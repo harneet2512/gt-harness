@@ -1,0 +1,361 @@
+# Terminal-Bench 2.0 MINI-SWE BASELINE, one job per task (GT-OFF).
+#
+# Full live visibility: every task is its own GHA job in an 89-job matrix (20
+# run in parallel), so task completions appear in `gh run list`/`gh run view`
+# in real time and each task uploads its own artifact. The plan job enumerates
+# the dataset, preflights the provider once, and gates the whole fan-out.
+#
+# GT-OFF only (eval.miniswe_agent:MiniSweAgent hard-codes --gt-off, no
+# gt_engine upload, no groundtruth). Internal matched control, not a
+# leaderboard submission: --agent-timeout-multiplier 1.0.
+name: TB2 miniswe baseline matrix (no GT)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model id for harbor -m, passed through verbatim when base_url is set (api.deepseek.com wants bare 'deepseek-v4-flash')"
+        type: string
+        default: "deepseek-v4-flash"
+      base_url:
+        description: "OpenAI-compatible gateway URL; exported as OPENAI_BASE_URL (overrides the repo secret)"
+        type: string
+        default: ""
+      parallel:
+        description: "Max concurrent task jobs (GHA concurrency cap)"
+        type: string
+        default: "20"
+      include:
+        description: "Optional comma-separated task names/globs to restrict the pool (default: all tasks)"
+        type: string
+        default: ""
+      exclude:
+        description: "Optional comma-separated task names/globs to drop from the pool"
+        type: string
+        default: ""
+      dataset:
+        description: "Harbor dataset name@version"
+        type: string
+        default: "terminal-bench@2.0"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tasks: ${{ steps.enum.outputs.tasks }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install nano-harness + harbor
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[miniswe]" "harbor==0.20.0"
+
+      - name: Sanitize API keys (strip BOM / stray whitespace)
+        run: |
+          python - <<'EOF'
+          import os, sys
+
+          cleaned, notes = [], []
+          for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+              raw = os.environ.get(name) or ""
+              if not raw:
+                  continue
+              clean = raw.replace("\ufeff", "").strip()
+              if clean != raw:
+                  notes.append(f"{name}: removed {len(raw) - len(clean)} stray char(s)")
+              if not clean.isascii():
+                  print(f"::error::{name} holds non-ASCII characters after stripping "
+                        "BOM/whitespace - it cannot be sent as an HTTP header")
+                  sys.exit(1)
+              cleaned.append((name, clean))
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              for name, clean in cleaned:
+                  print(f"::add-mask::{clean}")
+                  f.write(f"{name}={clean}\n")
+          for n in notes:
+              print(f"::warning::{n}")
+          EOF
+
+      # Gate the whole fan-out on one ~1k-token call through the runner's exact
+      # routing (mirrors scripts/miniswe_gt_run.py: bare model id becomes
+      # openai/<id> with api_base=OPENAI_BASE_URL). litellm.completion directly
+      # avoids miniswe's tool-call parser (FormatError on a valid response).
+      # Records served model id + system_fingerprint (no snapshot suffix in API).
+      - name: Preflight provider (gates all jobs)
+        env:
+          MODEL: ${{ inputs.model }}
+        run: |
+          python - <<'EOF'
+          import os, sys
+          import litellm
+
+          model = os.environ["MODEL"]
+          base = os.environ.get("OPENAI_BASE_URL") or ""
+          mname, kwargs = model, {"temperature": 1.0}
+          if base and "/" not in model:
+              mname = f"openai/{model}"
+              kwargs["api_base"] = base
+          print(f"model={model!r} -> litellm model={mname!r} "
+                f"OPENAI_BASE_URL={base or '(unset)'}")
+          try:
+              resp = litellm.completion(
+                  model=mname,
+                  messages=[{"role": "user",
+                             "content": "Reply with the single word: ok"}],
+                  **kwargs,
+              )
+          except Exception as e:
+              print(f"::error::preflight failed: {type(e).__name__}: {e}")
+              print("No task jobs were spawned and no task images were pulled.")
+              sys.exit(1)
+          d = resp.model_dump()
+          text = (d.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+          print(f"preflight ok: served_model={d.get('model')} "
+                f"system_fingerprint={d.get('system_fingerprint')} "
+                f"usage={d.get('usage')} text={text[:80]!r}")
+          EOF
+
+      # Task definitions only (~15s, no Docker, no API): gives the real task
+      # names so the matrix is explicit and reproducible.
+      - name: Enumerate dataset tasks
+        id: enum
+        env:
+          DATASET: ${{ inputs.dataset }}
+          INCLUDE: ${{ inputs.include }}
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          harbor dataset download "$DATASET" -o ds --export
+          python - <<'EOF'
+          import fnmatch, json, os
+          from pathlib import Path
+
+          dataset = os.environ["DATASET"]
+          root = Path("ds") / dataset.split("@", 1)[0]
+          tasks = sorted(p.name for p in root.iterdir() if p.is_dir())
+          if not tasks:
+              raise SystemExit(f"::error::no tasks found under {root}")
+
+          def patterns(raw):
+              return [s.strip() for s in raw.split(",") if s.strip()]
+
+          inc, exc = patterns(os.environ["INCLUDE"]), patterns(os.environ["EXCLUDE"])
+          if inc:
+              tasks = [t for t in tasks if any(fnmatch.fnmatch(t, p) for p in inc)]
+          if exc:
+              tasks = [t for t in tasks if not any(fnmatch.fnmatch(t, p) for p in exc)]
+          if not tasks:
+              raise SystemExit("::error::include/exclude filtered every task out")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"tasks={json.dumps(tasks)}\n")
+
+          summary = [f"## Plan: {len(tasks)} tasks as individual jobs", ""]
+          summary.append("`" + ", ".join(tasks) + "`")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("\n".join(summary) + "\n")
+          print("\n".join(summary))
+          EOF
+
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      # One task failing must not cancel the rest - a partial baseline with
+      # known-failed tasks is still useful.
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.parallel) }}
+      matrix:
+        task: ${{ fromJson(needs.plan.outputs.tasks) }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -af
+
+      - name: Install nano-harness + harbor
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[miniswe]" "harbor==0.20.0"
+
+      - name: Sanitize API keys (strip BOM / stray whitespace)
+        run: |
+          python - <<'EOF'
+          import os, sys
+
+          cleaned = []
+          for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+              raw = os.environ.get(name) or ""
+              if not raw:
+                  continue
+              clean = raw.replace("\ufeff", "").strip()
+              if not clean.isascii():
+                  print(f"::error::{name} holds non-ASCII characters after stripping")
+                  sys.exit(1)
+              cleaned.append((name, clean))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              for name, clean in cleaned:
+                  print(f"::add-mask::{clean}")
+                  f.write(f"{name}={clean}\n")
+          EOF
+
+      - name: Run harbor - task ${{ matrix.task }}
+        id: harbor
+        env:
+          MODEL: ${{ inputs.model }}
+          DATASET: ${{ inputs.dataset }}
+          TASK: ${{ matrix.task }}
+        run: |
+          set -uo pipefail
+          JOB_NAME="tb2-miniswe-${GITHUB_RUN_ID}-${TASK}"
+          echo "job_name=${JOB_NAME}" >> "$GITHUB_OUTPUT"
+
+          harbor run \
+            -d "$DATASET" \
+            -a eval.miniswe_agent:MiniSweAgent \
+            -m "$MODEL" \
+            -o results/terminal-bench \
+            --job-name "$JOB_NAME" \
+            --agent-timeout-multiplier 1.0 \
+            -n 1 \
+            -y \
+            -i "$TASK"
+
+      - name: Disk after run
+        if: always()
+        run: df -h /
+
+      - name: Upload task result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb2-miniswe-${{ github.run_id }}-task-${{ matrix.task }}
+          path: results/terminal-bench/
+          if-no-files-found: warn
+
+  merge:
+    needs: [plan, run]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download all task artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tb2-miniswe-${{ github.run_id }}-task-*
+          path: tasks
+          merge-multiple: false
+
+      # Merge honestly: a task that never produced a result.json is reported as
+      # missing, never silently treated as zero solved.
+      - name: Merge task results
+        env:
+          EXPECTED_TASKS: ${{ fromJSON(needs.plan.outputs.tasks) | join(',') }}
+        run: |
+          python - <<'EOF'
+          import json, os
+          from pathlib import Path
+
+          expected = [t for t in (os.environ.get("EXPECTED_TASKS") or "").split(",") if t]
+          trials, missing, per_task = [], [], []
+
+          for task_dir in sorted(Path("tasks").glob("*")):
+              results = list(task_dir.rglob("result.json"))
+              if not results:
+                  missing.append(task_dir.name)
+                  continue
+              for rp in results:
+                  r = json.loads(rp.read_text(encoding="utf-8"))
+                  got = r.get("trial_results", []) or []
+                  trials.extend(got)
+                  per_task.append((task_dir.name, len(got)))
+
+          def solved(t):
+              rewards = (t.get("verifier_result") or {}).get("rewards") or {}
+              vals = [v for v in rewards.values() if isinstance(v, (int, float))]
+              return bool(vals) and all(v >= 1 for v in vals)
+
+          graded = [t for t in trials if (t.get("verifier_result") or {}).get("rewards")]
+          errored = [t for t in trials if t.get("exception_info")]
+          n_solved = sum(1 for t in graded if solved(t))
+          n_expected = len(expected) if expected else 0
+
+          out = ["# TB2 miniswe baseline (matrix, no GT)", ""]
+          if missing:
+              out.append(f"> **INCOMPLETE**: {len(missing)} task(s) produced no "
+                         f"result.json: {', '.join(missing)}. The score below covers "
+                         "only tasks that reported.")
+              out.append("")
+          out += [
+              f"- tasks planned: **{n_expected}**",
+              f"- trials returned: **{len(trials)}**",
+              f"- graded (verifier produced rewards): **{len(graded)}**",
+              f"- errored (exception, not graded): **{len(errored)}**",
+          ]
+          if graded:
+              out.append(f"- **solved: {n_solved}/{len(graded)} "
+                         f"({100 * n_solved / len(graded):.1f}% of graded)**")
+          if n_expected:
+              out.append(f"- **solved of planned: {n_solved}/{n_expected} "
+                         f"({100 * n_solved / n_expected:.1f}%)**")
+          out += ["", "| task | solved | rewards / error |", "|---|---|---|"]
+          for t in sorted(trials, key=lambda x: x.get("task_name") or ""):
+              name = (t.get("task_name") or t.get("trial_name", "?")).split("__")[0]
+              rewards = (t.get("verifier_result") or {}).get("rewards")
+              exc = (t.get("exception_info") or {}).get("exception_type")
+              mark = "yes" if rewards and solved(t) else ("no" if rewards else "-")
+              out.append(f"| {name} | {mark} | {json.dumps(rewards) if rewards else (exc or 'no reward')} |")
+
+          Path("merged.json").write_text(json.dumps({
+              "expected_tasks": n_expected,
+              "missing_tasks": missing,
+              "n_trials": len(trials),
+              "n_graded": len(graded),
+              "n_errored": len(errored),
+              "n_solved": n_solved,
+              "trial_results": trials,
+          }, indent=2), encoding="utf-8")
+
+          body = "\n".join(out) + "\n"
+          Path("SUMMARY.md").write_text(body, encoding="utf-8")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(body)
+          print(body[:4000])
+          EOF
+
+      - name: Upload merged result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb2-miniswe-${{ github.run_id }}-MERGED
+          path: |
+            merged.json
+            SUMMARY.md
+          if-no-files-found: warn
