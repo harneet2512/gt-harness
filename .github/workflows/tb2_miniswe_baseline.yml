@@ -1,0 +1,264 @@
+# Terminal-Bench 2.0 MINI-SWE BASELINE: Mini-SWE-Agent 2.2.8, GT-OFF, via Harbor.
+#
+# Cloned from tb2_baseline.yml with the harness swapped to eval.miniswe_agent:
+#MiniSweAgent (uploads scripts/ + eval/ + pyproject.toml, installs
+# mini-swe-agent==2.2.8 with uv inside every task container, and runs
+# scripts/miniswe_gt_run.py --gt-off). The preflight exercises miniswe's OWN
+# model path (LitellmModel) and records the served model id + system_fingerprint
+# so the paired GT-on arm can be verified against the same served snapshot.
+#
+# This is an internal matched control for the GT-on arm, NOT a leaderboard
+# submission: --agent-timeout-multiplier is 1.0 (the frozen comparator config),
+# and every run records temperature 1.0 / concurrency 5 / step limit 100.
+name: TB2 miniswe baseline (no GT)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Provider-native model id; the DeepSeek gateway requires bare deepseek-v4-flash"
+        type: string
+        default: "deepseek-v4-flash"
+      base_url:
+        description: "OpenAI-compatible gateway URL; when set, exported as OPENAI_BASE_URL (overrides the repo secret)"
+        type: string
+        default: ""
+      n_tasks:
+        description: "Slice size (harbor -l). 'all' = full dataset"
+        type: string
+        default: "5"
+      concurrency:
+        description: "Concurrent trials (harbor -n)"
+        type: string
+        default: "5"
+      job_name:
+        description: "Harbor job name (default: auto tb2-miniswe-<run id>)"
+        type: string
+        default: ""
+      task_ids:
+        description: "Optional comma-separated task names (harbor -i, glob ok). Overrides n_tasks"
+        type: string
+        default: ""
+      agent_timeout_multiplier:
+        description: "harbor --agent-timeout-multiplier. Frozen comparator config = 1.0"
+        type: string
+        default: "1.0"
+      n_attempts:
+        description: "Trials per task (harbor -k). 1 is fine for an internal paired baseline."
+        type: string
+        default: "1"
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Input beats secret; empty means "no gateway" (direct provider APIs).
+      OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Ubuntu runners ship ~20-25 GB free on /. TB2 task images are mostly
+      # sub-GB but there are 89 distinct ones and harbor keeps pulled images
+      # around, so a full run plausibly exhausts the disk.
+      - name: Free disk space (full runs only)
+        if: ${{ inputs.n_tasks == 'all' && inputs.task_ids == '' }}
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -af
+
+      # The [miniswe] extra puts mini-swe-agent 2.2.8 on the RUNNER so the
+      # preflight can exercise the exact model path the agent will use
+      # in-container. The container itself installs mini-swe-agent via uv.
+      - name: Install nano-harness + harbor
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[miniswe]" "harbor==0.20.0"
+
+      # Same BOM/whitespace sanitation as tb2_baseline.yml (a BOM in the key
+      # kills every request at httpx's ASCII header encode).
+      - name: Sanitize API keys (strip BOM / stray whitespace)
+        run: |
+          python - <<'EOF'
+          import os, sys
+
+          cleaned, notes = [], []
+          for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+              raw = os.environ.get(name) or ""
+              if not raw:
+                  continue
+              clean = raw.replace("\ufeff", "").strip()
+              if clean != raw:
+                  notes.append(f"{name}: removed {len(raw) - len(clean)} stray "
+                               "char(s) (BOM/whitespace); re-set the secret to fix at source")
+              if not clean.isascii():
+                  print(f"::error::{name} still holds non-ASCII characters after "
+                        "stripping BOM/whitespace - it cannot be sent as an HTTP header")
+                  sys.exit(1)
+              cleaned.append((name, clean))
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              for name, clean in cleaned:
+                  print(f"::add-mask::{clean}")
+                  f.write(f"{name}={clean}\n")
+          for n in notes:
+              print(f"::warning::{n}")
+          print(f"sanitized {len(cleaned)} key(s); {len(notes)} needed repair")
+          EOF
+
+      # One ~1k-token call (<$0.001) through mini-swe's OWN provider path
+      # (LitellmModel, the same object miniswe_gt_run.py builds) before harbor
+      # pulls a single task image. Mirror the runner's routing: bare model id
+      # becomes openai/<id> with api_base=OPENAI_BASE_URL. Also records the
+      # served model id + system_fingerprint (the API exposes no snapshot
+      # suffix) - the GT-on arm must hit the same served snapshot.
+      - name: Preflight provider (fail fast, not 5 dead containers)
+        env:
+          MODEL: ${{ inputs.model }}
+        run: |
+          python - <<'EOF'
+          import os, sys
+
+          os.environ.setdefault("MSWEA_COST_TRACKING", "ignore_errors")
+          from minisweagent.models.litellm_model import LitellmModel
+
+          model = os.environ["MODEL"]
+          base = os.environ.get("OPENAI_BASE_URL") or ""
+          mname, kwargs = model, {"temperature": 1.0}
+          if base and "/" not in model:
+              mname = f"openai/{model}"
+              kwargs["api_base"] = base
+          print(f"model={model!r} -> litellm model={mname!r} "
+                f"OPENAI_BASE_URL={base or '(unset)'}")
+          try:
+              lm = LitellmModel(model_name=mname, model_kwargs=kwargs)
+              resp = lm.query(
+                  messages=[{"role": "user",
+                             "content": "Reply with the single word: ok"}]
+              )
+          except Exception as e:
+              print(f"::error::preflight failed: {type(e).__name__}: {e}")
+              print("The model id, API key, or gateway is wrong - fix it before "
+                    "spending a run. No task images were pulled.")
+              sys.exit(1)
+          extra = resp.get("extra", {}).get("response", {})
+          print(f"preflight ok: served_model={extra.get('model')} "
+                f"system_fingerprint={extra.get('system_fingerprint')} "
+                f"usage={extra.get('usage')} "
+                f"text={(resp.get('content') or '')[:80]!r}")
+          EOF
+
+      - name: Disk before run
+        run: df -h /
+
+      - name: Run harbor (Terminal-Bench 2.0)
+        id: harbor
+        env:
+          MODEL: ${{ inputs.model }}
+          N_TASKS: ${{ inputs.n_tasks }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          JOB_NAME_INPUT: ${{ inputs.job_name }}
+          TASK_IDS: ${{ inputs.task_ids }}
+          AGENT_TIMEOUT_MULTIPLIER: ${{ inputs.agent_timeout_multiplier }}
+          N_ATTEMPTS: ${{ inputs.n_attempts }}
+        run: |
+          set -uo pipefail
+          JOB_NAME="${JOB_NAME_INPUT:-tb2-miniswe-${GITHUB_RUN_ID}}"
+          echo "job_name=${JOB_NAME}" >> "$GITHUB_OUTPUT"
+
+          args=( run
+            -d terminal-bench@2.0
+            -a eval.miniswe_agent:MiniSweAgent
+            -m "$MODEL"
+            -o results/terminal-bench
+            --job-name "$JOB_NAME"
+            --agent-timeout-multiplier "$AGENT_TIMEOUT_MULTIPLIER"
+            -n "$CONCURRENCY"
+            -k "$N_ATTEMPTS"
+            -y
+          )
+          if [ -n "$TASK_IDS" ]; then
+            IFS=',' read -ra ids <<< "$TASK_IDS"
+            for id in "${ids[@]}"; do
+              id="$(echo "$id" | xargs)"   # trim whitespace
+              [ -n "$id" ] && args+=( -i "$id" )
+            done
+          elif [ "$N_TASKS" != "all" ]; then
+            args+=( -l "$N_TASKS" )
+          fi
+
+          harbor "${args[@]}"
+
+      - name: Disk after run
+        if: always()
+        run: df -h /
+
+      # Everything harbor wrote: result.json plus per-task dirs with the agent
+      # transcript (<task>/agent/miniswe.txt), trajectory JSON, verifier
+      # output, and config.
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb2-miniswe-${{ github.run_id }}
+          path: results/terminal-bench/
+          if-no-files-found: warn
+
+      - name: Score summary
+        if: always()
+        env:
+          JOB_NAME: ${{ steps.harbor.outputs.job_name }}
+        run: |
+          python - <<'EOF'
+          import json, os
+          from pathlib import Path
+
+          job = os.environ.get("JOB_NAME", "")
+          path = Path("results/terminal-bench") / job / "result.json"
+          out = [f"## TB2 miniswe baseline: `{job}`", ""]
+          if not path.is_file():
+              out.append(f"No result.json at `{path}` - harbor did not finish. "
+                         "Check the run logs and the uploaded artifact.")
+          else:
+              r = json.loads(path.read_text(encoding="utf-8"))
+              stats = r.get("stats", {})
+              out += [
+                  f"- total trials: **{r.get('n_total_trials', '?')}**",
+                  f"- completed: **{stats.get('n_completed_trials', '?')}**"
+                  f", errored: **{stats.get('n_errored_trials', '?')}**",
+              ]
+              # stats.evals["<agent>__<model>__<dataset>"].reward_stats maps
+              # reward name -> {value: [trial names]} (harbor 0.20 schema).
+              for key, ev in (stats.get("evals") or {}).items():
+                  out.append(f"\n### {key}")
+                  for reward, by_val in (ev.get("reward_stats") or {}).items():
+                      total = sum(len(v) for v in by_val.values())
+                      solved = sum(len(v) for val, v in by_val.items()
+                                   if float(val) >= 1)
+                      pct = f"{100 * solved / total:.1f}%" if total else "n/a"
+                      out.append(f"- **{reward}**: {solved}/{total} ({pct})")
+                  for k, v in (ev.get("pass_at_k") or {}).items():
+                      out.append(f"- pass@{k}: {v}")
+              rows = []
+              for t in r.get("trial_results", []):
+                  name = t.get("task_name") or t.get("trial_name", "?")
+                  vr = t.get("verifier_result") or {}
+                  rewards = vr.get("rewards")
+                  exc = (t.get("exception_info") or {}).get("exception_type")
+                  status = json.dumps(rewards) if rewards else (exc or "no reward")
+                  rows.append(f"| {name} | {status} |")
+              if rows:
+                  out += ["", "| task | rewards |", "|---|---|"] + rows
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("\n".join(out) + "\n")
+          EOF
