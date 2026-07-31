@@ -37,6 +37,10 @@ on:
         description: "Harbor dataset name@version"
         type: string
         default: "terminal-bench@2.0"
+      image_tag:
+        description: "Task image tag (all TB2.0 task images are alexgshaw/<task>:<tag>). Cache key component; bump when the dataset images change"
+        type: string
+        default: "20251031"
 
 jobs:
   plan:
@@ -222,6 +226,25 @@ jobs:
                   f.write(f"{name}={clean}\n")
           EOF
 
+      # Docker image pre-pull for GT reuse. GHA runners are ephemeral so
+      # harbor re-pulls every task image each run; with actions/cache the GT-on
+      # run loads the images this baseline pulled (docker load skips the pull).
+      # Key = task + image tag; per-task entry stays under the 10GB repo cache
+      # budget only for images <=1.5GB - the giants (mteb-* ~8.8GB, hf/pytorch
+      # ~6GB) are skipped and pull fresh on GT.
+      - name: Restore task image from cache
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/tb2-img.tar.gz
+          key: tb2-img-${{ matrix.task }}-${{ inputs.image_tag }}
+
+      - name: Load cached task image
+        if: steps.restore.outputs.cache-hit == 'true'
+        run: |
+          docker load -i "${{ runner.temp }}/tb2-img.tar.gz"
+          echo "loaded task image from cache for ${{ matrix.task }}"
+
       - name: Run harbor - task ${{ matrix.task }}
         id: harbor
         env:
@@ -247,6 +270,37 @@ jobs:
       - name: Disk after run
         if: always()
         run: df -h /
+
+      - name: Cache task image for GT reuse
+        if: steps.restore.outputs.cache-hit != 'true'
+        id: saveimg
+        env:
+          TASK: ${{ matrix.task }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          IMG="alexgshaw/${TASK}:${IMAGE_TAG}"
+          set +e
+          SIZE=$(docker image inspect --format '{{.Size}}' "$IMG" 2>/dev/null)
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "image $IMG not present; nothing to cache"
+            exit 0
+          fi
+          if [ "$SIZE" -gt 1500000000 ]; then
+            echo "image ${TASK} is $SIZE bytes (>1.5GB); skipping cache to protect the budget"
+            exit 0
+          fi
+          docker save "$IMG" | gzip -1 > "${{ runner.temp }}/tb2-img.tar.gz"
+          echo "cached=1" >> "$GITHUB_OUTPUT"
+          echo "saved ${TASK} image ($SIZE bytes) for GT reuse"
+
+      - name: Upload task image cache
+        if: steps.restore.outputs.cache-hit != 'true' && steps.saveimg.outputs.cached == '1'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/tb2-img.tar.gz
+          key: tb2-img-${{ matrix.task }}-${{ inputs.image_tag }}
 
       - name: Upload task result
         if: always()
@@ -291,11 +345,17 @@ jobs:
               if not results:
                   missing.append(task_dir.name)
                   continue
+              got = []
               for rp in results:
                   r = json.loads(rp.read_text(encoding="utf-8"))
-                  got = r.get("trial_results", []) or []
-                  trials.extend(got)
-                  per_task.append((task_dir.name, len(got)))
+                  # Single-task runs emit per-trial result.json (has
+                  # verifier_result/task_name) plus a job-level one (only stats,
+                  # no trial data). Count the per-trial files, skip job-level.
+                  if not r.get("verifier_result") and not r.get("task_name"):
+                      continue
+                  got.append(r)
+              trials.extend(got)
+              per_task.append((task_dir.name, len(got)))
 
           def solved(t):
               rewards = (t.get("verifier_result") or {}).get("rewards") or {}
