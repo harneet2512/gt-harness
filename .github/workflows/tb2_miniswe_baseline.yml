@@ -116,10 +116,12 @@ jobs:
           print(f"sanitized {len(cleaned)} key(s); {len(notes)} needed repair")
           EOF
 
-      # One ~1k-token call (<$0.001) through mini-swe's OWN provider path
-      # (LitellmModel, the same object miniswe_gt_run.py builds) before harbor
-      # pulls a single task image. Mirror the runner's routing: bare model id
-      # becomes openai/<id> with api_base=OPENAI_BASE_URL. Also records the
+      # One ~1k-token call (<$0.001) through the runner's exact routing
+      # (mirrors scripts/miniswe_gt_run.py: bare model id becomes
+      # openai/<id> with api_base=OPENAI_BASE_URL) before harbor pulls a
+      # single task image. Calls litellm.completion DIRECTLY - miniswe's
+      # LitellmModel.query also parses tool calls, which can raise FormatError
+      # on a valid model response (preflight run 30649233881). Records the
       # served model id + system_fingerprint (the API exposes no snapshot
       # suffix) - the GT-on arm must hit the same served snapshot.
       - name: Preflight provider (fail fast, not 5 dead containers)
@@ -128,9 +130,7 @@ jobs:
         run: |
           python - <<'EOF'
           import os, sys
-
-          os.environ.setdefault("MSWEA_COST_TRACKING", "ignore_errors")
-          from minisweagent.models.litellm_model import LitellmModel
+          import litellm
 
           model = os.environ["MODEL"]
           base = os.environ.get("OPENAI_BASE_URL") or ""
@@ -141,21 +141,22 @@ jobs:
           print(f"model={model!r} -> litellm model={mname!r} "
                 f"OPENAI_BASE_URL={base or '(unset)'}")
           try:
-              lm = LitellmModel(model_name=mname, model_kwargs=kwargs)
-              resp = lm.query(
+              resp = litellm.completion(
+                  model=mname,
                   messages=[{"role": "user",
-                             "content": "Reply with the single word: ok"}]
+                             "content": "Reply with the single word: ok"}],
+                  **kwargs,
               )
           except Exception as e:
               print(f"::error::preflight failed: {type(e).__name__}: {e}")
               print("The model id, API key, or gateway is wrong - fix it before "
                     "spending a run. No task images were pulled.")
               sys.exit(1)
-          extra = resp.get("extra", {}).get("response", {})
-          print(f"preflight ok: served_model={extra.get('model')} "
-                f"system_fingerprint={extra.get('system_fingerprint')} "
-                f"usage={extra.get('usage')} "
-                f"text={(resp.get('content') or '')[:80]!r}")
+          d = resp.model_dump()
+          text = (d.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+          print(f"preflight ok: served_model={d.get('model')} "
+                f"system_fingerprint={d.get('system_fingerprint')} "
+                f"usage={d.get('usage')} text={text[:80]!r}")
           EOF
 
       - name: Disk before run
