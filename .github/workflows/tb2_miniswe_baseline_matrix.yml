@@ -277,13 +277,13 @@ jobs:
       # missing, never silently treated as zero solved.
       - name: Merge task results
         env:
-          EXPECTED_TASKS: ${{ fromJSON(needs.plan.outputs.tasks) | join(',') }}
+          EXPECTED_TASKS_JSON: ${{ needs.plan.outputs.tasks }}
         run: |
           python - <<'EOF'
           import json, os
           from pathlib import Path
 
-          expected = [t for t in (os.environ.get("EXPECTED_TASKS") or "").split(",") if t]
+          expected = json.loads(os.environ.get("EXPECTED_TASKS_JSON") or "[]")
           trials, missing, per_task = [], [], []
 
           for task_dir in sorted(Path("tasks").glob("*")):
