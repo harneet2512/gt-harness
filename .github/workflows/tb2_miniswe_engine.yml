@@ -296,10 +296,13 @@ jobs:
       - name: Fix artifact permissions
         if: always()
         run: |
-          # The runner writes provider_requests/*.json blobs 0600; the upload
-          # zip step runs as a different process and cannot read them
-          # (EACCES -> "error during zip creation"). Make artifacts readable.
-          find results -type f -exec chmod a+r {} + 2>/dev/null || true
+          # The runner writes provider_requests/*.json blobs inside the task
+          # container as root:root with restrictive modes; they come back to
+          # the runner root-owned, and upload-artifact's zip step (running as
+          # the 'runner' user) gets EACCES on them. Plain chmod silently fails
+          # on root-owned files, so use sudo.
+          sudo find results -type f -exec chmod a+r {} + 2>/dev/null || \
+            sudo chmod -R a+r results || true
 
       - name: Disk after run
         if: always()
