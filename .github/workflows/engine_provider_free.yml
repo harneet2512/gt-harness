@@ -69,6 +69,8 @@ jobs:
           python scripts/engine_129_audit.py --check
 
       - name: Finalstand document validator
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python scripts/validate_gt_finalstand.py
 
