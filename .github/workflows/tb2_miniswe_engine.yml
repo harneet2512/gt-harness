@@ -338,11 +338,17 @@ jobs:
               if not results:
                   missing.append(task_dir.name)
                   continue
+              got = []
               for rp in results:
                   r = json.loads(rp.read_text(encoding="utf-8"))
-                  got = r.get("trial_results", []) or []
-                  trials.extend(got)
-                  per_task.append((task_dir.name, len(got)))
+                  # Single-task runs emit per-trial result.json (has
+                  # verifier_result/task_name) plus a job-level one (only stats,
+                  # no trial data). Count the per-trial files, skip job-level.
+                  if not r.get("verifier_result") and not r.get("task_name"):
+                      continue
+                  got.append(r)
+              trials.extend(got)
+              per_task.append((task_dir.name, len(got)))
 
           def solved(t):
               rewards = (t.get("verifier_result") or {}).get("rewards") or {}
