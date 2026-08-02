@@ -293,6 +293,14 @@ jobs:
           path: ${{ runner.temp }}/tb2-img.tar.gz
           key: tb2-img-${{ matrix.task }}-${{ inputs.image_tag }}
 
+      - name: Fix artifact permissions
+        if: always()
+        run: |
+          # The runner writes provider_requests/*.json blobs 0600; the upload
+          # zip step runs as a different process and cannot read them
+          # (EACCES -> "error during zip creation"). Make artifacts readable.
+          find results -type f -exec chmod a+r {} + 2>/dev/null || true
+
       - name: Disk after run
         if: always()
         run: df -h /
