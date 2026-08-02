@@ -186,6 +186,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
+      MINISWE_AGENT_VERSION: "2.2.8"
     steps:
       - uses: actions/checkout@v4
         with:
