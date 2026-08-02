@@ -187,6 +187,15 @@ jobs:
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
       MINISWE_AGENT_VERSION: "2.2.8"
+      # Enable the gateway's deterministic producers (they default OFF). The
+      # ENGINE is the canonical runtime; without these, localization/
+      # signature_delta/def_partition/covering never fire. Forwarded into the
+      # container by MiniSweEngineAgent.
+      GT_GATEWAY: "1"
+      GT_LOC_RESLOT: "1"
+      GT_PATCH_DELTA: "1"
+      GT_CS_EDIT_TRIGGER: "1"
+      GT_CHANGE_SURFACE: "1"
     steps:
       - uses: actions/checkout@v4
         with:
