@@ -197,6 +197,7 @@ jobs:
       GT_CS_EDIT_TRIGGER: "1"
       GT_CHANGE_SURFACE: "1"
       GT_EDIT_OVERLAY: "1"
+      GT_SUBMIT_SUPPRESSION_ENFORCE: "1"
     steps:
       - uses: actions/checkout@v4
         with:
