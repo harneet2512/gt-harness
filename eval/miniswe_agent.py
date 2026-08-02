@@ -1,10 +1,11 @@
-"""Mini-SWE-Agent 2.3.0 as a Terminal-Bench 2.0 agent (GT-off and GT-on arms).
+"""Mini-SWE-Agent as a Terminal-Bench 2.0 agent (GT-off and GT-on arms).
 
 The two Harbor agents install the same pinned treatment bundle. ``MiniSweAgent``
 runs the stock loop with ``--gt-off`` and never activates or imports GT in the
 runner. ``MiniSweGtAgent`` activates the advisory session and forwards only the
 GT state/index configuration. This makes activation—not package drift—the A/B
-treatment.
+treatment. Version 2.3.0 is the default; a closed 2.2.8 override exists only
+for execution matched to the historical baseline.
 
 ``uv tool install`` does not emit a ~/.local/bin/python shim; the tool venv's
 interpreter lives at the layout GTNanoAgent already relies on.
@@ -35,6 +36,8 @@ _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
+_DEFAULT_MINISWE_AGENT_VERSION = "2.3.0"
+_ALLOWED_MINISWE_AGENT_VERSIONS = frozenset({"2.2.8", "2.3.0"})
 _UV_INSTALL = f"https://astral.sh/uv/{_UV_VERSION}/install.sh"
 # After the uv tool install the staged checkout is removed (the tool venv holds
 # the installed wheel copy). Leaving it readable lets a root task model
@@ -59,8 +62,21 @@ _ENSURE_CURL = (
 )
 
 
+def _miniswe_agent_version() -> str:
+    """Return the closed Mini-SWE treatment version for this execution."""
+    version = os.environ.get(
+        "MINISWE_AGENT_VERSION", _DEFAULT_MINISWE_AGENT_VERSION
+    )
+    if version not in _ALLOWED_MINISWE_AGENT_VERSIONS:
+        allowed = ", ".join(sorted(_ALLOWED_MINISWE_AGENT_VERSIONS))
+        raise ValueError(
+            f"MINISWE_AGENT_VERSION must be one of: {allowed}; got {version!r}"
+        )
+    return version
+
+
 class MiniSweAgent(BaseInstalledAgent):
-    """Mini-SWE-Agent 2.3.0, GT-off, as a Terminal-Bench 2.0 agent."""
+    """Mini-SWE-Agent, GT-off, as a Terminal-Bench 2.0 agent."""
 
     @staticmethod
     def name() -> str:
@@ -94,6 +110,7 @@ class MiniSweAgent(BaseInstalledAgent):
     async def install(self, environment: BaseEnvironment) -> None:
         wheel = self._gt_wheel()
         binary = self._gt_binary_host()
+        miniswe_version = _miniswe_agent_version()
         await environment.upload_dir(_REPO_ROOT / "scripts", f"{_REMOTE_DIR}/scripts")
         await environment.upload_dir(_REPO_ROOT / "eval", f"{_REMOTE_DIR}/eval")
         await environment.upload_dir(
@@ -113,12 +130,12 @@ class MiniSweAgent(BaseInstalledAgent):
             "set -eu; "
             f"curl -LsSf {_UV_INSTALL} | sh && "
             f'"$HOME/.local/bin/uv" tool install --python {_PYTHON_VERSION} '
-            f'--with "mini-swe-agent==2.3.0" '
+            f'--with "mini-swe-agent=={miniswe_version}" '
             f"--with {shlex.quote(remote_wheel)} --with 'numpy==2.5.1' "
             f"{_REMOTE_DIR} && "
             f'"{_REMOTE_PY}" -c "import importlib.metadata as m, sys; '
             "assert sys.version_info[:3] == (3, 12, 13); "
-            "assert m.version('mini-swe-agent') == '2.3.0'; "
+            f"assert m.version('mini-swe-agent') == '{miniswe_version}'; "
             "assert m.version('groundtruth-mcp') == '1.0.0'; "
             "assert m.version('numpy') == '2.5.1'; "
             "import minisweagent, groundtruth, gt_engine" + '" && '
@@ -170,7 +187,7 @@ class MiniSweAgent(BaseInstalledAgent):
 
 
 class MiniSweGtAgent(MiniSweAgent):
-    """Mini-SWE-Agent 2.3.0 + GroundTruth as a Terminal-Bench 2.0 agent."""
+    """Mini-SWE-Agent + GroundTruth as a Terminal-Bench 2.0 agent."""
 
     ENV_VARS = [
         EnvVar(
