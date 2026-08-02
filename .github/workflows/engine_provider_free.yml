@@ -62,7 +62,16 @@ jobs:
             tests/test_engine_runner.py \
             tests/test_engine_129_audit.py \
             tests/test_engine_compliance.py \
+            tests/test_engine_force_17.py \
+            tests/test_engine_gates.py \
+            tests/test_engine_interface.py \
+            tests/test_engine_visibility.py \
+            tests/test_engine_e2e_smoke.py \
             -q
+
+      - name: 16-feature visibility matrix
+        run: |
+          python scripts/engine_visibility.py
 
       - name: 129-row inventory audit
         run: |
