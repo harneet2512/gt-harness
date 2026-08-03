@@ -1,0 +1,77 @@
+name: GT central provider-free certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Repository ref containing the host-owned central runtime"
+        type: string
+        default: "inline-engine"
+
+jobs:
+  provider_free:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install exact host runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+            "pytest==9.1.1" "pytest-asyncio==1.4.0" "ruff==0.16.0"
+
+      - name: Central runtime tests
+        run: |
+          python -m pytest tests/test_gt_central_runtime.py \
+            tests/test_gt_central_agent.py \
+            tests/test_gt_on_experiment.py -q
+
+      - name: Structural readiness audit
+        run: python scripts/central_readiness_audit.py
+
+      - name: Static checks
+        run: |
+          python -m ruff check gt_engine/central_runtime.py \
+            gt_engine/experiment.py eval/gt_central_agent.py \
+            scripts/central_readiness_audit.py \
+            tests/test_gt_central_runtime.py \
+            tests/test_gt_central_agent.py \
+            tests/test_gt_on_experiment.py
+
+      - name: Provider-free receipt
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os
+          from pathlib import Path
+
+          receipt = {
+              "schema": "gt.central.provider-free.v1",
+              "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "ref": "${{ inputs.ref }}",
+              "provider_calls": 0,
+              "note": "Live task-container discoverability remains a separate gate.",
+          }
+          Path("central_provider_free_receipt.json").write_text(
+              json.dumps(receipt, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(receipt))
+          EOF
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-provider-free-${{ github.run_id }}
+          path: central_provider_free_receipt.json
+          if-no-files-found: warn
+
