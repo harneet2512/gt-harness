@@ -73,6 +73,14 @@ jobs:
         run: |
           python scripts/engine_visibility.py
 
+      - name: READINESS audit (Gate 1) — 17x6 matrix from observed bytes
+        run: |
+          python scripts/engine_readiness_audit.py
+
+      - name: META-audit (Gate 2) — mutation tests prove the audit can't lie
+        run: |
+          python scripts/engine_meta_audit.py
+
       - name: 129-row inventory audit
         run: |
           python scripts/engine_129_audit.py --check
