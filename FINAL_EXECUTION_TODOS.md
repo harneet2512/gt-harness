@@ -20,10 +20,10 @@ the relevant gate and explicit authorization are recorded.
 | GT-FINAL-001 | complete | Four-layer proof contract documented | `FINAL_EXECUTION_PLAN.md` | continue baseline |
 | GT-FINAL-002 | complete | ARB retrieval-only claim and paired reasoning contract documented | `RETRIEVAL_BENCH_CONTRACT.md`, `DECISION_POINT_EVAL_CONTRACT.md` | verify current defect evidence |
 | GT-FINAL-003 | complete | Current SHA/config/environment captured | `artifacts/final_execution/baseline.md` | continue contract work |
-| GT-FINAL-004 | in_progress | Verified P0/P1 defects reproduced and provider-free gates recorded | `artifacts/final_execution/baseline.md`; full pytest 1,180 passed / 3 skips | resolve exact-tree publication blocker and map defects |
+| GT-FINAL-004 | pending | Verified P0/P1 defects reproduced and provider-free gates recorded | `artifacts/final_execution/baseline.md`; full pytest 1,180 passed / 3 skips | resume after exact-tree publication gate; map defects before paid evaluation |
 | GT-FINAL-005 | pending | Runtime delivery/abstention/failure proof complete | `FINAL_RUNTIME_PROOF.md` | capture three cases |
 | GT-FINAL-006 | complete | Gold-isolated ARB adapter exercises production retrieval | `scripts/arb_adapter.py`, `tests/test_arb_adapter.py` | prepare official data |
-| GT-FINAL-007 | in_progress | ARB data is pinned, extracted, redacted, and ready for lossless snapshot indexing | `artifacts/final_execution/ARB_SETUP_AUDIT.md` | build exact base-commit checkout cache |
+| GT-FINAL-007 | in_progress | ARB data is pinned, extracted, redacted, and executing on GitHub with lossless snapshot shards | `artifacts/final_execution/ARB_SETUP_AUDIT.md`; `.github/workflows/arb_gt_retrieval.yml`; run `31440151863` | monitor shards, verify artifacts, classify retrieval misses |
 | GT-FINAL-008 | pending | At most one generalized retrieval repair, if justified | repair receipt | analyze dominant defect |
 | GT-FINAL-009 | pending | Paired decision-point reasoning evaluation complete | `DECISION_POINT_EVAL_RESULTS.md` | locate replay-ready cases |
 | GT-FINAL-010 | pending | GT and harness frozen | `FINAL_GT_MANIFEST.md` | freeze only after gates |
@@ -34,10 +34,14 @@ the relevant gate and explicit authorization are recorded.
 
 ## Current stop state
 
-`GT-FINAL-004` is active. Documentation, the ARB contract/adapter, the full
-local suite, and provider-free integrity gates are complete. No paid provider
-run has started. The next work is exact P0/P1 evidence mapping and official
-redacted ARB data preparation. The 89-task run remains blocked.
+`GT-FINAL-007` is active. Documentation, the ARB contract/adapter, the full
+local suite, provider-free integrity gates, official ARB pinning, gold-free
+projection, and the GitHub-only sharded runner are complete locally. A
+memory-heavy local ARB baseline was intentionally stopped and is not evidence.
+No paid provider run has started. The next work is to validate the workflow on
+GitHub, dispatch the retrieval shards, and retain the artifacts. The 89-task
+run remains blocked. GitHub Actions run `31440151863` is the first benchmark
+execution; it is retrieval-only and does not spend model-provider credits.
 
 ## Work plan mapped to the GT objective
 
@@ -69,16 +73,29 @@ redacted ARB data preparation. The 89-task run remains blocked.
   graph projection, evidence need, and ranker.
 - [x] Reject recursive gold/fix/patch/evaluator leakage.
 - [x] Separate index-build latency from post-index query latency.
-- [ ] Download and validate official V2 benchmark/corpus releases.
-- [ ] Prepare redacted input JSONL containing only query state and declared
+- [x] Download and validate official V2 benchmark/corpus releases.
+- [x] Prepare redacted input JSONL containing only query state and declared
   given files.
-- [ ] Run local lexical/BM25/RepoMap-compatible baselines with `all_files`.
-- [ ] Run GT candidates and bounded delivered evidence; report both.
+- [x] Move corpus/index/baseline execution to the pinned GitHub workflow;
+  local memory-heavy evaluation is prohibited.
+- [ ] Dispatch GitHub lexical/BM25/RepoMap-compatible baselines with
+  `all_files` and retain run artifacts.
+- [ ] Dispatch GitHub GT candidates and bounded delivered evidence; report
+  both.
 - [ ] Classify misses as query, index, graph, ranking, redundancy, over-
   retrieval, failed abstention, or unrepresentable input.
 - [ ] Allow at most one generalized retrieval repair if the repeated-defect
   rule is satisfied.
 - [ ] Produce `RETRIEVAL_BENCH_RESULTS.md`.
+
+### GitHub execution controls
+
+- [x] Use immutable action SHAs and the pinned ARB source commit.
+- [x] Use eight independent exact-base snapshot shards.
+- [x] Keep gold/fix/patch/evaluator fields out of GT inputs.
+- [x] Upload per-shard receipts and optional official baseline details.
+- [ ] Push the workflow and dispatch it from the intended harness SHA.
+- [ ] Verify uploaded artifacts and write the retrieval results report.
 
 ### Phase 3 — Prove whether the model’s next decision changes usefully
 
@@ -106,12 +123,18 @@ redacted ARB data preparation. The 89-task run remains blocked.
 
 ### Phase 5 — Establish end-to-end product evidence
 
-- [ ] Run contemporaneous same-wrapper GT-off vs `certified_context` SWE-Live
-  Lite only after freeze and authorization.
-- [ ] Analyze every gain/loss by first trajectory divergence; do not attribute
-  zero-intervention differences to GT.
-- [ ] Run DeepSWE only if SWE-Live passes its decision gate.
-- [ ] Run Terminal-Bench 2.1 last, with all-task and source-applicable results.
+- [ ] Run DeepSWE first after freeze, using a GitHub-hosted same-wrapper
+  baseline/treatment adapter and its current official protocol.
+- [ ] Analyze every DeepSWE gain/loss by first trajectory divergence; do not
+  attribute zero-intervention differences to GT.
+- [ ] Verify and run the existing GitHub-hosted DeepSWE workflow in the
+  GroundTruth repository (`.github/workflows/deepswe_full.yml`/`deepswe_trial.yml`);
+  it launches the pinned Mini-SWE agent through Pier (no OpenHands/OpenAgents
+  path) and still requires a matched GT-off arm.
+- [ ] Run Terminal-Bench 2.0 next through the existing GitHub Mini-SWE/Harbor
+  workflows, with all-task and source-applicable results.
+- [ ] Run contemporaneous same-wrapper SWE-Live Lite only after the DeepSWE and
+  Terminal-Bench gates, if still needed for the final product claim.
 - [ ] Report resolution first, then outcome-conditioned calls, steps, actions,
   tokens, cost, wall time, GT context, and graph applicability.
 - [ ] Produce the final causal report and stop the project.
