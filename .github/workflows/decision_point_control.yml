@@ -52,17 +52,23 @@ jobs:
       - name: Sanitize API key (strip BOM / stray whitespace)
         env:
           RAW_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RAW_OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
         run: |
           python - <<'PY'
           import os
-          value = (os.environ.get("RAW_OPENAI_API_KEY") or "").lstrip("\ufeff").strip()
+          values = {
+              "OPENAI_API_KEY": os.environ.get("RAW_OPENAI_API_KEY") or "",
+              "OPENAI_BASE_URL": os.environ.get("RAW_OPENAI_BASE_URL") or "",
+          }
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-              print(f"OPENAI_API_KEY={value}", file=fh)
+              for name, raw in values.items():
+                  value = raw.replace("\ufeff", "").strip()
+                  if not value.isascii():
+                      raise SystemExit(f"{name} contains non-ASCII characters")
+                  print(f"{name}={value}", file=fh)
           PY
       - name: Run matched control responses
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
           MSWEA_COST_TRACKING: ignore_errors
           PYTHONUTF8: "1"
         run: |
