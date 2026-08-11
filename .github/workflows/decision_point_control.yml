@@ -49,6 +49,16 @@ jobs:
             --repo "${{ github.repository }}" \
             --pattern "tb2-miniswe-central-certified_full-integrated-${{ inputs.source_run_id }}-task-*" \
             --dir captures
+      - name: Sanitize API key (strip BOM / stray whitespace)
+        env:
+          RAW_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          value = (os.environ.get("RAW_OPENAI_API_KEY") or "").lstrip("\ufeff").strip()
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              print(f"OPENAI_API_KEY={value}", file=fh)
+          PY
       - name: Run matched control responses
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
