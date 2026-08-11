@@ -50,7 +50,7 @@ on:
       arm:
         description: "Conservative component arm; paid execution still requires the pre-smoke gate"
         type: choice
-        options: [off, audit, certified_context, certified_controllers, certified_full]
+        options: ["off", audit, certified_context, certified_controllers, certified_full]
         default: audit
       feature:
         description: "Integrated all-17 runtime (component behavior is selected by arm)"
