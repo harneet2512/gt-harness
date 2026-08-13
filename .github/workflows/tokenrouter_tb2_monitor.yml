@@ -106,7 +106,7 @@ jobs:
               "--ref", branch,
               "-f", "model=deepseek-v4-flash",
               "-f", "provider=deepseek",
-              "-f", "parallel=2",
+              "-f", "parallel=15",
               "-f", f"include={tasks}",
               "-f", "dataset=terminal-bench@2.0",
               "-f", "image_tag=20251031",
