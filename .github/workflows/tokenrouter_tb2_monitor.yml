@@ -60,46 +60,34 @@ jobs:
               print("TOKENROUTER_MONITOR=unexpected_status")
               sys.exit(0)
 
-          # A repository variable is the durable one-shot lock. It prevents a
-          # scheduled tick from launching a second paid cohort after recovery.
-          lock = ""
-          try:
-              lock = subprocess.run(
-                  ["gh", "variable", "get", "TOKENROUTER_TB2_15_LOCK", "--repo", repo,
-                   "--json", "value", "--jq", ".value"],
-                  check=False, capture_output=True, text=True,
-              ).stdout.strip()
-          except Exception:
-              pass
-          if lock:
-              print(f"TOKENROUTER_MONITOR=locked value={lock}")
-              if lock.startswith("run:"):
-                  run_id = lock.split(":", 1)[1]
-                  jobs = json.loads(subprocess.run(
-                      ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"],
-                      check=True, capture_output=True, text=True,
-                  ).stdout).get("jobs", [])
-                  counts = {}
-                  for job in jobs:
-                      counts[job.get("status", "unknown")] = counts.get(job.get("status", "unknown"), 0) + 1
-                  print(f"TOKENROUTER_TASK_PROGRESS run={run_id} counts={json.dumps(counts, sort_keys=True)}")
-              sys.exit(0)
-
+          target_sha = subprocess.run(
+              ["gh", "api", f"repos/{repo}/git/ref/heads/{branch}", "--jq", ".object.sha"],
+              check=True, capture_output=True, text=True,
+          ).stdout.strip()
           runs = json.loads(subprocess.run(
               ["gh", "run", "list", "--repo", repo, "--workflow", "tb2_miniswe_central.yml",
-               "--limit", "20", "--json", "databaseId,status,headBranch,event"],
+               "--limit", "50", "--json", "databaseId,status,headBranch,headSha"],
               check=True, capture_output=True, text=True,
           ).stdout)
+          matching = [r for r in runs if r.get("headBranch") == branch and r.get("headSha") == target_sha]
+          if matching:
+              run_id = str(matching[0]["databaseId"])
+              jobs = json.loads(subprocess.run(
+                  ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"],
+                  check=True, capture_output=True, text=True,
+              ).stdout).get("jobs", [])
+              counts = {}
+              for job in jobs:
+                  counts[job.get("status", "unknown")] = counts.get(job.get("status", "unknown"), 0) + 1
+              print(f"TOKENROUTER_MONITOR=locked run={run_id} sha={target_sha}")
+              print(f"TOKENROUTER_TASK_PROGRESS run={run_id} counts={json.dumps(counts, sort_keys=True)}")
+              sys.exit(0)
           active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested"}
                     and r.get("headBranch") == branch]
           if active:
               print("TOKENROUTER_MONITOR=run_already_active")
               sys.exit(0)
 
-          subprocess.run(
-              ["gh", "variable", "set", "TOKENROUTER_TB2_15_LOCK", "--repo", repo,
-               "--body", "dispatched"], check=True,
-          )
           subprocess.run([
               "gh", "workflow", "run", "tb2_miniswe_central.yml", "--repo", repo,
               "--ref", branch,
@@ -128,10 +116,5 @@ jobs:
                   run_id = str(candidates[0]["databaseId"])
                   break
               import time; time.sleep(2)
-          lock_value = f"run:{run_id}" if run_id else "dispatched"
-          subprocess.run(
-              ["gh", "variable", "set", "TOKENROUTER_TB2_15_LOCK", "--repo", repo,
-               "--body", lock_value], check=True,
-          )
           print(f"TOKENROUTER_MONITOR=dispatched cohort=15 run={run_id or 'pending'}")
           PY
