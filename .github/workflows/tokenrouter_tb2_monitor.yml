@@ -47,6 +47,7 @@ jobs:
           try:
               with urllib.request.urlopen(req, timeout=25) as response:
                   status = response.status
+                  body = response.read()
           except urllib.error.HTTPError as exc:
               status = exc.code
           except Exception as exc:
@@ -58,6 +59,18 @@ jobs:
               sys.exit(0)
           if status != 200:
               print("TOKENROUTER_MONITOR=unexpected_status")
+              sys.exit(0)
+          try:
+              catalog = json.loads(body.decode("utf-8"))
+              ids = {str(item.get("id")) for item in catalog.get("data", [])
+                     if isinstance(item, dict) and item.get("id")}
+              requested = "deepseek-v4-flash-0731"
+              print(f"TOKENROUTER_MODEL_EXACT_ID_PRESENT={requested in ids}")
+              if requested not in ids:
+                  print("TOKENROUTER_MONITOR=model_not_listed")
+                  sys.exit(0)
+          except Exception as exc:
+              print(f"TOKENROUTER_MONITOR=models_parse_error error={type(exc).__name__}")
               sys.exit(0)
 
           target_sha = subprocess.run(
