@@ -64,7 +64,7 @@ jobs:
               catalog = json.loads(body.decode("utf-8"))
               ids = {str(item.get("id")) for item in catalog.get("data", [])
                      if isinstance(item, dict) and item.get("id")}
-              requested = "deepseek-v4-flash-0731"
+              requested = "deepseek/deepseek-v4-flash-0731"
               print(f"TOKENROUTER_MODEL_EXACT_ID_PRESENT={requested in ids}")
               if requested not in ids:
                   print("TOKENROUTER_MONITOR=model_not_listed")
@@ -104,7 +104,7 @@ jobs:
           subprocess.run([
               "gh", "workflow", "run", "tb2_miniswe_central.yml", "--repo", repo,
               "--ref", branch,
-              "-f", "model=deepseek-v4-flash-0731",
+              "-f", "model=deepseek/deepseek-v4-flash-0731",
               "-f", "provider=tokenrouter",
               "-f", "parallel=10",
               "-f", f"include={tasks}",
