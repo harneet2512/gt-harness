@@ -1,4 +1,4 @@
-name: TokenRouter 15-task monitor
+name: DeepSeek 15-task monitor
 
 on:
   schedule:
@@ -23,9 +23,9 @@ jobs:
       BRANCH: baseline-swe-live-lite-v4flash0731
       TASKS: extract-elf,torch-pipeline-parallelism,torch-tensor-parallelism,video-processing,llm-inference-batching-scheduler,write-compressor,schemelike-metacircular-eval,gpt2-codegolf,prove-plus-comm,sanitize-git-repo,headless-terminal,portfolio-optimization,fix-code-vulnerability,cobol-modernization,winning-avg-corewars
     steps:
-      - name: Check TokenRouter and dispatch at most once
+      - name: Check native DeepSeek and dispatch at most once
         env:
-          TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -34,13 +34,13 @@ jobs:
           repo = os.environ["REPO"]
           branch = os.environ["BRANCH"]
           tasks = os.environ["TASKS"]
-          key = (os.environ.get("TOKENROUTER_API_KEY") or "").strip()
+          key = (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
           if not key:
-              print("TOKENROUTER_MONITOR=blocked_missing_secret")
+              print("DEEPSEEK_MONITOR=blocked_missing_secret")
               sys.exit(0)
 
           req = urllib.request.Request(
-              "https://api.tokenrouter.com/v1/models",
+              "https://api.deepseek.com/models",
               headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
           )
           status = None
@@ -51,26 +51,26 @@ jobs:
           except urllib.error.HTTPError as exc:
               status = exc.code
           except Exception as exc:
-              print(f"TOKENROUTER_MONITOR=unavailable error={type(exc).__name__}")
+              print(f"DEEPSEEK_MONITOR=unavailable error={type(exc).__name__}")
               sys.exit(0)
-          print(f"TOKENROUTER_HTTP_STATUS={status}")
+          print(f"DEEPSEEK_HTTP_STATUS={status}")
           if status in (502, 503, 504) or status is None or status >= 500:
-              print("TOKENROUTER_MONITOR=unavailable")
+              print("DEEPSEEK_MONITOR=unavailable")
               sys.exit(0)
           if status != 200:
-              print("TOKENROUTER_MONITOR=unexpected_status")
+              print("DEEPSEEK_MONITOR=unexpected_status")
               sys.exit(0)
           try:
               catalog = json.loads(body.decode("utf-8"))
               ids = {str(item.get("id")) for item in catalog.get("data", [])
                      if isinstance(item, dict) and item.get("id")}
-              requested = "deepseek/deepseek-v4-flash-0731"
-              print(f"TOKENROUTER_MODEL_EXACT_ID_PRESENT={requested in ids}")
+              requested = "deepseek-v4-flash"
+              print(f"DEEPSEEK_MODEL_EXACT_ID_PRESENT={requested in ids}")
               if requested not in ids:
-                  print("TOKENROUTER_MONITOR=model_not_listed")
+                  print("DEEPSEEK_MONITOR=model_not_listed")
                   sys.exit(0)
           except Exception as exc:
-              print(f"TOKENROUTER_MONITOR=models_parse_error error={type(exc).__name__}")
+              print(f"DEEPSEEK_MONITOR=models_parse_error error={type(exc).__name__}")
               sys.exit(0)
 
           target_sha = subprocess.run(
@@ -104,9 +104,9 @@ jobs:
           subprocess.run([
               "gh", "workflow", "run", "tb2_miniswe_central.yml", "--repo", repo,
               "--ref", branch,
-              "-f", "model=deepseek/deepseek-v4-flash-0731",
-              "-f", "provider=tokenrouter",
-              "-f", "parallel=10",
+              "-f", "model=deepseek-v4-flash",
+              "-f", "provider=deepseek",
+              "-f", "parallel=2",
               "-f", f"include={tasks}",
               "-f", "dataset=terminal-bench@2.0",
               "-f", "image_tag=20251031",
