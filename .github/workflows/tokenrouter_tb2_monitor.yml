@@ -56,7 +56,7 @@ jobs:
           if status in (502, 503, 504) or status is None or status >= 500:
               print("TOKENROUTER_MONITOR=unavailable")
               sys.exit(0)
-          if status not in (200, 401, 403):
+          if status != 200:
               print("TOKENROUTER_MONITOR=unexpected_status")
               sys.exit(0)
 
