@@ -1,0 +1,110 @@
+name: TokenRouter 15-task monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: tokenrouter-tb2-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: baseline-swe-live-lite-v4flash0731
+      TASKS: extract-elf,torch-pipeline-parallelism,torch-tensor-parallelism,video-processing,llm-inference-batching-scheduler,write-compressor,schemelike-metacircular-eval,gpt2-codegolf,prove-plus-comm,sanitize-git-repo,headless-terminal,portfolio-optimization,fix-code-vulnerability,cobol-modernization,winning-avg-corewars
+    steps:
+      - name: Check TokenRouter and dispatch at most once
+        env:
+          TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess, sys, urllib.error, urllib.request
+
+          repo = os.environ["REPO"]
+          branch = os.environ["BRANCH"]
+          tasks = os.environ["TASKS"]
+          key = (os.environ.get("TOKENROUTER_API_KEY") or "").strip()
+          if not key:
+              print("TOKENROUTER_MONITOR=blocked_missing_secret")
+              sys.exit(0)
+
+          req = urllib.request.Request(
+              "https://api.tokenrouter.com/v1/models",
+              headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+          )
+          status = None
+          try:
+              with urllib.request.urlopen(req, timeout=25) as response:
+                  status = response.status
+          except urllib.error.HTTPError as exc:
+              status = exc.code
+          except Exception as exc:
+              print(f"TOKENROUTER_MONITOR=unavailable error={type(exc).__name__}")
+              sys.exit(0)
+          print(f"TOKENROUTER_HTTP_STATUS={status}")
+          if status in (502, 503, 504) or status is None or status >= 500:
+              print("TOKENROUTER_MONITOR=unavailable")
+              sys.exit(0)
+          if status not in (200, 401, 403):
+              print("TOKENROUTER_MONITOR=unexpected_status")
+              sys.exit(0)
+
+          # A repository variable is the durable one-shot lock. It prevents a
+          # scheduled tick from launching a second paid cohort after recovery.
+          lock = ""
+          try:
+              lock = subprocess.run(
+                  ["gh", "variable", "get", "TOKENROUTER_TB2_15_LOCK", "--repo", repo,
+                   "--json", "value", "--jq", ".value"],
+                  check=False, capture_output=True, text=True,
+              ).stdout.strip()
+          except Exception:
+              pass
+          if lock:
+              print(f"TOKENROUTER_MONITOR=locked value={lock}")
+              sys.exit(0)
+
+          runs = json.loads(subprocess.run(
+              ["gh", "run", "list", "--repo", repo, "--workflow", "tb2_miniswe_central.yml",
+               "--limit", "20", "--json", "databaseId,status,headBranch,event"],
+              check=True, capture_output=True, text=True,
+          ).stdout)
+          active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested"}
+                    and r.get("headBranch") == branch]
+          if active:
+              print("TOKENROUTER_MONITOR=run_already_active")
+              sys.exit(0)
+
+          subprocess.run(
+              ["gh", "variable", "set", "TOKENROUTER_TB2_15_LOCK", "--repo", repo,
+               "--body", "dispatched"], check=True,
+          )
+          subprocess.run([
+              "gh", "workflow", "run", "tb2_miniswe_central.yml", "--repo", repo,
+              "--ref", branch,
+              "-f", "model=deepseek-v4-flash-0731",
+              "-f", "provider=tokenrouter",
+              "-f", "parallel=10",
+              "-f", f"include={tasks}",
+              "-f", "dataset=terminal-bench@2.0",
+              "-f", "image_tag=20251031",
+              "-f", f"ref={branch}",
+              "-f", "arm=certified_full",
+              "-f", "feature=integrated",
+              "-f", "replay_capture=false",
+              "-f", "step_limit=100",
+              "-f", "provider_preflight_timeout_sec=600",
+          ], check=True)
+          print("TOKENROUTER_MONITOR=dispatched cohort=15")
+          PY
