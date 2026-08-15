@@ -1,0 +1,10 @@
+artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
+source_repository=https://github.com/harneet2512/groundtruth
+source_commit=7fcb019104f0e43311e2db009950e60014bc1f4b
+sha256=60abf2f50435e5de01a35877a57d39b21a8ddd34c5ed4fdca0f79b6f279dfef7
+build_command=python -m build --wheel
+
+The wheel was built from a detached clean worktree at source_commit, not from
+the developer checkout. The edit-time caller-contract and patch-delta producer
+audit fixes are committed upstream. The relevant upstream runtime tests passed
+before build, and the built archive was inspected for all four fix markers.

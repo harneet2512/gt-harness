@@ -45,6 +45,19 @@ No trailing tool calls.
 """
 
 
+# Appended to SYSTEM_PROMPT only when GroundTruth is active (--gt-root): a
+# GT-off run must send byte-identical prompts to stock nano-harness.
+GT_PROMPT_SUFFIX = """\
+
+Structural evidence from static analysis of the repository (definitions, \
+callers, signatures, test results) may appear appended to tool outputs; it is \
+deterministic and trustworthy - use it. Treat `.gt`, `/installed-agent`, the \
+agent's Python environment, and GroundTruth's implementation as harness \
+internals, not task code: never inspect, modify, test, or reverse-engineer \
+them. Work only on the user's task and its repository.
+"""
+
+
 def count_tokens_approx(text: str) -> int:
     """4 chars ~= 1 token rule of thumb. Good enough for the cap test."""
     return max(1, len(text) // 4)

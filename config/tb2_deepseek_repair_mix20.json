@@ -1,0 +1,92 @@
+{
+  "schema": "gt.tb2.deepseek.smoke20.v1",
+  "dataset": "terminal-bench/terminal-bench-2",
+  "model": "deepseek-v4-flash",
+  "temperature": 1.0,
+  "timeout_multiplier": 1.0,
+  "concurrency": 10,
+  "mix_name": "regression-repair-complete-20260810",
+  "selection_basis": {
+    "all_known_outcome_regressions": [
+      "extract-elf",
+      "mcmc-sampling-stan",
+      "prove-plus-comm",
+      "qemu-alpine-ssh",
+      "regex-chess",
+      "sanitize-git-repo",
+      "torch-tensor-parallelism",
+      "video-processing",
+      "winning-avg-corewars",
+      "write-compressor"
+    ],
+    "gt_working": [
+      "headless-terminal",
+      "portfolio-optimization",
+      "schemelike-metacircular-eval",
+      "cobol-modernization",
+      "llm-inference-batching-scheduler",
+      "fix-code-vulnerability",
+      "feal-linear-cryptanalysis"
+    ],
+    "prior_gt_on_flips": [
+      "count-dataset-tokens",
+      "largest-eigenval",
+      "torch-pipeline-parallelism"
+    ]
+  },
+  "baseline": {
+    "source": "baseline_deepseekv4flash",
+    "arm": "GT-OFF",
+    "known_rewards": {
+      "extract-elf": 1.0,
+      "mcmc-sampling-stan": 1.0,
+      "prove-plus-comm": 1.0,
+      "qemu-alpine-ssh": 1.0,
+      "regex-chess": 1.0,
+      "sanitize-git-repo": 1.0,
+      "torch-tensor-parallelism": 1.0,
+      "video-processing": 1.0,
+      "winning-avg-corewars": 1.0,
+      "write-compressor": 1.0,
+      "headless-terminal": 1.0,
+      "portfolio-optimization": 1.0,
+      "schemelike-metacircular-eval": 1.0,
+      "cobol-modernization": 1.0,
+      "llm-inference-batching-scheduler": 1.0,
+      "fix-code-vulnerability": 1.0,
+      "feal-linear-cryptanalysis": 1.0,
+      "count-dataset-tokens": 0.0,
+      "largest-eigenval": 0.0,
+      "torch-pipeline-parallelism": 0.0
+    },
+    "ungraded_tasks": [],
+    "outcome_contract": {
+      "official_resolved": "verifier reward == 1",
+      "uncensored_resolved": "verifier reward == 1 and Harbor process completed without outer cancellation",
+      "comparison_gate_field": "uncensored_resolved",
+      "known_outer_timeout_tasks": []
+    }
+  },
+  "tasks": [
+    "extract-elf",
+    "mcmc-sampling-stan",
+    "prove-plus-comm",
+    "qemu-alpine-ssh",
+    "regex-chess",
+    "sanitize-git-repo",
+    "torch-tensor-parallelism",
+    "video-processing",
+    "winning-avg-corewars",
+    "write-compressor",
+    "headless-terminal",
+    "portfolio-optimization",
+    "schemelike-metacircular-eval",
+    "cobol-modernization",
+    "llm-inference-batching-scheduler",
+    "fix-code-vulnerability",
+    "feal-linear-cryptanalysis",
+    "count-dataset-tokens",
+    "largest-eigenval",
+    "torch-pipeline-parallelism"
+  ]
+}

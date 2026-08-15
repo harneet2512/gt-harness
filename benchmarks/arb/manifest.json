@@ -1,0 +1,37 @@
+{
+  "schema": "gt.arb.redacted_bundle.v1",
+  "arb_source_commit": "07014c986f3deadb1548c62b32c0ffbe6a81465d",
+  "files": [
+    {
+      "file": "v2_abstention.redacted.jsonl",
+      "sha256": "dd4fe19da0896d5e2174de1a4bcd901138a0585e866224951053840ef5d0187c",
+      "rows": 82,
+      "bytes": 125014
+    },
+    {
+      "file": "v2_code2test.redacted.jsonl",
+      "sha256": "86ddb5715478ead6728c065385a18f5b28de052db7da7da8e4c5ad175a02ecb5",
+      "rows": 106,
+      "bytes": 103573
+    },
+    {
+      "file": "v2_comment2context.redacted.jsonl",
+      "sha256": "3227c816c083f669efd6f716eddaccf9497988c79227ebfa6340bf66013b931a",
+      "rows": 80,
+      "bytes": 63919
+    },
+    {
+      "file": "v2_edit2ripple.redacted.jsonl",
+      "sha256": "163f758e7586d1eed6e67352272d2b1535a74733890ccb703ca8fbce97e2c4b7",
+      "rows": 58,
+      "bytes": 355937
+    },
+    {
+      "file": "v2_trace2code.redacted.jsonl",
+      "sha256": "dcc32f48a79873dbdee3bb1b94221c6a3aa040e2c09983dcaac1642a6771c922",
+      "rows": 101,
+      "bytes": 204881
+    }
+  ],
+  "total_rows": 427
+}

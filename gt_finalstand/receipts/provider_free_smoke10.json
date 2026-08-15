@@ -1,0 +1,37 @@
+{
+  "schema": "gt.finalstand.provider_free_smoke10.v1",
+  "environment": {
+    "kind": "github_codespace",
+    "repository": "gt-harness",
+    "base_head": "2ec6cc56460549a83cba4163d81b95fdccb4fbb1",
+    "workspace": "/workspaces/gt-harness"
+  },
+  "scope": "provider_free_miniswe_runtime_smoke",
+  "collected": 10,
+  "passed": 9,
+  "skipped": 1,
+  "failed": 0,
+  "provider_calls": 0,
+  "junit_sha256": "c420152806eabc9dfa73ef98394d3acf0482926ad8974913ef4a1795a5716234",
+  "nodes": [
+    "tests/test_miniswe_smoke.py::test_miniswe_gt_smoke_runs_to_submitted",
+    "tests/test_miniswe_smoke.py::test_miniswe_gt_smoke_delivers_evidence_and_receipts",
+    "tests/test_miniswe_smoke.py::test_task_start_localization_delivered_with_graph",
+    "tests/test_miniswe_smoke.py::test_miniswe_gt_smoke_localization_requires_graph",
+    "tests/test_miniswe_runtime.py::test_runtime_hooks_capture_provider_payload_and_action",
+    "tests/test_miniswe_runtime.py::test_native_groundtruth_action_is_routed_without_shell_execution",
+    "tests/test_miniswe_runtime.py::test_provider_response_is_bound_to_delivery",
+    "tests/test_miniswe_runtime.py::test_runtime_augments_test_result_but_keeps_raw_output_byte_for_byte",
+    "tests/test_miniswe_runtime.py::test_gt_off_never_attaches_terminal_or_provider_authorities",
+    "tests/test_miniswe_runtime.py::test_gt_on_attaches_and_restores_canonical_provider_boundary"
+  ],
+  "skip": {
+    "node": "tests/test_miniswe_smoke.py::test_miniswe_gt_smoke_localization_requires_graph",
+    "reason": "graph available; positive graph behavior is covered by test_task_start_localization_delivered_with_graph"
+  },
+  "limits": [
+    "This is an offline runtime smoke and is not the ten-task provider benchmark.",
+    "The canonical benchmark remains 10 tasks x 6 arms = 60 provider-bound trials."
+  ],
+  "ok": true
+}

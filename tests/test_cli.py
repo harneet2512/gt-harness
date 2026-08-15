@@ -17,9 +17,14 @@ def test_build_provider_openai_for_gpt_model(monkeypatch):
 
 
 def test_build_provider_openai_with_base_url():
-    p = build_provider(model="local/llama3", base_url="http://localhost:8000/v1")
+    p = build_provider(
+        model="local/llama3",
+        base_url="http://localhost:8000/v1",
+        temperature=1.0,
+    )
     assert p.__class__.__name__ == "OpenAIProvider"
     assert p.base_url == "http://localhost:8000/v1"
+    assert p.temperature == 1.0
 
 
 def test_main_runs_agent_and_prints(monkeypatch, capsys):

@@ -17,19 +17,18 @@
 # exact tree the local runtime was developed against; the public repo's
 # gt-index has drifted) is the only deterministic option.
 #
-# NOTE: gt_engine writes no ledger/receipt files to disk yet — delivered GT
-# evidence is only visible inline in the transcript (<task>/agent/nano.txt),
-# which the results artifact already captures. On-disk delivery ledgers are a
-# gap deferred to the audit-tooling phase.
+# The artifact includes a sealed delivery ledger, verbatim delivery blocks,
+# hash-chained attribution events, provider-final request receipts, and the
+# live acceptance report. Transcript markers are corroboration, not proof.
 name: TB2 GT arm (nano + GroundTruth)
 
 on:
   workflow_dispatch:
     inputs:
       model:
-        description: "Model name in provider/name form (harbor -m)"
+        description: "Provider-native model id; the DeepSeek gateway requires bare deepseek-v4-flash"
         type: string
-        default: "deepseek/deepseek-v4-flash"
+        default: "deepseek-v4-flash"
       base_url:
         description: "OpenAI-compatible gateway URL; when set, exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -41,19 +40,43 @@ on:
       concurrency:
         description: "Concurrent trials (harbor -n)"
         type: string
-        default: "4"
+        default: "5"
+      temperature:
+        description: "Explicit OpenAI-compatible sampling temperature"
+        type: string
+        default: "1"
       job_name:
         description: "Harbor job name (default: auto tb2-gt-<run id>)"
         type: string
         default: ""
       task_ids:
-        description: "Optional comma-separated task names (harbor -i, glob ok). Overrides n_tasks — use to shard a full run manually"
+        description: "Comma-separated trigger-opportunity smoke slice; overrides n_tasks"
         type: string
-        default: ""
+        default: "build-cython-ext,headless-terminal,llm-inference-batching-scheduler,reshard-c4-data,sanitize-git-repo"
+      timeout_multiplier:
+        description: "harbor --agent-timeout-multiplier. MUST match the baseline arm being paired against (frozen full-89 baseline = 1.0; early smokes = 2.0)"
+        type: string
+        default: "1.0"
       gt_profile:
         description: "GT_RL_PROFILE for the agent (GT capability profile; '2' = production law)"
         type: string
         default: "2"
+      min_witnessed:
+        description: "Minimum live-witnessed identities (delivery or deterministic capability receipt)"
+        type: string
+        default: "7"
+      min_exercised:
+        description: "Minimum identities with a specific live evaluation or terminal outcome"
+        type: string
+        default: "12"
+      min_action_consistent:
+        description: "Minimum distinct identities whose immediate next action matches the GT delivery"
+        type: string
+        default: "5"
+      expected_tasks:
+        description: "Exact task count required by the live attribution gate"
+        type: string
+        default: "5"
 
 jobs:
   gt:
@@ -71,6 +94,12 @@ jobs:
       # GTNanoAgent resolves GT_RL_PROFILE as kwarg > host env > default "2"
       # and forwards every GT_* host var into the task container.
       GT_RL_PROFILE: ${{ inputs.gt_profile }}
+      # Harness-local SDLC gate: after a source edit, the penultimate submit
+      # checkpoint requires a passing behavioral test/self-check. It spends
+      # one existing advisory bounce and then fails open, so it cannot deadlock
+      # completion. Kept outside Groundtruth's canonical Profile-2 inventory.
+      GT_SDLC_VERIFY: "1"
+      NANO_TEMPERATURE: ${{ inputs.temperature }}
       PYTHONUTF8: "1"
     steps:
       - name: Checkout
@@ -139,7 +168,12 @@ jobs:
       - name: Install nano-harness + harbor
         run: |
           python -m pip install --upgrade pip
-          pip install -e . "harbor==0.20.0"
+          pip install -e . "harbor==0.20.0" vendor/groundtruth_mcp-*.whl "numpy==2.5.1" "pytest==9.1.1"
+
+      - name: Audit all 17 deterministic trigger paths
+        env:
+          GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
+        run: python -m pytest -m gt_all17 -q
 
       # Substrate-era assumption, corrected: credentials used to be baked ONCE
       # into the substrate image; now every dispatch re-imports them from
@@ -206,7 +240,11 @@ jobs:
           last = None
           for attempt in range(1, 4):
               try:
-                  provider = build_provider(model=model, base_url=None)
+                  provider = build_provider(
+                      model=model,
+                      base_url=None,
+                      temperature=float(os.environ["NANO_TEMPERATURE"]),
+                  )
                   r = provider.step(
                       messages=[{"role": "user", "content": "Reply with the single word: ok"}],
                       tools=TOOLS, system=SYSTEM_PROMPT,
@@ -255,18 +293,26 @@ jobs:
           CONCURRENCY: ${{ inputs.concurrency }}
           JOB_NAME_INPUT: ${{ inputs.job_name }}
           TASK_IDS: ${{ inputs.task_ids }}
+          TIMEOUT_MULT: ${{ inputs.timeout_multiplier }}
         run: |
           set -uo pipefail
           JOB_NAME="${JOB_NAME_INPUT:-tb2-gt-${GITHUB_RUN_ID}}"
           echo "job_name=${JOB_NAME}" >> "$GITHUB_OUTPUT"
 
+          # Pairing law: the GT arm must run the SAME timeout budget as the
+          # baseline arm it is compared against (the frozen full-89 baseline
+          # used harbor's default 1.0; the early 5-task smokes used 2.0).
+          export GT_AGENT_TIMEOUT_SECONDS="$(
+            python -c 'import sys; print(1800 * float(sys.argv[1]))' \
+              "${TIMEOUT_MULT:-1.0}"
+          )"
           args=( run
             -d terminal-bench@2.0
             -a eval.tb_agent:GTNanoAgent
             -m "$MODEL"
             -o results/terminal-bench
             --job-name "$JOB_NAME"
-            --agent-timeout-multiplier 2.0
+            --agent-timeout-multiplier "${TIMEOUT_MULT:-1.0}"
             -n "$CONCURRENCY"
             -y
           )
@@ -286,10 +332,68 @@ jobs:
         if: always()
         run: df -h /
 
-      # Everything harbor wrote: result.json plus per-task dirs with the agent
-      # transcript (<task>/agent/nano.txt — GT evidence deliveries appear
-      # inline there), verifier output, and config. gt_engine writes no
-      # separate ledger/receipt files yet (audit-tooling gap).
+      - name: Audit provider-bound GT attribution
+        if: always()
+        env:
+          JOB_NAME: ${{ steps.harbor.outputs.job_name }}
+          MIN_WITNESSED: ${{ inputs.min_witnessed }}
+          MIN_EXERCISED: ${{ inputs.min_exercised }}
+          MIN_ACTION_CONSISTENT: ${{ inputs.min_action_consistent }}
+          EXPECTED_TASKS: ${{ inputs.expected_tasks }}
+          EXPECTED_TEMPERATURE: ${{ inputs.temperature }}
+        run: |
+          set -uo pipefail
+          run_dir="results/terminal-bench/${JOB_NAME}"
+          audit_json="${run_dir}/gt-audit.json"
+          gate_json="${run_dir}/gt-live-gate.json"
+          replay_json="${run_dir}/gt-iteration-replay.json"
+          audit_rc=0
+          gate_rc=0
+          replay_rc=0
+          python scripts/gt_replay.py "$run_dir" --json "$replay_json" \
+            || replay_rc=$?
+          python scripts/gt_audit.py "$run_dir" --json "$audit_json" \
+            || audit_rc=$?
+          if [ -f "$audit_json" ]; then
+            python scripts/gt_live_gate.py "$audit_json" \
+              --run-dir "$run_dir" \
+              --min-witnessed "$MIN_WITNESSED" \
+              --min-exercised "$MIN_EXERCISED" \
+              --min-action-consistent "$MIN_ACTION_CONSISTENT" \
+              --expected-tasks "$EXPECTED_TASKS" \
+              --expected-model "deepseek-v4-flash" \
+              --expected-temperature "$EXPECTED_TEMPERATURE" \
+              --require-complete-census \
+              --require-complete-profile \
+              --require-task-contract \
+              --require-graph-surface-receipt \
+              --require-verification-plan-on-graph-edit \
+              --require-improvement-receipts \
+              --require-step0-localization \
+              --require-behavior-flags "GT_CS_EDIT_TRIGGER,GT_SS_EDIT_PREVENTIVE,GT_INFRA_NOISE_GUARD,GT_HYP_CONTRA_GUARD,GT_RECOVERY_ESCALATE,GT_OBLIG_STEER_GUARD,GT_ROLE_DRIVEN_COALITION" \
+              --require-lifecycle "task_start,research,pre_edit,post_edit,test,verify,submit" \
+              --json "$gate_json" || gate_rc=$?
+          else
+            echo "::error::GT audit did not produce $audit_json"
+            gate_rc=1
+          fi
+          if [ -f "$gate_json" ]; then
+            {
+              echo "## GT live attribution gate"
+              echo
+              echo '```json'
+              cat "$gate_json"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$audit_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ] \
+              || [ "$replay_rc" -ne 0 ]; then
+            exit 1
+          fi
+
+      # Everything harbor and the attribution gate wrote: benchmark result,
+      # transcript, sealed ledger, exact delivery blocks, hash-chained
+      # provider receipts, model patch, verifier output, and live gate report.
       - name: Upload results artifact
         if: always()
         uses: actions/upload-artifact@v4

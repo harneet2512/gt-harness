@@ -26,15 +26,32 @@ Anthropic provider, everything else to the OpenAI provider — see
 
 | Model choice | Required secrets |
 |---|---|
-| `deepseek/deepseek-v4-flash` (default) | `OPENAI_API_KEY` (=DeepSeek key) + `OPENAI_BASE_URL` (DeepSeek's OpenAI-compatible endpoint) |
+| `deepseek-v4-flash` (default) | `OPENAI_API_KEY` (=DeepSeek key) + `OPENAI_BASE_URL` (DeepSeek's OpenAI-compatible endpoint) |
 | `openai/gpt-*` | `OPENAI_API_KEY` |
 | `anthropic/claude-*` | `ANTHROPIC_API_KEY` |
 | Gemini or anything else | via an OpenAI-compatible gateway: `OPENAI_API_KEY` (gateway token) + `OPENAI_BASE_URL` |
 
 The `base_url` dispatch input overrides the `OPENAI_BASE_URL` secret for a
-single run. When `OPENAI_BASE_URL` is set, the full `provider/name` string is
-passed through as the gateway's model id; without it, the provider prefix is
-stripped (see `eval/tb_agent.py`).
+single run.
+
+**Model-id gotcha (read before changing `model`).** `eval/tb_agent.py` strips a
+`provider/` prefix *only when `OPENAI_BASE_URL` is unset*. With a gateway
+configured, the `model` string reaches nano — and therefore the gateway's
+`/chat/completions` — **verbatim**. So `model` must be the gateway's own native
+model id:
+
+| Endpoint | Correct `model` |
+|---|---|
+| `https://api.deepseek.com/v1` | `deepseek-v4-flash` (bare) |
+| OpenRouter | `deepseek/deepseek-v4-flash` (prefixed — OpenRouter's id *is* prefixed) |
+
+Passing DeepSeek the OpenRouter spelling makes every request 400, which
+surfaces as "the model can't drive the harness" rather than as a config error.
+The **preflight step** exists to catch exactly this: before any task image is
+pulled it makes one ~1k-token call through `nano.cli.build_provider` — nano's
+real routing, real `max_completion_tokens`, real translated tool schemas — and
+fails the job with a clear message if the id, key, gateway, or request shape is
+wrong. It costs well under a cent.
 
 ### 2. Dispatch
 
@@ -87,9 +104,41 @@ since 89 distinct task images can exhaust the runner disk.
 1. **5-task slice** (now): prove the CI plumbing + model routing end to end.
 2. **Full 89-task baseline** (next): the frozen no-GT reference number.
    Freeze the commit + model + job artifact; all GT comparisons point at it.
-3. **GT arm** (future, not enabled): same workflow shape with the
-   GroundTruth-augmented agent. Blocked on container plumbing in
-   `eval/tb_agent.py` `install()` (upload `gt_engine/`, install the
-   `groundtruth` package, stage the `gt-index` binary, pass `--gt-root`) —
-   see the `TODO(gt)` there. It will be a separate workflow (or a
-   `gt_enabled` input) so the baseline stays byte-for-byte reproducible.
+3. **GT arm** (`tb2_gt.yml`, live — GT delivered in containers on run
+   30501483446): same workflow shape with `eval.tb_agent:GTNanoAgent`, which
+   uploads `gt_engine/` + the vendored `groundtruth` wheel + a CI-built
+   `gt-index` binary into every task container and runs nano with
+   `--gt-root "$PWD"`. Separate workflow so the baseline stays
+   byte-for-byte reproducible.
+
+## `swe_gt.yml` — SWE-bench Verified GT arm (nano + GroundTruth)
+
+Same hardened shape as `tb2_gt.yml` (sanitize ALL provider secrets, retrying
+provider preflight with cause chain, gt-index build + FTS5 smoke, GT artifact
+preflight, artifact-always, score summary), pointed at
+`swebench-verified@1.0` with `eval.swe_agent:GTNanoSweAgent`. Secrets, the
+dispatch pattern, and the results layout match the sections above
+(`-o results/swebench`, artifact `swe-gt-<run id>`).
+
+SWE-specific deltas:
+
+- **`--gt-root /testbed`** by default (the repo location is baked into the
+  SWE task images; override with `--ak gt_root=...` / `NANO_GT_ROOT` only for
+  debugging). GT's `.gt/` index dir is self-gitignored and removed before the
+  model patch is staged, so it can never reach `model_patch.diff` or grading;
+  the GT delivery ledger lands at `<task>/agent/gt_ledger.jsonl` in the
+  artifact.
+- **Disk**: swebench eval images are 1–3 GB EACH, so the free-disk step runs
+  unconditionally and defaults are small: `n_tasks=5`, `concurrency=2`
+  (task.toml wants 1 cpu / 4G per task). The full 500-task dataset does NOT
+  fit one hosted runner — shard with `task_ids` across dispatches.
+- **Model id**: default is the **bare** `deepseek-v4-flash`. The model-id
+  gotcha above applies with extra force here: with `OPENAI_BASE_URL` set the
+  string reaches the gateway verbatim, and DeepSeek 400s the
+  `deepseek/`-prefixed spelling — five dead 3-GB containers instead of one
+  failed preflight if you skip reading this.
+
+```bash
+gh workflow run swe_gt.yml --ref gt-integration                 # 5-task slice
+gh workflow run swe_gt.yml --ref gt-integration -f task_ids="astropy__astropy-7606"
+```

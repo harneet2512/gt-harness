@@ -1,0 +1,83 @@
+name: GT decision-point matched controls
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed GT-on capture run containing gt_replay artifacts"
+        required: true
+        type: string
+      model:
+        description: "Same model identifier used by the capture"
+        required: true
+        default: "deepseek-v4-flash"
+        type: string
+      max_cases:
+        description: "Maximum valid first-intervention cases to replay"
+        required: true
+        default: "20"
+        type: string
+      base_url:
+        description: "Optional OpenAI-compatible gateway URL"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install minimal runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . "mini-swe-agent==2.2.8"
+      - name: Download exact capture artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p captures
+          gh run download "${{ inputs.source_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "tb2-miniswe-central-certified_full-integrated-${{ inputs.source_run_id }}-task-*" \
+            --dir captures
+      - name: Sanitize API key (strip BOM / stray whitespace)
+        env:
+          RAW_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RAW_OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          values = {
+              "OPENAI_API_KEY": os.environ.get("RAW_OPENAI_API_KEY") or "",
+              "OPENAI_BASE_URL": os.environ.get("RAW_OPENAI_BASE_URL") or "",
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              for name, raw in values.items():
+                  value = raw.replace("\ufeff", "").strip()
+                  if not value.isascii():
+                      raise SystemExit(f"{name} contains non-ASCII characters")
+                  print(f"{name}={value}", file=fh)
+          PY
+      - name: Run matched control responses
+        env:
+          MSWEA_COST_TRACKING: ignore_errors
+          PYTHONUTF8: "1"
+        run: |
+          python scripts/decision_point_control.py captures \
+            --model "${{ inputs.model }}" \
+            --limit "${{ inputs.max_cases }}" \
+            --output decision-point-controls.json
+      - name: Upload control report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-decision-point-controls-${{ github.run_id }}
+          path: decision-point-controls.json

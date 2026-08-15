@@ -1,0 +1,30 @@
+{
+  "schema": "gt.finalstand.forbidden_rules.v1",
+  "entrypoints": ["harness:scripts/miniswe_gt_run.py"],
+  "rules": [
+    {
+      "id": "semantic_embedding_runtime",
+      "pattern": "(?:get_embedding_model|embed_query|embed_passage|sentence_transformer)",
+      "scope": "reachable",
+      "terminal_requirement": "remove from product runtime and advertised registration"
+    },
+    {
+      "id": "model_reranking_runtime",
+      "pattern": "(?:embedding_rerank|llm_rerank|semantic_rerank)",
+      "scope": "reachable",
+      "terminal_requirement": "remove from the Mini-SWE product execution path"
+    },
+    {
+      "id": "automatic_cochange_injection",
+      "pattern": "(?:_co_change_reminder|co_change_provider)",
+      "scope": "reachable",
+      "terminal_requirement": "remove unrestricted delivery while retaining advisory data only if explicitly requested"
+    },
+    {
+      "id": "forbidden_typed_public_identifiers",
+      "pattern": "(?:semantic_embedder|whole_graph_dump|all_pairs_semantic_closure|predictive_dynamic_test_dependency|universal_raw_replacement)",
+      "scope": "reachable",
+      "terminal_requirement": "zero public schema and runner visibility"
+    }
+  ]
+}

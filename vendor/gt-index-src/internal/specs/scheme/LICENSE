@@ -1,0 +1,6 @@
+MIT License
+
+The generated Scheme parser source is pinned from
+thchha/tree-sitter-scheme, commit
+8d95e3608c00d7aaa8a5c36a8fced00d502addde. See UPSTREAM_README.md for the
+upstream license and grammar limitations.

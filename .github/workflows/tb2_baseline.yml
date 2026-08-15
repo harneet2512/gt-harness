@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: "Model name in provider/name form (harbor -m)"
+        description: "Model id passed to harbor -m AND through to nano. When base_url is set this string is used verbatim as the gateway's model id, so it must be the gateway's NATIVE spelling (api.deepseek.com wants bare 'deepseek-v4-flash', not OpenRouter's 'deepseek/deepseek-v4-flash'). Only with no base_url is a provider/ prefix stripped."
         type: string
-        default: "deepseek/deepseek-v4-flash"
+        default: "deepseek-v4-flash"
       base_url:
         description: "OpenAI-compatible gateway URL; when set, exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -37,6 +37,14 @@ on:
         description: "Optional comma-separated task names (harbor -i, glob ok). Overrides n_tasks — use to shard a full run manually"
         type: string
         default: ""
+      agent_timeout_multiplier:
+        description: "LEAVE EMPTY for a leaderboard-legal run. The TB2.1 leaderboard's static_analysis.py requires agent_timeout_multiplier to be null; any value here disqualifies the run AND doubles worst-case wall clock."
+        type: string
+        default: ""
+      n_attempts:
+        description: "Trials per task (harbor -k). Leaderboard submission requires >=5 (MIN_TRIALS_PER_TASK). 1 is fine for an internal paired baseline."
+        type: string
+        default: "1"
 
 jobs:
   baseline:
@@ -78,6 +86,78 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e . "harbor==0.20.0"
 
+      # A secret set from a PowerShell-written file carries a UTF-8 BOM. The key
+      # only ever appears in the `Authorization: Bearer <key>` header, which
+      # httpx encodes as ASCII, so a BOM raises
+      #   UnicodeEncodeError: 'ascii' codec can't encode character U+FEFF (a BOM)
+      # on every single request - i.e. a total run failure that looks like a
+      # model problem. Strip it here (and re-mask, since the cleaned string is
+      # not the registered secret and would otherwise print unmasked in a PUBLIC
+      # repo's logs). Fix at source too: `gh secret set` from clean UTF-8.
+      - name: Sanitize API keys (strip BOM / stray whitespace)
+        run: |
+          python - <<'EOF'
+          import os, sys
+
+          cleaned, notes = [], []
+          for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+              raw = os.environ.get(name) or ""
+              if not raw:
+                  continue
+              clean = raw.replace("\ufeff", "").strip()
+              if clean != raw:
+                  notes.append(f"{name}: removed {len(raw) - len(clean)} stray "
+                               "char(s) (BOM/whitespace); re-set the secret to fix at source")
+              if not clean.isascii():
+                  print(f"::error::{name} still holds non-ASCII characters after "
+                        "stripping BOM/whitespace - it cannot be sent as an HTTP header")
+                  sys.exit(1)
+              cleaned.append((name, clean))
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              for name, clean in cleaned:
+                  print(f"::add-mask::{clean}")
+                  f.write(f"{name}={clean}\n")
+          for n in notes:
+              print(f"::warning::{n}")
+          print(f"sanitized {len(cleaned)} key(s); {len(notes)} needed repair")
+          EOF
+
+      # One ~1k-token call (<$0.001) through nano's OWN provider routing before
+      # harbor pulls a single task image. Catches the failures that otherwise
+      # cost a full run and look like "the model is bad": wrong model id, bad
+      # key, unreachable gateway, and gateways that reject the exact request
+      # shape nano sends (max_completion_tokens, translated tool schemas).
+      - name: Preflight provider (fail fast, not 5 dead containers)
+        env:
+          MODEL: ${{ inputs.model }}
+        run: |
+          python - <<'EOF'
+          import os, sys
+          from nano.cli import build_provider
+          from nano.prompts import SYSTEM_PROMPT
+          from nano.tools import TOOLS
+
+          model = os.environ["MODEL"]
+          base = os.environ.get("OPENAI_BASE_URL") or ""
+          # Mirror eval/tb_agent.py: it passes no --base-url, so nano builds a
+          # plain client and the openai SDK picks up OPENAI_BASE_URL from env.
+          print(f"model={model!r} OPENAI_BASE_URL={base or '(unset)'}")
+          try:
+              provider = build_provider(model=model, base_url=None)
+              r = provider.step(
+                  messages=[{"role": "user", "content": "Reply with the single word: ok"}],
+                  tools=TOOLS, system=SYSTEM_PROMPT,
+              )
+          except Exception as e:
+              print(f"::error::preflight failed: {type(e).__name__}: {e}")
+              print("The model id, API key, or gateway is wrong - fix it before "
+                    "spending a run. No task images were pulled.")
+              sys.exit(1)
+          print(f"preflight ok: stop_reason={r.stop_reason} usage={r.usage} "
+                f"text={(r.text or '')[:80]!r} tool_calls={len(r.tool_calls)}")
+          EOF
+
       - name: Disk before run
         run: df -h /
 
@@ -89,6 +169,8 @@ jobs:
           CONCURRENCY: ${{ inputs.concurrency }}
           JOB_NAME_INPUT: ${{ inputs.job_name }}
           TASK_IDS: ${{ inputs.task_ids }}
+          AGENT_TIMEOUT_MULTIPLIER: ${{ inputs.agent_timeout_multiplier }}
+          N_ATTEMPTS: ${{ inputs.n_attempts }}
         run: |
           set -uo pipefail
           JOB_NAME="${JOB_NAME_INPUT:-tb2-baseline-${GITHUB_RUN_ID}}"
@@ -100,10 +182,18 @@ jobs:
             -m "$MODEL"
             -o results/terminal-bench
             --job-name "$JOB_NAME"
-            --agent-timeout-multiplier 2.0
             -n "$CONCURRENCY"
+            -k "$N_ATTEMPTS"
             -y
           )
+          # Only pass the flag when explicitly asked for. Omitting it leaves the
+          # multiplier null, which is what the leaderboard's static analysis
+          # requires; passing 1.0 explicitly would also be accepted, but null is
+          # the documented default and the safer thing to record in the config.
+          if [ -n "$AGENT_TIMEOUT_MULTIPLIER" ]; then
+            args+=( --agent-timeout-multiplier "$AGENT_TIMEOUT_MULTIPLIER" )
+            echo "::warning::agent_timeout_multiplier=$AGENT_TIMEOUT_MULTIPLIER set - this run is NOT leaderboard-legal"
+          fi
           if [ -n "$TASK_IDS" ]; then
             IFS=',' read -ra ids <<< "$TASK_IDS"
             for id in "${ids[@]}"; do

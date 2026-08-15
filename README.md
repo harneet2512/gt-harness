@@ -1,4 +1,47 @@
-# nano-harness
+# GT-Harness — GroundTruth × nano-harness
+
+> **[nano-harness](https://github.com/TroyJLorents-GH/nano-harness) by Troy J
+> Lorents supplies the small agent loop. In GT-enabled runs, GroundTruth is the
+> deterministic evidence engine inside that loop—not an after-the-fact trace
+> annotator.**
+
+This repository embeds **GroundTruth (GT)** — a deterministic, LLM-free codebase-evidence
+engine — alongside the stock nano-harness. The stock `nano/` loop remains the GT-off baseline.
+The active Terminal-Bench GT arm is `eval.gt_central_agent:MiniSweCentralAgent`, with the
+host-owned runtime in `gt_engine/`. It builds a bounded source mirror, validates the pinned
+graph substrate, selects source-backed facts, and accounts for every provider request without
+asking the model to acknowledge GT.
+
+The active GT arm follows this deterministic boundary:
+
+1. **Model selection:** the model returns a Bash action; GT does not predict it.
+2. **Preflight:** the host normalizes a typed proposal and runs bounded deterministic checks;
+   paid runs currently use SHADOW mode, so the original command executes unchanged.
+3. **Execution/postflight:** the host executes the command, then GT observes the result,
+   source/workspace revisions, validation status, graph changes, and all 17 feature paths.
+4. **Next request:** grounded evidence is delivered at the first eligible provider request;
+   private engine state is accounted separately from model-visible text.
+5. **Audit:** exact request hashes, lifecycle counters, source revisions, graph provenance,
+   replay blobs, and outcome-first metrics make exposure and resource deltas verifiable.
+
+The architecture and behavioral contract are documented in
+[`docs/architecture.md`](docs/architecture.md) and [`AGENTS.md`](AGENTS.md). Exposure is not
+mislabeled as semantic consumption or causal benefit; the frozen GT-off baseline supplies the
+comparison, and a live GT-on efficiency claim requires an authorized matched smoke.
+The implementation audit and remaining ten-task gate are recorded in
+[`details_done/GT_FINAL_REGRESSION_REPAIR_AND_89_GATE_20260809.md`](details_done/GT_FINAL_REGRESSION_REPAIR_AND_89_GATE_20260809.md).
+
+**With GT disabled
+(no `--gt-root`), this harness is byte-identical to stock nano-harness** — that property is
+enforced by tests, and it is what makes clean GT-on vs. GT-off benchmark comparisons possible.
+
+All credit for the base harness — the loop, tools, providers, prompts, and the Terminal Bench
+adapter — belongs to upstream nano-harness. Everything below this section is its original
+README.
+
+---
+
+# nano-harness (the base harness)
 
 ![nano-harness — a coding agent in ~970 lines](docs/assets/banner.png)
 
@@ -74,6 +117,12 @@ Docker container, the exact shipping harness installed per container):
 | Harness | Model | Tasks | Score |
 |---------|-------|-------|-------|
 | nano-harness | Claude Opus 4.8 | 89 (full) | **59.6% (53/89)** |
+
+The table above is the historical stock nano-harness result, not a GT-on result. The current
+GT implementation has passed its provider-free and exact pre-smoke gates, but no new paid GT-on
+score is claimed yet. The next authorized measurement is a ten-task matched smoke against the
+frozen GT-off baseline; the 89-task GT run remains blocked until that outcome and efficiency
+audit passes.
 
 Self-run through Harbor, every task in its own Docker container, the exact shipping
 harness installed per container. Errored trials (agent wall-clock timeouts on the
@@ -178,6 +227,9 @@ Key design choices:
 | `nano/prompts.py` | The system prompt and an approximate token counter. |
 | `nano/cli.py` | `nano run` CLI: argument parsing, provider selection, Rich event rendering. |
 | `eval/tb_agent.py` | Terminal-Bench 2.0 (Harbor) installed-agent adapter. |
+| `eval/gt_central_agent.py` | Active host-owned Terminal-Bench GT arm and Mini-SWE model loop. |
+| `gt_engine/` | Deterministic preflight, postflight, graph, context, replay, and deep-metrics runtime. |
+| `scripts/central_pre_smoke_gate.py` | Exact pushed-commit gate required before a paid GT smoke. |
 | `eval/log.py` | `RunLog` / `TaskRecord` — structured run manifests and per-task transcript JSONL. |
 
 ## Setup / Install
@@ -290,9 +342,18 @@ nano-harness/
 
 ## Testing
 
+The stock `nano/` tests and the central GT tests are separate surfaces. The central runtime
+scope includes `eval/gt_central_agent.py`, `gt_engine/`, and the provider-free certification
+scripts; it is not represented by the historical five-file line count above.
+
 ```bash
 pytest          # configured via [tool.pytest.ini_options]; testpaths = ["tests"]
 ruff check .    # lint (line length 100, py312 target)
+
+# provider-free GT certification before any paid smoke
+python -m scripts.central_feature_census
+python scripts/central_readiness_audit.py
+python scripts/central_pre_smoke_gate.py
 ```
 
 ## Notes

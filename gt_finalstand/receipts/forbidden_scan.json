@@ -1,0 +1,7 @@
+{
+  "findings": [],
+  "ok": true,
+  "reachable_files": 66,
+  "rules": 4,
+  "schema": "gt.finalstand.forbidden_scan.v1"
+}

@@ -1,0 +1,144 @@
+{
+  "schema": "gt.tb2.language-contract.v1",
+  "dataset_repository": "https://github.com/harbor-framework/terminal-bench-2.git",
+  "dataset_commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+  "expected_task_count": 89,
+  "instruction_source_suffixes": {
+    ".c": "c",
+    ".cbl": "cobol",
+    ".conf": "nginx",
+    ".cpp": "cpp",
+    ".gcode": "gcode",
+    ".html": "html",
+    ".js": "javascript",
+    ".pov": "povray",
+    ".proto": "protobuf",
+    ".py": "python",
+    ".r": "r",
+    ".red": "red",
+    ".rs": "rust",
+    ".scm": "scheme",
+    ".sparql": "sparql",
+    ".sql": "sql",
+    ".stan": "stan",
+    ".tex": "latex",
+    ".toml": "toml",
+    ".ttl": "turtle",
+    ".v": "coq",
+    ".vim": "vim"
+  },
+  "witnesses": [
+    {
+      "task": "prove-plus-comm",
+      "path": "plus_comm.v",
+      "language": "coq",
+      "sample": "Require Import Arith.\nTheorem plus_comm : forall n m : nat, n + m = m + n.\nProof. Qed.\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "mcmc-sampling-stan",
+      "path": "hierarchical_model.stan",
+      "language": "stan",
+      "sample": "functions { real helper(real x) { return x; } }\nparameters { real alpha; }\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "adaptive-rejection-sampler",
+      "path": "ars.R",
+      "language": "r",
+      "sample": "target <- function(value) { value + 1 }\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "sparql-university",
+      "path": "solution.sparql",
+      "language": "sparql",
+      "sample": "PREFIX ex: <https://example.test/>\nSELECT ?s WHERE { ?s ?p ?o . }\n",
+      "requires_symbols": false,
+      "requires_callers": false
+    },
+    {
+      "task": "sparql-university",
+      "path": "university_graph.ttl",
+      "language": "turtle",
+      "sample": "@prefix ex: <https://example.test/> .\nex:University a ex:Organization .\n",
+      "requires_symbols": true,
+      "requires_callers": false
+    },
+    {
+      "task": "overfull-hbox",
+      "path": "input.tex",
+      "language": "latex",
+      "sample": "\\documentclass{article}\n\\newcommand{\\target}[1]{#1}\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "large-scale-text-editing",
+      "path": "apply_macros.vim",
+      "language": "vim",
+      "sample": "function! Apply()\nendfunction\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "nginx-request-logging",
+      "path": "benchmark-site.conf",
+      "language": "nginx",
+      "sample": "server { listen 8080; location / { proxy_pass http://backend; } }\n",
+      "requires_symbols": true,
+      "requires_callers": false
+    },
+    {
+      "task": "gcode-to-text",
+      "path": "text.gcode",
+      "language": "gcode",
+      "sample": "O1000\nG1 X1\nM98 P2000\nO2000\nM99\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "cobol-modernization",
+      "path": "program.cbl",
+      "language": "cobol",
+      "sample": "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. FIXTURE.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n           STOP RUN.\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "schemelike-metacircular-eval",
+      "path": "eval.scm",
+      "language": "scheme",
+      "sample": "(define (target value) (+ value 1))\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "winning-avg-corewars",
+      "path": "my_warrior.red",
+      "language": "red",
+      "sample": ";redcode-94\nstart mov 0, 1\n      jmp finish\nfinish dat 0, 0\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "build-pov-ray",
+      "path": "illum1.pov",
+      "language": "povray",
+      "sample": "#macro Helper()\nsphere { <0,0,0>, 1 }\n#end\n#macro Thing()\nHelper()\n#end\nThing()\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    },
+    {
+      "task": "cobol-modernization",
+      "path": "program.py",
+      "language": "python",
+      "sample": "def main():\n    return 0\n",
+      "requires_symbols": true,
+      "requires_callers": true
+    }
+  ]
+}

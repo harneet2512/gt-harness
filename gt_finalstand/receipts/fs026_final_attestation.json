@@ -1,0 +1,63 @@
+{
+  "attested_at": "2026-08-02T04:03:40.5592556Z",
+  "attestation": "bounded_project_closeout",
+  "artifact": {
+    "api_sha256": "bbd7b620bfd9285c8a88a12714ce1331586052286fe2d96f9efcd36e2d6d12b5",
+    "github_artifact_id": "8828119172"
+  },
+  "claims": {
+    "benchmark_wide_efficacy": false,
+    "general_causal_effect": false,
+    "one_task_non_regression_observed": true,
+    "population_non_inferiority": false,
+    "project_scope_closed": true
+  },
+  "evidence_chain": {
+    "analysis": {
+      "path": "gt_finalstand/receipts/fs024_single_witness_analysis.json",
+      "sha256": "1750029d28f5e8892c4ac7f693e49c07bf3688282263f68e864197efa6944c11"
+    },
+    "execution": {
+      "path": "gt_finalstand/receipts/fs024_single_witness_execution.json",
+      "sha256": "93f2b4c01f28af834727d9554f64083cc93a5d70fa90dc0a42ce322a84d21ced"
+    },
+    "promotion_decision": {
+      "path": "gt_finalstand/receipts/fs025_promotion_decision.json",
+      "sha256": "fbaf85677838957558fd9456cf6e7ae1abff1b3a2c41ca99b30bb564077aeada"
+    }
+  },
+  "execution_identity": {
+    "github_actions_job_id": "91452315208",
+    "github_actions_run_id": "30731388242",
+    "harness_commit": "cdefd9a52c915364d346b790a65dde3104c17286",
+    "provider_trial_count": 1
+  },
+  "final_decision": {
+    "baseline_default_retained": true,
+    "decision": "KEEP",
+    "groundtruth_availability": "explicit_opt_in",
+    "groundtruth_default_enabled": false,
+    "rollback_and_kill_switch_boundaries_retained": true
+  },
+  "limitations": [
+    "the attestation covers one stochastic matched task and is descriptive only",
+    "reward remained 1.0 to 1.0; this does not establish benchmark-wide improvement",
+    "calls decreased from 33 to 25 while actions increased from 33 to 37, pre-edit exploration increased from 19 to 25, and raw pre-edit bytes increased from 34696 to 43009",
+    "the GitHub Actions workflow conclusion was failure only because offline postprocessing rejected Harbor's per-trial result shape after the provider trial and verifier had passed",
+    "the analyzer was fixed and rerun locally against the downloaded immutable artifact; no additional provider trial was run"
+  ],
+  "schema": "gt.fs026.final_attestation.v1",
+  "terminal_rows": {
+    "complete": 25,
+    "in_progress": 0,
+    "removed": 1,
+    "total": 26
+  },
+  "witness_outcome": {
+    "baseline_reward": 1.0,
+    "candidate_reward": 1.0,
+    "candidate_verifier_passed": true,
+    "matched_tasks": 1,
+    "verdict": "non_regressing_witness"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "comparison": {
+    "baseline": {
+      "action_count": 33,
+      "api_calls": 33,
+      "exploration_actions_before_first_edit": 19,
+      "raw_bytes_before_first_edit": 34696,
+      "reward": 1.0
+    },
+    "candidate_groundtruth": {
+      "action_count": 37,
+      "api_calls": 25,
+      "exploration_actions_before_first_edit": 25,
+      "raw_bytes_before_first_edit": 43009,
+      "reward": 1.0
+    },
+    "delta_candidate_minus_baseline": {
+      "action_count": 4,
+      "api_calls": -8,
+      "exploration_actions_before_first_edit": 6,
+      "raw_bytes_before_first_edit": 8313,
+      "reward": 0.0
+    }
+  },
+  "decision": "KEEP",
+  "decision_basis": [
+    "candidate reward did not regress on the matched task (1.0 to 1.0)",
+    "the GroundTruth implementation may remain available behind its explicit activation boundary",
+    "one stochastic task does not justify changing the universal default or claiming benchmark-wide efficacy"
+  ],
+  "default_behavior": {
+    "groundtruth_activation": "explicit_opt_in",
+    "groundtruth_default_enabled": false,
+    "policy": "retain_baseline_default"
+  },
+  "execution_receipt": {
+    "path": "gt_finalstand/receipts/fs024_single_witness_execution.json",
+    "sha256": "93f2b4c01f28af834727d9554f64083cc93a5d70fa90dc0a42ce322a84d21ced"
+  },
+  "inferential_claim": false,
+  "limitations": [
+    "exactly one provider trial and one matched task were observed",
+    "the comparison is descriptive and cannot estimate population solve-rate impact, confidence intervals, or a general causal effect",
+    "the archived baseline lacks a resolved container image digest, although task identity, dataset commit, prompt hashes, and task checksum matched"
+  ],
+  "mutation_performed": false,
+  "provider_rerun_required": false,
+  "schema": "gt.fs025.promotion_decision.v1",
+  "witness": {
+    "analysis_receipt_sha256": "1750029d28f5e8892c4ac7f693e49c07bf3688282263f68e864197efa6944c11",
+    "github_actions_job_id": "91452315208",
+    "github_actions_run_id": "30731388242",
+    "matched_tasks": 1,
+    "provider_trial_count": 1,
+    "verdict": "non_regressing_witness"
+  }
+}

@@ -1,8 +1,6 @@
-import pytest
 
-from nano.agent import Agent, AgentResult
+from nano.agent import Agent, AgentResult, gt_harness_access_reason
 from nano.providers import StepResult, ToolCall, Usage
-from nano.tools import BashTool
 
 
 class FakeProvider:
@@ -25,6 +23,234 @@ def _u(i, o):
     return Usage(input_tokens=i, output_tokens=o)
 
 
+def test_gt_harness_access_guard_rejects_access_but_allows_exclusions():
+    assert gt_harness_access_reason(
+        "bash",
+        {"command": "ls -la .gt && find .gt -type f"},
+    )
+    assert gt_harness_access_reason(
+        "read_file",
+        {"path": "/installed-agent/nano-harness/gt_engine/bridge.py"},
+    )
+    assert gt_harness_access_reason(
+        "edit_file",
+        {"path": "/tmp/.nano-gt-state/abc/graph.db"},
+    )
+    assert gt_harness_access_reason(
+        "bash",
+        {"command": "grep -rn token . --exclude-dir=.gt"},
+    ) is None
+    assert gt_harness_access_reason(
+        "bash",
+        {
+            "command": (
+                "find . -path ./.git -prune -o -path ./.gt -prune "
+                "-o -type f -print"
+            )
+        },
+    ) is None
+
+
+def test_bash_timeout_is_clamped_to_wall_clock_finalization_reserve():
+    from nano.agent import affordable_bash_timeout
+
+    assert affordable_bash_timeout(
+        requested_seconds=2_500,
+        remaining_seconds=240,
+        reserve_seconds=180,
+    ) == 60
+    assert affordable_bash_timeout(
+        requested_seconds=60,
+        remaining_seconds=180,
+        reserve_seconds=180,
+    ) is None
+    assert affordable_bash_timeout(
+        requested_seconds=30,
+        remaining_seconds=None,
+        reserve_seconds=180,
+    ) == 30
+
+
+def test_agent_clamps_model_bash_timeout_before_dispatch():
+    fp = FakeProvider([
+        StepResult(
+            text="verify",
+            tool_calls=[ToolCall(
+                id="t1",
+                name="bash",
+                arguments={"command": "run tests", "timeout": 2_500},
+            )],
+            stop_reason="tool_use",
+            usage=_u(10, 5),
+        ),
+        StepResult(
+            text="done",
+            tool_calls=[],
+            stop_reason="end_turn",
+            usage=_u(10, 5),
+        ),
+    ])
+
+    class _RecordingBash:
+        def __init__(self):
+            self.timeouts = []
+
+        def run(self, command, timeout=30):
+            self.timeouts.append(timeout)
+            return "ok\n"
+
+    bash = _RecordingBash()
+    class _BudgetGT:
+        issue_text = ""
+        delivered_spans = []
+
+        def __init__(self):
+            self.budgets = []
+
+        def task_start(self):
+            return None
+
+        def provider_message_view(self, messages, **_kwargs):
+            return messages
+
+        def trace_model_request(self, *_args):
+            return ()
+
+        def trace_model_response(self, *_args):
+            return None
+
+        def trace_run_completed(self, *_args):
+            return None
+
+        def capture_bash_preimage(self, *_args):
+            return None
+
+        def enrich(self, _name, _args, output, _is_error, **_kwargs):
+            return output
+
+        def trace_tool_budget(self, **receipt):
+            self.budgets.append(receipt)
+
+    agent = Agent(
+        provider=fp,
+        system="sys",
+        max_iterations=2,
+        verify=False,
+        bash=bash,
+        time_budget_seconds=600,
+        finalization_reserve_seconds=180,
+        clock=lambda: 0.0,
+    )
+    gt = _BudgetGT()
+    agent._gt = gt
+
+    result = agent.run("task")
+
+    assert result.stop_reason == "end_turn"
+    assert bash.timeouts == [420]
+    assert gt.budgets == [{
+        "requested_seconds": 2_500,
+        "allowed_seconds": 420,
+        "remaining_seconds": 600.0,
+        "reserve_seconds": 180,
+        "decision": "CLAMPED",
+    }]
+
+
+def test_agent_injects_ephemeral_gt_progress_control_before_provider_call():
+    fp = FakeProvider([
+        StepResult(
+            text="done",
+            tool_calls=[],
+            stop_reason="end_turn",
+            usage=_u(10, 5),
+        ),
+    ])
+
+    class _ControlGT:
+        issue_text = ""
+        iteration_budget = 0
+
+        def task_start(self):
+            return None
+
+        def progress_control(self, iteration):
+            assert iteration == 1
+            return "[deterministic GT lifecycle control]\nfinish now"
+
+        def provider_message_view(self, messages, **_kwargs):
+            return messages
+
+        def trace_model_request(self, *_args):
+            return None
+
+        def trace_model_response(self, *_args):
+            return None
+
+        def trace_run_completed(self, *_args):
+            return None
+
+    agent = Agent(
+        provider=fp,
+        system="sys",
+        max_iterations=1,
+        verify=False,
+    )
+    agent._gt = _ControlGT()
+
+    result = agent.run("task")
+
+    assert result.stop_reason == "end_turn"
+    request = fp.calls[0]["messages"]
+    assert request[-1]["content"].endswith("finish now")
+    assert result.transcript[-2]["gt"] == "progress_control"
+
+
+def test_agent_rejects_tool_when_only_finish_reserve_remains():
+    fp = FakeProvider([
+        StepResult(
+            text="long verification",
+            tool_calls=[ToolCall(
+                id="t1",
+                name="bash",
+                arguments={"command": "run tests", "timeout": 2_500},
+            )],
+            stop_reason="tool_use",
+            usage=_u(10, 5),
+        ),
+        StepResult(
+            text="summarizing",
+            tool_calls=[],
+            stop_reason="end_turn",
+            usage=_u(10, 5),
+        ),
+    ])
+
+    class _NeverBash:
+        def run(self, command, timeout=30):
+            raise AssertionError("unaffordable command must not execute")
+
+    agent = Agent(
+        provider=fp,
+        system="sys",
+        max_iterations=2,
+        verify=False,
+        bash=_NeverBash(),
+        time_budget_seconds=180,
+        finalization_reserve_seconds=180,
+        clock=lambda: 0.0,
+    )
+
+    result = agent.run("task")
+
+    assert result.stop_reason == "end_turn"
+    tool_rows = [
+        row for row in result.transcript if row.get("type") == "tool_result"
+    ]
+    assert tool_rows[0]["is_error"] is True
+    assert "wall-clock finish reserve" in tool_rows[0]["output"]
+
+
 def test_agent_one_shot_end_turn():
     fp = FakeProvider([
         StepResult(text="task done", tool_calls=[], stop_reason="end_turn",
@@ -39,6 +265,66 @@ def test_agent_one_shot_end_turn():
     assert result.iterations == 1
     assert result.total_input_tokens == 10
     assert result.total_output_tokens == 5
+
+
+def test_agent_links_gt_exposure_to_the_next_model_response():
+    class _ReceiptProvider(FakeProvider):
+        request_observer = None
+
+        def step(self, messages, tools, system):
+            if self.request_observer is not None:
+                self.request_observer(
+                    "test.provider",
+                    {"model": self.model, "messages": list(messages)},
+                )
+            return super().step(messages, tools, system)
+
+    class _TraceGT:
+        issue_text = ""
+        delivered_spans = []
+
+        def __init__(self):
+            self.requests = []
+            self.provider_requests = []
+            self.responses = []
+            self.completed = []
+
+        def task_start(self):
+            return "GT evidence"
+
+        def trace_model_request(self, iteration, messages):
+            self.requests.append((iteration, messages))
+            return ("0",)
+
+        def trace_provider_request(self, iteration, provider, payload):
+            self.provider_requests.append((iteration, provider, payload))
+            return ("0",)
+
+        def trace_model_response(self, iteration, result, delivery_ids):
+            self.responses.append((iteration, result.text, delivery_ids))
+
+        def trace_run_completed(self, result):
+            self.completed.append(
+                (result.stop_reason, result.iterations,
+                 result.total_input_tokens, result.total_output_tokens)
+            )
+
+    fp = _ReceiptProvider([
+        StepResult(text="used evidence", tool_calls=[], stop_reason="end_turn",
+                   usage=_u(10, 5)),
+    ])
+    agent = Agent(provider=fp, system="sys", max_iterations=10)
+    gt = _TraceGT()
+    agent._gt = gt
+
+    result = agent.run("solve x")
+
+    assert result.stop_reason == "end_turn"
+    assert gt.requests and gt.requests[0][0] == 1
+    assert "GT evidence" in str(gt.requests[0][1])
+    assert gt.provider_requests[0][0:2] == (1, "test.provider")
+    assert gt.responses == [(1, "used evidence", ("0",))]
+    assert gt.completed == [("end_turn", 1, 10, 5)]
 
 
 def test_agent_executes_tool_then_completes(tmp_workdir):
@@ -123,7 +409,6 @@ def test_agent_cumulative_spend_does_not_kill_long_tasks():
 def test_agent_reports_tool_error_back_to_model():
     """When dispatch raises ToolError, the loop continues with is_error=True
     in the tool_result, and the model gets to retry."""
-    from nano.tools import ToolError
 
     fp = FakeProvider([
         StepResult(
@@ -384,7 +669,7 @@ def test_agent_failed_tool_does_not_satisfy_verify_gate():
                    usage=_u(50, 5)),
     ])
     agent = Agent(provider=fp, system="sys", max_iterations=20)
-    result = agent.run("fix it")
+    agent.run("fix it")
     # The failing-tool 'done' was challenged, so more than 2 pushbacks happened.
     challenges = sum(1 for m in fp.calls[-1]["messages"]
                      if m["role"] == "user"

@@ -1,0 +1,60 @@
+{
+  "schema": "gt.tb2.deepseek.smoke10.v1",
+  "dataset": "terminal-bench/terminal-bench-2",
+  "model": "deepseek-v4-flash",
+  "temperature": 1.0,
+  "timeout_multiplier": 1.0,
+  "concurrency": 5,
+  "mix_name": "regression-repair-balanced-20260810",
+  "selection_basis": {
+    "regressions": [
+      "prove-plus-comm",
+      "sanitize-git-repo",
+      "write-compressor",
+      "regex-chess",
+      "qemu-alpine-ssh",
+      "torch-tensor-parallelism"
+    ],
+    "gt_working": [
+      "headless-terminal",
+      "portfolio-optimization",
+      "schemelike-metacircular-eval"
+    ],
+    "prior_gt_on_flip": ["count-dataset-tokens"]
+  },
+  "baseline": {
+    "source": "baseline_deepseekv4flash",
+    "arm": "GT-OFF",
+    "known_rewards": {
+      "prove-plus-comm": 1.0,
+      "sanitize-git-repo": 1.0,
+      "write-compressor": 1.0,
+      "regex-chess": 1.0,
+      "qemu-alpine-ssh": 1.0,
+      "torch-tensor-parallelism": 1.0,
+      "headless-terminal": 1.0,
+      "portfolio-optimization": 1.0,
+      "schemelike-metacircular-eval": 1.0,
+      "count-dataset-tokens": 0.0
+    },
+    "ungraded_tasks": [],
+    "outcome_contract": {
+      "official_resolved": "verifier reward == 1",
+      "uncensored_resolved": "verifier reward == 1 and Harbor process completed without outer cancellation",
+      "comparison_gate_field": "uncensored_resolved",
+      "known_outer_timeout_tasks": []
+    }
+  },
+  "tasks": [
+    "prove-plus-comm",
+    "sanitize-git-repo",
+    "write-compressor",
+    "regex-chess",
+    "qemu-alpine-ssh",
+    "torch-tensor-parallelism",
+    "headless-terminal",
+    "portfolio-optimization",
+    "schemelike-metacircular-eval",
+    "count-dataset-tokens"
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "baseline": {
+    "agent": "eval.miniswe_agent:MiniSweAgent",
+    "agent_timeout_multiplier": 1.0,
+    "baseline_github_actions_run_id": "30665246698",
+    "baseline_harness_commit": "62c06c1",
+    "command_timeout_seconds": 30,
+    "cost_limit": 3.0,
+    "dataset_commit": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+    "gt_enabled": false,
+    "image_digest_available": false,
+    "limitations": [
+      "the archived control records Docker execution and the exact task checksum but not the resolved container image digest"
+    ],
+    "merged_results_sha256": "602fc6ac093ef3a35c25f00b4a4311229f631bb525dec3cc1eee3b5493456f79",
+    "metrics": {
+      "action_count": 33,
+      "api_calls": 33,
+      "exploration_actions_before_first_edit": 19,
+      "raw_bytes_before_first_edit": 34696
+    },
+    "mini_swe_version": "2.2.8",
+    "model": "deepseek-v4-flash",
+    "resolved_model": "openai/deepseek-v4-flash",
+    "reward": 1.0,
+    "schema": "gt.phase2.single_witness_baseline.v1",
+    "step_limit": 100,
+    "summary_sha256": "fd76b3cdb56c63be56f8492b81a27a5ebb2b0675bf41ca6210ef11ae62904921",
+    "system_fingerprint": "fp_a18b46594c_prod0820_fp8_kvcache_20260402",
+    "system_prompt_sha256": "1c5d1622923d128240923e4695f21917b90c5058c1f48796de3ec2e60685f216",
+    "task_checksum": "13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119",
+    "task_id": "fix-code-vulnerability",
+    "task_prompt_sha256": "9a682c518b4cfac416a70095ab8f33f983ccd4ee670cfcb96d7d230d70eae49a",
+    "temperature": 1.0,
+    "trajectory_format": "mini-swe-agent-1.1",
+    "trajectory_sha256": "e7c4d4b25efb853e36f2953876bff12b805dfa01ddd702827306970b93250db0",
+    "trial_id": "70179645-7ff8-4142-9354-a0613b6c04d0"
+  },
+  "candidate": {
+    "agent": "eval.miniswe_agent:MiniSweGtAgent",
+    "agent_timeout_multiplier": 1.0,
+    "command_timeout_seconds": 30,
+    "cost_limit": 3.0,
+    "dataset_commit": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+    "gt_enabled": true,
+    "metrics": {
+      "action_count": 37,
+      "api_calls": 25,
+      "exploration_actions_before_first_edit": 25,
+      "raw_bytes_before_first_edit": 43009
+    },
+    "mini_swe_version": "2.2.8",
+    "model": "deepseek-v4-flash",
+    "resolved_model": "openai/deepseek-v4-flash",
+    "result_sha256": "4ce0481d84ff7d5a87a6696a41af34be9e906c2f872fa92263966c177852dd74",
+    "reward": 1.0,
+    "step_limit": 100,
+    "system_fingerprint": "fp_a18b46594c_prod0820_fp8_kvcache_20260402",
+    "system_prompt_sha256": "1c5d1622923d128240923e4695f21917b90c5058c1f48796de3ec2e60685f216",
+    "task_checksum": "13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119",
+    "task_id": "fix-code-vulnerability",
+    "task_prompt_sha256": "9a682c518b4cfac416a70095ab8f33f983ccd4ee670cfcb96d7d230d70eae49a",
+    "temperature": 1.0,
+    "trajectory_format": "mini-swe-agent-1.1",
+    "trajectory_sha256": "2dd095a00dffcea108ec82e90da428ac6cacdf89313613df27695540c16a1a6b",
+    "trial_id": "4caf8b43-3a4a-4387-8a14-29528cb67e79"
+  },
+  "deltas": {
+    "action_count": 4,
+    "api_calls": -8,
+    "exploration_actions_before_first_edit": 6,
+    "raw_bytes_before_first_edit": 8313,
+    "reward": 0.0
+  },
+  "inferential_claim": false,
+  "limitations": [
+    "the archived control records Docker execution and the exact task checksum but not the resolved container image digest",
+    "one stochastic matched task is a descriptive engineering witness, not a population solve-rate estimate"
+  ],
+  "manifest_identical": true,
+  "matched_tasks": 1,
+  "schema": "gt.phase2.single_witness_analysis.v1",
+  "verdict": "non_regressing_witness"
+}

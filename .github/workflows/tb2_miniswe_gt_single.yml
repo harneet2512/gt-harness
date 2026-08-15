@@ -1,0 +1,332 @@
+# One provider-bound matched witness for the historical Mini-SWE 2.2.8
+# fix-code-vulnerability baseline. This workflow is deliberately closed: the
+# task, model, served snapshot, budgets, cardinality, and treatment are not
+# dispatch inputs.
+name: TB2 Mini-SWE GT single matched witness
+
+on:
+  workflow_dispatch:
+
+jobs:
+  witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      PYTHONUTF8: "1"
+      MODEL: "deepseek-v4-flash"
+      BASELINE_SERVED_MODEL: "deepseek-v4-flash"
+      BASELINE_SYSTEM_FINGERPRINT: "fp_a18b46594c_prod0820_fp8_kvcache_20260402"
+      TASK_ID: "fix-code-vulnerability"
+      EXPECTED_TASK_CHECKSUM: "13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119"
+      MINISWE_AGENT_VERSION: "2.2.8"
+      GT_RL_PROFILE: "2"
+      GT_MODE: "advisory"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
+
+      - name: Build gt-index with sqlite_fts5
+        working-directory: vendor/gt-index-src
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=1
+          if go build -tags sqlite_fts5 \
+               -ldflags '-linkmode external -extldflags "-static"' \
+               -o ../gt-index-linux-amd64 ./cmd/gt-index/; then
+            echo "static build ok"
+          else
+            echo "::warning::static link failed; using a dynamically linked gt-index"
+            go build -tags sqlite_fts5 -o ../gt-index-linux-amd64 ./cmd/gt-index/
+          fi
+
+      - name: Prove gt-index schema includes FTS5
+        run: |
+          set -euo pipefail
+          ./vendor/gt-index-linux-amd64 -root nano -output /tmp/gt-smoke.db
+          python - <<'PY'
+          import sqlite3
+
+          names = {
+              row[0]
+              for row in sqlite3.connect("/tmp/gt-smoke.db").execute(
+                  "SELECT name FROM sqlite_master"
+              )
+          }
+          required = {"nodes", "edges", "nodes_fts", "symbol_content_fts"}
+          missing = required - names
+          assert not missing, f"gt-index schema missing required tables: {sorted(missing)}"
+          PY
+
+      - name: Install exact witness harness
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e . "harbor==0.20.0" "mini-swe-agent==2.2.8"
+          python - <<'PY'
+          import importlib.metadata as metadata
+          import inspect
+
+          from minisweagent.agents.default import AgentConfig
+          from scripts.miniswe_gt_run import build_agent
+
+          assert metadata.version("mini-swe-agent") == "2.2.8"
+          assert inspect.signature(build_agent).parameters["step_limit"].default == 100
+          assert AgentConfig.model_fields["cost_limit"].default == 3.0
+          PY
+
+      - name: Sanitize provider configuration
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import sys
+
+          cleaned = []
+          for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL"):
+              raw = os.environ.get(name) or ""
+              if not raw:
+                  continue
+              value = raw.replace("\ufeff", "").strip()
+              if not value.isascii():
+                  print(f"::error::{name} contains non-ASCII characters")
+                  sys.exit(1)
+              cleaned.append((name, value))
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              for name, value in cleaned:
+                  print(f"::add-mask::{value}")
+                  stream.write(f"{name}={value}\n")
+          PY
+
+      - name: Preflight exact baseline provider snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p witness-receipts
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          import litellm
+
+          requested_model = os.environ["MODEL"]
+          expected_model = os.environ["BASELINE_SERVED_MODEL"]
+          expected_fingerprint = os.environ["BASELINE_SYSTEM_FINGERPRINT"]
+          base_url = os.environ.get("OPENAI_BASE_URL") or ""
+          routed_model = requested_model
+          kwargs = {"temperature": 1.0}
+          if base_url and "/" not in routed_model:
+              routed_model = f"openai/{routed_model}"
+              kwargs["api_base"] = base_url
+
+          response = litellm.completion(
+              model=routed_model,
+              messages=[{"role": "user", "content": "Reply with the single word: ok"}],
+              **kwargs,
+          ).model_dump()
+          served_model = response.get("model")
+          fingerprint = response.get("system_fingerprint")
+          receipt = {
+              "schema": "gt.miniswe.single_witness.preflight.v1",
+              "requested_model": requested_model,
+              "routed_model": routed_model,
+              "served_model": served_model,
+              "system_fingerprint": fingerprint,
+              "expected_served_model": expected_model,
+              "expected_system_fingerprint": expected_fingerprint,
+              "matched": (
+                  served_model == expected_model
+                  and fingerprint == expected_fingerprint
+              ),
+          }
+          Path("witness-receipts/provider_preflight.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          if served_model != expected_model:
+              print(
+                  f"::error::served model mismatch: {served_model!r} != {expected_model!r}"
+              )
+              sys.exit(1)
+          if fingerprint != expected_fingerprint:
+              print(
+                  "::error::system fingerprint mismatch: "
+                  f"{fingerprint!r} != {expected_fingerprint!r}"
+              )
+              sys.exit(1)
+          PY
+
+      - name: Run exactly one GT advisory trial
+        id: harbor
+        env:
+          GT_INDEX_BINARY_HOST: ${{ github.workspace }}/vendor/gt-index-linux-amd64
+        run: |
+          set -euo pipefail
+          job_name="tb2-miniswe-gt-single-${GITHUB_RUN_ID}"
+          echo "job_name=$job_name" >> "$GITHUB_OUTPUT"
+          harbor run \
+            -d terminal-bench@2.0 \
+            -a eval.miniswe_agent:MiniSweGtAgent \
+            -m "$MODEL" \
+            -o results/terminal-bench \
+            --job-name "$job_name" \
+            --agent-timeout-multiplier "1.0" \
+            -n "1" \
+            -k "1" \
+            -i "$TASK_ID" \
+            -y
+
+      - name: Verify exact task checksum after execution
+        env:
+          JOB_NAME: ${{ steps.harbor.outputs.job_name }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          root = Path("results/terminal-bench") / os.environ["JOB_NAME"]
+          matches = sorted(root.glob(f"{os.environ['TASK_ID']}__*/result.json"))
+          if len(matches) != 1:
+              print(f"::error::expected exactly one trial result, found {len(matches)}")
+              sys.exit(1)
+          result = json.loads(matches[0].read_text(encoding="utf-8"))
+          expected = os.environ["EXPECTED_TASK_CHECKSUM"]
+          verifier_result = result.get("verifier_result") or {}
+          rewards = verifier_result.get("rewards") or {}
+          if "reward" not in rewards or not isinstance(rewards["reward"], (int, float)):
+              print("::error::trial result lacks a numeric verifier reward")
+              sys.exit(1)
+          trial_dir = matches[0].parent
+          trajectory = trial_dir / "agent" / "miniswe_trajectory.json"
+          report_path = trial_dir / "agent" / "miniswe_report.json"
+          required_files = [trajectory, report_path]
+          missing_files = [path for path in required_files if not path.is_file()]
+          if missing_files:
+              print(f"::error::missing agent artifacts: {missing_files}")
+              sys.exit(1)
+          json.loads(trajectory.read_text(encoding="utf-8"))
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          if report.get("gt_mode") != "advisory":
+              print(f"::error::GT mode is not advisory: {report.get('gt_mode')!r}")
+              sys.exit(1)
+          gt_state = trial_dir / "agent" / "gt-state"
+          receipt_groups = {
+              "events": sorted(gt_state.rglob("events.jsonl")),
+              "provider_events": sorted(gt_state.rglob("provider_events.jsonl")),
+              "reproducibility_manifest": sorted(
+                  gt_state.rglob("reproducibility_manifest.json")
+              ),
+          }
+          absent = [name for name, paths in receipt_groups.items() if not paths]
+          empty = [
+              path
+              for paths in receipt_groups.values()
+              for path in paths
+              if not path.is_file() or path.stat().st_size == 0
+          ]
+          if absent or empty:
+              print(f"::error::missing GT receipts: groups={absent} empty={empty}")
+              sys.exit(1)
+          receipt = {
+              "schema": "gt.miniswe.single_witness.task.v1",
+              "task_id": result.get("task_name"),
+              "task_checksum": result.get("task_checksum"),
+              "expected_task_checksum": expected,
+              "trial_result": matches[0].as_posix(),
+              "verifier_rewards": rewards,
+              "trajectory": trajectory.as_posix(),
+              "report": report_path.as_posix(),
+              "gt_receipts": {
+                  name: [path.as_posix() for path in paths]
+                  for name, paths in receipt_groups.items()
+              },
+              "matched": result.get("task_checksum") == expected,
+          }
+          Path("witness-receipts").mkdir(exist_ok=True)
+          Path("witness-receipts/task_checksum.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          if result.get("task_checksum") != expected:
+              print(
+                  "::error::task checksum mismatch: "
+                  f"{result.get('task_checksum')!r} != {expected!r}"
+              )
+              sys.exit(1)
+          PY
+
+      - name: Compile matched comparison and execution receipt
+        env:
+          JOB_NAME: ${{ steps.harbor.outputs.job_name }}
+        run: |
+          set -euo pipefail
+          candidate_root="results/terminal-bench/${JOB_NAME}"
+          python scripts/phase2_single_witness.py analyze \
+            --baseline-receipt gt_finalstand/receipts/fs024_single_witness_baseline.json \
+            --candidate-root "$candidate_root" \
+            --out witness-receipts/single_witness_analysis.json
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def sha256(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          receipt = {
+              "schema": "gt.phase2.single_witness_execution.v1",
+              "authorized_by": "project_owner_single_run_instruction",
+              "github_actions_run_id": os.environ["GITHUB_RUN_ID"],
+              "github_actions_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "github_repository": os.environ["GITHUB_REPOSITORY"],
+              "github_commit": os.environ["GITHUB_SHA"],
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "provider_trial_count": 1,
+              "baseline_receipt_sha256": sha256(
+                  "gt_finalstand/receipts/fs024_single_witness_baseline.json"
+              ),
+              "provider_preflight_sha256": sha256(
+                  "witness-receipts/provider_preflight.json"
+              ),
+              "task_receipt_sha256": sha256(
+                  "witness-receipts/task_checksum.json"
+              ),
+              "analysis_sha256": sha256(
+                  "witness-receipts/single_witness_analysis.json"
+              ),
+          }
+          Path("witness-receipts/execution.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload complete witness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb2-miniswe-gt-single-${{ github.run_id }}
+          path: |
+            results/terminal-bench/
+            witness-receipts/
+          if-no-files-found: warn

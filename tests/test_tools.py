@@ -1,9 +1,16 @@
-import os
 import sys
 
 import pytest
 
-from nano.tools import TOOLS, BashTool, ToolError, dispatch, edit_file, read_file
+from nano.tools import (
+    TOOLS,
+    BashTool,
+    ToolError,
+    _needs_isolated_shell,
+    dispatch,
+    edit_file,
+    read_file,
+)
 
 
 @pytest.fixture
@@ -264,6 +271,39 @@ def test_bash_output_without_trailing_newline(bash):
     assert out.strip() == "x"
 
 
+def test_bash_top_level_exit_isolated_from_persistent_shell(bash):
+    if bash._is_cmd:
+        pytest.skip("POSIX subshell isolation")
+    out = bash.run(
+        "if true; then\n"
+        "  echo validation-complete\n"
+        "  exit 0\n"
+        "fi",
+        timeout=5,
+    )
+    assert out.strip() == "validation-complete"
+    assert bash.run("echo shell-still-alive", timeout=5).strip() == (
+        "shell-still-alive"
+    )
+
+
+def test_bash_nonzero_exit_isolated_and_parent_recovers(bash):
+    if bash._is_cmd:
+        pytest.skip("POSIX subshell isolation")
+    with pytest.raises(ToolError) as exc:
+        bash.run("echo useful-red\nexit 7", timeout=5)
+    assert "useful-red" in str(exc.value)
+    assert "exit code 7" in str(exc.value).lower()
+    assert bash.run("echo recovered", timeout=5).strip() == "recovered"
+
+
+def test_exit_detector_ignores_argument_text():
+    assert _needs_isolated_shell("echo before\nexit 0")
+    assert _needs_isolated_shell("  builtin exit 1")
+    assert not _needs_isolated_shell("echo 'exit 0'")
+    assert not _needs_isolated_shell("printf 'please exit now\\n'")
+
+
 def test_bash_timeout_does_not_contaminate_next_command(bash):
     # A timed-out command's leftover output must NOT leak into the next run.
     # (Old reader thread writing into the respawned shell's queue.)
@@ -275,6 +315,17 @@ def test_bash_timeout_does_not_contaminate_next_command(bash):
     assert "FRESH" in out
     assert "LATE_LEAK" not in out
     assert "NANO_DONE" not in out  # no stale sentinel from the killed shell
+
+
+def test_unexpected_shell_death_is_actionable_and_recovers(bash):
+    if bash._is_cmd:
+        pytest.skip("POSIX shell lifecycle")
+    with pytest.raises(ToolError) as exc:
+        bash.run("kill $$", timeout=5)
+    assert exc.value.kind == "shell_lifecycle"
+    assert exc.value.recovery == "restore_state_then_retry_unfinished_command"
+    assert "shell was restarted" in str(exc.value).lower()
+    assert bash.run("echo recovered", timeout=5).strip() == "recovered"
 
 
 def test_edit_file_preserves_lf_newlines(tmp_workdir):
@@ -334,6 +385,27 @@ def test_edit_file_preserves_unix_mode(tmp_workdir):
     p.chmod(0o755)
     edit_file(str(p), old="echo hi", new="echo bye")
     assert (p.stat().st_mode & 0o777) == 0o755, oct(p.stat().st_mode)
+
+
+def test_file_tools_follow_persistent_shell_cwd(tmp_path):
+    """Relative file-tool paths resolve where the persistent shell has cd'd."""
+    sub = tmp_path / "nested"
+    sub.mkdir()
+    (sub / "note.txt").write_text("before\n", encoding="utf-8")
+    bash = BashTool()
+    try:
+        bash.run(f'cd "{sub.as_posix()}"')
+        observed = dispatch("read_file", {"path": "note.txt"}, bash=bash)
+        dispatch(
+            "edit_file",
+            {"path": "note.txt", "old": "before", "new": "after"},
+            bash=bash,
+        )
+    finally:
+        bash.close()
+
+    assert "before" in observed
+    assert (sub / "note.txt").read_text(encoding="utf-8") == "after\n"
 
 
 def test_edit_file_edits_through_symlink(tmp_workdir):

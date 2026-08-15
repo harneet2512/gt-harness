@@ -1,0 +1,93 @@
+{
+  "schema": "gt.finalstand.offline_cases.v1",
+  "action_identifiability": [
+    {"command": "rg -n literal src", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "sed -n '1,80p' src/a.py", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "rg TODO src && rm scratch.tmp", "regex_expected": "simple_read", "ast_expected": "mixed_read_write"},
+    {"command": "rg TODO src | head", "regex_expected": "simple_read", "ast_expected": "compound"},
+    {"command": "python -c 'print(1)'", "regex_expected": "opaque", "ast_expected": "opaque"},
+    {"command": "rg 'unterminated", "regex_expected": "simple_read", "ast_expected": "opaque"},
+    {"command": "pwd", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "git status --short", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "find src -name '*.py'", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "head -n 2 a.py", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "tail -n 2 a.py", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "wc -l a.py", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "touch scratch.tmp", "regex_expected": "simple_write", "ast_expected": "simple_write"},
+    {"command": "cp a.py b.py", "regex_expected": "simple_write", "ast_expected": "simple_write"},
+    {"command": "rg 'a|b' src", "regex_expected": "simple_read", "ast_expected": "simple_read"},
+    {"command": "cd src && rg needle", "regex_expected": "opaque", "ast_expected": "compound"},
+    {"command": "rg needle > out.txt", "regex_expected": "simple_read", "ast_expected": "mixed_read_write"},
+    {"command": "rm scratch || rg scratch", "regex_expected": "simple_write", "ast_expected": "mixed_read_write"},
+    {"command": "FOO=1 rg needle", "regex_expected": "opaque", "ast_expected": "opaque"},
+    {"command": "(rg needle)", "regex_expected": "opaque", "ast_expected": "opaque"}
+  ],
+  "typed_action_identifiability": [
+    {"payload": {"kind": "definition", "arguments": {"symbol": "Widget"}}, "expected": "typed"},
+    {"payload": {"kind": "unknown", "arguments": {}}, "expected": "invalid_typed"},
+    {"payload": "definition", "expected": "invalid_typed"}
+  ],
+  "evidence_sufficiency": [
+    {
+      "expected_valid": true,
+      "artifact": {
+        "schema": "gt.evidence_artifact.v1",
+        "semantics": "exact",
+        "coverage": "complete",
+        "ambiguity": [],
+        "omissions": [],
+        "producer": "fixture.exact.v1",
+        "freshness": {"repository": "r1"}
+      }
+    },
+    {
+      "expected_valid": true,
+      "artifact": {
+        "schema": "gt.evidence_artifact.v1",
+        "semantics": "incomplete",
+        "coverage": "partial",
+        "ambiguity": ["multiple candidates"],
+        "omissions": ["unsupported configuration"],
+        "producer": "fixture.partial.v1",
+        "freshness": {"repository": "r1"}
+      }
+    },
+    {
+      "expected_valid": false,
+      "artifact": {
+        "schema": "gt.evidence_artifact.v1",
+        "semantics": "exact",
+        "coverage": "complete",
+        "ambiguity": [],
+        "omissions": ["unreadable file"],
+        "producer": "fixture.invalid.v1",
+        "freshness": {"repository": "r1"}
+      }
+    }
+  ],
+  "freshness": [
+    {"artifact_revision": "r1", "request_revision": "r1", "expected_eligible": true},
+    {"artifact_revision": "r1", "request_revision": "r2", "expected_eligible": false}
+  ],
+  "observation_leak": [
+    {
+      "decision": "REPLACE",
+      "sentinel": "RAW_SENTINEL_001",
+      "model_visible_observation": "typed exact answer"
+    },
+    {
+      "decision": "AUGMENT",
+      "sentinel": "RAW_SENTINEL_002",
+      "model_visible_observation": "RAW_SENTINEL_002\ntyped structure"
+    }
+  ],
+  "determinism": [
+    {"b": 2, "a": [3, 1]},
+    {"unicode": "λ", "paths": ["b.py", "a.py"]}
+  ],
+  "cost_samples": [
+    {"kind": "exact_literal_search", "arguments": {"literal": "needle", "paths": ["src"]}},
+    {"kind": "definition", "arguments": {"symbol": "Widget"}},
+    {"kind": "verification_status", "arguments": {"plan": "unit"}}
+  ]
+}

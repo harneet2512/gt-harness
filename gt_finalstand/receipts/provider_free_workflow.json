@@ -1,0 +1,27 @@
+{
+  "event_name": "workflow_dispatch",
+  "github_actions": true,
+  "groundtruth_commit": "61cfdbce2c42751c11028e46e863b3231f0bb70e",
+  "harness_commit": "e87cada097f55fe5df203c339148c65fff75c36a",
+  "job_status": "success",
+  "ok": true,
+  "receipt_inputs": {
+    "experiment_dry_run.json": "4f5f07e30d80d01541c1435d19f9ec57d601daa636abbde931b522cd510b0b49",
+    "experiment_execution_plan.json": "a3edf2fa4147b66219f87fca2632cdbb320596c4ca96ac94bd901bb06b5f15db",
+    "final_codespace_verification.json": "5c3c720fed796cd574a6f90b346801e485ed8a233267f055de214c08033a782a",
+    "forbidden_scan.json": "232f7b4f7a1195f0841871274a62f9e8eb2ef3b77e17aa49f3bce7e879151f6d",
+    "fs023_provenance.json": "0e20b9d6333eca09ce583ec9c6621a6075a2a46e0647fed0f410082159d9ec13",
+    "language_manifest.json": "289b2f4c3b9857886d2754c6b87d8d9983efd8793c9d62b4a67e0786b1e6e420",
+    "offline_suite.json": "fdf6013ea298b3361edf8f9d037b50dc65740c37da55eeb7fcc1ba0d2ef529a4",
+    "promotion_refusal.json": "fc01c26b4029db70be1bc5add16ae7406d1c2df12905cfbb91dd0bc122ad6182",
+    "provider_free_smoke10.json": "06873180c1d9372f3252fdeb39001726898683c64727fb75bae37636d5a49287",
+    "runbook_validation.json": "ec52385353275ae076943c5cb2d63fb00bd1762037cadf990338605fff243334"
+  },
+  "repository": "harneet2512/gt-harness",
+  "run_attempt": 1,
+  "run_id": "30729901088",
+  "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/30729901088",
+  "schema": "gt.provider_free_workflow_receipt.v1",
+  "workflow_ref": "harneet2512/gt-harness/.github/workflows/gt_finalstand_provider_free.yml@refs/heads/fs023-workflow-deps",
+  "workflow_sha": "e87cada097f55fe5df203c339148c65fff75c36a"
+}

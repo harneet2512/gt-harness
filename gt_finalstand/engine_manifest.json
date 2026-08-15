@@ -1,0 +1,57 @@
+{
+  "schema": "gt.engine.manifest.v1",
+  "phase": "inline-engine",
+  "created": "2026-08-02T00:00:00Z",
+  "repositories": {
+    "gt-harness": {
+      "branch": "inline-engine",
+      "head": "4f393f1e3ca229a641e5d4313ad48c49933f5ecf",
+      "note": "implementation branch for the Inline Engine phase"
+    },
+    "groundtruth": {
+      "branch": "main",
+      "head": "61cfdbce2c42751c11028e46e863b3231f0bb70e"
+    },
+    "gt_runs/miniswe_gtoff_20260731": {
+      "branch": "miniswe-gtoff-20260731",
+      "head": "f1f2cf5f15f5d4dd3ebcf8e2a7f08c299d70de14",
+      "note": "frozen GT-off baseline worktree (read-only; do not modify)"
+    }
+  },
+  "baseline": {
+    "location": "C:/Users/Lenovo/Downloads/gt-off-baseline deepseeknew",
+    "harness": "mini-swe-agent==2.2.8",
+    "model": "deepseek-v4-flash",
+    "served_snapshot": "DeepSeek-V4-Flash-0731",
+    "dataset": "terminal-bench@2.0",
+    "temperature": 1.0,
+    "step_limit": 100,
+    "timeout_multiplier": 1.0,
+    "total_solved": "66/89 (74.2%)",
+    "sha256": {
+      "SUMMARY.md": "FD76B3CDB56C63BE56F8492B81A27A5EBB2B0675BF41CA6210EF11AE62904921",
+      "merged.json": "602FC6AC093EF3A35C25F00B4A4311229F631BB525DEC3CC1EEE3B5493456F79",
+      "per_task_tokens.json": "AEA4158AA9E568997B5AE5E5438929BC10DDC71DA93DCFAEF4A2C660C85F82F4"
+    },
+    "smoke_ten": {
+      "tasks": [
+        "fix-code-vulnerability", "portfolio-optimization", "modernize-scientific-stack",
+        "headless-terminal", "llm-inference-batching-scheduler", "break-filter-js-from-html",
+        "write-compressor", "gpt2-codegolf", "schemelike-metacircular-eval", "cobol-modernization"
+      ],
+      "result": "9 solved + gpt2-codegolf failed (0.0; infra AgentTimeoutError)",
+      "config": "temp 1.0, step limit 100, n_attempts 1, timeout multiplier 1.0"
+    }
+  },
+  "environment": {
+    "local_venv_python": "3.12.0",
+    "local_minisweagent": "2.3.0 (NOTE: baseline pinned 2.2.8; the ENGINE smoke MUST pin mini-swe-agent==2.2.8)",
+    "hypothesis": "6.165.0",
+    "codespace": "special-fortnight-95p9q5wrpqp2qww (harneet2512/gt-harness @ inline-engine)"
+  },
+  "gates": {
+    "no_provider_runs_before_provider_free_green": true,
+    "exactly_ten_engine_trials_in_scope": true,
+    "do_not_rerun_baseline": true
+  }
+}

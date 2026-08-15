@@ -1,0 +1,155 @@
+{
+  "schema": "gt.finalstand.codespace_verification.v1",
+  "recorded_at": "2026-08-02T01:46:15Z",
+  "scope": "provider_free_codespace_regression_and_smoke",
+  "project_terminal": false,
+  "status_authority": {
+    "complete": 21,
+    "in_progress": 4,
+    "removed": 1
+  },
+  "environments": {
+    "groundtruth": {
+      "kind": "github_codespace",
+      "hostname": "codespaces-b9af82",
+      "workspace": "/workspaces/groundtruth",
+      "branch": "ss-diagnosis-128-20260714",
+      "base_head": "7fcb019104f0e43311e2db009950e60014bc1f4b",
+      "tracked_diff_git_object": "9f5550b94ceef8e6fdd6413b15194a20ab71c7d7",
+      "tracked_diff_sha256": "408e34de3891f9e2b7962e36aad8a1a6b92395acd3b272bbef43410d0db48dbd",
+      "tracked_changed_paths": 90,
+      "untracked_paths": 24,
+      "porcelain_v1_sha256": "3540c75ab732812710fcb1b34b49225948be896d306b6200c6056b0637ccbccc",
+      "python": "3.12.1",
+      "pytest": "8.4.2",
+      "go": "go1.26.1 linux/amd64",
+      "platform": "Linux 6.8.0-1052-azure x86_64"
+    },
+    "harness": {
+      "kind": "github_codespace",
+      "hostname": "codespaces-11a591",
+      "workspace": "/workspaces/gt-harness",
+      "base_head": "2ec6cc56460549a83cba4163d81b95fdccb4fbb1",
+      "tracked_diff_git_object": "010c93dc9e17044bea350a44c02f319c26e732a4",
+      "python": "3.12.1",
+      "pytest": "9.1.1",
+      "platform": "Linux 6.8.0-1052-azure x86_64"
+    }
+  },
+  "suites": {
+    "groundtruth_python": {
+      "command": "PYTHONPATH=/workspaces/groundtruth/src python -m pytest tests/ -q --ignore=tests/integration/test_real_lsp.py --ignore=tests/integration/test_depth_parity.py --ignore=tests/test_graphstore_contract.py --timeout=60 --junitxml=/tmp/product_full_final_receipt.xml",
+      "exit_code": 0,
+      "console": {
+        "passed": 9980,
+        "skipped": 415,
+        "xfailed": 6,
+        "warnings": 69,
+        "duration_seconds": 395.26
+      },
+      "junit": {
+        "tests": 10401,
+        "failures": 0,
+        "errors": 0,
+        "skipped_including_xfailed": 421,
+        "duration_seconds": 394.8,
+        "sha256": "2e96bae37da6761c1a1088a988d08ad0642ffc447190cdbf94cf160e8dbac688",
+        "bytes": 1572981
+      },
+      "log_sha256": "4fbbff7aa80bfb8f85c4a4757fdb6275bef6c5eb1c60509be2312d0173934f48",
+      "log_bytes": 22109,
+      "ok": true
+    },
+    "harness_python": {
+      "collected": 592,
+      "passed": 591,
+      "skipped": 1,
+      "failed": 0,
+      "junit_sha256": "0a26259408a93879563f288c7f1433331aff27ecf20c59350ec32733ff075189",
+      "log_sha256": "9eeb7303bd1b54335628fcc5f5e95c33b9427e7a6a0c1f4f724afec5a681a49e",
+      "skip": {
+        "node": "tests/test_miniswe_smoke.py::test_miniswe_gt_smoke_localization_requires_graph",
+        "reason": "graph available; positive graph behavior is covered by test_task_start_localization_delivered_with_graph"
+      },
+      "ok": true
+    },
+    "provider_free_smoke10": {
+      "receipt": "receipts/provider_free_smoke10.json",
+      "receipt_sha256": "06873180c1d9372f3252fdeb39001726898683c64727fb75bae37636d5a49287",
+      "collected": 10,
+      "passed": 9,
+      "skipped": 1,
+      "failed": 0,
+      "provider_calls": 0,
+      "junit_sha256": "c420152806eabc9dfa73ef98394d3acf0482926ad8974913ef4a1795a5716234",
+      "ok": true
+    },
+    "groundtruth_go": {
+      "command": "CGO_ENABLED=1 go test -tags sqlite_fts5 ./...",
+      "exit_code": 0,
+      "all_packages_passed": true,
+      "ok": true
+    }
+  },
+  "clean_fixture_repairs": {
+    "verified_adapter_fixture_root": "tests/fixtures/verified_adapter",
+    "verified_adapter_test_count": 23,
+    "verified_adapter_test_result": "23 passed",
+    "verified_adapter_source_manifest_sha256": "d3e515940d3539e058c36b215f3f3a7fa0d7701fe0407d64e32b7824e4fd702d",
+    "rc15_performance_source_manifest_sha256": "b71c3f397cc5fdc57c658e1a6aac78c5fd9be07d82813d81978d55dc192286c9",
+    "files": {
+      "gt_verified_agent.py": "2333cc04264257d995878311e85075b7435ffc24e33d4397e209cea43f73bdf2",
+      "verified_deep_metrics.py": "81ca14c0c4ee020532776d593437f3ee6b14d7e620c638f7754729f52e513103",
+      "verified_gt.yaml": "0eb1fd917717ac6326b6417d168ee89640d6bd31a7396d4e5e916d159f038cd0"
+    },
+    "notes": [
+      "Verified-adapter tests read repository test fixtures instead of the ignored artifact_verified directory.",
+      "The test package resolves the co-located src-layout package before unrelated editable installs.",
+      "Runtime package-isolation tests use a subprocess so they cannot poison later sys.modules state.",
+      "Reload-sensitive carrier, enum, and embedding-cache fixtures were repaired without restoring prohibited comparison controls."
+    ]
+  },
+  "experiment_plan": {
+    "receipt": "receipts/experiment_execution_plan.json",
+    "sha256": "a3edf2fa4147b66219f87fca2632cdbb320596c4ca96ac94bd901bb06b5f15db",
+    "tasks": 10,
+    "arms": 6,
+    "planned_trials": 60,
+    "executed": false,
+    "provider_calls": 0
+  },
+  "quality_checks": {
+    "focused_ruff": {
+      "command": "python -m ruff check tests/conftest.py tests/runtime/test_runtime_package_isolation_20260801.py",
+      "exit_code": 0,
+      "result": "All checks passed!"
+    },
+    "focused_whitespace": {
+      "tracked_command": "git diff --check -- tests/conftest.py",
+      "tracked_diagnostics": 0,
+      "untracked_command": "git diff --no-index --check /dev/null tests/runtime/test_runtime_package_isolation_20260801.py",
+      "untracked_whitespace_diagnostics": 0
+    },
+    "global_ruff_green": false,
+    "wider_untracked_closeout_sweep": {
+      "files": 18,
+      "diagnostics": 49,
+      "auto_fixable": 26,
+      "edits_applied": false
+    }
+  },
+  "external_blockers": [
+    "FS-023: no immutable GitHub Actions run identity or uploaded artifact bundle for the current worktrees",
+    "FS-024: no user-authorized 10-task by 6-arm provider-bound experiment",
+    "FS-025: no measured promotion decision or rollback rehearsal from the missing experiment",
+    "FS-026: no immutable clean-machine closure, frozen release manifest, or terminal receipt bundle"
+  ],
+  "limitations": [
+    "Codespaces are external compute but are not immutable GitHub Actions executions.",
+    "The worktrees are dirty; tracked-diff Git objects omit untracked files, including the new verified-adapter fixtures until they are committed.",
+    "The provider-free smoke10 is an offline runtime smoke, not the 60-trial causal benchmark.",
+    "Focused final-closeout Ruff checks pass, but an exploratory wider sweep of 18 untracked Python closeout surfaces reports 49 diagnostics; no global Ruff-green claim is made.",
+    "No commit, push, workflow dispatch, authentication change, provider call, or paid run is asserted."
+  ],
+  "ok": true
+}

@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 import queue
 import re
-import stat
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -42,6 +42,17 @@ def _resolve_shell() -> tuple[list[str], bool]:
 class ToolError(Exception):
     """Raised when a tool call fails. The message is shown to the model."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: str = "tool_error",
+        recovery: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.recovery = recovery
+
 
 _OUTPUT_LIMIT = 16_000  # chars; spec §3.3 leaves "large output truncation" to impl
 
@@ -69,6 +80,23 @@ def _strip_cmd_prompt(text: str) -> str:
         else:
             out_lines.append(line)
     return "".join(out_lines)
+
+
+_SHELL_EXIT_RE = re.compile(
+    r"(?m)^[ \t]*(?:(?:builtin|command)[ \t]+)?(?:exit|logout)(?=[ \t;]|$)"
+)
+
+
+def _needs_isolated_shell(command: str) -> bool:
+    """Return whether *command* can terminate nano's persistent POSIX shell.
+
+    Model-authored verification snippets sometimes end an ``if`` branch with
+    ``exit 0``/``exit 1``.  Sending that text directly to the long-lived shell
+    prevents the framing sentinel from running and turns an otherwise useful
+    check into ``Shell process exited unexpectedly``.  Match command-position
+    exit builtins only; words inside ordinary arguments do not qualify.
+    """
+    return bool(_SHELL_EXIT_RE.search(command or ""))
 
 
 class BashTool:
@@ -133,7 +161,15 @@ class BashTool:
         else:
             tail = f"__nano_rc=$?; echo; echo {sentinel}:$__nano_rc"
         assert self._proc and self._proc.stdin
-        self._proc.stdin.write(f"{command}{nl}{tail}{nl}")
+        # An exit/logout builtin must not terminate the persistent parent.
+        # A POSIX subshell preserves the command's exact control-flow and exit
+        # status while containing its lifecycle effect.  State from a command
+        # that explicitly exits could not persist anyway.  cmd.exe has
+        # different syntax and is left unchanged.
+        effective_command = command
+        if not self._is_cmd and _needs_isolated_shell(command):
+            effective_command = f"(\n{command}\n)"
+        self._proc.stdin.write(f"{effective_command}{nl}{tail}{nl}")
         self._proc.stdin.flush()
 
         sentinel_re = re.compile(re.escape(sentinel) + r":(-?\d+)\s*$")
@@ -144,17 +180,32 @@ class BashTool:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self._kill()
+                self._spawn()
                 raise ToolError(
                     f"Command exceeded timeout of {timeout}s and was killed: "
-                    f"{command!r}. The shell was restarted: cwd, env vars, and "
-                    f"background processes are reset. Re-establish state if "
-                    f"needed; pass a larger timeout for long commands."
+                    f"{command!r}. The shell was restarted; background "
+                    "processes are gone and shell-local cwd/env state was "
+                    "reset. Re-run only the smallest unfinished check, first "
+                    "restoring its cwd/env, and pass a larger timeout if that "
+                    "check legitimately needs it.",
+                    kind="timeout",
+                    recovery="restore_state_then_retry_smallest_check",
                 )
             try:
                 line = self._lines.get(timeout=min(remaining, 0.5))
             except queue.Empty:
                 if self._proc.poll() is not None:
-                    raise ToolError("Shell process exited unexpectedly.")
+                    code = self._proc.returncode
+                    self._kill()
+                    self._spawn()
+                    raise ToolError(
+                        "Shell process exited unexpectedly "
+                        f"(exit {code}) before the command receipt completed. "
+                        "The shell was restarted; restore cwd/env and retry "
+                        "only the unfinished command.",
+                        kind="shell_lifecycle",
+                        recovery="restore_state_then_retry_unfinished_command",
+                    ) from None
                 continue
             m = sentinel_re.match(line)
             if m:
@@ -171,6 +222,14 @@ class BashTool:
             # verification evidence. The output rides along for diagnosis.
             raise ToolError(_truncate(joined) + f"[exit code {exit_code}]")
         return _truncate(joined)
+
+    def cwd(self) -> str:
+        """Return the persistent shell's current directory in host form."""
+        if self._is_cmd:
+            return self.run("cd").strip()
+        if sys.platform == "win32":
+            return self.run("pwd -W").strip()
+        return self.run("pwd").strip()
 
     def _kill(self) -> None:
         proc = self._proc
@@ -220,7 +279,7 @@ def read_file(path: str, line_start: int | None = None,
     try:
         text = p.read_text(encoding="utf-8")
     except UnicodeDecodeError as e:
-        raise ToolError(f"Cannot decode {path} as UTF-8 (binary file?): {e}")
+        raise ToolError(f"Cannot decode {path} as UTF-8 (binary file?): {e}") from e
 
     lines = text.splitlines()
     start = (line_start or 1) - 1
@@ -406,7 +465,7 @@ def _int_arg(arguments: dict[str, Any], key: str, default: int | None = None) ->
         raise ToolError(
             f"Argument {key!r} must be an integer, got {value!r}. "
             f"Re-issue the call with an integer value."
-        )
+        ) from None
 
 
 def dispatch(name: str, arguments: dict[str, Any], *, bash: BashTool) -> str:
@@ -415,10 +474,16 @@ def dispatch(name: str, arguments: dict[str, Any], *, bash: BashTool) -> str:
         return bash.run(arguments["command"], timeout=_int_arg(arguments, "timeout", 60))
     if name == "read_file":
         _require(arguments, name, "path")
-        return read_file(arguments["path"],
+        path = Path(arguments["path"])
+        if not path.is_absolute():
+            path = Path(bash.cwd()) / path
+        return read_file(str(path),
                          _int_arg(arguments, "line_start"),
                          _int_arg(arguments, "line_end"))
     if name == "edit_file":
         _require(arguments, name, "path", "old", "new")
-        return edit_file(arguments["path"], arguments["old"], arguments["new"])
+        path = Path(arguments["path"])
+        if not path.is_absolute():
+            path = Path(bash.cwd()) / path
+        return edit_file(str(path), arguments["old"], arguments["new"])
     raise ToolError(f"Unknown tool: {name}")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -74,6 +75,7 @@ class AnthropicProvider:
     model: str
     client: Any = None  # injectable for tests; defaults to anthropic.Anthropic()
     max_tokens: int = 8192  # big file writes get cut at 4096 and waste a continuation turn
+    request_observer: Callable[[str, dict[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         if self.client is None:
@@ -98,6 +100,20 @@ class AnthropicProvider:
                 m["content"][-1]["cache_control"] = {"type": "ephemeral"}
                 break
 
+        if self.request_observer is not None:
+            try:
+                self.request_observer(
+                    "anthropic.messages",
+                    {
+                        "model": self.model,
+                        "system": sys_param,
+                        "messages": msgs,
+                        "tools": tools,
+                        "max_tokens": self.max_tokens,
+                    },
+                )
+            except Exception:
+                pass
         resp = _call_with_retry(lambda: self.client.messages.create(
             model=self.model,
             system=sys_param,
@@ -195,6 +211,8 @@ class OpenAIProvider:
     client: Any = None
     base_url: str | None = None
     max_completion_tokens: int = 8192  # match AnthropicProvider; fewer mid-write cuts
+    temperature: float | None = None
+    request_observer: Callable[[str, dict[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         if self.client is None:
@@ -227,9 +245,16 @@ class OpenAIProvider:
             "messages": oai_messages,
             "max_completion_tokens": self.max_completion_tokens,
         }
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
         if oai_tools:
             kwargs["tools"] = oai_tools
 
+        if self.request_observer is not None:
+            try:
+                self.request_observer("openai.chat.completions", kwargs)
+            except Exception:
+                pass
         resp = _call_with_retry(lambda: self.client.chat.completions.create(**kwargs))
         choice = resp.choices[0]
         msg = choice.message

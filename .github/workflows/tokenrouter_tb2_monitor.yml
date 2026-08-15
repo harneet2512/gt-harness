@@ -1,0 +1,133 @@
+name: DeepSeek 15-task monitor
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: tokenrouter-tb2-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: baseline-swe-live-lite-v4flash0731
+      TASKS: extract-elf,torch-pipeline-parallelism,torch-tensor-parallelism,video-processing,llm-inference-batching-scheduler,write-compressor,schemelike-metacircular-eval,gpt2-codegolf,prove-plus-comm,sanitize-git-repo,headless-terminal,portfolio-optimization,fix-code-vulnerability,cobol-modernization,winning-avg-corewars
+    steps:
+      - name: Check native DeepSeek and dispatch at most once
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess, sys, urllib.error, urllib.request
+
+          repo = os.environ["REPO"]
+          branch = os.environ["BRANCH"]
+          tasks = os.environ["TASKS"]
+          key = (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+          if not key:
+              print("DEEPSEEK_MONITOR=blocked_missing_secret")
+              sys.exit(0)
+
+          req = urllib.request.Request(
+              "https://api.deepseek.com/models",
+              headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+          )
+          status = None
+          try:
+              with urllib.request.urlopen(req, timeout=25) as response:
+                  status = response.status
+                  body = response.read()
+          except urllib.error.HTTPError as exc:
+              status = exc.code
+          except Exception as exc:
+              print(f"DEEPSEEK_MONITOR=unavailable error={type(exc).__name__}")
+              sys.exit(0)
+          print(f"DEEPSEEK_HTTP_STATUS={status}")
+          if status in (502, 503, 504) or status is None or status >= 500:
+              print("DEEPSEEK_MONITOR=unavailable")
+              sys.exit(0)
+          if status != 200:
+              print("DEEPSEEK_MONITOR=unexpected_status")
+              sys.exit(0)
+          try:
+              catalog = json.loads(body.decode("utf-8"))
+              ids = {str(item.get("id")) for item in catalog.get("data", [])
+                     if isinstance(item, dict) and item.get("id")}
+              requested = "deepseek-v4-flash"
+              print(f"DEEPSEEK_MODEL_EXACT_ID_PRESENT={requested in ids}")
+              if requested not in ids:
+                  print("DEEPSEEK_MONITOR=model_not_listed")
+                  sys.exit(0)
+          except Exception as exc:
+              print(f"DEEPSEEK_MONITOR=models_parse_error error={type(exc).__name__}")
+              sys.exit(0)
+
+          target_sha = subprocess.run(
+              ["gh", "api", f"repos/{repo}/git/ref/heads/{branch}", "--jq", ".object.sha"],
+              check=True, capture_output=True, text=True,
+          ).stdout.strip()
+          runs = json.loads(subprocess.run(
+              ["gh", "run", "list", "--repo", repo, "--workflow", "tb2_miniswe_central.yml",
+               "--limit", "50", "--json", "databaseId,status,headBranch,headSha"],
+              check=True, capture_output=True, text=True,
+          ).stdout)
+          matching = [r for r in runs if r.get("headBranch") == branch and r.get("headSha") == target_sha]
+          if matching:
+              run_id = str(matching[0]["databaseId"])
+              jobs = json.loads(subprocess.run(
+                  ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"],
+                  check=True, capture_output=True, text=True,
+              ).stdout).get("jobs", [])
+              counts = {}
+              for job in jobs:
+                  counts[job.get("status", "unknown")] = counts.get(job.get("status", "unknown"), 0) + 1
+              print(f"TOKENROUTER_MONITOR=locked run={run_id} sha={target_sha}")
+              print(f"TOKENROUTER_TASK_PROGRESS run={run_id} counts={json.dumps(counts, sort_keys=True)}")
+              sys.exit(0)
+          active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested"}
+                    and r.get("headBranch") == branch]
+          if active:
+              print("TOKENROUTER_MONITOR=run_already_active")
+              sys.exit(0)
+
+          subprocess.run([
+              "gh", "workflow", "run", "tb2_miniswe_central.yml", "--repo", repo,
+              "--ref", branch,
+              "-f", "model=deepseek-v4-flash",
+              "-f", "provider=deepseek",
+              "-f", "parallel=15",
+              "-f", f"include={tasks}",
+              "-f", "dataset=terminal-bench@2.0",
+              "-f", "image_tag=20251031",
+              "-f", f"ref={branch}",
+              "-f", "arm=certified_full",
+              "-f", "feature=integrated",
+              "-f", "replay_capture=false",
+              "-f", "step_limit=100",
+              "-f", "provider_preflight_timeout_sec=600",
+          ], check=True)
+          run_id = ""
+          for _ in range(10):
+              listed = json.loads(subprocess.run(
+                  ["gh", "run", "list", "--repo", repo, "--workflow", "tb2_miniswe_central.yml",
+                   "--limit", "10", "--json", "databaseId,status,headBranch,createdAt"],
+                  check=True, capture_output=True, text=True,
+              ).stdout)
+              candidates = [r for r in listed if r.get("headBranch") == branch]
+              if candidates:
+                  run_id = str(candidates[0]["databaseId"])
+                  break
+              import time; time.sleep(2)
+          print(f"TOKENROUTER_MONITOR=dispatched cohort=15 run={run_id or 'pending'}")
+          PY

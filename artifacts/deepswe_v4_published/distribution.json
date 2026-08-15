@@ -1,0 +1,399 @@
+{
+  "scope": "Coverage of the 113-task set",
+  "n_tasks": 113,
+  "n_repositories": 91,
+  "languages": [
+    {
+      "name": "go",
+      "n": 34
+    },
+    {
+      "name": "javascript",
+      "n": 5
+    },
+    {
+      "name": "python",
+      "n": 34
+    },
+    {
+      "name": "rust",
+      "n": 5
+    },
+    {
+      "name": "typescript",
+      "n": 35
+    }
+  ],
+  "repositories": [
+    {
+      "name": "Effect-TS/effect",
+      "n": 1
+    },
+    {
+      "name": "Fatal1ty/mashumaro",
+      "n": 1
+    },
+    {
+      "name": "Gallopsled/pwntools",
+      "n": 1
+    },
+    {
+      "name": "KaTeX/KaTeX",
+      "n": 1
+    },
+    {
+      "name": "Owloops/updo",
+      "n": 1
+    },
+    {
+      "name": "PyCQA/bandit",
+      "n": 3
+    },
+    {
+      "name": "TanStack/query",
+      "n": 1
+    },
+    {
+      "name": "Textualize/textual",
+      "n": 2
+    },
+    {
+      "name": "TomWright/dasel",
+      "n": 1
+    },
+    {
+      "name": "abs-lang/abs",
+      "n": 2
+    },
+    {
+      "name": "aio-libs/aiomonitor",
+      "n": 1
+    },
+    {
+      "name": "alecthomas/participle",
+      "n": 1
+    },
+    {
+      "name": "arktypeio/arktype",
+      "n": 1
+    },
+    {
+      "name": "baryhuang/claude-code-by-agents",
+      "n": 1
+    },
+    {
+      "name": "beevik/etree",
+      "n": 1
+    },
+    {
+      "name": "boa-dev/boa",
+      "n": 1
+    },
+    {
+      "name": "bombshell-dev/clack",
+      "n": 1
+    },
+    {
+      "name": "boyter/scc",
+      "n": 1
+    },
+    {
+      "name": "c4spar/cliffy",
+      "n": 1
+    },
+    {
+      "name": "capricorn86/happy-dom",
+      "n": 2
+    },
+    {
+      "name": "carvel-dev/ytt",
+      "n": 1
+    },
+    {
+      "name": "celery/kombu",
+      "n": 2
+    },
+    {
+      "name": "cockroachdb/pebble",
+      "n": 1
+    },
+    {
+      "name": "csstree/csstree",
+      "n": 1
+    },
+    {
+      "name": "d5/tengo",
+      "n": 2
+    },
+    {
+      "name": "dahlia/optique",
+      "n": 1
+    },
+    {
+      "name": "dateutil/dateutil",
+      "n": 1
+    },
+    {
+      "name": "drizzle-team/drizzle-orm",
+      "n": 1
+    },
+    {
+      "name": "dry-python/returns",
+      "n": 1
+    },
+    {
+      "name": "dynamodb-toolbox/dynamodb-toolbox",
+      "n": 2
+    },
+    {
+      "name": "eicrud/eicrud",
+      "n": 1
+    },
+    {
+      "name": "encode/httpx",
+      "n": 3
+    },
+    {
+      "name": "expr-lang/expr",
+      "n": 1
+    },
+    {
+      "name": "fastapi/fastapi",
+      "n": 2
+    },
+    {
+      "name": "fgmacedo/python-statemachine",
+      "n": 1
+    },
+    {
+      "name": "flightcontrolhq/superjson",
+      "n": 1
+    },
+    {
+      "name": "getarcaneapp/arcane",
+      "n": 1
+    },
+    {
+      "name": "go-critic/go-critic",
+      "n": 1
+    },
+    {
+      "name": "go-git/go-git",
+      "n": 1
+    },
+    {
+      "name": "go-task/task",
+      "n": 1
+    },
+    {
+      "name": "golang/geo",
+      "n": 1
+    },
+    {
+      "name": "google/mobly",
+      "n": 1
+    },
+    {
+      "name": "googleapis/go-genai",
+      "n": 1
+    },
+    {
+      "name": "goreleaser/goreleaser",
+      "n": 1
+    },
+    {
+      "name": "graphql-python/gql",
+      "n": 1
+    },
+    {
+      "name": "gvergnaud/ts-pattern",
+      "n": 1
+    },
+    {
+      "name": "helm/helm",
+      "n": 2
+    },
+    {
+      "name": "ipython/ipython",
+      "n": 1
+    },
+    {
+      "name": "jeffijoe/awilix",
+      "n": 1
+    },
+    {
+      "name": "jendrikseipp/vulture",
+      "n": 1
+    },
+    {
+      "name": "jkwill87/mnamer",
+      "n": 1
+    },
+    {
+      "name": "keajs/kea",
+      "n": 1
+    },
+    {
+      "name": "kgateway-dev/kgateway",
+      "n": 1
+    },
+    {
+      "name": "kysely-org/kysely",
+      "n": 1
+    },
+    {
+      "name": "langchain-ai/langchain",
+      "n": 1
+    },
+    {
+      "name": "liweiyi88/onedump",
+      "n": 1
+    },
+    {
+      "name": "mattn/anko",
+      "n": 2
+    },
+    {
+      "name": "meriyah/meriyah",
+      "n": 1
+    },
+    {
+      "name": "muesli/termenv",
+      "n": 1
+    },
+    {
+      "name": "narwhals-dev/narwhals",
+      "n": 1
+    },
+    {
+      "name": "nidhaloff/igel",
+      "n": 1
+    },
+    {
+      "name": "noahbald/oxvg",
+      "n": 1
+    },
+    {
+      "name": "numba/numba",
+      "n": 1
+    },
+    {
+      "name": "open-circle/valibot",
+      "n": 1
+    },
+    {
+      "name": "open-policy-agent/opa",
+      "n": 2
+    },
+    {
+      "name": "open2b/scriggo",
+      "n": 1
+    },
+    {
+      "name": "pest-parser/pest",
+      "n": 1
+    },
+    {
+      "name": "platers/obsidian-linter",
+      "n": 3
+    },
+    {
+      "name": "pmndrs/koota",
+      "n": 5
+    },
+    {
+      "name": "prometheus/prometheus",
+      "n": 2
+    },
+    {
+      "name": "psd-tools/psd-tools",
+      "n": 1
+    },
+    {
+      "name": "python-attrs/cattrs",
+      "n": 1
+    },
+    {
+      "name": "python-poetry/tomlkit",
+      "n": 1
+    },
+    {
+      "name": "reagento/adaptix",
+      "n": 1
+    },
+    {
+      "name": "rhysd/actionlint",
+      "n": 1
+    },
+    {
+      "name": "sharkdp/fd",
+      "n": 1
+    },
+    {
+      "name": "simonw/sqlite-utils",
+      "n": 1
+    },
+    {
+      "name": "skrub-data/skrub",
+      "n": 1
+    },
+    {
+      "name": "slab/quill",
+      "n": 1
+    },
+    {
+      "name": "sql-formatter-org/sql-formatter",
+      "n": 1
+    },
+    {
+      "name": "tconbeer/sqlfmt",
+      "n": 1
+    },
+    {
+      "name": "testem/testem",
+      "n": 2
+    },
+    {
+      "name": "traefik/yaegi",
+      "n": 1
+    },
+    {
+      "name": "true-myth/true-myth",
+      "n": 1
+    },
+    {
+      "name": "unjs/ofetch",
+      "n": 1
+    },
+    {
+      "name": "vadimdemedes/ink",
+      "n": 1
+    },
+    {
+      "name": "vitest-dev/vitest",
+      "n": 1
+    },
+    {
+      "name": "wasmi-labs/wasmi",
+      "n": 1
+    },
+    {
+      "name": "wazero/wazero",
+      "n": 1
+    },
+    {
+      "name": "xtaci/kcp-go",
+      "n": 1
+    },
+    {
+      "name": "yjs/yjs",
+      "n": 1
+    }
+  ],
+  "prompt_characters": {
+    "max": 5385,
+    "mean": 2158.070796460177,
+    "median": 1975,
+    "min": 471
+  }
+}

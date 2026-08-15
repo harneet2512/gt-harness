@@ -22,9 +22,9 @@ def test_step_result_text_only():
     assert sr.stop_reason == "end_turn"
 
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock  # noqa: E402
 
-from nano.providers import AnthropicProvider
+from nano.providers import AnthropicProvider  # noqa: E402
 
 
 class _AnthroMsg:
@@ -140,9 +140,9 @@ def test_anthropic_provider_caches_last_user_not_last_message():
     assert "cache_control" not in sent[1]["content"][-1]
 
 
-import json as _json
+import json as _json  # noqa: E402
 
-from nano.providers import OpenAIProvider
+from nano.providers import OpenAIProvider  # noqa: E402
 
 
 def _fake_openai_response_with_tool():
@@ -237,6 +237,79 @@ def test_openai_provider_translates_tool_schema_to_openai_format():
     assert sent_tool["function"]["parameters"]["required"] == ["command"]
 
 
+def test_openai_provider_observer_receives_final_normalized_payload():
+    resp = MagicMock(
+        choices=[MagicMock(
+            message=MagicMock(content="done", tool_calls=None),
+            finish_reason="stop",
+        )],
+        usage=MagicMock(prompt_tokens=3, completion_tokens=1),
+    )
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = resp
+    observed = []
+    p = OpenAIProvider(
+        model="deepseek-v4-flash",
+        client=fake_client,
+        request_observer=lambda provider, payload: observed.append(
+            (provider, payload)
+        ),
+    )
+
+    p.step(
+        messages=[{
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "raw output\nsealed GT bytes",
+                "is_error": False,
+            }],
+        }],
+        tools=[],
+        system="SYS",
+    )
+
+    assert len(observed) == 1
+    provider, payload = observed[0]
+    assert provider == "openai.chat.completions"
+    assert payload["model"] == "deepseek-v4-flash"
+    assert payload["messages"] == (
+        fake_client.chat.completions.create.call_args.kwargs["messages"]
+    )
+    assert payload["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "tool-1",
+        "content": "raw output\nsealed GT bytes",
+    }
+
+
+def test_openai_provider_sends_explicit_temperature():
+    resp = MagicMock(
+        choices=[MagicMock(
+            message=MagicMock(content="done", tool_calls=None),
+            finish_reason="stop",
+        )],
+        usage=MagicMock(prompt_tokens=3, completion_tokens=1),
+    )
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = resp
+    p = OpenAIProvider(
+        model="deepseek-v4-flash",
+        client=fake_client,
+        temperature=1.0,
+    )
+
+    p.step(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        system="SYS",
+    )
+
+    kwargs = fake_client.chat.completions.create.call_args.kwargs
+    assert kwargs["temperature"] == 1.0
+
+
 def test_normalize_for_openai_round_trips_assistant_tool_calls():
     from nano.providers import _normalize_for_openai
     out = _normalize_for_openai({
@@ -277,7 +350,7 @@ def test_normalize_for_openai_passes_plain_user_through():
 
 # --- retry behavior ---
 
-from nano.providers import _call_with_retry
+from nano.providers import _call_with_retry  # noqa: E402
 
 
 class _FlakyError(Exception):

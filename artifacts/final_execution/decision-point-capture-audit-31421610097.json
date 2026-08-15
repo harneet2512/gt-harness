@@ -1,0 +1,11 @@
+{
+  "schema": "gt.decision_point_capture_audit.v1",
+  "bundle_count": 20,
+  "call_count": 1051,
+  "valid_case_count": 0,
+  "validity_counts": {
+    "missing_control": 1051
+  },
+  "valid_cases": [],
+  "corrupt_bundles": []
+}

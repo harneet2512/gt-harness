@@ -1,0 +1,78 @@
+{
+  "schema": "gt.feature_smoke.v1",
+  "model": "deepseek-v4-flash",
+  "profile": "2",
+  "temperature_note": "The provider default is stochastic; no replay claim is made.",
+  "selection_source": "local 89-task DeepSeek V4 Flash GT-off baseline corpus",
+  "selection_rule": "Pair structured tool-call blocks with their following structured tool-result blocks, then maximize canonical GT predicates observed in the historical action sequence. Raw substring counts are not accepted.",
+  "task_ids": [
+    "build-cython-ext",
+    "crack-7z-hash",
+    "headless-terminal",
+    "llm-inference-batching-scheduler",
+    "sanitize-git-repo"
+  ],
+  "historical_opportunities": {
+    "build-cython-ext": [
+      "search",
+      "file_view",
+      "verified_caller_surface",
+      "formal_failure",
+      "intervening_source_edit",
+      "same_formal_failure_recurred"
+    ],
+    "crack-7z-hash": [
+      "repeated_failed_search",
+      "new_file_creation"
+    ],
+    "headless-terminal": [
+      "indexed_code_root",
+      "task_start_obligations",
+      "ranked_localization",
+      "new_source_file",
+      "source_edit"
+    ],
+    "llm-inference-batching-scheduler": [
+      "indexed_code_root",
+      "task_start_obligations",
+      "ranked_localization",
+      "file_view",
+      "verified_caller_surface",
+      "source_edit"
+    ],
+    "sanitize-git-repo": [
+      "indexed_code_root",
+      "recursive_search_with_definition_and_reference_rows",
+      "source_edit"
+    ]
+  },
+  "expected_identity_clusters": {
+    "indexed_success_path": [
+      "obligations",
+      "localization",
+      "GT_LOC_RESLOT",
+      "caller_contract",
+      "GT_EDIT_CHECK"
+    ],
+    "change_surface_path": [
+      "newfile_precedent",
+      "GT_CHANGE_SURFACE"
+    ],
+    "unresolved_red_submit_path": [
+      "submit_refusal",
+      "GT_SS_SUBMIT_RED",
+      "GT_CERT_DELIVERY"
+    ],
+    "search_partition_path": [
+      "def_partition"
+    ]
+  },
+  "acceptance": {
+    "expected_tasks": 5,
+    "minimum_witnessed_identities": 9,
+    "target_witnessed_identities": 12,
+    "maximum_triggered_dark": 0,
+    "maximum_telemetry_faults": 0,
+    "provider_final_receipt_required_for_every_delivery": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "executed": false,
+  "manifest_sha256": "ea8826a0f8a3a3dbbff2215d12becbe2ff50c40f26fcef92b581dd8fdc36d5ae",
+  "ok": true,
+  "planned_arms": [
+    "stock_raw",
+    "prepend_only",
+    "action_bound_augmentation",
+    "certified_replacement",
+    "typed_interface",
+    "proactive_map_embedding_control"
+  ],
+  "provider_calls": 0,
+  "schema": "gt.phase2.dry_run.v1"
+}

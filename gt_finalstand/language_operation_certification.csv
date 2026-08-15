@@ -1,0 +1,211 @@
+language,registry_identity,operation,terminal_semantics,current_state,certification_basis
+Bash,bash,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Bash,bash,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Bash,bash,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Bash,bash,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Bash,bash,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+C,c,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+C,c,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C,c,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+C,c,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+C,c,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+C++,cpp,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+C++,cpp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C++,cpp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+C++,cpp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+C++,cpp,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+C#,csharp,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+C#,csharp,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+C#,csharp,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+C#,csharp,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+C#,csharp,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+CSS,css,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+CSS,css,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CSS,css,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+CSS,css,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+CSS,css,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+CUE,cue,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+CUE,cue,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+CUE,cue,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+CUE,cue,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+CUE,cue,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Elixir,elixir,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Elixir,elixir,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elixir,elixir,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Elixir,elixir,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Elixir,elixir,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Elm,elm,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Elm,elm,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Elm,elm,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Elm,elm,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Elm,elm,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Go,go,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Go,go,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Go,go,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Go,go,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Go,go,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
+Go,go,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Go,go,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Groovy,groovy,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Groovy,groovy,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Groovy,groovy,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Groovy,groovy,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Groovy,groovy,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+HCL,hcl,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+HCL,hcl,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HCL,hcl,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+HCL,hcl,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+HCL,hcl,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+HTML,html,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+HTML,html,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+HTML,html,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+HTML,html,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+HTML,html,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Java,java,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Java,java,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Java,java,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Java,java,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Java,java,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Java,java,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Java,java,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+JavaScript,javascript,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+JavaScript,javascript,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+JavaScript,javascript,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+JavaScript,javascript,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+JavaScript,javascript,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
+JavaScript,javascript,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+JavaScript,javascript,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Kotlin,kotlin,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Kotlin,kotlin,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Kotlin,kotlin,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Kotlin,kotlin,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Kotlin,kotlin,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Lua,lua,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Lua,lua,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Lua,lua,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Lua,lua,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Lua,lua,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Markdown,markdown,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Markdown,markdown,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Markdown,markdown,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Markdown,markdown,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Markdown,markdown,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+OCaml,ocaml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+OCaml,ocaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+OCaml,ocaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+OCaml,ocaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+OCaml,ocaml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+PHP,php,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+PHP,php,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+PHP,php,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+PHP,php,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+PHP,php,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Protobuf,protobuf,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Protobuf,protobuf,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Protobuf,protobuf,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Protobuf,protobuf,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Protobuf,protobuf,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Python,python,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Python,python,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Python,python,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Python,python,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Python,python,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
+Python,python,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Python,python,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Ruby,ruby,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Ruby,ruby,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Ruby,ruby,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
+Ruby,ruby,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Ruby,ruby,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Rust,rust,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Rust,rust,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Rust,rust,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Rust,rust,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Rust,rust,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Rust,rust,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Rust,rust,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Scala,scala,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Scala,scala,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Scala,scala,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Scala,scala,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Scala,scala,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+SQL,sql,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+SQL,sql,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+SQL,sql,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+SQL,sql,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+SQL,sql,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Svelte,svelte,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Svelte,svelte,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Svelte,svelte,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Svelte,svelte,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Svelte,svelte,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+Swift,swift,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+Swift,swift,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+Swift,swift,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+Swift,swift,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+Swift,swift,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+TOML,toml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+TOML,toml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TOML,toml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+TOML,toml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+TOML,toml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+TypeScript,typescript,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+TypeScript,typescript,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TypeScript,typescript,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TypeScript,typescript,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+TypeScript,typescript,syntax,exact,ADVERTISED_CERTIFIED,registered parse-only checker with positive-error and unavailable outcomes
+TypeScript,typescript,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+TypeScript,typescript,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision
+YAML,yaml,exact_literal_search,exact,ADVERTISED_CERTIFIED,language-agnostic explicit-scope byte scanner; omissions prevent exactness
+YAML,yaml,definition,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,references,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,callers,removed,REMOVED_FROM_ADVERTISED_SCHEMA,no language/configuration completeness certificate exists
+YAML,yaml,syntax,removed,REMOVED_FROM_ADVERTISED_SCHEMA,registered parse-only checker with positive-error and unavailable outcomes
+YAML,yaml,patch_impact,removed,REMOVED_FROM_ADVERTISED_SCHEMA,current producer is incomplete/partial and cannot satisfy its advertised contract
+YAML,yaml,verification_status,execution_specific,ADVERTISED_CERTIFIED,execution-specific verification contract bound to exact command and revision

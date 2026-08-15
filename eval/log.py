@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +40,7 @@ class RunLog:
         return Path(self.results_root) / self.benchmark / self.model / self.run_id
 
     def start(self) -> None:
-        self._started_at = datetime.now(timezone.utc).isoformat()
+        self._started_at = datetime.now(UTC).isoformat()
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
     def add_task(self, rec: TaskRecord) -> None:
@@ -51,7 +51,7 @@ class RunLog:
         self._tasks.append(rec)
 
     def finish(self, grader_output_path: Path | None = None) -> Path:
-        completed_at = datetime.now(timezone.utc).isoformat()
+        completed_at = datetime.now(UTC).isoformat()
         passed = sum(1 for t in self._tasks if t.passed)
         total = len(self._tasks) or 1
         manifest = {

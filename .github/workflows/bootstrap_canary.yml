@@ -1,0 +1,186 @@
+# Standalone one-call persistent bootstrap canary.
+# Isolates the single paid provider call on an exact pinned SHA without
+# triggering the DeepSWE task matrix.  Requires the exact-commit Linux
+# provider-free proof (READY + SMOKE_APPROVED) to already exist for `ref`.
+name: Bootstrap canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Exact GT commit/ref to canary (must already have a passing Linux provider-free proof)"
+        type: string
+        required: true
+        default: "3d66944"
+      model:
+        description: "DeepSeek V4 Flash model id passed to litellm"
+        type: string
+        required: true
+        default: "deepseek-v4-flash-0731"
+      provider:
+        description: "Provider route for this single call"
+        type: choice
+        required: true
+        options: [openrouter, tokenrouter, deepseek]
+        default: "openrouter"
+      timeout_sec:
+        description: "Bootstrap provider timeout in seconds"
+        type: string
+        required: true
+        default: "45"
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+  LANG: "C.UTF-8"
+  LC_ALL: "C.UTF-8"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      MODEL: ${{ inputs.model }}
+      PROVIDER: ${{ inputs.provider }}
+      TIMEOUT_SEC: ${{ inputs.timeout_sec }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pin exact checked-out SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.ref }}" || {
+            echo "::error::checked-out SHA is not the requested ref"; exit 1;
+          }
+      - name: Install exact Mini-SWE provider adapter
+        run: |
+          python -m pip install "mini-swe-agent==2.2.8" "harbor==0.20.0"
+          python -m pip install -e .
+      - name: Resolve provider route
+        run: |
+          set -euo pipefail
+          test -n "${OPENROUTER_API_KEY:-}${TOKENROUTER_API_KEY:-}${DEEPSEEK_API_KEY:-}${OPENAI_API_KEY:-}${ANTHROPIC_API_KEY:-}" || {
+            echo "::error::no provider credential configured"; exit 1;
+          }
+          python - <<'PY'
+          import json, os, urllib.request
+
+          model = os.environ["MODEL"]
+          provider = os.environ.get("PROVIDER") or "configured"
+          base = (os.environ.get("OPENAI_BASE_URL") or "").strip()
+          env_path = os.environ["GITHUB_ENV"]
+
+          def export(name, value):
+              with open(env_path, "a", encoding="utf-8") as handle:
+                  handle.write(f"{name}={value}\n")
+
+          if provider == "openrouter":
+              if model in {"deepseek-v4-flash", "deepseek-v4-flash-0731"}:
+                  model = "deepseek/deepseek-v4-flash-0731"
+              if not model.startswith("openai/"):
+                  model = f"openai/{model}"
+              export("GT_LITELLM_MODEL", model)
+              export("OPENAI_BASE_URL", base or "https://openrouter.ai/api/v1")
+              export("GT_OPENROUTER_PROVIDER_ONLY", "deepseek")
+              export("GT_OPENROUTER_DATA_COLLECTION", "allow")
+          elif provider == "tokenrouter":
+              if model in {"deepseek-v4-flash", "deepseek-v4-flash-0731"}:
+                  model = "deepseek/deepseek-v4-flash-0731"
+              if not model.startswith("openai/"):
+                  model = f"openai/{model}"
+              tokenrouter_key = os.environ["TOKENROUTER_API_KEY"].strip()
+              tokenrouter_base = "https://api.tokenrouter.com/v1"
+              # The catalog query is unbilled mechanism identity proof.  A
+              # missing exact checkpoint aborts before the completion call.
+              request = urllib.request.Request(
+                  tokenrouter_base + "/models",
+                  headers={"Authorization": "Bearer " + tokenrouter_key},
+              )
+              with urllib.request.urlopen(request, timeout=30) as catalog_response:
+                  catalog = json.loads(catalog_response.read().decode("utf-8"))
+              exact_model_id = model.removeprefix("openai/")
+              catalog_ids = {
+                  str(item.get("id") or "") for item in (catalog.get("data") or [])
+              }
+              if exact_model_id not in catalog_ids:
+                  raise SystemExit(
+                      "TokenRouter does not expose the exact requested model: "
+                      + exact_model_id
+                  )
+              export("GT_LITELLM_MODEL", model)
+              export("OPENAI_BASE_URL", tokenrouter_base)
+              export("OPENAI_API_KEY", tokenrouter_key)
+          elif provider == "deepseek":
+              if model in {
+                  "deepseek-v4-flash",
+                  "deepseek-v4-flash-0731",
+                  "deepseek/deepseek-v4-flash-0731",
+              }:
+                  model = "openai/deepseek-v4-flash"
+              elif not model.startswith("openai/"):
+                  model = f"openai/{model}"
+              export("GT_LITELLM_MODEL", model)
+              export("OPENAI_BASE_URL", "https://api.deepseek.com")
+              export("OPENAI_API_KEY", os.environ["DEEPSEEK_API_KEY"].strip())
+          elif base:
+              if "/" not in model:
+                  model = f"openai/{model}"
+              export("GT_LITELLM_MODEL", model)
+              export("OPENAI_BASE_URL", base)
+          print(f"canary_route provider={provider} model={model}")
+          PY
+      - name: One-call bootstrap-shape canary
+        run: |
+          set -euo pipefail
+          python -m scripts.central_bootstrap_canary \
+            --model "${MODEL}" \
+            --timeout-sec "${TIMEOUT_SEC}" \
+            --output bootstrap-canary.json \
+            --provider-proof provider-route-proof.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          provider = os.environ.get("PROVIDER") or "configured"
+          proof = json.loads(Path("provider-route-proof.json").read_text(encoding="utf-8"))
+          setup = proof.get("benchmark_setup_overhead") or {}
+          cost_observed = setup.get("cost_observed")
+          if proof.get("forced_tool") != "select_catalog":
+              raise SystemExit("bootstrap canary did not force select_catalog")
+          if not proof.get("selection_valid"):
+              raise SystemExit("bootstrap canary failed production parser")
+          if not proof["response_model"] or not proof["response_provider"]:
+              raise SystemExit("bootstrap canary response identity is incomplete")
+          if provider not in {"tokenrouter", "deepseek"} and not proof["system_fingerprint"]:
+              raise SystemExit("bootstrap canary response fingerprint is incomplete")
+          if any(float(setup[field]) <= 0 for field in ("input_tokens", "output_tokens", "latency_ms")):
+              raise SystemExit("bootstrap canary resource accounting is incomplete")
+          if provider not in {"tokenrouter", "deepseek"} and (
+              not cost_observed or float(setup["cost_usd"]) <= 0
+          ):
+              raise SystemExit("bootstrap canary monetary cost accounting is incomplete")
+          if cost_observed and float(setup["cost_usd"]) < 0:
+              raise SystemExit("bootstrap canary monetary cost is invalid")
+          print("BOOTSTRAP_CANARY_APPROVED")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bootstrap-canary-${{ github.run_id }}
+          path: |
+            bootstrap-canary.json
+            provider-route-proof.json
+          if-no-files-found: error

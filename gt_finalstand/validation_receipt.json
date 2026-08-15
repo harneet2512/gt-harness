@@ -1,0 +1,16 @@
+{
+  "counts": {
+    "direct": 17,
+    "language_operation_pairs": 210,
+    "languages": 30,
+    "role_audit": 129,
+    "todo_statuses": 26
+  },
+  "errors": [],
+  "ok": true,
+  "schema": "gt.finalstand.validation.v1",
+  "status_counts": {
+    "COMPLETE": 25,
+    "REMOVED": 1
+  }
+}

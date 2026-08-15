@@ -1,0 +1,243 @@
+name: GT central provider-free certification
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Exact GT commit to certify"
+        required: true
+        type: string
+
+jobs:
+  provider_free:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+      GH_TOKEN: ${{ github.token }}
+      GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
+      SNOWFLAKE_MODEL_SHA256: 564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971
+      SNOWFLAKE_TOKENIZER_SHA256: 91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
+
+      - name: Build certified gt-index from the checked-out source
+        working-directory: vendor/gt-index-src
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
+          chmod +x "$RUNNER_TEMP/gt-index"
+          echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+
+      - name: Go parser and spec regression tests
+        working-directory: vendor/gt-index-src
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          go test ./internal/parser/ ./internal/specs/
+
+      - name: Install exact host runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+            "pytest==9.1.1" "pytest-asyncio==1.4.0" "ruff==0.16.0" \
+            vendor/groundtruth_mcp-*.whl
+
+      - name: Provision pinned Snowflake ONNX runtime asset
+        run: |
+          set -euo pipefail
+          model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"
+          mkdir -p "$model_dir"
+          gh release download gt-retrieval-runtime-v1 \
+            --repo harneet2512/gt-harness \
+            --pattern model.onnx --pattern tokenizer.json --pattern manifest.json \
+            --dir "$model_dir"
+          echo "$SNOWFLAKE_MODEL_SHA256  $model_dir/model.onnx" \
+            | sha256sum -c -
+          echo "$SNOWFLAKE_TOKENIZER_SHA256  $model_dir/tokenizer.json" \
+            | sha256sum -c -
+          echo "GT_TEST_SNOWFLAKE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
+
+      - name: Prove repository intelligence substrate
+        run: python scripts/verify_gt_index_runtime.py
+
+      - name: Language depth audit
+        run: python scripts/central_language_depth_audit.py
+
+      - name: Prove pinned Terminal-Bench language coverage
+        run: |
+          set -euo pipefail
+          dataset="$RUNNER_TEMP/terminal-bench-2-language-contract"
+          git init "$dataset"
+          git -C "$dataset" remote add origin https://github.com/harbor-framework/terminal-bench-2.git
+          git -C "$dataset" fetch --depth=1 origin 2fd12b88aafdd04a52c298e3940bcb189f9766d6
+          git -C "$dataset" checkout --detach FETCH_HEAD
+          python scripts/verify_tb2_language_contract.py --dataset-root "$dataset"
+
+      - name: Central runtime tests
+        run: |
+          python -m pytest tests/test_gt_central_runtime.py \
+            tests/test_gt_central_agent.py \
+            tests/test_gt_uplift_policy.py \
+            tests/test_gt_preflight.py \
+            tests/test_gt_intelligence_layer.py \
+            tests/test_gt_repository_intelligence.py \
+            tests/test_gt_repository_mirror.py \
+            tests/test_gt_language_resolution.py \
+            tests/test_gt_benchmark_language_contract.py \
+            tests/test_gt_task_contract.py \
+            tests/test_central_readiness.py \
+            tests/test_central_replay.py \
+            tests/test_central_run_diff.py \
+            tests/test_central_trajectory_audit.py \
+            tests/test_gt_delivery_audit.py \
+            tests/test_gt_runtime_gate.py \
+            tests/test_gt_contributions.py \
+            tests/test_provider_view.py \
+            tests/test_gt_host_execution.py \
+            tests/test_central_efficiency_replay.py \
+            tests/test_gt_deep_metrics.py \
+            tests/test_gt_progress.py \
+            tests/test_provider_evidence.py \
+            tests/test_gt_central_consumer_proof.py \
+            tests/test_gt_on_experiment.py \
+            tests/test_replay_bundle.py \
+            tests/test_preemptive_retrieval_frame.py \
+            tests/test_hybrid_retrieval.py \
+            tests/test_diagnostics.py \
+            tests/test_decision_sufficiency.py \
+            tests/test_persistent_execution_state.py \
+            tests/test_central_release_gate.py \
+            tests/test_deepswe_release_gate.py \
+            tests/test_hybrid_repository.py \
+            tests/test_graph_retrieval_repairs.py \
+            tests/test_snowflake_onnx_backend.py \
+            tests/test_live_retrieval_profile.py \
+            tests/test_gt_contributions.py \
+            tests/test_gt_component_registry.py \
+            tests/test_decision_point_eval.py -q
+
+      - name: Structural readiness audit
+        run: python scripts/central_readiness_audit.py
+
+      - name: Exact pre-smoke release gate
+        run: python scripts/central_pre_smoke_gate.py
+
+      - name: Static checks
+        run: |
+          python -m ruff check gt_engine/central_runtime.py \
+            gt_engine/central_controls.py \
+            gt_engine/preflight.py gt_engine/provider_view.py \
+            gt_engine/provider_evidence.py gt_engine/progress.py \
+            gt_engine/host_execution.py gt_engine/context_frontier.py \
+            gt_engine/language_registry.py gt_engine/repository_intelligence.py \
+            gt_engine/repository_mirror.py gt_engine/graph_evidence.py \
+            gt_engine/graph_context.py gt_engine/task_contract.py \
+            gt_engine/indexer.py gt_engine/hybrid_retrieval.py \
+            gt_engine/diagnostics.py \
+            gt_engine/decision_sufficiency.py \
+            gt_engine/persistent_execution_state.py \
+            gt_engine/thin_compiler.py \
+            gt_engine/hybrid_repository.py gt_engine/preemptive_retrieval.py \
+            gt_engine/component_registry.py gt_engine/contributions.py \
+            gt_engine/retrieval_profile.py \
+            gt_engine/decision_point_eval.py \
+            gt_engine/snowflake_onnx.py \
+            gt_engine/semantic_decisions.py gt_engine/deep_metrics.py \
+            gt_engine/delivery_audit.py \
+            gt_engine/uplift_policy.py \
+            gt_engine/experiment.py eval/gt_central_agent.py \
+            scripts/central_readiness_audit.py \
+            scripts/central_release_gate.py \
+            scripts/central_bootstrap_canary.py \
+            scripts/deepswe_release_gate.py \
+            scripts/central_feature_census.py \
+            scripts/central_replay.py scripts/central_run_diff.py \
+            scripts/central_trajectory_audit.py \
+            gt_engine/replay_bundle.py \
+            scripts/central_efficiency_replay.py \
+            scripts/central_regression_preservation_replay.py \
+            scripts/verify_tb2_language_contract.py \
+            scripts/central_language_depth_audit.py \
+            scripts/decision_point_eval.py \
+            tests/test_gt_central_runtime.py \
+            tests/test_gt_central_agent.py \
+            tests/test_gt_uplift_policy.py \
+            tests/test_gt_preflight.py tests/test_provider_view.py \
+            tests/test_provider_evidence.py tests/test_gt_progress.py \
+            tests/test_gt_intelligence_layer.py \
+            tests/test_gt_repository_intelligence.py \
+            tests/test_gt_repository_mirror.py \
+            tests/test_gt_language_resolution.py \
+            tests/test_gt_benchmark_language_contract.py \
+            tests/test_gt_task_contract.py \
+            tests/test_gt_host_execution.py \
+            tests/test_central_efficiency_replay.py \
+            tests/test_central_readiness.py \
+            tests/test_central_replay.py tests/test_central_run_diff.py \
+            tests/test_central_trajectory_audit.py \
+            tests/test_gt_delivery_audit.py \
+            tests/test_replay_bundle.py \
+            tests/test_gt_deep_metrics.py \
+            tests/test_gt_central_consumer_proof.py \
+            tests/test_gt_on_experiment.py \
+            tests/test_preemptive_retrieval_frame.py \
+            tests/test_hybrid_retrieval.py \
+            tests/test_diagnostics.py \
+            tests/test_decision_sufficiency.py \
+            tests/test_persistent_execution_state.py \
+            tests/test_central_release_gate.py \
+            tests/test_deepswe_release_gate.py \
+            tests/test_hybrid_repository.py \
+            tests/test_graph_retrieval_repairs.py \
+            tests/test_snowflake_onnx_backend.py \
+            tests/test_live_retrieval_profile.py \
+            tests/test_gt_contributions.py \
+            tests/test_gt_component_registry.py \
+            tests/test_decision_point_eval.py
+
+      - name: Provider-free receipt
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os, subprocess
+          from pathlib import Path
+
+          receipt = {
+              "schema": "gt.central.provider-free.v1",
+              "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "dispatch_sha": "${{ github.sha }}",
+              "commit": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], text=True
+              ).strip(),
+              "provider_calls": 0,
+              "note": "Live task-container discoverability remains a separate gate.",
+          }
+          Path("central_provider_free_receipt.json").write_text(
+              json.dumps(receipt, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(receipt))
+          EOF
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-provider-free-${{ github.run_id }}
+          path: central_provider_free_receipt.json
+          if-no-files-found: warn

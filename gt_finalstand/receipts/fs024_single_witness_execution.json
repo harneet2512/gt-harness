@@ -1,0 +1,94 @@
+{
+  "analysis": {
+    "local_offline_analyzer_fix": {
+      "affected_provider_trial": false,
+      "cause": "the analyzer accepted an aggregate Harbor result but not the per-trial result.json emitted by this run",
+      "provider_rerun_performed": false,
+      "status": "fixed_locally_after_artifact_download"
+    },
+    "receipt_path": "gt_finalstand/receipts/fs024_single_witness_analysis.json",
+    "receipt_sha256": "1750029d28f5e8892c4ac7f693e49c07bf3688282263f68e864197efa6944c11",
+    "verdict": "non_regressing_witness"
+  },
+  "artifact": {
+    "api_sha256": "bbd7b620bfd9285c8a88a12714ce1331586052286fe2d96f9efcd36e2d6d12b5",
+    "github_artifact_id": "8828119172",
+    "name": "tb2-miniswe-gt-single-30731388242"
+  },
+  "authorized_by": "project_owner_single_run_instruction",
+  "evidence": {
+    "baseline_receipt": {
+      "path": "gt_finalstand/receipts/fs024_single_witness_baseline.json",
+      "sha256": "bc29ea42c1deb36b564ade4adcb9cea32ef5fe8c295e807f00f2e1f5b7c96c57"
+    },
+    "candidate_result": {
+      "path": "results/terminal-bench/tb2-miniswe-gt-single-30731388242/fix-code-vulnerability__RBTRbrx/result.json",
+      "sha256": "4ce0481d84ff7d5a87a6696a41af34be9e906c2f872fa92263966c177852dd74"
+    },
+    "candidate_trajectory": {
+      "path": "results/terminal-bench/tb2-miniswe-gt-single-30731388242/fix-code-vulnerability__RBTRbrx/agent/miniswe_trajectory.json",
+      "sha256": "2dd095a00dffcea108ec82e90da428ac6cacdf89313613df27695540c16a1a6b"
+    },
+    "groundtruth_events": {
+      "path": "results/terminal-bench/tb2-miniswe-gt-single-30731388242/fix-code-vulnerability__RBTRbrx/agent/gt-state/89b1abdf0af19399/events.jsonl",
+      "sha256": "57a5598b52411c7f1e295be334cc44c07f26bf98f7cd0160708890bca6152ebf"
+    },
+    "miniswe_report": {
+      "path": "results/terminal-bench/tb2-miniswe-gt-single-30731388242/fix-code-vulnerability__RBTRbrx/agent/miniswe_report.json",
+      "sha256": "96e4e43064d85e41302ee341eacb00bee41d878654b8c446086fbed10be10712"
+    },
+    "provider_preflight": {
+      "path": "witness-receipts/provider_preflight.json",
+      "sha256": "6e25b9c6e446dd97672fbac21e1c22245aadc798d1646beec6ed33f8e6b4f56f"
+    },
+    "task_receipt": {
+      "path": "witness-receipts/task_checksum.json",
+      "sha256": "903205b5422c1b1716e2bf29ee58f11cf4fdaf214b9beb3a67ed4b3cd1de9370"
+    },
+    "verifier_reward": {
+      "path": "results/terminal-bench/tb2-miniswe-gt-single-30731388242/fix-code-vulnerability__RBTRbrx/verifier/reward.txt",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    }
+  },
+  "github": {
+    "commit": "cdefd9a52c915364d346b790a65dde3104c17286",
+    "commit_timestamp": "2026-08-02T03:52:40Z",
+    "job_id": "91452315208",
+    "repository": "harneet2512/gt-harness",
+    "run_attempt": 1,
+    "run_id": "30731388242",
+    "workflow": ".github/workflows/tb2_miniswe_gt_single.yml"
+  },
+  "provider_trial_count": 1,
+  "instrumentation_discrepancy": {
+    "events_and_trajectory_observation": "events.jsonl contains one localization evidence_delivery event and the trajectory contains multiple GT_EXECUTION_EVIDENCE observation augmentations",
+    "miniswe_report_delivered_evidence": 0,
+    "resolved": false
+  },
+  "run_conclusion": {
+    "benchmark_trial_completed": true,
+    "failure_stage": "postprocess_single_witness_analysis",
+    "overall_workflow": "failure",
+    "trial_or_verifier_failure": false,
+    "verifier_passed": true
+  },
+  "schema": "gt.phase2.single_witness_execution.v1",
+  "trial": {
+    "dataset_commit": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+    "finished_at": "2026-08-02T03:57:41.214224Z",
+    "reward": 1.0,
+    "started_at": "2026-08-02T03:55:10.064797Z",
+    "task_checksum": "13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119",
+    "task_id": "fix-code-vulnerability",
+    "trial_id": "4caf8b43-3a4a-4387-8a14-29528cb67e79",
+    "verifier_finished_at": "2026-08-02T03:57:29.964338Z",
+    "verifier_started_at": "2026-08-02T03:57:27.383762Z"
+  },
+  "usage": {
+    "completion_tokens": 8649,
+    "estimated_cost_usd_official_current_rates": 0.006527528,
+    "prompt_cache_hit_tokens": 357760,
+    "prompt_cache_miss_tokens": 22172,
+    "prompt_tokens_total": 379932
+  }
+}

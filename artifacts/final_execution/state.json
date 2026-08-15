@@ -1,0 +1,21 @@
+{
+  "plan": "FINAL_EXECUTION_PLAN.md",
+  "ledger": "FINAL_EXECUTION_TODOS.md",
+  "active_todo": "GT-FINAL-007",
+  "status": "in_progress",
+  "paid_provider_run_started": false,
+  "gt_freeze": false,
+  "full_local_suite": "1180 passed, 3 skips",
+  "last_heartbeat_utc": "2026-08-10T00:00:00Z",
+  "current_commit": "HEAD",
+  "remaining": [
+    "P0/P1 defect reproduction and exact-tree gate",
+    "lossless ARB base-commit checkout/cache runner",
+    "decision-point evaluation contract",
+    "gold-isolated ARB adapter",
+    "runtime proof",
+    "retrieval evaluation",
+    "paired model decision evaluation",
+    "freeze and conditional benchmarks"
+  ]
+}

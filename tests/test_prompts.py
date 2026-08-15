@@ -1,6 +1,5 @@
-import re
 
-from nano.prompts import SYSTEM_PROMPT, count_tokens_approx
+from nano.prompts import GT_PROMPT_SUFFIX, SYSTEM_PROMPT, count_tokens_approx
 
 
 def test_system_prompt_under_1000_tokens():
@@ -22,3 +21,11 @@ def test_system_prompt_no_filler_phrases():
     s = SYSTEM_PROMPT.lower()
     for phrase in forbidden:
         assert phrase not in s, f"filler phrase present: {phrase!r}"
+
+
+def test_gt_prompt_forbids_harness_reverse_engineering():
+    prompt = GT_PROMPT_SUFFIX.lower()
+    assert "/installed-agent" in prompt
+    assert ".gt" in prompt
+    assert "never inspect" in prompt
+    assert "work only on the user's task" in prompt

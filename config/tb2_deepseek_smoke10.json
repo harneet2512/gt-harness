@@ -1,0 +1,43 @@
+{
+  "schema": "gt.tb2.deepseek.smoke10.v1",
+  "dataset": "terminal-bench/terminal-bench-2",
+  "model": "deepseek-v4-flash",
+  "temperature": 1.0,
+  "timeout_multiplier": 1.0,
+  "concurrency": 5,
+  "baseline": {
+    "source": "baseline_deepseekv4flash",
+    "arm": "GT-OFF",
+    "known_rewards": {
+      "fix-code-vulnerability": 1.0,
+      "portfolio-optimization": 1.0,
+      "modernize-scientific-stack": 1.0,
+      "headless-terminal": 1.0,
+      "llm-inference-batching-scheduler": 1.0,
+      "break-filter-js-from-html": 1.0,
+      "write-compressor": 1.0,
+      "gpt2-codegolf": 0.0,
+      "schemelike-metacircular-eval": 1.0,
+      "cobol-modernization": 1.0
+    },
+    "ungraded_tasks": [],
+    "outcome_contract": {
+      "official_resolved": "verifier reward == 1",
+      "uncensored_resolved": "verifier reward == 1 and Harbor process completed without outer cancellation",
+      "comparison_gate_field": "uncensored_resolved",
+      "known_outer_timeout_tasks": ["gpt2-codegolf"]
+    }
+  },
+  "tasks": [
+    "fix-code-vulnerability",
+    "portfolio-optimization",
+    "modernize-scientific-stack",
+    "headless-terminal",
+    "llm-inference-batching-scheduler",
+    "break-filter-js-from-html",
+    "write-compressor",
+    "gpt2-codegolf",
+    "schemelike-metacircular-eval",
+    "cobol-modernization"
+  ]
+}

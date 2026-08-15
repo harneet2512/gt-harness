@@ -1,0 +1,62 @@
+{
+  "limitations": [],
+  "native_graph_battery": {
+    "cold_builds": 10,
+    "corpus_coverage": {
+      "dirty_non_source_file": true,
+      "dynamic_import": true,
+      "generated_file": true,
+      "multiple_languages": true,
+      "overloads": true,
+      "shadowing": true,
+      "symlink": true
+    },
+    "cost": {
+      "cold_build_p50_ns": 31232686.5,
+      "cold_build_p95_ns": 33529528,
+      "incremental_build_ns": 15058168,
+      "query_p50_ns": 8647,
+      "query_p95_ns": 9417
+    },
+    "cost_scope": "native gt-index tiny adversarial fixture; workflow runner input",
+    "database_files_byte_identical": true,
+    "executed": true,
+    "failures": [],
+    "ok": true,
+    "semantic_artifact_sha256": "98a4e36b6fb4dd75f6c5ea0970a361535b926c3f55c4745f01189273cbd73f79",
+    "semantic_artifacts_byte_identical": true
+  },
+  "ok": true,
+  "runtime_probes": {
+    "failures": [],
+    "freshness_invalidation_executed": true,
+    "gt_off_parity_regression": "tests/test_miniswe_runtime.py::test_gt_off_never_attaches_terminal_or_provider_authorities",
+    "ok": true,
+    "provider_calls": 0,
+    "sentinel_clean_replacement_certified": true,
+    "sentinel_leak_rejected": true,
+    "stock_bash_parse_parity": true,
+    "typed_exact_literal_executed": true
+  },
+  "schema": "gt.finalstand.offline_suite.v2",
+  "static_cases": {
+    "cost": {
+      "canonical_json_p50_ns": 5069,
+      "canonical_json_p95_ns": 5069
+    },
+    "cost_scope": "compiler canonicalization microbenchmark only",
+    "counts": {
+      "action_identifiability": 20,
+      "cost_samples": 3,
+      "determinism": 2,
+      "evidence_sufficiency": 3,
+      "freshness": 2,
+      "observation_leak": 2,
+      "typed_action_identifiability": 3
+    },
+    "failures": [],
+    "ok": true,
+    "schema": "gt.finalstand.offline_suite.v1"
+  },
+  "terminal": true
+}
