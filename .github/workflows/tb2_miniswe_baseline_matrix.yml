@@ -111,7 +111,7 @@ jobs:
           model = os.environ["MODEL"]
           base = os.environ.get("OPENAI_BASE_URL") or ""
           mname, kwargs = model, {"temperature": 1.0}
-          if base and "/" not in model:
+          if base:
               mname = f"openai/{model}"
               kwargs["api_base"] = base
           print(f"model={model!r} -> litellm model={mname!r} "
