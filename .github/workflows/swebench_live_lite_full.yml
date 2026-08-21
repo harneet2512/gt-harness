@@ -27,10 +27,14 @@ name: "SWE-bench Live Lite: Full 300-task (mini-swe-agent, GT substrate)"
 on:
   workflow_dispatch:
     inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
       model:
         description: "LLM model (litellm-compatible)"
         required: true
-        default: "deepseek/deepseek-v4-flash"
+        default: "openrouter/stealth/ox-alpha"
       mode:
         description: "Run mode: smoke (5 tasks), pilot (20), pilot100 (100), full (300)"
         required: true
@@ -673,9 +677,9 @@ jobs:
 
       - name: Preflight checks (fail-fast on infra, warn on quality)
         env:
-          TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TOKENROUTER_API_KEY: ${{ inputs.api_key || secrets.TOKENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ inputs.api_key || secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ inputs.api_key || secrets.OPENROUTER_API_KEY }}
         shell: bash
         run: |
           set -e
@@ -1127,8 +1131,8 @@ jobs:
           INPUT_MODEL: ${{ inputs.model }}
           INPUT_BASELINE: ${{ inputs.baseline }}
           GT_BASELINE_FLAG: ${{ inputs.baseline == true && '1' || '0' }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ inputs.api_key || secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ inputs.api_key || secrets.OPENROUTER_API_KEY }}
           REPO_OWNER: ${{ github.repository_owner }}
           GH_TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
           GT_LIVE_CHECK_TOKEN: ${{ github.token }}

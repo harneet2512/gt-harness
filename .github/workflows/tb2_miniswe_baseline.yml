@@ -15,10 +15,14 @@ name: TB2 miniswe baseline (no GT)
 on:
   workflow_dispatch:
     inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
       model:
         description: "Provider-native model id; the DeepSeek gateway requires bare deepseek-v4-flash"
         type: string
-        default: "deepseek-v4-flash"
+        default: "openrouter/stealth/ox-alpha"
       base_url:
         description: "OpenAI-compatible gateway URL; when set, exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -53,8 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ inputs.api_key || secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       # Input beats secret; empty means "no gateway" (direct provider APIs).
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"

@@ -13,10 +13,14 @@ name: TB2 baseline (nano, no GT)
 on:
   workflow_dispatch:
     inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
       model:
         description: "Model id passed to harbor -m AND through to nano. When base_url is set this string is used verbatim as the gateway's model id, so it must be the gateway's NATIVE spelling (api.deepseek.com wants bare 'deepseek-v4-flash', not OpenRouter's 'deepseek/deepseek-v4-flash'). Only with no base_url is a provider/ prefix stripped."
         type: string
-        default: "deepseek-v4-flash"
+        default: "openrouter/stealth/ox-alpha"
       base_url:
         description: "OpenAI-compatible gateway URL; when set, exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -55,8 +59,8 @@ jobs:
     env:
       # Set whichever your model needs: `gh secret set ANTHROPIC_API_KEY` etc.
       # Unset secrets resolve to "" and are simply absent for the agent.
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ inputs.api_key || secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       # Input beats secret; empty means "no gateway" (direct provider APIs).
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"

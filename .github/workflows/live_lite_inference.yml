@@ -3,6 +3,10 @@ name: "Live Lite: Inference"
 on:
   workflow_dispatch:
     inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
       mode:
         description: "Run mode (smoke=5, pilot20=20, pilot100=100, full300=all)"
         required: true
@@ -22,7 +26,7 @@ on:
       model:
         description: "LLM model identifier"
         required: true
-        default: "deepseek/deepseek-v4-flash"
+        default: "openrouter/stealth/ox-alpha"
       max_iterations:
         description: "Max agent iterations per task"
         required: true
@@ -65,7 +69,7 @@ on:
       model:
         type: string
         required: false
-        default: "deepseek/deepseek-v4-flash"
+        default: "openrouter/stealth/ox-alpha"
       max_iterations:
         type: string
         required: false
@@ -296,7 +300,7 @@ jobs:
 
       - name: Preflight checks (fail-fast on infra, warn on quality)
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ inputs.api_key || secrets.DEEPSEEK_API_KEY }}
         run: |
           set -e
           echo "=== INFRA PREFLIGHT (fail-fast) ==="
@@ -356,7 +360,7 @@ jobs:
 
           [llm.eval]
           model = "${{ inputs.model }}"
-          api_key = "${{ secrets.DEEPSEEK_API_KEY }}"
+          api_key = "${{ inputs.api_key || secrets.DEEPSEEK_API_KEY }}"
           base_url = "https://api.deepseek.com"
           temperature = 1.0
           top_p = 1.0

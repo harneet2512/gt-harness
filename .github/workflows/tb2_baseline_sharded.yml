@@ -21,10 +21,14 @@ name: TB2 baseline sharded (nano, no GT)
 on:
   workflow_dispatch:
     inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
       model:
         description: "Model id for harbor -m, passed through to nano verbatim when base_url is set (api.deepseek.com wants bare 'deepseek-v4-flash')"
         type: string
-        default: "deepseek-v4-flash"
+        default: "openrouter/stealth/ox-alpha"
       base_url:
         description: "OpenAI-compatible gateway URL; exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -60,8 +64,8 @@ jobs:
       matrix: ${{ steps.shard.outputs.matrix }}
       n_tasks: ${{ steps.shard.outputs.n_tasks }}
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ inputs.api_key || secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
@@ -200,8 +204,8 @@ jobs:
       matrix:
         shard: ${{ fromJson(needs.plan.outputs.matrix) }}
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ inputs.api_key || secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:

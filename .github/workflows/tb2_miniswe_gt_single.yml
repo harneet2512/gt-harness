@@ -6,14 +6,19 @@ name: TB2 Mini-SWE GT single matched witness
 
 on:
   workflow_dispatch:
+    inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
 
 jobs:
   witness:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ inputs.api_key || secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
       MODEL: "deepseek-v4-flash"
