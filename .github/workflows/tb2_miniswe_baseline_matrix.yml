@@ -45,6 +45,10 @@ on:
         description: "Task image tag (all TB2.0 task images are alexgshaw/<task>:<tag>). Cache key component; bump when the dataset images change"
         type: string
         default: "20251031"
+      agent_timeout_multiplier:
+        description: "Multiplier for the per-task agent wall-clock timeout (harbor --agent-timeout-multiplier). 1.0 = TB2 default. Raise for slow reasoning models on heavy tasks."
+        type: string
+        default: "2.0"
 
 jobs:
   plan:
@@ -266,7 +270,7 @@ jobs:
             -m "$MODEL" \
             -o results/terminal-bench \
             --job-name "$JOB_NAME" \
-            --agent-timeout-multiplier 1.0 \
+            --agent-timeout-multiplier ${{ inputs.agent_timeout_multiplier }} \
             -n 1 \
             -y \
             -i "$TASK"

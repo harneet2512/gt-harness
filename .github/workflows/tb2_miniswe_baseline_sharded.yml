@@ -48,6 +48,10 @@ on:
         description: "Harbor dataset name@version"
         type: string
         default: "terminal-bench@2.0"
+      agent_timeout_multiplier:
+        description: "Multiplier for the per-task agent wall-clock timeout (harbor --agent-timeout-multiplier). 1.0 = TB2 default. Raise for slow reasoning models on heavy tasks."
+        type: string
+        default: "2.0"
 
 jobs:
   plan:
@@ -272,7 +276,7 @@ jobs:
             -m "$MODEL"
             -o results/terminal-bench
             --job-name "$JOB_NAME"
-            --agent-timeout-multiplier 1.0
+            --agent-timeout-multiplier ${{ inputs.agent_timeout_multiplier }}
             -n "$CONCURRENCY"
             -y
           )
