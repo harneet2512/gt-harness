@@ -110,8 +110,14 @@ jobs:
           from minisweagent.models.litellm_model import BASH_TOOL
 
           model = os.environ["GT_LITELLM_MODEL"]
+          # Match MiniSweCentralAgent._build_model: LiteLLM needs the
+          # OpenAI-compatible adapter prefix, while the provider response
+          # identity remains the exact catalog ID supplied by the workflow.
+          litellm_model = model
+          if os.environ["OPENAI_BASE_URL"] and not litellm_model.startswith("openai/"):
+              litellm_model = f"openai/{litellm_model}"
           response = litellm.completion(
-              model=model,
+              model=litellm_model,
               api_base=os.environ["OPENAI_BASE_URL"],
               api_key=os.environ["OPENAI_API_KEY"],
               messages=[{"role": "user", "content": "Use bash to run: printf ID_OK"}],
