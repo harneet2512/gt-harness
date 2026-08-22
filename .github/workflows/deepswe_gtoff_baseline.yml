@@ -191,7 +191,7 @@ jobs:
           set -uo pipefail
           echo "=== DeepSWE GT-off trial: $TASK (model $MODEL) ==="
           pier run -p deepswe-bench/tasks --include-task-name "$TASK" \
-            --agent-import-path eval.miniswe_agent:MiniSweAgent \
+            --agent mini-swe-agent \
             -m "$MODEL" -o results/deepswe \
             --job-name "deepswe-gtoff-${GITHUB_RUN_ID}-${TASK}" \
             --agent-timeout-multiplier ${{ inputs.agent_timeout_multiplier }} \
