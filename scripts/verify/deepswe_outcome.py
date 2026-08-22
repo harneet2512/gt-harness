@@ -109,6 +109,9 @@ INFRA_LOG_MARKERS: tuple[str, ...] = (
     # denominator), the same treatment as GT_PROOF_OOM. Uncapped, this was a silent host
     # OOM-SIGKILL that surfaced as a generic failure; now it is a classified diagnostic.
     "GT_AGENT_OOM",
+    # The task-owned agent wall-clock cap is an infrastructure timeout.  Keep it
+    # separate from an agent/model failure so the run summary can expose it.
+    "GT_AGENT_WALL_TIMEOUT",
     "GT_ARTIFACT_MISSING",
     "TASK_IMAGE_PULL_FAIL",
     # The task issue could not be materialized (no instruction.md, no task.toml
