@@ -94,6 +94,10 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   # ── Phase 1: Build task matrix ──────────────────────────────────────
   prepare:
@@ -589,6 +593,16 @@ jobs:
           if-no-files-found: warn
 
   # ── Phase 3: Merge results ──────────────────────────────────────────
+  task_progress:
+    name: Task progress
+    needs: [prepare]
+    if: always()
+    uses: ./.github/workflows/task_progress.yml
+    with:
+      expected_total: ${{ needs.prepare.outputs.task_count }}
+      task_job_regex: '^inference \(.+\)$'
+    secrets: inherit
+
   merge:
     needs: [prepare, inference]
     runs-on: ubuntu-latest
