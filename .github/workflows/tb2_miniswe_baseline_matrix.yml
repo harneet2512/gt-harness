@@ -175,7 +175,6 @@ jobs:
   run:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 350
     strategy:
       # One task failing must not cancel the rest - a partial baseline with
       # known-failed tasks is still useful.
