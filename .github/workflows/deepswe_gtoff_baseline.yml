@@ -197,6 +197,7 @@ jobs:
           pier run -p deepswe-bench/tasks --include-task-name "$TASK" \
             --agent mini-swe-agent \
             -m "$MODEL" -o results/deepswe \
+            --ak model_class=litellm \
             --job-name "deepswe-gtoff-${GITHUB_RUN_ID}-${TASK}" \
             --agent-timeout-multiplier ${{ inputs.agent_timeout_multiplier }} \
             -n 1 -y 2>&1 | tee "deepswe-task-${TASK}.log" || true
