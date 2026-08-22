@@ -1,0 +1,261 @@
+# DeepSWE v1.1 GT-OFF baseline, one job per task (no GT, no release gates).
+#
+# Follows the official DeepSWE protocol: Pier runs mini-swe-agent on the pinned
+# v1.1 catalog snapshot (435ee89..., 113 tasks). GT is hard-off
+# (eval.miniswe_agent:MiniSweAgent adds --gt-off). Provider key comes from
+# outside (api_key dispatch input). No provider-free / bootstrap-canary gates --
+# a single litellm preflight proves the route before the matrix fans out.
+name: DeepSWE v1.1 GT-off baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_key:
+        description: "Provider API key, supplied from outside at dispatch time (overrides the repo secret)."
+        required: false
+        default: ""
+      model:
+        description: "Model id passed to pier -m (OpenAI-compatible; openrouter base expects e.g. openai/stealth/ox-alpha)"
+        type: string
+        default: "openai/stealth/ox-alpha"
+      base_url:
+        description: "OpenAI-compatible gateway URL; exported as OPENAI_BASE_URL"
+        type: string
+        default: "https://openrouter.ai/api/v1"
+      parallel:
+        description: "Max concurrent task jobs (GHA concurrency cap)"
+        type: string
+        default: "20"
+      agent_timeout_multiplier:
+        description: "Multiplier for the per-task agent wall-clock timeout (pier --agent-timeout-multiplier). 1.0 = official."
+        type: string
+        default: "1.0"
+      include:
+        description: "Optional comma-separated task names/globs to restrict the pool (default: all 113)"
+        type: string
+        default: ""
+      exclude:
+        description: "Optional comma-separated task names/globs to drop from the pool"
+        type: string
+        default: ""
+      dataset_ref:
+        description: "Pinned DeepSWE v1.1 catalog snapshot"
+        type: string
+        default: "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tasks: ${{ steps.enum.outputs.tasks }}
+    env:
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ inputs.base_url }}
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install nano-harness + pier
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[miniswe]" "datacurve-pier==0.3.1"
+
+      - name: Checkout pinned DeepSWE v1.1 catalog snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: datacurve-ai/deep-swe
+          ref: ${{ inputs.dataset_ref }}
+          path: deepswe-bench
+
+      - name: Prove v1.1 catalog (113 tasks)
+        working-directory: deepswe-bench
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.dataset_ref }}" || { echo "::error::snapshot mismatch"; exit 1; }
+          test "$(find tasks -mindepth 2 -maxdepth 2 -name task.toml | wc -l)" -eq 113 || { echo "::error::expected 113 tasks"; exit 1; }
+          echo "v1.1 catalog verified: 113 tasks at ${{ inputs.dataset_ref }}"
+
+      - name: Sanitize API key
+        run: |
+          python - <<'EOF'
+          import os, sys
+          raw = os.environ.get("OPENAI_API_KEY") or ""
+          clean = raw.replace("\ufeff", "").strip()
+          if not clean:
+              raise SystemExit("::error::no provider key (pass -f api_key=...)")
+          if not clean.isascii():
+              raise SystemExit("::error::api_key holds non-ASCII characters")
+          print(f"::add-mask::{clean}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"OPENAI_API_KEY={clean}\n")
+          EOF
+
+      - name: Preflight provider (gates all jobs)
+        run: |
+          python - <<'EOF'
+          import os, sys
+          import litellm
+          model = "${{ inputs.model }}"
+          base = os.environ.get("OPENAI_BASE_URL") or ""
+          mname, kwargs = model, {"temperature": 1.0}
+          if base and not model.startswith("openai/"):
+              mname = f"openai/{model}"
+              kwargs["api_base"] = base
+          print(f"model={model!r} -> litellm model={mname!r} OPENAI_BASE_URL={base}")
+          try:
+              resp = litellm.completion(
+                  model=mname,
+                  messages=[{"role": "user", "content": "Reply with the single word: ok"}],
+                  **kwargs,
+              )
+          except Exception as e:
+              print(f"::error::preflight failed: {type(e).__name__}: {e}")
+              sys.exit(1)
+          d = resp.model_dump()
+          text = (d.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+          print(f"preflight ok: served_model={d.get('model')} text={text[:60]!r}")
+          EOF
+
+      - name: Enumerate v1.1 tasks
+        id: enum
+        env:
+          INCLUDE: ${{ inputs.include }}
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          python - <<'EOF'
+          import fnmatch, json, os
+          from pathlib import Path
+          root = Path("deepswe-bench/tasks")
+          tasks = sorted(p.name for p in root.iterdir() if (p / "task.toml").is_file())
+          def patterns(raw):
+              return [s.strip() for s in raw.split(",") if s.strip()]
+          inc, exc = patterns(os.environ["INCLUDE"]), patterns(os.environ["EXCLUDE"])
+          if inc:
+              tasks = [t for t in tasks if any(fnmatch.fnmatch(t, p) for p in inc)]
+          if exc:
+              tasks = [t for t in tasks if not any(fnmatch.fnmatch(t, p) for p in exc)]
+          if not tasks:
+              raise SystemExit("::error::no tasks after include/exclude")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"tasks={json.dumps(tasks)}\n")
+          print(f"## Plan: {len(tasks)} DeepSWE v1.1 tasks as individual jobs")
+          EOF
+
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.parallel) }}
+      matrix:
+        task: ${{ fromJson(needs.plan.outputs.tasks) }}
+    env:
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ inputs.base_url }}
+      MODEL: ${{ inputs.model }}
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+
+      - name: Install nano-harness + pier
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[miniswe]" "datacurve-pier==0.3.1"
+
+      - name: Checkout pinned DeepSWE v1.1 catalog snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: datacurve-ai/deep-swe
+          ref: ${{ inputs.dataset_ref }}
+          path: deepswe-bench
+
+      - name: Run pier - task ${{ matrix.task }}
+        env:
+          TASK: ${{ matrix.task }}
+        run: |
+          set -uo pipefail
+          echo "=== DeepSWE GT-off trial: $TASK (model $MODEL) ==="
+          pier run -p deepswe-bench/tasks --include-task-name "$TASK" \
+            --agent-import-path eval.miniswe_agent:MiniSweAgent \
+            -m "$MODEL" -o results/deepswe \
+            --job-name "deepswe-gtoff-${GITHUB_RUN_ID}-${TASK}" \
+            --agent-timeout-multiplier ${{ inputs.agent_timeout_multiplier }} \
+            -n 1 -y 2>&1 | tee "deepswe-task-${TASK}.log" || true
+          echo "PIER_RC=${PIPESTATUS[0]}"
+
+      - name: Upload task result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepswe-gtoff-${{ github.run_id }}-${{ matrix.task }}
+          path: |
+            results/deepswe/
+            deepswe-task-${{ matrix.task }}.log
+          if-no-files-found: warn
+
+  merge:
+    needs: [plan, run]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install nano-harness
+        run: pip install -e ".[miniswe]"
+      - name: Download task evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deepswe-gtoff-${{ github.run_id }}-*
+          path: tasks
+          merge-multiple: false
+      - name: Aggregate results
+        run: |
+          python - <<'EOF'
+          import json
+          from pathlib import Path
+          rows = []
+          for rj in Path("tasks").rglob("result.json"):
+              if "__" not in str(rj):
+                  continue
+              try:
+                  r = json.loads(rj.read_text(encoding="utf-8"))
+              except Exception:
+                  continue
+              task = rj.parent.parent.name.split("__")[0]
+              rew = (r.get("verifier_result") or {}).get("rewards") or {}
+              rows.append({"task": task, "reward": rew.get("reward"),
+                           "exit": (r.get("agent_result") or {}).get("metadata", {}).get("exit_status")})
+          graded = [x for x in rows if x["reward"] is not None]
+          solved = [x for x in graded if x["reward"] == 1.0]
+          print(f"## DeepSWE v1.1 GT-off result ({len(rows)} returned / {len(graded)} graded / {len(solved)} solved)")
+          for x in sorted(rows, key=lambda z: z["task"]):
+              print(f"{x['task']}: reward={x['reward']} exit={x['exit']}")
+          Path("gtoff_summary.json").write_text(json.dumps({
+              "n_returned": len(rows), "n_graded": len(graded),
+              "n_solved": len(solved), "solved": sorted(x["task"] for x in solved),
+              "rows": rows}, indent=2), encoding="utf-8")
+          EOF
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepswe-gtoff-${{ github.run_id }}-MERGED
+          path: gtoff_summary.json
+          if-no-files-found: warn
