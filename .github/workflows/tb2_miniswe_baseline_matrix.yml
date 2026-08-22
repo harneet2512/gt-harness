@@ -263,6 +263,10 @@ jobs:
           # runner must be able to read every receipt before upload; this does
           # not alter the task workspace, model, evaluator, or score.
           if [ -d results/terminal-bench ]; then
+            # Harbor task containers may write receipts as root.  chmod alone
+            # cannot repair ownership for the GitHub runner, so take ownership
+            # first and then normalize read/execute bits for artifact upload.
+            sudo chown -R "$(id -u):$(id -g)" results/terminal-bench || true
             chmod -R a+rX results/terminal-bench || true
           fi
 
