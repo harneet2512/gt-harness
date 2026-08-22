@@ -291,12 +291,19 @@ jobs:
                       rows.append(row)
               except Exception as exc:
                   rows.append({"task_name": str(path), "parse_error": str(exc)})
+          def reward(row):
+              verifier = row.get("verifier_result") or {}
+              rewards = verifier.get("rewards") if isinstance(verifier, dict) else {}
+              value = rewards.get("reward") if isinstance(rewards, dict) else None
+              return value
+          reward_values = [reward(row) for row in rows]
           summary = {
               "expected_tasks": 89,
               "observed_trial_results": len(rows),
-              "rewards": sum(1 for row in rows if row.get("reward") is not None),
+              "rewards": sum(value is not None for value in reward_values),
               "errors": sum(1 for row in rows if row.get("exception_info")),
-              "solved": sum(1 for row in rows if float(row.get("reward") or 0) > 0),
+              "solved": sum(float(value or 0) > 0 for value in reward_values),
+              "reward_values": sorted(set(repr(value) for value in reward_values)),
               "task_names": sorted(str(row.get("task_name") or "") for row in rows),
           }
           if summary["observed_trial_results"] != 89 or len(set(summary["task_names"])) != 89:
