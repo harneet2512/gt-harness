@@ -774,6 +774,16 @@ jobs:
             deepswe-task.log
           if-no-files-found: warn
 
+  task_progress:
+    name: Task progress
+    needs: [plan]
+    if: always()
+    uses: ./.github/workflows/task_progress.yml
+    with:
+      expected_tasks_json: ${{ needs.plan.outputs.tasks }}
+      task_job_regex: '^run \(.+\)$'
+    secrets: inherit
+
   merge:
     needs: [plan, baseline, run]
     if: always()
