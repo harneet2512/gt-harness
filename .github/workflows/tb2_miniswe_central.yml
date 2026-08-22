@@ -66,6 +66,10 @@ on:
         type: string
         default: "100"
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -489,6 +493,16 @@ jobs:
           name: tb2-miniswe-central-${{ inputs.arm }}-${{ inputs.feature }}-${{ github.run_id }}-task-${{ matrix.task }}
           path: results/terminal-bench/
           if-no-files-found: warn
+
+  task_progress:
+    name: Task progress
+    needs: [plan]
+    if: always()
+    uses: ./.github/workflows/task_progress.yml
+    with:
+      expected_tasks_json: ${{ needs.plan.outputs.tasks }}
+      task_job_regex: '^run \(.+\)$'
+    secrets: inherit
 
   merge:
     needs: [plan, run]
