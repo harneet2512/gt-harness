@@ -1,14 +1,13 @@
-name: TB2 Mini-SWE Ox Alpha diagnostic (89 tasks, 20 parallel)
+name: TB2 Mini-SWE Ox Alpha diagnostic (89 tasks, 20 isolated shards)
 
-# Diagnostic only. This workflow intentionally does not alter or promote the
-# frozen DeepSeek central release. It exercises the current host-owned
-# MiniSweCentralAgent against Terminal-Bench 2.0 through an explicit
-# OpenAI-compatible provider route.
+# Diagnostic only. The canonical DeepSeek release is not modified or
+# promoted by this workflow. Harbor runs MiniSweCentralAgent; each shard gets
+# its own GitHub runner so Docker images cannot exhaust one shared disk.
 on:
   workflow_dispatch:
     inputs:
       model:
-        description: "Exact OpenRouter model ID"
+        description: "Exact provider catalog model ID"
         type: string
         default: "stealth/ox-alpha"
       base_url:
@@ -19,40 +18,158 @@ on:
         description: "Repository Actions secret containing the provider key"
         type: string
         default: "OX_ALPHA_OPENROUTER_KEY"
-      concurrency:
-        description: "Harbor concurrent trials; fixed default is 20"
-        type: string
-        default: "20"
       temperature:
         description: "Mini-SWE sampling temperature"
         type: string
         default: "1"
-      job_name:
-        description: "Optional Harbor job name"
-        type: string
-        default: ""
       code_ref:
         description: "Exact branch or commit containing the Mini-SWE GT code"
         type: string
         default: "ox-alpha-tb2-diagnostic"
+      job_name:
+        description: "Optional Harbor job-name prefix"
+        type: string
+        default: "tb2-miniswe-ox-alpha-89-sharded"
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  GH_TOKEN: ${{ github.token }}
+  OPENAI_API_KEY: ${{ secrets[inputs.provider_secret] }}
+  OPENAI_BASE_URL: ${{ inputs.base_url }}
+  GT_LITELLM_MODEL: ${{ inputs.model }}
+  GT_EXPECTED_RESPONSE_MODEL: ${{ inputs.model }}
+  GT_EXPECTED_ADAPTER_PROVIDER: openai
+  GT_PROVIDER_ROUTE_ID: openrouter:diagnostic:openrouter.ai
+  GT_DENSE_INTRA_OP_THREADS: "4"
+  GT_DENSE_INTER_OP_THREADS: "1"
+  MSWEA_SILENT_STARTUP: "1"
 
 jobs:
-  diagnostic:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      task_count: ${{ steps.plan.outputs.task_count }}
+      task_set_sha256: ${{ steps.plan.outputs.task_set_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.code_ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Harbor for dataset planning
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install "harbor==0.20.0" "mini-swe-agent==2.2.8"
+
+      - name: Verify exact Ox Alpha Mini-SWE tool route
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import litellm
+          from minisweagent.models.litellm_model import BASH_TOOL
+
+          model = os.environ["GT_LITELLM_MODEL"]
+          litellm_model = model
+          if os.environ["OPENAI_BASE_URL"] and not litellm_model.startswith("openai/"):
+              litellm_model = f"openai/{litellm_model}"
+          response = litellm.completion(
+              model=litellm_model,
+              api_base=os.environ["OPENAI_BASE_URL"],
+              api_key=os.environ["OPENAI_API_KEY"],
+              messages=[{"role": "user", "content": "Use bash to run: printf ID_OK"}],
+              tools=[BASH_TOOL],
+              tool_choice={"type": "function", "function": {"name": "bash"}},
+              temperature=float("${{ inputs.temperature }}"),
+              max_tokens=64,
+              num_retries=0,
+          )
+          payload = response.model_dump() if hasattr(response, "model_dump") else response
+          choice = (payload.get("choices") or [{}])[0]
+          calls = ((choice.get("message") or {}).get("tool_calls") or [])
+          if payload.get("model") != model:
+              raise SystemExit(f"served model mismatch: {payload.get('model')!r}")
+          if not calls or calls[0].get("function", {}).get("name") != "bash":
+              raise SystemExit("provider did not return the Mini-SWE bash tool call")
+          print(json.dumps({
+              "schema": "gt.tb2.ox-alpha.tool-preflight.v1",
+              "model": payload.get("model"),
+              "provider": "openrouter",
+              "finish_reason": choice.get("finish_reason"),
+              "tool_name": calls[0]["function"]["name"],
+              "response_id": payload.get("id"),
+          }, sort_keys=True))
+          PY
+
+      - name: Enumerate and shard exactly 89 Terminal-Bench 2.0 tasks
+        id: plan
+        run: |
+          set -euo pipefail
+          harbor dataset download terminal-bench@2.0 -o tb2-cardinality --export
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("tb2-cardinality/terminal-bench")
+          tasks = sorted(path.name for path in root.iterdir() if path.is_dir())
+          if len(tasks) != 89:
+              raise SystemExit(f"expected exactly 89 tasks, found {len(tasks)}")
+          # Round-robin keeps the 20 shards close in size and avoids putting
+          # the largest images into one shard. Every task appears exactly once.
+          shards = [{"shard": i, "tasks": []} for i in range(20)]
+          for i, task in enumerate(tasks):
+              shards[i % len(shards)]["tasks"].append(task)
+          if sorted(task for shard in shards for task in shard["tasks"]) != tasks:
+              raise SystemExit("shard partition is not an exact task-set partition")
+          task_hash = hashlib.sha256(
+              json.dumps(tasks, separators=(",", ":")).encode()
+          ).hexdigest()
+          matrix = json.dumps({"include": shards}, separators=(",", ":"))
+          Path("tb2-task-plan.json").write_text(
+              json.dumps({"task_count": len(tasks), "tasks": tasks,
+                          "task_set_sha256": task_hash, "shards": shards}, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"matrix={matrix}\n")
+              out.write(f"task_count={len(tasks)}\n")
+              out.write(f"task_set_sha256={task_hash}\n")
+          print(f"TB2_TASK_COUNT={len(tasks)}")
+          print(f"TB2_TASK_SET_SHA256={task_hash}")
+          print(f"TB2_SHARD_COUNT={len(shards)}")
+          PY
+
+      - name: Upload task plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb2-miniswe-ox-alpha-task-plan-${{ github.run_id }}
+          path: tb2-task-plan.json
+          if-no-files-found: error
+
+  shard:
+    needs: plan
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 600
     env:
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: utf-8
-      GH_TOKEN: ${{ github.token }}
-      OPENAI_API_KEY: ${{ secrets[inputs.provider_secret] }}
-      OPENAI_BASE_URL: ${{ inputs.base_url }}
-      GT_LITELLM_MODEL: ${{ inputs.model }}
-      GT_EXPECTED_RESPONSE_MODEL: ${{ inputs.model }}
-      GT_EXPECTED_ADAPTER_PROVIDER: openai
-      GT_PROVIDER_ROUTE_ID: openrouter:diagnostic:openrouter.ai
-      GT_DENSE_INTRA_OP_THREADS: "4"
-      GT_DENSE_INTER_OP_THREADS: "1"
-      MSWEA_SILENT_STARTUP: "1"
+      MODEL: ${{ inputs.model }}
+      TEMPERATURE: ${{ inputs.temperature }}
+      JOB_PREFIX: ${{ inputs.job_name }}
+      TASKS_JSON: ${{ toJSON(matrix.tasks) }}
+      SHARD_ID: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,120 +217,96 @@ jobs:
           echo "GT_TEST_SNOWFLAKE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
           echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
 
-      - name: Verify exact Ox Alpha Mini-SWE tool route
+      - name: Run this shard through Harbor Mini-SWE central GT
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          import os
-          import litellm
-          from minisweagent.models.litellm_model import BASH_TOOL
+          mapfile -t TASKS < <(python -c 'import json,os; print("\n".join(json.loads(os.environ["TASKS_JSON"])))')
+          test "${#TASKS[@]}" -gt 0
+          args=(run
+            -d terminal-bench@2.0
+            --agent-import-path eval.gt_central_agent:MiniSweCentralAgent
+            -m "$MODEL"
+            -o results/terminal-bench
+            --job-name "${JOB_PREFIX}-shard-${SHARD_ID}-${GITHUB_RUN_ID}"
+            --agent-timeout-multiplier 1.0
+            -n 1
+            -l "${#TASKS[@]}"
+            --delete
+            -y
+            --ak temperature="$TEMPERATURE"
+            --ak step_limit=100
+            --ak command_timeout_sec=30
+            --ak enable_all_features=true
+            --ak enable_repository_intelligence=true
+            --ak require_graph_ready=true
+            --ak enable_persistent_execution_state=true
+            --ak enable_preemptive_retrieval=true
+            --ak preemptive_retrieval_model_dir="$GT_DENSE_MODEL_DIR"
+            --ak enable_relational_context=true
+            --ak enable_semantic_evidence=true
+            --ak enable_decision_sufficiency=true
+            --ak enable_replay_capture=true
+            --ak retrieval_delivery_mode=integrated_same_observation
+            --ak persistent_state_selection_mode=deterministic_v1
+            --ak integration_mode=active
+            --ak policy_mode=certified_active
+            --ak preflight_mode=assistive_safe
+            --ak treatment_profile=central_relational_v2)
+          for task in "${TASKS[@]}"; do
+            args+=( -i "$task" )
+          done
+          harbor "${args[@]}"
 
-          model = os.environ["GT_LITELLM_MODEL"]
-          # Match MiniSweCentralAgent._build_model: LiteLLM needs the
-          # OpenAI-compatible adapter prefix, while the provider response
-          # identity remains the exact catalog ID supplied by the workflow.
-          litellm_model = model
-          if os.environ["OPENAI_BASE_URL"] and not litellm_model.startswith("openai/"):
-              litellm_model = f"openai/{litellm_model}"
-          response = litellm.completion(
-              model=litellm_model,
-              api_base=os.environ["OPENAI_BASE_URL"],
-              api_key=os.environ["OPENAI_API_KEY"],
-              messages=[{"role": "user", "content": "Use bash to run: printf ID_OK"}],
-              tools=[BASH_TOOL],
-              tool_choice={"type": "function", "function": {"name": "bash"}},
-              temperature=float("${{ inputs.temperature }}"),
-              max_tokens=64,
-          )
-          payload = response.model_dump() if hasattr(response, "model_dump") else response
-          choice = (payload.get("choices") or [{}])[0]
-          message = choice.get("message") or {}
-          calls = message.get("tool_calls") or []
-          if payload.get("model") != model:
-              raise SystemExit(f"served model mismatch: {payload.get('model')!r}")
-          if not calls or calls[0].get("function", {}).get("name") != "bash":
-              raise SystemExit("provider did not return the Mini-SWE bash tool call")
-          print(json.dumps({
-              "schema": "gt.tb2.ox-alpha.tool-preflight.v1",
-              "model": payload.get("model"),
-              "provider": "openrouter",
-              "finish_reason": choice.get("finish_reason"),
-              "tool_name": calls[0]["function"]["name"],
-              "response_id": payload.get("id"),
-          }, sort_keys=True))
-          PY
+      - name: Upload shard results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb2-miniswe-ox-alpha-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: results/terminal-bench/
+          if-no-files-found: warn
 
-      - name: Verify exactly 89 Terminal-Bench 2.0 tasks
+  merge:
+    if: always()
+    needs: [plan, shard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tb2-miniswe-ox-alpha-shard-*-${{ github.run_id }}
+          path: shard-artifacts
+          merge-multiple: true
+
+      - name: Summarize all shard receipts
         run: |
           set -euo pipefail
-          harbor dataset download terminal-bench@2.0 -o tb2-cardinality --export
           python - <<'PY'
           import json
           from pathlib import Path
 
-          root = Path("tb2-cardinality/terminal-bench")
-          tasks = sorted(path.name for path in root.iterdir() if path.is_dir())
-          if len(tasks) != 89:
-              raise SystemExit(f"expected exactly 89 tasks, found {len(tasks)}")
-          digest = __import__("hashlib").sha256(
-              json.dumps(tasks, separators=(",", ":")).encode()
-          ).hexdigest()
-          Path("tb2-task-plan.json").write_text(
-              json.dumps({"task_count": len(tasks), "tasks": tasks, "task_set_sha256": digest}, indent=2) + "\n",
-              encoding="utf-8",
-          )
-          print(f"TB2_TASK_COUNT={len(tasks)}")
-          print(f"TB2_TASK_SET_SHA256={digest}")
+          rows = []
+          for path in Path("shard-artifacts").rglob("result.json"):
+              try:
+                  rows.append(json.loads(path.read_text(encoding="utf-8")))
+              except Exception as exc:
+                  rows.append({"task_name": str(path), "parse_error": str(exc)})
+          summary = {
+              "expected_tasks": 89,
+              "observed_trial_results": len(rows),
+              "rewards": sum(1 for row in rows if row.get("reward") is not None),
+              "errors": sum(1 for row in rows if row.get("exception_info")),
+              "solved": sum(1 for row in rows if float(row.get("reward") or 0) > 0),
+              "task_names": sorted(str(row.get("task_name") or "") for row in rows),
+          }
+          if summary["observed_trial_results"] != 89:
+              raise SystemExit(f"expected 89 result.json files, found {summary['observed_trial_results']}")
+          Path("tb2-ox-alpha-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          print(json.dumps(summary, indent=2))
           PY
 
-      - name: Run current Mini-SWE central GT on all 89 tasks
-        env:
-          MODEL: ${{ inputs.model }}
-          TEMPERATURE: ${{ inputs.temperature }}
-          CONCURRENCY: ${{ inputs.concurrency }}
-          JOB_NAME_INPUT: ${{ inputs.job_name }}
-        run: |
-          set -euo pipefail
-          job_name="${JOB_NAME_INPUT:-tb2-miniswe-ox-alpha-89-par20-${GITHUB_RUN_ID}}"
-          DENSE_DIR="${GT_DENSE_MODEL_DIR}"
-          test -d "$DENSE_DIR"
-          harbor run \
-            -d terminal-bench@2.0 \
-            --agent-import-path eval.gt_central_agent:MiniSweCentralAgent \
-            -m "$MODEL" \
-            -o results/terminal-bench \
-            --job-name "$job_name" \
-            --agent-timeout-multiplier 1.0 \
-            -n "$CONCURRENCY" \
-            -l 89 \
-            -y \
-            --ak temperature="$TEMPERATURE" \
-            --ak step_limit=100 \
-            --ak command_timeout_sec=30 \
-            --ak enable_all_features=true \
-            --ak enable_repository_intelligence=true \
-            --ak require_graph_ready=true \
-            --ak enable_persistent_execution_state=true \
-            --ak enable_preemptive_retrieval=true \
-            --ak preemptive_retrieval_model_dir="$DENSE_DIR" \
-            --ak enable_relational_context=true \
-            --ak enable_semantic_evidence=true \
-            --ak enable_decision_sufficiency=true \
-            --ak enable_replay_capture=true \
-            --ak retrieval_delivery_mode=integrated_same_observation \
-            --ak persistent_state_selection_mode=deterministic_v1 \
-            --ak integration_mode=active \
-            --ak policy_mode=certified_active \
-            --ak preflight_mode=assistive_safe \
-            --ak treatment_profile=central_relational_v2
-
-      - name: Upload diagnostic results
+      - name: Upload merged diagnostic summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tb2-miniswe-ox-alpha-89-par20-${{ github.run_id }}
-          path: |
-            results/terminal-bench/
-            tb2-task-plan.json
+          name: tb2-miniswe-ox-alpha-merged-${{ github.run_id }}
+          path: tb2-ox-alpha-summary.json
           if-no-files-found: warn
