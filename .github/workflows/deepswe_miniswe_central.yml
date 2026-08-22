@@ -109,7 +109,7 @@ env:
   SNOWFLAKE_TOKENIZER_SHA256: 91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854
   GT_DENSE_INTRA_OP_THREADS: "4"
   GT_DENSE_INTER_OP_THREADS: "1"
-  GT_OPENROUTER_PROVIDER_ONLY: deepseek
+  GT_OPENROUTER_PROVIDER_ONLY: ""
   GT_OPENROUTER_DATA_COLLECTION: allow
 
 jobs:
@@ -424,7 +424,8 @@ jobs:
                   model = f"openai/{model}"
               export("GT_LITELLM_MODEL", model)
               export("OPENAI_BASE_URL", base or "https://openrouter.ai/api/v1")
-              export("GT_OPENROUTER_PROVIDER_ONLY", "deepseek")
+              if "deepseek" in model.lower():
+                  export("GT_OPENROUTER_PROVIDER_ONLY", "deepseek")
               export("GT_OPENROUTER_DATA_COLLECTION", "allow")
           elif provider == "tokenrouter":
               if model in {"deepseek-v4-flash", "deepseek-v4-flash-0731"}:
@@ -637,6 +638,9 @@ jobs:
             # DeepSeek provider and bypasses OpenRouter.
             echo "OPENAI_BASE_URL=https://openrouter.ai/api/v1" >> "$GITHUB_ENV"
             echo "OPENAI_API_KEY=${OPENROUTER_API_KEY}" >> "$GITHUB_ENV"
+            if echo "${MODEL:-}" | grep -qi deepseek; then
+              echo "GT_OPENROUTER_PROVIDER_ONLY=deepseek" >> "$GITHUB_ENV"
+            fi
           elif [ "${PROVIDER:-configured}" = "tokenrouter" ]; then
             echo "OPENAI_BASE_URL=https://api.tokenrouter.com/v1" >> "$GITHUB_ENV"
             echo "OPENAI_API_KEY=${TOKENROUTER_API_KEY}" >> "$GITHUB_ENV"
