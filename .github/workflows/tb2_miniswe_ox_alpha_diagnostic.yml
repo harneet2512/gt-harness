@@ -222,6 +222,22 @@ jobs:
           set -euo pipefail
           mapfile -t TASKS < <(python -c 'import json,os; print("\n".join(json.loads(os.environ["TASKS_JSON"])))')
           test "${#TASKS[@]}" -gt 0
+          TREATMENT_CONTRACT="$RUNNER_TEMP/gt-treatment-runtime.json"
+          python -m scripts.render_treatment_agent_args \
+            --release-manifest eval/release/active_release.json \
+            --source-sha "$(git rev-parse HEAD)" \
+            --max-steps 100 \
+            --output "$TREATMENT_CONTRACT"
+          mapfile -t FEATURE_ARGS < <(
+            python -m scripts.render_treatment_agent_args \
+              --emit-harbor-args "$TREATMENT_CONTRACT"
+          )
+          FEATURE_ARGS+=(
+            --ak temperature="$TEMPERATURE"
+            --ak preemptive_retrieval_model_dir="$GT_DENSE_MODEL_DIR"
+            --ak enable_replay_capture=true
+            --ak treatment_runtime_contract_path="$TREATMENT_CONTRACT"
+          )
           args=(run
             -d terminal-bench@2.0
             --agent-import-path eval.gt_central_agent:MiniSweCentralAgent
@@ -233,25 +249,7 @@ jobs:
             -l "${#TASKS[@]}"
             --delete
             -y
-            --ak temperature="$TEMPERATURE"
-            --ak step_limit=100
-            --ak command_timeout_sec=30
-            --ak enable_all_features=true
-            --ak enable_repository_intelligence=true
-            --ak require_graph_ready=true
-            --ak enable_persistent_execution_state=true
-            --ak enable_preemptive_retrieval=true
-            --ak preemptive_retrieval_model_dir="$GT_DENSE_MODEL_DIR"
-            --ak enable_relational_context=true
-            --ak enable_semantic_evidence=true
-            --ak enable_decision_sufficiency=true
-            --ak enable_replay_capture=true
-            --ak retrieval_delivery_mode=integrated_same_observation
-            --ak persistent_state_selection_mode=deterministic_v1
-            --ak integration_mode=active
-            --ak policy_mode=certified_active
-            --ak preflight_mode=assistive_safe
-            --ak treatment_profile=central_relational_v2)
+            "${FEATURE_ARGS[@]}")
           for task in "${TASKS[@]}"; do
             args+=( -i "$task" )
           done
@@ -286,7 +284,11 @@ jobs:
           rows = []
           for path in Path("shard-artifacts").rglob("result.json"):
               try:
-                  rows.append(json.loads(path.read_text(encoding="utf-8")))
+                  row = json.loads(path.read_text(encoding="utf-8"))
+                  # Each shard also uploads Harbor's job-level result.json.
+                  # Only trial rows have both task_name and trial_name.
+                  if row.get("task_name") and row.get("trial_name"):
+                      rows.append(row)
               except Exception as exc:
                   rows.append({"task_name": str(path), "parse_error": str(exc)})
           summary = {
@@ -297,8 +299,11 @@ jobs:
               "solved": sum(1 for row in rows if float(row.get("reward") or 0) > 0),
               "task_names": sorted(str(row.get("task_name") or "") for row in rows),
           }
-          if summary["observed_trial_results"] != 89:
-              raise SystemExit(f"expected 89 result.json files, found {summary['observed_trial_results']}")
+          if summary["observed_trial_results"] != 89 or len(set(summary["task_names"])) != 89:
+              raise SystemExit(
+                  f"expected 89 unique trial result rows, found "
+                  f"{summary['observed_trial_results']} rows/{len(set(summary['task_names']))} tasks"
+              )
           Path("tb2-ox-alpha-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
           print(json.dumps(summary, indent=2))
           PY
