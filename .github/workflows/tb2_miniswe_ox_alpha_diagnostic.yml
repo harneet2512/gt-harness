@@ -31,6 +31,10 @@ on:
         description: "Optional Harbor job name"
         type: string
         default: ""
+      code_ref:
+        description: "Exact branch or commit containing the Mini-SWE GT code"
+        type: string
+        default: "ox-alpha-tb2-diagnostic"
 
 jobs:
   diagnostic:
@@ -51,6 +55,8 @@ jobs:
       MSWEA_SILENT_STARTUP: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.code_ref }}
 
       - uses: actions/setup-python@v5
         with:
