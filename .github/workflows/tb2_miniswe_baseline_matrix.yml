@@ -17,6 +17,11 @@ on:
         description: "Model id for harbor -m, passed through verbatim when base_url is set (api.deepseek.com wants bare 'deepseek-v4-flash')"
         type: string
         default: "deepseek-v4-flash"
+      api_key:
+        description: "Provider API key supplied at dispatch time; falls back to the repository secret when omitted."
+        type: string
+        required: false
+        default: ""
       base_url:
         description: "OpenAI-compatible gateway URL; exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -50,7 +55,7 @@ jobs:
       tasks: ${{ steps.enum.outputs.tasks }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
@@ -184,7 +189,7 @@ jobs:
         task: ${{ fromJson(needs.plan.outputs.tasks) }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
