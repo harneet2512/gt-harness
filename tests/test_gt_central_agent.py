@@ -239,7 +239,7 @@ def test_deepswe_workflow_sets_a_nontrivial_initial_index_timeout():
     assert "len(explicit) != target" in workflow
 
 
-def test_deepswe_workflow_uses_deepseek_v4_and_pins_v11_catalog_snapshot():
+def test_deepswe_workflow_model_default_and_v11_catalog_snapshot():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -247,7 +247,7 @@ def test_deepswe_workflow_uses_deepseek_v4_and_pins_v11_catalog_snapshot():
         / "deepswe_miniswe_central.yml"
     ).read_text(encoding="utf-8")
 
-    assert 'default: "deepseek-v4-flash-0731"' in workflow
+    assert 'default: "openrouter/stealth/ox-alpha"' in workflow
     assert workflow.count("ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9") == 2
     assert "v1.0.0" not in workflow
     assert "v1.1 catalog-compatible" in workflow
@@ -284,8 +284,14 @@ def test_deepswe_workflow_provider_preflight_matches_gateway_model_routing():
     assert 'base = (os.environ.get("OPENAI_BASE_URL") or "").strip()' in workflow
     assert 'model = f"openai/{model}"' in workflow
     assert "options: [openrouter, tokenrouter, deepseek]" in workflow
-    assert "TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}" in workflow
-    assert "DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" in workflow
+    assert (
+        "TOKENROUTER_API_KEY: ${{ inputs.api_key || secrets.TOKENROUTER_API_KEY }}"
+        in workflow
+    )
+    assert (
+        "DEEPSEEK_API_KEY: ${{ inputs.api_key || secrets.DEEPSEEK_API_KEY }}"
+        in workflow
+    )
     assert 'tokenrouter_base = "https://api.tokenrouter.com/v1"' in workflow
     assert "python -m scripts.central_bootstrap_canary" in workflow
     assert "--provider-proof provider-route-proof.json" in workflow
