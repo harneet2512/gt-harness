@@ -485,7 +485,8 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
     ).read_text(encoding="utf-8")
 
     assert 'default: "20"' in workflow
-    assert "GT_OPENROUTER_PROVIDER_ONLY: deepseek" in workflow
+    assert 'GT_OPENROUTER_PROVIDER_ONLY: ""' in workflow
+    assert 'if "deepseek" in model.lower():' in workflow
     assert "GT_OPENROUTER_DATA_COLLECTION: allow" in workflow
     assert 'echo "GT_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"' in workflow
     assert "GT_COMMIT: ${{ github.sha }}" not in workflow
