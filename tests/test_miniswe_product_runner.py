@@ -16,6 +16,25 @@ class _Treatment(BareTreatment):
         self.observed = (name, dict(arguments), output, is_error)
 
 
+class _AugmentingTreatment(_Treatment):
+    def before_model_call(self, iteration: int) -> str:
+        # The runner must use this hook only as an integrity barrier.  Context
+        # returned here must never become a synthetic user turn.
+        return "late context must not be injected"
+
+    def after_action(self, name, arguments, output, is_error):
+        from gt_harness.treatments import ObservationAugmentation
+
+        super().after_action(name, arguments, output, is_error)
+        return ObservationAugmentation(
+            content="<groundtruth-repository-context>fresh fact</groundtruth-repository-context>",
+            raw_output_sha256="2689367b205c16ce32ed4200942b8b1e",
+            context_sha256="fb1ad99f7e71862b188faec62afc5e8e",
+            delivery_index=2,
+            source_revision="revision-2",
+        )
+
+
 class _Model:
     def __init__(self) -> None:
         self.queries = []
@@ -79,6 +98,36 @@ def test_miniswe_treatment_is_advisory_and_observes_unmodified_action() -> None:
         "task=fix it\n\ndeterministic repository fact"
     )
     assert treatment.observed == ("bash", {"command": "echo ok"}, "ok", False)
+
+
+def test_gt_update_is_appended_to_same_observation_without_mutating_raw_output() -> None:
+    model = _Model()
+    treatment = _AugmentingTreatment()
+    agent = TreatmentMiniSweAgent(
+        model,
+        _Environment(),
+        system_template="system",
+        instance_template="task={{task}}",
+        step_limit=3,
+        cost_limit=0.0,
+        treatment=treatment,
+    )
+
+    assistant = {
+        "role": "assistant",
+        "content": "read",
+        "extra": {"actions": [{"command": "echo ok"}]},
+    }
+    observations = agent.execute_actions(assistant)
+
+    assert treatment.observed == ("bash", {"command": "echo ok"}, "ok", False)
+    assert len(observations) == 1
+    assert observations[0]["content"].startswith("ok")
+    assert "fresh fact" in observations[0]["content"]
+    assert not any(
+        message.get("role") == "user" and "late context" in message.get("content", "")
+        for message in agent.messages
+    )
 
 
 def test_miniswe_product_import_is_quiet_under_non_utf8_console(tmp_path) -> None:

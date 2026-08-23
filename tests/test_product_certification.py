@@ -53,11 +53,14 @@ def _bundle(tmp_path: Path, repository: Path) -> Path:
                 for language in ("python", "javascript", "typescript", "go", "rust", "java")
             ],
         },
-        "mcp-e2e.json": {
+        "harness-e2e.json": {
             **common,
-            "transport": "stdio",
-            "tools": ["gt_context", "gt_impact", "gt_query", "gt_status"],
-            "agent_received": {"status": {"query_ready": True}},
+            "agent_scaffold_version": "2.2.8",
+            "same_observation": True,
+            "raw_output_preserved": True,
+            "restart_reused_current_graph": True,
+            "initial_context_token_count": 500,
+            "update_context_token_count": 350,
         },
         "failure-campaign.json": {
             **common,

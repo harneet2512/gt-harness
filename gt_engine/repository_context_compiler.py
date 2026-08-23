@@ -55,6 +55,9 @@ class ContextCompileRequest:
     previously_exposed_claims: tuple[str, ...] = ()
     token_budget: int = 1_000
     character_budget: int = 4_000
+    dense_candidates: tuple[tuple[str, float], ...] = ()
+    dense_index_receipt: dict[str, Any] = field(default_factory=dict)
+    retrieval_mode: str = "sparse_only"
 
     def retrieval_state(self) -> RetrievalState:
         return RetrievalState(
@@ -99,6 +102,7 @@ class GTContextPacket:
     repository_identity: dict[str, Any]
     task_anchors: tuple[ContextEvidenceItem, ...] = ()
     primary_edit_targets: tuple[ContextEvidenceItem, ...] = ()
+    inspection_candidates: tuple[ContextEvidenceItem, ...] = ()
     supporting_files: tuple[ContextEvidenceItem, ...] = ()
     symbol_contracts: tuple[ContextEvidenceItem, ...] = ()
     semantic_facts: tuple[str, ...] = ()
@@ -113,6 +117,7 @@ class GTContextPacket:
     selected_token_count: int = 0
     retrieval_channel_count: int = 0
     truncated: bool = False
+    projection_claim_ids: tuple[str, ...] = ()
 
     @property
     def claim_ids(self) -> tuple[str, ...]:
@@ -125,6 +130,9 @@ class GTContextPacket:
             "task_anchors": [item.as_dict() for item in self.task_anchors],
             "primary_edit_targets": [
                 item.as_dict() for item in self.primary_edit_targets
+            ],
+            "inspection_candidates": [
+                item.as_dict() for item in self.inspection_candidates
             ],
             "supporting_files": [item.as_dict() for item in self.supporting_files],
             "symbol_contracts": [item.as_dict() for item in self.symbol_contracts],
@@ -140,6 +148,7 @@ class GTContextPacket:
             "selected_token_count": self.selected_token_count,
             "retrieval_channel_count": self.retrieval_channel_count,
             "truncated": self.truncated,
+            "projection_claim_ids": list(self.projection_claim_ids),
         }
 
 
@@ -367,6 +376,64 @@ def _identity_item(
     )
 
 
+def _inspection_item(
+    ranked: RankedFile,
+    request: ContextCompileRequest,
+    *,
+    decision_reason: str = "hybrid_retrieval_inspection",
+) -> ContextEvidenceItem:
+    candidate = ranked.representative
+    start = max(1, int(candidate.start_line or 1))
+    end = max(start, int(candidate.end_line or start))
+    symbol = str(candidate.symbol or "")
+    return ContextEvidenceItem(
+        kind="inspection_candidate",
+        path=candidate.path,
+        start_line=start,
+        end_line=end,
+        symbol=symbol,
+        relation="",
+        confidence=max(0.0, min(1.0, float(ranked.fused_score))),
+        verification_status="verified_source_identity",
+        source_revision=request.source_revision,
+        graph_revision=request.graph_revision,
+        evidence_sha256=_sha(
+            "inspection", candidate.path, start, end, symbol, request.source_revision
+        ),
+        decision_reason=decision_reason,
+        completeness="ranked_candidate_not_edit_target",
+        source_excerpt=str(candidate.text or "").strip()[:600],
+    )
+
+
+def _dense_inspection_item(
+    document: Any,
+    request: ContextCompileRequest,
+    *,
+    score: float,
+) -> ContextEvidenceItem:
+    start = max(1, int(document.start_line or 1))
+    end = max(start, int(document.end_line or start))
+    return ContextEvidenceItem(
+        kind="inspection_candidate",
+        path=str(document.path),
+        start_line=start,
+        end_line=end,
+        symbol="",
+        relation="",
+        confidence=max(-1.0, min(1.0, float(score))),
+        verification_status="verified_source_identity",
+        source_revision=request.source_revision,
+        graph_revision=request.graph_revision,
+        evidence_sha256=_sha(
+            "dense_inspection", document.path, start, end, request.source_revision
+        ),
+        decision_reason="dense_semantic_inspection",
+        completeness="dense_file_candidate_not_edit_target",
+        source_excerpt=str(document.text or "").strip()[:600],
+    )
+
+
 def _safe_link(link: StructuralLink) -> bool:
     return bool(
         link.certified
@@ -485,7 +552,6 @@ class RepositoryContextCompiler:
             if (candidate := _exact_candidate(row)) is not None
             and "exact_path" in set(candidate.provenance)
         )
-        selected_claims = {candidate.claim_hash for candidate in retrieval.selected_context}
         def matches_concrete_anchor(row: RankedFile) -> bool:
             candidate = _exact_candidate(row) or row.representative
             haystack = " ".join(
@@ -497,17 +563,17 @@ class RepositoryContextCompiler:
             ).lower()
             return any(identifier in haystack for identifier in concrete_identifiers)
 
-        certified_rows = tuple(
+        inspection_rows = tuple(
             row
             for row in ranked
-            if row.representative.claim_hash in selected_claims
+            if _exact_candidate(row) is None
+            and len(row.channel_ranks) >= 2
             and (
                 not concrete_identifiers
                 or matches_concrete_anchor(row)
             )
         )
-        candidates = exact_symbol_rows or exact_path_rows or certified_rows
-        primary_rows = tuple(candidates[:3])
+        primary_rows = tuple((exact_symbol_rows or exact_path_rows)[:3])
         primary = tuple(
             _identity_item(
                 row,
@@ -517,19 +583,99 @@ class RepositoryContextCompiler:
                     if row in exact_symbol_rows
                     else "exact_task_path"
                     if row in exact_path_rows
-                    else "hybrid_retrieval_match"
+                    else "exact_repository_identity"
                 ),
             )
             for row in primary_rows
         )
         exposed = set(request.previously_exposed_claims)
         primary = tuple(item for item in primary if item.evidence_sha256 not in exposed)
-        anchor_paths = frozenset(item.path for item in primary)
-        anchor_symbols = frozenset(item.symbol for item in primary if item.symbol)
-        anchor_identities = frozenset(
-            (item.path, item.symbol) for item in primary if item.symbol
+        exact_row_paths = {row.path for row in primary_rows}
+        documents_by_path_for_dense: dict[str, Any] = {}
+        for document in repository.documents:
+            documents_by_path_for_dense.setdefault(document.path, document)
+
+        # Fuse independent dense and sparse ranks at the file boundary. Dense
+        # similarity remains retrieval evidence only: it can improve inspection
+        # ordering, but it can never manufacture an exact symbol or edit target.
+        rrf_k = 60
+        sparse_by_path = {
+            row.path: (rank, row)
+            for rank, row in enumerate(inspection_rows, start=1)
+            if row.path not in exact_row_paths
+        }
+        dense_by_path: dict[str, tuple[int, float]] = {}
+        for rank, (path, score) in enumerate(request.dense_candidates, start=1):
+            if path in documents_by_path_for_dense and path not in dense_by_path:
+                dense_by_path[path] = (rank, float(score))
+        fusion_rows: list[dict[str, Any]] = []
+        for path in sorted(set(sparse_by_path) | set(dense_by_path)):
+            sparse_entry = sparse_by_path.get(path)
+            dense_entry = dense_by_path.get(path)
+            channels = tuple(
+                channel
+                for channel, present in (
+                    ("dense", dense_entry is not None),
+                    ("sparse", sparse_entry is not None),
+                )
+                if present
+            )
+            fusion_rows.append(
+                {
+                    "path": path,
+                    "rrf_score": (
+                        (1.0 / (rrf_k + sparse_entry[0]) if sparse_entry else 0.0)
+                        + (1.0 / (rrf_k + dense_entry[0]) if dense_entry else 0.0)
+                    ),
+                    "sparse_rank": sparse_entry[0] if sparse_entry else None,
+                    "dense_rank": dense_entry[0] if dense_entry else None,
+                    "dense_score": dense_entry[1] if dense_entry else None,
+                    "supporting_channels": channels,
+                }
+            )
+        fusion_rows.sort(
+            key=lambda item: (
+                -float(item["rrf_score"]),
+                _path_penalty(str(item["path"])),
+                str(item["path"]).lower(),
+                str(item["path"]),
+            )
         )
-        file_anchors = frozenset(item.path for item in primary if not item.symbol)
+        inspection_items: list[ContextEvidenceItem] = []
+        for fused in fusion_rows:
+            path = str(fused["path"])
+            sparse_entry = sparse_by_path.get(path)
+            dense_entry = dense_by_path.get(path)
+            if sparse_entry is not None:
+                item = _inspection_item(
+                    sparse_entry[1],
+                    request,
+                    decision_reason=(
+                        "hybrid_rrf_inspection"
+                        if dense_entry is not None
+                        else "hybrid_retrieval_inspection"
+                    ),
+                )
+            else:
+                document = documents_by_path_for_dense[path]
+                item = _dense_inspection_item(
+                    document,
+                    request,
+                    score=float(dense_entry[1]) if dense_entry is not None else 0.0,
+                )
+            if item.evidence_sha256 in exposed:
+                continue
+            inspection_items.append(item)
+            if len(inspection_items) >= 3:
+                break
+        inspection = tuple(inspection_items)
+        anchors = (*primary, *inspection)
+        anchor_paths = frozenset(item.path for item in anchors)
+        anchor_symbols = frozenset(item.symbol for item in anchors if item.symbol)
+        anchor_identities = frozenset(
+            (item.path, item.symbol) for item in anchors if item.symbol
+        )
+        file_anchors = frozenset(item.path for item in anchors if not item.symbol)
 
         def related_to_anchor(link: StructuralLink) -> bool:
             return bool(
@@ -629,7 +775,7 @@ class RepositoryContextCompiler:
                 "semantic_certainty": 1.0,
                 "retrieval_relevance": 1.0,
             }
-            for item in (*primary, *supporting)
+            for item in (*anchors, *supporting)
             if item.symbol
         )
         evidence = RepositoryEvidence(
@@ -653,7 +799,7 @@ class RepositoryContextCompiler:
             for row in ranked[:20]
         )
         semantic_paths = frozenset(
-            item.path for item in (*primary, *supporting) if item.path
+            item.path for item in (*anchors, *supporting) if item.path
         )
         snapshot = RepositorySnapshot(
             source_revision=request.source_revision,
@@ -726,12 +872,15 @@ class RepositoryContextCompiler:
         evidence_items = tuple(
             {
                 item.evidence_sha256: item
-                for item in (*primary, *link_items, *semantic_items)
+                for item in (*primary, *inspection, *link_items, *semantic_items)
             }.values()
         )
         uncertainty_reasons = [*repository.reason_codes]
         if concrete_identifiers and not primary:
-            uncertainty_reasons.append("concrete_task_anchor_unmatched")
+            if inspection:
+                uncertainty_reasons.append("inspection_candidate_not_edit_target")
+            else:
+                uncertainty_reasons.append("concrete_task_anchor_unmatched")
         uncertainty_reasons.extend(
             reason
             for reason in retrieval.reason_codes
@@ -753,6 +902,7 @@ class RepositoryContextCompiler:
             repository_identity=identity,
             task_anchors=primary,
             primary_edit_targets=primary,
+            inspection_candidates=inspection,
             supporting_files=tuple(supporting),
             symbol_contracts=primary,
             semantic_facts=tuple(
@@ -785,6 +935,24 @@ class RepositoryContextCompiler:
                     for receipt in retrieval.channel_receipts
                 },
                 "query_terms": list(retrieval_query_terms(state)),
+                "retrieval_mode": request.retrieval_mode,
+                "dense_index": dict(request.dense_index_receipt),
+                "dense_candidates": len(request.dense_candidates),
+                "dense_sparse_fusion": {
+                    "method": "reciprocal_rank_fusion",
+                    "k": rrf_k,
+                    "candidate_count": len(fusion_rows),
+                    "ranked_paths": [
+                        {
+                            "path": item["path"],
+                            "rrf_score": item["rrf_score"],
+                            "sparse_rank": item["sparse_rank"],
+                            "dense_rank": item["dense_rank"],
+                            "supporting_channels": list(item["supporting_channels"]),
+                        }
+                        for item in fusion_rows[:20]
+                    ],
+                },
             },
             selected_token_count=selected_tokens,
             retrieval_channel_count=len(retrieval.channel_receipts),

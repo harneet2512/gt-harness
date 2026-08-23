@@ -70,13 +70,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     query.add_argument("--refresh", action="store_true")
 
-    mcp = sub.add_parser("mcp", help="Serve the production repository-intelligence MCP.")
-    mcp.add_argument("--root", default=".")
-    mcp.add_argument("--state-dir", default=None)
-    mcp.add_argument("--transport", choices=("stdio", "streamable-http", "sse"), default="stdio")
-    mcp.add_argument("--host", default="127.0.0.1")
-    mcp.add_argument("--port", type=int, default=8799)
-
     run = sub.add_parser("run", help="Run the common coding-agent scaffold.")
     run.add_argument("task")
     run.add_argument("--model", required=True, help="Exact model identifier for both arms.")
@@ -576,16 +569,6 @@ def main(argv: list[str] | None = None) -> int:
         return _doctor(build=not args.no_build)
     if args.command == "graph":
         return _graph(args)
-    if args.command == "mcp":
-        from gt_harness.mcp_server import run_server
-
-        return run_server(
-            root=args.root,
-            state_dir=args.state_dir,
-            transport=args.transport,
-            host=args.host,
-            port=args.port,
-        )
     if args.command == "record-outcome":
         from gt_harness.outcomes import OutcomeBindingError, bind_evaluator_outcome
 

@@ -460,8 +460,8 @@ def build_hybrid_repository(
         canonical_node_ids = tuple(
             dict.fromkeys(int(node_id) for node_id in (include_node_ids or ()) if int(node_id) > 0)
         )
-        if include_node_ids is not None:
-            if not canonical_node_ids:
+        if include_node_ids is not None or include_paths is not None:
+            if not canonical_node_ids and not canonical_include_paths:
                 return HybridRepository(
                     documents=(),
                     structural_links=(),
@@ -471,23 +471,22 @@ def build_hybrid_repository(
                     source_file_count=0,
                     document_chars=0,
                 )
-            path_clause = "WHERE id IN (" + ",".join("?" for _ in canonical_node_ids) + ") "
-            path_parameters = canonical_node_ids
-        elif include_paths is not None:
-            if not canonical_include_paths:
-                return HybridRepository(
-                    documents=(),
-                    structural_links=(),
-                    source_revision=source_revision,
-                    complete=True,
-                    reason_codes=("query_no_candidates",),
-                    source_file_count=0,
-                    document_chars=0,
+            clauses: list[str] = []
+            parameters: list[object] = []
+            if canonical_node_ids:
+                clauses.append(
+                    "id IN (" + ",".join("?" for _ in canonical_node_ids) + ")"
                 )
-            path_clause = (
-                "WHERE file_path IN (" + ",".join("?" for _ in canonical_include_paths) + ") "
-            )
-            path_parameters = canonical_include_paths
+                parameters.extend(canonical_node_ids)
+            if canonical_include_paths:
+                clauses.append(
+                    "file_path IN ("
+                    + ",".join("?" for _ in canonical_include_paths)
+                    + ")"
+                )
+                parameters.extend(canonical_include_paths)
+            path_clause = "WHERE (" + " OR ".join(clauses) + ") "
+            path_parameters = tuple(parameters)
         node_query = (
             "SELECT id,name,file_path,start_line,end_line,"
             + f"{signature},{label},{return_type} FROM nodes "
@@ -862,6 +861,7 @@ def build_query_hybrid_repository(
     limits: RepositoryBuildLimits = _DEFAULT_BUILD_LIMITS,
     model_authored_paths: Iterable[str] = (),
     task_deliverables: Iterable[str] = (),
+    additional_candidate_paths: Iterable[str] = (),
 ) -> HybridRepository:
     """Materialize only task-conditioned graph/FTS candidates.
 
@@ -911,12 +911,20 @@ def build_query_hybrid_repository(
     ordered_node_ids = tuple(
         dict.fromkeys(fact.node_id for fact in projection.semantic_facts if int(fact.node_id) > 0)
     )[: max(8, int(candidate_limit) * 4)]
+    dense_paths = tuple(
+        dict.fromkeys(
+            path
+            for raw_path in additional_candidate_paths
+            if (path := _canonical_repo_path(Path(repo_root).resolve(), raw_path))
+            is not None
+        )
+    )[: max(8, int(candidate_limit))]
     return build_hybrid_repository(
         repo_root,
         graph,
         source_revision=state.source_revision,
         limits=limits,
-        include_paths=tuple(sorted(projection.files)),
+        include_paths=tuple(sorted((*projection.files, *dense_paths))),
         include_node_ids=ordered_node_ids,
         model_authored_paths=model_authored_paths,
         task_deliverables=task_deliverables,

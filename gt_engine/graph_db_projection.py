@@ -308,7 +308,13 @@ class PersistedGraphProjector:
     @staticmethod
     def _load_exact_calls(
         connection: sqlite3.Connection,
-    ) -> tuple[tuple[_ExactEdge, ...], int, int, tuple[str, ...]]:
+    ) -> tuple[
+        tuple[_ExactEdge, ...],
+        int,
+        int,
+        tuple[str, ...],
+        dict[str, int],
+    ]:
         edge_columns = _columns(connection, "edges")
         required = {
             "id",
@@ -326,7 +332,13 @@ class PersistedGraphProjector:
             "verification_status",
         }
         if not required <= edge_columns:
-            return (), 0, 0, ("edges_exact_provenance",)
+            return (), 0, 0, ("edges_exact_provenance",), {
+                "resolved": 0,
+                "ambiguous": 0,
+                "external": 0,
+                "unresolved": 0,
+                "capped": 0,
+            }
         normalized_metadata: dict[int, dict[str, str]] = defaultdict(dict)
         if {"edge_id", "key", "value"} <= _columns(connection, "edge_metadata"):
             for edge_id, key, value in connection.execute(
@@ -352,6 +364,13 @@ class PersistedGraphProjector:
         ).fetchall()
         accepted: list[_ExactEdge] = []
         rejected = 0
+        resolution_outcomes = {
+            "resolved": 0,
+            "ambiguous": 0,
+            "external": 0,
+            "unresolved": 0,
+            "capped": 0,
+        }
         for row in rows:
             origin, outcome, candidates = _edge_resolution_provenance(
                 resolution_method=row["resolution_method"],
@@ -371,6 +390,16 @@ class PersistedGraphProjector:
                 and trust.upper() == "CERTIFIED"
             ):
                 rejected += 1
+                if outcome == "ambiguous":
+                    resolution_outcomes["ambiguous"] += 1
+                elif outcome == "external" or origin != "program":
+                    resolution_outcomes["external"] += 1
+                elif outcome == "unresolved":
+                    resolution_outcomes["unresolved"] += 1
+                else:
+                    # A persisted target exists, but its proof is below the
+                    # exact threshold (heuristic/dynamic/unknown/unverified).
+                    resolution_outcomes["capped"] += 1
                 continue
             edge_id = int(row["edge_id"])
             metadata = _parse_edge_metadata(row["metadata"])
@@ -396,7 +425,8 @@ class PersistedGraphProjector:
                     ),
                 )
             )
-        return tuple(accepted), len(accepted), rejected, ()
+            resolution_outcomes["resolved"] += 1
+        return tuple(accepted), len(accepted), rejected, (), resolution_outcomes
 
     @staticmethod
     def _load_exact_impact_edges(
@@ -618,7 +648,13 @@ class PersistedGraphProjector:
         graph, connection = self._open()
         try:
             status, anchor, ambiguous = self._resolve_anchor(connection, token, selected_file)
-            calls, exact_count, rejected_count, unsupported = self._load_exact_calls(connection)
+            (
+                calls,
+                exact_count,
+                rejected_count,
+                unsupported,
+                resolution_outcomes,
+            ) = self._load_exact_calls(connection)
         finally:
             connection.close()
         reasons: set[str] = set()
@@ -629,6 +665,8 @@ class PersistedGraphProjector:
             "candidate_paths": 0,
             "returned_paths": 0,
             "unsupported_surfaces": list(unsupported),
+            "receiver_resolution_outcomes": resolution_outcomes,
+            "receiver_resolution_coverage": "persisted_edges_only",
         }
         if unsupported:
             reasons.add("exact_call_provenance_unavailable")

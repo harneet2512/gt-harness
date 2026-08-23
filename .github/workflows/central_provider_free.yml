@@ -170,7 +170,7 @@ jobs:
             tests/test_product_treatments.py \
             tests/test_product_comparison.py \
             tests/test_product_repository_matrix.py \
-            tests/test_mcp_stdio_real.py -q
+            tests/test_miniswe_product_runner.py -q
 
       - name: Structural readiness audit
         run: python scripts/central_readiness_audit.py
@@ -304,7 +304,7 @@ jobs:
             tests/test_product_treatments.py \
             tests/test_product_comparison.py \
             tests/test_product_repository_matrix.py \
-            tests/test_mcp_stdio_real.py
+            tests/test_miniswe_product_runner.py
 
       - name: Documentation consistency audit
         run: |

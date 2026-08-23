@@ -899,6 +899,24 @@ func buildNameAliasIndex(nodeIDs map[string][]int64) map[string][]int64 {
 // target and whether a same-directory winner existed (the caller demotes below CERTIFIED
 // when there are multiple candidates and NO same-dir winner — an ambiguous import is not a
 // deterministic fact). When meta is absent it falls back to the smallest node ID (stable).
+// uniqueImportCandidates preserves first-seen deterministic order while making
+// ambiguity mean distinct graph targets. Invalid zero IDs are never candidates.
+func uniqueImportCandidates(candidates []int64) []int64 {
+	if len(candidates) == 0 {
+		return nil
+	}
+	seen := make(map[int64]bool, len(candidates))
+	result := make([]int64, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate <= 0 || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+	return result
+}
+
 func pickBestImportCandidate(callerFile string, candidates []int64, meta map[int64]NodeMeta) (int64, bool) {
 	if len(candidates) == 0 {
 		return 0, false
@@ -2711,6 +2729,9 @@ func Resolve(
 				}
 			}
 
+			// CandidateCount describes distinct possible graph targets, not the
+			// number of syntactic import paths that reached the same declaration.
+			importCandidates = uniqueImportCandidates(importCandidates)
 			if len(importCandidates) > 0 {
 				// #40: implement the promised same-dir tie-break (prefer a target in the
 				// caller's directory; else lexicographically-smallest path) so the pick is

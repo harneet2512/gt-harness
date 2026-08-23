@@ -19,7 +19,6 @@ from gt_engine.repository_graph_service import (
     compute_repository_identity,
 )
 from gt_harness.cli import _graph, _graph_receipt_output
-from gt_harness.mcp_server import RepositoryMCP
 
 
 def _git(root: Path, *args: str) -> str:
@@ -623,53 +622,3 @@ def test_cli_graph_build_converts_state_write_failure_to_structured_error(
     assert payload["status"] == "FAILED"
     assert payload["query_ready"] is False
     assert payload["error_type"] == "PermissionError"
-
-
-def test_mcp_query_converts_build_failure_to_non_queryable_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = _repo(tmp_path)
-    service = RepositoryGraphService(root, state_dir=tmp_path / "state")
-    controller = RepositoryMCP(service)
-
-    def fail_build(*_args: object, **_kwargs: object) -> GraphReceipt:
-        raise PermissionError("state directory is read-only")
-
-    monkeypatch.setattr(service, "build", fail_build)
-    result = controller.query("definition", "answer")
-
-    assert result["status"] == "ABSENT"
-    assert result["query_ready"] is False
-    assert result["error_type"] == "PermissionError"
-    assert result["commit_sha"]
-
-
-def test_mcp_context_composes_bounded_relationship_evidence(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    state = tmp_path / "state"
-    state.mkdir()
-    graph = state / "graph.db"
-    _database(graph)
-    receipt = _receipt(root, graph)
-    (state / "graph-receipt.json").write_text(
-        json.dumps(receipt.as_dict(), sort_keys=True), encoding="utf-8"
-    )
-
-    result = RepositoryMCP(RepositoryGraphService(root, state_dir=state)).context(
-        "Change answer without breaking its callers", limit=8
-    )
-
-    assert result["schema"] == "gt.graph_context.v2"
-    assert result["query_ready"] is True
-    assert result["query_count"] >= 2
-    assert result["count"] <= 8
-    assert any(
-        row["context_role"] == "anchor" and row["qualified_name"] == "answer"
-        for row in result["evidence"]
-    )
-    assert any(
-        row["context_role"] == "relationship"
-        and row["query_mode"] == "callers"
-        and row["qualified_name"] == "invoke"
-        for row in result["evidence"]
-    )

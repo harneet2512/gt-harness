@@ -62,6 +62,7 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
         logs_dir=tmp_path / "logs",
         model_name="stealth/ox-alpha",
         task_id="fix-code-vulnerability",
+        product_source_sha="a" * 40,
     )
     monkeypatch.setattr(
         agent.logger,
@@ -88,6 +89,8 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
     assert environment["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert environment["GT_REQUESTED_MODEL"] == "stealth/ox-alpha"
     assert environment["GT_EFFECTIVE_MODEL"] == "openai/stealth/ox-alpha"
+    assert environment["GT_RETRIEVAL_MODE"] == "hybrid_required"
+    assert environment["GT_DENSE_MODEL_DIR"] == "/installed-agent/snowflake-arctic-embed-m"
     assert "test-key" not in command
     assert "/logs/agent/harbor-adapter.json" in command
     assert all("test-key" not in repr(record) for record in log_records)
@@ -99,6 +102,11 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
 ) -> None:
     indexer = tmp_path / "gt-index"
     indexer.write_bytes(b"source-built-indexer")
+    dense = tmp_path / "dense"
+    dense.mkdir()
+    for name in ("model.onnx", "tokenizer.json", "manifest.json"):
+        (dense / name).write_bytes(name.encode())
+    monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(dense))
     monkeypatch.setattr(
         GtHarnessMiniSwe228Agent,
         "_indexer_host_path",
@@ -125,11 +133,17 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
 
     install = commands[-1]
     assert '--with "mini-swe-agent==2.2.8"' in install
+    assert '--with "onnxruntime==1.28.0"' in install
+    assert '--with "tokenizers==0.23.1"' in install
     assert "m.version('mini-swe-agent') == '2.2.8'" in install
     assert "mini-swe-agent==2.3" not in install
     assert "/installed-agent/gt-index -root /installed-agent/gt-harness/gt_engine" in install
     assert "test -s /tmp/gt-harbor-install-smoke.db" in install
     assert any(destination == "/installed-agent/gt-index" for _, destination in uploads)
+    assert any(
+        destination == "/installed-agent/snowflake-arctic-embed-m"
+        for _, destination in uploads
+    )
 
 
 def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> None:
@@ -142,6 +156,9 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert "secrets.OPENROUTER_NEW" in workflow
     assert "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent" in workflow
     assert '--ak task_id="$TASK"' in workflow
+    assert '--ak product_source_sha="${{ needs.plan.outputs.source_sha }}"' in workflow
+    assert "GT_RETRIEVAL_MODE" in workflow
+    assert "hybrid_required" in workflow
     assert "-n 1" in workflow
     assert "-l 1" in workflow
     assert REPAIR20_SHA256 in workflow

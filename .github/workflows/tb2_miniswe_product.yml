@@ -139,6 +139,7 @@ jobs:
       TASK: ${{ matrix.task }}
       MODEL: stealth/ox-alpha
       MINISWE_AGENT_VERSION: "2.2.8"
+      GT_RETRIEVAL_MODE: hybrid_required
     steps:
       - uses: actions/checkout@v4
         with:
@@ -206,6 +207,7 @@ jobs:
             --delete \
             -y \
             --ak task_id="$TASK" \
+            --ak product_source_sha="${{ needs.plan.outputs.source_sha }}" \
             --ak temperature=1.0 \
             --ak max_iterations=100 \
             --ak time_budget_seconds=35400 \
@@ -284,6 +286,8 @@ jobs:
                   errors.append(f"scaffold_version_mismatch:{task}")
               if row.get("attempt") != 1 or row.get("product_command") != "gt-harness run":
                   errors.append(f"adapter_contract_mismatch:{task}")
+              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"adapter_source_sha_mismatch:{task}")
           if set(adapters) != expected_set:
               errors.append("adapter_receipt_task_set_mismatch")
 

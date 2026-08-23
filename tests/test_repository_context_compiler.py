@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from gt_engine.hybrid_repository import HybridRepository
 from gt_engine.hybrid_retrieval import (
     EvidenceOrigin,
@@ -115,6 +117,103 @@ def test_compiler_does_not_treat_issue_verbs_as_symbol_anchors() -> None:
 
     assert packet.primary_edit_targets[0].symbol == "answer"
     assert all(item.symbol != "Change" for item in packet.primary_edit_targets)
+
+
+def test_hybrid_similarity_is_an_inspection_candidate_not_a_verified_edit_target() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "ranking.py",
+                "rank_candidates",
+                "def rank_candidates(rows): return semantic_relevance(rows)",
+            ),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=1,
+        document_chars=72,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Improve rows returned by semantic relevance ordering"),
+    )
+
+    assert packet.primary_edit_targets == ()
+    assert packet.inspection_candidates
+    assert packet.inspection_candidates[0].kind == "inspection_candidate"
+    assert packet.inspection_candidates[0].decision_reason == "hybrid_retrieval_inspection"
+    assert packet.inspection_candidates[0].completeness == "ranked_candidate_not_edit_target"
+
+
+def test_dense_repository_candidate_recovers_file_without_claiming_edit_authority() -> None:
+    request = _request("Repair invoice rounding for international billing")
+    request = replace(
+        request,
+        dense_candidates=(("gt_harness/treatments.py", 0.82),),
+        dense_index_receipt={"status": "READY", "query_ready": True},
+        retrieval_mode="hybrid_required",
+    )
+
+    packet = RepositoryContextCompiler().compile(_repository(), request)
+
+    assert packet.primary_edit_targets == ()
+    dense = next(
+        item
+        for item in packet.inspection_candidates
+        if item.decision_reason == "dense_semantic_inspection"
+    )
+    assert dense.path == "gt_harness/treatments.py"
+    assert dense.symbol == ""
+    assert dense.completeness == "dense_file_candidate_not_edit_target"
+    assert packet.coverage["dense_index"]["query_ready"] is True
+
+
+def test_dense_and_sparse_rankings_are_fused_with_auditable_rrf() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "shared.py",
+                "rank_invoices",
+                "def rank_invoices(rows): return international_rounding(rows)",
+            ),
+            _document(
+                "sparse_only.py",
+                "round_invoices",
+                "def round_invoices(rows): return international_billing(rows)",
+            ),
+            _document(
+                "dense_only.py",
+                "helper",
+                "def helper(rows): return rows",
+            ),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=3,
+        document_chars=200,
+    )
+    request = replace(
+        _request("Improve international invoice rounding and billing relevance"),
+        dense_candidates=(("shared.py", 0.91), ("dense_only.py", 0.90)),
+        dense_index_receipt={"status": "READY", "query_ready": True},
+        retrieval_mode="hybrid_required",
+    )
+
+    packet = RepositoryContextCompiler().compile(repository, request)
+
+    assert packet.inspection_candidates[0].path == "shared.py"
+    assert packet.inspection_candidates[0].decision_reason == "hybrid_rrf_inspection"
+    fusion = packet.coverage["dense_sparse_fusion"]
+    assert fusion["method"] == "reciprocal_rank_fusion"
+    assert fusion["k"] == 60
+    assert fusion["candidate_count"] == 3
+    assert fusion["ranked_paths"][0]["path"] == "shared.py"
+    assert fusion["ranked_paths"][0]["supporting_channels"] == ["dense", "sparse"]
 
 
 def test_compiler_abstains_instead_of_sending_generic_symbols_for_unmatched_anchor(

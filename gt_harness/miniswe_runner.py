@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import time
+from copy import deepcopy
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,22 +144,29 @@ class TreatmentMiniSweAgent(DefaultAgent):
             and time.monotonic() - self._started_clock >= self.time_budget_seconds
         ):
             raise TimeoutError("Mini-SWE run time budget exhausted")
-        update = self.treatment.before_model_call(self.n_calls + 1)
-        if update:
-            self.add_messages(self.model.format_message(role="user", content=update))
+        # Integrity barrier only. Context updates belong to the observation
+        # that produced them; injecting a synthetic user turn here weakens
+        # causal attribution and makes the model reason one step too late.
+        self.treatment.before_model_call(self.n_calls + 1)
         return super().query()
 
     def execute_actions(self, message: dict) -> list[dict]:
         outputs: list[dict[str, Any]] = []
         for action in message.get("extra", {}).get("actions", []):
             output = self.env.execute(action)
-            outputs.append(output)
-            self.treatment.after_action(
+            raw_text = str(output.get("output") or output.get("exception_info") or "")
+            augmentation = self.treatment.after_action(
                 "bash",
                 dict(action),
-                str(output.get("output") or output.get("exception_info") or ""),
+                raw_text,
                 int(output.get("returncode") or 0) != 0,
             )
+            provider_output = deepcopy(output)
+            if augmentation is not None:
+                separator = "\n\n" if raw_text else ""
+                provider_output["output"] = raw_text + separator + augmentation.content
+                provider_output["gt_delivery_receipt"] = augmentation.as_dict()
+            outputs.append(provider_output)
         return self.add_messages(
             *self.model.format_observation_messages(
                 message, outputs, self.get_template_vars()

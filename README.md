@@ -10,7 +10,8 @@ The current system combines:
 
 - deterministic repository graph construction;
 - exact symbol search and source-evidenced structural graph queries;
-- hybrid exact/BM25/lexical/structural retrieval with deterministic reciprocal-rank fusion;
+- persistent revision-bound dense retrieval fused with exact/BM25/lexical/structural
+  retrieval by deterministic reciprocal-rank fusion;
 - bounded decision packets containing edit targets, certified process paths, change surface, affected tests, validation facts, uncertainty, and revision-bound evidence;
 - preflight and postflight command classification;
 - exact source-revision tracking and fail-closed full graph convergence after edits;
@@ -18,11 +19,12 @@ The current system combines:
 
 The goal is not to force a model's answer. The goal is to give the model less context, but better-grounded context, at the moment it can use it.
 
-The graph and treatment path does not require an LSP, embedding model, ONNX
-runtime, or provider credential. Dense retrieval code remains an optional
-research/benchmark fallback outside the canonical treatment until separately
-recertified. The canonical treatment uses the deterministic hybrid repository
-and does not expose an uncertified graph relationship as a fact.
+The graph does not require an LSP or provider credential. The release benchmark
+uses the pinned local Snowflake ONNX embedder and `hybrid_required`, so a missing,
+stale, or corrupt dense index fails before provider use. Local exploratory runs
+default to `hybrid_if_available` and explicitly receipt degradation when the model
+is absent. Dense similarity only ranks inspection candidates; it never creates a
+verified symbol, relationship, or edit target.
 
 ## Historical results (not product certification)
 
@@ -68,7 +70,10 @@ delivered evidence cannot enter a paired comparison. Evaluator outcomes are
 derived from graded Harbor receipts and hash-bound to the run receipt; they are
 not typed in by an operator.
 
-`gt-harness mcp --root /path/to/repository` is an optional interoperability adapter over the same graph. It is tested, but MCP is not the product identity and is not a replacement for the `gt-harness run` benchmark path.
+`gt-harness run` is the sole coding-agent product boundary. GT Harness does not
+ship an MCP server: benchmark treatments run through the pinned Mini-SWE-Agent
+2.2.8 loop so graph delivery, trajectories, costs, and solve outcomes share one
+auditable path.
 
 The legacy file-keyed incremental indexer and historical benchmark/control paths remain in the repository for parity analysis, but they are not the canonical graph lifecycle. See `CANONICAL_ARCHITECTURE.md` for the authoritative boundary.
 

@@ -19,6 +19,8 @@ from gt_engine.repository_graph_service import GraphStatus
 from gt_harness.treatments import (
     BareTreatment,
     GroundTruthTreatment,
+    TreatmentUnavailableError,
+    _bounded_token_count,
 )
 
 
@@ -28,6 +30,46 @@ def test_bare_treatment_is_a_strict_no_op() -> None:
     assert treatment.before_model_call(1) == ""
     assert treatment.after_action("bash", {"command": "x"}, "ok", False) is None
     assert treatment.finalize(None)["provider_calls"] == 0
+
+
+def test_successful_repository_read_requests_same_observation_context(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        source_revision = "revision-2"
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    source = tmp_path / "app.py"
+    source.write_text("def answer():\n    return 42\n", encoding="utf-8")
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(
+        GroundTruthTreatment,
+        "_refresh_and_render_update",
+        lambda self: (
+            "<groundtruth-repository-context>real app fact"
+            "</groundtruth-repository-context>"
+        ),
+    )
+
+    augmentation = treatment.after_action(
+        "bash",
+        {"command": "sed -n '1,20p' app.py"},
+        "app.py:1:def answer():",
+        False,
+    )
+
+    assert augmentation is not None
+    assert augmentation.content.endswith("</groundtruth-repository-context>")
+    assert augmentation.source_revision
 
 
 def test_run_cli_records_not_applicable_treatment_and_runs_provider(
@@ -87,6 +129,32 @@ def test_groundtruth_honors_private_state_directory(tmp_path: Path, monkeypatch)
     assert treatment.service.state_dir == state.resolve()
 
 
+def test_hybrid_required_fails_closed_when_dense_model_is_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        degraded_reasons = ()
+        files_attempted = 1
+
+    class FakeService:
+        def status(self):
+            return FakeReceipt()
+
+    monkeypatch.delenv("GT_DENSE_MODEL_DIR", raising=False)
+    treatment = GroundTruthTreatment(tmp_path, retrieval_mode="hybrid_required")
+    treatment.service = FakeService()
+
+    with pytest.raises(
+        TreatmentUnavailableError,
+        match="dense_retrieval_required:dense_model_not_configured",
+    ):
+        treatment._ensure_dense_ready()
+
+    assert treatment.treatment_status.value == "FAILED"
+
+
 def test_groundtruth_observes_only_real_repository_paths_and_real_diagnostics(
     tmp_path: Path,
 ) -> None:
@@ -104,7 +172,7 @@ def test_groundtruth_observes_only_real_repository_paths_and_real_diagnostics(
 
     assert treatment.active_paths == [".github/workflows/check.yml"]
     assert treatment.diagnostics == []
-    assert treatment.context_dirty is False
+    assert treatment.context_dirty is True
 
     treatment.context_dirty = False
     treatment.after_action("bash", {"command": "pwd"}, "ordinary output", False)
@@ -211,23 +279,25 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
     rendered = treatment._render(update=False, budget=4_000, delivered_before_call=1)
 
     assert len(rendered) <= 4_000
-    assert rendered.endswith("\n</groundtruth-repository-context>")
-    payload = json.loads(rendered.splitlines()[1])
-    assert payload["schema"] == "gt.agent_context.v3"
-    packet = payload["context_packet"]
-    assert packet["status"] == "READY"
-    assert packet["primary_edit_targets"][0]["path"] == "app.py"
-    assert packet["execution_paths"]
-    assert all(
-        item["verification_status"] == "verified"
-        for item in packet["evidence_items"]
-    )
+    assert rendered.endswith("</groundtruth-repository-context>")
+    assert 'schema="gt.agent_context.v4"' in rendered
+    assert "EXACT_EDIT_TARGET app.py:1#answer" in rendered
+    assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY caller.py:1#invoke" in rendered
+    assert "VERIFIED_RELATION caller.py:invoke CALLS app.py:answer" in rendered
+    assert "UNCERTAINTY graph_projection_failed" in rendered
+    assert _bounded_token_count(rendered) <= 500
     treatment.max_delivery_count = 1
     treatment.context_dirty = True
     assert treatment._render(update=True, budget=4_000, delivered_before_call=2) == ""
     assert treatment.delivery_count == 1
     assert treatment.context_compile_count == 1
     assert "context_delivery_limit_reached" in treatment.errors
+
+
+def test_bounded_token_count_does_not_undercount_long_underscored_identifiers() -> None:
+    identifier = "this_is_a_very_long_repository_symbol_name"
+
+    assert _bounded_token_count(identifier) >= (len(identifier) + 3) // 4
 
 
 @pytest.mark.real_graph
@@ -254,34 +324,34 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
     assert treatment.prepare("Change answer without breaking invoke") == initial
     assert treatment.context_compile_count == compile_count
     assert treatment.delivery_count == delivery_count
-    initial_payload = json.loads(initial.splitlines()[1])
-    initial_revision = initial_payload["source_revision"]
-    assert initial_payload["context_packet"]["primary_edit_targets"][0]["symbol"] == "answer"
+    initial_revision = treatment.finalize(None)["source_revision"]
+    assert "EXACT_EDIT_TARGET app.py:1#answer" in initial
+    assert "BOUNDED_PROCESS gt-process-" in initial
 
     (root / "app.py").write_text(
         "def answer(value: int = 1):\n    return 41 + value\n",
         encoding="utf-8",
     )
-    treatment.after_action(
+    augmentation = treatment.after_action(
         "edit_file",
         {"path": "app.py"},
         "updated app.py",
         False,
     )
-    updated = treatment.before_model_call(2)
+    assert augmentation is not None
+    updated = augmentation.content
+    assert treatment.before_model_call(2) == ""
     assert updated, json.dumps(treatment.finalize(None), sort_keys=True)
     assert len(updated) <= treatment.update_char_budget
-    updated_payload = json.loads(updated.splitlines()[1])
-
-    assert updated_payload["kind"] == "repository_update"
-    assert updated_payload["source_revision"] != initial_revision
-    assert updated_payload["context_packet"]["status"] == "READY"
+    assert 'kind="repository_update"' in updated
     receipt = treatment.finalize(None)
     assert receipt["treatment_status"] == "ACTIVE"
     assert receipt["delivery_count"] == 2
-    assert receipt["source_revision"] == updated_payload["source_revision"]
+    assert receipt["source_revision"] != initial_revision
     assert receipt["initial_context"] == initial
     assert receipt["initial_context_sha256"]
+    assert augmentation.context_token_count <= 350
+    assert receipt["delivery_receipts"][-1]["same_observation"] is True
 
 
 def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(

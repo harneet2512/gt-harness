@@ -41,7 +41,7 @@ cleanup change.
 | `eval/miniswe_agent.py` | Shared historical installed-agent adapters | Do not delete while baseline/phase workflows import it |
 | `eval/pier_gt_adapter.py` | Pier-specific experimental bridge | Do not delete while DeepSWE workflows import it |
 | `scripts/miniswe_gt_run.py` | Historical runner and replay dependency | Do not delete while old receipts or tests require replay |
-| `nano/` | Non-canonical experimental implementation | Excluded from the canonical workflow; retain pending separate ownership decision |
+| `nano/` | Not tracked product source | No tracked Nano implementation exists; local ignored cache files are outside the release and the canonical workflow rejects Nano references |
 | `artifacts/` | Historical benchmark evidence | Preserve until canonical artifacts are uploaded, hash-bound, and release authorities migrate |
 | `artifact_deepswe/` | Historical DeepSWE evidence | Preserve independently of the Harbor replacement |
 

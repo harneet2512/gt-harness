@@ -139,3 +139,42 @@ def test_semantic_graph_declares_mixed_language_limitations() -> None:
 
     assert projection.status is SemanticGraphStatus.READY_WITH_DECLARED_LIMITATIONS
     assert "semantic_language_unsupported" in projection.receipt.limitations
+
+
+def test_semantic_graph_deduplicates_same_fact_from_overlapping_symbol_documents() -> None:
+    source = "def work():\n    return 1\n"
+    documents = (
+        RepositoryDocument(
+            path="src/core.py",
+            symbol="core",
+            text=source,
+            start_line=1,
+            end_line=2,
+            origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+            origin_revision="source-1",
+        ),
+        RepositoryDocument(
+            path="src/core.py",
+            symbol="work",
+            text=source,
+            start_line=1,
+            end_line=3,
+            origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+            origin_revision="source-1",
+        ),
+    )
+
+    projection = compile_semantic_graph(
+        documents,
+        source_revision="source-1",
+        task="Inspect work",
+        anchor_paths=("src/core.py",),
+        anchor_symbols=("work",),
+    )
+
+    assert len(projection.facts) == len({fact.claim_id for fact in projection.facts})
+    assert [fact.rendered for fact in projection.facts].count(
+        "- Return flow src/core.py:2 (work): work.return <- 1"
+    ) == 1
+    assert projection.receipt.facts_by_kind["return_flow"] == 1
+    assert projection.receipt.duplicate_facts_removed == 1

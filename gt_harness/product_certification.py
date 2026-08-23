@@ -22,7 +22,7 @@ REQUIRED_STEPS = {
     "graph_truth",
     "graph_lifecycle",
     "language_lifecycle",
-    "mcp_e2e",
+    "harness_e2e",
     "failure_campaign",
 }
 
@@ -31,7 +31,7 @@ REQUIRED_RECEIPTS = {
     "graph-truth.json": "gt.graph_truth_audit_receipt.v1",
     "graph-lifecycle.json": "gt.graph_lifecycle_audit_receipt.v1",
     "language-lifecycle.json": "gt.language_support_audit_receipt.v1",
-    "mcp-e2e.json": "gt.mcp_e2e_audit_receipt.v1",
+    "harness-e2e.json": "gt.harness_e2e_audit_receipt.v1",
     "failure-campaign.json": "gt.failure_campaign_receipt.v1",
 }
 
@@ -148,14 +148,19 @@ def _check_specialized_receipt(
         missing = sorted(required - observed)
         if missing:
             fail("languages_missing", ", ".join(missing))
-    elif filename == "mcp-e2e.json":
-        tools = set(value.get("tools", []))
-        required_tools = {"gt_context", "gt_impact", "gt_query", "gt_status"}
-        if value.get("transport") != "stdio" or not required_tools.issubset(tools):
-            fail("mcp_boundary_incomplete", "stdio production MCP or required tools missing")
-        agent_received = value.get("agent_received")
-        if not isinstance(agent_received, dict) or not agent_received:
-            fail("mcp_evidence_missing", "no agent-visible evidence")
+    elif filename == "harness-e2e.json":
+        if value.get("agent_scaffold_version") != "2.2.8":
+            fail("harness_scaffold_mismatch", "Mini-SWE 2.2.8 was not exercised")
+        if value.get("same_observation") is not True:
+            fail("harness_delivery_timing", "GT update was not on the action observation")
+        if value.get("raw_output_preserved") is not True:
+            fail("harness_observation_mutated", "raw action output was not preserved")
+        if value.get("restart_reused_current_graph") is not True:
+            fail("harness_restart_failed", "updated graph identity was not reused")
+        if int(value.get("initial_context_token_count", 501)) > 500:
+            fail("harness_initial_context_budget", "initial GT context exceeded 500 tokens")
+        if int(value.get("update_context_token_count", 351)) > 350:
+            fail("harness_update_context_budget", "GT update exceeded 350 tokens")
     elif filename == "failure-campaign.json":
         cases = _rows(value, "cases", "checks", "results")
         if len(cases) < 18 or any(row.get("status") != "PASS" for row in cases):

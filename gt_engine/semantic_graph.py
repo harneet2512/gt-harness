@@ -83,6 +83,7 @@ class SemanticGraphReceipt:
     documents_indexed: int
     documents_failed: int
     facts_by_kind: dict[str, int] = field(default_factory=dict)
+    duplicate_facts_removed: int = 0
     limitations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
@@ -497,6 +498,10 @@ def compile_semantic_graph(
             )
         )
 
+    unique_facts = {fact.claim_id: fact for fact in facts}
+    duplicate_facts_removed = len(facts) - len(unique_facts)
+    facts = list(unique_facts.values())
+
     def relevant(fact: SemanticGraphFact) -> bool:
         if fact.diagnostic_relevant:
             return True
@@ -548,6 +553,7 @@ def compile_semantic_graph(
             documents_indexed=indexed,
             documents_failed=failed,
             facts_by_kind=dict(sorted(counts.items())),
+            duplicate_facts_removed=duplicate_facts_removed,
             limitations=tuple(dict.fromkeys(limitations)),
         ),
         truncated_count=truncated,

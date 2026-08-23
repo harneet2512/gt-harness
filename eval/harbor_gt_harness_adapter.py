@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -29,6 +30,7 @@ CANONICAL_MINISWE_VERSION = "2.2.8"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_SOURCE = "/installed-agent/gt-harness"
 _REMOTE_INDEXER = "/installed-agent/gt-index"
+_REMOTE_DENSE_MODEL = "/installed-agent/snowflake-arctic-embed-m"
 _REMOTE_PYTHON = '"$HOME/.local/share/uv/tools/gt-harness/bin/python"'
 _REMOTE_CLI = '"$HOME/.local/bin/gt-harness"'
 _UV_VERSION = "0.11.32"
@@ -59,6 +61,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
 
     ENV_VARS = [
         EnvVar(kwarg="task_id", env="GT_HARBOR_TASK_ID"),
+        EnvVar(kwarg="product_source_sha", env="GT_PRODUCT_SOURCE_SHA"),
         EnvVar(kwarg="temperature", env="GT_HARBOR_TEMPERATURE", default="1.0"),
         EnvVar(kwarg="max_iterations", env="GT_HARBOR_MAX_ITERATIONS", default="100"),
         EnvVar(
@@ -94,6 +97,14 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
 
     async def install(self, environment: BaseEnvironment) -> None:
         indexer = self._indexer_host_path()
+        dense_model = Path(
+            clean_env_value(os.environ.get("GT_DENSE_MODEL_DIR"))
+        ).resolve()
+        required_dense = tuple(dense_model / name for name in ("model.onnx", "tokenizer.json"))
+        if not dense_model.is_dir() or not all(path.is_file() for path in required_dense):
+            raise FileNotFoundError(
+                "canonical Harbor adapter requires the provisioned Snowflake ONNX model"
+            )
         for relative in ("eval", "gt_engine", "gt_harness", "src/groundtruth"):
             await environment.upload_dir(
                 _REPO_ROOT / relative,
@@ -104,6 +115,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             f"{_REMOTE_SOURCE}/pyproject.toml",
         )
         await environment.upload_file(indexer, _REMOTE_INDEXER)
+        await environment.upload_dir(dense_model, _REMOTE_DENSE_MODEL)
         await self.exec_as_root(
             environment,
             _ENSURE_CURL,
@@ -116,6 +128,8 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             f'"$HOME/.local/bin/uv" tool install --python {_PYTHON_VERSION} '
             f'--with "mini-swe-agent=={CANONICAL_MINISWE_VERSION}" '
             "--with 'numpy==2.5.1' "
+            '--with "onnxruntime==1.28.0" '
+            '--with "tokenizers==0.23.1" '
             f"{_REMOTE_SOURCE} && "
             f"{_REMOTE_PYTHON} -c \"import importlib.metadata as m, sys; "
             f"assert sys.version_info[:3] == (3, 12, 13); "
@@ -140,6 +154,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         temperature: str,
         max_iterations: str,
         time_budget_seconds: str,
+        product_source_sha: str,
     ) -> str:
         identity = {
             "schema": "gt.harbor_product_adapter.v1",
@@ -152,6 +167,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             "task_id": task_id,
             "attempt": 1,
             "product_command": "gt-harness run",
+            "product_source_sha": product_source_sha,
         }
         receipt = json.dumps(identity, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         write_receipt = (
@@ -238,6 +254,9 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         task_id = adapter_env.get("GT_HARBOR_TASK_ID", "").strip()
         if not task_id:
             raise ValueError("Harbor must provide task_id to the canonical adapter")
+        product_source_sha = adapter_env.get("GT_PRODUCT_SOURCE_SHA", "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
+            raise ValueError("Harbor must provide the exact 40-character product source SHA")
         environment_vars = {
             **host_env,
             **UTF8_ENV,
@@ -245,6 +264,8 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             "GT_INDEX_BINARY": _REMOTE_INDEXER,
             "GT_REQUESTED_MODEL": requested_model,
             "GT_EFFECTIVE_MODEL": effective_model,
+            "GT_DENSE_MODEL_DIR": _REMOTE_DENSE_MODEL,
+            "GT_RETRIEVAL_MODE": "hybrid_required",
         }
         await self._exec_product_secret_safe(
             environment,
@@ -257,6 +278,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
                 temperature=adapter_env["GT_HARBOR_TEMPERATURE"],
                 max_iterations=adapter_env["GT_HARBOR_MAX_ITERATIONS"],
                 time_budget_seconds=adapter_env["GT_HARBOR_TIME_BUDGET_SECONDS"],
+                product_source_sha=product_source_sha,
             ),
             environment_vars,
         )

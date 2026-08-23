@@ -364,6 +364,17 @@ def test_process_projection_reads_only_exact_persisted_calls_and_exposes_receive
     assert result.receipt.lower_bound is True
     assert result.receipt.evidence["exact_calls"] == 5
     assert result.receipt.evidence["rejected_calls"] == 1
+    assert result.receipt.evidence["receiver_resolution_outcomes"] == {
+        "resolved": 5,
+        "ambiguous": 1,
+        "external": 0,
+        "unresolved": 0,
+        "capped": 0,
+    }
+    assert (
+        result.receipt.evidence["receiver_resolution_coverage"]
+        == "persisted_edges_only"
+    )
     assert result.receipt.evidence["returned_edge_ids"] == [10, 11, 12, 13, 14]
     assert result.receipt.evidence["typed_receiver_outcomes"] == [
         {"edge_id": 10, "receiver_type": "Application"},

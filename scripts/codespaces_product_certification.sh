@@ -100,13 +100,13 @@ run_step canonical_lint python -m ruff check \
   scripts/graph_truth_audit.py \
   scripts/graph_lifecycle_campaign.py \
   scripts/language_lifecycle_matrix.py \
-  scripts/mcp_real_repository_campaign.py \
+  scripts/harness_real_repository_campaign.py \
   scripts/failure_campaign.py \
   gt_harness/product_certification.py \
   tests/test_repository_graph_service.py \
   tests/test_product_repository_matrix.py \
   tests/test_product_certification.py \
-  tests/test_mcp_stdio_real.py
+  tests/test_miniswe_product_runner.py
 
 run_step repository_matrix python scripts/product_repository_matrix.py \
   --workspace "$WORKSPACE" \
@@ -131,11 +131,11 @@ run_step language_lifecycle python scripts/language_lifecycle_matrix.py \
   --output "$RECEIPTS/language-lifecycle.json" \
   --timeout 1200
 
-run_step mcp_e2e python scripts/mcp_real_repository_campaign.py \
+run_step harness_e2e python scripts/harness_real_repository_campaign.py \
   --source-repository "$WORKSPACE/repositories/python-small-itsdangerous" \
   --commit 672971d66a2ef9f85151e53283113f33d642dabd \
-  --run-dir "$WORKSPACE/mcp-run" \
-  --output "$RECEIPTS/mcp-e2e.json"
+  --run-dir "$WORKSPACE/harness-run" \
+  --output "$RECEIPTS/harness-e2e.json"
 
 run_step failure_campaign python scripts/failure_campaign.py \
   --source-repository "$WORKSPACE/repositories/python-small-itsdangerous" \
