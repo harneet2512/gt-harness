@@ -702,6 +702,7 @@ def build_bootstrap_catalog(
     task_deliverables: tuple[str, ...] = (),
     initial_retrieval: HybridRetrievalResult | None = None,
     max_items: int = 32,
+    allow_empty_catalog: bool = False,
 ) -> BootstrapCatalog:
     """Build the immutable selection surface after a complete graph exists."""
 
@@ -998,13 +999,34 @@ def build_bootstrap_catalog(
         ),
     )
     items = _pack_catalog_items(ordered, max_items)
+    if not items and allow_empty_catalog and not reasons:
+        # A graph can be valid while exposing no symbol/document candidates
+        # (for example a shell-only repository).  Keep the catalog explicitly
+        # no-op rather than treating persistent-state initialization as a
+        # runtime failure.  The sentinel has no path or repository claim; it
+        # only makes the empty selection surface mechanically selectable and
+        # preserves the declared empty_catalog limitation in the receipt.
+        items = (
+            BootstrapCatalogItem(
+                item_id="__empty_catalog__",
+                kind=CatalogItemKind.FOCUS,
+                label="No certified symbol-level repository facts are available",
+                certified=True,
+                evidence_authority=EvidenceAuthority.IDENTITY_ONLY,
+                origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+                origin_revision=bound_graph_source_revision,
+            ),
+        )
+    reason_codes = tuple(
+        dict.fromkeys(reasons or (("empty_catalog",) if not ordered else ()))
+    )
     return BootstrapCatalog(
         source_revision=source_revision,
         graph_source_revision=bound_graph_source_revision,
         graph_revision=graph_revision,
         items=items,
         complete=bool(items) and not reasons,
-        reason_codes=tuple(dict.fromkeys(reasons or (() if items else ("empty_catalog",)))),
+        reason_codes=reason_codes,
     )
 
 

@@ -233,6 +233,56 @@ def test_graph_without_task_conditioned_catalog_abstains_before_bootstrap():
     assert catalog.reason_codes == ("empty_catalog",)
 
 
+def test_empty_catalog_can_be_explicitly_initialized_for_valid_shell_graph():
+    evidence = RepositoryEvidence(
+        available=True,
+        graph_revision="graph-1",
+        status="source_backed",
+        source_revision="source-1",
+        index_current=True,
+        intelligence_valid=True,
+        substrate_ready=True,
+    )
+    catalog = build_bootstrap_catalog(
+        instruction="Run the repository command.",
+        evidence=evidence,
+        documents=(),
+        structural_links=(),
+        source_revision="source-1",
+        graph_revision="graph-1",
+        repository_complete=True,
+        allow_empty_catalog=True,
+    )
+
+    assert catalog.complete is True
+    assert catalog.reason_codes == ("empty_catalog",)
+    assert catalog.item_ids == frozenset({"__empty_catalog__"})
+    selection = parse_bootstrap_selection(
+        json.dumps(
+            {
+                "primary_focus_id": "__empty_catalog__",
+                "ordered_item_ids": ["__empty_catalog__"],
+                "risk_item_ids": [],
+                "validation_item_ids": [],
+            }
+        ),
+        catalog,
+    )
+    assert selection.valid is True
+    engine = PersistentExecutionStateEngine.initialize_from_graph(
+        task="Run the repository command.",
+        catalog=catalog,
+        structural_links=(),
+        present_paths=(),
+    )
+    snapshot = engine.apply_bootstrap(
+        selection,
+        current_source_revision="source-1",
+    )
+    assert snapshot.bootstrap_status is BootstrapStatus.SELECTED
+    assert snapshot.primary_focus_id == "__empty_catalog__"
+
+
 def test_shared_hybrid_retrieval_seeds_bootstrap_when_legacy_graph_query_is_empty():
     evidence = RepositoryEvidence(
         available=True,

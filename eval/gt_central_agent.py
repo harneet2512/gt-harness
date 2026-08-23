@@ -4317,6 +4317,7 @@ class MiniSweCentralAgent(BaseAgent):
                             graph_revision=repository_evidence.graph_revision,
                             repository_complete=True,
                             initial_retrieval=initial_retrieval_result,
+                            allow_empty_catalog=True,
                         )
                         persistent_state_initialization = {
                             "enabled": True,
@@ -8819,6 +8820,7 @@ class MiniSweCentralAgent(BaseAgent):
                                 graph_revision=repository_evidence.graph_revision,
                                 repository_complete=True,
                                 initial_retrieval=activation_result,
+                                allow_empty_catalog=True,
                             )
                             persistent_state_initialization = {
                                 "enabled": True,
