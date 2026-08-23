@@ -41,7 +41,10 @@ env:
   GT_LITELLM_MODEL: ${{ inputs.model }}
   GT_EXPECTED_RESPONSE_MODEL: ${{ inputs.model }}
   GT_EXPECTED_ADAPTER_PROVIDER: openai
-  GT_PROVIDER_ROUTE_ID: openrouter:diagnostic:openrouter.ai
+  # This is the release route identity, not a workflow/display label.  The
+  # runtime certificate requires provider:native:host and rejects arbitrary
+  # middle segments so receipts cannot claim an unapproved execution path.
+  GT_PROVIDER_ROUTE_ID: openrouter:native:openrouter.ai
   GT_DENSE_INTRA_OP_THREADS: "4"
   GT_DENSE_INTER_OP_THREADS: "1"
   MSWEA_SILENT_STARTUP: "1"
