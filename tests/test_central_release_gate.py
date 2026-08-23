@@ -2144,6 +2144,34 @@ def test_runtime_barrier_is_recomputed_from_provider_and_compiler_receipts() -> 
     assert "task:provider_barrier_reconstruction_mismatch:1" in check.failures
 
 
+def test_runtime_barrier_preserves_temporal_source_less_applicability() -> None:
+    """A task may become source-backed after an early N/A provider call."""
+    receipt = _relational_treatment()
+    receipt["repository_intelligence"]["denominator_excluded"] = False
+    context = receipt["model_call_contexts"][0]
+    barrier = json.loads(json.dumps(context["mechanical_completeness_barrier"]))
+    for requirement in barrier["requirements"]:
+        if requirement["requirement_id"] in {
+            "graph_current",
+            "repository_intelligence",
+            "retrieval",
+            "persistent_state",
+        }:
+            requirement["status"] = "PROVEN_NOT_APPLICABLE"
+            requirement["evidence"] = {
+                "applicable": False,
+                **({"current": True} if requirement["requirement_id"] == "graph_current" else {}),
+            }
+            if requirement["requirement_id"] != "graph_current":
+                requirement["evidence"]["ready"] = True
+    context["mechanical_completeness_barrier"] = barrier
+    receipt["mechanical_completeness"]["provider_barriers"] = [barrier]
+
+    check = _mechanical_completeness_runtime(receipt, "task")
+
+    assert check.passed is True
+
+
 def test_release_rejects_equal_length_assistant_history_mutation() -> None:
     receipt = _relational_treatment()
     receipt["model_call_contexts"][0]["context_compiler"].update(

@@ -2010,9 +2010,31 @@ def _mechanical_completeness_runtime(
             failures.append(f"{label}:provider_barrier_requirement_invalid:{call}")
         compiler = contribution_by_call.get(call) or {}
         evidence = receipt.get("repository_evidence") or {}
+        # Applicability is temporal.  A task may begin with no supported
+        # source and create source later; the barrier for an early provider
+        # call is legitimately PROVEN_NOT_APPLICABLE even though the final
+        # receipt is source-backed.  Recomputing every call from final
+        # repository state incorrectly turns that valid transition into a
+        # reconstruction mismatch.  Use the call's captured applicability
+        # evidence, with the final denominator only as a legacy fallback.
+        graph_requirement = next(
+            (
+                row
+                for row in barrier.get("requirements") or ()
+                if str(row.get("requirement_id") or "") == "graph_current"
+            ),
+            {},
+        )
+        graph_evidence = graph_requirement.get("evidence") or {}
         graph_applicable = (
-            (receipt.get("repository_intelligence") or {}).get("denominator_excluded")
-            is not True
+            bool(graph_evidence["applicable"])
+            if "applicable" in graph_evidence
+            else (
+                (receipt.get("repository_intelligence") or {}).get(
+                    "denominator_excluded"
+                )
+                is not True
+            )
         )
         persistent = receipt.get("persistent_execution_state") or {}
         persistent_state = persistent.get("state") or {}
