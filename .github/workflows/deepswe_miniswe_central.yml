@@ -863,6 +863,34 @@ jobs:
             deepswe-task.log
           if-no-files-found: warn
 
+  # Publish task outcomes independently from the strict GT receipt merge gate.
+  # This is reporting-only and cannot promote a treatment or change scoring.
+  partial_results:
+    name: Publish partial task results
+    needs: [plan, run]
+    if: ${{ always() && needs.plan.result == 'success' && needs.run.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: deepswe-central-${{ github.run_id }}-*
+          path: tasks
+          merge-multiple: false
+      - name: Aggregate explicit verifier outcomes
+        env:
+          ARTIFACT_ROOT: tasks
+          OUTPUT: tb2_partial_summary.json
+        run: python scripts/ci/aggregate_tb2_partial.py | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepswe-central-${{ github.run_id }}-PARTIAL
+          path: tb2_partial_summary.json
+          if-no-files-found: error
+
   merge:
     needs: [plan, baseline, provider_free, bootstrap_canary, run]
     if: ${{ always() && needs.plan.result == 'success' && needs.run.result != 'skipped' && (inputs.arm == 'gt_off' || (needs.provider_free.result == 'success' && needs.bootstrap_canary.result == 'success' && (inputs.diagnostic_only || needs.baseline.result == 'success'))) }}
