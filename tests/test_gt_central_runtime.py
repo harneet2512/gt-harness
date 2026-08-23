@@ -1169,6 +1169,54 @@ async def test_sensor_caches_missing_python_capture_backend_across_source_edits(
 
 
 @pytest.mark.asyncio
+async def test_sensor_hashes_and_captures_new_graph_metadata():
+    """New lock/config files must refresh the graph instead of invalidating it."""
+    import base64
+    import json
+    import shlex
+
+    contents = {
+        "requirements.txt": "pytest==9.1.1\n",
+        "dedup/bff/Cargo.lock": "version = 3\n",
+    }
+    digests = {
+        path: __import__("hashlib").sha256(value.encode()).hexdigest()
+        for path, value in contents.items()
+    }
+
+    class Result:
+        def __init__(self, stdout="", return_code=0):
+            self.stdout = stdout
+            self.return_code = return_code
+
+    class Environment:
+        async def exec(self, command, **kwargs):
+            if "find . -xdev" in command:
+                return Result(
+                    "".join(
+                        f"f\t{len(value)}\t1.0\t1.0\t{path}\t\n"
+                        for path, value in contents.items()
+                    )
+                )
+            if command.startswith("sha256sum"):
+                paths = shlex.split(command)[2:]
+                return Result("".join(f"{digests[path]}  {path}\n" for path in paths))
+            if command.startswith("python3 -c"):
+                paths = shlex.split(command)[3:]
+                encoded = {
+                    path: base64.b64encode(contents[path].encode()).decode()
+                    for path in paths
+                }
+                return Result(json.dumps(encoded))
+            raise AssertionError(command)
+
+    snapshot = await WorkspaceSensor().scan(Environment(), cwd="/workspace")
+    assert snapshot.healthy is True
+    assert all(snapshot.entries[path].digest == digests[path] for path in contents)
+    assert all(snapshot.entries[path].content == contents[path] for path in contents)
+
+
+@pytest.mark.asyncio
 async def test_sensor_captures_binary_heads_only_on_request():
     import base64
 

@@ -24,7 +24,7 @@ from gt_engine.central_controls import (
     FeatureEffect,
     consumer_spec_for,
 )
-from gt_engine.graph_inputs import is_graph_input
+from gt_engine.graph_inputs import is_graph_input, is_graph_metadata
 from gt_engine.host_execution import HostExecCategory, HostExecutionRecorder
 from gt_engine.language_registry import (
     candidate_capabilities,
@@ -1554,6 +1554,7 @@ class WorkspaceSensor:
                 if state.kind == "f"
                 and (
                     is_validation_source(path)
+                    or is_graph_metadata(path)
                     or _workspace_relative_path(path) in tracked
                     or _workspace_relative_path(path) in shebang_candidates
                     or _may_be_content_signature_source(path)
@@ -1566,6 +1567,7 @@ class WorkspaceSensor:
                 if state.kind == "f"
                 and (
                     is_validation_source(path)
+                    or is_graph_metadata(path)
                     or _workspace_relative_path(path) in tracked
                     or _workspace_relative_path(path) in shebang_candidates
                     or _may_be_content_signature_source(path)
@@ -1642,6 +1644,7 @@ class WorkspaceSensor:
             for path in changed
             if (
                 is_validation_source(path)
+                or is_graph_metadata(path)
                 or _workspace_relative_path(path) in shebang_candidates
                 or _may_be_content_signature_source(path)
             )
