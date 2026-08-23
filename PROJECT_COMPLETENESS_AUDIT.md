@@ -29,7 +29,7 @@ Passing the inherited test suite is Gate 0 evidence only. The table below record
 
 ## Demonstrated release-blocking defects and repairs
 
-1. The vendored wheel provenance hash did not match the wheel and the product identity was `nano-harness 0.0.1`. The wheel and prebuilt binary were removed; pinned first-party source and a content-addressed build became authoritative.
+1. The legacy vendored wheel provenance hash did not match the wheel and its product identity was wrong. The wheel and prebuilt binary were removed; pinned first-party source and a content-addressed build became authoritative.
 2. The frozen release could report `READY` by comparing a Python discovery count with a different Go discovery policy. Cancellation between omitted dot-directories and additionally indexed Markdown concealed the mismatch. One Go-authored path/reason receipt now controls readiness.
 3. Every dot-directory and every directory named `vendor` was excluded, dropping tracked workflows and GT's own Go source. Discovery now uses Git's tracked plus non-ignored working-tree set; `.github` and tracked product source are covered by regression tests.
 4. An ignored 91,556,692-byte developer `gt-index.exe` silently outranked the certified source build. The file was removed and local/PATH/cache fallback precedence was deleted from the canonical resolver.

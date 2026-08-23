@@ -1,6 +1,6 @@
-"""Evidence-aware context management for nano-harness.
+"""Evidence-aware context management for the coding-agent harness.
 
-``smart_truncate`` preserves nano's exact two-phase, char-metric truncation
+``smart_truncate`` preserves the original two-phase, char-metric truncation
 (agent.py:_truncate_if_needed) as the base behavior. The single change is
 phase 1's treatment of tool_result blocks that carry delivered GT evidence:
 
@@ -10,7 +10,7 @@ phase 1's treatment of tool_result blocks that carry delivered GT evidence:
     model reads iteration N+1; a sealed-but-never-seen delivery would be the
     F1 lie class (the seal attests the model received the bytes). Overflow
     falls through to phase 2 (tool_use input shrinking) and ultimately to
-    nano's provider-side token cap — accepted cost: deliveries are <=4000
+    the provider-side token cap — accepted cost: deliveries are <=4000
     chars and <=1 per observation.
 
 Phase 2 (shrinking >200-char string args of past tool_use blocks) is kept

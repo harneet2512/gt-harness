@@ -7,7 +7,7 @@ evidence capsule through the installed Groundtruth gateway:
         -> augment -> arbitrate -> render_envelope -> fits_budget
 
 Sealing (``seal_delivery``) is done by the caller-owned episode chain so the
-per-episode dedup chain lives on the adapter, exactly as the nano bridge's
+per-episode dedup chain lives on the adapter, exactly as the legacy bridge's
 ``_deliver`` keeps state on the shared ``EpisodeState``.
 
 Pure and deterministic: no time, no randomness, no I/O. Repository reads

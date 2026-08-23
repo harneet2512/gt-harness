@@ -1,6 +1,6 @@
 """Container exec-env hardening shared by every Harbor adapter (BOTH arms).
 
-Two harness-level, arm-neutral guarantees (kept out of nano/ itself so the
+Two harness-level, arm-neutral guarantees shared by both Mini-SWE arms so the
 agent stays byte-identical; kept out of any single workflow so no future
 workflow can silently lose them):
 
@@ -19,7 +19,7 @@ workflow can silently lose them):
 
 2. ``UTF8_ENV``: task images run POSIX/C locales; the workflow-level
    PYTHONUTF8=1 applies only to the RUNNER, never inside task containers.
-   Pinning UTF-8 mode in the exec env for install+run keeps nano's Python
+   Pinning UTF-8 mode in the exec env for install+run keeps Mini-SWE's Python
    UTF-8 regardless of image locale (subprocess text decoding, file I/O
    defaults). Applied identically to baseline and GT arms — the one
    deliberate shared environment change.

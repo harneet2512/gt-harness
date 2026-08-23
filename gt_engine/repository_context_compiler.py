@@ -101,6 +101,8 @@ class GTContextPacket:
     primary_edit_targets: tuple[ContextEvidenceItem, ...] = ()
     supporting_files: tuple[ContextEvidenceItem, ...] = ()
     symbol_contracts: tuple[ContextEvidenceItem, ...] = ()
+    semantic_facts: tuple[str, ...] = ()
+    semantic_graph_receipt: dict[str, Any] = field(default_factory=dict)
     execution_paths: tuple[str, ...] = ()
     change_surface: tuple[str, ...] = ()
     affected_tests: tuple[str, ...] = ()
@@ -126,6 +128,8 @@ class GTContextPacket:
             ],
             "supporting_files": [item.as_dict() for item in self.supporting_files],
             "symbol_contracts": [item.as_dict() for item in self.symbol_contracts],
+            "semantic_facts": list(self.semantic_facts),
+            "semantic_graph_receipt": dict(self.semantic_graph_receipt),
             "execution_paths": list(self.execution_paths),
             "change_surface": list(self.change_surface),
             "affected_tests": list(self.affected_tests),
@@ -648,6 +652,9 @@ class RepositoryContextCompiler:
             )
             for row in ranked[:20]
         )
+        semantic_paths = frozenset(
+            item.path for item in (*primary, *supporting) if item.path
+        )
         snapshot = RepositorySnapshot(
             source_revision=request.source_revision,
             graph_revision=request.graph_revision,
@@ -658,6 +665,11 @@ class RepositoryContextCompiler:
                 (document.path, document.origin.value) for document in repository.documents
             ),
             retrieval_rank_hints=hints,
+            documents=tuple(
+                document
+                for document in repository.documents
+                if document.path in semantic_paths
+            ),
         )
         projection = RepositoryContextEngine(
             max_tokens=max(1, min(320, int(request.token_budget)))
@@ -671,6 +683,7 @@ class RepositoryContextCompiler:
                 anchors=tuple(anchor_paths),
                 changed_paths=request.changed_paths,
                 changed_symbols=tuple(anchor_symbols),
+                task_text=request.task,
             ),
             snapshot,
             delivered_claim_ids=frozenset(request.previously_exposed_claims),
@@ -688,9 +701,32 @@ class RepositoryContextCompiler:
         validation_plan = tuple(
             fact.rendered for fact in projection.validation_facts[:5]
         )
+        semantic_projection = projection.semantic_graph
+        semantic_items = tuple(
+            ContextEvidenceItem(
+                kind="semantic_fact",
+                path=fact.path,
+                start_line=fact.start_line,
+                end_line=fact.end_line,
+                symbol=fact.scope or fact.subject,
+                relation=fact.relation,
+                confidence=1.0,
+                verification_status="verified",
+                source_revision=request.source_revision,
+                graph_revision=request.graph_revision,
+                evidence_sha256=fact.claim_id,
+                decision_reason=f"deterministic_{fact.kind.value}",
+                completeness="bounded_semantic_fact",
+                source_path=fact.path,
+                source_symbol=fact.scope,
+                source_excerpt=fact.evidence,
+            )
+            for fact in (semantic_projection.facts if semantic_projection else ())
+        )
         evidence_items = tuple(
             {
-                item.evidence_sha256: item for item in (*primary, *link_items)
+                item.evidence_sha256: item
+                for item in (*primary, *link_items, *semantic_items)
             }.values()
         )
         uncertainty_reasons = [*repository.reason_codes]
@@ -719,6 +755,13 @@ class RepositoryContextCompiler:
             primary_edit_targets=primary,
             supporting_files=tuple(supporting),
             symbol_contracts=primary,
+            semantic_facts=tuple(
+                fact.rendered
+                for fact in (semantic_projection.facts if semantic_projection else ())
+            ),
+            semantic_graph_receipt=(
+                semantic_projection.receipt.as_dict() if semantic_projection else {}
+            ),
             execution_paths=execution_paths,
             change_surface=change_surface,
             affected_tests=affected_tests,

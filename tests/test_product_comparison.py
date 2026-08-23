@@ -75,7 +75,7 @@ def _receipt(
         "temperature": 0.0,
         "max_iterations": 30,
         "time_budget_seconds": 900.0,
-        "agent_scaffold": "nano.agent.Agent",
+        "agent_scaffold": "minisweagent.agents.default.DefaultAgent",
         "system_prompt_sha256": "prompt-hash",
         "tool_policy_sha256": "tools-hash",
         "repository_start": dict(repository),

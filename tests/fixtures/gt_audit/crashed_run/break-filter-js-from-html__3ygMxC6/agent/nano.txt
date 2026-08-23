@@ -1,6 +1,0 @@
-
-stop: error  iterations=1  in=0  out=0  cache_read=0
-╭─────────────────────────────────── final ────────────────────────────────────╮
-│ agent error: UnicodeEncodeError: 'ascii' codec can't encode character        │
-│ '\ufeff' in position 7: ordinal not in range(128)                            │
-╰──────────────────────────────────────────────────────────────────────────────╯

@@ -694,7 +694,7 @@ class MiniSweAdapter(GroundtruthController):
 
         Built lazily so a GT-off construction never touches the engine. The
         episode + delivered-dedup chain persist for the whole task, matching the
-        nano bridge's ``_deliver`` production pattern.
+        legacy bridge's ``_deliver`` production pattern.
         """
         if self._gateway_state is None:
             from groundtruth.runtime.episode_state import EpisodeState

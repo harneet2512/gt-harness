@@ -95,7 +95,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/gt-index"
           echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
 
-      - name: Install nano-harness + harbor
+      - name: Install GT Harness + Harbor
         run: |
           python -m pip install --upgrade pip
           chmod +x vendor/gt-index-linux-amd64
@@ -274,7 +274,7 @@ jobs:
             /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           sudo docker image prune -af
 
-      - name: Install nano-harness + harbor
+      - name: Install GT Harness + Harbor
         run: |
           python -m pip install --upgrade pip
           chmod +x vendor/gt-index-linux-amd64

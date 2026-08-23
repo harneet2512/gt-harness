@@ -20,12 +20,17 @@ from gt_engine.contributions import (
     GTContribution,
     build_provider_value_certificates,
 )
-from gt_engine.hybrid_retrieval import EvidenceOrigin, StructuralLink
+from gt_engine.hybrid_retrieval import EvidenceOrigin, RepositoryDocument, StructuralLink
 from gt_engine.repository_intelligence import RepositoryEvidence
 from gt_engine.semantic_evidence import (
     SemanticEvidenceBridge,
     SemanticEvidenceResult,
     SemanticEvidenceStatus,
+)
+from gt_engine.semantic_graph import (
+    SemanticGraphProjection,
+    SemanticGraphStatus,
+    compile_semantic_graph,
 )
 
 
@@ -133,6 +138,7 @@ class DecisionOpportunity:
     anchors: tuple[str, ...] = ()
     changed_paths: tuple[str, ...] = ()
     changed_symbols: tuple[str, ...] = ()
+    task_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +161,7 @@ class RepositorySnapshot:
     represented_checks: frozenset[str] = frozenset()
     path_origins: tuple[tuple[str, str], ...] = ()
     retrieval_rank_hints: tuple[RetrievalRankHint, ...] = ()
+    documents: tuple[RepositoryDocument, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +248,7 @@ class RepositoryContextProjection:
     resolved_conventions: tuple[ResolvedConventionRecord, ...] = ()
     convention_coverage: dict[str, int] = field(default_factory=dict)
     semantic_evidence: SemanticEvidenceResult | None = None
+    semantic_graph: SemanticGraphProjection | None = None
     token_count: int = 0
     truncated_count: int = 0
     rejected_edge_count: int = 0
@@ -266,6 +274,9 @@ class RepositoryContextProjection:
         ]
         row["semantic_evidence"] = (
             self.semantic_evidence.as_dict() if self.semantic_evidence is not None else None
+        )
+        row["semantic_graph"] = (
+            self.semantic_graph.as_dict() if self.semantic_graph is not None else None
         )
         row["process_coverage"] = dict(self.process_coverage)
         return row
@@ -1056,6 +1067,7 @@ class RepositoryContextEngine:
         reasons: tuple[str, ...],
         *,
         semantic: SemanticEvidenceResult | None = None,
+        semantic_graph: SemanticGraphProjection | None = None,
         rejected_edge_count: int = 0,
         process_coverage: dict[str, int] | None = None,
     ) -> RepositoryContextProjection:
@@ -1068,6 +1080,7 @@ class RepositoryContextEngine:
             source_revision=opportunity.source_revision,
             graph_revision=opportunity.graph_revision,
             semantic_evidence=semantic,
+            semantic_graph=semantic_graph,
             rejected_edge_count=rejected_edge_count,
             process_coverage=dict(process_coverage or {}),
         )
@@ -1117,6 +1130,15 @@ class RepositoryContextEngine:
             delivered_claim_ids=delivered_claim_ids,
         )
         semantic_for_composition = semantic
+        semantic_graph = compile_semantic_graph(
+            snapshot.documents,
+            source_revision=opportunity.source_revision,
+            task=opportunity.task_text,
+            anchor_paths=anchor_paths,
+            anchor_symbols=anchor_symbols,
+            diagnostics=snapshot.diagnostics,
+            max_facts=self.max_semantic_items,
+        )
         if (
             opportunity.kind == "post_read_search"
             and semantic.status is SemanticEvidenceStatus.DELIVER
@@ -1309,11 +1331,24 @@ class RepositoryContextEngine:
             if semantic.status is SemanticEvidenceStatus.DELIVER
             else []
         )
+        semantic_graph_lines = (
+            [(fact.claim_id, fact.rendered) for fact in semantic_graph.facts]
+            if semantic_graph.status
+            in {
+                SemanticGraphStatus.READY,
+                SemanticGraphStatus.READY_WITH_DECLARED_LIMITATIONS,
+            }
+            else []
+        )
         critical_lines = [(item.claim_id, item.rendered) for item in coupled]
         critical_lines.extend((item.claim_id, item.rendered) for item in conventions)
         critical_lines.extend(
             (fact.claim_id, fact.rendered) for fact in diagnostics
         )
+        # Decision-specific data/shape facts replace source re-reading and are
+        # more actionable than generic catalog definitions.  Keep them in the
+        # single high-priority repository-context surface.
+        critical_lines.extend(semantic_graph_lines)
         critical_lines.extend(
             (fact.claim_id, fact.rendered)
             for fact in validation
@@ -1374,6 +1409,7 @@ class RepositoryContextEngine:
                 opportunity,
                 tuple(reasons),
                 semantic=semantic,
+                semantic_graph=semantic_graph,
                 rejected_edge_count=rejected_edges,
                 process_coverage=process_coverage,
             )
@@ -1414,6 +1450,7 @@ class RepositoryContextEngine:
                 opportunity,
                 ("repository_context_token_budget",),
                 semantic=semantic,
+                semantic_graph=semantic_graph,
                 rejected_edge_count=rejected_edges,
                 process_coverage=process_coverage,
             )
@@ -1475,7 +1512,26 @@ class RepositoryContextEngine:
                     - len(selected_semantic_items)
                 ),
             )
+        selected_semantic_graph_facts = tuple(
+            fact for fact in semantic_graph.facts if fact.claim_id in selected_claims
+        )
+        if selected_semantic_graph_facts != semantic_graph.facts:
+            semantic_graph = replace(
+                semantic_graph,
+                status=(
+                    SemanticGraphStatus.READY
+                    if selected_semantic_graph_facts
+                    else SemanticGraphStatus.ABSTAIN
+                ),
+                facts=selected_semantic_graph_facts,
+                truncated_count=(
+                    semantic_graph.truncated_count
+                    + len(semantic_graph.facts)
+                    - len(selected_semantic_graph_facts)
+                ),
+            )
         semantic_claims = {item.claim_id for item in semantic.items}
+        semantic_graph_claims = {item.claim_id for item in semantic_graph.facts}
         execution_claims = {view.view_id for view in execution_views}
         impact_claims = {fact.claim_id for fact in impact}
         diagnostic_claims = {fact.claim_id for fact in diagnostics}
@@ -1485,12 +1541,28 @@ class RepositoryContextEngine:
         coupled_by_id = {item.claim_id: item for item in coupled}
         convention_by_id = {item.claim_id: item for item in conventions}
         semantic_by_id = {item.claim_id: item for item in semantic.items}
+        semantic_graph_by_id = {
+            item.claim_id: item for item in semantic_graph.facts
+        }
         execution_by_id = {item.view_id: item for item in execution_views}
         impact_by_id = {item.claim_id: item for item in impact}
         diagnostic_by_id = {item.claim_id: item for item in diagnostics}
         validation_by_id = {item.claim_id: item for item in validation}
 
         def anchors_for(claim: str) -> tuple[str, ...]:
+            semantic_graph_item = semantic_graph_by_id.get(claim)
+            if semantic_graph_item is not None:
+                return tuple(
+                    dict.fromkeys(
+                        item
+                        for item in (
+                            semantic_graph_item.path,
+                            semantic_graph_item.scope,
+                            semantic_graph_item.subject,
+                        )
+                        if item
+                    )
+                )
             semantic_item = semantic_by_id.get(claim)
             if semantic_item is not None:
                 return tuple(
@@ -1564,6 +1636,8 @@ class RepositoryContextEngine:
                 "authority": (
                     "execution_observation"
                     if claim in diagnostic_claims
+                    else "deterministic_derived"
+                    if claim in semantic_graph_claims
                     else "certified_structural"
                     if claim in execution_claims or claim in impact_claims
                     else "certified_composition"
@@ -1696,6 +1770,7 @@ class RepositoryContextEngine:
             ),
             convention_coverage=convention_coverage,
             semantic_evidence=semantic,
+            semantic_graph=semantic_graph,
             token_count=_tokens(rendered),
             truncated_count=truncated,
             rejected_edge_count=rejected_edges,

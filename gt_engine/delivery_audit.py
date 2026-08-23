@@ -554,6 +554,60 @@ def audit_provider_deliveries(
                 for item in semantic.get("items") or ()
                 if isinstance(item, dict)
             }
+            semantic_graph = projection.get("semantic_graph") or {}
+            semantic_graph_facts = tuple(
+                item
+                for item in semantic_graph.get("facts") or ()
+                if isinstance(item, dict)
+            )
+            semantic_graph_ids = {
+                str(item.get("claim_id") or "") for item in semantic_graph_facts
+            }
+            semantic_graph_receipt = semantic_graph.get("receipt") or {}
+            delivered_semantic_graph_ids = semantic_graph_ids & set(delivery_claim_ids)
+            semantic_graph_support_valid = bool(
+                not delivered_semantic_graph_ids
+                or (
+                    isinstance(semantic_graph_receipt, dict)
+                    and str(semantic_graph_receipt.get("builder_version") or "")
+                    == "python-semantic-graph-v1"
+                    and str(semantic_graph_receipt.get("source_revision") or "")
+                    == str(raw.get("source_revision") or "")
+                    and int(semantic_graph_receipt.get("documents_attempted") or 0) > 0
+                    and int(semantic_graph_receipt.get("documents_indexed") or 0) > 0
+                    and all(
+                        str(item.get("claim_id") or "")
+                        and str(item.get("path") or "")
+                        and _positive_int(item.get("start_line")) > 0
+                        and str(item.get("kind") or "")
+                        in {
+                            "value_flow",
+                            "return_flow",
+                            "call_argument_flow",
+                            "shape_constraint",
+                            "control_dependency",
+                        }
+                        and str(item.get("source_revision") or "")
+                        == str(raw.get("source_revision") or "")
+                        and bool(item.get("evidence"))
+                        and bool(item.get("provenance"))
+                        and str(
+                            metadata_by_claim[
+                                str(item.get("claim_id") or "")
+                            ].get("authority")
+                            or ""
+                        )
+                        == "deterministic_derived"
+                        for item in semantic_graph_facts
+                        if str(item.get("claim_id") or "")
+                        in delivered_semantic_graph_ids
+                    )
+                )
+            )
+            if not semantic_graph_support_valid:
+                failures.append(
+                    f"{task}:repository_context_semantic_graph_support_invalid:{index}"
+                )
             execution_ids = {
                 str(item.get("view_id") or "")
                 for item in projection.get("execution_views") or ()
@@ -640,6 +694,7 @@ def audit_provider_deliveries(
             }
             supported_ids = (
                 semantic_ids
+                | semantic_graph_ids
                 | execution_ids
                 | impact_ids
                 | diagnostic_ids

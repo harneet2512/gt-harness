@@ -50,6 +50,7 @@ from minisweagent.exceptions import InterruptAgentFlow
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.litellm_model import BASH_TOOL, LitellmModel
 
+from gt_engine.batch_continuation import assess_batch_continuation
 from gt_engine.benchmark_parity import (
     RUNTIME_FIELD_ORIGINS,
     runtime_observation_hash,
@@ -5311,6 +5312,7 @@ class MiniSweCentralAgent(BaseAgent):
                             ),
                             changed_paths=retrieval_changed_paths,
                             changed_symbols=retrieval_active_symbols,
+                            task_text=instruction,
                         ),
                         RepositorySnapshot(
                             source_revision=graph_source_revision,
@@ -5348,6 +5350,7 @@ class MiniSweCentralAgent(BaseAgent):
                                 )
                             ),
                             retrieval_rank_hints=retrieval_rank_hints,
+                            documents=preemptive_repository.documents,
                         ),
                         delivered_claim_ids=frozenset(
                             delivered_repository_context_claim_ids
@@ -6486,6 +6489,15 @@ class MiniSweCentralAgent(BaseAgent):
                         }
                         for fact in repository_context_projection.validation_facts
                     )
+                    if repository_context_projection.semantic_graph is not None:
+                        repository_context_fact_rows.extend(
+                            {
+                                "path": fact.path,
+                                "symbol": fact.scope or fact.subject,
+                                "kind": fact.kind.value,
+                            }
+                            for fact in repository_context_projection.semantic_graph.facts
+                        )
                     for convention in repository_context_projection.resolved_conventions:
                         repository_context_fact_rows.append(
                             {
@@ -9589,14 +9601,22 @@ class MiniSweCentralAgent(BaseAgent):
                     # before the terminal submit exit, otherwise the final
                     # boundary would leave registered effects un-applied.
                     effects = self._features.consume_effects(action_id=actions_count, call=calls)
-                    stale_batch_barrier = (
-                        self.preflight_mode is PreflightMode.ASSISTIVE_SAFE
-                        and index + 1 < len(actions)
-                        and (
-                            proposed.operation in {ActionOperation.VALIDATE, ActionOperation.SUBMIT}
-                            or material_workspace_change
-                            or source_revision != proposed.source_revision
+                    continuation_decision = None
+                    if index + 1 < len(proposed_actions):
+                        continuation_decision = assess_batch_continuation(
+                            executed=proposed,
+                            next_action=proposed_actions[index + 1],
+                            action_returncode=int(output.get("returncode") or 0),
+                            material_workspace_change=material_workspace_change,
+                            source_revision_changed=(
+                                source_revision != proposed.source_revision
+                            ),
+                            changed_paths=tuple(changed_files),
                         )
+                    stale_batch_barrier = bool(
+                        self.preflight_mode is PreflightMode.ASSISTIVE_SAFE
+                        and continuation_decision is not None
+                        and continuation_decision.interrupt
                     )
                     if effects and not (submit or auto_submitted):
                         later_actions = actions[index + 1 :]
@@ -9658,11 +9678,15 @@ class MiniSweCentralAgent(BaseAgent):
                             self._features.record_cancelled_proposal(
                                 cancelled_proposal,
                                 mode=self.preflight_mode,
-                                reason="stale_batch_barrier",
+                                reason=continuation_decision.reason,
                             )
                         outputs.extend(
                             {
-                                "output": "Cancelled: prior action changed the decision boundary.",
+                                "output": (
+                                    "Cancelled: "
+                                    + continuation_decision.reason.replace("_", " ")
+                                    + "."
+                                ),
                                 "returncode": 2,
                                 "exception_info": "",
                             }
@@ -9671,7 +9695,7 @@ class MiniSweCentralAgent(BaseAgent):
                         self._features.record_batch_interrupt(
                             action_id=actions_count,
                             cancelled=cancelled,
-                            reason="stale_batch_barrier",
+                            reason=continuation_decision.reason,
                         )
                         break
 

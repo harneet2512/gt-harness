@@ -1,6 +1,6 @@
 """DeepSeek Mini-SWE baseline and GT feature-audit primitives.
 
-This module is deliberately independent of the nano bridge.  It validates the
+This module is deliberately independent of the legacy bridge. It validates the
 frozen 83/300 DeepSeek GT-off population and audits provider-bound GT rows
 without treating transcript text as attribution evidence.
 """

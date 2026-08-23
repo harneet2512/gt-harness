@@ -1,7 +1,7 @@
-"""Bridge between nano-harness tool dispatch and the GT Gateway.
+"""Legacy bridge between coding-agent tool dispatch and the GT Gateway.
 
 Replicates the production seam template ``_gt_gateway_deliver``
-(gt_mini_patch.py:16215-16599) with nano's tool vocabulary:
+(gt_mini_patch.py:16215-16599) with the harness tool vocabulary:
 
     bash       -> command passed through verbatim (gateway.classify_command
                   decides search/view/edit/test/submit/other)
@@ -72,7 +72,7 @@ from gt_engine.language_registry import VALIDATION_SOURCE_SUFFIXES
 MAX_DELTA_CHARS = 4000
 
 # tools.py:172 flattens a failed bash command into ToolError text ending with
-# "[exit code N]". nano gives the agent only (output_string, is_error) - the
+# "[exit code N]". The legacy seam gives the agent only (output_string, is_error) - the
 # exit code must be parsed back out of the string.
 _EXIT_CODE_RE = re.compile(r"\[exit code (-?\d+)\]\s*$")
 _AGGREGATE_CHECK_RE = re.compile(
@@ -574,7 +574,7 @@ class GTBridge:
         self._last_green_verification_action = 0
         self._last_test_outcome = ""
         # Complete, graph-independent SDLC contract.  The task text is assigned
-        # by nano immediately before task_start(), so extraction happens there.
+        # immediately before task_start(), so extraction happens there.
         self._task_contract: Any | None = None
         self._shipped_obligation_ids: set[str] = set()
         self._verified_obligation_ids: set[str] = set()
@@ -1885,7 +1885,7 @@ class GTBridge:
             )
 
     def trace_run_completed(self, result: Any) -> None:
-        """Record nano's terminal state; the benchmark reward joins offline."""
+        """Record the agent terminal state; the benchmark reward joins offline."""
         self._trace_record(
             "run.completed",
             "run",
@@ -1913,7 +1913,7 @@ class GTBridge:
         gitignored at creation and rm'd pre-snapshot on SWE). Motivation
         (TRAJECTORY_AUDIT.md): two deliveries were model-received but
         human-invisible — task-start rides the unprinted seed message and a
-        suffix past nano's [:2000] display cap never prints. This file is the
+        suffix past the legacy [:2000] display cap never prints. This file is the
         human-auditable byte record; it CONTAINS payload bytes, so it must
         never enter the graded tree (both homes guarantee that).
 
@@ -2527,7 +2527,7 @@ class GTBridge:
                 {"feature_id": "covering_red", "eligible": False,
                  "outcome": "red_not_attributable"})
             return None  # a red the edit did not plausibly cause never ships
-        # No edited_symbol claim: nano has no span-derived symbol proof, and an
+        # No edited_symbol claim: this seam has no span-derived symbol proof, and an
         # unproven name in model-facing text is worse than the generic head
         # (production's _verified_edited_symbol_for_rendering rule).
         rendered = render_covering_failure_native(
@@ -2635,13 +2635,13 @@ class GTBridge:
     # HONEST SUBSET (documented): production's imperative map covers five
     # dispositions (env-repair, falsified, new-hypothesis, alternate-surface,
     # stale-graph). Only D_HYPOTHESIS_FALSIFIED is DELIVERED here — it is the
-    # class the GT_HYPOTHESIS CAP owns and the only one nano's observables
+    # class the GT_HYPOTHESIS CAP owns and the only one the seam's observables
     # prove (an executed formal-test FAIL + the bridge's own edit record).
     # Selection still respects production's first-mapped-wins order: when a
     # higher-priority mapped disposition (e.g. env-failure -> repair) wins the
     # turn, this lane stays QUIET rather than misdelivering falsification.
     # Also NOT ported: the degenerate-loop stall union (GT_RECOVERY_LOOP needs
-    # the seam's TIDE loop detector, which nano does not track) and the
+    # the seam's TIDE loop detector, which the agent does not track) and the
     # GT_RECOVERY_ESCALATE form escalation (needs delivery-count history that
     # only matters once >1 recovery ships; we ship at most one per signature).
     # ------------------------------------------------------------------ #
@@ -3095,7 +3095,7 @@ class GTBridge:
         return tuple(changed), before_after or None
 
     # ------------------------------------------------------------------ #
-    # nano tool call -> gateway event ingredients
+    # tool call -> gateway event ingredients
     # ------------------------------------------------------------------ #
     def _event_parts(
         self,
@@ -3464,7 +3464,7 @@ class GTBridge:
         producer (verified: producers dispatch on view/edit/test/search
         semantics only), so the probe consumes GT's pure submit decision head
         directly - ``submit_gate.safe_gate_verdict`` - fed with the nearest
-        honest evidence nano possesses: executed syntax and graph-selected
+        honest evidence the harness possesses: executed syntax and graph-selected
         verification checks, unresolved observed RED state, the complete task
         contract, and fresh diff hygiene. Unavailable heads remain
         pass-with-record and never fabricate a block. A BLOCK renders as the
@@ -3507,7 +3507,7 @@ class GTBridge:
 
     # Syntax-check at most this many edited files at the submit boundary.
     _MAX_SUBMIT_SYNTAX_FILES = 10
-    # Nano owns the terminal bound with ``max_pushbacks=3``. GT remains
+    # The legacy runner owns the terminal bound with ``max_pushbacks=3``. GT remains
     # authoritative for positive unresolved evidence throughout that existing
     # budget instead of failing open after its first refusal.
     _MAX_SUBMIT_BLOCKS = 3
@@ -3627,7 +3627,7 @@ class GTBridge:
         # if the agent NEVER observed a failing test (hidden verifier tests
         # are invisible by design), the latch is None and this never fires —
         # GT only knows what the agent observed. Single-dose rides the
-        # existing bounded nano pushback economy.
+        # existing bounded legacy pushback economy.
         # Leak guard on the detail: the echoed command is the agent's OWN
         # (agent-visible by definition), but the seam law still applies —
         # if the quoted line trips contains_test_identity it degrades to the
@@ -3710,7 +3710,7 @@ class GTBridge:
         # SDLC penultimate gate: syntax success proves parseability, not
         # behavior. When enabled, a source edit must be followed by a passing
         # formal test, explicit self-check, or selected covering run. This is
-        # bounded advisory refusals using nano's existing pushback economy; GT
+        # bounded advisory refusals using the existing pushback economy; GT
         # does not create an independent unbounded loop.
         sdlc_verify_on = os.environ.get(
             "GT_SDLC_VERIFY", ""
@@ -3817,9 +3817,9 @@ class GTBridge:
             bounce_count=self.submit_bounces,
             max_bounces=self._MAX_SUBMIT_BLOCKS)
         # WIRE 3: the CompletionCertificate (GT_CERT_DELIVERY, production's own
-        # flag read — gt_mini_patch.py:22329). Built from what nano HONESTLY
+        # flag read — gt_mini_patch.py:22329). Built from what the harness HONESTLY
         # has: the frozen head, syntax/covering/hygiene results, and explicit
-        # obligation coverage. Heads nano cannot compute stay absent ->
+        # obligation coverage. Heads the harness cannot compute stay absent ->
         # UNKNOWN/NOT_APPLICABLE (visible, fail-open). Obligation coverage is
         # advisory-only in the certificate; ``cert.decision`` is
         # a pure function of the head, so the cert can NEVER turn an allow into
@@ -3888,7 +3888,7 @@ class GTBridge:
             text = render_submit_rejection(verdict.reason, verdict.detail)
         if text and self.submit_bounces:
             # A repeated positive blocker is new decision evidence only because
-            # nano acted after the prior refusal and still did not clear it.
+            # The agent acted after the prior refusal and still did not clear it.
             # Name that state so provider bytes and dedup identity remain
             # honest rather than replaying an indistinguishable capsule.
             marker = (
@@ -3935,7 +3935,7 @@ class GTBridge:
         # ships (all guards above passed). A guard-suppressed refusal (empty
         # render, leak trip, over budget) is a silent allow and must not burn
         # bounded refusal budget — otherwise a suppressed attempt could consume
-        # nano's remaining opportunity to act on real evidence.
+        # the agent's remaining opportunity to act on real evidence.
         self.submit_bounces += 1
         self._last_submit_block_reason = str(
             (submit_block or {}).get("reason") or verdict.reason or ""
@@ -4290,7 +4290,7 @@ class GTBridge:
             producer_audit_context={
                 "observation_id": f"{self._attribution.trace_id}:{self.action_index}",
                 "decision_id": f"gateway:{self.action_index}",
-                "decision_context": "nano.tool_result",
+                "decision_context": "agent.tool_result",
                 "decision_open": True,
             })
         # 3. THE ONE CALL.

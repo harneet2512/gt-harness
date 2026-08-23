@@ -1,9 +1,9 @@
-"""GroundTruth engine layer for nano-harness.
+"""GroundTruth engine layer for Mini-SWE.
 
 One entry point: :func:`create_bridge`. Returns a live :class:`~gt_engine.bridge.GTBridge`
 when ``gt_root`` names an indexable code repository and GT is not explicitly
-disabled, else ``None``. A ``None`` bridge means every nano code path behaves
-byte-identically to stock nano-harness (GT-off byte identity).
+disabled, else ``None``. A ``None`` bridge means the agent path remains
+provider-neutral (GT-off byte identity).
 """
 from __future__ import annotations
 

@@ -4550,7 +4550,7 @@ async def test_unclassified_exploration_failure_alone_does_not_split_batch(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_assistive_safe_breaks_mutating_batch_before_stale_second_action(tmp_path):
+async def test_assistive_safe_preserves_model_selected_ordered_mutation_batch(tmp_path):
     submit = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
     model = _BatchModel([["touch app.py", "rm app.py"], [submit], [submit]])
     environment = _ObservedMutationEnvironment("touch app.py", "f\t6\t2.0\t2.0\tapp.py\t\n")
@@ -4566,21 +4566,19 @@ async def test_assistive_safe_breaks_mutating_batch_before_stale_second_action(t
 
     commands = [command for command, _ in environment.commands]
     assert "touch app.py" in commands
-    assert "rm app.py" not in commands
+    assert "rm app.py" in commands
     receipt = json.loads((tmp_path / "central_receipt.json").read_text())
-    assert receipt["metrics"]["stale_batched_actions_prevented"] == 1
-    assert receipt["features"]["batch_interrupts"][0]["reason"] == "stale_batch_barrier"
-    cancelled = next(
+    assert receipt["metrics"]["stale_batched_actions_prevented"] == 0
+    executed = next(
         row
         for row in receipt["features"]["action_cycles"]
         if row["proposed"]["raw_command"] == "rm app.py"
     )
-    assert cancelled["executed"] is False
-    assert cancelled["postflight"]["status"] == "cancelled_before_dispatch"
+    assert executed["executed"] is True
 
 
 @pytest.mark.asyncio
-async def test_compound_mutating_action_breaks_batch_after_observed_directory_change(tmp_path):
+async def test_compound_mutating_action_preserves_following_read(tmp_path):
     submit = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
     model = _BatchModel([["mkdir -p work && echo made", "cat work/result"], [submit], [submit]])
     environment = _ObservedMutationEnvironment(
@@ -4599,9 +4597,9 @@ async def test_compound_mutating_action_breaks_batch_after_observed_directory_ch
 
     commands = [command for command, _ in environment.commands]
     assert "mkdir -p work && echo made" in commands
-    assert "cat work/result" not in commands
+    assert "cat work/result" in commands
     receipt = json.loads((tmp_path / "central_receipt.json").read_text())
-    assert receipt["metrics"]["stale_batched_actions_prevented"] == 1
+    assert receipt["metrics"]["stale_batched_actions_prevented"] == 0
 
 
 @pytest.mark.asyncio

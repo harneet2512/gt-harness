@@ -796,7 +796,7 @@ def test_carried_delivery_does_not_overwrite_immediate_response_action():
 
 
 def test_transcript_parser_consumes_gt_index_diagnostics_as_structured_noise():
-    from scripts.gt_audit import parse_transcript
+    from gt_engine.transcript_parser import parse_transcript
 
     transcript = (
         "GroundTruth: gt-index failed: Pass 1: discovering files\n"

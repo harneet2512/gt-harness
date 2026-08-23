@@ -20,37 +20,6 @@ from gt_harness.treatments import (
     BareTreatment,
     GroundTruthTreatment,
 )
-from nano.agent import Agent
-from nano.providers import StepResult, ToolCall, Usage
-
-
-class Provider:
-    def __init__(self) -> None:
-        self.messages = []
-        self.calls = 0
-
-    def step(self, messages, tools, system):
-        self.messages.append(messages)
-        self.calls += 1
-        if self.calls == 1:
-            return StepResult(
-                text="",
-                tool_calls=[ToolCall(id="1", name="bash", arguments={"command": "echo ok"})],
-                stop_reason="tool_use",
-                usage=Usage(input_tokens=1, output_tokens=1),
-            )
-        return StepResult(
-            text="done",
-            tool_calls=[],
-            stop_reason="end_turn",
-            usage=Usage(input_tokens=1, output_tokens=1),
-        )
-
-
-class Bash:
-    def run(self, command: str, timeout: int = 60) -> str:
-        assert command == "echo ok"
-        return "ok"
 
 
 def test_bare_treatment_is_a_strict_no_op() -> None:
@@ -61,74 +30,27 @@ def test_bare_treatment_is_a_strict_no_op() -> None:
     assert treatment.finalize(None)["provider_calls"] == 0
 
 
-def test_treatment_cannot_rewrite_or_block_agent_tool_action() -> None:
-    class Treatment(BareTreatment):
-        def prepare(self, task: str) -> str:
-            return "repository fact"
-
-        def after_action(self, name, arguments, output, is_error):
-            self.observed = (name, dict(arguments), output, is_error)
-
-    provider = Provider()
-    treatment = Treatment()
-    result = Agent(
-        provider=provider,
-        system="system",
-        bash=Bash(),
-        treatment=treatment,
-        verify=False,
-    ).run("task")
-
-    assert result.stop_reason == "end_turn"
-    assert treatment.observed == ("bash", {"command": "echo ok", "timeout": 60}, "ok", False)
-    assert provider.messages[0][0]["content"] == "task\n\nrepository fact"
-
-
-def test_groundtruth_not_applicable_is_explicit_and_agent_still_runs(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "not-code"
-    root.mkdir()
-    treatment = GroundTruthTreatment(root)
-
-    provider = Provider()
-    result = Agent(
-        provider=provider,
-        system="system",
-        bash=Bash(),
-        treatment=treatment,
-        verify=False,
-    ).run("task")
-
-    assert result.stop_reason == "end_turn"
-    assert provider.calls == 2
-    receipt = treatment.finalize(None)
-    assert receipt["treatment"] == "groundtruth"
-    assert receipt["treatment_status"] == "NOT_APPLICABLE"
-    assert receipt["provider_calls"] == 0
-    assert receipt["graph_available"] is False
-    assert receipt["delivery_count"] == 0
-
-
 def test_run_cli_records_not_applicable_treatment_and_runs_provider(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import nano.cli
+    import gt_harness.miniswe_runner as runner
     from gt_harness.cli import _run_agent
 
-    class CompletingProvider:
-        def step(self, *_args, **_kwargs):
-            return StepResult(
-                text="done",
-                tool_calls=[],
-                stop_reason="end_turn",
-                usage=Usage(input_tokens=1, output_tokens=1),
-            )
-
+    fake_agent = SimpleNamespace(
+        config=SimpleNamespace(system_template="system", instance_template="task={{task}}")
+    )
+    monkeypatch.setattr(runner, "build_miniswe_agent", lambda **_kwargs: fake_agent)
     monkeypatch.setattr(
-        nano.cli,
-        "build_provider",
-        lambda **_kwargs: CompletingProvider(),
+        runner,
+        "run_miniswe_agent",
+        lambda _agent, _task: SimpleNamespace(
+            stop_reason="Submitted",
+            iterations=1,
+            total_input_tokens=1,
+            total_output_tokens=1,
+            total_cache_read_tokens=0,
+            transcript=({"role": "assistant", "content": "done"},),
+        ),
     )
     root = tmp_path / "not-code-cli"
     root.mkdir()
@@ -365,32 +287,33 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
 def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import nano.agent
-    import nano.cli
+    import gt_harness.miniswe_runner as runner
     from gt_harness.cli import _run_agent
 
     captures: list[dict[str, object]] = []
 
-    class FakeAgent:
-        def __init__(self, **kwargs):
-            captures.append(kwargs)
-            self.treatment = kwargs["treatment"]
+    def build(**kwargs):
+        captures.append(kwargs)
+        return SimpleNamespace(
+            config=SimpleNamespace(
+                system_template="miniswe-system",
+                instance_template="miniswe-task={{task}}",
+            ),
+            treatment=kwargs["treatment"],
+        )
 
-        def run(self, _task: str):
-            return SimpleNamespace(
-                stop_reason="end_turn",
-                iterations=1,
-                total_input_tokens=10,
-                total_output_tokens=2,
-                total_cache_read_tokens=0,
-                transcript=[
-                    {"type": "assistant"},
-                    {"type": "treatment_receipt", "receipt": self.treatment.finalize(None)},
-                ],
-            )
+    def run(agent, _task):
+        return SimpleNamespace(
+            stop_reason="Submitted",
+            iterations=1,
+            total_input_tokens=10,
+            total_output_tokens=2,
+            total_cache_read_tokens=0,
+            transcript=({"role": "assistant", "content": "done"},),
+        )
 
-    monkeypatch.setattr(nano.agent, "Agent", FakeAgent)
-    monkeypatch.setattr(nano.cli, "build_provider", lambda **_kwargs: object())
+    monkeypatch.setattr(runner, "build_miniswe_agent", build)
+    monkeypatch.setattr(runner, "run_miniswe_agent", run)
     common = {
         "task": "Fix the parser",
         "model": "provider/model",
@@ -406,7 +329,8 @@ def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
     assert _run_agent(SimpleNamespace(**common, treatment="bare")) == 0
     assert _run_agent(SimpleNamespace(**common, treatment="groundtruth")) == 0
 
-    assert captures[0]["system"] == captures[1]["system"]
+    assert captures[0]["model"] == captures[1]["model"]
+    assert captures[0]["base_url"] == captures[1]["base_url"]
     assert captures[0]["max_iterations"] == captures[1]["max_iterations"]
     assert captures[0]["time_budget_seconds"] == captures[1]["time_budget_seconds"]
     assert isinstance(captures[0]["treatment"], BareTreatment)
@@ -420,7 +344,10 @@ def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
     assert all(receipt["task_fingerprint"] for receipt in receipts)
     assert all(receipt["task_id"].startswith("task-") for receipt in receipts)
     assert all(receipt["trial_id"] == "1" for receipt in receipts)
-    assert all(receipt["agent_scaffold"] == "nano.agent.Agent" for receipt in receipts)
+    assert all(
+        receipt["agent_scaffold"] == "minisweagent.agents.default.DefaultAgent"
+        for receipt in receipts
+    )
     assert len({receipt["system_prompt_sha256"] for receipt in receipts}) == 1
     assert len({receipt["tool_policy_sha256"] for receipt in receipts}) == 1
     assert len({receipt["repository_start"]["source_revision"] for receipt in receipts}) == 1
@@ -429,45 +356,37 @@ def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
 def test_run_cli_checkpoints_receipt_before_agent_finishes(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import nano.agent
-    import nano.cli
+    import gt_harness.miniswe_runner as runner
     from gt_harness.cli import _run_agent
 
     output = tmp_path / "gt-run.json"
 
-    class CheckpointingAgent:
-        def __init__(self, **kwargs):
-            self.on_event = kwargs["on_event"]
-            self.treatment = kwargs["treatment"]
+    def build(**kwargs):
+        return SimpleNamespace(
+            config=SimpleNamespace(system_template="system", instance_template="task"),
+            on_message=kwargs["on_message"],
+            treatment=kwargs["treatment"],
+        )
 
-        def run(self, _task: str):
-            initial = json.loads(output.read_text(encoding="utf-8"))
-            assert initial["status"] == "RUNNING"
-            assert initial["provider_calls"] == 0
-            self.on_event({"type": "assistant", "text": "working", "tool_calls": []})
-            self.on_event(
-                {"type": "stats", "iteration": 1, "input_tokens": 12,
-                 "output_tokens": 3}
-            )
-            checkpoint = json.loads(output.read_text(encoding="utf-8"))
-            assert checkpoint["status"] == "RUNNING"
-            assert checkpoint["provider_calls"] == 1
-            assert checkpoint["input_tokens"] == 12
-            treatment_receipt = self.treatment.finalize(None)
-            return SimpleNamespace(
-                stop_reason="end_turn",
-                iterations=1,
-                total_input_tokens=12,
-                total_output_tokens=3,
-                total_cache_read_tokens=0,
-                transcript=[
-                    {"type": "assistant", "text": "working"},
-                    {"type": "treatment_receipt", "receipt": treatment_receipt},
-                ],
-            )
+    def run(agent, _task):
+        initial = json.loads(output.read_text(encoding="utf-8"))
+        assert initial["status"] == "RUNNING"
+        assert initial["provider_calls"] == 0
+        agent.on_message({"role": "assistant", "content": "working", "extra": {}})
+        checkpoint = json.loads(output.read_text(encoding="utf-8"))
+        assert checkpoint["status"] == "RUNNING"
+        assert checkpoint["provider_calls"] == 1
+        return SimpleNamespace(
+            stop_reason="Submitted",
+            iterations=1,
+            total_input_tokens=12,
+            total_output_tokens=3,
+            total_cache_read_tokens=0,
+            transcript=({"role": "assistant", "content": "working"},),
+        )
 
-    monkeypatch.setattr(nano.agent, "Agent", CheckpointingAgent)
-    monkeypatch.setattr(nano.cli, "build_provider", lambda **_kwargs: object())
+    monkeypatch.setattr(runner, "build_miniswe_agent", build)
+    monkeypatch.setattr(runner, "run_miniswe_agent", run)
     args = SimpleNamespace(
         task="Do work",
         model="provider/model",

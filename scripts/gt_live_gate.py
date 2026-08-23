@@ -1,6 +1,6 @@
 """Acceptance gate for a live GT-on Mini-SWE campaign.
 
-The input is the machine JSON emitted by ``scripts/gt_audit.py``. This gate
+The input follows the archived deterministic conduct-audit JSON schema. This gate
 does not inspect transcript markers. Attribution comes from the hash-chained
 trigger/producer/delivery/provider/response records already verified by the
 auditor.

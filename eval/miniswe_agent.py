@@ -8,7 +8,7 @@ treatment. Version 2.3.0 is the default; a closed 2.2.8 override exists only
 for execution matched to the historical baseline.
 
 ``uv tool install`` does not emit a ~/.local/bin/python shim; the tool venv's
-interpreter lives at the layout GTNanoAgent already relies on.
+    interpreter lives inside uv's managed tool environment.
 """
 
 from __future__ import annotations
@@ -106,7 +106,6 @@ class MiniSweAgent(BaseInstalledAgent):
         miniswe_version = _miniswe_agent_version()
         await environment.upload_dir(_REPO_ROOT / "scripts", f"{_REMOTE_DIR}/scripts")
         await environment.upload_dir(_REPO_ROOT / "eval", f"{_REMOTE_DIR}/eval")
-        await environment.upload_dir(_REPO_ROOT / "nano", f"{_REMOTE_DIR}/nano")
         await environment.upload_dir(
             _REPO_ROOT / "gt_harness", f"{_REMOTE_DIR}/gt_harness"
         )

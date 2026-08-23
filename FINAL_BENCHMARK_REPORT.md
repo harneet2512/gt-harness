@@ -10,7 +10,7 @@ GitHub Actions: `32635379908`
 
 Artifact: `tb2-gt-32635379908` (942,358 bytes compressed)
 
-The authorized experiment was one GT-only Terminal-Bench 2.0 smoke with `stealth/ox-alpha`, mini-swe-agent through the production `GTNanoAgent`, 20 frozen tasks, one attempt, temperature 1, timeout multiplier 1.0, and concurrency 10. It was not a Bare/GT/GitNexus causal benchmark.
+The historical experiment was one GT-only Terminal-Bench 2.0 smoke with `stealth/ox-alpha`, Mini-SWE-Agent through a now-retired compatibility wrapper, 20 frozen tasks, one attempt, temperature 1, timeout multiplier 1.0, and concurrency 10. It was not a Bare/GT/GitNexus causal benchmark and is not evidence about the current Mini-SWE-only runner.
 
 ## Outcome
 

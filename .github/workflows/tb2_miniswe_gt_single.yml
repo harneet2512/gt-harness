@@ -57,7 +57,7 @@ jobs:
       - name: Prove gt-index schema includes FTS5
         run: |
           set -euo pipefail
-          ./vendor/gt-index-linux-amd64 -root nano -output /tmp/gt-smoke.db
+          ./vendor/gt-index-linux-amd64 -root gt_engine -output /tmp/gt-smoke.db
           python - <<'PY'
           import sqlite3
 

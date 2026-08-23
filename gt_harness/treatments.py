@@ -251,6 +251,8 @@ class GroundTruthTreatment(BareTreatment):
             "supporting_files": [
                 compact_target(item) for item in normalized_packet["supporting_files"]
             ],
+            "semantic_facts": normalized_packet["semantic_facts"],
+            "semantic_graph_receipt": normalized_packet["semantic_graph_receipt"],
             "execution_paths": normalized_packet["execution_paths"],
             "change_surface": normalized_packet["change_surface"],
             "affected_tests": normalized_packet["affected_tests"],

@@ -39,10 +39,16 @@ repository working tree
   -> RepositoryContextCompiler
      (production-path ranking, exact symbol anchors, certified direct relationships,
       process/change/test/validation projection, uncertainty and evidence ledger)
+  -> bounded SemanticGraph projection over the selected exact source spans
+     (Python AST value/return/control flow, uniquely bound local call arguments,
+      explicit tensor-shape assertions, and versioned library contracts;
+      source-revision receipt, no model-authored evidence, no guessed method binding)
   -> compact gt.agent_context.v3 provider packet
   -> GroundTruthTreatment in gt-harness run
      (or direct CLI query / optional MCP adapter)
-  -> unchanged common coding-agent action loop
+  -> pinned Mini-SWE-Agent 2.2.8 action loop
+     (ordered action batches continue unless failed validation precedes submit,
+      a must-be-absent precondition is invalidated, or revision change is unexplained)
 ```
 
 No provider credential or provider call is required to build, validate, update, persist, or query the graph.
@@ -97,14 +103,16 @@ anchors, so a same-named constructor cannot make a class query ambiguous.
 | Area | Classification | Disposition |
 |---|---|---|
 | `gt_harness/` | PRODUCTION | Canonical benchmarking CLI, treatment, comparison/certification, optional MCP adapter, and source provisioning |
+| `gt_harness/miniswe_runner.py` | PRODUCTION | Sole in-process coding-agent runner; pinned Mini-SWE-Agent loop with the GT treatment seam and credential-isolated repository shell |
+| `gt_engine/semantic_graph.py` | PRODUCTION | Deterministic, source-receipted semantic facts admitted by the context compiler; unsupported/ambiguous cases abstain or declare limitations |
+| `gt_engine/batch_continuation.py` | PRODUCTION | Dependency-aware Mini-SWE batch continuation policy; never cancels later mutations merely because an earlier ordered mutation changed the checkout |
 | `gt_engine/repository_graph_service.py` | PRODUCTION | Sole graph readiness/lifecycle/query boundary |
 | `vendor/gt-index-src/` | PRODUCTION | Source-built graph writer; upstream provenance plus audited overlay |
 | `src/groundtruth/` | PRODUCTION SUPPORT / MIGRATION SOURCE | First-party GT capabilities retained; only code reached from the canonical service is production until migration finishes |
-| `nano/` | PRODUCTION | Common model/provider/tool agent scaffold |
-| `eval/tb_agent.py` | BENCHMARK | Official Harbor Bare/GT adapter; passes dataset task identity and invokes `gt-harness run` |
-| `eval/miniswe_agent.py`, historical central agents | LEGACY BENCHMARK | Retained for old-result reconstruction; not the canonical prerelease treatment |
+| `eval/miniswe_agent.py` | BENCHMARK | Official Harbor Mini-SWE adapter and result/trajectory boundary |
+| `eval/gt_central_agent.py` | BENCHMARK / RESEARCH | Mini-SWE-compatible deterministic treatment laboratory; not a separate agent scaffold |
 | `gt_engine/indexer.py:refresh_index_files`, `gt_engine/bridge.py`, central runtime and historical control layers | LEGACY / RESEARCH pending parity audit | File-keyed refresh and older control paths are not the official CLI/MCP lifecycle; do not delete until consumers and unique behavior are classified |
-| `.github/workflows/tb2_gt.yml` | BENCHMARK CANDIDATE | Official GT-Harness/Harbor path; fail-closed authorization, source install, exact treatment receipts, and hash-bound grader outcomes |
+| `.github/workflows/tb2_miniswe_*.yml` | BENCHMARK | Mini-SWE-only Harbor paths; fail-closed authorization, source install, exact treatment receipts, and hash-bound grader outcomes |
 | historical central workflows and `gt_finalstand/` | LEGACY evidence | Cannot certify the prerelease and are not authorized paid treatment paths |
 | generated head-to-head outputs, historical run artifacts, broken `artifact_deepswe` configs | DELETE (completed) | Removed after zero production consumers and missing referenced modules were verified; frozen tag retains recovery history |
 | vendored wheel and prebuilt Linux binary | DELETE (completed) | Removed; frozen tag retains recovery history |

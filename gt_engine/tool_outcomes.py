@@ -1,4 +1,4 @@
-"""Deterministic taxonomy for nano tool observations."""
+"""Deterministic taxonomy for coding-agent tool observations."""
 from __future__ import annotations
 
 import hashlib

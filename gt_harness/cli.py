@@ -275,11 +275,12 @@ def _run_repository_identity(root: Path) -> dict[str, object]:
 
 
 def _run_agent(args: argparse.Namespace) -> int:
+    from gt_harness.miniswe_runner import (
+        BASH_TOOL,
+        build_miniswe_agent,
+        run_miniswe_agent,
+    )
     from gt_harness.treatments import BareTreatment, GroundTruthTreatment
-    from nano.agent import Agent
-    from nano.cli import _print_event, build_provider
-    from nano.prompts import SYSTEM_PROMPT
-    from nano.tools import TOOLS
 
     root = Path(args.root).resolve()
     temperature = getattr(args, "temperature", None)
@@ -292,7 +293,7 @@ def _run_agent(args: argparse.Namespace) -> int:
     task_id = str(getattr(args, "task_id", None) or f"task-{task_fingerprint[:16]}")
     trial_id = str(getattr(args, "trial_id", "1") or "1")
     base_url = getattr(args, "base_url", None)
-    run_configuration = {
+    run_configuration: dict[str, object] = {
         "model": args.model,
         "base_url_configured": bool(base_url),
         "base_url_sha256": (
@@ -301,9 +302,10 @@ def _run_agent(args: argparse.Namespace) -> int:
         "temperature": temperature,
         "max_iterations": int(args.max_iterations),
         "time_budget_seconds": args.time_budget_seconds,
-        "agent_scaffold": "nano.agent.Agent",
-        "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
-        "tool_policy_sha256": _sha256_json(TOOLS),
+        "agent_scaffold": "minisweagent.agents.default.DefaultAgent",
+        "agent_scaffold_version": "2.2.8",
+        "system_prompt_sha256": None,
+        "tool_policy_sha256": _sha256_json(BASH_TOOL),
     }
     repository_start = _run_repository_identity(root)
     output_path = (
@@ -373,21 +375,17 @@ def _run_agent(args: argparse.Namespace) -> int:
             },
         )
 
-    def handle_event(event: dict[str, object]) -> None:
+    def handle_message(message: dict[str, object]) -> None:
         nonlocal checkpoint_provider_calls
         nonlocal checkpoint_input_tokens
         nonlocal checkpoint_output_tokens
         nonlocal checkpoint_repository_end
-        _print_event(event)
-        normalized = _receipt_event(event)
+        normalized = _receipt_event(message)
         checkpoint_events.append(normalized)
-        event_type = str(normalized.get("type") or "")
-        if event_type == "assistant":
+        role = str(normalized.get("role") or "")
+        if role == "assistant":
             checkpoint_provider_calls += 1
-        elif event_type == "stats":
-            checkpoint_input_tokens = int(normalized.get("input_tokens") or 0)
-            checkpoint_output_tokens = int(normalized.get("output_tokens") or 0)
-        elif event_type == "tool_result":
+        if role in {"tool", "user"} and normalized.get("extra"):
             try:
                 checkpoint_repository_end = _run_repository_identity(root)
             except Exception:  # noqa: BLE001 - next event/final receipt can recover
@@ -395,19 +393,24 @@ def _run_agent(args: argparse.Namespace) -> int:
         write_checkpoint()
 
     try:
-        provider = build_provider(
+        agent = build_miniswe_agent(
             model=args.model,
+            root=root,
+            treatment=treatment,
             base_url=base_url,
             temperature=temperature,
-        )
-        agent = Agent(
-            provider=provider,
-            system=SYSTEM_PROMPT,
             max_iterations=args.max_iterations,
-            on_event=handle_event,
-            treatment=treatment,
             time_budget_seconds=args.time_budget_seconds,
+            trajectory_path=output_path.with_suffix(".trajectory.json"),
+            on_message=handle_message,
         )
+        run_configuration["system_prompt_sha256"] = hashlib.sha256(
+            (
+                agent.config.system_template
+                + "\x1f"
+                + agent.config.instance_template
+            ).encode("utf-8")
+        ).hexdigest()
         # Build and freeze the initial GT packet before the first checkpoint.
         # Agent.run invokes prepare again, but GroundTruthTreatment caches the
         # exact packet, so this remains one production delivery.
@@ -447,7 +450,7 @@ def _run_agent(args: argparse.Namespace) -> int:
         _emit({**receipt, "receipt_path": str(output_path)})
         return 1
     try:
-        result = agent.run(args.task)
+        result = run_miniswe_agent(agent, args.task)
     except Exception as exc:  # noqa: BLE001 - pre-provider failure needs a receipt
         try:
             treatment_receipt = treatment.finalize(None)
@@ -510,15 +513,12 @@ def _run_agent(args: argparse.Namespace) -> int:
             }
         )
         return 1
-    treatment_receipt = next(
-        (
-            dict(row["receipt"])
-            for row in reversed(result.transcript)
-            if row.get("type") == "treatment_receipt" and isinstance(row.get("receipt"), dict)
-        ),
-        None,
-    )
-    provider_calls = sum(1 for row in result.transcript if row.get("type") == "assistant")
+    treatment_receipt = treatment.finalize(result)
+    provider_calls = result.iterations
+    checkpoint_input_tokens = result.total_input_tokens
+    checkpoint_output_tokens = result.total_output_tokens
+    completed_normally = result.stop_reason in {"Submitted", "LimitsExceeded"}
+    transcript = [*result.transcript, {"type": "treatment_receipt", "receipt": treatment_receipt}]
     receipt = {
         "schema": "gt.run_receipt.v1",
         "run_id": run_id,
@@ -526,7 +526,7 @@ def _run_agent(args: argparse.Namespace) -> int:
         "task_fingerprint": task_fingerprint,
         "trial_id": trial_id,
         "task": args.task,
-        "status": "COMPLETED" if result.stop_reason == "end_turn" else "ERROR",
+        "status": "COMPLETED" if completed_normally else "ERROR",
         "started": started,
         "completed": _now(),
         "duration_ms": round((time.perf_counter() - started_clock) * 1000, 3),
@@ -549,12 +549,9 @@ def _run_agent(args: argparse.Namespace) -> int:
         "output_tokens": result.total_output_tokens,
         "cached_tokens": result.total_cache_read_tokens,
         "treatment_receipt": treatment_receipt,
-        "treatment_receipt_present": treatment_receipt is not None,
-        "transcript": result.transcript,
+        "treatment_receipt_present": True,
+        "transcript": transcript,
     }
-    if treatment_receipt is None:
-        receipt["status"] = "ERROR"
-        receipt["error_type"] = "treatment_receipt_missing"
     _write_json_atomic(output_path, receipt)
     _emit(
         {
@@ -564,10 +561,10 @@ def _run_agent(args: argparse.Namespace) -> int:
             "stop_reason": result.stop_reason,
             "provider_calls": provider_calls,
             "receipt_path": str(output_path),
-            "treatment_receipt_present": treatment_receipt is not None,
+            "treatment_receipt_present": True,
         }
     )
-    return 0 if result.stop_reason == "end_turn" and treatment_receipt is not None else 1
+    return 0 if completed_normally else 1
 
 
 def main(argv: list[str] | None = None) -> int:
