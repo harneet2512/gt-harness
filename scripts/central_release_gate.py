@@ -989,13 +989,13 @@ def _contribution_budget(receipt: dict[str, Any], label: str) -> ReleaseGateChec
             prepared_not_sent = [
                 row
                 for row in calls
-                if row.get("dispatch_status") == "prepared_not_sent"
+                if row.get("dispatch_status") in {"prepared", "prepared_not_sent"}
             ]
             invalid_statuses = [
                 row.get("dispatch_status")
                 for row in calls
                 if row.get("dispatch_status")
-                not in {None, "dispatched", "prepared_not_sent"}
+                not in {None, "dispatched", "prepared", "prepared_not_sent"}
             ]
             if invalid_statuses:
                 failures.append(f"{label}:contribution_dispatch_status_invalid")

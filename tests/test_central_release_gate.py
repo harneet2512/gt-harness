@@ -2172,6 +2172,40 @@ def test_runtime_barrier_preserves_temporal_source_less_applicability() -> None:
     assert check.passed is True
 
 
+def test_release_gate_treats_legacy_prepared_contribution_as_unsent():
+    receipt = {
+        "component_configuration": {
+            "gt_request_token_budget": 1200,
+            "gt_task_evidence_budget_tokens": 4096,
+        },
+        "model_call_contexts": [{}],
+        "contribution_compiler": {
+            "calls": [
+                {
+                    "token_budget": 1200,
+                    "task_budget_tokens": 0,
+                    "task_budget_token_limit": 4096,
+                    "payload_tokens": 0,
+                    "candidate_count": 0,
+                    "accounted_count": 0,
+                    "dispatch_status": "prepared",
+                }
+            ],
+            "task_budget": {
+                "token_budget": 4096,
+                "critical_reserve_tokens": 512,
+                "used_regular_tokens": 0,
+                "used_critical_tokens": 0,
+                "used_tokens": 0,
+            },
+        },
+    }
+
+    check = _contribution_budget(receipt, "task-legacy")
+
+    assert check.passed is True
+
+
 def test_release_rejects_equal_length_assistant_history_mutation() -> None:
     receipt = _relational_treatment()
     receipt["model_call_contexts"][0]["context_compiler"].update(

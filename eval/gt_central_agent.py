@@ -7393,6 +7393,16 @@ class MiniSweCentralAgent(BaseAgent):
                                 "certified_opportunity": delivery_metadata.get(
                                     "certified_opportunity"
                                 ),
+                                "certified_nonlocal_relation": bool(
+                                    delivery_metadata.get("certified_nonlocal_relation")
+                                ),
+                                "relation": delivery_metadata.get("relation", ""),
+                                "relation_endpoint": delivery_metadata.get(
+                                    "relation_endpoint", ""
+                                ),
+                                "certified_predecision_gap": bool(
+                                    delivery_metadata.get("certified_predecision_gap")
+                                ),
                                 "decision_need_id": delivery_metadata.get(
                                     "decision_need_id"
                                 ),
