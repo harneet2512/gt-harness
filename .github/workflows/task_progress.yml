@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: "350"
+      checkpoint_every:
+        description: "Emit a durable progress checkpoint after this many completed tasks"
+        required: false
+        type: string
+        default: "20"
 
 permissions:
   actions: read
@@ -54,6 +59,8 @@ jobs:
           TASK_JOB_REGEX: ${{ inputs.task_job_regex }}
           GATE_JOB_REGEX: ${{ inputs.gate_job_regex }}
           POLL_SECONDS: ${{ inputs.poll_seconds }}
+          CHECKPOINT_EVERY: ${{ inputs.checkpoint_every }}
+          MONITOR_TIMEOUT_MINUTES: ${{ inputs.monitor_timeout_minutes }}
         run: |
           set -euo pipefail
 
@@ -70,7 +77,14 @@ jobs:
           [[ "$expected" =~ ^[0-9]+$ ]] || expected=0
 
           final_stats="0 0 0 0 0 0 0 0"
-          deadline=$(( $(date +%s) + 350 * 60 ))
+          checkpoints_file="$RUNNER_TEMP/task_progress_checkpoints.jsonl"
+          : > "$checkpoints_file"
+          checkpoint_every="${CHECKPOINT_EVERY:-20}"
+          [[ "$checkpoint_every" =~ ^[1-9][0-9]*$ ]] || checkpoint_every=20
+          next_checkpoint="$checkpoint_every"
+          monitor_minutes="${MONITOR_TIMEOUT_MINUTES:-350}"
+          [[ "$monitor_minutes" =~ ^[1-9][0-9]*$ ]] || monitor_minutes=350
+          deadline=$(( $(date +%s) + monitor_minutes * 60 ))
           while (( $(date +%s) < deadline )); do
             jobs_url="https://api.github.com/repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100"
             if ! jobs_json="$(curl --fail --silent --show-error --retry 3 "${api_headers[@]}" "$jobs_url")"; then
@@ -93,9 +107,20 @@ jobs:
               ] | @tsv' <<< "$jobs_json")"
             read -r observed completed success failed infra_timeout cancelled in_progress queued <<< "$stats"
             final_stats="$observed $completed $success $failed $infra_timeout $cancelled $in_progress $queued"
-
             total="$expected"
             if (( total == 0 )); then total="$observed"; fi
+            while (( completed >= next_checkpoint )); do
+              jq -cn --argjson checkpoint "$next_checkpoint" --argjson total "$total" \
+                --argjson completed "$completed" --argjson success "$success" \
+                --argjson failed "$failed" --argjson infra_timeout "$infra_timeout" \
+                --argjson cancelled "$cancelled" --argjson in_progress "$in_progress" \
+                --argjson queued "$queued" \
+                '{checkpoint, total, completed, success, failed, infra_timeout, cancelled, in_progress, queued}' \
+                >> "$checkpoints_file"
+              echo "TASK_PROGRESS_CHECKPOINT checkpoint=${next_checkpoint} total=${total} completed=${completed} success=${success} failed=${failed} infra_timeout=${infra_timeout} cancelled=${cancelled} in_progress=${in_progress} queued=${queued}"
+              next_checkpoint=$(( next_checkpoint + checkpoint_every ))
+            done
+
             remaining=$(( total - completed )); (( remaining < 0 )) && remaining=0
             echo "TASK_PROGRESS total=${total} completed=${completed} success=${success} failed=${failed} infra_timeout=${infra_timeout} cancelled=${cancelled} in_progress=${in_progress} queued=${queued} remaining=${remaining}"
 
@@ -130,3 +155,15 @@ jobs:
             echo "| Queued | ${queued} |"
             echo "| Remaining | ${remaining} |"
           } >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "### Checkpoints (every ${checkpoint_every} completed tasks)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```jsonl' >> "$GITHUB_STEP_SUMMARY"
+          cat "$checkpoints_file" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload durable progress checkpoints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-progress-${{ github.run_id }}
+          path: ${{ runner.temp }}/task_progress_checkpoints.jsonl
+          if-no-files-found: error
