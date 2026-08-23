@@ -1,7 +1,7 @@
 {
   "schema": "gt.release_manifest.v2",
   "release_id": "gt-prerelease-ox-alpha-smoke20-2026-08-23-v10",
-  "runtime_commit": "f948f8ef994014089ae84b62e36cf72a4cfe3341",
+  "runtime_commit": "1481c292c725e9d40b30ad88ee730bbe1c3b4600",
   "benchmark_authorized": true,
   "authorization_scope": "one replacement GT-only 20-task end-to-end smoke using the production Mini-SWE central agent after the Nano run exposed timeout finalization, initial-packet durability, and Rich rendering defects; not broad superiority certification",
   "authorization_blockers": [],
@@ -9,7 +9,7 @@
     "tb2_miniswe_ox_alpha_diagnostic.yml"
   ],
   "product_certification": {
-    "implementation_commit": "f948f8ef994014089ae84b62e36cf72a4cfe3341",
+    "implementation_commit": "1481c292c725e9d40b30ad88ee730bbe1c3b4600",
     "github_actions_provider_free_run": "32634873373",
     "codespaces_status": "CERTIFIED_WITH_DECLARED_LIMITATIONS",
     "provider_calls": 0
