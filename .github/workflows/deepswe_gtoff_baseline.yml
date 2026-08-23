@@ -255,9 +255,17 @@ jobs:
               except Exception:
                   continue
               task = rj.parent.parent.name.split("__")[0]
-              rew = (r.get("verifier_result") or {}).get("rewards") or {}
+              verifier = r.get("verifier_result")
+              verifier = verifier if isinstance(verifier, dict) else {}
+              rew = verifier.get("rewards") or {}
+              rew = rew if isinstance(rew, dict) else {}
+              agent = r.get("agent_result")
+              agent = agent if isinstance(agent, dict) else {}
+              metadata = agent.get("metadata")
+              metadata = metadata if isinstance(metadata, dict) else {}
               rows.append({"task": task, "reward": rew.get("reward"),
-                           "exit": (r.get("agent_result") or {}).get("metadata", {}).get("exit_status")})
+                           "exit": metadata.get("exit_status"),
+                           "exception": bool(r.get("exception_info"))})
           graded = [x for x in rows if x["reward"] is not None]
           solved = [x for x in graded if x["reward"] == 1.0]
           print(f"## DeepSWE v1.1 GT-off result ({len(rows)} returned / {len(graded)} graded / {len(solved)} solved)")
@@ -265,7 +273,10 @@ jobs:
               print(f"{x['task']}: reward={x['reward']} exit={x['exit']}")
           Path("gtoff_summary.json").write_text(json.dumps({
               "n_returned": len(rows), "n_graded": len(graded),
-              "n_solved": len(solved), "solved": sorted(x["task"] for x in solved),
+              "n_ungraded": len(rows) - len(graded),
+              "n_solved": len(solved), "n_unsolved": len(graded) - len(solved),
+              "solved": sorted(x["task"] for x in solved),
+              "ungraded": sorted(x["task"] for x in rows if x["reward"] is None),
               "rows": rows}, indent=2), encoding="utf-8")
           EOF
       - name: Upload summary
