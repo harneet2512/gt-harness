@@ -185,6 +185,9 @@ class GroundTruthTreatment(BareTreatment):
     )
     dense_receipt: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     dense_error: str = field(default="", init=False, repr=False)
+    dense_query_receipts: list[dict[str, Any]] = field(
+        default_factory=list, init=False, repr=False
+    )
     projection_receipts: list[dict[str, Any]] = field(
         default_factory=list, init=False, repr=False
     )
@@ -287,6 +290,19 @@ class GroundTruthTreatment(BareTreatment):
                     if item
                 ),
                 limit=12,
+            )
+            self.dense_query_receipts.append(
+                {
+                    "query_ready": dense_query.query_ready,
+                    "status": dense_query.status.value,
+                    "source_revision": dense_query.source_revision,
+                    "model_identity": dense_query.model_identity,
+                    "candidate_count": len(dense_query.candidates),
+                    "candidate_paths": [
+                        candidate.path for candidate in dense_query.candidates[:12]
+                    ],
+                    "degraded_reasons": list(dense_query.degraded_reasons),
+                }
             )
             if dense_query.query_ready:
                 dense_candidates = tuple(
@@ -915,6 +931,7 @@ class GroundTruthTreatment(BareTreatment):
             "degraded_reasons": list(receipt.degraded_reasons),
             "retrieval_mode": self.retrieval_mode,
             "dense_index_receipt": dict(self.dense_receipt),
+            "dense_query_receipts": list(self.dense_query_receipts),
             "dense_error": self.dense_error or None,
             "graph_projection_receipts": list(self.projection_receipts),
             "errors": list(dict.fromkeys(self.errors)),

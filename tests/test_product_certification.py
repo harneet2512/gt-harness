@@ -59,6 +59,9 @@ def _bundle(tmp_path: Path, repository: Path) -> Path:
             "same_observation": True,
             "raw_output_preserved": True,
             "restart_reused_current_graph": True,
+            "retrieval_mode": "hybrid_required",
+            "dense_lifecycle_ready": True,
+            "dense_queries": [{"query_ready": True, "candidate_count": 3}],
             "initial_context_token_count": 500,
             "update_context_token_count": 350,
         },
@@ -135,4 +138,39 @@ def test_certification_rejects_wrong_sha_provider_use_and_missing_receipt(
         "evidence_sha_mismatch",
         "provider_use",
         "receipt_missing",
+    }
+
+
+def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "audit@example.invalid"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Audit"], cwd=repository, check=True
+    )
+    (repository / "README.md").write_text("receipt subject\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "subject"], cwd=repository, check=True)
+    bundle = _bundle(tmp_path, repository)
+    e2e_path = bundle / "receipts" / "harness-e2e.json"
+    e2e = json.loads(e2e_path.read_text(encoding="utf-8"))
+    e2e["retrieval_mode"] = "sparse_only"
+    e2e["dense_lifecycle_ready"] = False
+    e2e["dense_queries"] = [{"query_ready": True, "candidate_count": 0}]
+    _write(e2e_path, e2e)
+    monkeypatch.setattr("gt_harness.product_certification.platform.platform", lambda: "Linux-test")
+
+    result = certify_receipt_bundle(bundle, repository=repository)
+
+    assert {error["code"] for error in result["errors"]} >= {
+        "harness_retrieval_mode",
+        "harness_dense_lifecycle",
+        "harness_dense_query",
     }

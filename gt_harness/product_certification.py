@@ -22,6 +22,7 @@ REQUIRED_STEPS = {
     "graph_truth",
     "graph_lifecycle",
     "language_lifecycle",
+    "dense_model",
     "harness_e2e",
     "failure_campaign",
 }
@@ -157,6 +158,17 @@ def _check_specialized_receipt(
             fail("harness_observation_mutated", "raw action output was not preserved")
         if value.get("restart_reused_current_graph") is not True:
             fail("harness_restart_failed", "updated graph identity was not reused")
+        if value.get("retrieval_mode") != "hybrid_required":
+            fail("harness_retrieval_mode", "release E2E did not require dense retrieval")
+        if value.get("dense_lifecycle_ready") is not True:
+            fail("harness_dense_lifecycle", "dense build/query/update/restart did not pass")
+        dense_queries = _rows(value, "dense_queries")
+        if not dense_queries or any(
+            row.get("query_ready") is not True
+            or int(row.get("candidate_count", 0)) < 1
+            for row in dense_queries
+        ):
+            fail("harness_dense_query", "no non-empty exact-revision dense query receipt")
         if int(value.get("initial_context_token_count", 501)) > 500:
             fail("harness_initial_context_budget", "initial GT context exceeded 500 tokens")
         if int(value.get("update_context_token_count", 351)) > 350:

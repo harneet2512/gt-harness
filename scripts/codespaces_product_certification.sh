@@ -7,6 +7,9 @@ WORKSPACE="$OUTPUT_ROOT/workspace"
 RECEIPTS="$OUTPUT_ROOT/receipts"
 LOGS="$OUTPUT_ROOT/logs"
 STEPS="$OUTPUT_ROOT/steps.tsv"
+MODEL_DIR="$OUTPUT_ROOT/models/snowflake-arctic-embed-m"
+SNOWFLAKE_MODEL_SHA256="564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971"
+SNOWFLAKE_TOKENIZER_SHA256="91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854"
 
 mkdir -p "$WORKSPACE" "$RECEIPTS" "$LOGS"
 : >"$STEPS"
@@ -89,7 +92,7 @@ trap 'trap_status=$?; finalize "$trap_status"; exit "$trap_status"' EXIT
 
 cd "$ROOT"
 
-run_step install python -m pip install -e '.[dev,eval,miniswe,gt]'
+run_step install python -m pip install -e '.[dev,eval,gt,retrieval]'
 run_step doctor gt-harness doctor
 run_step python_tests python -m pytest -q -m 'not external_evidence'
 run_step go_tests bash -c 'cd vendor/gt-index-src && go test ./...'
@@ -131,11 +134,23 @@ run_step language_lifecycle python scripts/language_lifecycle_matrix.py \
   --output "$RECEIPTS/language-lifecycle.json" \
   --timeout 1200
 
+run_step dense_model bash -c '
+  set -euo pipefail
+  mkdir -p "$1"
+  gh release download gt-retrieval-runtime-v1 \
+    --repo harneet2512/gt-harness \
+    --pattern model.onnx --pattern tokenizer.json --pattern manifest.json \
+    --dir "$1"
+  echo "$2  $1/model.onnx" | sha256sum -c -
+  echo "$3  $1/tokenizer.json" | sha256sum -c -
+' _ "$MODEL_DIR" "$SNOWFLAKE_MODEL_SHA256" "$SNOWFLAKE_TOKENIZER_SHA256"
+
 run_step harness_e2e python scripts/harness_real_repository_campaign.py \
   --source-repository "$WORKSPACE/repositories/python-small-itsdangerous" \
   --commit 672971d66a2ef9f85151e53283113f33d642dabd \
   --run-dir "$WORKSPACE/harness-run" \
-  --output "$RECEIPTS/harness-e2e.json"
+  --output "$RECEIPTS/harness-e2e.json" \
+  --dense-model-dir "$MODEL_DIR"
 
 run_step failure_campaign python scripts/failure_campaign.py \
   --source-repository "$WORKSPACE/repositories/python-small-itsdangerous" \

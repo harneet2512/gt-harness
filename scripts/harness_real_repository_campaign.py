@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -78,7 +79,12 @@ class _EditingEnvironment:
 
 
 def run_campaign(
-    *, source_repository: Path, commit: str, run_dir: Path, output: Path
+    *,
+    source_repository: Path,
+    commit: str,
+    run_dir: Path,
+    output: Path,
+    dense_model_dir: Path,
 ) -> dict[str, Any]:
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -90,7 +96,14 @@ def run_campaign(
         raise RuntimeError(f"checkout mismatch: expected {commit}, got {exact_commit}")
 
     state = run_dir.parent / f"{run_dir.name}-gt-state"
-    treatment = GroundTruthTreatment(run_dir, state_dir=state, retrieval_mode="sparse_only")
+    if not (dense_model_dir / "model.onnx").is_file() or not (
+        dense_model_dir / "tokenizer.json"
+    ).is_file():
+        raise RuntimeError("pinned dense model assets are missing")
+    os.environ["GT_DENSE_MODEL_DIR"] = str(dense_model_dir)
+    treatment = GroundTruthTreatment(
+        run_dir, state_dir=state, retrieval_mode="hybrid_required"
+    )
     initial = treatment.prepare("Inspect Signer behavior and its callers before changing it")
     match = _TARGET.search(initial)
     if match is None:
@@ -128,7 +141,9 @@ def run_campaign(
     if treatment.before_model_call(2) != "":
         raise RuntimeError("GT attempted late synthetic-user context injection")
 
-    restarted = GroundTruthTreatment(run_dir, state_dir=state, retrieval_mode="sparse_only")
+    restarted = GroundTruthTreatment(
+        run_dir, state_dir=state, retrieval_mode="hybrid_required"
+    )
     restart_context = restarted.prepare(
         "Inspect Signer behavior and its callers before changing it"
     )
@@ -141,6 +156,39 @@ def run_campaign(
     )
     if not restart_reused_current_graph:
         raise RuntimeError("restart did not reuse the exact updated graph identity")
+
+    dense_receipts = (
+        before["dense_index_receipt"],
+        after["dense_index_receipt"],
+        reopened["dense_index_receipt"],
+    )
+    dense_queries = (
+        *before["dense_query_receipts"],
+        *after["dense_query_receipts"],
+        *reopened["dense_query_receipts"],
+    )
+    dense_lifecycle_ready = bool(
+        all(
+            item.get("query_ready")
+            and item.get("status") in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}
+            and item.get("provider_calls") == 0
+            and item.get("network_calls") == 0
+            for item in dense_receipts
+        )
+        and dense_queries
+        and all(
+            item.get("query_ready") and int(item.get("candidate_count", 0)) > 0
+            for item in dense_queries
+        )
+        and before["dense_index_receipt"]["source_revision"]
+        == before["source_revision"]
+        and after["dense_index_receipt"]["source_revision"]
+        == after["source_revision"]
+        and reopened["dense_index_receipt"]["source_revision"]
+        == reopened["source_revision"]
+    )
+    if not dense_lifecycle_ready:
+        raise RuntimeError("dense index/query lifecycle was not exact and provider-free")
 
     delivery = after["delivery_receipts"][-1]
     receipt = {
@@ -166,6 +214,12 @@ def run_campaign(
         "update_context_token_count": int(delivery["context_token_count"]),
         "before_model_call_injected_context": False,
         "restart_reused_current_graph": restart_reused_current_graph,
+        "retrieval_mode": "hybrid_required",
+        "dense_lifecycle_ready": dense_lifecycle_ready,
+        "initial_dense_index": dense_receipts[0],
+        "updated_dense_index": dense_receipts[1],
+        "restarted_dense_index": dense_receipts[2],
+        "dense_queries": list(dense_queries),
         "provider_calls": 0,
         "provider_credentials_inspected": False,
     }
@@ -179,6 +233,7 @@ def main() -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--dense-model-dir", type=Path, required=True)
     args = parser.parse_args()
     try:
         receipt = run_campaign(
@@ -186,6 +241,7 @@ def main() -> int:
             commit=args.commit,
             run_dir=args.run_dir.resolve(),
             output=args.output.resolve(),
+            dense_model_dir=args.dense_model_dir.resolve(),
         )
     except Exception as exc:  # noqa: BLE001 - command boundary writes explicit failure
         _write_atomic(
