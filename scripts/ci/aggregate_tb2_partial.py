@@ -6,9 +6,11 @@ from pathlib import Path
 
 def main() -> int:
     root = Path(os.environ.get("ARTIFACT_ROOT", "tasks"))
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    prefix = f"deepswe-central-{run_id}-" if run_id else "deepswe-central-"
     rows = []
     for task_root in sorted(root.glob("deepswe-central-*-*")):
-        task = task_root.name.rsplit("-", 1)[-1]
+        task = task_root.name.removeprefix(prefix)
         results = [json.loads(p.read_text(encoding="utf-8")) for p in task_root.rglob("result.json")]
         result = next((r for r in results if "verifier_result" in r or "exception_info" in r), {})
         verifier = result.get("verifier_result") if isinstance(result, dict) else {}
