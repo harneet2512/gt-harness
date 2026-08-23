@@ -1,4 +1,4 @@
-name: TB2 Mini-SWE Ox Alpha smoke20 (20 tasks, 10 parallel)
+name: TB2 Mini-SWE Ox Alpha smoke20 (20 tasks, 20 parallel)
 
 # This is the canonical prerelease Ox Alpha smoke. Harbor runs the production
 # MiniSweCentralAgent; each task gets its own GitHub runner. The task set is
@@ -139,7 +139,7 @@ jobs:
           if missing:
               raise SystemExit(f"contract tasks absent from dataset: {missing}")
           # One matrix row per task gives task-level status and artifacts while
-          # max-parallel below retains a bounded 10-way cap.
+          # max-parallel below allows the complete 20-task smoke to run at once.
           matrix_rows = [{"ordinal": i, "task": task} for i, task in enumerate(tasks)]
           task_hash = hashlib.sha256(
               json.dumps(tasks, separators=(",", ":")).encode()
@@ -170,7 +170,7 @@ jobs:
     needs: plan
     strategy:
       fail-fast: false
-      max-parallel: 10
+      max-parallel: 20
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 600
