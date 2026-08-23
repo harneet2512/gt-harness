@@ -1,0 +1,338 @@
+name: "GT Harness: canonical Mini-SWE 2.2.8 repair20"
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_ref:
+        description: "Commit or branch to evaluate (defaults to the dispatched SHA)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gt-harness-repair20-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.repair20.outputs.matrix }}
+      task_count: ${{ steps.repair20.outputs.task_count }}
+      task_set_sha256: ${{ steps.repair20.outputs.task_set_sha256 }}
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.code_ref || github.sha }}
+
+      - name: Resolve the immutable product source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned Harbor planner
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "harbor==0.20.0"
+
+      - name: Resolve and attest the frozen repair20 task set
+        id: repair20
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          harbor dataset download terminal-bench@2.0 -o "$RUNNER_TEMP/tb2-plan" --export
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          tasks = [
+              "cobol-modernization",
+              "count-dataset-tokens",
+              "extract-elf",
+              "feal-linear-cryptanalysis",
+              "fix-code-vulnerability",
+              "headless-terminal",
+              "largest-eigenval",
+              "llm-inference-batching-scheduler",
+              "mcmc-sampling-stan",
+              "portfolio-optimization",
+              "prove-plus-comm",
+              "qemu-alpine-ssh",
+              "regex-chess",
+              "sanitize-git-repo",
+              "schemelike-metacircular-eval",
+              "torch-pipeline-parallelism",
+              "torch-tensor-parallelism",
+              "video-processing",
+              "winning-avg-corewars",
+              "write-compressor",
+          ]
+          expected_hash = "36d5c8945f6f8d9ae23fe2cea759f16da0c0cea424a98f710cfaa0d9d6fd0303"
+          canonical = "\n".join(sorted(tasks)) + "\n"
+          task_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+          if task_hash != expected_hash or len(tasks) != 20 or len(set(tasks)) != 20:
+              raise SystemExit("checked-in repair20 identity is invalid")
+          dataset = Path(os.environ["RUNNER_TEMP"]) / "tb2-plan" / "terminal-bench"
+          available = {path.name for path in dataset.iterdir() if path.is_dir()}
+          missing = sorted(set(tasks) - available)
+          if missing:
+              raise SystemExit(f"repair20 tasks absent from terminal-bench@2.0: {missing}")
+          matrix_rows = [
+              {"ordinal": ordinal, "task": task}
+              for ordinal, task in enumerate(tasks, start=1)
+          ]
+          receipt = {
+              "schema": "gt.harbor_repair20_plan.v1",
+              "profile": "repair20-v1",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "task_count": len(tasks),
+              "task_ids": tasks,
+              "task_set_sha256": task_hash,
+              "attempts_per_task": 1,
+              "max_parallel": 20,
+              "dataset": "terminal-bench@2.0",
+              "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+              "agent_scaffold": "mini-swe-agent",
+              "agent_scaffold_version": "2.2.8",
+              "requested_model": "stealth/ox-alpha",
+              "effective_model": "openai/stealth/ox-alpha",
+              "matrix": matrix_rows,
+          }
+          Path("repair20-plan.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          matrix = json.dumps({"include": matrix_rows}, separators=(",", ":"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={matrix}\n")
+              output.write(f"task_count={len(tasks)}\n")
+              output.write(f"task_set_sha256={task_hash}\n")
+          PY
+
+      - name: Upload the immutable task-plan receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-repair20-plan-${{ github.run_id }}
+          path: repair20-plan.json
+          if-no-files-found: error
+
+  task:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 600
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      TASK: ${{ matrix.task }}
+      MODEL: stealth/ox-alpha
+      MINISWE_AGENT_VERSION: "2.2.8"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
+
+      - name: Build the checked-in graph indexer
+        working-directory: vendor/gt-index-src
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          go test -tags sqlite_fts5 ./...
+          go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
+          chmod 755 "$RUNNER_TEMP/gt-index"
+          echo "GT_INDEX_BINARY_HOST=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+
+      - name: Install Harbor and the canonical product source
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[retrieval,eval]' \
+            "mini-swe-agent==2.2.8" "harbor==0.20.0"
+
+      - name: Provision the pinned local retrieval model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"
+          mkdir -p "$model_dir"
+          gh release download gt-retrieval-runtime-v1 \
+            --repo harneet2512/gt-harness \
+            --pattern model.onnx --pattern tokenizer.json --pattern manifest.json \
+            --dir "$model_dir"
+          echo "564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971  $model_dir/model.onnx" | sha256sum -c -
+          echo "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854  $model_dir/tokenizer.json" | sha256sum -c -
+          echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
+
+      - name: Run one Harbor trial through gt-harness run
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENROUTER_NEW }}
+          OPENAI_BASE_URL: https://openrouter.ai/api/v1
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
+        run: |
+          set -euo pipefail
+          harbor run \
+            -d terminal-bench@2.0 \
+            --agent-import-path eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent \
+            -m "$MODEL" \
+            -o results/terminal-bench \
+            --job-name "gt-harness-repair20-task-${{ matrix.ordinal }}-${GITHUB_RUN_ID}" \
+            --agent-timeout-multiplier 1.0 \
+            -n 1 \
+            -l 1 \
+            --delete \
+            -y \
+            --ak task_id="$TASK" \
+            --ak temperature=1.0 \
+            --ak max_iterations=100 \
+            --ak time_budget_seconds=35400 \
+            -i "$TASK"
+
+      - name: Upload this task's Harbor and product receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-repair20-task-${{ matrix.ordinal }}-${{ github.run_id }}
+          path: results/terminal-bench/
+          if-no-files-found: error
+
+  attest:
+    if: always()
+    needs: [plan, task]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the task-plan receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: gt-harness-repair20-plan-${{ github.run_id }}
+          path: attestation
+
+      - name: Download all task artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gt-harness-repair20-task-*-${{ github.run_id }}
+          path: attestation/tasks
+          merge-multiple: true
+
+      - name: Verify and bind the complete repair20 run
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          TASK_JOB_RESULT: ${{ needs.task.result }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("attestation")
+          plan = json.loads((root / "repair20-plan.json").read_text(encoding="utf-8"))
+          expected = list(plan["task_ids"])
+          expected_set = set(expected)
+          errors = []
+
+          trial_rows = []
+          for path in (root / "tasks").rglob("result.json"):
+              try:
+                  row = json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError) as exc:
+                  errors.append(f"invalid_result:{path}:{type(exc).__name__}")
+                  continue
+              if row.get("task_name") and row.get("trial_name"):
+                  trial_rows.append(row)
+          observed_trials = [
+              str(row["task_name"]).split("__", 1)[0] for row in trial_rows
+          ]
+          if len(observed_trials) != 20 or set(observed_trials) != expected_set:
+              errors.append("trial_task_set_mismatch")
+          if len(observed_trials) != len(set(observed_trials)):
+              errors.append("duplicate_trial_task")
+
+          adapters = {}
+          for path in (root / "tasks").rglob("agent/harbor-adapter.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              task = str(row.get("task_id") or "")
+              adapters[task] = row
+              if row.get("requested_model") != "stealth/ox-alpha":
+                  errors.append(f"requested_model_mismatch:{task}")
+              if row.get("effective_model") != "openai/stealth/ox-alpha":
+                  errors.append(f"effective_model_mismatch:{task}")
+              if row.get("agent_scaffold_version") != "2.2.8":
+                  errors.append(f"scaffold_version_mismatch:{task}")
+              if row.get("attempt") != 1 or row.get("product_command") != "gt-harness run":
+                  errors.append(f"adapter_contract_mismatch:{task}")
+          if set(adapters) != expected_set:
+              errors.append("adapter_receipt_task_set_mismatch")
+
+          product_runs = {}
+          for path in (root / "tasks").rglob("agent/gt-run.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              product_runs[str(row.get("task_id") or "")] = row
+          if set(product_runs) != expected_set:
+              errors.append("product_receipt_task_set_mismatch")
+
+          receipt = {
+              "schema": "gt.harbor_repair20_attestation.v1",
+              "status": "PASS" if not errors else "FAIL",
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "task_job_result": os.environ["TASK_JOB_RESULT"],
+              "profile": plan["profile"],
+              "task_count": plan["task_count"],
+              "task_ids": expected,
+              "task_set_sha256": plan["task_set_sha256"],
+              "attempts_per_task": 1,
+              "max_parallel": 20,
+              "requested_model": plan["requested_model"],
+              "effective_model": plan["effective_model"],
+              "agent": plan["agent"],
+              "agent_scaffold_version": plan["agent_scaffold_version"],
+              "observed_trial_tasks": sorted(observed_trials),
+              "adapter_receipt_tasks": sorted(adapters),
+              "product_receipt_tasks": sorted(product_runs),
+              "errors": errors,
+          }
+          if receipt["source_sha"] != plan.get("source_sha"):
+              errors.append("source_sha_mismatch")
+              receipt["status"] = "FAIL"
+              receipt["errors"] = errors
+          output = root / "repair20-attestation.json"
+          output.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(receipt, indent=2, sort_keys=True))
+          if errors:
+              raise SystemExit("repair20 attestation failed")
+          PY
+
+      - name: Upload the final repair20 attestation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-repair20-attestation-${{ github.run_id }}
+          path: attestation/repair20-attestation.json
+          if-no-files-found: error
