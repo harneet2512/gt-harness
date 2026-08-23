@@ -223,6 +223,36 @@ jobs:
       task_job_regex: '^run \(.+\)$'
     secrets: inherit
 
+  # This publication path is deliberately independent of the diagnostic merge
+  # job.  If merge code, optional diagnostics, or a single malformed metadata
+  # field fails, the completed task artifacts still yield an auditable partial
+  # solve count and remain downloadable from the run.
+  partial_results:
+    name: Publish partial task results
+    needs: [plan, run]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download task artifacts (best effort)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: deepswe-gtoff-${{ github.run_id }}-*
+          path: tasks
+          merge-multiple: false
+      - name: Aggregate returned artifacts
+        env:
+          ARTIFACT_ROOT: tasks
+          OUTPUT: gtoff_partial_summary.json
+        run: python scripts/ci/aggregate_deepswe_partial.py | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload merge-independent partial summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepswe-gtoff-${{ github.run_id }}-PARTIAL
+          path: gtoff_partial_summary.json
+          if-no-files-found: error
+
   merge:
     needs: [plan, run]
     if: always()
