@@ -1,0 +1,19 @@
+{
+  "schema": "gt.gitnexus.parity.v1",
+  "gt_commit": "c63fc5e",
+  "gitnexus_commit": "aac7515d2a8c50a1f8f923c6fb77218b333560d6",
+  "overall_level": "L2_SUBSTRATE_AND_INTEGRITY_PARITY_OUTCOME_UNPROVEN",
+  "entries": [
+    {"capability":"graph_indexing","gt_status":"live_proven_on_prior_20","gitnexus_status":"source_proven","assessment":"near_parity","decision":"preserve_gt_certification"},
+    {"capability":"language_framework_resolution","gt_status":"partial_central_exposure","gitnexus_status":"source_proven_broad","assessment":"gitnexus_ahead","decision":"bridge_observed_gt_semantics_selectively"},
+    {"capability":"receiver_type_mro","gt_status":"implemented_unverified","gitnexus_status":"source_proven","assessment":"gitnexus_ahead_in_exposure","decision":"adapt_resolution_outcomes_without_global_guessing"},
+    {"capability":"process_execution_paths","gt_status":"candidate_live_unverified","gitnexus_status":"source_proven","assessment":"gitnexus_ahead","decision":"build_certified_bounded_process_projection"},
+    {"capability":"hybrid_retrieval","gt_status":"live_proven_prior_20","gitnexus_status":"source_proven","assessment":"gt_stronger_certification","decision":"preserve"},
+    {"capability":"task_checks_deliverables_validation","gt_status":"live_proven_mechanics","gitnexus_status":"not_equivalent","assessment":"gt_ahead","decision":"preserve_and_compose"},
+    {"capability":"post_edit_freshness","gt_status":"live_proven_design_exact_sha_pending","gitnexus_status":"weaker_commit_oriented","assessment":"gt_ahead","decision":"preserve"},
+    {"capability":"provider_delivery_certification","gt_status":"implemented_exact_sha_pending","gitnexus_status":"not_equivalent","assessment":"gt_ahead","decision":"preserve_fail_closed_audit"},
+    {"capability":"same_observation_delivery","gt_status":"implemented","gitnexus_status":"source_proven","assessment":"gitnexus_mechanism_to_adapt","decision":"deliver_process_projection_without_extra_call"},
+    {"capability":"causal_regression_attribution","gt_status":"implemented_exact_sha_pending","gitnexus_status":"public_evidence_incomplete","assessment":"gt_ahead","decision":"preserve"},
+    {"capability":"benchmark_outcome","gt_status":"unauthorized_unproven","gitnexus_status":"published_but_methodology_limited","assessment":"unknown","decision":"run_frozen_matched_gt_evaluation"}
+  ]
+}
