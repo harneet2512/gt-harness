@@ -207,8 +207,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[retrieval]' \
             "mini-swe-agent==2.2.8" "harbor==0.20.0" \
-            "pytest==9.1.1" "pytest-asyncio==1.4.0" \
-            vendor/groundtruth_mcp-*.whl
+            "pytest==9.1.1" "pytest-asyncio==1.4.0"
 
       - name: Provision pinned local dense backend
         run: |
