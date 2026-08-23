@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 
@@ -40,10 +41,24 @@ def rows(root: Path) -> list[dict]:
         agent = agent if isinstance(agent, dict) else {}
         metadata = agent.get("metadata")
         metadata = metadata if isinstance(metadata, dict) else {}
+        stats = agent.get("n_input_tokens"), agent.get("n_cache_tokens"), agent.get("n_output_tokens")
+        started, finished = raw.get("started_at"), raw.get("finished_at")
+        wall = None
+        try:
+            wall = (datetime.fromisoformat(finished.replace("Z", "+00:00")) -
+                    datetime.fromisoformat(started.replace("Z", "+00:00"))).total_seconds()
+        except (AttributeError, TypeError, ValueError):
+            pass
         out.append({"task": path.parent.name.split("__", 1)[0],
                     "reward": reward,
                     "exit": metadata.get("exit_status"),
-                    "exception": bool(raw.get("exception_info"))})
+                    "exception": bool(raw.get("exception_info")),
+                    "agent_steps": raw.get("n_agent_steps", agent.get("n_agent_steps")),
+                    "input_tokens": stats[0], "cache_tokens": stats[1],
+                    "output_tokens": stats[2], "cost_usd": agent.get("cost_usd"),
+                    "wall_time_sec": wall,
+                    "model": (raw.get("agent_info") or {}).get("model_info", {}).get("name"),
+                    "provider": (raw.get("agent_info") or {}).get("model_info", {}).get("provider")})
     return out
 
 
@@ -60,6 +75,9 @@ def main() -> int:
         "ungraded": len(data) - len(graded),
         "solved": len(solved),
         "unsolved": len(graded) - len(solved),
+        "metrics": {k: sum((r.get(k) or 0) for r in data)
+                    for k in ("agent_steps", "input_tokens", "cache_tokens", "output_tokens", "wall_time_sec")},
+        "cost_usd_observed": any(r.get("cost_usd") is not None for r in data),
         "rows": sorted(data, key=lambda r: r["task"]),
     }
     output = Path(os.environ.get("OUTPUT", "gtoff_partial_summary.json"))
