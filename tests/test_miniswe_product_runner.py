@@ -173,11 +173,6 @@ def test_timed_shell_action_terminates_descendants(tmp_path) -> None:
     )
     command = f"{shlex.quote(sys.executable)} -c {shlex.quote(launcher)}"
     environment = CredentialIsolatedEnvironment(
-        config_class=type(
-            "Config",
-            (),
-            {"cwd": str(tmp_path), "timeout": 30, "env": {}},
-        ),
         cwd=str(tmp_path),
         timeout=30,
     )
