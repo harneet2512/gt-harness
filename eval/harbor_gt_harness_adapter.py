@@ -109,7 +109,10 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         # It can create the final destination, but not a missing destination
         # parent.  Create the product root before uploading its component
         # directories so installation is consistent across task images.
-        await self.exec_as_root(environment, f"mkdir -p -- {_REMOTE_SOURCE}")
+        await self.exec_as_root(
+            environment,
+            f"mkdir -p -- {_REMOTE_SOURCE} {_REMOTE_SOURCE}/src",
+        )
         for relative in ("eval", "gt_engine", "gt_harness", "src/groundtruth"):
             await environment.upload_dir(
                 _REPO_ROOT / relative,
