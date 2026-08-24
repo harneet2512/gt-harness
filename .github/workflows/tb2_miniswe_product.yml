@@ -56,7 +56,10 @@ jobs:
           import os
           from pathlib import Path
 
-          from scripts.resolve_harbor_budget import resolve_budget
+          from scripts.resolve_harbor_budget import (
+              SUPERVISOR_GRACE_SECONDS,
+              resolve_budget,
+          )
 
           tasks = [
               "cobol-modernization",
@@ -105,7 +108,10 @@ jobs:
                       ),
                       "time_budget_seconds": max(
                           30,
-                          int(float(budget["execution_budget_sec"]) - 60.0),
+                          int(
+                              float(budget["execution_budget_sec"])
+                              - float(SUPERVISOR_GRACE_SECONDS)
+                          ),
                       ),
                       "task_config_sha256": budget["task_config_sha256"],
                   }
@@ -119,7 +125,10 @@ jobs:
               "task_set_sha256": task_hash,
               "attempts_per_task": 1,
               "max_parallel": 20,
-              "timeout_policy": "task.toml agent.timeout_sec minus 60 seconds",
+              "timeout_policy": (
+                  "task.toml agent.timeout_sec minus "
+                  f"{SUPERVISOR_GRACE_SECONDS} seconds"
+              ),
               "dataset": "terminal-bench@2.0",
               "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
               "agent_scaffold": "mini-swe-agent",
@@ -337,13 +346,6 @@ jobs:
               if not isinstance(transcript, list):
                   errors.append(f"missing_product_transcript:{task}")
                   transcript = []
-              observed_calls = sum(
-                  item.get("role") == "assistant"
-                  for item in transcript
-                  if isinstance(item, dict)
-              )
-              if int(row.get("provider_calls") or 0) != observed_calls:
-                  errors.append(f"provider_call_receipt_mismatch:{task}")
               trajectory_path = path.with_name("gt-run.trajectory.json")
               if not trajectory_path.is_file():
                   errors.append(f"missing_full_trajectory:{task}")
@@ -353,6 +355,15 @@ jobs:
                   )
                   if not isinstance(trajectory.get("messages"), list):
                       errors.append(f"invalid_full_trajectory:{task}")
+                  info = trajectory.get("info") or {}
+                  model_stats = info.get("model_stats") or {}
+                  trajectory_calls = model_stats.get("api_calls")
+                  if trajectory_calls is None:
+                      errors.append(f"missing_trajectory_provider_calls:{task}")
+                  elif int(row.get("provider_calls") or 0) != int(
+                      trajectory_calls
+                  ):
+                      errors.append(f"provider_call_receipt_mismatch:{task}")
               treatment = row.get("treatment_receipt")
               if not isinstance(treatment, dict):
                   errors.append(f"missing_treatment_receipt:{task}")
