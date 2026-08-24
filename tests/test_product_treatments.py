@@ -216,6 +216,31 @@ def test_hybrid_required_fails_closed_when_dense_model_is_missing(
     assert treatment.treatment_status.value == "FAILED"
 
 
+def test_hybrid_required_abstains_when_repository_has_no_indexable_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = False
+        build_status = GraphStatus.FAILED
+        degraded_reasons = ("no_supported_source",)
+        files_attempted = 0
+
+    class FakeService:
+        def status(self):
+            return FakeReceipt()
+
+    monkeypatch.delenv("GT_DENSE_MODEL_DIR", raising=False)
+    treatment = GroundTruthTreatment(tmp_path, retrieval_mode="hybrid_required")
+    treatment.service = FakeService()
+
+    treatment._ensure_dense_ready()
+
+    assert treatment.treatment_status.value == "NOT_APPLICABLE"
+    assert treatment.errors == [
+        "NOT_APPLICABLE:dense_retrieval_required:dense_model_not_configured"
+    ]
+
+
 def test_groundtruth_observes_only_real_repository_paths_and_real_diagnostics(
     tmp_path: Path,
 ) -> None:

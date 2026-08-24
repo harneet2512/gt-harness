@@ -243,6 +243,18 @@ class GroundTruthTreatment(BareTreatment):
             "query_ready"
         ):
             receipt = self.service.status()
+            if self._not_applicable(receipt):
+                # A repository can become empty or unsupported after the
+                # agent's own edit (for example, a source-only task that
+                # deletes its last indexable file).  Preserve that fact as an
+                # explicit abstention, but do not abort the stock agent loop;
+                # there is no graph-derived claim to deliver and the agent can
+                # continue with its own observations.
+                self._abstain(
+                    "dense_retrieval_required:"
+                    + str(self.dense_receipt.get("reason") or self.dense_receipt.get("status"))
+                )
+                return
             raise self._unavailable(
                 receipt,
                 "dense_retrieval_required:"
@@ -826,6 +838,9 @@ class GroundTruthTreatment(BareTreatment):
 
         observed = self._refresh_stale_graph(self.service.status())
         if not observed.query_ready:
+            if self._not_applicable(observed):
+                self._abstain(f"graph_update_not_ready:{observed.build_status.value}")
+                return ""
             raise self._unavailable(
                 observed, f"graph_update_not_ready:{observed.build_status.value}"
             )
