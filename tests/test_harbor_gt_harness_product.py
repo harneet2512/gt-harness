@@ -199,6 +199,54 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
     )
 
 
+@pytest.mark.asyncio
+async def test_harbor_adapter_creates_remote_source_parent_before_upload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Pier's Docker uploader does not create a missing destination parent."""
+
+    indexer = tmp_path / "gt-index"
+    indexer.write_bytes(b"source-built-indexer")
+    dense = tmp_path / "dense"
+    dense.mkdir()
+    for name in ("model.onnx", "tokenizer.json"):
+        (dense / name).write_bytes(name.encode())
+    monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(dense))
+    monkeypatch.setattr(
+        GtHarnessMiniSwe228Agent,
+        "_indexer_host_path",
+        staticmethod(lambda: indexer),
+    )
+    remote_source_exists = False
+
+    class Environment:
+        async def upload_dir(self, source, destination):
+            if destination.startswith("/installed-agent/gt-harness/"):
+                assert remote_source_exists, (
+                    "adapter uploaded into /installed-agent/gt-harness before "
+                    "creating that parent directory"
+                )
+
+        async def upload_file(self, source, destination):
+            if destination.startswith("/installed-agent/gt-harness/"):
+                assert remote_source_exists
+
+    async def capture_root_exec(environment, command, **kwargs):
+        nonlocal remote_source_exists
+        if "mkdir" in command and "/installed-agent/gt-harness" in command:
+            remote_source_exists = True
+
+    async def capture_agent_exec(environment, command, **kwargs):
+        return None
+
+    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+    monkeypatch.setattr(agent, "exec_as_root", capture_root_exec)
+    monkeypatch.setattr(agent, "exec_as_agent", capture_agent_exec)
+
+    await agent.install(Environment())
+    assert remote_source_exists
+
+
 def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 

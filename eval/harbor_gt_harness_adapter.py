@@ -105,6 +105,11 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             raise FileNotFoundError(
                 "canonical Harbor adapter requires the provisioned Snowflake ONNX model"
             )
+        # Pier's Docker Compose upload implementation delegates to `docker cp`.
+        # It can create the final destination, but not a missing destination
+        # parent.  Create the product root before uploading its component
+        # directories so installation is consistent across task images.
+        await self.exec_as_root(environment, f"mkdir -p -- {_REMOTE_SOURCE}")
         for relative in ("eval", "gt_engine", "gt_harness", "src/groundtruth"):
             await environment.upload_dir(
                 _REPO_ROOT / relative,
