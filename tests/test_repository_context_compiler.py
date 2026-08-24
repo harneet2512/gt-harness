@@ -606,6 +606,16 @@ def test_compiler_rejects_same_named_member_outside_unresolved_owner_scope() -> 
                 "run_jobs",
                 "pub fn run_jobs() {}",
             ),
+            _document(
+                "core/engine/src/context/mod.rs",
+                "enqueue_job",
+                "pub fn enqueue_job() {}",
+            ),
+            _document(
+                "examples/src/bin/event_loop.rs",
+                "enqueue_job",
+                "pub fn enqueue_job() {}",
+            ),
         ),
         structural_links=(),
         source_revision="source-1",
@@ -619,12 +629,17 @@ def test_compiler_rejects_same_named_member_outside_unresolved_owner_scope() -> 
         repository,
         _request(
             "Add `EvaluationHandle::is_cancelled` and "
-            "`Context::run_jobs_with_evaluation`."
+            "`Context::run_jobs_with_evaluation` and "
+            "`Context::enqueue_job_with_evaluation`."
         ),
     )
 
     assert all(
-        item.path != "core/runtime/src/abort/mod.rs"
+        item.path
+        not in {
+            "core/runtime/src/abort/mod.rs",
+            "examples/src/bin/event_loop.rs",
+        }
         for item in packet.primary_edit_targets
     )
     assert any(

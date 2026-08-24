@@ -698,18 +698,28 @@ def _matching_facet_ids(
 ) -> tuple[str, ...]:
     keys = _symbol_keys(symbol)
     normalized_path = _normalized_path(path)
-    return tuple(
-        facet.facet_id
-        for facet in facets
-        if (
+    matched: list[str] = []
+    for facet in facets:
+        symbol_match = bool(
             keys
             and any(
                 keys & _symbol_keys(candidate)
                 for candidate in (*facet.exact_symbols, *facet.owning_symbols)
             )
         )
-        or normalized_path in facet.owning_modules
-    )
+        owner_scoped = bool(
+            facet.owning_modules
+            and any(
+                "::" in candidate or "." in candidate
+                for candidate in facet.unresolved_symbols
+            )
+        )
+        if (
+            symbol_match
+            and (not owner_scoped or normalized_path in facet.owning_modules)
+        ) or normalized_path in facet.owning_modules:
+            matched.append(facet.facet_id)
+    return tuple(matched)
 
 
 def _select_role_complete_rows(
