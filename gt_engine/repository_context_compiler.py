@@ -400,6 +400,18 @@ def compile_task_facets(
         if segment.casefold() not in represented
     )
     rows = obligation_rows + symbol_rows or (("task", str(task or "").strip()),)
+    task_qualified_entities = (
+        *_associated_entities(task),
+        *(
+            match.group(1)
+            for match in _CODE_ENTITY.finditer(task)
+            if "::" in match.group(1) or "." in match.group(1)
+        ),
+    )
+    qualified_task_leaves = frozenset(
+        re.split(r"(?:::|[.#])", entity)[-1].casefold()
+        for entity in task_qualified_entities
+    )
     available: dict[str, list[tuple[str, str]]] = {}
     for document in documents:
         symbol = str(getattr(document, "symbol", "") or "").strip()
@@ -470,6 +482,8 @@ def compile_task_facets(
                 else set(),
                 key=lambda row: (-len(row[0]), row[0].casefold(), row[1]),
             )
+            if len(segments) == 1 and entity.casefold() in qualified_task_leaves:
+                analogs = []
             if analogs:
                 analog, analog_path = analogs[0]
                 exact.append(analog)

@@ -704,6 +704,51 @@ def test_compiler_rejects_same_named_member_outside_unresolved_owner_scope() -> 
     )
 
 
+def test_qualified_api_context_prevents_unqualified_clarification_from_global_binding() -> None:
+    documents = (
+        _document(
+            "core/runtime/src/abort/mod.rs",
+            "cancel",
+            "pub fn cancel() -> bool { true }",
+        ),
+        _document(
+            "core/runtime/src/abort/mod.rs",
+            "is_cancelled",
+            "pub fn is_cancelled() -> bool { false }",
+        ),
+        _document(
+            "core/engine/src/context/mod.rs",
+            "Context",
+            "pub struct Context;",
+        ),
+    )
+    task = (
+        "Public capabilities include "
+        "`EvaluationHandle::{cancel, cancel_with_reason, is_cancelled}`. "
+        "The `cancel_with_reason` call must be first-wins."
+    )
+
+    facets = compile_task_facets(task, documents)
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=2,
+            document_chars=160,
+        ),
+        _request(task),
+    )
+
+    assert all("cancel" not in facet.exact_symbols for facet in facets)
+    assert all(
+        item.path != "core/runtime/src/abort/mod.rs"
+        for item in packet.primary_edit_targets
+    )
+
+
 def test_compiler_separates_integration_callers_from_edit_targets() -> None:
     call = StructuralLink(
         source_path="src/job.rs",
