@@ -602,6 +602,28 @@ def test_task_facets_split_multi_owner_api_surface_for_bounded_set_cover() -> No
     assert owner_facets["Script"].exact_symbols == ("evaluate",)
 
 
+def test_qualified_owner_prefers_case_exact_type_over_lowercase_namesakes() -> None:
+    documents = (
+        _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
+        _document("core/engine/src/context/mod.rs", "run_jobs", "pub fn run_jobs() {}"),
+        _document("core/parser/src/error/mod.rs", "context", "fn context() {}"),
+        _document("core/runtime/src/state.rs", "context", "fn context() {}"),
+    )
+
+    facets = compile_task_facets(
+        "Add `Context::run_jobs_with_evaluation`.",
+        documents,
+    )
+    scoped = next(
+        facet
+        for facet in facets
+        if "Context::run_jobs_with_evaluation" in facet.unresolved_symbols
+    )
+
+    assert scoped.owning_symbols == ("Context",)
+    assert scoped.owning_modules == ("core/engine/src/context/mod.rs",)
+
+
 def test_qualified_unresolved_owner_does_not_claim_unrelated_leaf_symbol() -> None:
     documents = (
         _document("core/runtime/src/abort/mod.rs", "is_cancelled", "pub fn is_cancelled()"),

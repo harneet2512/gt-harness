@@ -417,6 +417,13 @@ def compile_task_facets(
     def resolve_entities(
         entity_values: tuple[str, ...],
     ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+        def spelling_preferred(
+            key: str, spelling: str
+        ) -> list[tuple[str, str]]:
+            rows = available.get(key.casefold(), [])
+            exact_case = [row for row in rows if row[0] == spelling]
+            return exact_case or rows
+
         exact: list[str] = []
         unresolved: list[str] = []
         owners: list[str] = []
@@ -424,13 +431,13 @@ def compile_task_facets(
         for entity in entity_values:
             segments = re.split(r"(?:::|[.#])", entity)
             leaf = segments[-1]
-            direct = available.get(entity.casefold(), [])
+            direct = spelling_preferred(entity, entity)
             owner_rows = (
-                available.get(segments[0].casefold(), [])
+                spelling_preferred(segments[0], segments[0])
                 if len(segments) > 1
                 else []
             )
-            leaf_rows = available.get(leaf.casefold(), [])
+            leaf_rows = spelling_preferred(leaf, leaf)
             if direct:
                 exact.extend(symbol for symbol, _path in direct)
                 modules.extend(path for _symbol, path in direct if path)
@@ -998,9 +1005,9 @@ class RepositoryContextCompiler:
         )
         retrieval = retriever.retrieve(
             state,
-            channel_limit=100,
-            top_k=20,
-            selection_limit=5,
+            channel_limit=128,
+            top_k=40,
+            selection_limit=20,
             token_budget=max(1, min(1_000, int(request.token_budget))),
             character_budget=max(1, int(request.character_budget)),
         )

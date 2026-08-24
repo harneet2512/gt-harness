@@ -545,7 +545,7 @@ class GroundTruthTreatment(BareTreatment):
             inspection_public_surface=tuple(
                 {
                     item.path: item
-                    for item in (*packet.inspection_public_surface, *additions)
+                    for item in (*additions, *packet.inspection_public_surface)
                 }.values()
             ),
             evidence_items=tuple(

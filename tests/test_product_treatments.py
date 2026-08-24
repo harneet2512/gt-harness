@@ -827,6 +827,69 @@ def test_treatment_adds_manifest_public_surface_as_inspection_only(
     assert updated.primary_edit_targets == (edit,)
 
 
+def test_treatment_prioritizes_manifest_surface_over_incidental_reexport(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "container.ts").write_text(
+        "export function register() {}\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "awilix.ts").write_text(
+        "export { register } from './container'\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "incidental.ts").write_text(
+        "export const unrelated = 1\n", encoding="utf-8"
+    )
+    (tmp_path / "package.json").write_text(
+        '{"exports":"./src/awilix.ts"}', encoding="utf-8"
+    )
+    edit = ContextEvidenceItem(
+        kind="symbol_identity",
+        path="src/container.ts",
+        start_line=1,
+        end_line=1,
+        symbol="register",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="s",
+        graph_revision="g",
+        evidence_sha256="d" * 64,
+        decision_reason="exact_task_symbol",
+        completeness="exact_identity",
+    )
+    incidental = ContextEvidenceItem(
+        kind="public_surface",
+        path="src/incidental.ts",
+        start_line=1,
+        end_line=1,
+        symbol="unrelated",
+        relation="RE_EXPORTS",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="s",
+        graph_revision="g",
+        evidence_sha256="e" * 64,
+        decision_reason="certified_reexport_public_surface",
+        completeness="certified_public_surface_edge",
+        localization_role="PUBLIC_SURFACE",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "s", "graph_revision": "g"},
+        primary_edit_targets=(edit,),
+        inspection_public_surface=(incidental,),
+        evidence_items=(edit, incidental),
+    )
+
+    updated = GroundTruthTreatment(tmp_path)._resolve_public_surfaces(packet)
+
+    assert [item.path for item in updated.inspection_public_surface] == [
+        "src/awilix.ts",
+        "src/incidental.ts",
+    ]
+
+
 def test_feature_receipt_tracks_delivery_and_behavioral_follow_through(
     tmp_path: Path, monkeypatch
 ) -> None:
