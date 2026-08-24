@@ -1,6 +1,6 @@
 # GroundTruth Canonical Architecture
 
-Status: canonical prerelease architecture. The last certified implementation is `3e2185d3f4ba0a228c740ab2a6d23a287cfc5380`; post-certification context-compiler changes require a new exact-SHA certification receipt.
+Status: canonical prerelease architecture. The certified implementation is `79321e0da09174805a0909f69dc695dd129a5ebf`; its clean Linux receipt bundle is committed under `audit/receipts/codespaces-79321e0/`.
 
 ## Product boundary
 

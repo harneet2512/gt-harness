@@ -1,32 +1,23 @@
 # GroundTruth Graph Lifecycle Audit
 
-Observed: `2026-08-23T03:57:34.347957Z`
+Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
 
-Verdict: **PASS**
+Verdict: **PASS (9/9 phases)**.
 
-Machine receipt: `D:\gt-product-audit-5296dc3\codespaces-3e2185d\receipts-only\graph-lifecycle.json`
+| Phase | Result | Required invariant |
+| --- | --- | --- |
+| Cold start | PASS | No state to exact-revision READY graph |
+| Warm start | PASS | Same identity and query results reused |
+| New file | PASS | New nodes/relations appear |
+| Modified file | PASS | New relations appear and stale edges disappear |
+| Renamed file | PASS | Old identity disappears; new identity appears |
+| Deleted file | PASS | Nodes and incident stale edges disappear |
+| Commit change | PASS | New commit/source identity replaces prior graph |
+| Restart during build | PASS | Partial state non-queryable; atomic recovery succeeds |
+| Concurrent reads/update | PASS | Readers observe explicit FAILED/STALE during transition and deterministic READY afterward |
 
-The campaign used an isolated local clone of the frozen real itsdangerous checkout. All graph operations went through `RepositoryGraphService` or the production CLI.
+Updates deliberately use atomic full rebuilds until file-keyed incremental
+relationship parity is proven. That is slower than an incremental writer but
+correct: no SHA-A graph is served as current for SHA B.
 
-| Phase | Result |
-| --- | --- |
-| cold_start | PASS |
-| warm_start | PASS |
-| new_file | PASS |
-| modified_file | PASS |
-| renamed_file | PASS |
-| deleted_file | PASS |
-| commit_change | PASS |
-| restart_during_build | PASS |
-| concurrent_reads_update | PASS |
-
-## Key observations
-
-- Cold/warm graph identity stable: `True`.
-- Commit A: `918629af49515abc65777843c009d1fd3e53876b`.
-- Commit B: `a22b792760b44065af6a274e04dcfb2229e14d6b`.
-- Add, modify, rename, and delete each produced an explicit STALE state before an atomic full rebuild and exact post-update query result.
-- A process killed after the BUILDING receipt left no queryable partial graph; a fresh production build recovered the state.
-- Concurrent read/update unexpected errors: `0`.
-
-This campaign proves the detailed crash/concurrency lifecycle on one real Python repository. `LANGUAGE_SUPPORT_AUDIT.md` separately applies the same cold/warm/add/modify/delete and stale-edge checks to all six declared languages. Neither campaign claims file-keyed incremental parity; correctness currently uses atomic full rebuilds after edits.
+Receipt: `audit/receipts/codespaces-79321e0/graph-lifecycle.json`.

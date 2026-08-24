@@ -1,0 +1,381 @@
+{
+  "cold_warm_same_graph": true,
+  "commit_a": "8f61c4ec5fb0c07ecbe77d75e7a98cec2cf30ad0",
+  "commit_b": "8d3a9084800f047a699c675e9a88a8c8a05fe70c",
+  "completed": "2026-08-24T00:06:12.009329Z",
+  "concurrent_errors": [],
+  "frozen_commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+  "phases": [
+    {
+      "phase": "cold_start",
+      "receipt": {
+        "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 137,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 50,
+        "files_indexed": 29,
+        "graph_identity": "8939a6a00e1b923aed60d2abd2f80619120c3ae26850fb12325de3289f6c71c6",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 27,
+          "Function": 19,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "79a7d8806bac1f750ae437d5cb3f9c53298e0d60656e17eb3df3b43cdbab4c03",
+        "symbols": 146,
+        "update_mode": "full",
+        "working_tree_state": "clean"
+      },
+      "status": "PASS"
+    },
+    {
+      "phase": "warm_start",
+      "receipt": {
+        "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 137,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 50,
+        "files_indexed": 29,
+        "graph_identity": "8939a6a00e1b923aed60d2abd2f80619120c3ae26850fb12325de3289f6c71c6",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 27,
+          "Function": 19,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "79a7d8806bac1f750ae437d5cb3f9c53298e0d60656e17eb3df3b43cdbab4c03",
+        "symbols": 146,
+        "update_mode": "full",
+        "working_tree_state": "clean"
+      },
+      "status": "PASS"
+    },
+    {
+      "phase": "new_file",
+      "receipt": {
+        "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 138,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 51,
+        "files_indexed": 30,
+        "graph_identity": "e41638cb1da9686b9645a1a9be05c01f767779a129cf3a3e51baf73e76c58e0b",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 28,
+          "Function": 21,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "73b86b06930566180f983744eba9441fb74048e4a8a2d2613f7c0b1e5c3f371b",
+        "symbols": 148,
+        "update_mode": "full_fallback_unproven_incremental_parity",
+        "working_tree_state": "dirty"
+      },
+      "status": "PASS"
+    },
+    {
+      "phase": "modified_file",
+      "receipt": {
+        "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 138,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 51,
+        "files_indexed": 30,
+        "graph_identity": "e6183938e887b527c66e015b9322582b537074fb16bc4e64f5f942f88b4863ce",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 28,
+          "Function": 21,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "df4c3a2f7c6b755dbbc149c9014d3f041a8d3bf852c9a5ef2df24eaf2355f9af",
+        "symbols": 148,
+        "update_mode": "full_fallback_unproven_incremental_parity",
+        "working_tree_state": "dirty"
+      },
+      "status": "PASS"
+    },
+    {
+      "phase": "renamed_file",
+      "receipt": {
+        "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 138,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 51,
+        "files_indexed": 30,
+        "graph_identity": "7c18ca00b20cc2c9315085dec3b737322b5775e9a48c76fd1f91f8fe8d204b71",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 28,
+          "Function": 21,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "3d75503355442096ce2a9ba6da17319d45f30c673c7a0d3312d776bc4934daa6",
+        "symbols": 148,
+        "update_mode": "full_fallback_unproven_incremental_parity",
+        "working_tree_state": "dirty"
+      },
+      "status": "PASS"
+    },
+    {
+      "phase": "deleted_file",
+      "receipt": {
+        "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 137,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 50,
+        "files_indexed": 29,
+        "graph_identity": "f8b6ff24f488339ef5b32152ed7b94473a7e3507548c7563627d03afdc9780f1",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 27,
+          "Function": 19,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "79a7d8806bac1f750ae437d5cb3f9c53298e0d60656e17eb3df3b43cdbab4c03",
+        "symbols": 146,
+        "update_mode": "full_fallback_unproven_incremental_parity",
+        "working_tree_state": "clean"
+      },
+      "status": "PASS"
+    },
+    {
+      "phase": "commit_change",
+      "receipt": {
+        "commit_sha": "8d3a9084800f047a699c675e9a88a8c8a05fe70c",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 137,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 51,
+        "files_indexed": 30,
+        "graph_identity": "4edf3a6e0002bf6a77c8058109d836b9abee7d09b3df99c0da922944f878a587",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 28,
+          "Function": 20,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "1575e3afb466dee1f02d20279b2058bcc8c27c825d91bb2b5cc832bd23486a93",
+        "symbols": 147,
+        "update_mode": "full_fallback_unproven_incremental_parity",
+        "working_tree_state": "clean"
+      },
+      "status": "PASS"
+    },
+    {
+      "interrupted": {
+        "commit_sha": "8d3a9084800f047a699c675e9a88a8c8a05fe70c",
+        "degraded_reasons": [
+          "build_in_progress",
+          "graph_database_missing"
+        ],
+        "edges_by_type": {},
+        "files_discovered": 51,
+        "files_indexed": 0,
+        "graph_identity": "",
+        "graph_status": "FAILED",
+        "nodes_by_type": {},
+        "query_ready": false,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "1575e3afb466dee1f02d20279b2058bcc8c27c825d91bb2b5cc832bd23486a93",
+        "symbols": 0,
+        "update_mode": "",
+        "working_tree_state": "clean"
+      },
+      "phase": "restart_during_build",
+      "recovered": {
+        "commit_sha": "8d3a9084800f047a699c675e9a88a8c8a05fe70c",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 137,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 51,
+        "files_indexed": 30,
+        "graph_identity": "1292e1ebe315bc5cb3b83f8a682619d5fa91db28b476d017babf7b9e21faf03e",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 28,
+          "Function": 20,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "1575e3afb466dee1f02d20279b2058bcc8c27c825d91bb2b5cc832bd23486a93",
+        "symbols": 147,
+        "update_mode": "full",
+        "working_tree_state": "clean"
+      },
+      "status": "PASS"
+    },
+    {
+      "observed_states": {
+        "FAILED": 172,
+        "STALE": 20
+      },
+      "phase": "concurrent_reads_update",
+      "receipt": {
+        "commit_sha": "8d3a9084800f047a699c675e9a88a8c8a05fe70c",
+        "degraded_reasons": [],
+        "edges_by_type": {
+          "CALLS": 137,
+          "COMPOSES": 3,
+          "CONTAINS": 98,
+          "CO_SERIALIZES": 24,
+          "DATA_FLOW": 37,
+          "EXTENDS": 22,
+          "IMPORTS": 73,
+          "PRECEDES": 5,
+          "RAISES": 6,
+          "READS": 19,
+          "RE_EXPORTS": 17,
+          "WRITES": 8
+        },
+        "files_discovered": 52,
+        "files_indexed": 31,
+        "graph_identity": "ca4cb4289138381bec12b54950b2eb6bce29d2bced415e63ac99eafc738d6c13",
+        "graph_status": "READY",
+        "nodes_by_type": {
+          "Class": 29,
+          "File": 29,
+          "Function": 21,
+          "Method": 98
+        },
+        "query_ready": true,
+        "repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository",
+        "source_revision": "55a100ad2f0878c4eb355cc6215bb0309f6297b2e7e392d7d902839d45ffa3b6",
+        "symbols": 148,
+        "update_mode": "full_fallback_unproven_incremental_parity",
+        "working_tree_state": "dirty"
+      },
+      "status": "PASS"
+    }
+  ],
+  "provider_calls": 0,
+  "provider_credentials_inspected": false,
+  "schema": "gt.graph_lifecycle_audit_receipt.v1",
+  "source_repository": "/tmp/gt-cert-79321e0/workspace/repositories/python-small-itsdangerous",
+  "status": "PASS",
+  "test_repository": "/tmp/gt-cert-79321e0/workspace/lifecycle-run/repository"
+}

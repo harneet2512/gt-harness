@@ -1,20 +1,41 @@
 # Paid Benchmark Authorization
 
-Verdict: `NOT_AUTHORIZED`
+Verdict: `AUTHORIZED`
 
-Audited experimental release: `2140693bc038449cfdf02b49fb03e34eae50ac29`
+Certified implementation: `79321e0da09174805a0909f69dc695dd129a5ebf`.
 
-Observed: `2026-08-23`
+Authorization is limited to **one final 20-task GT-on prerelease smoke** through
+`.github/workflows/tb2_miniswe_product.yml`. It does not authorize a broad paid
+Bare/GT/GitNexus matrix.
 
-The authorized GT-only 20-task smoke has been consumed. No additional paid run is authorized.
+## Preconditions satisfied
 
-Blocking evidence from run `32635379908`:
+- product verdict `CERTIFIED_WITH_DECLARED_LIMITATIONS` with zero errors;
+- exact graph identity and ten-repository matrix PASS;
+- 62/62 bounded independent graph truth PASS;
+- 9/9 graph lifecycle PASS;
+- six-language lifecycle PASS;
+- pinned real dense build/query/edit/restart PASS;
+- actual Mini-SWE 2.2.8 same-observation Harness E2E PASS;
+- 18/18 failure campaign PASS;
+- bounded GitNexus fact comparison and mechanism analysis complete;
+- final workflow statically rejects Nano, MCP, central-agent, and alternate scaffold paths;
+- no unresolved critical product defect.
 
-- only 6/20 run receipts completed cleanly;
-- seven outer timeouts left checkpoint receipts in `RUNNING` state;
-- seven trials produced explicit run errors;
-- interrupted receipts did not contain the complete initial delivered GT packet;
-- a terminal-rendering crash was fixed only after the experimental release;
-- no paired Bare/GT/GitNexus methodology has been executed.
+## Frozen run contract
 
-Authorization can be reconsidered only after provider-free tests prove a shutdown grace period that always finalizes timeout receipts, complete packet text is durable from the first checkpoint, the post-experiment Rich fix is in a newly certified release, and a provider-free rehearsal proves binding/upload for completed, errored and externally killed trials. A new paid run requires explicit user authorization.
+- repository: `harneet2512/gt-harness`;
+- workflow: `tb2_miniswe_product.yml`;
+- task set: `repair20-v1`;
+- task-set SHA-256: `36d5c8945f6f8d9ae23fe2cea759f16da0c0cea424a98f710cfaa0d9d6fd0303`;
+- agent: Mini-SWE-Agent `2.2.8` only;
+- model request: `stealth/ox-alpha` through `OPENROUTER_NEW`;
+- treatment: GroundTruth, `hybrid_required`;
+- concurrency: 20;
+- attempts: one per task;
+- trajectories and GT receipts: required for all outcomes;
+- final source SHA: the documentation-only release SHA created after this file;
+- reruns: forbidden unless the user separately authorizes a new experiment.
+
+The run must still be manually dispatched after the user reviews the benchmark-ready
+SHA. Authorization is not execution.

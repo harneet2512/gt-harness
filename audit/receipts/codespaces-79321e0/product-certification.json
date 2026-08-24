@@ -1,0 +1,57 @@
+{
+  "completed": "2026-08-24T00:07:46.688654Z",
+  "current_commit": "79321e0da09174805a0909f69dc695dd129a5ebf",
+  "errors": [],
+  "evidence_wrapper": "/tmp/gt-cert-79321e0/codespaces-product-certification.json",
+  "limitations": [
+    "Graph truth is certified on a bounded independently derived sample, not universal recall.",
+    "Post-edit correctness uses an atomic full rebuild until file-keyed incremental parity is proven.",
+    "Parser recovery and deliberate exclusions are explicit READY_WITH_DECLARED_LIMITATIONS states.",
+    "Cold builds and graph storage are material on the largest certified repositories.",
+    "Competitive superiority and paid-agent solve-rate uplift are not part of product certification."
+  ],
+  "platform": "Linux-6.8.0-1052-azure-x86_64-with-glibc2.39",
+  "provider_calls": 0,
+  "provider_credentials_inspected": false,
+  "receipts": {
+    "failure-campaign.json": {
+      "completed": "2026-08-24T00:07:46.511773Z",
+      "path": "/tmp/gt-cert-79321e0/receipts/failure-campaign.json",
+      "schema": "gt.failure_campaign_receipt.v1",
+      "status": "PASS"
+    },
+    "graph-lifecycle.json": {
+      "completed": "2026-08-24T00:06:12.009329Z",
+      "path": "/tmp/gt-cert-79321e0/receipts/graph-lifecycle.json",
+      "schema": "gt.graph_lifecycle_audit_receipt.v1",
+      "status": "PASS"
+    },
+    "graph-truth.json": {
+      "completed": "2026-08-24T00:06:08.083422Z",
+      "path": "/tmp/gt-cert-79321e0/receipts/graph-truth.json",
+      "schema": "gt.graph_truth_audit_receipt.v1",
+      "status": "PASS"
+    },
+    "harness-e2e.json": {
+      "completed": null,
+      "path": "/tmp/gt-cert-79321e0/receipts/harness-e2e.json",
+      "schema": "gt.harness_e2e_audit_receipt.v1",
+      "status": "PASS"
+    },
+    "language-lifecycle.json": {
+      "completed": "2026-08-24T00:07:01.095890Z",
+      "path": "/tmp/gt-cert-79321e0/receipts/language-lifecycle.json",
+      "schema": "gt.language_support_audit_receipt.v1",
+      "status": "PASS"
+    },
+    "real-repository-matrix.json": {
+      "completed": "2026-08-24T00:06:06.907663Z",
+      "path": "/tmp/gt-cert-79321e0/receipts/real-repository-matrix.json",
+      "schema": "gt.real_repository_matrix_receipt.v1",
+      "status": "PASS"
+    }
+  },
+  "schema": "gt.product_certification.v1",
+  "status": "CERTIFIED_WITH_DECLARED_LIMITATIONS",
+  "subject_commit": "79321e0da09174805a0909f69dc695dd129a5ebf"
+}

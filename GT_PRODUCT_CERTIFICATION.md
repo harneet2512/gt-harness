@@ -1,15 +1,35 @@
 # GroundTruth Product Certification
 
-Verdict: `NOT_CERTIFIED`
+Verdict: `CERTIFIED_WITH_DECLARED_LIMITATIONS`
 
-Audited experimental release: `2140693bc038449cfdf02b49fb03e34eae50ac29`
+Implementation subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
 
-Core graph implementation entering the final smoke: `d8286c15783ba090e1594bba69d0645d439a1b5c`
+Observed on clean Linux: `2026-08-24`.
 
-Provider-free certification receipt: GitHub Actions run `32634873373` (`SUCCESS`).
+All required steps passed: install, doctor, complete provider-free Python suite,
+Go suite, canonical lint, ten-repository matrix, independent graph truth, graph
+lifecycle, six-language lifecycle, pinned dense provisioning, real Mini-SWE
+Harness E2E, 18-case failure campaign, and the fail-closed certifier.
 
-The repository graph core retains its prior `CERTIFIED_WITH_DECLARED_LIMITATIONS` evidence: clean Linux install; source-built Go indexer; ten real repositories; exact commit/source identity; persistence/reopen; explicit readiness states; lifecycle/failure campaigns; and bounded truth evidence for Python, JavaScript, TypeScript, Go, Rust and Java.
+Certified scope:
 
-The complete GT Harness product is nevertheless `NOT_CERTIFIED` because its production-path smoke failed. Run `32635379908` bound and uploaded all 20 trials, but only six run receipts were `COMPLETED`; seven were explicit `ERROR` and seven externally timed-out checkpoints remained `RUNNING`. Interrupted receipts also omitted the exact initial delivered context text. These are release-blocking benchmark-lifecycle and auditability defects even though the graph did not silently claim stale readiness.
+- exact revision/dirty-tree graph identity and readiness;
+- persisted structural graph for Python, JavaScript, TypeScript, Go, Rust, Java;
+- persistent local dense retrieval with pinned Snowflake ONNX model;
+- deterministic dense+sparse RRF and inspection-only dense epistemics;
+- exact persisted process and impact projection;
+- same-observation Mini-SWE 2.2.8 delivery;
+- restart, edit, deletion, rename, crash, concurrency, and explicit failures;
+- Harbor final workflow contract with exact product SHA and full trajectories.
 
-Certification can be restored only after timeout finalization, first-checkpoint context durability, Linux certification of the post-experiment Rich rendering fix, and a clean production-boundary smoke with no silently incomplete run state.
+Declared limitations:
+
+- the 62/62 graph-truth result is a bounded corpus, not universal recall;
+- updates are atomic full rebuilds until incremental relationship parity is proven;
+- parser recovery/exclusions create explicit `READY_WITH_DECLARED_LIMITATIONS`;
+- semantic AST facts are currently Python-specific;
+- Django/pnpm cold builds and graph sizes are material;
+- competitive superiority and causal solve-rate uplift require the final live run.
+
+The certificate has zero errors, zero provider calls, and no credential inspection.
+Raw receipt: `audit/receipts/codespaces-79321e0/product-certification.json`.

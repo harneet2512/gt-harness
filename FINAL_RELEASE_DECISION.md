@@ -1,47 +1,37 @@
 # GroundTruth Final Release Decision
 
-Verdict: `BLOCK`
+Verdict: `HOLD`
 
-Exact experimental release SHA: `2140693bc038449cfdf02b49fb03e34eae50ac29`
+Certified implementation SHA: `79321e0da09174805a0909f69dc695dd129a5ebf`.
 
-Implementation SHA: `d8286c15783ba090e1594bba69d0645d439a1b5c`
-
-Latest post-experiment fix SHA: `b1020bd47929e740ce5e4532d4e151f510602afb` (not release-certified)
-
-Decision date: `2026-08-23`
-
-The graph core remains credible within its certified scope, but GT Harness is not yet a complete official benchmarking product. The production 20-task run did not satisfy end-to-end completion: 14/20 GT run receipts were non-complete and seven timeout checkpoints remained `RUNNING`. The workflow correctly failed closed.
-
-## Evidence
-
-- Exact-subject provider-free run `32634873373`: PASS for clean install, Linux Python/Go, and frozen ten-repository matrix.
-- Final smoke `32635379908`: Harbor 20/20 graded; 8 solved, 12 unsolved, 7 `AgentTimeoutError`; artifact upload PASS; outcome binding 20/20 PASS; integrity gate FAIL because 14 receipts were not `COMPLETED`.
-- Treatment split: 7 ACTIVE, 13 NOT_APPLICABLE. ACTIVE delivery was bounded to 12 packets, 36,307 characters, 18 source-verified evidence items, maximum four packets per task.
-- Graph certification scope remains Python, JavaScript, TypeScript, Go, Rust and Java, with correctness-first atomic rebuild and declared parser limitations.
-- Bounded fact comparison remains GT 50 TP / 4 FP / 3 FN versus GitNexus 20 TP / 0 FP / 33 FN over 53 facts. This does not establish broad superiority.
-- No controlled Bare/GT/GitNexus solve-rate experiment exists. Cost, negative flips and causal uplift remain unknown.
-
-## Release blockers
-
-1. Reserve shutdown grace and atomically finalize every interrupted receipt as explicit `ERROR`/`TIMEOUT`, never `RUNNING`.
-2. Persist the exact initial task plus delivered GT packet before the first provider call so timeout trajectories remain auditable.
-3. Certify the post-experiment plain-text Rich rendering fix on Linux.
-4. Add provider-free kill/recovery tests at the actual Harbor boundary, including ownership, binding and upload.
-5. Run paired Bare/GT/GitNexus trials only after the product smoke passes; do not infer uplift from 8/20 GT-only results.
-
-## Final questions
+The core GT Harness prerelease product is complete and certified with declared
+limitations. Broad release remains on hold because the authorized final 20-task
+trajectory audit has not run, so causal solve-rate uplift and live efficiency are
+still unknown.
 
 | Question | Answer | Confidence |
 | --- | --- | --- |
-| A. Mechanically reproducible? | Yes for clean install, graph matrix and source build at the experimental release. | High |
-| B. Complete production project? | No; benchmark receipt finalization and interrupted trajectory durability are incomplete. | High |
-| C. Graph reliably builds? | Yes on the certified ten-repository matrix. | High |
-| D. Graph accurate and sufficiently complete? | Accurate on bounded audited facts; broad completeness remains unproven. | Moderate |
-| E. Correct across edits, commits, crashes and restarts? | Graph lifecycle passed; agent-run timeout lifecycle did not. | High |
-| F. Normal agent without benchmark substitutes? | Production GT Harness ran, but only 6/20 runs completed cleanly. | High |
-| G. Claimed languages genuinely supported? | Six languages are graph-certified with declared limits. | High |
-| H. Competitive with GitNexus? | Competitive structurally; weaker in processes, communities, trace, hybrid retrieval and PDG. | Moderate |
-| I. Causally improves solve rates? | Unknown; no paired experiment. | High |
-| J. Improves efficiency without negative flips? | Unknown; 404 calls and 4.45M input tokens were observed without a matched comparator or cost receipt. | High |
+| A. Mechanically reproducible? | Yes; clean Linux install/build/test/certification passed. | High |
+| B. Complete production project? | Yes for the two-month prerelease Harness scope, with declared limits. | High |
+| C. Graph reliably builds? | Yes on 10 frozen repositories; every attempted file failure count was zero. | High |
+| D. Graph accurate and sufficiently complete? | 62/62 on the bounded six-language truth corpus; universal recall is unproven. | High for corpus, moderate broadly |
+| E. Correct across edits, commits, crashes and restarts? | Yes in 9/9 lifecycle phases and the failure campaign. | High |
+| F. Normal coding agent can use the complete product? | Yes through Mini-SWE 2.2.8 and same-observation delivery; no MCP substitute. | High |
+| G. Claimed languages genuinely supported? | Python, JavaScript, TypeScript, Go, Rust, Java structurally; declared parser/semantic limits apply. | High |
+| H. Competitive with GitNexus? | Competitive on bounded structural facts and integrity; GitNexus remains broader in communities/PDG/framework/cross-repo features. | Moderate |
+| I. Causally improves solve rates? | Unknown until the final 20-task run. | High |
+| J. Improves efficiency without unacceptable regressions? | Unknown live; provider context is bounded to 500/350 tokens and product latency is measured. | High |
 
-The two-month prerelease may continue as a development program, but this exact product must not be called complete or ready for broad release.
+Current evidence:
+
+- product: `CERTIFIED_WITH_DECLARED_LIMITATIONS`;
+- graph truth: precision/recall `1.0/1.0` over 62 expected relationships;
+- lifecycle: 9/9 PASS;
+- language matrix: 6/6 PASS;
+- Harness+dense E2E: PASS, 257/256 context tokens, zero provider/network calls;
+- failure campaign: 18/18 PASS;
+- final paid smoke: authorized but not run.
+
+The decision moves from `HOLD` only after all 20 final trajectories and receipts
+are adjudicated. A successful prerelease smoke may justify `SHIP_WITH_LIMITATIONS`;
+`SHIP` still requires controlled broader competitive outcome evidence.

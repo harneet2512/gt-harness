@@ -4,7 +4,28 @@ Status: Gate 13 research complete. This is a primary-source capability audit, no
 
 Access date: `2026-08-23`
 
-GroundTruth subject entering this gate: `3e2185d3f4ba0a228c740ab2a6d23a287cfc5380`
+GroundTruth subject entering this gate: `3e2185d3f4ba0a228c740ab2a6d23a287cfc5380`.
+Implementation response certified afterward: `79321e0da09174805a0909f69dc695dd129a5ebf`.
+
+## Certified implementation response
+
+The research identified composition, hybrid retrieval, process delivery, impact
+formatting, live freshness, and compactness as the mechanisms most likely to affect
+agent decisions. GT did not copy GitNexus's product surface. It retained the existing
+exact-revision graph and added:
+
+- a persistent repository-wide 768-dimensional Snowflake ONNX index;
+- deterministic dense+sparse reciprocal-rank fusion;
+- strict separation of exact edit targets from inspection candidates;
+- exact persisted bounded process and impact projections;
+- compact v4 evidence ledgers within 500/350 conservative tokens;
+- same-observation Mini-SWE delivery after every relevant edit/diagnostic;
+- dense, graph, delivery, and restart receipts tied to the actual source revision.
+
+These mechanisms passed the final Linux product certificate. Communities, optional
+PDG/def-use, broad framework extractors, and contract-aware cross-repository graphs
+remain GitNexus advantages. Their agent value remains a benchmark hypothesis, not a
+reason to add decorative features before the final smoke.
 
 ## Scope and evidence rules
 
@@ -44,7 +65,7 @@ Inspected open-source revisions:
 
 4. **GT already has a defensible integrity differentiator. Confidence: high within the inspected boundary.** GitNexus checks and reports staleness, but its MCP query boundary deliberately attaches staleness as a non-blocking warning. Commit-check failures fail open, and that check does not establish dirty-working-tree identity. Graphify and CodeGraphContext also do not prove exact source identity before every graph answer. GT's exact commit plus working-tree/source receipt and fail-closed query-readiness invariant is materially stronger if it remains enforced.
 
-5. **GT is behind GitNexus on higher-order repository intelligence. Confidence: high as a feature gap; unknown as an accuracy gap.** GitNexus currently exposes first-class communities, processes, impact/change detection, optional PDG/data-flow queries, proactive agent hooks, and contract-aware cross-repository traversal. Feature presence does not prove truth or agent uplift, but these facts are available to its agent and mostly absent from GT's current certified graph surface.
+5. **GT entered the gate behind GitNexus on higher-order repository intelligence. Confidence: high as a feature gap; unknown as an accuracy gap.** GitNexus exposes first-class communities, processes, impact/change detection, optional PDG/data-flow queries, proactive agent hooks, and contract-aware cross-repository traversal. The certified response closes process, impact, hybrid-retrieval, and automatic-delivery gaps; communities, PDG, broad framework extraction, and cross-repository contracts remain open.
 
 6. **Sourcegraph is the strongest inspected standard for compiler-derived symbol navigation and organization-scale scope. Confidence: high for SCIP; moderate for the proprietary product.** SCIP models precise occurrences, definitions, references, imports, implementations, type definitions, signatures, and documentation across language-specific indexers. It is not, by itself, a call/process/community graph.
 

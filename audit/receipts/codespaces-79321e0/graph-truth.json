@@ -1,0 +1,1014 @@
+{
+  "completed": "2026-08-24T00:06:08.083422Z",
+  "facts": [
+    {
+      "actual": [
+        {
+          "file_path": "src/itsdangerous/exc.py",
+          "name": "BadPayload"
+        },
+        {
+          "file_path": "src/itsdangerous/exc.py",
+          "name": "BadSignature"
+        }
+      ],
+      "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "src/itsdangerous/exc.py",
+          "name": "BadPayload"
+        },
+        {
+          "file_path": "src/itsdangerous/exc.py",
+          "name": "BadSignature"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "c944fd44a6628df66b41de8d5f7b007ee70741ef5f35c99cbb16f1815478909f",
+      "graph_status": "READY",
+      "id": "python-direct-subclasses-baddata",
+      "language": "python",
+      "latency_ms": 5.64,
+      "oracle": {
+        "kind": "python_direct_subclasses",
+        "symbol": "BadData"
+      },
+      "query": {
+        "mode": "subclasses",
+        "symbol": "BadData"
+      },
+      "query_supported": true,
+      "relationship": "subclasses",
+      "repository_id": "python-small-itsdangerous",
+      "true_positives": 2,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "src/itsdangerous/encoding.py",
+          "name": "want_bytes"
+        }
+      ],
+      "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "src/itsdangerous/encoding.py",
+          "name": "want_bytes"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "c944fd44a6628df66b41de8d5f7b007ee70741ef5f35c99cbb16f1815478909f",
+      "graph_status": "READY",
+      "id": "python-in-repository-callees-base64-encode",
+      "language": "python",
+      "latency_ms": 5.539,
+      "oracle": {
+        "file": "src/itsdangerous/encoding.py",
+        "kind": "python_in_repo_callees",
+        "symbol": "base64_encode"
+      },
+      "query": {
+        "file": "src/itsdangerous/encoding.py",
+        "mode": "callees",
+        "symbol": "base64_encode"
+      },
+      "query_supported": true,
+      "relationship": "callees",
+      "repository_id": "python-small-itsdangerous",
+      "true_positives": 1,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "lib/application.js",
+          "name": "application"
+        },
+        {
+          "file_path": "lib/request.js",
+          "name": "request"
+        },
+        {
+          "file_path": "lib/response.js",
+          "name": "response"
+        }
+      ],
+      "commit_sha": "023767fe9872e029271df1418f73401bff20ff40",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "lib/application.js",
+          "name": "application"
+        },
+        {
+          "file_path": "lib/request.js",
+          "name": "request"
+        },
+        {
+          "file_path": "lib/response.js",
+          "name": "response"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "be59ea5ba2b55fa81ad0e39c5d1b275ee338e197db9028d13c0afdeaf95d2b78",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "javascript-relative-requires-express-entry",
+      "language": "javascript",
+      "latency_ms": 7.971,
+      "oracle": {
+        "file": "lib/express.js",
+        "kind": "javascript_relative_requires"
+      },
+      "query": {
+        "mode": "imports",
+        "symbol": "lib/express.js"
+      },
+      "query_supported": true,
+      "relationship": "imports",
+      "repository_id": "javascript-express",
+      "true_positives": 3,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldHaveBody"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldHaveHeader"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldNotHaveBody"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldNotHaveHeader"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldSkipQuery"
+        }
+      ],
+      "commit_sha": "023767fe9872e029271df1418f73401bff20ff40",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldHaveBody"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldHaveHeader"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldNotHaveBody"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldNotHaveHeader"
+        },
+        {
+          "file_path": "test/support/utils.js",
+          "name": "shouldSkipQuery"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "be59ea5ba2b55fa81ad0e39c5d1b275ee338e197db9028d13c0afdeaf95d2b78",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "javascript-commonjs-local-reexports",
+      "language": "javascript",
+      "latency_ms": 7.752,
+      "oracle": {
+        "file": "test/support/utils.js",
+        "kind": "javascript_commonjs_local_reexports"
+      },
+      "query": {
+        "mode": "reexports",
+        "symbol": "test/support/utils.js"
+      },
+      "query_supported": true,
+      "relationship": "reexports",
+      "repository_id": "javascript-express",
+      "true_positives": 5,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "Action"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "ActionCreator"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "ActionCreatorsMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ActionFromReducer"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ActionFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "AnyAction"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Dispatch"
+        },
+        {
+          "file_path": "src/types/middleware.ts",
+          "name": "Middleware"
+        },
+        {
+          "file_path": "src/types/middleware.ts",
+          "name": "MiddlewareAPI"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Observable"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Observer"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "PreloadedStateShapeFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "Reducer"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ReducerFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ReducersMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "StateFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Store"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "StoreCreator"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "StoreEnhancer"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "StoreEnhancerStoreCreator"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "UnknownAction"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Unsubscribe"
+        }
+      ],
+      "commit_sha": "71606661ac515bdd64c199a6bb508401c7cf736f",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "Action"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "ActionCreator"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "ActionCreatorsMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ActionFromReducer"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ActionFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "AnyAction"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Dispatch"
+        },
+        {
+          "file_path": "src/types/middleware.ts",
+          "name": "Middleware"
+        },
+        {
+          "file_path": "src/types/middleware.ts",
+          "name": "MiddlewareAPI"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Observable"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Observer"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "PreloadedStateShapeFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "Reducer"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ReducerFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "ReducersMapObject"
+        },
+        {
+          "file_path": "src/types/reducers.ts",
+          "name": "StateFromReducersMapObject"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Store"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "StoreCreator"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "StoreEnhancer"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "StoreEnhancerStoreCreator"
+        },
+        {
+          "file_path": "src/types/actions.ts",
+          "name": "UnknownAction"
+        },
+        {
+          "file_path": "src/types/store.ts",
+          "name": "Unsubscribe"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "64aec971eede0b6c85d6beea31f83f9d4bf5113e94e031cf8a41784b1fd775ce",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "typescript-redux-type-barrel",
+      "language": "typescript",
+      "latency_ms": 9.825,
+      "oracle": {
+        "file": "src/index.ts",
+        "kind": "typescript_named_type_reexports"
+      },
+      "query": {
+        "mode": "reexports",
+        "symbol": "src/index.ts"
+      },
+      "query_supported": true,
+      "relationship": "reexports",
+      "repository_id": "typescript-redux",
+      "true_positives": 22,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [],
+      "commit_sha": "71606661ac515bdd64c199a6bb508401c7cf736f",
+      "exact_match": true,
+      "expected": [],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "64aec971eede0b6c85d6beea31f83f9d4bf5113e94e031cf8a41784b1fd775ce",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "typescript-external-react-component-abstention",
+      "language": "javascript",
+      "latency_ms": 10.154,
+      "oracle": {
+        "kind": "external_import_subclass_abstention",
+        "module": "react",
+        "symbol": "Component"
+      },
+      "query": {
+        "file": "test/typescript/injectedDispatch.test-d.ts",
+        "mode": "subclasses",
+        "symbol": "Component"
+      },
+      "query_supported": true,
+      "relationship": "subclasses",
+      "repository_id": "typescript-redux",
+      "true_positives": 0,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "_codegen/internal/imports/imports.go",
+          "name": "AddImportsFrom"
+        }
+      ],
+      "commit_sha": "c627960a7323bfc7a58835e9ef5540f306fc7fac",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "_codegen/internal/imports/imports.go",
+          "name": "AddImportsFrom"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "b4dee51dadaae386f005dc82fe8267d4c4d35fd129ea66a6cddf550a66861cfa",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "go-clean-import-path-caller",
+      "language": "go",
+      "latency_ms": 6.892,
+      "oracle": {
+        "kind": "go_text_callers",
+        "symbol": "cleanImportPath"
+      },
+      "query": {
+        "file": "_codegen/internal/imports/imports.go",
+        "mode": "callers",
+        "symbol": "cleanImportPath"
+      },
+      "query_supported": true,
+      "relationship": "callers",
+      "repository_id": "go-testify",
+      "true_positives": 1,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "crates/cli/src/process.rs",
+          "name": "CommandError"
+        },
+        {
+          "file_path": "crates/cli/src/process.rs",
+          "name": "CommandReader"
+        },
+        {
+          "file_path": "crates/cli/src/process.rs",
+          "name": "CommandReaderBuilder"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionMatcher"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionMatcherBuilder"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionReader"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionReaderBuilder"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "InvalidPatternError"
+        },
+        {
+          "file_path": "crates/cli/src/human.rs",
+          "name": "ParseSizeError"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "StandardStream"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "escape"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "escape_os"
+        },
+        {
+          "file_path": "crates/cli/src/hostname.rs",
+          "name": "hostname"
+        },
+        {
+          "file_path": "crates/cli/src/human.rs",
+          "name": "parse_human_readable_size"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "pattern_from_bytes"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "pattern_from_os"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "patterns_from_path"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "patterns_from_reader"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "patterns_from_stdin"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "resolve_binary"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "stdout"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "stdout_buffered_block"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "stdout_buffered_line"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "unescape"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "unescape_os"
+        }
+      ],
+      "commit_sha": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "crates/cli/src/process.rs",
+          "name": "CommandError"
+        },
+        {
+          "file_path": "crates/cli/src/process.rs",
+          "name": "CommandReader"
+        },
+        {
+          "file_path": "crates/cli/src/process.rs",
+          "name": "CommandReaderBuilder"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionMatcher"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionMatcherBuilder"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionReader"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "DecompressionReaderBuilder"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "InvalidPatternError"
+        },
+        {
+          "file_path": "crates/cli/src/human.rs",
+          "name": "ParseSizeError"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "StandardStream"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "escape"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "escape_os"
+        },
+        {
+          "file_path": "crates/cli/src/hostname.rs",
+          "name": "hostname"
+        },
+        {
+          "file_path": "crates/cli/src/human.rs",
+          "name": "parse_human_readable_size"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "pattern_from_bytes"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "pattern_from_os"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "patterns_from_path"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "patterns_from_reader"
+        },
+        {
+          "file_path": "crates/cli/src/pattern.rs",
+          "name": "patterns_from_stdin"
+        },
+        {
+          "file_path": "crates/cli/src/decompress.rs",
+          "name": "resolve_binary"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "stdout"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "stdout_buffered_block"
+        },
+        {
+          "file_path": "crates/cli/src/wtr.rs",
+          "name": "stdout_buffered_line"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "unescape"
+        },
+        {
+          "file_path": "crates/cli/src/escape.rs",
+          "name": "unescape_os"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "b242695a3186d904c5f77fdd05d7a9f143c595f3c9c433a011615f736c706a30",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "rust-cli-crate-reexports",
+      "language": "rust",
+      "latency_ms": 8.395,
+      "oracle": {
+        "file": "crates/cli/src/lib.rs",
+        "kind": "rust_crate_named_reexports"
+      },
+      "query": {
+        "mode": "reexports",
+        "symbol": "crates/cli/src/lib.rs"
+      },
+      "query_supported": true,
+      "relationship": "reexports",
+      "repository_id": "rust-ripgrep",
+      "true_positives": 25,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [],
+      "commit_sha": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "exact_match": true,
+      "expected": [],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "b242695a3186d904c5f77fdd05d7a9f143c595f3c9c433a011615f736c706a30",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "rust-stdlib-import-abstention",
+      "language": "rust",
+      "latency_ms": 9.454,
+      "oracle": {
+        "file": "build.rs",
+        "kind": "rust_external_use_abstention",
+        "module": "std::process",
+        "symbol": "Command"
+      },
+      "query": {
+        "mode": "imports",
+        "symbol": "build.rs"
+      },
+      "query_supported": true,
+      "relationship": "imports",
+      "repository_id": "rust-ripgrep",
+      "true_positives": 0,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "extras/src/test/java/com/google/gson/typeadapters/RuntimeTypeAdapterFactoryTest.java",
+          "name": "BankTransfer"
+        },
+        {
+          "file_path": "extras/src/test/java/com/google/gson/typeadapters/RuntimeTypeAdapterFactoryTest.java",
+          "name": "CreditCard"
+        }
+      ],
+      "commit_sha": "dae37cf0fe12235b76fb09f01118a0a8c8823f42",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "extras/src/test/java/com/google/gson/typeadapters/RuntimeTypeAdapterFactoryTest.java",
+          "name": "BankTransfer"
+        },
+        {
+          "file_path": "extras/src/test/java/com/google/gson/typeadapters/RuntimeTypeAdapterFactoryTest.java",
+          "name": "CreditCard"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "9a9195bae07eb9ae548116f78cd3b6dc7c2f4762c911b88d46688d85cdbaa470",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "java-direct-subclasses-billing-instrument",
+      "language": "java",
+      "latency_ms": 9.988,
+      "oracle": {
+        "kind": "java_direct_subclasses",
+        "symbol": "BillingInstrument"
+      },
+      "query": {
+        "file": "extras/src/test/java/com/google/gson/typeadapters/RuntimeTypeAdapterFactoryTest.java",
+        "mode": "subclasses",
+        "symbol": "BillingInstrument"
+      },
+      "query_supported": true,
+      "relationship": "subclasses",
+      "repository_id": "java-gson",
+      "true_positives": 2,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    },
+    {
+      "actual": [
+        {
+          "file_path": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java",
+          "name": "padInt"
+        }
+      ],
+      "commit_sha": "dae37cf0fe12235b76fb09f01118a0a8c8823f42",
+      "exact_match": true,
+      "expected": [
+        {
+          "file_path": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java",
+          "name": "padInt"
+        }
+      ],
+      "false_negatives": 0,
+      "false_positives": 0,
+      "graph_identity": "9a9195bae07eb9ae548116f78cd3b6dc7c2f4762c911b88d46688d85cdbaa470",
+      "graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "id": "java-in-file-callees-utc-format",
+      "language": "java",
+      "latency_ms": 9.983,
+      "oracle": {
+        "file": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java",
+        "kind": "java_in_file_callees",
+        "symbol": "format"
+      },
+      "query": {
+        "file": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java",
+        "mode": "callees",
+        "symbol": "format"
+      },
+      "query_supported": true,
+      "relationship": "callees",
+      "repository_id": "java-gson",
+      "true_positives": 1,
+      "wrong_file": 0,
+      "wrong_symbol": 0
+    }
+  ],
+  "facts_manifest": "/workspaces/gt-harness/audit/graph_truth_facts.v1.json",
+  "metrics": {
+    "exact_set_accuracy": 1.0,
+    "facts": 11,
+    "false_negative_rate": 0.0,
+    "false_negatives": 0,
+    "false_positive_rate": 0.0,
+    "false_positives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+    "true_positives": 62,
+    "unsupported_rate": 0.0,
+    "wrong_file_rate": 0.0,
+    "wrong_symbol_rate": 0.0
+  },
+  "metrics_by_dimension": {
+    "language:go": {
+      "exact_set_accuracy": 1.0,
+      "facts": 1,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 1,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "language:java": {
+      "exact_set_accuracy": 1.0,
+      "facts": 2,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 3,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "language:javascript": {
+      "exact_set_accuracy": 1.0,
+      "facts": 3,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 8,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "language:python": {
+      "exact_set_accuracy": 1.0,
+      "facts": 2,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 3,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "language:rust": {
+      "exact_set_accuracy": 1.0,
+      "facts": 2,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 25,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "language:typescript": {
+      "exact_set_accuracy": 1.0,
+      "facts": 1,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 22,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "relationship:callees": {
+      "exact_set_accuracy": 1.0,
+      "facts": 2,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 2,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "relationship:callers": {
+      "exact_set_accuracy": 1.0,
+      "facts": 1,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 1,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "relationship:imports": {
+      "exact_set_accuracy": 1.0,
+      "facts": 2,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 3,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "relationship:reexports": {
+      "exact_set_accuracy": 1.0,
+      "facts": 3,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 52,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    },
+    "relationship:subclasses": {
+      "exact_set_accuracy": 1.0,
+      "facts": 3,
+      "false_negative_rate": 0.0,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "false_positives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "stale_edge_rate": "NOT_MEASURED_IN_STATIC_TRUTH_CORPUS",
+      "true_positives": 4,
+      "unsupported_rate": 0.0,
+      "wrong_file_rate": 0.0,
+      "wrong_symbol_rate": 0.0
+    }
+  },
+  "provider_calls": 0,
+  "provider_credentials_inspected": false,
+  "schema": "gt.graph_truth_audit_receipt.v1",
+  "started_from_frozen_clean_checkouts": true,
+  "status": "PASS"
+}

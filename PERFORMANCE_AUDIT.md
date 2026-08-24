@@ -1,33 +1,26 @@
-# GroundTruth Performance and Scale Audit
+# GroundTruth Performance Audit
 
-Observed: `2026-08-23T03:57:29.260900Z`
+Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
 
-Receipt: `D:\gt-product-audit-5296dc3\codespaces-3e2185d\receipts-only\real-repository-matrix.json`
+Linux 32-GB Codespace, frozen clean repositories. Times are milliseconds;
+RSS and graph sizes are peak/process bytes and persisted DB bytes.
 
-Verdict: **PASS_WITH_DECLARED_LIMITATIONS on Linux Codespaces**
+| Repository | Cold build | Warm p95 | Query p95 | Peak RSS | Graph size |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| itsdangerous | 529 | 4.98 | 5.45 | 111,521,792 | 1,110,016 |
+| Django | 123,392 | 78.47 | 76.21 | 469,045,248 | 317,870,080 |
+| Pydantic | 24,384 | 10.89 | 10.36 | 257,634,304 | 89,010,176 |
+| Express | 1,227 | 6.50 | 6.99 | 128,892,928 | 4,427,776 |
+| Redux | 2,114 | 8.58 | 9.12 | 128,901,120 | 3,207,168 |
+| pnpm | 76,545 | 67.27 | 68.18 | 463,519,744 | 269,991,936 |
+| gorilla/mux | 870 | 5.15 | 5.29 | 132,173,824 | 2,617,344 |
+| Testify | 2,086 | 5.51 | 5.91 | 133,857,280 | 8,785,920 |
+| ripgrep | 3,820 | 7.25 | 8.15 | 144,216,064 | 19,210,240 |
+| Gson | 4,076 | 8.97 | 8.82 | 144,216,064 | 23,023,616 |
 
-The canonical source-built product was measured on ten frozen real repositories. The run used no provider, mock graph, precomputed benchmark graph, or substitute query path.
+The large Django and pnpm cold builds are material (123 s and 77 s). Warm and
+query p95 remain below 80 ms. Correctness currently wins over file-keyed update
+speed: post-edit updates are full atomic rebuilds and are explicitly receipted as
+`full_fallback_unproven_incremental_parity`.
 
-| Repository | Files | Symbols | Edges | Cold ms | Peak MiB | CPU s | Graph MiB | First check ms | Warm p50/p95 ms | Query p50/p95 ms |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| itsdangerous | 29 | 146 | 449 | 435 | 106.3 | 0.48 | 1.1 | 10.1 | 4.8 / 5.1 | 5.5 / 5.6 |
-| Django | 3,500 | 45,224 | 142,622 | 121,580 | 469.6 | 181.13 | 303.2 | 1,682.5 | 73.4 / 77.2 | 74.5 / 75.8 |
-| Pydantic | 729 | 16,569 | 38,345 | 24,334 | 240.9 | 42.11 | 84.9 | 455.5 | 9.7 / 10.7 | 10.6 / 10.7 |
-| Express | 163 | 1,298 | 1,848 | 1,129 | 122.2 | 2.32 | 4.2 | 36.3 | 6.4 / 7.1 | 6.9 / 7.2 |
-| Redux | 334 | 677 | 1,105 | 1,197 | 122.2 | 2.68 | 3.1 | 27.6 | 8.7 / 9.8 | 9.4 / 10.2 |
-| pnpm | 4,246 | 34,848 | 94,920 | 74,157 | 469.9 | 142.43 | 257.5 | 1,733.6 | 64.2 / 65.9 | 65.3 / 65.5 |
-| gorilla/mux | 23 | 271 | 880 | 797 | 125.2 | 1.23 | 2.5 | 19.4 | 4.6 / 5.0 | 5.2 / 5.4 |
-| Testify | 73 | 1,156 | 3,317 | 2,038 | 127.0 | 4.66 | 8.4 | 51.1 | 5.1 / 5.9 | 5.8 / 6.0 |
-| ripgrep | 161 | 3,917 | 10,056 | 3,709 | 137.0 | 8.16 | 18.3 | 109.0 | 6.3 / 7.2 | 7.1 / 7.5 |
-| Gson | 292 | 4,144 | 12,459 | 3,911 | 137.0 | 7.91 | 21.9 | 124.2 | 8.4 / 9.2 | 8.7 / 9.4 |
-
-Peak process-tree RSS was sampled every 10 ms with pinned `psutil==7.2.2`. Warm and query distributions each contain ten observations. The first-process check includes SQLite reopen and the complete persisted-graph checksum; every warm/query operation still verifies repository identity.
-
-## Findings
-
-- Query p95 stayed below 76 ms across this Linux matrix. First-process checks stayed below 1.74 seconds.
-- Maximum observed peak RSS was 469.9 MiB. The two largest graphs were Django at 303.2 MiB and pnpm at 257.5 MiB.
-- Cold construction is the material limitation: Django took 121.6 seconds and pnpm 74.2 seconds on the four-core Codespaces host.
-- The correctness-first edit path performs an atomic full rebuild because file-keyed incremental relationship parity is not yet proven. Its latency is therefore explicit and noncompetitive for large interactive edits.
-- v4 readiness avoids rehashing every unchanged normal Git path but still checks current/previous dirty paths, `skip-worktree` and `assume-unchanged` paths, repository identity, and the persisted graph checksum.
-- These measurements cover the declared ten-repository matrix on one Linux host. They do not prove scaling beyond the matrix or cross-machine variance.
+Receipt: `audit/receipts/codespaces-79321e0/real-repository-matrix.json`.
