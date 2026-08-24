@@ -571,18 +571,66 @@ Cancellation must be first-wins.""",
 def test_qualified_unresolved_owner_does_not_claim_unrelated_leaf_symbol() -> None:
     documents = (
         _document("core/runtime/src/abort/mod.rs", "is_cancelled", "pub fn is_cancelled()"),
+        _document("core/runtime/src/abort/mod.rs", "cancel", "pub fn cancel()"),
         _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
     )
 
     facets = compile_task_facets(
-        "Add `EvaluationHandle::is_cancelled` to Context.",
+        "Add `EvaluationHandle::is_cancelled` and "
+        "`EvaluationHandle::cancel_with_reason` to Context.",
         documents,
     )
 
     exact = {symbol for facet in facets for symbol in facet.exact_symbols}
     unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
     assert "is_cancelled" not in exact
+    assert "cancel" not in exact
     assert "EvaluationHandle::is_cancelled" in unresolved
+
+
+def test_compiler_rejects_same_named_member_outside_unresolved_owner_scope() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "core/runtime/src/abort/mod.rs",
+                "is_cancelled",
+                "pub fn is_cancelled() -> bool { false }",
+            ),
+            _document(
+                "core/engine/src/context/mod.rs",
+                "Context",
+                "pub struct Context; pub fn run_jobs() {}",
+            ),
+            _document(
+                "core/engine/src/context/mod.rs",
+                "run_jobs",
+                "pub fn run_jobs() {}",
+            ),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=2,
+        document_chars=160,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request(
+            "Add `EvaluationHandle::is_cancelled` and "
+            "`Context::run_jobs_with_evaluation`."
+        ),
+    )
+
+    assert all(
+        item.path != "core/runtime/src/abort/mod.rs"
+        for item in packet.primary_edit_targets
+    )
+    assert any(
+        item.path == "core/engine/src/context/mod.rs"
+        for item in packet.primary_edit_targets
+    )
 
 
 def test_compiler_separates_integration_callers_from_edit_targets() -> None:
@@ -627,6 +675,80 @@ def test_compiler_separates_integration_callers_from_edit_targets() -> None:
     assert [item.path for item in packet.inspection_integration] == ["src/job.rs"]
     assert packet.inspection_integration[0].localization_role == "INTEGRATION"
     assert all(item.path != "src/job.rs" for item in packet.primary_edit_targets)
+
+
+def test_public_surface_survives_high_fan_in_relationship_budget() -> None:
+    links = tuple(
+        StructuralLink(
+            source_path=f"examples/example_{index}.ts",
+            target_path="src/container.ts",
+            relation="CALLS",
+            confidence=1.0,
+            certified=True,
+            verification_status="verified",
+            source_symbol=f"example{index}",
+            target_symbol="register",
+            source_start_line=1,
+            target_start_line=5,
+            source_content_sha256=f"{index + 1:x}" * 64,
+            target_content_sha256="a" * 64,
+            source_evidence_origin="preexisting_repository",
+            target_evidence_origin="preexisting_repository",
+            origin="program",
+            resolution_outcome="exact",
+            resolution_method="exact_symbol",
+            candidate_count=1,
+        )
+        for index in range(8)
+    )
+    public = StructuralLink(
+        source_path="src/awilix.ts",
+        target_path="src/container.ts",
+        relation="RE_EXPORTS",
+        confidence=1.0,
+        certified=True,
+        verification_status="verified",
+        source_symbol="register",
+        target_symbol="register",
+        source_start_line=1,
+        target_start_line=5,
+        source_content_sha256="b" * 64,
+        target_content_sha256="a" * 64,
+        source_evidence_origin="preexisting_repository",
+        target_evidence_origin="preexisting_repository",
+        origin="program",
+        resolution_outcome="exact",
+        resolution_method="exact_symbol",
+        candidate_count=1,
+    )
+    documents = (
+        _document("src/container.ts", "register", "export function register() {}"),
+        _document("src/awilix.ts", "register", "export { register } from './container'"),
+        *(
+            _document(
+                f"examples/example_{index}.ts",
+                f"example{index}",
+                "register()",
+            )
+            for index in range(8)
+        ),
+    )
+    repository = HybridRepository(
+        documents=documents,
+        structural_links=(*links, public),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=len(documents),
+        document_chars=500,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Change `register` and preserve the public API"),
+    )
+
+    assert [item.path for item in packet.inspection_public_surface] == ["src/awilix.ts"]
 
 
 def test_compiler_marks_greenfield_rust_file_as_proposal_not_repository_fact() -> None:

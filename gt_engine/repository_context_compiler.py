@@ -473,7 +473,9 @@ def compile_task_facets(
                     and leaf.casefold().startswith(key + "_")
                     for row in values
                     if not owner_paths or row[1] in owner_paths
-                },
+                }
+                if len(segments) == 1 or owner_paths
+                else set(),
                 key=lambda row: (-len(row[0]), row[0].casefold(), row[1]),
             )
             if analogs:
@@ -950,6 +952,11 @@ class RepositoryContextCompiler:
         )
         identifiers = _explicit_identifiers(request)
         authoritative_symbols = _authoritative_symbol_identifiers(request)
+        facet_exact_symbols = frozenset(
+            symbol.casefold()
+            for facet in task_facets
+            for symbol in facet.exact_symbols
+        )
         concrete_identifiers = _concrete_identifiers(request)
         ranked = tuple(sorted(retrieval.ranked_files, key=lambda row: _rank_key(row, identifiers)))
 
@@ -958,7 +965,15 @@ class RepositoryContextCompiler:
             for row in ranked
             if (candidate := _exact_candidate(row)) is not None
             and bool(candidate.symbol)
-            and str(candidate.symbol).lower() in authoritative_symbols
+            and str(candidate.symbol).casefold()
+            in (authoritative_symbols | facet_exact_symbols)
+            and bool(
+                _matching_facet_ids(
+                    symbol=str(candidate.symbol),
+                    path=row.path,
+                    facets=task_facets,
+                )
+            )
         )
         exact_path_rows = tuple(
             row
@@ -1170,7 +1185,30 @@ class RepositoryContextCompiler:
                 relation,
             )
             distinct_links.setdefault(key, link)
-        certified_relevant_links = tuple(distinct_links.values())
+        relation_priority = {
+            "RE_EXPORTS": 0,
+            "TESTED_BY": 1,
+            "CALLS": 2,
+            "IMPORTS": 3,
+            "IMPLEMENTS": 4,
+            "EXTENDS": 5,
+        }
+        certified_relevant_links = tuple(
+            sorted(
+                distinct_links.values(),
+                key=lambda link: (
+                    relation_priority.get(str(link.relation or "").upper(), 6),
+                    _is_test(link.source_path) or _is_test(link.target_path),
+                    "/examples/" in ("/" + link.source_path.lower())
+                    or "/examples/" in ("/" + link.target_path.lower()),
+                    _path_penalty(link.source_path) + _path_penalty(link.target_path),
+                    link.source_path,
+                    str(link.source_symbol or ""),
+                    link.target_path,
+                    str(link.target_symbol or ""),
+                ),
+            )
+        )
         safe_links = certified_relevant_links[:6]
         link_items = tuple(
             item
