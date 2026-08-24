@@ -743,12 +743,17 @@ def _rank_key(ranked: RankedFile, identifiers: dict[str, int]) -> tuple[Any, ...
     exact = _exact_candidate(ranked)
     symbol = str(exact.symbol if exact is not None else ranked.representative.symbol or "")
     exact_symbol = bool(symbol and symbol.lower() in identifiers)
+    facet_seed = bool(
+        exact is not None and "facet_exact_symbol" in set(exact.provenance)
+    )
     exact_path = bool(
         exact is not None
         and "exact_path" in set(exact.provenance)
     )
     return (
         0 if exact_symbol else 1 if exact_path else 2,
+        0 if facet_seed else 1,
+        -float(ranked.fused_score) if facet_seed else 0.0,
         identifiers.get(symbol.lower(), len(identifiers)),
         _path_penalty(ranked.path),
         -float(ranked.fused_score),
