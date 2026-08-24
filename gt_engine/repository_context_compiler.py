@@ -210,6 +210,9 @@ _SYMBOL_CUE = re.compile(
 _CODE_ENTITY = re.compile(
     r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)(?:`|'|\")"
 )
+_ASSOCIATED_GROUP = re.compile(
+    r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_]*)::\{([^}]+)\}(?:`|'|\")?"
+)
 _ISSUE_LANGUAGE_WORDS = frozenset(
     {
         "add",
@@ -314,11 +317,57 @@ def _facet_role(text: str) -> LocalizationRole:
     lowered = str(text or "").lower()
     if re.search(r"\b(?:test|verify|validate|regression)\b", lowered):
         return LocalizationRole.VALIDATION
-    if re.search(r"\b(?:public api|public surface|export|re-export|reexport)\b", lowered):
+    if re.search(
+        r"\b(?:public api|public capabilities|public entry points|public surface|"
+        r"crate surface|export|re-export|reexport)\b",
+        lowered,
+    ):
         return LocalizationRole.PUBLIC_SURFACE
     if re.search(r"\b(?:integrat|wire|lifecycle|execution path|data flow)\w*\b", lowered):
         return LocalizationRole.INTEGRATION
     return LocalizationRole.EDIT
+
+
+def _code_shaped(value: str) -> bool:
+    token = str(value or "").strip()
+    return bool(
+        token
+        and (
+            "_" in token
+            or "::" in token
+            or "." in token
+            or any(character.isupper() for character in token[1:])
+        )
+    )
+
+
+def _associated_entities(text: str) -> tuple[str, ...]:
+    entities: list[str] = []
+    for match in _ASSOCIATED_GROUP.finditer(text):
+        owner = match.group(1)
+        for raw_member in match.group(2).split(","):
+            member = raw_member.strip().strip("`'\" ")
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", member):
+                entities.append(f"{owner}::{member}")
+    return tuple(dict.fromkeys(entities))
+
+
+def _symbol_bearing_segments(task: str) -> tuple[str, ...]:
+    segments: list[str] = []
+    for raw in re.split(r"\n\s*\n", str(task or "")):
+        segment = " ".join(line.strip() for line in raw.splitlines() if line.strip())
+        if not segment:
+            continue
+        explicit = tuple(_EXPLICIT_TOKEN.findall(segment))
+        if (
+            _CODE_ENTITY.search(segment)
+            or _ASSOCIATED_GROUP.search(segment)
+            or any(_code_shaped(token) for token in explicit)
+        ):
+            segments.append(segment[:2_000])
+        if len(segments) >= 24:
+            break
+    return tuple(dict.fromkeys(segments))
 
 
 def compile_task_facets(
@@ -334,42 +383,55 @@ def compile_task_facets(
     """
 
     contract = extract_task_contract(task)
-    rows = tuple(
+    obligation_rows = tuple(
         (obligation.obligation_id, obligation.text)
         for obligation in contract.obligations
-    ) or (("task", str(task or "").strip()),)
-    available: dict[str, str] = {}
-    modules_by_symbol: dict[str, str] = {}
+    )
+    represented = "\n".join(text for _identifier, text in obligation_rows).casefold()
+    symbol_rows = tuple(
+        (
+            "symbols-" + hashlib.sha256(segment.encode()).hexdigest()[:12],
+            segment,
+        )
+        for segment in _symbol_bearing_segments(task)
+        if segment.casefold() not in represented
+    )
+    rows = obligation_rows + symbol_rows or (("task", str(task or "").strip()),)
+    available: dict[str, list[tuple[str, str]]] = {}
     for document in documents:
         symbol = str(getattr(document, "symbol", "") or "").strip()
         if not symbol:
             continue
+        path = str(getattr(document, "path", "") or "")
         for key in {
             symbol.casefold(),
             re.split(r"(?:::|[.#])", symbol)[-1].casefold(),
         }:
-            available.setdefault(key, symbol)
-            modules_by_symbol.setdefault(key, str(getattr(document, "path", "") or ""))
+            row = (symbol, path)
+            if row not in available.setdefault(key, []):
+                available[key].append(row)
 
     facets: list[TaskFacet] = []
     for obligation_id, text in rows:
-        entities = list(dict.fromkeys(match.group(1) for match in _CODE_ENTITY.finditer(text)))
+        associated = _associated_entities(text)
+        associated_members = {
+            re.split(r"(?:::|[.#])", entity)[-1].casefold()
+            for entity in associated
+        }
+        entities = list(associated)
+        entities.extend(match.group(1) for match in _CODE_ENTITY.finditer(text))
         for match in _SYMBOL_CUE.finditer(text):
-            entities.append(match.group(1))
+            candidate = match.group(1)
+            if candidate.casefold() in available or _code_shaped(candidate):
+                entities.append(candidate)
         for token in _EXPLICIT_TOKEN.findall(text):
             token = token.strip("`'\".,:;()[]{}")
             if (
                 token
+                and token.casefold() not in associated_members
                 and "/" not in token
                 and "\\" not in token
-                and (
-                    "_" in token
-                    or "::" in token
-                    or (
-                        not token.isupper()
-                        and any(character.isupper() for character in token[1:])
-                    )
-                )
+                and _code_shaped(token)
             ):
                 entities.append(token)
         entities = list(dict.fromkeys(entities))
@@ -378,38 +440,45 @@ def compile_task_facets(
         owners: list[str] = []
         modules: list[str] = []
         for entity in entities:
-            leaf = re.split(r"(?:::|[.#])", entity)[-1]
-            match = available.get(entity.casefold()) or available.get(leaf.casefold())
-            if match:
-                exact.append(match)
-                path = modules_by_symbol.get(entity.casefold()) or modules_by_symbol.get(
-                    leaf.casefold(), ""
-                )
-                if path:
-                    modules.append(path)
+            segments = re.split(r"(?:::|[.#])", entity)
+            leaf = segments[-1]
+            direct = available.get(entity.casefold(), [])
+            owner_rows = available.get(segments[0].casefold(), []) if len(segments) > 1 else []
+            leaf_rows = available.get(leaf.casefold(), [])
+            if direct:
+                exact.extend(symbol for symbol, _path in direct)
+                modules.extend(path for _symbol, path in direct if path)
+                continue
+            if len(segments) == 1 and leaf_rows:
+                exact.extend(symbol for symbol, _path in leaf_rows)
+                modules.extend(path for _symbol, path in leaf_rows if path)
                 continue
             unresolved.append(entity)
-            segments = re.split(r"(?:::|[.#])", entity)
-            owner = available.get(segments[0].casefold()) if len(segments) > 1 else None
-            if owner:
-                owners.append(owner)
-                owner_path = modules_by_symbol.get(segments[0].casefold(), "")
-                if owner_path:
-                    modules.append(owner_path)
+            owner_paths = {path for _symbol, path in owner_rows if path}
+            if owner_rows:
+                owners.extend(symbol for symbol, _path in owner_rows)
+                modules.extend(owner_paths)
+                colocated_leaf_rows = [
+                    row for row in leaf_rows if row[1] and row[1] in owner_paths
+                ]
+                exact.extend(symbol for symbol, _path in colocated_leaf_rows)
+                modules.extend(path for _symbol, path in colocated_leaf_rows if path)
             # New APIs commonly extend an existing sibling name. Keep the
             # longest exact prefix as an analog, never as proof the new API exists.
             analogs = sorted(
                 {
-                    value
-                    for key, value in available.items()
+                    row
+                    for key, values in available.items()
                     if len(key) >= 4
-                    and entity.casefold().startswith(key + "_")
+                    and leaf.casefold().startswith(key + "_")
+                    for row in values
+                    if not owner_paths or row[1] in owner_paths
                 },
-                key=lambda value: (-len(value), value.casefold()),
+                key=lambda row: (-len(row[0]), row[0].casefold(), row[1]),
             )
             if analogs:
-                exact.append(analogs[0])
-                analog_path = modules_by_symbol.get(analogs[0].casefold(), "")
+                analog, analog_path = analogs[0]
+                exact.append(analog)
                 if analog_path:
                     modules.append(analog_path)
         digest = hashlib.sha256(
@@ -450,13 +519,36 @@ def _proposed_rust_files(
     if not rust_paths:
         return ()
     existing = frozenset(rust_paths)
-    parent_counts = Counter(path.rsplit("/", 1)[0] if "/" in path else "" for path in rust_paths)
-    parent = min(parent_counts, key=lambda value: (-parent_counts[value], value))
+
+    def source_root(path: str) -> str:
+        if "/src/" in path:
+            return path.split("/src/", 1)[0] + "/src"
+        if path.startswith("src/"):
+            return "src"
+        return path.rsplit("/", 1)[0] if "/" in path else ""
+
+    root_counts = Counter(source_root(path) for path in rust_paths)
+    default_root = min(root_counts, key=lambda value: (-root_counts[value], value))
     proposals: list[str] = []
     for facet in facets:
+        facet_roots = Counter(
+            source_root(path)
+            for path in facet.owning_modules
+            if path.lower().endswith(".rs")
+        )
+        parent = (
+            min(facet_roots, key=lambda value: (-facet_roots[value], value))
+            if facet_roots
+            else default_root
+        )
+        existing_owners = {symbol.casefold() for symbol in facet.owning_symbols}
         for symbol in facet.unresolved_symbols:
             owner = re.split(r"(?:::|[.#])", symbol)[0]
-            if owner == symbol or not re.match(r"^[A-Z][A-Za-z0-9]+$", owner):
+            if (
+                owner == symbol
+                or owner.casefold() in existing_owners
+                or not re.match(r"^[A-Z][A-Za-z0-9]+$", owner)
+            ):
                 continue
             stem = _snake_case_type(owner)
             if not stem:

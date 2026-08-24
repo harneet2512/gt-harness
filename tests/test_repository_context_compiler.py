@@ -537,6 +537,54 @@ def test_task_facets_capture_unquoted_case_significant_symbols() -> None:
     assert {"HybridRetriever", "GroundTruthTreatment"} <= exact
 
 
+def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:
+    documents = (
+        _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
+        _document("core/engine/src/context/mod.rs", "run_jobs", "pub fn run_jobs() {}"),
+        _document("core/engine/src/script.rs", "Script", "pub struct Script;"),
+        _document("core/engine/src/script.rs", "evaluate", "pub fn evaluate() {}"),
+    )
+
+    facets = compile_task_facets(
+        """Implement evaluation cancellation.
+
+Public capabilities include
+`Context::{run_jobs_with_evaluation, new_evaluation_handle}` and
+`Script::evaluate_with_evaluation`.
+
+Cancellation must be first-wins.""",
+        documents,
+    )
+
+    unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
+    owners = {symbol for facet in facets for symbol in facet.owning_symbols}
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    roles = {facet.role.value for facet in facets if facet.owning_symbols}
+    assert "Context::run_jobs_with_evaluation" in unresolved
+    assert "Context::new_evaluation_handle" in unresolved
+    assert "Script::evaluate_with_evaluation" in unresolved
+    assert {"Context", "Script"} <= owners
+    assert {"run_jobs", "evaluate"} <= exact
+    assert "PUBLIC_SURFACE" in roles
+
+
+def test_qualified_unresolved_owner_does_not_claim_unrelated_leaf_symbol() -> None:
+    documents = (
+        _document("core/runtime/src/abort/mod.rs", "is_cancelled", "pub fn is_cancelled()"),
+        _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
+    )
+
+    facets = compile_task_facets(
+        "Add `EvaluationHandle::is_cancelled` to Context.",
+        documents,
+    )
+
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
+    assert "is_cancelled" not in exact
+    assert "EvaluationHandle::is_cancelled" in unresolved
+
+
 def test_compiler_separates_integration_callers_from_edit_targets() -> None:
     call = StructuralLink(
         source_path="src/job.rs",
