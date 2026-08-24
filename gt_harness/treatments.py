@@ -564,6 +564,8 @@ class GroundTruthTreatment(BareTreatment):
             not update
             and not decision_grade_initial
             and "insufficient_independent_support" in normalized_packet["uncertainties"]
+            and "no_decision_relevant_evidence" in normalized_packet["uncertainties"]
+            and "no_complete_evidence" in normalized_packet["uncertainties"]
         ):
             self.suppressed_inspection_only_updates += 1
             return self._abstain("context_abstained:no_decision_grade_evidence")

@@ -170,7 +170,11 @@ def test_initial_context_abstains_without_decision_grade_evidence(
         status=ContextStatus.READY,
         repository_identity={"source_revision": "b" * 64},
         inspection_candidates=(item,),
-        uncertainties=("insufficient_independent_support",),
+        uncertainties=(
+            "insufficient_independent_support",
+            "no_decision_relevant_evidence",
+            "no_complete_evidence",
+        ),
         evidence_items=(item,),
         coverage={"dense_index": {"status": "READY", "query_ready": True}},
     )

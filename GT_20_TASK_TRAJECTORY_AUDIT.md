@@ -99,9 +99,10 @@ QEMU startup failure. Remaining failures were product lifecycle boundaries:
    outer cancellation; and
 3. final attestation counted assistant messages rather than Mini-SWE API attempts.
 
-The retry repair is live-verified by run `32700056236`. The pending inspection-only
-abstention patch has focused provider-free regression coverage but has not yet
-been paid-replayed.
+The retry repair is live-verified by run `32700056236`. The dense-update fallback
+is live-verified by run `32711664602`; its attestation passed. The initial-packet
+abstention policy is deliberately narrow and remains subject to the next live
+replay.
 
 ## Baseline interpretation
 

@@ -15,11 +15,11 @@ controlled same-model causal uplift remain unproven.
 | Question | Answer | Confidence |
 | --- | --- | --- |
 | A. Mechanically reproducible? | Yes. Exact-SHA clean Linux install, Python, Go, lint, graph, dense, lifecycle, E2E, and failure gates pass. | High |
-| B. Complete production project? | Complete for controlled prerelease scope with declared limits; retry repair is live-verified, while inspection-only abstention is pending replay. | Moderate |
+| B. Complete production project? | Complete for controlled prerelease scope with declared limits; retry and dense-update repairs are live-verified, while the narrowed initial abstention policy awaits replay. | Moderate |
 | C. Graph reliably builds? | Yes in the frozen real-repository matrix and for every active second-smoke treatment; unsupported/source-less tasks abstained. | High |
 | D. Graph accurate and sufficiently complete? | 62/62 on the bounded independent corpus; all live packet source text was real. Universal recall is not established. | High for corpus, moderate broadly |
 | E. Correct across edits, commits, crashes, restarts? | Provider-free lifecycle is 9/9. Live process-kill/outer-timeout receipt finalization is fixed and regression tested, not paid-replayed. | Moderate-high |
-| F. Normal coding agent can use it? | Yes through the actual Mini-SWE 2.2.8 Harbor adapter. The latest smoke produced 20 trajectories; weak inspection-only packets are now blocked by a provider-free regression fix pending live replay. | High |
+| F. Normal coding agent can use it? | Yes through the actual Mini-SWE 2.2.8 Harbor adapter. The latest smoke produced 20 trajectories and passed attestation; the narrowed abstention policy awaits replay. | High |
 | G. Claimed languages supported? | Python, JavaScript, TypeScript, Go, Rust, and Java structurally, with explicit parser/semantic limitations. | High |
 | H. Competitive with GitNexus? | GT leads the bounded structural/revision audit; GitNexus remains broader in processes, communities, trace, PDG, and compact higher-order retrieval. | Moderate |
 | I. Causally improves solve rates? | Unknown. The only repair20 baseline uses another model; no controlled GT-off pair exists. | High |

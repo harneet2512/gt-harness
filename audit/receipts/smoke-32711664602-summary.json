@@ -1,0 +1,42 @@
+{
+  "schema": "gt.repair20.smoke_summary.v2",
+  "workflow_run_id": "32711664602",
+  "source_sha": "88493bc8a3c98d6bd32df3726f13e408e2579cb0",
+  "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+  "model": "stealth/ox-alpha",
+  "provider": "OpenRouter",
+  "max_parallel": 20,
+  "attempts_per_task": 1,
+  "attestation": "PASS",
+  "task_count": 20,
+  "gt_solved": 8,
+  "gt_provider_calls": 616,
+  "gt_input_tokens": 19713040,
+  "gt_output_tokens": 606423,
+  "gt_input_output_tokens": 20319463,
+  "gt_product_error_tasks": [
+    "headless-terminal",
+    "largest-eigenval",
+    "torch-tensor-parallelism",
+    "winning-avg-corewars"
+  ],
+  "provider_timeout_error_tasks": [
+    "torch-tensor-parallelism"
+  ],
+  "treatment_unavailable_tasks": [],
+  "baseline": {
+    "artifact": "eval/frozen_baselines/tb2_miniswe_20260731.json",
+    "model": "deepseek-v4-flash",
+    "solved": 17,
+    "provider_calls": 1041,
+    "input_output_tokens": 65625578
+  },
+  "comparison_note": "The run is attested and the dense-update failure did not recur, but solve rate is stochastic and remains non-causal against a different baseline model.",
+  "diagnosis": {
+    "verified_fixes": [
+      "provider retry cap raised from one to three bounded attempts",
+      "stale dense retrieval during updates degrades to explicit sparse graph evidence instead of aborting treatment"
+    ],
+    "next_adjustment": "narrow initial abstention to packets explicitly reporting no decision-relevant and no complete evidence"
+  }
+}

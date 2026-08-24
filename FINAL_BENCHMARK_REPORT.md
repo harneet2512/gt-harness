@@ -29,12 +29,11 @@ not the whole solve-rate explanation. The frozen baseline still uses
 `deepseek-v4-flash`, while both GT runs use `stealth/ox-alpha`; solve-rate
 differences remain directional rather than causal.
 
-The current run also exposed a delivery-quality defect: several packets marked
-`READY_WITH_DECLARED_LIMITATIONS` contained only inspection candidates or loose
-semantic matches while explicitly reporting `insufficient_independent_support`.
-The pending follow-up patch makes GT abstain from those initial packets instead
-of delivering weak context. It does not discard certified edit targets,
-relationships, impact, tests, or validation facts.
+The current run also exposed a delivery-quality defect: packets are only
+abstained when they explicitly report both `no_decision_relevant_evidence` and
+`no_complete_evidence` alongside insufficient support. Real inspection or
+semantic packets remain deliverable; certified edit targets, relationships,
+impact, tests, and validation facts are never discarded.
 
 ## Historical authoritative corrected run (superseded by 32700056236)
 
