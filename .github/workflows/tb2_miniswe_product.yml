@@ -56,6 +56,8 @@ jobs:
           import os
           from pathlib import Path
 
+          from scripts.resolve_harbor_budget import resolve_budget
+
           tasks = [
               "cobol-modernization",
               "count-dataset-tokens",
@@ -88,10 +90,26 @@ jobs:
           missing = sorted(set(tasks) - available)
           if missing:
               raise SystemExit(f"repair20 tasks absent from terminal-bench@2.0: {missing}")
-          matrix_rows = [
-              {"ordinal": ordinal, "task": task}
-              for ordinal, task in enumerate(tasks, start=1)
-          ]
+          matrix_rows = []
+          for ordinal, task in enumerate(tasks, start=1):
+              budget = resolve_budget(
+                  dataset / task / "task.toml",
+                  multiplier=1.0,
+              )
+              matrix_rows.append(
+                  {
+                      "ordinal": ordinal,
+                      "task": task,
+                      "outer_agent_timeout_seconds": int(
+                          budget["execution_budget_sec"]
+                      ),
+                      "time_budget_seconds": max(
+                          30,
+                          int(float(budget["execution_budget_sec"]) - 60.0),
+                      ),
+                      "task_config_sha256": budget["task_config_sha256"],
+                  }
+              )
           receipt = {
               "schema": "gt.harbor_repair20_plan.v1",
               "profile": "repair20-v1",
@@ -101,6 +119,7 @@ jobs:
               "task_set_sha256": task_hash,
               "attempts_per_task": 1,
               "max_parallel": 20,
+              "timeout_policy": "task.toml agent.timeout_sec minus 60 seconds",
               "dataset": "terminal-bench@2.0",
               "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
               "agent_scaffold": "mini-swe-agent",
@@ -158,10 +177,20 @@ jobs:
         working-directory: vendor/gt-index-src
         env:
           CGO_ENABLED: "1"
+          CC: musl-gcc
         run: |
           set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
           go test -tags sqlite_fts5 ./...
-          go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
+          go build -tags sqlite_fts5 \
+            -ldflags '-linkmode external -extldflags "-static"' \
+            -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
+          file "$RUNNER_TEMP/gt-index" | grep -F "statically linked"
+          if readelf -d "$RUNNER_TEMP/gt-index" 2>&1 | grep -q '(NEEDED)'; then
+            echo "gt-index contains a dynamic-library dependency" >&2
+            exit 1
+          fi
           chmod 755 "$RUNNER_TEMP/gt-index"
           echo "GT_INDEX_BINARY_HOST=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
 
@@ -210,7 +239,7 @@ jobs:
             --ak product_source_sha="${{ needs.plan.outputs.source_sha }}" \
             --ak temperature=1.0 \
             --ak max_iterations=100 \
-            --ak time_budget_seconds=35400 \
+            --ak time_budget_seconds="${{ matrix.time_budget_seconds }}" \
             -i "$TASK"
 
       - name: Upload this task's Harbor and product receipts
@@ -254,6 +283,10 @@ jobs:
           plan = json.loads((root / "repair20-plan.json").read_text(encoding="utf-8"))
           expected = list(plan["task_ids"])
           expected_set = set(expected)
+          expected_budgets = {
+              row["task"]: str(row["time_budget_seconds"])
+              for row in plan["matrix"]
+          }
           errors = []
 
           trial_rows = []
@@ -288,13 +321,61 @@ jobs:
                   errors.append(f"adapter_contract_mismatch:{task}")
               if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
                   errors.append(f"adapter_source_sha_mismatch:{task}")
+              if str(row.get("time_budget_seconds")) != expected_budgets.get(task):
+                  errors.append(f"adapter_time_budget_mismatch:{task}")
           if set(adapters) != expected_set:
               errors.append("adapter_receipt_task_set_mismatch")
 
           product_runs = {}
           for path in (root / "tasks").rglob("agent/gt-run.json"):
               row = json.loads(path.read_text(encoding="utf-8"))
-              product_runs[str(row.get("task_id") or "")] = row
+              task = str(row.get("task_id") or "")
+              product_runs[task] = row
+              if row.get("status") not in {"COMPLETED", "ERROR"}:
+                  errors.append(f"nonterminal_product_receipt:{task}")
+              transcript = row.get("transcript")
+              if not isinstance(transcript, list):
+                  errors.append(f"missing_product_transcript:{task}")
+                  transcript = []
+              observed_calls = sum(
+                  item.get("role") == "assistant"
+                  for item in transcript
+                  if isinstance(item, dict)
+              )
+              if int(row.get("provider_calls") or 0) != observed_calls:
+                  errors.append(f"provider_call_receipt_mismatch:{task}")
+              trajectory_path = path.with_name("gt-run.trajectory.json")
+              if not trajectory_path.is_file():
+                  errors.append(f"missing_full_trajectory:{task}")
+              else:
+                  trajectory = json.loads(
+                      trajectory_path.read_text(encoding="utf-8")
+                  )
+                  if not isinstance(trajectory.get("messages"), list):
+                      errors.append(f"invalid_full_trajectory:{task}")
+              treatment = row.get("treatment_receipt")
+              if not isinstance(treatment, dict):
+                  errors.append(f"missing_treatment_receipt:{task}")
+                  continue
+              if row.get("error_type") == "TreatmentUnavailableError":
+                  errors.append(f"gt_treatment_unavailable:{task}")
+              if int(treatment.get("delivery_count") or 0) > 4:
+                  errors.append(f"delivery_limit_exceeded:{task}")
+              for delivery in treatment.get("delivery_receipts") or []:
+                  if not delivery.get("same_observation"):
+                      errors.append(f"late_delivery:{task}")
+                  if int(delivery.get("context_token_count") or 0) > 350:
+                      errors.append(f"update_context_budget_exceeded:{task}")
+              if treatment.get("treatment_status") == "ACTIVE":
+                  if not treatment.get("graph_available") or treatment.get(
+                      "graph_status"
+                  ) not in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}:
+                      errors.append(f"active_graph_not_ready:{task}")
+                  dense = treatment.get("dense_index_receipt") or {}
+                  if treatment.get("retrieval_mode") != "hybrid_required" or not dense.get(
+                      "query_ready"
+                  ):
+                      errors.append(f"active_dense_not_ready:{task}")
           if set(product_runs) != expected_set:
               errors.append("product_receipt_task_set_mismatch")
 
