@@ -124,7 +124,7 @@ jobs:
               "task_order_sha256": order_hash,
               "language_counts": language_counts,
               "attempts_per_task": 1,
-              "max_parallel": 4,
+              "max_parallel": 20,
               "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent",
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.2.8",
@@ -221,10 +221,10 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      # Four concurrent agents avoid converting the shared Ox Alpha upstream
-      # throttle into benchmark failures while still exercising independent
-      # GitHub-hosted runners.
-      max-parallel: 4
+      # The frozen DeepSWE smoke has 20 independent tasks. Run the complete
+      # cohort concurrently; provider throttling is recorded as infrastructure
+      # evidence and never reclassified as a task solve/loss.
+      max-parallel: 20
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       TASK: ${{ matrix.task }}

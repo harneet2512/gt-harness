@@ -98,5 +98,7 @@ still exhausted the route on the first logical model call. It was cancelled beca
 the upstream pool remained unavailable. The production runner had also accidentally
 reduced Mini-SWE's default retry attempts from ten to three. Current implementation
 `84be516` adds a pre-task provider-availability gate, six bounded in-task attempts,
-four-way campaign parallelism, and fail-closed product-error attestation. Both invalid
-runs are excluded from solve-rate and efficiency metrics.
+and fail-closed product-error attestation. Those historical runs remain excluded
+from solve-rate and efficiency metrics. The current final DeepSWE smoke restores the
+required 20-way cohort parallelism; provider throttling is kept as explicit
+infrastructure evidence and cannot be counted as a task result.

@@ -124,7 +124,7 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "active_dense_not_ready:" in source
     assert "trial_task_set_mismatch" in source
     assert "gt.deepswe_gt_harness_attestation.v1" in source
-    assert "max-parallel: 4" in source
+    assert "max-parallel: 20" in source
     assert "eval.pier_gt_adapter:PierMiniSweCentralAgent" not in source
     assert "eval.gt_central_agent" not in source
     assert "nano" not in source.lower()
