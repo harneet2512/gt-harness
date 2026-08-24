@@ -1,6 +1,8 @@
 # GT Localization v5 Implementation Receipt
 
-Implementation SHA: `2bab25973fd1e4e90372aac30231bbbe3009b863`
+Current benchmark implementation SHA: `84be516dee2111f8394ed311fd59abe2e0391d27`
+
+Localization-v5 core SHA: `2bab25973fd1e4e90372aac30231bbbe3009b863`
 
 Observed on `2026-08-24` in the clean 32-GB Linux Codespace
 `gt-final-cert-9411ed1-5rwq4r5jjv7f4gxp`.
@@ -90,3 +92,11 @@ result and not a GT localization failure. The official workflow now caps paralle
 provider trials at four and fails final attestation for every terminal product
 `ERROR`; the invalid run was cancelled before its final four shards consumed more
 capacity.
+
+Recovery run `32778568134` capped parallelism at four, but its first completed shard
+still exhausted the route on the first logical model call. It was cancelled because
+the upstream pool remained unavailable. The production runner had also accidentally
+reduced Mini-SWE's default retry attempts from ten to three. Current implementation
+`84be516` adds a pre-task provider-availability gate, six bounded in-task attempts,
+four-way campaign parallelism, and fail-closed product-error attestation. Both invalid
+runs are excluded from solve-rate and efficiency metrics.

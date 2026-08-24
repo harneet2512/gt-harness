@@ -3,7 +3,7 @@
 GT-Harness is a model-agnostic benchmarking product for measuring whether deterministic GroundTruth repository intelligence helps coding agents. The prerelease product owns graph construction, readiness, delivery, run receipts, and paired comparison; it does not depend on a particular model or provider.
 
 The current provider-free certified implementation is
-`2bab25973fd1e4e90372aac30231bbbe3009b863`, with verdict
+`84be516dee2111f8394ed311fd59abe2e0391d27`, with verdict
 `CERTIFIED_WITH_DECLARED_LIMITATIONS`. It includes the canonical decision-context
 compiler, real pinned dense retrieval, persisted process/impact projection,
 same-observation Mini-SWE delivery, operation-aware Harbor deadlines, and external

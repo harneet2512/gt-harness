@@ -3,7 +3,7 @@
 Verdict: `HOLD`
 
 Exact implementation SHA under current provider-free verification:
-`2bab25973fd1e4e90372aac30231bbbe3009b863`.
+`84be516dee2111f8394ed311fd59abe2e0391d27`.
 
 GT Harness is suitable for continued controlled prerelease engineering. The
 latest official smoke [32717496816](https://github.com/harneet2512/gt-harness/actions/runs/32717496816)

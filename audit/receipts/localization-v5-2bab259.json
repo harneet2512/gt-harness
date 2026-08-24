@@ -1,7 +1,8 @@
 {
   "schema": "gt.localization_v5_delta_receipt.v1",
   "observed_at": "2026-08-24",
-  "implementation_sha": "2bab25973fd1e4e90372aac30231bbbe3009b863",
+  "implementation_sha": "84be516dee2111f8394ed311fd59abe2e0391d27",
+  "localization_core_sha": "2bab25973fd1e4e90372aac30231bbbe3009b863",
   "environment": {
     "kind": "github_codespace",
     "name": "gt-final-cert-9411ed1-5rwq4r5jjv7f4gxp",
@@ -45,6 +46,13 @@
       "disposition": "INVALID_INFRASTRUCTURE",
       "reason": "shared_upstream_rate_limit_under_20_way_parallelism"
     },
-    "recovery_max_parallel": 4
+    "invalid_recovery": {
+      "run_id": 32778568134,
+      "disposition": "INVALID_INFRASTRUCTURE",
+      "reason": "shared_upstream_route_unavailable_before_provider_gate"
+    },
+    "recovery_max_parallel": 4,
+    "provider_availability_gate_required": true,
+    "bounded_model_retry_attempts": 6
   }
 }

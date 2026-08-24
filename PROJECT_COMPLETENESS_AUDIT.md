@@ -1,6 +1,6 @@
 # GroundTruth Project Completeness Audit
 
-Implementation subject: `2bab25973fd1e4e90372aac30231bbbe3009b863`
+Implementation subject: `84be516dee2111f8394ed311fd59abe2e0391d27`
 
 Observed: `2026-08-24` in a clean 32-GB Linux Codespace.
 
@@ -89,6 +89,11 @@ not yet live-replayed.
 22. Feature lifecycle credited reading or unrelated edits as implementation progress.
     Transitions are now tied to content hashes of attributed paths and applicable
     post-edit validation.
+23. The official smoke launched 20 requests into a shared provider pool and reduced
+    Mini-SWE's retry policy from ten attempts to three; attestation also accepted
+    terminal product errors. The workflow now gates route availability before task
+    clocks start, caps parallelism at four, uses six bounded attempts, and fails
+    attestation on every product error.
 
 ## Canonical boundary and retained work
 

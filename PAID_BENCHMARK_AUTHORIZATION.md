@@ -2,7 +2,7 @@
 
 Verdict: `AUTHORIZED`
 
-Current implementation: `2bab25973fd1e4e90372aac30231bbbe3009b863`.
+Current implementation: `84be516dee2111f8394ed311fd59abe2e0391d27`.
 
 The previous limited authorization was consumed by GT-only repair20 runs
 [32676409425](https://github.com/harneet2512/gt-harness/actions/runs/32676409425)
@@ -29,4 +29,7 @@ repair20 task set, Mini-SWE-Agent 2.2.8, one attempt, `stealth/ox-alpha`, full
 trajectories, exact source SHA, and a maximum of four concurrent provider trials.
 Run `32777013633` is invalid infrastructure evidence: the former 20-way launch
 exhausted the shared upstream route and produced terminal `RateLimitError` receipts.
-It is not a benchmark result. One corrected recovery run is authorized.
+Run `32778568134` proved that the route remained unavailable even at four-way
+parallelism and was also cancelled. Neither is a benchmark result. The next recovery
+must pass the new provider-availability gate before any task starts; one such
+corrected recovery run is authorized.

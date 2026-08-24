@@ -1,7 +1,7 @@
 # GroundTruth Canonical Architecture
 
 Status: canonical prerelease architecture. The current implementation is
-`2bab25973fd1e4e90372aac30231bbbe3009b863`; its localization-v5 delta receipt is
+`84be516dee2111f8394ed311fd59abe2e0391d27`; its localization-v5 delta receipt is
 `audit/receipts/localization-v5-2bab259.json`. The preceding complete clean-Linux
 campaign remains under `audit/receipts/codespaces-8931876/`; all applicable
 provider-free gates were rerun on the current implementation.
