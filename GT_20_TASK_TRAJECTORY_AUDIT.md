@@ -2,11 +2,11 @@
 
 Audit date: 2026-08-24
 
-Canonical run: `32695000605`
+Canonical run: `32700056236`
 
-Run subject: `b6e16099a827449953670b053d9ac873d4f6f367`
+Run subject: `1fd7efae7eca064cbec56ba319f2169eb81a9ceb`
 
-Current repaired implementation: `d78f4d2e7d1ebe45abe23b92c4b5cc89ead4c776`
+Current repaired implementation: `1fd7efae7eca064cbec56ba319f2169eb81a9ceb`
 
 Agent: `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent`
 
@@ -14,14 +14,19 @@ Model request: `stealth/ox-alpha` through OpenRouter
 
 Parallelism/attempts: `20 / 1`
 
-The authoritative corrected run passed the final attestation. It produced 20
+The latest authoritative rerun passed the final attestation. It produced 20
 terminal GT receipts and 20 full trajectories. Raw Harbor reward was 9/20.
 The frozen local baseline for the same task set was 17/20, but used a different
 model route (`deepseek-v4-flash` versus GT's `stealth/ox-alpha`).
 
-The historical table below is retained for run `32680131105`; it is superseded by
-the authoritative corrected run table in `FINAL_BENCHMARK_REPORT.md` and the
-receipt `audit/receipts/smoke-32695000605-summary.json`.
+The prior tables are retained for audit history; the latest table is in
+`FINAL_BENCHMARK_REPORT.md` and the receipt
+`audit/receipts/smoke-32700056236-summary.json`.
+
+The retry repair changed Mini-SWE transport retries from one to three. It removed
+the two prior OpenRouter read-timeout failures, but the solve rate remained 9/20.
+The latest two product-process errors were COBOL and Corewars. The frozen 17/20
+baseline remains a different model route and is not a causal GT comparison.
 
 | Task | Reward | GT status | Calls | Delivery | Graph |
 | --- | ---: | --- | ---: | ---: | --- |
@@ -50,18 +55,20 @@ receipt `audit/receipts/smoke-32695000605-summary.json`.
 received no GT context. Every active treatment had a query-ready current-revision
 graph and dense index before its first provider delivery.
 
-## Authoritative corrected-run findings
+## Latest authoritative-run findings
 
-The final attested run recorded 20 terminal receipts and 20 full trajectories.
-It solved 9/20 with 651 provider calls and 30,111,583 input/output tokens. Two
-tasks ended with explicit provider timeout errors (`headless-terminal` and
-`torch-tensor-parallelism`); neither was a missing-receipt or attestation defect.
-The nine baseline-only tasks were COBOL, MCMC, QEMU, Regex Chess, Scheme,
-Video Processing, Tensor Parallelism, Winning Average CoreWars, and Write
-Compressor. Active-treatment packets contained repository-derived text and
-query-ready dense indexes; the NOT_APPLICABLE tasks explicitly abstained because
-the graph had no supported source after repository changes. No dummy or fabricated
-context was observed.
+The latest attested run recorded 20 terminal receipts and 20 full trajectories.
+It solved 9/20 with 591 provider calls and 22,153,615 input/output tokens. Two
+tasks ended with explicit product-process errors (`cobol-modernization` and
+`winning-avg-corewars`); no provider read-timeout error remained. Active-treatment
+packets contained repository-derived text and query-ready dense indexes; the
+NOT_APPLICABLE tasks explicitly abstained because the graph had no supported
+source after repository changes. No dummy or fabricated context was observed.
+
+The latest baseline-only task set is COBOL, FEAL, Headless Terminal, QEMU,
+Largest Eigenval, Regex Chess, Scheme, Video Processing, Winning Average
+CoreWars, and Write Compressor; this list is directional because the baseline
+model differs.
 
 ## Full-text findings
 
@@ -92,9 +99,9 @@ QEMU startup failure. Remaining failures were product lifecycle boundaries:
    outer cancellation; and
 3. final attestation counted assistant messages rather than Mini-SWE API attempts.
 
-Current SHA `8931876` has regression coverage for each cause plus the exact-path
-authority bug. This audit therefore certifies the diagnosis, not a successful live
-retest of the repaired SHA.
+The retry repair is live-verified by run `32700056236`. The pending inspection-only
+abstention patch has focused provider-free regression coverage but has not yet
+been paid-replayed.
 
 ## Baseline interpretation
 

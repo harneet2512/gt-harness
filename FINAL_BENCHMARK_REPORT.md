@@ -2,9 +2,41 @@
 
 Status: `OFFICIAL_REPAIR20_SMOKE_ATTESTED_BASELINE_COMPARISON_COMPLETE`
 
-Current implementation: `d78f4d2e7d1ebe45abe23b92c4b5cc89ead4c776`.
+Current implementation under audit: `1fd7efae7eca064cbec56ba319f2169eb81a9ceb`.
 
-## Authoritative corrected run
+## Latest official rerun after the transport-retry repair
+
+The official GitHub Actions/Harbor run [32700056236](https://github.com/harneet2512/gt-harness/actions/runs/32700056236)
+ran the same frozen `repair20-v1` task set with Mini-SWE-Agent 2.2.8,
+`stealth/ox-alpha` through OpenRouter, one attempt per task, and max parallelism
+20. The final attestation was `PASS`; all 20 task receipts and trajectories were
+present. The source change under test was the bounded retry repair: Mini-SWE
+provider calls now allow three transport attempts instead of one, so transient
+OpenRouter read timeouts are not terminal on the first failure.
+
+| Metric | Frozen baseline | Prior GT run | Latest GT run | Latest vs prior |
+| --- | ---: | ---: | ---: | ---: |
+| Solved | 17/20 | 9/20 | 9/20 | unchanged |
+| Provider calls | 1,041 | 651 | 591 | -60 |
+| Input + output tokens | 65,625,578 | 30,111,583 | 22,153,615 | -7,957,968 |
+| GT product error receipts | n/a | 2/20 | 2/20 | same count, different tasks |
+| Attestation | n/a | PASS | PASS | maintained |
+
+The retry repair removed the two prior OpenRouter timeout errors (headless and
+tensor); the latest errors are product-process exits on COBOL and Corewars.
+Solve rate did not improve, so retry policy was a real reliability defect but
+not the whole solve-rate explanation. The frozen baseline still uses
+`deepseek-v4-flash`, while both GT runs use `stealth/ox-alpha`; solve-rate
+differences remain directional rather than causal.
+
+The current run also exposed a delivery-quality defect: several packets marked
+`READY_WITH_DECLARED_LIMITATIONS` contained only inspection candidates or loose
+semantic matches while explicitly reporting `insufficient_independent_support`.
+The pending follow-up patch makes GT abstain from those initial packets instead
+of delivering weak context. It does not discard certified edit targets,
+relationships, impact, tests, or validation facts.
+
+## Historical authoritative corrected run (superseded by 32700056236)
 
 The official GitHub Actions/Harbor run [32695000605](https://github.com/harneet2512/gt-harness/actions/runs/32695000605)
 ran the exact frozen `repair20-v1` task set with Mini-SWE-Agent 2.2.8,
@@ -120,7 +152,7 @@ the vulnerability was elsewhere. Current SHA `8931876` emits path-only anchors a
 `file_identity` at line 1 with no symbol or excerpt. Exact quoted/symbol anchors
 retain symbol authority.
 
-## Current fixes after the second run
+## Historical fixes after the second run
 
 Current SHA `8931876`:
 
@@ -146,6 +178,12 @@ The real Scheme artifact was replayed provider-free through the new supervisor:
 it became terminal `ERROR`, preserved its transcript, and reconciled to the
 trajectory's 57 provider calls. The complete Python suite, targeted lint, and all
 Go packages pass locally. Exact-SHA Codespaces certification is recorded separately.
+
+The latest source adds two further controls. `1fd7efae` restores three bounded
+Mini-SWE transport retries for transient provider read timeouts. The uncommitted
+follow-up in the current workspace then abstains from initial inspection-only
+packets when independent support is absent, preventing weak candidates from
+being presented as actionable repository context.
 
 ## Directional baseline only
 

@@ -133,6 +133,65 @@ def test_update_suppresses_inspection_only_packet_instead_of_spending_delivery(
     assert treatment.suppressed_inspection_only_updates == 1
 
 
+def test_initial_context_abstains_without_decision_grade_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    item = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="README.md",
+        start_line=1,
+        end_line=1,
+        symbol="",
+        relation="",
+        confidence=None,
+        verification_status="ranked",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="hybrid_retrieval_inspection",
+        completeness="ranked_candidate_not_edit_target",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        inspection_candidates=(item,),
+        uncertainties=("insufficient_independent_support",),
+        evidence_items=(item,),
+        coverage={"dense_index": {"status": "READY", "query_ready": True}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(
+        GroundTruthTreatment,
+        "_context",
+        lambda self, **_kwargs: packet,
+    )
+
+    assert treatment._render(update=False, budget=4_000, delivered_before_call=1) == ""
+    assert treatment.delivery_count == 0
+    assert treatment.treatment_status.value == "NOT_APPLICABLE"
+    assert treatment.suppressed_inspection_only_updates == 1
+    assert treatment.errors == [
+        "NOT_APPLICABLE:context_abstained:no_decision_grade_evidence"
+    ]
+
+
 def test_run_cli_records_not_applicable_treatment_and_runs_provider(
     tmp_path: Path, monkeypatch
 ) -> None:

@@ -521,6 +521,36 @@ class GroundTruthTreatment(BareTreatment):
             return ""
         normalized_packet = packet.as_dict()
 
+        # An inspection candidate or a loose semantic match is not an
+        # instruction.  When retrieval explicitly reports that it lacks
+        # independent support and the packet contains no decision-grade
+        # evidence, delivering it at repository start only adds noise and can
+        # anchor the agent on the wrong file.  Abstain honestly and let the
+        # agent inspect the repository itself.  Real edit targets,
+        # relationships, impact/test facts, or validation plans remain
+        # eligible for delivery even when the graph declares limitations.
+        decision_grade_initial = any(
+            normalized_packet[name]
+            for name in (
+                "primary_edit_targets",
+                "supporting_files",
+                "execution_paths",
+                "change_surface",
+                "affected_tests",
+                "validation_plan",
+            )
+        ) or any(
+            item.get("kind") == "relationship"
+            for item in normalized_packet["evidence_items"]
+        )
+        if (
+            not update
+            and not decision_grade_initial
+            and "insufficient_independent_support" in normalized_packet["uncertainties"]
+        ):
+            self.suppressed_inspection_only_updates += 1
+            return self._abstain("context_abstained:no_decision_grade_evidence")
+
         def compact_target(item: dict[str, Any]) -> dict[str, Any]:
             return {
                 "path": item["path"],

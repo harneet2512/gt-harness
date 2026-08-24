@@ -1,0 +1,56 @@
+{
+  "schema": "gt.repair20.smoke_summary.v2",
+  "workflow_run_id": "32700056236",
+  "source_sha": "1fd7efae7eca064cbec56ba319f2169eb81a9ceb",
+  "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+  "model": "stealth/ox-alpha",
+  "provider": "OpenRouter",
+  "max_parallel": 20,
+  "attempts_per_task": 1,
+  "attestation": "PASS",
+  "task_count": 20,
+  "gt_solved": 9,
+  "gt_provider_calls": 591,
+  "gt_input_tokens": 21458765,
+  "gt_output_tokens": 694850,
+  "gt_input_output_tokens": 22153615,
+  "gt_product_error_tasks": [
+    "cobol-modernization",
+    "winning-avg-corewars"
+  ],
+  "provider_timeout_error_tasks": [],
+  "baseline": {
+    "artifact": "eval/frozen_baselines/tb2_miniswe_20260731.json",
+    "model": "deepseek-v4-flash",
+    "solved": 17,
+    "provider_calls": 1041,
+    "input_output_tokens": 65625578
+  },
+  "task_rewards": {
+    "cobol-modernization": 0,
+    "count-dataset-tokens": 1,
+    "extract-elf": 1,
+    "feal-linear-cryptanalysis": 0,
+    "fix-code-vulnerability": 1,
+    "headless-terminal": 0,
+    "largest-eigenval": 0,
+    "llm-inference-batching-scheduler": 1,
+    "mcmc-sampling-stan": 1,
+    "portfolio-optimization": 1,
+    "prove-plus-comm": 1,
+    "qemu-alpine-ssh": 0,
+    "regex-chess": 0,
+    "sanitize-git-repo": 1,
+    "schemelike-metacircular-eval": 0,
+    "torch-pipeline-parallelism": 0,
+    "torch-tensor-parallelism": 1,
+    "video-processing": 0,
+    "winning-avg-corewars": 0,
+    "write-compressor": 0
+  },
+  "diagnosis": {
+    "verified_fix": "provider retry cap raised from one to three bounded attempts",
+    "remaining_delivery_fix": "abstain when initial packet has no decision-grade evidence and insufficient independent support",
+    "causal_solve_rate_claim": "not_established_due_to_different_baseline_model"
+  }
+}
