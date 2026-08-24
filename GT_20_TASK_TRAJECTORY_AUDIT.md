@@ -19,10 +19,9 @@ terminal GT receipts and 20 full trajectories. Raw Harbor reward was 9/20.
 The frozen local baseline for the same task set was 17/20, but used a different
 model route (`deepseek-v4-flash` versus GT's `stealth/ox-alpha`).
 
-The complete run contained 20 Harbor results, 20 GT receipts, 20 adapter receipts,
-and 20 full Mini-SWE trajectories. Raw reward was 12/20. Valid terminal treatment
-reward was 11/20 because the rewarded Scheme trial ended with product exit 137 and
-a nonterminal GT receipt.
+The historical table below is retained for run `32680131105`; it is superseded by
+the authoritative corrected run table in `FINAL_BENCHMARK_REPORT.md` and the
+receipt `audit/receipts/smoke-32695000605-summary.json`.
 
 | Task | Reward | GT status | Calls | Delivery | Graph |
 | --- | ---: | --- | ---: | ---: | --- |
@@ -50,6 +49,19 @@ a nonterminal GT receipt.
 `NOT_APPLICABLE` is explicit abstention, not a fake healthy graph. Those six tasks
 received no GT context. Every active treatment had a query-ready current-revision
 graph and dense index before its first provider delivery.
+
+## Authoritative corrected-run findings
+
+The final attested run recorded 20 terminal receipts and 20 full trajectories.
+It solved 9/20 with 651 provider calls and 30,111,583 input/output tokens. Two
+tasks ended with explicit provider timeout errors (`headless-terminal` and
+`torch-tensor-parallelism`); neither was a missing-receipt or attestation defect.
+The nine baseline-only tasks were COBOL, MCMC, QEMU, Regex Chess, Scheme,
+Video Processing, Tensor Parallelism, Winning Average CoreWars, and Write
+Compressor. Active-treatment packets contained repository-derived text and
+query-ready dense indexes; the NOT_APPLICABLE tasks explicitly abstained because
+the graph had no supported source after repository changes. No dummy or fabricated
+context was observed.
 
 ## Full-text findings
 

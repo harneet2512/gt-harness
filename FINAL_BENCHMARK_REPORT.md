@@ -56,6 +56,9 @@ Flips: one GT-only solve, nine baseline-only solves, eight both solve, and two
 both fail. This is a measurable regression in this cross-model smoke, not a
 claim about GT causality.
 
+All sections below are historical run notes retained for audit traceability; the
+authoritative result above supersedes their older run IDs and SHA references.
+
 No claim of solve-rate superiority is certified. Two authorized GT-only repair20
 smokes found real product defects. The second run showed that the graph and dense
 context path now works across the portfolio, but two tasks still ended without a
