@@ -443,7 +443,19 @@ def compile_task_facets(
         for entity in entity_values:
             segments = re.split(r"(?:::|[.#])", entity)
             leaf = segments[-1]
-            direct = spelling_preferred(entity, entity)
+            # If the task names a member through an owner anywhere (for
+            # example EvaluationHandle::cancel), a later unqualified
+            # clarification must not bind that leaf to a same-named symbol in
+            # another subsystem.  The qualified owner is the stronger fact.
+            qualified_shadow = (
+                len(segments) == 1
+                and leaf.casefold() in qualified_task_leaves
+            )
+            direct = (
+                []
+                if qualified_shadow
+                else spelling_preferred(entity, entity)
+            )
             owner_rows = (
                 spelling_preferred(segments[0], segments[0])
                 if len(segments) > 1
@@ -454,7 +466,7 @@ def compile_task_facets(
                 exact.extend(symbol for symbol, _path in direct)
                 modules.extend(path for _symbol, path in direct if path)
                 continue
-            if len(segments) == 1 and leaf_rows:
+            if len(segments) == 1 and leaf_rows and not qualified_shadow:
                 exact.extend(symbol for symbol, _path in leaf_rows)
                 modules.extend(path for _symbol, path in leaf_rows if path)
                 continue

@@ -725,7 +725,8 @@ def test_qualified_api_context_prevents_unqualified_clarification_from_global_bi
     task = (
         "Public capabilities include "
         "`EvaluationHandle::{cancel, cancel_with_reason, is_cancelled}`. "
-        "The `cancel_with_reason` call must be first-wins."
+        "The `cancel` call must be first-wins, and `cancel_with_reason` "
+        "must preserve that result."
     )
 
     facets = compile_task_facets(task, documents)
@@ -743,6 +744,7 @@ def test_qualified_api_context_prevents_unqualified_clarification_from_global_bi
     )
 
     assert all("cancel" not in facet.exact_symbols for facet in facets)
+    assert all("is_cancelled" not in facet.exact_symbols for facet in facets)
     assert all(
         item.path != "core/runtime/src/abort/mod.rs"
         for item in packet.primary_edit_targets
