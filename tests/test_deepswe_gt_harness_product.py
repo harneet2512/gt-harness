@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "deepswe_gt_harness_product.yml"
@@ -14,6 +16,12 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
     from eval.pier_gt_harness_adapter import PierGtHarnessMiniSwe228Agent
 
     assert PierGtHarnessMiniSwe228Agent.name() == "gt-harness-miniswe-2.2.8"
+    adapter_source = (ROOT / "eval" / "pier_gt_harness_adapter.py").read_text(
+        encoding="utf-8"
+    )
+    for domain in ("openrouter.ai", "pypi.org", "files.pythonhosted.org"):
+        assert domain in adapter_source
+    pytest.importorskip("pier.models.agent.network")
     allowlist = PierGtHarnessMiniSwe228Agent.network_allowlist(
         PierGtHarnessMiniSwe228Agent.__new__(PierGtHarnessMiniSwe228Agent)
     )
@@ -72,4 +80,3 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "eval.pier_gt_adapter:PierMiniSweCentralAgent" not in source
     assert "eval.gt_central_agent" not in source
     assert "nano" not in source.lower()
-
