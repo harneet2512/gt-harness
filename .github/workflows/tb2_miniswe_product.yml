@@ -124,7 +124,7 @@ jobs:
               "task_ids": tasks,
               "task_set_sha256": task_hash,
               "attempts_per_task": 1,
-              "max_parallel": 20,
+              "max_parallel": 4,
               "timeout_policy": (
                   "task.toml agent.timeout_sec minus "
                   f"{SUPERVISOR_GRACE_SECONDS} seconds"
@@ -161,7 +161,11 @@ jobs:
     timeout-minutes: 600
     strategy:
       fail-fast: false
-      max-parallel: 20
+      # The Stealth route is a shared upstream pool. Twenty simultaneous
+      # agents can exhaust it and invalidate every trial with HTTP 429. Four
+      # preserves useful parallelism without turning orchestration pressure
+      # into a benchmark outcome.
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       TASK: ${{ matrix.task }}
@@ -342,6 +346,10 @@ jobs:
               product_runs[task] = row
               if row.get("status") not in {"COMPLETED", "ERROR"}:
                   errors.append(f"nonterminal_product_receipt:{task}")
+              elif row.get("status") == "ERROR":
+                  errors.append(
+                      f"product_error:{task}:{row.get('error_type') or 'unknown'}"
+                  )
               transcript = row.get("transcript")
               if not isinstance(transcript, list):
                   errors.append(f"missing_product_transcript:{task}")
@@ -408,7 +416,7 @@ jobs:
               "task_ids": expected,
               "task_set_sha256": plan["task_set_sha256"],
               "attempts_per_task": 1,
-              "max_parallel": 20,
+              "max_parallel": 4,
               "requested_model": plan["requested_model"],
               "effective_model": plan["effective_model"],
               "agent": plan["agent"],

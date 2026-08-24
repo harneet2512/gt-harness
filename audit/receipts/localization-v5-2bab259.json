@@ -39,6 +39,12 @@
   "smoke_authorization": {
     "status": "AUTHORIZED",
     "scope": "one canonical Mini-SWE-Agent 2.2.8 repair20 GitHub Actions run",
-    "workflow": ".github/workflows/tb2_miniswe_product.yml"
+    "workflow": ".github/workflows/tb2_miniswe_product.yml",
+    "invalid_attempt": {
+      "run_id": 32777013633,
+      "disposition": "INVALID_INFRASTRUCTURE",
+      "reason": "shared_upstream_rate_limit_under_20_way_parallelism"
+    },
+    "recovery_max_parallel": 4
   }
 }

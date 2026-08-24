@@ -203,7 +203,7 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
-    assert "max-parallel: 20" in workflow
+    assert "max-parallel: 4" in workflow
     assert "mini-swe-agent==2.2.8" in workflow
     assert "stealth/ox-alpha" in workflow
     assert "secrets.OPENROUTER_NEW" in workflow
@@ -231,6 +231,7 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert "SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}" in workflow
     assert "SOURCE_SHA: ${{ github.sha }}" not in workflow
     assert "nonterminal_product_receipt" in workflow
+    assert "product_error:" in workflow
     assert "missing_full_trajectory" in workflow
     assert "provider_call_receipt_mismatch" in workflow
     assert 'trajectory.get("info")' in workflow

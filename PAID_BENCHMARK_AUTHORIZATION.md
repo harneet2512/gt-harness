@@ -26,4 +26,7 @@ Before a future authorization:
 
 Authorization is limited to `.github/workflows/tb2_miniswe_product.yml`, the frozen
 repair20 task set, Mini-SWE-Agent 2.2.8, one attempt, `stealth/ox-alpha`, full
-trajectories, and exact source SHA. The resulting run ID must be added after dispatch.
+trajectories, exact source SHA, and a maximum of four concurrent provider trials.
+Run `32777013633` is invalid infrastructure evidence: the former 20-way launch
+exhausted the shared upstream route and produced terminal `RateLimitError` receipts.
+It is not a benchmark result. One corrected recovery run is authorized.

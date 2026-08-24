@@ -80,3 +80,13 @@ common-scaffold benchmark product boundary.
 The current result proves implementation behavior and exact regression repair. It
 does not prove causal solve-rate uplift or broad competitive superiority; the
 authorized official 20-task smoke is the next evidence gate.
+
+## First live dispatch disposition
+
+Run `32777013633` used the frozen v5 source but launched all 20 trials concurrently.
+Every downloaded completed shard ended in an upstream shared-pool HTTP 429 after
+Mini-SWE retry attempts. This is invalid infrastructure evidence, not a solve-rate
+result and not a GT localization failure. The official workflow now caps parallel
+provider trials at four and fails final attestation for every terminal product
+`ERROR`; the invalid run was cancelled before its final four shards consumed more
+capacity.
