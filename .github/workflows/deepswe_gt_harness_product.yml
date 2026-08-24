@@ -7,6 +7,12 @@ on:
         description: "Immutable GT Harness commit or branch to evaluate"
         required: false
         type: string
+  workflow_call:
+    inputs:
+      code_ref:
+        description: "Immutable GT Harness commit or branch to evaluate"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -314,6 +320,15 @@ jobs:
             --ak max_iterations=300 \
             --ak time_budget_seconds="${{ matrix.time_budget_seconds }}"
 
+      - name: Bind the Pier reward to the canonical product receipt
+        if: always()
+        run: |
+          python -m scripts.standardize_benchmark_result \
+            --root results/deepswe \
+            --suite deepswe \
+            --task-id "$TASK" \
+            --source-sha "${{ needs.plan.outputs.source_sha }}"
+
       - name: Upload DeepSWE verifier and GT Harness product evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -388,7 +403,7 @@ jobs:
               errors.append("duplicate_trial_task")
 
           adapters = {}
-          for path in (root / "tasks").rglob("agent/harbor-adapter.json"):
+          for path in (root / "tasks").rglob("agent/benchmark-adapter.json"):
               row = json.loads(path.read_text(encoding="utf-8"))
               task = str(row.get("task_id") or "")
               adapters[task] = row
@@ -466,6 +481,18 @@ jobs:
           if set(product_runs) != expected_set:
               errors.append("product_receipt_task_set_mismatch")
 
+          official_results = {}
+          for path in (root / "tasks").rglob("agent/official-verifier-result.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              task = str(row.get("task_id") or "")
+              official_results[task] = row
+              if row.get("status") != "GRADED":
+                  errors.append(f"official_verifier_ungraded:{task}")
+              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"official_verifier_source_mismatch:{task}")
+          if set(official_results) != expected_set:
+              errors.append("official_verifier_task_set_mismatch")
+
           outcomes = {}
           for row in trial_rows:
               task = str(row["task_name"]).split("__", 1)[0]
@@ -501,6 +528,7 @@ jobs:
               "graded": graded,
               "solved": solved,
               "outcomes": outcomes,
+              "official_verifier_tasks": sorted(official_results),
               "product_totals": {
                   "provider_calls": sum(row["provider_calls"] for row in product_rows),
                   "input_tokens": sum(row["input_tokens"] for row in product_rows),

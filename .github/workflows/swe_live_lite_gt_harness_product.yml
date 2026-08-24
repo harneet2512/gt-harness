@@ -1,0 +1,521 @@
+name: "GT Harness: SWE-Live Lite product"
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_ref:
+        description: "Immutable GT Harness commit or branch to evaluate"
+        required: false
+        type: string
+      mode:
+        description: "Task set size"
+        required: true
+        type: choice
+        options: [smoke, pilot, full]
+        default: smoke
+      instance_ids:
+        description: "Optional comma-separated official task IDs; overrides mode"
+        required: false
+        type: string
+      shard:
+        description: "For full mode only, one-based i/n shard (required for >256 tasks)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: gt-harness-swe-live-lite-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  SWE_LIVE_EVALUATOR_SHA: ad79b850f15e33992e96f03f6e97f05ddf9aa0be
+  SNOWFLAKE_MODEL_SHA256: 564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971
+  SNOWFLAKE_TOKENIZER_SHA256: 91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      source_sha: ${{ steps.source.outputs.sha }}
+      task_count: ${{ steps.select.outputs.task_count }}
+      task_order_sha256: ${{ steps.select.outputs.task_order_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.code_ref || github.sha }}
+          lfs: false
+
+      - id: source
+        name: Resolve immutable GT Harness source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the complete frozen Live Lite manifest when checkout contains an LFS pointer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          manifest=benchmarks/data/swebench_live_lite.jsonl
+          if [ "$(wc -l < "$manifest" 2>/dev/null || echo 0)" -lt 100 ]; then
+            gh release download pipeline-assets-v1 \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern swebench_live_lite.jsonl \
+              --dir benchmarks/data --clobber
+          fi
+          test "$(wc -l < "$manifest")" -eq 300
+
+      - id: select
+        name: Freeze the requested official task set
+        env:
+          MODE: ${{ inputs.mode }}
+          INSTANCE_IDS: ${{ inputs.instance_ids }}
+          SHARD: ${{ inputs.shard }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          rows = [
+              json.loads(line)
+              for line in Path("benchmarks/data/swebench_live_lite.jsonl")
+              .read_text(encoding="utf-8")
+              .splitlines()
+              if line.strip()
+          ]
+          by_id = {str(row["instance_id"]): row for row in rows}
+          explicit = [value.strip() for value in os.environ["INSTANCE_IDS"].split(",") if value.strip()]
+          if explicit:
+              if len(explicit) != len(set(explicit)):
+                  raise SystemExit("duplicate explicit SWE-Live Lite task IDs")
+              missing = sorted(set(explicit) - set(by_id))
+              if missing:
+                  raise SystemExit(f"unknown SWE-Live Lite task IDs: {missing}")
+              selected = explicit
+          else:
+              mode = os.environ["MODE"]
+              limits = {"smoke": 5, "pilot": 20, "full": len(rows)}
+              selected = [str(row["instance_id"]) for row in rows[: limits[mode]]]
+              shard = os.environ["SHARD"].strip()
+              if mode == "full" and shard:
+                  try:
+                      index_text, count_text = shard.split("/", 1)
+                      index, count = int(index_text), int(count_text)
+                      assert count > 0 and 1 <= index <= count
+                  except Exception as exc:
+                      raise SystemExit("shard must be one-based i/n, for example 1/2") from exc
+                  size = math.ceil(len(selected) / count)
+                  selected = selected[(index - 1) * size : index * size]
+              elif len(selected) > 256:
+                  raise SystemExit("full mode exceeds the GitHub matrix limit; provide shard=i/n")
+          if not selected or len(selected) > 256:
+              raise SystemExit(f"invalid task count: {len(selected)}")
+          order_hash = hashlib.sha256(("\n".join(selected) + "\n").encode()).hexdigest()
+          matrix = {
+              "include": [
+                  {"ordinal": ordinal, "task": task, "time_budget_seconds": 5310}
+                  for ordinal, task in enumerate(selected, start=1)
+              ]
+          }
+          receipt = {
+              "schema": "gt.swe_live_lite_product_plan.v1",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "manifest_rows": len(rows),
+              "task_ids": selected,
+              "task_count": len(selected),
+              "task_order_sha256": order_hash,
+              "attempts_per_task": 1,
+              "max_parallel": 4,
+              "model": "stealth/ox-alpha",
+              "effective_model": "openai/stealth/ox-alpha",
+              "agent_scaffold": "mini-swe-agent",
+              "agent_scaffold_version": "2.2.8",
+              "adapter": "eval.swe_live_lite_gt_harness_adapter",
+              "matrix": matrix["include"],
+          }
+          Path("swe-live-lite-plan.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("matrix=" + json.dumps(matrix, separators=(",", ":")) + "\n")
+              output.write(f"task_count={len(selected)}\n")
+              output.write(f"task_order_sha256={order_hash}\n")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-swe-live-lite-plan-${{ github.run_id }}
+          path: swe-live-lite-plan.json
+          if-no-files-found: error
+
+  provider_gate:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Prove the exact OpenRouter model route is available
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENROUTER_NEW }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: |
+          set -uo pipefail
+          attempts=0; success=false; status_codes=""
+          while [ "$attempts" -lt 20 ]; do
+            attempts=$((attempts + 1))
+            status="$(curl --silent --show-error --max-time 90 --output "$RUNNER_TEMP/response.json" --write-out '%{http_code}' \
+              https://openrouter.ai/api/v1/chat/completions \
+              --header "Authorization: Bearer $OPENAI_API_KEY" \
+              --header 'Content-Type: application/json' \
+              --data '{"model":"stealth/ox-alpha","messages":[{"role":"user","content":"Reply OK."}],"max_tokens":1,"temperature":0}' 2>/dev/null || true)"
+            status_codes="${status_codes}${status_codes:+,}${status:-000}"
+            case "$status" in 2??) success=true; break ;; 429|500|502|503|504|000) sleep 60 ;; *) break ;; esac
+          done
+          ATTEMPTS="$attempts" STATUS_CODES="$status_codes" SUCCESS="$success" SOURCE_SHA="$SOURCE_SHA" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          row = {
+              "schema": "gt.provider_availability_gate.v1",
+              "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "model": "stealth/ox-alpha",
+              "attempts": int(os.environ["ATTEMPTS"]),
+              "http_statuses": [int(x) for x in os.environ["STATUS_CODES"].split(",") if x],
+          }
+          Path("provider-gate.json").write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+          PY
+          test "$success" = true
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-swe-live-lite-provider-gate-${{ github.run_id }}
+          path: provider-gate.json
+          if-no-files-found: error
+
+  task:
+    needs: [plan, provider_gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      TASK: ${{ matrix.task }}
+      GT_RETRIEVAL_MODE: hybrid_required
+      OPENAI_API_KEY: ${{ secrets.OPENROUTER_NEW }}
+      OPENAI_BASE_URL: https://openrouter.ai/api/v1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          lfs: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gt-index/go.mod
+          cache-dependency-path: gt-index/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore official manifest and immutable Python-only evaluator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$(wc -l < benchmarks/data/swebench_live_lite.jsonl 2>/dev/null || echo 0)" -lt 100 ]; then
+            gh release download pipeline-assets-v1 --repo "$GITHUB_REPOSITORY" \
+              --pattern swebench_live_lite.jsonl --dir benchmarks/data --clobber
+          fi
+          git clone --filter=blob:none https://github.com/microsoft/SWE-bench-Live.git "$RUNNER_TEMP/swe-live-evaluator"
+          git -C "$RUNNER_TEMP/swe-live-evaluator" checkout --detach "$SWE_LIVE_EVALUATOR_SHA"
+          test "$(git -C "$RUNNER_TEMP/swe-live-evaluator" rev-parse HEAD)" = "$SWE_LIVE_EVALUATOR_SHA"
+          python -m pip install --upgrade pip
+          python -m pip install "$RUNNER_TEMP/swe-live-evaluator"
+
+      - name: Build the portable graph indexer
+        working-directory: gt-index
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+          go test -tags sqlite_fts5 ./...
+          go build -tags sqlite_fts5 -ldflags '-linkmode external -extldflags "-static"' \
+            -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
+          file "$RUNNER_TEMP/gt-index" | grep -F "statically linked"
+          chmod 755 "$RUNNER_TEMP/gt-index"
+
+      - name: Provision the checksum-pinned local dense model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"
+          mkdir -p "$model_dir"
+          gh release download gt-retrieval-runtime-v1 --repo harneet2512/gt-harness \
+            --pattern model.onnx --pattern tokenizer.json --pattern manifest.json --dir "$model_dir"
+          echo "$SNOWFLAKE_MODEL_SHA256  $model_dir/model.onnx" | sha256sum -c -
+          echo "$SNOWFLAKE_TOKENIZER_SHA256  $model_dir/tokenizer.json" | sha256sum -c -
+
+      - name: Resolve immutable task image and run the canonical product
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          TIME_BUDGET_SECONDS: ${{ matrix.time_budget_seconds }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/product-output/agent"
+          python - "$TASK" <<'PY' > "$RUNNER_TEMP/product-output/agent/issue.txt"
+          import json, sys
+          for line in open("benchmarks/data/swebench_live_lite.jsonl", encoding="utf-8"):
+              row = json.loads(line)
+              if row.get("instance_id") == sys.argv[1]:
+                  text = str(row.get("problem_statement") or "").strip()
+                  if not text:
+                      raise SystemExit("official problem statement is empty")
+                  print(text)
+                  break
+          else:
+              raise SystemExit("task is absent from official manifest")
+          PY
+          repo="${TASK%%__*}"
+          rest="${TASK#*__}"
+          basename="sweb.eval.x86_64.${repo}_1776_${rest}"
+          ghcr="ghcr.io/${REPOSITORY_OWNER}/${basename}:latest"
+          dockerhub="docker.io/starryzhang/${basename}:latest"
+          if docker pull "$ghcr"; then requested="$ghcr"; else docker pull "$dockerhub"; requested="$dockerhub"; fi
+          image_id="$(docker image inspect --format '{{.Id}}' "$requested")"
+          repo_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$requested")"
+          test -n "$image_id" && test -n "$repo_digest"
+          TASK="$TASK" REQUESTED="$requested" IMAGE_ID="$image_id" REPO_DIGEST="$repo_digest" SOURCE_SHA="$SOURCE_SHA" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path(os.environ["RUNNER_TEMP"], "product-output", "agent", "task-image.json").write_text(
+              json.dumps({
+                  "schema": "gt.swe_live_lite_task_image.v1",
+                  "task": os.environ["TASK"],
+                  "product_source_sha": os.environ["SOURCE_SHA"],
+                  "task_image_requested": os.environ["REQUESTED"],
+                  "task_image_repo_digest": os.environ["REPO_DIGEST"],
+                  "task_image_id": os.environ["IMAGE_ID"],
+              }, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+          set +e
+          timeout --signal=TERM --kill-after=30s 5400s docker run --name "gt-live-${GITHUB_RUN_ID}-${{ matrix.ordinal }}" \
+            --memory 10g --memory-swap 12g \
+            -v "$GITHUB_WORKSPACE:/installed-agent/gt-harness:ro" \
+            -v "$RUNNER_TEMP/gt-index:/installed-agent/gt-index:ro" \
+            -v "$RUNNER_TEMP/snowflake-arctic-embed-m:/installed-agent/snowflake-arctic-embed-m:ro" \
+            -v "$RUNNER_TEMP/product-output/agent:/logs/agent:rw" \
+            -e OPENAI_API_KEY -e OPENAI_BASE_URL \
+            -e GT_INDEX_BINARY=/installed-agent/gt-index \
+            -e GT_DENSE_MODEL_DIR=/installed-agent/snowflake-arctic-embed-m \
+            -e GT_RETRIEVAL_MODE=hybrid_required \
+            -e GT_PRODUCT_SOURCE_SHA="$SOURCE_SHA" \
+            -e GT_TASK_ID="$TASK" \
+            -e GT_TIME_BUDGET_SECONDS="$TIME_BUDGET_SECONDS" \
+            --entrypoint /bin/bash "$repo_digest" -lc '
+              set -uo pipefail
+              cd /testbed 2>/dev/null || cd /app 2>/dev/null || cd /workspace 2>/dev/null || exit 90
+              repo_root="$PWD"
+              command -v curl >/dev/null 2>&1 || {
+                command -v apt-get >/dev/null && apt-get update && apt-get install -y curl;
+              } || { command -v apk >/dev/null && apk add --no-cache curl bash; }
+              curl -LsSf https://astral.sh/uv/0.11.32/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+              uv tool install --python 3.12.13 \
+                --with "mini-swe-agent==2.2.8" --with "numpy==2.5.1" \
+                --with "onnxruntime==1.28.0" --with "tokenizers==0.23.1" \
+                /installed-agent/gt-harness
+              product_python="$HOME/.local/share/uv/tools/gt-harness/bin/python"
+              "$product_python" -c "import importlib.metadata as m; assert m.version(\"mini-swe-agent\")==\"2.2.8\""
+              "$product_python" -m eval.swe_live_lite_gt_harness_adapter \
+                --instruction-file /logs/agent/issue.txt \
+                --root "$repo_root" \
+                --model openai/stealth/ox-alpha \
+                --base-url "$OPENAI_BASE_URL" \
+                --task-id "$GT_TASK_ID" \
+                --product-source-sha "$GT_PRODUCT_SOURCE_SHA" \
+                --time-budget-seconds "$GT_TIME_BUDGET_SECONDS" \
+                --max-iterations 300 --temperature 1.0 \
+                --output /logs/agent/gt-run.json \
+                --state-dir /logs/agent/gt-state \
+                --adapter-receipt /logs/agent/benchmark-adapter.json
+              product_rc=$?
+              git add -A -N >/dev/null 2>&1 || true
+              git diff --binary HEAD > /logs/agent/agent_patch.diff
+              exit "$product_rc"
+            '
+          product_rc=$?
+          docker stop --time 10 "gt-live-${GITHUB_RUN_ID}-${{ matrix.ordinal }}" >/dev/null 2>&1 || true
+          docker rm -f "gt-live-${GITHUB_RUN_ID}-${{ matrix.ordinal }}" >/dev/null 2>&1 || true
+          echo "$product_rc" > "$RUNNER_TEMP/product-output/agent/product-exit-code.txt"
+          exit 0
+
+      - name: Run the pinned official SWE-Live Lite verifier
+        if: always()
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/product-output/agent"
+          patch="$out/agent_patch.diff"
+          reward=0; verifier_status=NO_PATCH
+          if [ -s "$patch" ]; then
+            python - "$TASK" "$patch" <<'PY'
+          import json, sys
+          with open("prediction.jsonl", "w", encoding="utf-8") as target:
+              target.write(json.dumps({
+                  "instance_id": sys.argv[1],
+                  "model_patch": open(sys.argv[2], encoding="utf-8").read(),
+                  "model_name_or_path": "GT Harness 0.9.0 + Mini-SWE-Agent 2.2.8 + Ox Alpha",
+              }) + "\n")
+          PY
+            image="$(python -c 'import json,os; print(json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"product-output","agent","task-image.json")))["task_image_repo_digest"])')"
+            repo="${TASK%%__*}"; rest="${TASK#*__}"; basename="sweb.eval.x86_64.${repo}_1776_${rest}"
+            docker tag "$image" "starryzhang/${basename}:latest"
+            python -m swebench.harness.run_evaluation \
+              --dataset_name benchmarks/data/swebench_live_lite.jsonl \
+              --predictions_path prediction.jsonl --instance_ids "$TASK" \
+              --namespace starryzhang --run_id "gt_${GITHUB_RUN_ID}_${{ matrix.ordinal }}" \
+              --max_workers 1 --timeout 1800 --cache_level env || true
+            report="$(find "logs/run_evaluation/gt_${GITHUB_RUN_ID}_${{ matrix.ordinal }}" -name report.json -print -quit)"
+            if [ -n "$report" ]; then
+              reward="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); v=(list(d.values())[0] if d else {}) or {}; print(1 if v.get("resolved") else 0)' "$report")"
+              verifier_status=GRADED
+              cp "$report" "$out/report.json"
+            else
+              verifier_status=ERROR
+            fi
+          fi
+          TASK="$TASK" REWARD="$reward" STATUS="$verifier_status" SOURCE_SHA="$SOURCE_SHA" python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          out = Path(os.environ["RUNNER_TEMP"], "product-output", "agent")
+          patch = out / "agent_patch.diff"
+          receipt = {
+              "schema": "gt.official_verifier_result.v1",
+              "benchmark_suite": "swe-live-lite",
+              "evaluator_repository": "microsoft/SWE-bench-Live",
+              "evaluator_sha": "ad79b850f15e33992e96f03f6e97f05ddf9aa0be",
+              "product_source_sha": os.environ["SOURCE_SHA"],
+              "task_id": os.environ["TASK"],
+              "status": os.environ["STATUS"],
+              "reward": int(os.environ["REWARD"]),
+              "solved": os.environ["REWARD"] == "1",
+              "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest() if patch.is_file() else None,
+          }
+          (out / "official-verifier-result.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-swe-live-lite-task-${{ matrix.ordinal }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/product-output/
+          if-no-files-found: error
+
+  attest:
+    if: always()
+    needs: [plan, provider_gate, task]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gt-harness-swe-live-lite-plan-${{ github.run_id }}
+          path: attestation
+      - uses: actions/download-artifact@v4
+        with:
+          name: gt-harness-swe-live-lite-provider-gate-${{ github.run_id }}
+          path: attestation
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gt-harness-swe-live-lite-task-*-${{ github.run_id }}
+          path: attestation/tasks
+          merge-multiple: false
+
+      - name: Verify every official result and every GT product receipt
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          TASK_JOB_RESULT: ${{ needs.task.result }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          root = Path("attestation")
+          plan = json.loads((root / "swe-live-lite-plan.json").read_text(encoding="utf-8"))
+          expected = set(plan["task_ids"])
+          errors = []
+          adapters = {}
+          products = {}
+          outcomes = {}
+          for path in (root / "tasks").rglob("benchmark-adapter.json"):
+              row = json.loads(path.read_text(encoding="utf-8")); task = str(row.get("task_id") or "")
+              adapters[task] = row
+              if row.get("product_command") != "gt-harness run" or row.get("attempt") != 1:
+                  errors.append(f"adapter_contract_mismatch:{task}")
+              if row.get("agent_scaffold_version") != "2.2.8" or row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"adapter_identity_mismatch:{task}")
+          for path in (root / "tasks").rglob("gt-run.json"):
+              row = json.loads(path.read_text(encoding="utf-8")); task = str(row.get("task_id") or "")
+              products[task] = row
+              if row.get("status") != "COMPLETED": errors.append(f"product_error:{task}:{row.get('status')}")
+              trajectory = path.with_name("gt-run.trajectory.json")
+              if not trajectory.is_file(): errors.append(f"missing_full_trajectory:{task}")
+              treatment = row.get("treatment_receipt") or {}
+              if treatment.get("treatment_status") == "ACTIVE":
+                  if not treatment.get("graph_available") or treatment.get("graph_status") not in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}:
+                      errors.append(f"active_graph_not_ready:{task}")
+                  dense = treatment.get("dense_index_receipt") or {}
+                  if treatment.get("retrieval_mode") != "hybrid_required" or not dense.get("query_ready"):
+                      errors.append(f"active_dense_not_ready:{task}")
+          for path in (root / "tasks").rglob("official-verifier-result.json"):
+              row = json.loads(path.read_text(encoding="utf-8")); task = str(row.get("task_id") or "")
+              outcomes[task] = row
+              if row.get("status") not in {"GRADED", "NO_PATCH"}: errors.append(f"verifier_error:{task}")
+          if set(adapters) != expected: errors.append("adapter_task_set_mismatch")
+          if set(products) != expected: errors.append("product_task_set_mismatch")
+          if set(outcomes) != expected: errors.append("outcome_task_set_mismatch")
+          solved = sum(1 for row in outcomes.values() if row.get("solved") is True)
+          receipt = {
+              "schema": "gt.swe_live_lite_gt_harness_attestation.v1",
+              "status": "PASS" if not errors else "FAIL",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "task_job_result": os.environ["TASK_JOB_RESULT"],
+              "task_count": len(expected),
+              "task_ids": plan["task_ids"],
+              "task_order_sha256": plan["task_order_sha256"],
+              "agent_scaffold_version": "2.2.8",
+              "product_command": "gt-harness run",
+              "solved": solved,
+              "errors": errors,
+          }
+          Path("swe-live-lite-attestation.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          print(json.dumps(receipt, indent=2, sort_keys=True))
+          if errors: raise SystemExit("SWE-Live Lite product attestation failed")
+          PY
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-swe-live-lite-attestation-${{ github.run_id }}
+          path: swe-live-lite-attestation.json
+          if-no-files-found: error

@@ -173,7 +173,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         receipt = json.dumps(identity, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         write_receipt = (
             "from pathlib import Path; "
-            f"Path('/logs/agent/harbor-adapter.json').write_text({receipt!r}, "
+            f"Path('/logs/agent/benchmark-adapter.json').write_text({receipt!r}, "
             "encoding='utf-8')"
         )
         parts = [

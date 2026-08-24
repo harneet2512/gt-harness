@@ -1,0 +1,57 @@
+{
+  "schema": "gt.benchmark_product_contract.v1",
+  "product": "GT Harness",
+  "product_version": "0.9.0",
+  "product_command": "gt-harness run",
+  "agent_scaffold": "mini-swe-agent",
+  "agent_scaffold_version": "2.2.8",
+  "retrieval_mode": "hybrid_required",
+  "benchmark_suites": {
+    "terminal-bench-2": {
+      "orchestrator": "harbor==0.20.0",
+      "adapter": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+      "workflow": ".github/workflows/tb2_miniswe_product.yml"
+    },
+    "deepswe": {
+      "orchestrator": "datacurve-pier==0.3.1",
+      "adapter": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent",
+      "workflow": ".github/workflows/deepswe_gt_harness_product.yml"
+    },
+    "swe-live-lite": {
+      "orchestrator": "direct immutable task container",
+      "adapter": "eval.swe_live_lite_gt_harness_adapter",
+      "workflow": ".github/workflows/swe_live_lite_gt_harness_product.yml"
+    }
+  },
+  "required_environment": [
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "GT_INDEX_BINARY",
+    "GT_DENSE_MODEL_DIR",
+    "GT_RETRIEVAL_MODE=hybrid_required"
+  ],
+  "required_receipts": [
+    "benchmark-adapter.json",
+    "gt-run.json",
+    "gt-run.trajectory.json",
+    "official-verifier-result.json"
+  ],
+  "delivery_invariant": {
+    "repository_revision_matches_graph": true,
+    "allowed_graph_statuses": [
+      "READY",
+      "READY_WITH_DECLARED_LIMITATIONS"
+    ],
+    "query_ready": true,
+    "dense_query_ready_when_active": true,
+    "partial_or_stale_graph_must_not_deliver": true
+  },
+  "forbidden_treatment_paths": [
+    "eval.gt_central_agent",
+    "eval.pier_gt_adapter",
+    "artifact_deepswe/gt_mini_patch.py",
+    "artifact_deepswe/gt_headless_runner.py",
+    "MCP treatment",
+    "Nano agent"
+  ]
+}

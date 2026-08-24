@@ -400,7 +400,7 @@ def test_merge_gate_does_not_promote_recovered_transient_repository_failures():
     assert "repository_intelligence_transient_failures" not in merge_block
 
 
-def test_deepswe_workflow_sets_a_nontrivial_initial_index_timeout():
+def test_deepswe_registered_entrypoint_routes_to_the_product_workflow():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -408,97 +408,62 @@ def test_deepswe_workflow_sets_a_nontrivial_initial_index_timeout():
         / "deepswe_miniswe_central.yml"
     ).read_text(encoding="utf-8")
 
-    assert "--ak repository_initial_index_timeout_sec=60" in workflow
-    assert "--ak repository_refresh_timeout_sec=60" in workflow
-    assert workflow.count("--ak enable_decision_sufficiency=true") == 2
-    assert workflow.count("--ak enable_decision_sufficiency=false") == 1
-    assert "audit_treatment_runtime" in workflow
-    assert "audit_intervention_artifacts" in workflow
-    assert "artifact_root=receipts[0].parent" in workflow
-    assert "GT treatment release gate failed" in workflow
-    assert "--ak enable_context_compaction=true" in workflow
-    assert "--ak enable_completion_controller=true" in workflow
-    assert "--ak enable_progress_control=true" in workflow
-    assert "--ak enable_adaptive_validation_timeout=true" in workflow
-    assert "TASK_COUNT: ${{ inputs.task_count }}" in workflow
-    assert 'target = int(os.environ["TASK_COUNT"])' in workflow
-    assert "len(explicit) != target" in workflow
+    assert "uses: ./.github/workflows/deepswe_gt_harness_product.yml" in workflow
+    assert "secrets: inherit" in workflow
+    assert "eval.pier_gt_adapter" not in workflow
+    assert "eval.gt_central_agent" not in workflow
 
 
-def test_deepswe_workflow_uses_deepseek_v4_and_pins_v11_catalog_snapshot():
+def test_deepswe_product_workflow_uses_ox_alpha_and_pins_v11_catalog_snapshot():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
         / "workflows"
-        / "deepswe_miniswe_central.yml"
+        / "deepswe_gt_harness_product.yml"
     ).read_text(encoding="utf-8")
 
-    assert 'default: "deepseek-v4-flash"' in workflow
+    assert "stealth/ox-alpha" in workflow
     assert workflow.count("ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9") == 2
     assert "v1.0.0" not in workflow
-    assert "v1.1 catalog-compatible" in workflow
+    assert "eval/deepswe_smoke20_v1.json" in workflow
     assert "mimo-v2.5-pro" not in workflow
 
 
-def test_deepswe_workflow_uses_pier_v11_verifier_protocol():
+def test_deepswe_product_workflow_uses_pier_v11_verifier_protocol():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
         / "workflows"
-        / "deepswe_miniswe_central.yml"
+        / "deepswe_gt_harness_product.yml"
     ).read_text(encoding="utf-8")
 
     # Matching task IDs is not sufficient for DeepSWE v1.1.  Its separate
     # verifier/collect-patch lifecycle is implemented by the pinned Pier
     # runner, not by a direct Harbor invocation.
     assert '"datacurve-pier==0.3.1"' in workflow
-    assert "pier run -p deepswe-bench/tasks" in workflow
+    assert "pier run \\" in workflow
+    assert "-p deepswe-bench/tasks \\" in workflow
     assert '--include-task-name "$TASK"' in workflow
-    assert "eval.pier_gt_adapter:PierMiniSweCentralAgent" in workflow
+    assert "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent" in workflow
+    assert "gt-harness run" in workflow
     assert "harbor run -p deepswe-bench/tasks" not in workflow
 
 
-def test_deepswe_workflow_provider_preflight_matches_gateway_model_routing():
+def test_deepswe_product_workflow_gates_the_exact_openrouter_route():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
         / "workflows"
-        / "deepswe_miniswe_central.yml"
+        / "deepswe_gt_harness_product.yml"
     ).read_text(encoding="utf-8")
 
-    assert "OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}" in workflow
-    assert 'base = (os.environ.get("OPENAI_BASE_URL") or "").strip()' in workflow
-    assert 'model = f"openai/{model}"' in workflow
-    assert "options: [openrouter, tokenrouter, deepseek]" in workflow
-    assert "TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}" in workflow
-    assert "DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" in workflow
-    assert 'tokenrouter_base = os.environ["PROVIDER_BASE_URL"].strip()' in workflow
-    assert 'PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}' in workflow
-    assert 'echo "GT_LITELLM_MODEL=${executor_model}"' in workflow
-    assert workflow.count('--ak treatment_profile=central_relational_v2') >= 2
-    assert "python -m scripts.central_bootstrap_canary" in workflow
-    assert "--provider-proof provider-route-proof.json" in workflow
-    fingerprint_gate = (
-        'if provider not in {"tokenrouter", "deepseek"} and not '
-        'proof["system_fingerprint"]:'
-    )
-    assert fingerprint_gate in workflow
-    assert 'echo "OPENAI_BASE_URL=${PROVIDER_BASE_URL}"' in workflow
-    assert "openai/deepseek-v4-flash" in workflow
-    assert 'executor_identity.get("models") == [expected_response_model]' in workflow
-    assert 'executor_identity.get("providers") == [expected_response_provider]' in workflow
-    assert 'model.rsplit("/", 1)[-1]' not in workflow
-    assert "deepseek_native" in workflow
-    readiness = (
-        Path(__file__).resolve().parents[1] / "scripts" / "central_readiness_audit.py"
-    ).read_text(encoding="utf-8")
-    assert '"product_mechanism_contract_is_17_plus_1"' in readiness
-    assert 'print("PRODUCT_MECHANISM_COUNT=18")' in readiness
-    assert 'print("ALL_18_PRODUCT_MECHANISMS_PROVEN")' in readiness
-    assert "| product mechanisms | legacy fired | PES lifecycle uses |" in workflow
-    assert "catalog_model_confirmed" in workflow
-    assert "TokenRouter does not expose the exact requested model" in workflow
-    assert "TokenRouter is authorized only for bounded diagnostics" in workflow
+    assert "provider_gate:" in workflow
+    assert "https://openrouter.ai/api/v1/chat/completions" in workflow
+    assert "OPENAI_BASE_URL: https://openrouter.ai/api/v1" in workflow
+    assert workflow.count("secrets.OPENROUTER_NEW") == 2
+    assert '"model":"stealth/ox-alpha"' in workflow
+    assert "TOKENROUTER" not in workflow
+    assert "DEEPSEEK_API_KEY" not in workflow
 
 
 def test_openrouter_model_builder_pins_exact_model_and_provider(monkeypatch, tmp_path):
@@ -668,101 +633,40 @@ def test_provider_response_summary_fails_closed_on_mixed_or_missing_identity():
 
 
 def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
-    workflow = (
+    entrypoint = (
         Path(__file__).resolve().parents[1]
         / ".github"
         / "workflows"
         / "deepswe_miniswe_central.yml"
     ).read_text(encoding="utf-8")
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "deepswe_gt_harness_product.yml"
+    ).read_text(encoding="utf-8")
 
-    assert 'default: "20"' in workflow
-    assert "GT_OPENROUTER_PROVIDER_ONLY: deepseek" in workflow
-    assert "GT_OPENROUTER_DATA_COLLECTION: allow" in workflow
-    assert 'echo "GT_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"' in workflow
-    assert "GT_COMMIT: ${{ github.sha }}" not in workflow
-    assert 'MODEL: ${{ inputs.model }}' in workflow
-    assert 'model = f"openai/{model}"' in workflow
-    assert 'model = "deepseek/deepseek-v4-flash-0731"' not in workflow
-    assert 'deepseek-v4-flash-0731' not in workflow
-    assert 'deepseek/deepseek-v4-flash-0731' not in workflow
-    assert "GT_OPENROUTER_PROVIDER_ONLY" in workflow
-    assert "allow_fallbacks" in workflow
-    assert "GT_OPENROUTER_DATA_COLLECTION" in workflow
-    assert "provider-route-proof.json" in workflow
-    assert "BOOTSTRAP_CANARY_APPROVED" in workflow
-    assert "python -m scripts.central_bootstrap_canary" in workflow
-    assert workflow.count("litellm.completion(") == 0
-    assert "BASH_TOOL" not in workflow
-    assert "select_catalog" in workflow
-    assert "ids <= allowed" not in workflow
-    assert '"system_prompt_sha256": prompt_identity.get("system_prompt_sha256")' in workflow
-    assert '"effective_actions": metrics.get("effective_actions")' in workflow
-    assert '"effective_actions_schema": metrics.get("effective_actions_schema")' in workflow
-    assert "Download the single exact bootstrap canary proof" in workflow
-    assert "exact provider route gate failed" in workflow
-    assert "not proof[\"system_fingerprint\"]" in workflow
-    assert "actual provider response identity gate failed" in workflow
-    assert 'executor_identity.get("models") == [expected_response_model]' in workflow
-    assert 'executor_identity.get("stable_provider_identity") is True' in workflow
-    assert '"integration_mode": "off"' in workflow
-    assert '"integration_mode": "off" if arm == "gt_off" else "active"' in workflow
-    assert '"leaderboard_equivalent": False' in workflow
-    assert '"executor_retry_policy": "provider_once_no_retry"' in workflow
-    assert "DeepSWE parity is 300" not in workflow
-    assert "--ak gt_request_token_budget=1200" in workflow
-    assert 'default: persistent_state_only' not in workflow
-    assert 'default: certified_full' in workflow
-    assert "--ak preflight_mode=assistive_safe" not in workflow
-    assert workflow.count("--ak preflight_mode=shadow") >= 2
-    assert (
-        'timeout --signal=TERM --kill-after=30s "${AGENT_TIMEOUT_SEC}s" pier run'
-        in workflow
-    )
-    assert '"execution_budget_sec"' in workflow
-    assert "provider_query_started.json" in workflow
-    assert "central_receipt.json -print -quit" in workflow
-    assert "infra-only retry: no GT provider query started" in workflow
-    assert 'rewards.get("reward") == 1' in workflow
-    assert "and not exception" in workflow
-    assert "all(isinstance(v" not in workflow
-    assert "gt.deepswe.central.evaluation.v1.1" in workflow
-    assert "DEEPSWE_EVALUATION_RESULTS.json" in workflow
-    assert '"decision_actions": metrics.get("decision_actions")' in workflow
-    assert "baseline_run_id:" in workflow
-    assert "baseline_artifact_name:" in workflow
-    assert "scripts/deepswe_release_gate.py" in workflow
-    assert '--phase "${{ inputs.release_phase }}"' in workflow
-    assert "Download frozen GT-off comparison before any paid task" in workflow
-    assert "BASELINE_APPROVED" in workflow
-    assert workflow.count('"workspace_prompt_contract": "resolved_workspace_v1"') == 2
-    assert "workspace prompt contract gate failed" in workflow
-    assert "needs: [plan, baseline, provider_free, bootstrap_canary, run]" in workflow
-    assert "# DeepSWE central evaluation" in workflow
-    assert "ten-task smoke" not in workflow
-    assert "diagnostic_only:" in workflow
-    assert "arm:" in workflow
-    assert "comparison_profile:" in workflow
-    assert "persistent_state_only" in workflow
-    assert "PROFILE_ARGS" in workflow
-    assert "persistent_state_bootstrap_calls" in workflow
-    assert "provider_free:" in workflow
-    assert "needs: [plan, baseline, provider_free]" in workflow
-    assert "needs.provider_free.result == 'success'" in workflow
-    assert workflow.index("provider_free:") < workflow.index("bootstrap_canary:")
-    assert (
-        '"${{ inputs.arm }}" == "gt_on" && "${{ inputs.diagnostic_only }}" == "true" && '
-        '"${{ inputs.comparison_profile }}" != "persistent_state_only"'
-    ) in workflow
-    assert (
-        '"${{ inputs.arm }}" == "gt_on" && "${{ inputs.diagnostic_only }}" != "true" && '
-        '"${{ inputs.comparison_profile }}" != "certified_full"'
-    ) in workflow
-    assert '"${{ inputs.arm }}" == "gt_off"' in workflow
-    assert '--ak integration_mode=off --ak policy_mode=off' in workflow
-    assert '--ak enable_decision_sufficiency=false' in workflow
-    assert '"arm": arm' in workflow
-    assert '"control"' in workflow
-    assert '"claim_scope": claim_scope' in workflow
+    assert "uses: ./.github/workflows/deepswe_gt_harness_product.yml" in entrypoint
+    assert "secrets: inherit" in entrypoint
+    assert "eval.gt_central_agent" not in entrypoint
+    assert "workflow_call:" in workflow
+    assert 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"' in workflow
+    assert "eval/deepswe_smoke20_v1.json" in workflow
+    assert '"agent_scaffold_version": "2.2.8"' in workflow
+    assert '"max_parallel": 4' in workflow
+    assert "max-parallel: 4" in workflow
+    assert "stealth/ox-alpha" in workflow
+    assert "OPENAI_BASE_URL: https://openrouter.ai/api/v1" in workflow
+    assert "--ak max_iterations=300" in workflow
+    assert "SUPERVISOR_GRACE_SECONDS" in workflow
+    assert "gt-run.json" in workflow
+    assert "gt-run.trajectory.json" in workflow
+    assert "benchmark-adapter.json" in workflow
+    assert '"solved": reward == 1 or reward == 1.0' in workflow
+    assert '"schema": "gt.deepswe_gt_harness_attestation.v1"' in workflow
+    assert "eval.gt_central_agent" not in workflow
+    assert "persistent_state_only" not in workflow
+    assert "deepseek-v4-flash" not in workflow
 
 
 def test_provider_free_workflow_covers_final_hardening_and_exact_commit():

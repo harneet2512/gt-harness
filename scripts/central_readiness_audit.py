@@ -422,10 +422,13 @@ def audit() -> dict[str, bool]:
                     "--ak persistent_state_context_tokens=512",
                 )
             )
-            and deepswe_workflow.count("--ak enable_persistent_execution_state=true") >= 2
-            and deepswe_workflow.count("--ak persistent_state_bootstrap_timeout_sec=45") >= 2
-            and "comparison_profile:" in deepswe_workflow
-            and "diagnostic_only:" in deepswe_workflow
+            # DeepSWE now uses the released GT Harness product, not the
+            # historical central-agent experiment.  The central readiness
+            # audit must prove that separation instead of requiring legacy
+            # persistent-state kwargs in the product dispatch wrapper.
+            and "uses: ./.github/workflows/deepswe_gt_harness_product.yml"
+            in deepswe_workflow
+            and "eval.gt_central_agent" not in deepswe_workflow
         ),
         "persistent_state_is_graph_first_and_repeated": (
             0

@@ -97,7 +97,7 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
     assert environment["GT_HARBOR_TIME_BUDGET_SECONDS"] == "840"
     assert '"time_budget_seconds": "840"' in command
     assert "test-key" not in command
-    assert "/logs/agent/harbor-adapter.json" in command
+    assert "/logs/agent/benchmark-adapter.json" in command
     assert all("test-key" not in repr(record) for record in log_records)
 
 

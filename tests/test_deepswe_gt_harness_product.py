@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "deepswe_gt_harness_product.yml"
+ENTRY_WORKFLOW = ROOT / ".github" / "workflows" / "deepswe_miniswe_central.yml"
 MANIFEST = ROOT / "eval" / "deepswe_smoke20_v1.json"
 
 
@@ -58,6 +58,7 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in source
+    assert "workflow_call:" in source
     assert "eval/deepswe_smoke20_v1.json" in source
     assert "repository: datacurve-ai/deep-swe" in source
     assert "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9" in source
@@ -70,7 +71,7 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "gt-harness run" in source
     assert "gt-run.json" in source
     assert "gt-run.trajectory.json" in source
-    assert "harbor-adapter.json" in source
+    assert "benchmark-adapter.json" in source
     assert "product_error:" in source
     assert "active_graph_not_ready:" in source
     assert "active_dense_not_ready:" in source
@@ -80,3 +81,14 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "eval.pier_gt_adapter:PierMiniSweCentralAgent" not in source
     assert "eval.gt_central_agent" not in source
     assert "nano" not in source.lower()
+
+
+def test_registered_deepswe_entrypoint_dispatches_only_the_product_workflow() -> None:
+    source = ENTRY_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in source
+    assert "uses: ./.github/workflows/deepswe_gt_harness_product.yml" in source
+    assert "secrets: inherit" in source
+    assert "eval.pier_gt_adapter" not in source
+    assert "eval.gt_central_agent" not in source
+    assert "DeepSWE Mini-SWE central evaluation" not in source

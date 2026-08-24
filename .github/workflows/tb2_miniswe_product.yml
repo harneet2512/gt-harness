@@ -327,6 +327,15 @@ jobs:
             --ak time_budget_seconds="${{ matrix.time_budget_seconds }}" \
             -i "$TASK"
 
+      - name: Bind the Harbor reward to the canonical product receipt
+        if: always()
+        run: |
+          python -m scripts.standardize_benchmark_result \
+            --root results/terminal-bench \
+            --suite terminal-bench-2 \
+            --task-id "$TASK" \
+            --source-sha "${{ needs.plan.outputs.source_sha }}"
+
       - name: Upload this task's Harbor and product receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -405,7 +414,7 @@ jobs:
               errors.append("duplicate_trial_task")
 
           adapters = {}
-          for path in (root / "tasks").rglob("agent/harbor-adapter.json"):
+          for path in (root / "tasks").rglob("agent/benchmark-adapter.json"):
               row = json.loads(path.read_text(encoding="utf-8"))
               task = str(row.get("task_id") or "")
               adapters[task] = row
@@ -490,6 +499,18 @@ jobs:
           if set(product_runs) != expected_set:
               errors.append("product_receipt_task_set_mismatch")
 
+          official_results = {}
+          for path in (root / "tasks").rglob("agent/official-verifier-result.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              task = str(row.get("task_id") or "")
+              official_results[task] = row
+              if row.get("status") != "GRADED":
+                  errors.append(f"official_verifier_ungraded:{task}")
+              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"official_verifier_source_mismatch:{task}")
+          if set(official_results) != expected_set:
+              errors.append("official_verifier_task_set_mismatch")
+
           receipt = {
               "schema": "gt.harbor_repair20_attestation.v1",
               "status": "PASS" if not errors else "FAIL",
@@ -510,6 +531,7 @@ jobs:
               "observed_trial_tasks": sorted(observed_trials),
               "adapter_receipt_tasks": sorted(adapters),
               "product_receipt_tasks": sorted(product_runs),
+              "official_verifier_tasks": sorted(official_results),
               "errors": errors,
           }
           if receipt["source_sha"] != plan.get("source_sha"):
