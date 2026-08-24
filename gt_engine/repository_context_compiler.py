@@ -336,7 +336,10 @@ def _code_shaped(value: str) -> bool:
             "_" in token
             or "::" in token
             or "." in token
-            or any(character.isupper() for character in token[1:])
+            or (
+                not token.isupper()
+                and any(character.isupper() for character in token[1:])
+            )
         )
     )
 
