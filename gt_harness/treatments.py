@@ -224,6 +224,9 @@ class GroundTruthTreatment(BareTreatment):
     )
     feature_states: dict[str, str] = field(default_factory=dict, init=False)
     feature_paths: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False)
+    feature_content_identities: dict[str, dict[str, str]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     feature_transitions: list[dict[str, Any]] = field(
         default_factory=list, init=False, repr=False
     )
@@ -300,6 +303,26 @@ class GroundTruthTreatment(BareTreatment):
                 "action_count": self.action_count,
             }
         )
+
+    def _feature_content_identity(self, path: str) -> str:
+        root = Path(self.service.root).resolve()
+        candidate = (root / _normalize_relative_path(path)).resolve()
+        if not candidate.is_relative_to(root):
+            return "outside_repository"
+        try:
+            payload = candidate.read_bytes()
+        except FileNotFoundError:
+            return "missing"
+        except OSError as exc:
+            return f"unreadable:{type(exc).__name__}"
+        return hashlib.sha256(payload).hexdigest()
+
+    def _snapshot_feature_content(
+        self, feature: str, paths: tuple[str, ...]
+    ) -> None:
+        identities = self.feature_content_identities.setdefault(feature, {})
+        for path in paths:
+            identities.setdefault(path, self._feature_content_identity(path))
 
     def _ensure_dense_ready(self) -> None:
         if self.retrieval_mode == "sparse_only":
@@ -539,24 +562,42 @@ class GroundTruthTreatment(BareTreatment):
 
         if packet.status is not ContextStatus.READY:
             return packet
-        ordered = (
-            *packet.primary_edit_targets,
-            *packet.inspection_public_surface,
-            *packet.inspection_integration,
-            *packet.inspection_candidates,
+        groups = (
+            packet.primary_edit_targets,
+            packet.inspection_public_surface,
+            packet.inspection_integration,
+            packet.inspection_candidates,
         )
-        anchors = tuple(
-            {
-                (item.path, item.symbol): item
-                for item in ordered
-                if item.symbol
+
+        def eligible(item: ContextEvidenceItem) -> bool:
+            return bool(
+                item.symbol
                 and (
                     item.facet_ids
                     or item in packet.primary_edit_targets
                     and item.decision_reason == "exact_task_path"
                 )
-            }.values()
-        )[:4]
+            )
+
+        anchors_list: list[ContextEvidenceItem] = []
+        seen_anchors: set[tuple[str, str]] = set()
+
+        def add(item: ContextEvidenceItem) -> None:
+            key = (item.path, item.symbol)
+            if eligible(item) and key not in seen_anchors and len(anchors_list) < 4:
+                seen_anchors.add(key)
+                anchors_list.append(item)
+
+        # One representative per available role first, then spend remaining
+        # capacity in stable group order. Three edit candidates must not crowd
+        # public/integration evidence out of the graph projection session.
+        for group in groups:
+            if candidate := next((item for item in group if eligible(item)), None):
+                add(candidate)
+        for group in groups:
+            for candidate in group:
+                add(candidate)
+        anchors = tuple(anchors_list)
         if not anchors:
             return replace(
                 packet,
@@ -1186,6 +1227,7 @@ class GroundTruthTreatment(BareTreatment):
             self._feature_transition(
                 feature, FeatureState.AVAILABLE_TO_AGENT, paths=paths
             )
+            self._snapshot_feature_content(feature, paths)
         self.delivered_claim_ids.update(delivered)
         self.delivery_count += 1
         self.delivery_calls.append(delivered_before_call)
@@ -1338,26 +1380,39 @@ class GroundTruthTreatment(BareTreatment):
         observed = self.service.status()
         repository_changed = observed.build_status is GraphStatus.STALE
         observed_paths = set(paths)
-        changed_now = {
-            _normalize_relative_path(path)
-            for path in getattr(observed, "git_status_paths", ())
-            if path
-        }
         for feature, feature_path_set in self.feature_paths.items():
             if observed_paths & feature_path_set:
                 self._feature_transition(feature, FeatureState.FOLLOWED)
-            if repository_changed and (changed_now | observed_paths) & feature_path_set:
+            baseline_identities = self.feature_content_identities.get(feature, {})
+            content_changed = any(
+                path in feature_path_set
+                and self._feature_content_identity(path) != baseline
+                for path, baseline in baseline_identities.items()
+            )
+            if repository_changed and content_changed:
                 self._feature_transition(feature, FeatureState.EDITED)
             if diagnostic_lines and observed_paths & feature_path_set:
                 self._feature_transition(feature, FeatureState.CONTRADICTED)
         if validation_passed:
+            repository_wide_validation = not observed_paths
             for feature, current in tuple(self.feature_states.items()):
                 if current in {
-                    FeatureState.FOLLOWED.value,
                     FeatureState.EDITED.value,
                     FeatureState.CONTRADICTED.value,
-                }:
-                    self._feature_transition(feature, FeatureState.VALIDATED)
+                } and (
+                    repository_wide_validation
+                    or observed_paths & self.feature_paths.get(feature, set())
+                ):
+                    self._feature_transition(
+                        feature,
+                        FeatureState.VALIDATED,
+                        paths=tuple(
+                            sorted(
+                                observed_paths
+                                & self.feature_paths.get(feature, set())
+                            )
+                        ),
+                    )
         if diagnostic_lines or diagnostics_cleared or discovered_new_path or repository_changed:
             self.context_dirty = True
         # The delivery budget limits provider-visible text, not graph freshness.

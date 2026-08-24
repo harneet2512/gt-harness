@@ -695,6 +695,93 @@ def test_persisted_graph_projection_uses_multiple_role_diverse_anchors(
     assert calls.count(("session", "close", "")) == 1
 
 
+def test_persisted_graph_projection_reserves_anchor_for_each_available_role(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def item(index: int, role: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=role.lower(),
+            path=f"src/{role.lower()}_{index}.py",
+            start_line=1,
+            end_line=1,
+            symbol=f"{role.title()}{index}",
+            relation="",
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="s",
+            graph_revision="g",
+            evidence_sha256=f"{index:x}" * 64,
+            decision_reason="fixture",
+            completeness="exact_identity",
+            localization_role=role,
+            facet_ids=(f"facet-{role.lower()}-{index}",),
+        )
+
+    edits = tuple(item(index, "EDIT") for index in range(3))
+    public = item(4, "PUBLIC_SURFACE")
+    integration = item(5, "INTEGRATION")
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "s"},
+        primary_edit_targets=edits,
+        inspection_public_surface=(public,),
+        inspection_integration=(integration,),
+        evidence_items=(*edits, public, integration),
+    )
+    projection_receipt = ProjectionReceipt(
+        repository=str(tmp_path),
+        commit_sha="a" * 40,
+        source_revision="s",
+        graph_identity="g",
+        lower_bound=True,
+        truncated=False,
+        truncation_reasons=(),
+        limits={},
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeProjector:
+        def __init__(self, _service):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def project_processes(self, symbol: str, *, file_path: str):
+            calls.append((file_path, symbol))
+            return ProcessProjection(
+                ProjectionStatus.READY,
+                symbol,
+                file_path,
+                None,
+                (),
+                (),
+                projection_receipt,
+            )
+
+        def project_impact(self, symbol: str, *, file_path: str):
+            return ImpactProjection(
+                ProjectionStatus.READY,
+                symbol,
+                file_path,
+                None,
+                (),
+                (),
+                projection_receipt,
+            )
+
+    monkeypatch.setattr("gt_harness.treatments.PersistedGraphProjector", FakeProjector)
+
+    GroundTruthTreatment(tmp_path)._project_persisted_graph(packet)
+
+    assert (public.path, public.symbol) in calls
+    assert (integration.path, integration.symbol) in calls
+    assert len(calls) == 4
+
+
 def test_treatment_adds_manifest_public_surface_as_inspection_only(
     tmp_path: Path,
 ) -> None:
@@ -801,6 +888,80 @@ def test_feature_receipt_tracks_delivery_and_behavioral_follow_through(
     )
     assert treatment.feature_states["public_surface"] == "FOLLOWED"
 
+    treatment.after_action(
+        "bash",
+        {"command": "pytest -q"},
+        "1 passed",
+        False,
+    )
+    assert treatment.feature_states["public_surface"] == "FOLLOWED"
+
+
+def test_feature_receipt_does_not_attribute_unrelated_edit_to_observed_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+        git_status_paths: tuple[str, ...] = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    source = tmp_path / "src" / "index.ts"
+    source.parent.mkdir()
+    source.write_text("export const answer = 42\n", encoding="utf-8")
+    public = ContextEvidenceItem(
+        kind="public_surface",
+        path="src/index.ts",
+        start_line=1,
+        end_line=1,
+        symbol="answer",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="package_manifest_entrypoint",
+        completeness="existing_public_surface_file",
+        localization_role="PUBLIC_SURFACE",
+        facet_ids=("facet-answer",),
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        inspection_public_surface=(public,),
+        evidence_items=(public,),
+        coverage={"dense_index": {"status": "DISABLED", "query_ready": False}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+    treatment._render(update=False, budget=4_000, delivered_before_call=1)
+
+    (tmp_path / "other.ts").write_text("export const other = 1\n", encoding="utf-8")
+    FakeReceipt.build_status = GraphStatus.STALE
+    FakeReceipt.git_status_paths = ("other.ts",)
+    treatment.treatment_status = treatment.treatment_status.NOT_APPLICABLE
+    treatment.after_action(
+        "bash",
+        {"command": "sed -n '1,20p' src/index.ts"},
+        "src/index.ts:1:export const answer = 42",
+        False,
+    )
+
+    assert treatment.feature_states["public_surface"] == "FOLLOWED"
+
 
 def test_bounded_token_count_does_not_undercount_long_underscored_identifiers() -> None:
     identifier = "this_is_a_very_long_repository_symbol_name"
@@ -860,6 +1021,10 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
     assert receipt["initial_context_sha256"]
     assert augmentation.context_token_count <= 350
     assert receipt["delivery_receipts"][-1]["same_observation"] is True
+    assert treatment.feature_states["exact_edit_targets"] == "EDITED"
+
+    treatment.after_action("bash", {"command": "pytest -q"}, "1 passed", False)
+    assert treatment.feature_states["exact_edit_targets"] == "VALIDATED"
 
 
 @pytest.mark.real_graph

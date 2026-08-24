@@ -9,8 +9,10 @@ No model or provider is invoked.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,8 +106,16 @@ def _path_lines(context: str) -> dict[str, list[str]]:
     return found
 
 
-def replay(case_name: str, repository: Path, state_dir: Path) -> dict[str, object]:
+def replay(
+    case_name: str,
+    repository: Path,
+    state_dir: Path,
+    *,
+    task_override: str = "",
+    task_source: str = "embedded_localization_preserving_reconstruction",
+) -> dict[str, object]:
     case = CASES[case_name]
+    task = task_override if task_override.strip() else case.task
     actual_commit = _git(repository, "rev-parse", "HEAD")
     if actual_commit != case.commit:
         raise RuntimeError(
@@ -117,12 +127,12 @@ def replay(case_name: str, repository: Path, state_dir: Path) -> dict[str, objec
     treatment = GroundTruthTreatment(
         repository, state_dir=state_dir, retrieval_mode="sparse_only"
     )
-    context = treatment.prepare(case.task)
+    context = treatment.prepare(task)
     receipt = treatment.finalize(None)
     diagnostic = GroundTruthTreatment(
         repository, state_dir=state_dir, retrieval_mode="sparse_only"
     )
-    diagnostic.task = case.task
+    diagnostic.task = task
     diagnostic.service.build()
     packet = diagnostic._context(update=False, budget=6_000)
     packet_dict = packet.as_dict()
@@ -137,6 +147,8 @@ def replay(case_name: str, repository: Path, state_dir: Path) -> dict[str, objec
         "repository": str(repository.resolve()),
         "commit": actual_commit,
         "task_is_only_retrieval_input": True,
+        "task_source": task_source,
+        "task_sha256": hashlib.sha256(task.encode("utf-8")).hexdigest(),
         "oracle_applied_post_hoc": True,
         "graph_available": receipt.get("graph_available"),
         "source_revision": receipt.get("source_revision"),
@@ -183,8 +195,26 @@ def main() -> int:
     parser.add_argument("--case", choices=tuple(CASES), required=True)
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
+    task_input = parser.add_mutually_exclusive_group()
+    task_input.add_argument("--task-file", type=Path)
+    task_input.add_argument("--task-stdin", action="store_true")
+    parser.add_argument(
+        "--task-source",
+        default="embedded_localization_preserving_reconstruction",
+    )
     args = parser.parse_args()
-    result = replay(args.case, args.repository, args.state_dir)
+    task_override = ""
+    if args.task_file is not None:
+        task_override = args.task_file.read_text(encoding="utf-8")
+    elif args.task_stdin:
+        task_override = sys.stdin.read()
+    result = replay(
+        args.case,
+        args.repository,
+        args.state_dir,
+        task_override=task_override,
+        task_source=args.task_source,
+    )
     print(json.dumps(result, sort_keys=True, indent=2))
     return 0
 
