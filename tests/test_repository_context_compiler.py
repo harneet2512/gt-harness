@@ -5,6 +5,7 @@ from dataclasses import replace
 from gt_engine.hybrid_repository import HybridRepository
 from gt_engine.hybrid_retrieval import (
     EvidenceOrigin,
+    HybridRetriever,
     RepositoryDocument,
     RetrievalIntent,
     StructuralLink,
@@ -543,6 +544,8 @@ def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:
         _document("core/engine/src/context/mod.rs", "run_jobs", "pub fn run_jobs() {}"),
         _document("core/engine/src/script.rs", "Script", "pub struct Script;"),
         _document("core/engine/src/script.rs", "evaluate", "pub fn evaluate() {}"),
+        _document("core/ast/src/source.rs", "Script", "pub struct Script;"),
+        _document("core/ast/src/source.rs", "evaluate", "pub fn evaluate() {}"),
     )
 
     facets = compile_task_facets(
@@ -630,6 +633,63 @@ def test_owner_scoped_exact_analogs_survive_global_retrieval_crowding() -> None:
         complete=True,
         reason_codes=(),
         source_file_count=len(documents),
+        document_chars=sum(len(document.text) for document in documents),
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request(
+            "Add `Context::run_jobs_with_evaluation`, "
+            "`Script::evaluate_with_evaluation`, and "
+            "`Module::load_link_evaluate_with_evaluation`."
+        ),
+    )
+
+    assert {item.path for item in packet.primary_edit_targets} == {
+        "core/engine/src/context/mod.rs",
+        "core/engine/src/module/mod.rs",
+        "core/engine/src/script.rs",
+    }
+
+
+def test_owner_scoped_exact_facts_are_seeded_when_rank_window_omits_them(
+    monkeypatch,
+) -> None:
+    documents = (
+        _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
+        _document("core/engine/src/context/mod.rs", "run_jobs", "pub fn run_jobs() {}"),
+        _document("core/engine/src/module/mod.rs", "Module", "pub struct Module;"),
+        _document(
+            "core/engine/src/module/mod.rs",
+            "load_link_evaluate",
+            "pub fn load_link_evaluate() {}",
+        ),
+        _document("core/engine/src/script.rs", "Script", "pub struct Script;"),
+        _document("core/engine/src/script.rs", "evaluate", "pub fn evaluate() {}"),
+    )
+    original_retrieve = HybridRetriever.retrieve
+
+    def crowded_retrieve(self, state, **kwargs):
+        result = original_retrieve(self, state, **kwargs)
+        visible = tuple(
+            row
+            for row in result.ranked_files
+            if row.path == "core/engine/src/module/mod.rs"
+        )
+        return replace(
+            result,
+            ranked_files=visible,
+            ranked_spans=tuple(row.representative for row in visible),
+        )
+
+    monkeypatch.setattr(HybridRetriever, "retrieve", crowded_retrieve)
+    repository = HybridRepository(
+        documents=documents,
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=3,
         document_chars=sum(len(document.text) for document in documents),
     )
 

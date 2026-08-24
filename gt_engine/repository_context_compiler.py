@@ -17,9 +17,11 @@ from typing import Any
 
 from gt_engine.hybrid_repository import HybridRepository
 from gt_engine.hybrid_retrieval import (
+    EvidenceAuthority,
     EvidenceOrigin,
     HybridRetriever,
     RankedFile,
+    RetrievalCandidate,
     RetrievalChannel,
     RetrievalIntent,
     RetrievalState,
@@ -796,6 +798,115 @@ def _matching_facet_ids(
     return tuple(matched)
 
 
+def _facet_seed_rows(
+    documents: tuple[Any, ...],
+    facets: tuple[TaskFacet, ...],
+    request: ContextCompileRequest,
+    *,
+    limit: int = 64,
+) -> tuple[RankedFile, ...]:
+    """Keep exact owner-scoped facts outside the statistical rank window.
+
+    The online repository is already a bounded, revision-checked graph
+    projection.  Within it, an explicitly named owner or existing sibling API
+    is stronger localization evidence than its BM25 position in a long issue.
+    This seed does not accept unresolved leaves or lexical body similarity.
+    """
+
+    candidates: list[tuple[int, int, str, int, Any, tuple[str, ...]]] = []
+    for document in documents:
+        symbol = str(getattr(document, "symbol", "") or "").strip()
+        path = _normalized_path(str(getattr(document, "path", "") or ""))
+        if not symbol or not path:
+            continue
+        origin = getattr(document, "origin", EvidenceOrigin.PREEXISTING_REPOSITORY)
+        if origin is not EvidenceOrigin.PREEXISTING_REPOSITORY:
+            continue
+        origin_revision = str(getattr(document, "origin_revision", "") or "")
+        if origin_revision and origin_revision != request.source_revision:
+            continue
+        keys = _symbol_keys(symbol)
+        matched: list[str] = []
+        owner_affinity = 0
+        normalized_parts = frozenset(
+            part.casefold()
+            for part in re.split(r"[/_.-]+", path)
+            if part
+        )
+        for facet in facets:
+            exact_keys = frozenset(
+                key
+                for value in (*facet.exact_symbols, *facet.owning_symbols)
+                for key in _symbol_keys(value)
+            )
+            if not keys & exact_keys:
+                continue
+            if facet.owning_modules and path not in facet.owning_modules:
+                continue
+            matched.append(facet.facet_id)
+            if any(
+                owner.casefold() in normalized_parts
+                for owner in facet.owning_symbols
+            ):
+                owner_affinity = 1
+        if matched:
+            candidates.append(
+                (
+                    len(set(matched)),
+                    owner_affinity,
+                    path,
+                    max(1, int(getattr(document, "start_line", 1) or 1)),
+                    document,
+                    tuple(dict.fromkeys(matched)),
+                )
+            )
+
+    # One representative per file prevents a large type from consuming the
+    # seed bound. Prefer the symbol covering most task facets, then the path
+    # whose component names agree with the qualified owner.
+    by_path: dict[str, tuple[int, int, str, int, Any, tuple[str, ...]]] = {}
+    for row in sorted(
+        candidates,
+        key=lambda item: (-item[0], -item[1], item[2].casefold(), item[3]),
+    ):
+        by_path.setdefault(row[2], row)
+    selected = sorted(
+        by_path.values(),
+        key=lambda item: (-item[0], -item[1], item[2].casefold(), item[3]),
+    )[: max(1, int(limit))]
+    rows: list[RankedFile] = []
+    for rank, (coverage, affinity, path, _line, document, _facets) in enumerate(
+        selected, start=1
+    ):
+        candidate = RetrievalCandidate(
+            path=path,
+            start_line=getattr(document, "start_line", 1),
+            end_line=getattr(document, "end_line", None),
+            symbol=str(getattr(document, "symbol", "") or ""),
+            text=str(getattr(document, "text", "") or ""),
+            channel=RetrievalChannel.EXACT,
+            channel_rank=rank,
+            relation=None,
+            provenance=("facet_exact_symbol", "exact_symbol"),
+            source_revision=request.source_revision,
+            channel_score=float(coverage + affinity),
+            origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+            authority=EvidenceAuthority.IDENTITY_ONLY,
+            origin_revision=str(getattr(document, "origin_revision", "") or ""),
+        )
+        rows.append(
+            RankedFile(
+                path=path,
+                fused_score=float(coverage + affinity),
+                channel_ranks=((RetrievalChannel.EXACT, rank),),
+                representative=candidate,
+                provenance=candidate.provenance,
+                channel_candidates=((RetrievalChannel.EXACT, candidate),),
+            )
+        )
+    return tuple(rows)
+
+
 def _select_role_complete_rows(
     rows: tuple[RankedFile, ...],
     facets: tuple[TaskFacet, ...],
@@ -1045,7 +1156,22 @@ class RepositoryContextCompiler:
             for symbol in facet.exact_symbols
         )
         concrete_identifiers = _concrete_identifiers(request)
-        ranked = tuple(sorted(retrieval.ranked_files, key=lambda row: _rank_key(row, identifiers)))
+        seeded = _facet_seed_rows(
+            repository.documents,
+            task_facets,
+            request,
+        )
+        ranked_by_path: dict[str, RankedFile] = {
+            row.path: row for row in seeded
+        }
+        for row in retrieval.ranked_files:
+            ranked_by_path.setdefault(row.path, row)
+        ranked = tuple(
+            sorted(
+                ranked_by_path.values(),
+                key=lambda row: _rank_key(row, identifiers),
+            )
+        )
 
         exact_symbol_rows = tuple(
             row
