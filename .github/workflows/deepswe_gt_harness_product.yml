@@ -228,6 +228,7 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       TASK: ${{ matrix.task }}
+      ORDINAL: ${{ matrix.ordinal }}
       MODEL: stealth/ox-alpha
       GT_RETRIEVAL_MODE: hybrid_required
     steps:
@@ -277,6 +278,15 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Stagger Docker task-image pulls
+        run: |
+          set -euo pipefail
+          # GitHub-hosted runners have isolated Docker daemons. Keep all 20
+          # jobs parallel, but avoid a synchronized Docker Hub pull burst.
+          delay=$(( (ORDINAL - 1) * 15 ))
+          echo "Waiting ${delay}s before the task image pull"
+          sleep "$delay"
 
       - name: Install Pier and the canonical product source
         run: |
