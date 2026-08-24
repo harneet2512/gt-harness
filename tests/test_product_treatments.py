@@ -15,6 +15,11 @@ from gt_engine.hybrid_retrieval import (
     RepositoryDocument,
     StructuralLink,
 )
+from gt_engine.repository_context_compiler import (
+    ContextEvidenceItem,
+    ContextStatus,
+    GTContextPacket,
+)
 from gt_engine.repository_graph_service import GraphStatus
 from gt_harness.treatments import (
     BareTreatment,
@@ -70,6 +75,62 @@ def test_successful_repository_read_requests_same_observation_context(
     assert augmentation is not None
     assert augmentation.content.endswith("</groundtruth-repository-context>")
     assert augmentation.source_revision
+
+
+def test_update_suppresses_inspection_only_packet_instead_of_spending_delivery(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    item = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="test/test_jinja2.py",
+        start_line=1,
+        end_line=1,
+        symbol="test_error",
+        relation="",
+        confidence=None,
+        verification_status="ranked",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="hybrid_retrieval_inspection",
+        completeness="ranked_candidate_not_edit_target",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        inspection_candidates=(item,),
+        uncertainties=("no_decision_relevant_evidence",),
+        evidence_items=(item,),
+        coverage={"dense_index": {"status": "READY", "query_ready": True}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    treatment.context_dirty = True
+    monkeypatch.setattr(
+        GroundTruthTreatment,
+        "_context",
+        lambda self, **_kwargs: packet,
+    )
+
+    assert treatment._render(update=True, budget=4_000, delivered_before_call=2) == ""
+    assert treatment.delivery_count == 0
+    assert treatment.suppressed_inspection_only_updates == 1
 
 
 def test_run_cli_records_not_applicable_treatment_and_runs_provider(

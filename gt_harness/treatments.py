@@ -166,6 +166,7 @@ class GroundTruthTreatment(BareTreatment):
     retrieval_channel_count: int = field(default=0, init=False)
     action_count: int = field(default=0, init=False)
     evidence_items_delivered: int = field(default=0, init=False)
+    suppressed_inspection_only_updates: int = field(default=0, init=False)
     delivery_char_count: int = field(default=0, init=False)
     delivery_calls: list[int] = field(default_factory=list, init=False)
     delivery_receipts: list[dict[str, Any]] = field(default_factory=list, init=False)
@@ -601,6 +602,24 @@ class GroundTruthTreatment(BareTreatment):
             "truncated": normalized_packet["truncated"],
             "relationships": relationship_evidence,
         }
+        decision_grade_update = any(
+            packet_dict[name]
+            for name in (
+                "primary_edit_targets",
+                "supporting_files",
+                "relationships",
+                "semantic_facts",
+                "execution_paths",
+                "change_surface",
+                "affected_tests",
+                "validation_plan",
+            )
+        )
+        if update and not decision_grade_update:
+            self.suppressed_inspection_only_updates += 1
+            self.context_dirty = False
+            return ""
+
         def encode() -> str:
             kind = "repository_update" if update else "repository_start"
             lines = [
@@ -936,6 +955,9 @@ class GroundTruthTreatment(BareTreatment):
             "delivery_receipts": list(self.delivery_receipts),
             "delivery_char_count": self.delivery_char_count,
             "evidence_items_delivered": self.evidence_items_delivered,
+            "suppressed_inspection_only_updates": (
+                self.suppressed_inspection_only_updates
+            ),
             "context_compile_count": self.context_compile_count,
             "retrieval_channel_count": self.retrieval_channel_count,
             "action_count": self.action_count,

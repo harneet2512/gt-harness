@@ -104,7 +104,9 @@ def run_campaign(
     treatment = GroundTruthTreatment(
         run_dir, state_dir=state, retrieval_mode="hybrid_required"
     )
-    initial = treatment.prepare("Inspect Signer behavior and its callers before changing it")
+    initial = treatment.prepare(
+        "Inspect `Signer` behavior and its callers before changing it"
+    )
     match = _TARGET.search(initial)
     if match is None:
         raise RuntimeError("GT did not produce an exact source target")
@@ -145,7 +147,7 @@ def run_campaign(
         run_dir, state_dir=state, retrieval_mode="hybrid_required"
     )
     restart_context = restarted.prepare(
-        "Inspect Signer behavior and its callers before changing it"
+        "Inspect `Signer` behavior and its callers before changing it"
     )
     reopened = restarted.finalize(None)
     restart_reused_current_graph = bool(
