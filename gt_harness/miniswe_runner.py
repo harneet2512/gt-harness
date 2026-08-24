@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import time
 from copy import deepcopy
@@ -71,24 +72,71 @@ class CredentialIsolatedEnvironment(LocalEnvironment):
             for key, value in (os.environ | self.config.env).items()
             if not _sensitive(key)
         }
+        popen_kwargs: dict[str, Any] = {
+            "shell": True,
+            "text": True,
+            "cwd": cwd,
+            "env": execution_env,
+            "stderr": subprocess.STDOUT,
+            "stdout": subprocess.PIPE,
+            "encoding": "utf-8",
+            "errors": "replace",
+        }
+        # A timed shell command may spawn a compiler, test runner, or other
+        # descendant.  Killing only the shell leaves descendants holding the
+        # pipe open, so ``communicate`` can block until Harbor's outer timeout.
+        # Put the complete action in its own process group and terminate that
+        # group on timeout.  This keeps the GT deadline authoritative while
+        # preserving the benchmark's native Harbor ceiling.
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            if creationflags:
+                popen_kwargs["creationflags"] = creationflags
+        else:
+            popen_kwargs["start_new_session"] = True
         try:
-            completed = subprocess.run(
-                command,
-                shell=True,
-                text=True,
-                cwd=cwd,
-                env=execution_env,
-                timeout=timeout or self.config.timeout,
-                encoding="utf-8",
-                errors="replace",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            output = {
-                "output": completed.stdout,
-                "returncode": completed.returncode,
-                "exception_info": "",
-            }
+            process = subprocess.Popen(command, **popen_kwargs)
+            try:
+                stdout, _ = process.communicate(
+                    timeout=timeout or self.config.timeout
+                )
+            except subprocess.TimeoutExpired as exc:
+                if os.name == "nt":
+                    process.kill()
+                else:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                try:
+                    stdout, _ = process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    if os.name == "nt":
+                        process.kill()
+                    else:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    stdout, _ = process.communicate()
+                output = {
+                    "output": stdout or str(exc.stdout or ""),
+                    "returncode": -1,
+                    "exception_info": (
+                        "An error occurred while executing the command: "
+                        f"Command timed out after {timeout or self.config.timeout}s"
+                    ),
+                    "extra": {
+                        "exception_type": "TimeoutExpired",
+                        "exception": str(exc),
+                    },
+                }
+            else:
+                output = {
+                    "output": stdout or "",
+                    "returncode": process.returncode,
+                    "exception_info": "",
+                }
         except Exception as exc:  # noqa: BLE001 - matches Mini-SWE's recoverable shell contract
             raw = getattr(exc, "output", None)
             if isinstance(raw, bytes):

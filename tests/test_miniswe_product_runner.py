@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
+import time
 
 from gt_harness.miniswe_runner import (
     MODEL_REQUEST_TIMEOUT_SECONDS,
+    CredentialIsolatedEnvironment,
     TreatmentMiniSweAgent,
     build_miniswe_agent,
 )
@@ -151,6 +154,42 @@ def test_time_budget_exits_cleanly_before_harbor_kills_the_agent() -> None:
     assert result["exit_status"] == "LimitsExceeded"
     assert result["limit_reason"] == "time_budget"
     assert agent.messages[-1]["content"] == "TimeBudgetExceeded"
+
+
+def test_timed_shell_action_terminates_descendants(tmp_path) -> None:
+    """A timed action must not leave a child holding Harbor's pipe open."""
+
+    if os.name == "nt":
+        return
+    marker = tmp_path / "orphan-marker"
+    child = (
+        "import pathlib,time; time.sleep(5); "
+        f"pathlib.Path({str(marker)!r}).write_text('orphan')"
+    )
+    launcher = (
+        "import subprocess,time; "
+        f"subprocess.Popen({[sys.executable, '-c', child]!r}); "
+        "time.sleep(60)"
+    )
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(launcher)}"
+    environment = CredentialIsolatedEnvironment(
+        config_class=type(
+            "Config",
+            (),
+            {"cwd": str(tmp_path), "timeout": 30, "env": {}},
+        ),
+        cwd=str(tmp_path),
+        timeout=30,
+    )
+    started = time.monotonic()
+    result = environment.execute({"command": command}, timeout=1)
+    elapsed = time.monotonic() - started
+
+    assert result["returncode"] == -1
+    assert "timed out" in result["exception_info"]
+    assert elapsed < 4
+    time.sleep(1)
+    assert not marker.exists()
 
 
 def test_product_model_calls_are_transport_bounded_and_not_retried(

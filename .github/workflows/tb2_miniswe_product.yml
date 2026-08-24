@@ -368,7 +368,14 @@ jobs:
               if not isinstance(treatment, dict):
                   errors.append(f"missing_treatment_receipt:{task}")
                   continue
-              if row.get("error_type") == "TreatmentUnavailableError":
+              # An unsupported/no-source repository is an explicit, valid
+              # abstention.  Only a FAILED treatment is a product defect;
+              # do not turn a truthful NOT_APPLICABLE receipt into a false
+              # attestation failure.
+              if (
+                  row.get("error_type") == "TreatmentUnavailableError"
+                  and (treatment.get("treatment_status") or "FAILED") != "NOT_APPLICABLE"
+              ):
                   errors.append(f"gt_treatment_unavailable:{task}")
               if int(treatment.get("delivery_count") or 0) > 4:
                   errors.append(f"delivery_limit_exceeded:{task}")
