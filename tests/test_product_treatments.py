@@ -9,6 +9,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from gt_engine.graph_db_projection import (
+    ImpactProjection,
+    ProcessProjection,
+    ProjectionReceipt,
+    ProjectionStatus,
+)
 from gt_engine.hybrid_repository import HybridRepository
 from gt_engine.hybrid_retrieval import (
     EvidenceOrigin,
@@ -429,9 +435,9 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
 
     assert len(rendered) <= 4_000
     assert rendered.endswith("</groundtruth-repository-context>")
-    assert 'schema="gt.agent_context.v4"' in rendered
+    assert 'schema="gt.agent_context.v5"' in rendered
     assert "EXACT_EDIT_TARGET app.py:1#answer" in rendered
-    assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY caller.py:1#invoke" in rendered
+    assert "INSPECT_INTEGRATION caller.py:1#invoke" in rendered
     assert "VERIFIED_RELATION caller.py:invoke CALLS app.py:answer" in rendered
     assert "UNCERTAINTY graph_projection_failed" in rendered
     assert _bounded_token_count(rendered) <= 500
@@ -441,6 +447,286 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
     assert treatment.delivery_count == 1
     assert treatment.context_compile_count == 1
     assert "context_delivery_limit_reached" in treatment.errors
+
+
+def test_provider_context_v5_keeps_edit_public_integration_and_new_file_roles_separate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    def item(path: str, symbol: str, role: str, digest: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=role.lower(),
+            path=path,
+            start_line=1,
+            end_line=1,
+            symbol=symbol,
+            relation="",
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="b" * 64,
+            graph_revision="c" * 64,
+            evidence_sha256=digest * 64,
+            decision_reason=f"verified_{role.lower()}",
+            completeness="exact_identity",
+            localization_role=role,
+            facet_ids=(f"facet-{role.lower()}",),
+        )
+
+    edit = item("src/container.ts", "AwilixContainer", "EDIT", "d")
+    public = item("src/awilix.ts", "AwilixContainer", "PUBLIC_SURFACE", "e")
+    integration = item("src/load-modules.ts", "loadModules", "INTEGRATION", "f")
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        primary_edit_targets=(edit,),
+        inspection_public_surface=(public,),
+        inspection_integration=(integration,),
+        proposed_new_files=("src/evaluation.rs",),
+        uncovered_facets=("facet-new role=EDIT unresolved=EvaluationHandle",),
+        evidence_items=(edit, public, integration),
+        coverage={"dense_index": {"status": "DISABLED", "query_ready": False}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert 'schema="gt.agent_context.v5"' in rendered
+    assert "EXACT_EDIT_TARGET src/container.ts:1#AwilixContainer" in rendered
+    assert "INSPECT_PUBLIC_SURFACE src/awilix.ts:1#AwilixContainer" in rendered
+    assert "INSPECT_INTEGRATION src/load-modules.ts:1#loadModules" in rendered
+    assert "PROPOSED_NEW_FILE src/evaluation.rs fact=false" in rendered
+    assert "UNCOVERED_FACET facet-new role=EDIT unresolved=EvaluationHandle" in rendered
+
+
+def test_persisted_graph_projection_uses_multiple_role_diverse_anchors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def item(path: str, symbol: str, role: str, digest: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=role.lower(),
+            path=path,
+            start_line=1,
+            end_line=1,
+            symbol=symbol,
+            relation="",
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="s",
+            graph_revision="g",
+            evidence_sha256=digest * 64,
+            decision_reason="fixture",
+            completeness="exact_identity",
+            localization_role=role,
+            facet_ids=(f"facet-{role.lower()}",),
+        )
+
+    edit = item("src/evaluation.rs", "evaluate", "EDIT", "d")
+    integration = item("src/job.rs", "run_jobs", "INTEGRATION", "e")
+    weak = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="src/source.rs",
+        start_line=1,
+        end_line=1,
+        symbol="transition",
+        relation="",
+        confidence=0.9,
+        verification_status="verified_source_identity",
+        source_revision="s",
+        graph_revision="g",
+        evidence_sha256="f" * 64,
+        decision_reason="hybrid_retrieval_inspection",
+        completeness="ranked_candidate_not_edit_target",
+        localization_role="UNCERTAIN",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "s"},
+        primary_edit_targets=(edit,),
+        inspection_integration=(integration,),
+        inspection_candidates=(weak,),
+        evidence_items=(edit, integration, weak),
+    )
+    projection_receipt = ProjectionReceipt(
+        repository=str(tmp_path),
+        commit_sha="a" * 40,
+        source_revision="s",
+        graph_identity="g",
+        lower_bound=True,
+        truncated=False,
+        truncation_reasons=(),
+        limits={},
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeProjector:
+        def __init__(self, _service):
+            pass
+
+        def __enter__(self):
+            calls.append(("session", "open", ""))
+            return self
+
+        def __exit__(self, *_args):
+            calls.append(("session", "close", ""))
+
+        def project_processes(self, symbol: str, *, file_path: str):
+            calls.append(("process", file_path, symbol))
+            return ProcessProjection(
+                ProjectionStatus.READY,
+                symbol,
+                file_path,
+                None,
+                (),
+                (),
+                projection_receipt,
+            )
+
+        def project_impact(self, symbol: str, *, file_path: str):
+            calls.append(("impact", file_path, symbol))
+            return ImpactProjection(
+                ProjectionStatus.READY,
+                symbol,
+                file_path,
+                None,
+                (),
+                (),
+                projection_receipt,
+            )
+
+    monkeypatch.setattr("gt_harness.treatments.PersistedGraphProjector", FakeProjector)
+    treatment = GroundTruthTreatment(tmp_path)
+
+    treatment._project_persisted_graph(packet)
+
+    assert ("process", "src/evaluation.rs", "evaluate") in calls
+    assert ("process", "src/job.rs", "run_jobs") in calls
+    assert ("process", "src/source.rs", "transition") not in calls
+    assert calls.count(("session", "open", "")) == 1
+    assert calls.count(("session", "close", "")) == 1
+
+
+def test_treatment_adds_manifest_public_surface_as_inspection_only(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "container.ts").write_text(
+        "export interface Container {}\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "index.ts").write_text(
+        "export { Container } from './container'\n", encoding="utf-8"
+    )
+    (tmp_path / "package.json").write_text(
+        '{"exports":"./src/index.ts"}', encoding="utf-8"
+    )
+    edit = ContextEvidenceItem(
+        kind="symbol_identity",
+        path="src/container.ts",
+        start_line=1,
+        end_line=1,
+        symbol="Container",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="s",
+        graph_revision="g",
+        evidence_sha256="d" * 64,
+        decision_reason="exact_task_symbol",
+        completeness="exact_identity",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "s", "graph_revision": "g"},
+        primary_edit_targets=(edit,),
+        evidence_items=(edit,),
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+
+    updated = treatment._resolve_public_surfaces(packet)
+
+    assert [item.path for item in updated.inspection_public_surface] == [
+        "src/index.ts"
+    ]
+    assert updated.inspection_public_surface[0].localization_role == "PUBLIC_SURFACE"
+    assert updated.primary_edit_targets == (edit,)
+
+
+def test_feature_receipt_tracks_delivery_and_behavioral_follow_through(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    source = tmp_path / "src" / "index.ts"
+    source.parent.mkdir()
+    source.write_text("export const answer = 42\n", encoding="utf-8")
+    public = ContextEvidenceItem(
+        kind="public_surface",
+        path="src/index.ts",
+        start_line=1,
+        end_line=1,
+        symbol="answer",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="package_manifest_entrypoint",
+        completeness="existing_public_surface_file",
+        localization_role="PUBLIC_SURFACE",
+        facet_ids=("facet-answer",),
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        inspection_public_surface=(public,),
+        evidence_items=(public,),
+        coverage={"dense_index": {"status": "DISABLED", "query_ready": False}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    treatment._render(update=False, budget=4_000, delivered_before_call=1)
+    assert treatment.feature_states["public_surface"] == "AVAILABLE_TO_AGENT"
+
+    treatment.after_action(
+        "bash",
+        {"command": "sed -n '1,20p' src/index.ts"},
+        "src/index.ts:1:export const answer = 42",
+        False,
+    )
+    assert treatment.feature_states["public_surface"] == "FOLLOWED"
 
 
 def test_bounded_token_count_does_not_undercount_long_underscored_identifiers() -> None:

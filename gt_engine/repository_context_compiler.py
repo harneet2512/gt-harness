@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import asdict, dataclass, field
+from collections import Counter
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -33,12 +34,42 @@ from gt_engine.repository_context import (
     RetrievalRankHint,
 )
 from gt_engine.repository_intelligence import RepositoryEvidence
+from gt_engine.task_contract import extract_task_contract, significant_tokens
 
 
 class ContextStatus(StrEnum):
     READY = "READY"
     ABSTAIN = "ABSTAIN"
     FAILED = "FAILED"
+
+
+class LocalizationRole(StrEnum):
+    """The decision a repository fact may support in the agent context."""
+
+    EDIT = "EDIT"
+    PUBLIC_SURFACE = "PUBLIC_SURFACE"
+    INTEGRATION = "INTEGRATION"
+    VALIDATION = "VALIDATION"
+    UNCERTAIN = "UNCERTAIN"
+
+
+@dataclass(frozen=True, slots=True)
+class TaskFacet:
+    """One deterministic repository question implied by a task obligation."""
+
+    facet_id: str
+    obligation_ids: tuple[str, ...]
+    role: LocalizationRole
+    exact_symbols: tuple[str, ...] = ()
+    unresolved_symbols: tuple[str, ...] = ()
+    query_terms: tuple[str, ...] = ()
+    owning_symbols: tuple[str, ...] = ()
+    owning_modules: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["role"] = self.role.value
+        return row
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +122,8 @@ class ContextEvidenceItem:
     source_path: str = ""
     source_symbol: str = ""
     source_excerpt: str = ""
+    localization_role: str = LocalizationRole.EDIT.value
+    facet_ids: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,9 +133,14 @@ class ContextEvidenceItem:
 class GTContextPacket:
     status: ContextStatus
     repository_identity: dict[str, Any]
+    task_facets: tuple[TaskFacet, ...] = ()
     task_anchors: tuple[ContextEvidenceItem, ...] = ()
     primary_edit_targets: tuple[ContextEvidenceItem, ...] = ()
     inspection_candidates: tuple[ContextEvidenceItem, ...] = ()
+    inspection_public_surface: tuple[ContextEvidenceItem, ...] = ()
+    inspection_integration: tuple[ContextEvidenceItem, ...] = ()
+    proposed_new_files: tuple[str, ...] = ()
+    uncovered_facets: tuple[str, ...] = ()
     supporting_files: tuple[ContextEvidenceItem, ...] = ()
     symbol_contracts: tuple[ContextEvidenceItem, ...] = ()
     semantic_facts: tuple[str, ...] = ()
@@ -127,6 +165,7 @@ class GTContextPacket:
         return {
             "status": self.status.value,
             "repository_identity": dict(self.repository_identity),
+            "task_facets": [facet.as_dict() for facet in self.task_facets],
             "task_anchors": [item.as_dict() for item in self.task_anchors],
             "primary_edit_targets": [
                 item.as_dict() for item in self.primary_edit_targets
@@ -134,6 +173,14 @@ class GTContextPacket:
             "inspection_candidates": [
                 item.as_dict() for item in self.inspection_candidates
             ],
+            "inspection_public_surface": [
+                item.as_dict() for item in self.inspection_public_surface
+            ],
+            "inspection_integration": [
+                item.as_dict() for item in self.inspection_integration
+            ],
+            "proposed_new_files": list(self.proposed_new_files),
+            "uncovered_facets": list(self.uncovered_facets),
             "supporting_files": [item.as_dict() for item in self.supporting_files],
             "symbol_contracts": [item.as_dict() for item in self.symbol_contracts],
             "semantic_facts": list(self.semantic_facts),
@@ -159,6 +206,9 @@ _QUOTED_IDENTIFIER = re.compile(
 _SYMBOL_CUE = re.compile(
     r"(?i)\b(?:class|constant|function|interface|method|module|symbol|type|variable)\s+"
     r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_.:]{1,})(?:`|'|\")?"
+)
+_CODE_ENTITY = re.compile(
+    r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)(?:`|'|\")"
 )
 _ISSUE_LANGUAGE_WORDS = frozenset(
     {
@@ -260,6 +310,165 @@ def _normalized_path(path: str) -> str:
     return normalized
 
 
+def _facet_role(text: str) -> LocalizationRole:
+    lowered = str(text or "").lower()
+    if re.search(r"\b(?:test|verify|validate|regression)\b", lowered):
+        return LocalizationRole.VALIDATION
+    if re.search(r"\b(?:public api|public surface|export|re-export|reexport)\b", lowered):
+        return LocalizationRole.PUBLIC_SURFACE
+    if re.search(r"\b(?:integrat|wire|lifecycle|execution path|data flow)\w*\b", lowered):
+        return LocalizationRole.INTEGRATION
+    return LocalizationRole.EDIT
+
+
+def compile_task_facets(
+    task: str,
+    documents: tuple[Any, ...],
+) -> tuple[TaskFacet, ...]:
+    """Compile task obligations into exact, unresolved, and owner-backed facets.
+
+    The result never claims that a requested new API already exists.  A
+    qualified unresolved symbol may name an existing owner, and a suffixed new
+    API may name an existing sibling; those are retained only as inspection
+    owners/analogs.
+    """
+
+    contract = extract_task_contract(task)
+    rows = tuple(
+        (obligation.obligation_id, obligation.text)
+        for obligation in contract.obligations
+    ) or (("task", str(task or "").strip()),)
+    available: dict[str, str] = {}
+    modules_by_symbol: dict[str, str] = {}
+    for document in documents:
+        symbol = str(getattr(document, "symbol", "") or "").strip()
+        if not symbol:
+            continue
+        for key in {
+            symbol.casefold(),
+            re.split(r"(?:::|[.#])", symbol)[-1].casefold(),
+        }:
+            available.setdefault(key, symbol)
+            modules_by_symbol.setdefault(key, str(getattr(document, "path", "") or ""))
+
+    facets: list[TaskFacet] = []
+    for obligation_id, text in rows:
+        entities = list(dict.fromkeys(match.group(1) for match in _CODE_ENTITY.finditer(text)))
+        for match in _SYMBOL_CUE.finditer(text):
+            entities.append(match.group(1))
+        for token in _EXPLICIT_TOKEN.findall(text):
+            token = token.strip("`'\".,:;()[]{}")
+            if (
+                token
+                and "/" not in token
+                and "\\" not in token
+                and (
+                    "_" in token
+                    or "::" in token
+                    or (
+                        not token.isupper()
+                        and any(character.isupper() for character in token[1:])
+                    )
+                )
+            ):
+                entities.append(token)
+        entities = list(dict.fromkeys(entities))
+        exact: list[str] = []
+        unresolved: list[str] = []
+        owners: list[str] = []
+        modules: list[str] = []
+        for entity in entities:
+            leaf = re.split(r"(?:::|[.#])", entity)[-1]
+            match = available.get(entity.casefold()) or available.get(leaf.casefold())
+            if match:
+                exact.append(match)
+                path = modules_by_symbol.get(entity.casefold()) or modules_by_symbol.get(
+                    leaf.casefold(), ""
+                )
+                if path:
+                    modules.append(path)
+                continue
+            unresolved.append(entity)
+            segments = re.split(r"(?:::|[.#])", entity)
+            owner = available.get(segments[0].casefold()) if len(segments) > 1 else None
+            if owner:
+                owners.append(owner)
+                owner_path = modules_by_symbol.get(segments[0].casefold(), "")
+                if owner_path:
+                    modules.append(owner_path)
+            # New APIs commonly extend an existing sibling name. Keep the
+            # longest exact prefix as an analog, never as proof the new API exists.
+            analogs = sorted(
+                {
+                    value
+                    for key, value in available.items()
+                    if len(key) >= 4
+                    and entity.casefold().startswith(key + "_")
+                },
+                key=lambda value: (-len(value), value.casefold()),
+            )
+            if analogs:
+                exact.append(analogs[0])
+                analog_path = modules_by_symbol.get(analogs[0].casefold(), "")
+                if analog_path:
+                    modules.append(analog_path)
+        digest = hashlib.sha256(
+            f"{obligation_id}\0{text}".encode()
+        ).hexdigest()[:16]
+        facets.append(
+            TaskFacet(
+                facet_id=f"facet-{digest}",
+                obligation_ids=(obligation_id,),
+                role=_facet_role(text),
+                exact_symbols=tuple(dict.fromkeys(exact)),
+                unresolved_symbols=tuple(dict.fromkeys(unresolved)),
+                query_terms=significant_tokens(text)[:12],
+                owning_symbols=tuple(dict.fromkeys(owners)),
+                owning_modules=tuple(dict.fromkeys(modules)),
+            )
+        )
+    return tuple(facets)
+
+
+def _snake_case_type(value: str) -> str:
+    token = re.split(r"(?:::|[.#])", str(value or ""))[0]
+    token = re.sub(r"(?:Handle|Manager|Service)$", "", token) or token
+    token = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", token)
+    token = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", token)
+    return token.replace("-", "_").casefold().strip("_")
+
+
+def _proposed_rust_files(
+    facets: tuple[TaskFacet, ...],
+    documents: tuple[Any, ...],
+) -> tuple[str, ...]:
+    rust_paths = tuple(
+        _normalized_path(str(getattr(document, "path", "") or ""))
+        for document in documents
+        if str(getattr(document, "path", "") or "").lower().endswith(".rs")
+    )
+    if not rust_paths:
+        return ()
+    existing = frozenset(rust_paths)
+    parent_counts = Counter(path.rsplit("/", 1)[0] if "/" in path else "" for path in rust_paths)
+    parent = min(parent_counts, key=lambda value: (-parent_counts[value], value))
+    proposals: list[str] = []
+    for facet in facets:
+        for symbol in facet.unresolved_symbols:
+            owner = re.split(r"(?:::|[.#])", symbol)[0]
+            if owner == symbol or not re.match(r"^[A-Z][A-Za-z0-9]+$", owner):
+                continue
+            stem = _snake_case_type(owner)
+            if not stem:
+                continue
+            path = f"{parent}/{stem}.rs" if parent else f"{stem}.rs"
+            if path not in existing and path not in proposals:
+                proposals.append(path)
+            if len(proposals) >= 2:
+                return tuple(proposals)
+    return tuple(proposals)
+
+
 def _is_test(path: str) -> bool:
     normalized = "/" + _normalized_path(path).lower()
     name = normalized.rsplit("/", 1)[-1]
@@ -311,6 +520,11 @@ def _authoritative_symbol_identifiers(request: ContextCompileRequest) -> frozens
             return
         identifiers.add(lowered)
         identifiers.add(token.rsplit(".", 1)[-1].rsplit("::", 1)[-1].lower())
+        identifiers.update(
+            segment.lower()
+            for segment in re.split(r"(?:::|[.#])", token)
+            if segment and segment.lower() not in _ISSUE_LANGUAGE_WORDS
+        )
 
     for symbol in request.active_symbols:
         add(symbol)
@@ -368,6 +582,76 @@ def _rank_key(ranked: RankedFile, identifiers: dict[str, int]) -> tuple[Any, ...
         ranked.path.lower(),
         ranked.path,
     )
+
+
+def _symbol_keys(value: str) -> frozenset[str]:
+    token = str(value or "").strip()
+    return frozenset(
+        item.casefold()
+        for item in (token, *re.split(r"(?:::|[.#])", token))
+        if item
+    )
+
+
+def _matching_facet_ids(
+    *,
+    symbol: str,
+    path: str,
+    facets: tuple[TaskFacet, ...],
+) -> tuple[str, ...]:
+    keys = _symbol_keys(symbol)
+    normalized_path = _normalized_path(path)
+    return tuple(
+        facet.facet_id
+        for facet in facets
+        if (
+            keys
+            and any(
+                keys & _symbol_keys(candidate)
+                for candidate in (*facet.exact_symbols, *facet.owning_symbols)
+            )
+        )
+        or normalized_path in facet.owning_modules
+    )
+
+
+def _select_role_complete_rows(
+    rows: tuple[RankedFile, ...],
+    facets: tuple[TaskFacet, ...],
+    *,
+    limit: int,
+) -> tuple[RankedFile, ...]:
+    """Greedy bounded set cover over task facets with stable rank tie-breaks."""
+
+    remaining = list(rows)
+    selected: list[RankedFile] = []
+    uncovered = {facet.facet_id for facet in facets}
+    while remaining and len(selected) < limit:
+        ranked_choices = []
+        for position, row in enumerate(remaining):
+            candidate = _exact_candidate(row) or row.representative
+            covered = set(
+                _matching_facet_ids(
+                    symbol=str(candidate.symbol or ""),
+                    path=candidate.path,
+                    facets=facets,
+                )
+            )
+            ranked_choices.append(
+                (
+                    -len(covered & uncovered),
+                    _path_penalty(row.path),
+                    position,
+                    row.path.casefold(),
+                    row,
+                    covered,
+                )
+            )
+        *_rank, row, covered = min(ranked_choices, key=lambda item: item[:-2])
+        remaining.remove(row)
+        selected.append(row)
+        uncovered.difference_update(covered)
+    return tuple(selected)
 
 
 def _sha(*parts: object) -> str:
@@ -556,6 +840,7 @@ class RepositoryContextCompiler:
                 ),
             )
 
+        task_facets = compile_task_facets(request.task, repository.documents)
         state = request.retrieval_state()
         retriever = HybridRetriever(
             repository.documents,
@@ -589,6 +874,21 @@ class RepositoryContextCompiler:
             if (candidate := _exact_candidate(row)) is not None
             and "exact_path" in set(candidate.provenance)
         )
+
+        # A barrel/module facade is a distinct inspection responsibility, not
+        # an implementation edit target merely because it repeats the same
+        # exported symbol name.  Only certified exact re-export evidence may
+        # assign this role.
+        public_surface_paths = frozenset(
+            link.source_path
+            for link in repository.structural_links
+            if _safe_link(link)
+            and str(link.relation or "").upper() == "RE_EXPORTS"
+            and (
+                str(link.target_symbol or "").lower() in authoritative_symbols
+                or str(link.source_symbol or "").lower() in authoritative_symbols
+            )
+        )
         def matches_concrete_anchor(row: RankedFile) -> bool:
             candidate = _exact_candidate(row) or row.representative
             haystack = " ".join(
@@ -610,19 +910,39 @@ class RepositoryContextCompiler:
                 or matches_concrete_anchor(row)
             )
         )
-        primary_rows = tuple((exact_symbol_rows or exact_path_rows)[:3])
+        authoritative_rows = exact_symbol_rows or exact_path_rows
+        non_public_rows = tuple(
+            row for row in authoritative_rows if row.path not in public_surface_paths
+        )
+        validation_rows = tuple(row for row in non_public_rows if _is_test(row.path))
+        edit_rows = tuple(row for row in non_public_rows if not _is_test(row.path))
+        primary_rows = _select_role_complete_rows(
+            tuple(edit_rows or (row for row in authoritative_rows if not _is_test(row.path))),
+            task_facets,
+            limit=3,
+        )
         primary = tuple(
-            _identity_item(
-                row,
-                request,
-                decision_reason=(
-                    "exact_task_symbol"
-                    if row in exact_symbol_rows
-                    else "exact_task_path"
-                    if row in exact_path_rows
-                    else "exact_repository_identity"
+            replace(
+                _identity_item(
+                    row,
+                    request,
+                    decision_reason=(
+                        "exact_task_symbol"
+                        if row in exact_symbol_rows
+                        else "exact_task_path"
+                        if row in exact_path_rows
+                        else "exact_repository_identity"
+                    ),
+                    file_only=row in exact_path_rows and row not in exact_symbol_rows,
                 ),
-                file_only=row in exact_path_rows and row not in exact_symbol_rows,
+                localization_role=LocalizationRole.EDIT.value,
+                facet_ids=_matching_facet_ids(
+                    symbol=str(
+                        (_exact_candidate(row) or row.representative).symbol or ""
+                    ),
+                    path=row.path,
+                    facets=task_facets,
+                ),
             )
             for row in primary_rows
         )
@@ -703,7 +1023,17 @@ class RepositoryContextCompiler:
                 )
             if item.evidence_sha256 in exposed:
                 continue
-            inspection_items.append(item)
+            inspection_items.append(
+                replace(
+                    item,
+                    localization_role=LocalizationRole.UNCERTAIN.value,
+                    facet_ids=_matching_facet_ids(
+                        symbol=item.symbol,
+                        path=item.path,
+                        facets=task_facets,
+                    ),
+                )
+            )
             if len(inspection_items) >= 3:
                 break
         inspection = tuple(inspection_items)
@@ -792,12 +1122,72 @@ class RepositoryContextCompiler:
                         decision_reason="certified_relationship_endpoint",
                         completeness="exact_identity",
                         source_excerpt=str(document.text or "").strip()[:400],
+                        localization_role=LocalizationRole.UNCERTAIN.value,
+                        facet_ids=_matching_facet_ids(
+                            symbol=symbol or str(document.symbol or ""),
+                            path=path,
+                            facets=task_facets,
+                        ),
                     )
                 )
                 if len(supporting) >= 5:
                     break
             if len(supporting) >= 5:
                 break
+
+        role_candidates_by_path = {
+            item.path: item for item in (*inspection, *supporting)
+        }
+        primary_paths = frozenset(item.path for item in primary)
+        anchor_facet_ids = tuple(
+            dict.fromkeys(facet_id for item in primary for facet_id in item.facet_ids)
+        )
+        public_surface = tuple(
+            replace(
+                role_candidates_by_path[link.source_path],
+                kind="public_surface",
+                localization_role=LocalizationRole.PUBLIC_SURFACE.value,
+                decision_reason="certified_reexport_public_surface",
+                completeness="certified_public_surface_edge",
+                facet_ids=(
+                    role_candidates_by_path[link.source_path].facet_ids
+                    or anchor_facet_ids
+                ),
+            )
+            for link in safe_links
+            if str(link.relation or "").upper() == "RE_EXPORTS"
+            and link.source_path in role_candidates_by_path
+            and link.source_path not in primary_paths
+        )
+        integration_paths: list[str] = []
+        for link in safe_links:
+            if str(link.relation or "").upper() not in {"CALLS", "IMPORTS"}:
+                continue
+            for path in (link.source_path, link.target_path):
+                if path not in primary_paths and path in role_candidates_by_path:
+                    integration_paths.append(path)
+        integration = tuple(
+            replace(
+                role_candidates_by_path[path],
+                kind="integration_surface",
+                localization_role=LocalizationRole.INTEGRATION.value,
+                decision_reason="certified_integration_relationship",
+                completeness="certified_integration_edge",
+                facet_ids=(
+                    role_candidates_by_path[path].facet_ids or anchor_facet_ids
+                ),
+            )
+            for path in dict.fromkeys(integration_paths)
+        )
+        role_paths = frozenset(
+            item.path for item in (*public_surface, *integration)
+        )
+        generic_inspection = tuple(
+            item for item in inspection if item.path not in role_paths
+        )
+        generic_supporting = tuple(
+            item for item in supporting if item.path not in role_paths
+        )
 
         definitions = tuple(
             {
@@ -876,10 +1266,15 @@ class RepositoryContextCompiler:
         change_surface = tuple(fact.rendered for fact in projection.impact_facts[:8])
         affected_tests = tuple(
             dict.fromkeys(
-                path
-                for fact in projection.impact_facts
-                for path in (fact.source.path, fact.target.path)
-                if _is_test(path)
+                (
+                    *(row.path for row in validation_rows),
+                    *(
+                        path
+                        for fact in projection.impact_facts
+                        for path in (fact.source.path, fact.target.path)
+                        if _is_test(path)
+                    ),
+                )
             )
         )[:5]
         validation_plan = tuple(
@@ -910,7 +1305,15 @@ class RepositoryContextCompiler:
         evidence_items = tuple(
             {
                 item.evidence_sha256: item
-                for item in (*primary, *inspection, *link_items, *semantic_items)
+                for item in (
+                    *primary,
+                    *generic_inspection,
+                    *generic_supporting,
+                    *public_surface,
+                    *integration,
+                    *link_items,
+                    *semantic_items,
+                )
             }.values()
         )
         uncertainty_reasons = [*repository.reason_codes]
@@ -932,16 +1335,32 @@ class RepositoryContextCompiler:
         if projection.status is RepositoryContextStatus.ABSTAIN:
             uncertainty_reasons.extend(projection.reason_codes)
         status = ContextStatus.READY if evidence_items else ContextStatus.ABSTAIN
+        proposed_new_files = _proposed_rust_files(task_facets, repository.documents)
+        uncovered_facets = tuple(
+            (
+                f"{facet.facet_id} role={facet.role.value} unresolved="
+                + ",".join(facet.unresolved_symbols)
+            )
+            for facet in task_facets
+            if facet.unresolved_symbols
+        )
         selected_tokens = sum(
             max(1, len(item.source_excerpt.split())) for item in evidence_items
         ) + int(projection.token_count)
         return GTContextPacket(
             status=status,
             repository_identity=identity,
+            task_facets=task_facets,
             task_anchors=primary,
             primary_edit_targets=primary,
-            inspection_candidates=inspection,
-            supporting_files=tuple(supporting),
+            inspection_candidates=generic_inspection,
+            inspection_public_surface=tuple(
+                {item.path: item for item in public_surface}.values()
+            ),
+            inspection_integration=integration,
+            proposed_new_files=proposed_new_files,
+            uncovered_facets=uncovered_facets,
+            supporting_files=generic_supporting,
             symbol_contracts=primary,
             semantic_facts=tuple(
                 fact.rendered
@@ -1008,5 +1427,8 @@ __all__ = [
     "ContextEvidenceItem",
     "ContextStatus",
     "GTContextPacket",
+    "LocalizationRole",
     "RepositoryContextCompiler",
+    "TaskFacet",
+    "compile_task_facets",
 ]

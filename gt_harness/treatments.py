@@ -19,8 +19,10 @@ from gt_engine.dense_semantic_index import PersistentDenseSemanticIndex
 from gt_engine.graph_db_projection import PersistedGraphProjector, ProjectionStatus
 from gt_engine.hybrid_repository import build_query_hybrid_repository
 from gt_engine.hybrid_retrieval import RetrievalIntent
+from gt_engine.public_surface import PublicSurfaceResolver
 from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
+    ContextEvidenceItem,
     ContextStatus,
     GTContextPacket,
     RepositoryContextCompiler,
@@ -33,6 +35,34 @@ class TreatmentStatus(StrEnum):
     ACTIVE = "ACTIVE"
     NOT_APPLICABLE = "NOT_APPLICABLE"
     FAILED = "FAILED"
+
+
+class FeatureState(StrEnum):
+    NOT_TRIGGERED = "NOT_TRIGGERED"
+    CANDIDATE = "CANDIDATE"
+    DELIVERED = "DELIVERED"
+    AVAILABLE_TO_AGENT = "AVAILABLE_TO_AGENT"
+    FOLLOWED = "FOLLOWED"
+    EDITED = "EDITED"
+    VALIDATED = "VALIDATED"
+    CONTRADICTED = "CONTRADICTED"
+    IGNORED = "IGNORED"
+
+
+_FEATURE_NAMES = (
+    "exact_edit_targets",
+    "inspection_candidates",
+    "public_surface",
+    "integration",
+    "supporting_files",
+    "semantic_facts",
+    "process",
+    "impact",
+    "affected_tests",
+    "validation",
+    "proposed_new_file",
+    "uncovered_facet",
+)
 
 
 class TreatmentUnavailableError(RuntimeError):
@@ -192,8 +222,16 @@ class GroundTruthTreatment(BareTreatment):
     projection_receipts: list[dict[str, Any]] = field(
         default_factory=list, init=False, repr=False
     )
+    feature_states: dict[str, str] = field(default_factory=dict, init=False)
+    feature_paths: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False)
+    feature_transitions: list[dict[str, Any]] = field(
+        default_factory=list, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
+        self.feature_states.update(
+            {name: FeatureState.NOT_TRIGGERED.value for name in _FEATURE_NAMES}
+        )
         if self.state_dir is None:
             override = str(os.environ.get("GT_STATE_DIR") or "").strip()
             if override:
@@ -222,6 +260,46 @@ class GroundTruthTreatment(BareTreatment):
                     )
                 except Exception as exc:  # noqa: BLE001 - readiness is explicit below
                     self.dense_error = f"dense_backend_unavailable:{type(exc).__name__}"
+
+    def _feature_transition(
+        self,
+        feature: str,
+        state: FeatureState,
+        *,
+        paths: tuple[str, ...] = (),
+    ) -> None:
+        order = {
+            FeatureState.NOT_TRIGGERED.value: 0,
+            FeatureState.CANDIDATE.value: 1,
+            FeatureState.DELIVERED.value: 2,
+            FeatureState.AVAILABLE_TO_AGENT.value: 3,
+            FeatureState.IGNORED.value: 4,
+            FeatureState.FOLLOWED.value: 5,
+            FeatureState.EDITED.value: 6,
+            FeatureState.CONTRADICTED.value: 7,
+            FeatureState.VALIDATED.value: 8,
+        }
+        current = self.feature_states.get(feature, FeatureState.NOT_TRIGGERED.value)
+        if state is FeatureState.IGNORED and current != FeatureState.AVAILABLE_TO_AGENT.value:
+            return
+        if order[state.value] < order[current]:
+            return
+        normalized_paths = tuple(
+            dict.fromkeys(_normalize_relative_path(path) for path in paths if path)
+        )
+        if normalized_paths:
+            self.feature_paths.setdefault(feature, set()).update(normalized_paths)
+        if current == state.value:
+            return
+        self.feature_states[feature] = state.value
+        self.feature_transitions.append(
+            {
+                "feature": feature,
+                "from": current,
+                "to": state.value,
+                "action_count": self.action_count,
+            }
+        )
 
     def _ensure_dense_ready(self) -> None:
         if self.retrieval_mode == "sparse_only":
@@ -375,25 +453,111 @@ class GroundTruthTreatment(BareTreatment):
             additional_candidate_paths=tuple(path for path, _score in dense_candidates),
         )
         packet = self.compiler.compile(repository, state)
+        packet = self._resolve_public_surfaces(packet)
         packet = self._project_persisted_graph(packet)
         self.context_compile_count += 1
         self.retrieval_channel_count += packet.retrieval_channel_count
         return packet
 
-    def _project_persisted_graph(self, packet: GTContextPacket) -> GTContextPacket:
-        """Replace anchor-local approximations with persisted exact projections."""
+    def _resolve_public_surfaces(self, packet: GTContextPacket) -> GTContextPacket:
+        """Add existing manifest/language surfaces as inspection-only evidence."""
 
         if packet.status is not ContextStatus.READY:
             return packet
-        anchor = next(
-            (
-                item
-                for item in (*packet.primary_edit_targets, *packet.inspection_candidates)
-                if item.symbol
-            ),
-            None,
+        candidates = PublicSurfaceResolver(self.service.root).resolve(
+            tuple(item.path for item in packet.primary_edit_targets)
         )
-        if anchor is None:
+        existing = {item.path for item in packet.inspection_public_surface}
+        additions: list[ContextEvidenceItem] = []
+        for candidate in candidates:
+            if candidate.path in existing:
+                continue
+            source = Path(self.service.root, candidate.path)
+            try:
+                body = source.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            digest = hashlib.sha256(
+                "\0".join(
+                    (
+                        "public_surface",
+                        candidate.path,
+                        str(packet.repository_identity.get("source_revision") or ""),
+                        hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                    )
+                ).encode("utf-8")
+            ).hexdigest()
+            additions.append(
+                ContextEvidenceItem(
+                    kind="public_surface",
+                    path=candidate.path,
+                    start_line=1,
+                    end_line=max(1, body.count("\n") + 1),
+                    symbol="",
+                    relation="",
+                    confidence=1.0,
+                    verification_status="verified_source_identity",
+                    source_revision=str(
+                        packet.repository_identity.get("source_revision") or ""
+                    ),
+                    graph_revision=str(
+                        packet.repository_identity.get("graph_revision") or ""
+                    ),
+                    evidence_sha256=digest,
+                    decision_reason=candidate.reason,
+                    completeness="existing_public_surface_file",
+                    source_excerpt=body.strip()[:400],
+                    localization_role="PUBLIC_SURFACE",
+                )
+            )
+        if not additions:
+            return packet
+        coverage = dict(packet.coverage)
+        coverage["deterministic_public_surfaces"] = [
+            {"path": item.path, "reason": item.decision_reason}
+            for item in additions
+        ]
+        return replace(
+            packet,
+            inspection_public_surface=tuple(
+                {
+                    item.path: item
+                    for item in (*packet.inspection_public_surface, *additions)
+                }.values()
+            ),
+            evidence_items=tuple(
+                {
+                    item.evidence_sha256: item
+                    for item in (*packet.evidence_items, *additions)
+                }.values()
+            ),
+            coverage=coverage,
+        )
+
+    def _project_persisted_graph(self, packet: GTContextPacket) -> GTContextPacket:
+        """Project up to four role-diverse anchors from one graph session."""
+
+        if packet.status is not ContextStatus.READY:
+            return packet
+        ordered = (
+            *packet.primary_edit_targets,
+            *packet.inspection_public_surface,
+            *packet.inspection_integration,
+            *packet.inspection_candidates,
+        )
+        anchors = tuple(
+            {
+                (item.path, item.symbol): item
+                for item in ordered
+                if item.symbol
+                and (
+                    item.facet_ids
+                    or item in packet.primary_edit_targets
+                    and item.decision_reason == "exact_task_path"
+                )
+            }.values()
+        )[:4]
+        if not anchors:
             return replace(
                 packet,
                 execution_paths=(),
@@ -402,113 +566,197 @@ class GroundTruthTreatment(BareTreatment):
                     dict.fromkeys((*packet.uncertainties, "graph_projection_anchor_unavailable"))
                 ),
             )
-        projector = PersistedGraphProjector(self.service)
+
+        results: list[tuple[ContextEvidenceItem, Any, Any]] = []
+        reasons = list(packet.uncertainties)
         try:
-            processes = projector.project_processes(anchor.symbol, file_path=anchor.path)
-            impact = projector.project_impact(anchor.symbol, file_path=anchor.path)
-        except Exception as exc:  # noqa: BLE001 - graph evidence fails closed
+            with PersistedGraphProjector(self.service) as projector:
+                for anchor in anchors:
+                    try:
+                        processes = projector.project_processes(
+                            anchor.symbol, file_path=anchor.path
+                        )
+                        impact = projector.project_impact(
+                            anchor.symbol, file_path=anchor.path
+                        )
+                    except Exception as exc:  # noqa: BLE001 - one facet fails closed
+                        reasons.append(
+                            "graph_projection_failed:"
+                            f"{anchor.path}#{anchor.symbol}:{type(exc).__name__}"
+                        )
+                        continue
+                    results.append((anchor, processes, impact))
+        except Exception as exc:  # noqa: BLE001 - graph session fails closed
             return replace(
                 packet,
                 execution_paths=(),
                 change_surface=(),
                 uncertainties=tuple(
                     dict.fromkeys(
-                        (*packet.uncertainties, f"graph_projection_failed:{type(exc).__name__}")
+                        (*reasons, f"graph_projection_failed:{type(exc).__name__}")
                     )
                 ),
             )
 
-        process_receipt = asdict(processes.receipt)
-        impact_receipt = asdict(impact.receipt)
         projection_receipt = {
-            "schema": "gt.graph_projection_receipt.v1",
-            "anchor": {"path": anchor.path, "symbol": anchor.symbol},
-            "process": process_receipt,
-            "impact": impact_receipt,
+            "schema": "gt.graph_projection_receipt.v2",
+            "anchors": [
+                {
+                    "path": anchor.path,
+                    "symbol": anchor.symbol,
+                    "role": anchor.localization_role,
+                    "process": asdict(processes.receipt),
+                    "impact": asdict(impact.receipt),
+                }
+                for anchor, processes, impact in results
+            ],
         }
-        key = (processes.receipt.source_revision, anchor.path, anchor.symbol)
-        if not any(
+        receipt_key = (
+            results[0][1].receipt.source_revision if results else "",
+            tuple((anchor.path, anchor.symbol) for anchor, _process, _impact in results),
+        )
+        if results and not any(
             (
-                item.get("process", {}).get("source_revision"),
-                item.get("anchor", {}).get("path"),
-                item.get("anchor", {}).get("symbol"),
+                (item.get("anchors") or [{}])[0].get("process", {}).get(
+                    "source_revision", ""
+                ),
+                tuple(
+                    (anchor.get("path", ""), anchor.get("symbol", ""))
+                    for anchor in item.get("anchors", [])
+                ),
             )
-            == key
+            == receipt_key
             for item in self.projection_receipts
         ):
             self.projection_receipts.append(projection_receipt)
 
         exposed = self.delivered_claim_ids
-        process_lines: list[str] = []
-        projection_claims: list[str] = []
-        if processes.status is ProjectionStatus.READY:
-            for process in processes.processes:
-                if process.process_id in exposed:
-                    continue
-                nodes = []
-                edge_receipts = []
-                for index, step in enumerate(process.steps):
-                    if index == 0:
-                        nodes.append(f"{step.source.file_path}#{step.source.name}")
-                    nodes.append(f"{step.target.file_path}#{step.target.name}")
-                    receiver = f",receiver={step.receiver_type}" if step.receiver_type else ""
-                    edge_receipts.append(
-                        f"edge={step.evidence.edge_id},resolution="
-                        f"{step.evidence.resolution_outcome}{receiver}"
-                    )
-                process_lines.append(
-                    f"{process.process_id} lower_bound=true "
-                    + " -> ".join(nodes)
-                    + " ["
-                    + ";".join(edge_receipts)
-                    + "]"
-                )
-                projection_claims.append(process.process_id)
-
-        impact_lines: list[str] = []
+        process_candidates: list[list[tuple[str, str]]] = []
+        impact_candidates: list[list[tuple[str, str, str]]] = []
         affected_tests: list[str] = []
-        if impact.status is ProjectionStatus.READY:
-            for fact in impact.impacts:
-                if fact.impact_id in exposed:
-                    continue
-                receiver = f" receiver={fact.receiver_type}" if fact.receiver_type else ""
-                edge_identity = fact.evidence.edge_id or (
-                    "assertion:" + str(fact.evidence.assertion_id)
-                )
-                impact_lines.append(
-                    f"{fact.impact_id} depth={fact.depth} {fact.relationship} "
-                    f"{fact.impacted.file_path}#{fact.impacted.name} "
-                    f"direction={fact.traversal_direction} "
-                    f"edge={edge_identity}"
-                    f"{receiver}"
-                )
-                projection_claims.append(fact.impact_id)
-                if fact.impacted.is_test:
-                    affected_tests.append(fact.impacted.file_path)
-
-        reasons = list(packet.uncertainties)
-        if processes.status is not ProjectionStatus.READY:
-            reasons.append(f"process_projection_{processes.status.value.lower()}")
-        if impact.status is not ProjectionStatus.READY:
-            reasons.append(f"impact_projection_{impact.status.value.lower()}")
-        reasons.extend(processes.receipt.truncation_reasons)
-        reasons.extend(impact.receipt.truncation_reasons)
+        truncated = packet.truncated
         coverage = dict(packet.coverage)
-        coverage["persisted_process_projection"] = process_receipt
-        coverage["persisted_impact_projection"] = impact_receipt
+        coverage["persisted_graph_projections"] = []
+
+        for anchor, processes, impact in results:
+            coverage["persisted_graph_projections"].append(
+                {
+                    "anchor": {
+                        "path": anchor.path,
+                        "symbol": anchor.symbol,
+                        "role": anchor.localization_role,
+                    },
+                    "process": asdict(processes.receipt),
+                    "impact": asdict(impact.receipt),
+                }
+            )
+            if processes.status is not ProjectionStatus.READY:
+                reasons.append(
+                    f"process_projection_{processes.status.value.lower()}:"
+                    f"{anchor.path}#{anchor.symbol}"
+                )
+            if impact.status is not ProjectionStatus.READY:
+                reasons.append(
+                    f"impact_projection_{impact.status.value.lower()}:"
+                    f"{anchor.path}#{anchor.symbol}"
+                )
+            reasons.extend(processes.receipt.truncation_reasons)
+            reasons.extend(impact.receipt.truncation_reasons)
+            truncated = bool(
+                truncated or processes.receipt.truncated or impact.receipt.truncated
+            )
+
+            anchor_processes: list[tuple[str, str]] = []
+            if processes.status is ProjectionStatus.READY:
+                for process in processes.processes:
+                    if process.process_id in exposed:
+                        continue
+                    nodes: list[str] = []
+                    edge_receipts: list[str] = []
+                    for index, step in enumerate(process.steps):
+                        if index == 0:
+                            nodes.append(f"{step.source.file_path}#{step.source.name}")
+                        nodes.append(f"{step.target.file_path}#{step.target.name}")
+                        receiver = (
+                            f",receiver={step.receiver_type}" if step.receiver_type else ""
+                        )
+                        edge_receipts.append(
+                            f"edge={step.evidence.edge_id},resolution="
+                            f"{step.evidence.resolution_outcome}{receiver}"
+                        )
+                    anchor_processes.append(
+                        (
+                            process.process_id,
+                            f"{process.process_id} lower_bound=true anchor="
+                            f"{anchor.path}#{anchor.symbol} "
+                            + " -> ".join(nodes)
+                            + " ["
+                            + ";".join(edge_receipts)
+                            + "]",
+                        )
+                    )
+            process_candidates.append(anchor_processes)
+
+            anchor_impacts: list[tuple[str, str, str]] = []
+            if impact.status is ProjectionStatus.READY:
+                for fact in impact.impacts:
+                    if fact.impact_id in exposed:
+                        continue
+                    receiver = (
+                        f" receiver={fact.receiver_type}" if fact.receiver_type else ""
+                    )
+                    edge_identity = fact.evidence.edge_id or (
+                        "assertion:" + str(fact.evidence.assertion_id)
+                    )
+                    line = (
+                        f"{fact.impact_id} anchor={anchor.path}#{anchor.symbol} "
+                        f"depth={fact.depth} {fact.relationship} "
+                        f"{fact.impacted.file_path}#{fact.impacted.name} "
+                        f"direction={fact.traversal_direction} edge={edge_identity}{receiver}"
+                    )
+                    anchor_impacts.append(
+                        (fact.impact_id, fact.impacted.file_path, line)
+                    )
+                    if fact.impacted.is_test:
+                        affected_tests.append(fact.impacted.file_path)
+            impact_candidates.append(anchor_impacts)
+
+        # Round-robin selection ensures one busy symbol cannot consume every
+        # bounded row before another task facet contributes any evidence.
+        selected_processes: list[tuple[str, str]] = []
+        for offset in range(max((len(rows) for rows in process_candidates), default=0)):
+            for rows in process_candidates:
+                if offset < len(rows):
+                    selected_processes.append(rows[offset])
+                if len(selected_processes) >= 3:
+                    break
+            if len(selected_processes) >= 3:
+                break
+        selected_impacts: list[tuple[str, str, str]] = []
+        seen_impact_ids: set[str] = set()
+        for offset in range(max((len(rows) for rows in impact_candidates), default=0)):
+            for rows in impact_candidates:
+                if offset >= len(rows) or rows[offset][0] in seen_impact_ids:
+                    continue
+                seen_impact_ids.add(rows[offset][0])
+                selected_impacts.append(rows[offset])
+                if len(selected_impacts) >= 8:
+                    break
+            if len(selected_impacts) >= 8:
+                break
+        projection_claims = [claim for claim, _line in selected_processes]
+        projection_claims.extend(claim for claim, _path, _line in selected_impacts)
         return replace(
             packet,
-            execution_paths=tuple(process_lines),
-            change_surface=tuple(impact_lines),
-            affected_tests=tuple(dict.fromkeys(affected_tests))[:5],
+            execution_paths=tuple(line for _claim, line in selected_processes),
+            change_surface=tuple(line for _claim, _path, line in selected_impacts),
+            affected_tests=tuple(
+                dict.fromkeys((*packet.affected_tests, *affected_tests))
+            )[:5],
             uncertainties=tuple(dict.fromkeys(reasons)),
             coverage=coverage,
             projection_claim_ids=tuple(dict.fromkeys(projection_claims)),
-            truncated=bool(
-                packet.truncated
-                or processes.receipt.truncated
-                or impact.receipt.truncated
-            ),
+            truncated=truncated,
         )
 
     def _render(self, *, update: bool, budget: int, delivered_before_call: int) -> str:
@@ -538,6 +786,42 @@ class GroundTruthTreatment(BareTreatment):
             return ""
         normalized_packet = packet.as_dict()
 
+        def feature_paths(values: list[Any]) -> tuple[str, ...]:
+            paths: list[str] = []
+            for value in values:
+                if isinstance(value, dict) and value.get("path"):
+                    paths.append(str(value["path"]))
+                    continue
+                text = str(value or "")
+                matches = tuple(_PATH_TOKEN.finditer(text))
+                if matches:
+                    paths.extend(match.group(1) for match in matches)
+                elif "/" in text or re.search(r"\.[A-Za-z0-9]{1,5}$", text):
+                    paths.append(text.split()[0])
+            return tuple(dict.fromkeys(_normalize_relative_path(path) for path in paths))
+
+        candidate_features = {
+            "exact_edit_targets": normalized_packet["primary_edit_targets"],
+            "inspection_candidates": normalized_packet["inspection_candidates"],
+            "public_surface": normalized_packet["inspection_public_surface"],
+            "integration": normalized_packet["inspection_integration"],
+            "supporting_files": normalized_packet["supporting_files"],
+            "semantic_facts": normalized_packet["semantic_facts"],
+            "process": normalized_packet["execution_paths"],
+            "impact": normalized_packet["change_surface"],
+            "affected_tests": normalized_packet["affected_tests"],
+            "validation": normalized_packet["validation_plan"],
+            "proposed_new_file": normalized_packet["proposed_new_files"],
+            "uncovered_facet": normalized_packet["uncovered_facets"],
+        }
+        for feature, values in candidate_features.items():
+            if values:
+                self._feature_transition(
+                    feature,
+                    FeatureState.CANDIDATE,
+                    paths=feature_paths(values),
+                )
+
         # An inspection candidate or a loose semantic match is not an
         # instruction.  When retrieval explicitly reports that it lacks
         # independent support and the packet contains no decision-grade
@@ -550,6 +834,8 @@ class GroundTruthTreatment(BareTreatment):
             normalized_packet[name]
             for name in (
                 "primary_edit_targets",
+                "inspection_public_surface",
+                "inspection_integration",
                 "supporting_files",
                 "execution_paths",
                 "change_surface",
@@ -608,6 +894,8 @@ class GroundTruthTreatment(BareTreatment):
             for group_name in (
                 "primary_edit_targets",
                 "inspection_candidates",
+                "inspection_public_surface",
+                "inspection_integration",
                 "supporting_files",
                 "evidence_items",
             )
@@ -649,9 +937,19 @@ class GroundTruthTreatment(BareTreatment):
                 compact_target(item)
                 for item in normalized_packet["inspection_candidates"]
             ],
+            "inspection_public_surface": [
+                compact_target(item)
+                for item in normalized_packet["inspection_public_surface"]
+            ],
+            "inspection_integration": [
+                compact_target(item)
+                for item in normalized_packet["inspection_integration"]
+            ],
             "supporting_files": [
                 compact_target(item) for item in normalized_packet["supporting_files"]
             ],
+            "proposed_new_files": normalized_packet["proposed_new_files"],
+            "uncovered_facets": normalized_packet["uncovered_facets"],
             "semantic_facts": semantic_facts,
             "semantic_graph_receipt": semantic_receipt,
             "execution_paths": normalized_packet["execution_paths"],
@@ -667,6 +965,8 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict[name]
             for name in (
                 "primary_edit_targets",
+                "inspection_public_surface",
+                "inspection_integration",
                 "supporting_files",
                 "relationships",
                 "semantic_facts",
@@ -684,7 +984,7 @@ class GroundTruthTreatment(BareTreatment):
         def encode() -> str:
             kind = "repository_update" if update else "repository_start"
             lines = [
-                '<groundtruth-repository-context schema="gt.agent_context.v4" '
+                '<groundtruth-repository-context schema="gt.agent_context.v5" '
                 f'kind="{kind}">',
                 "RECEIPT "
                 f"repository={Path(receipt.repository).name or receipt.repository} "
@@ -713,6 +1013,10 @@ class GroundTruthTreatment(BareTreatment):
                 lines.append(
                     target_line("INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY", item)
                 )
+            for item in packet_dict["inspection_public_surface"]:
+                lines.append(target_line("INSPECT_PUBLIC_SURFACE", item))
+            for item in packet_dict["inspection_integration"]:
+                lines.append(target_line("INSPECT_INTEGRATION", item))
             for item in packet_dict["supporting_files"]:
                 lines.append(target_line("SUPPORTING_FILE", item))
             for item in packet_dict["relationships"]:
@@ -729,6 +1033,13 @@ class GroundTruthTreatment(BareTreatment):
             lines.extend(f"BOUNDED_IMPACT {item}" for item in packet_dict["change_surface"])
             lines.extend(f"AFFECTED_TEST {item}" for item in packet_dict["affected_tests"])
             lines.extend(f"VALIDATE {item}" for item in packet_dict["validation_plan"])
+            lines.extend(
+                f"PROPOSED_NEW_FILE {item} fact=false"
+                for item in packet_dict["proposed_new_files"]
+            )
+            lines.extend(
+                f"UNCOVERED_FACET {item}" for item in packet_dict["uncovered_facets"]
+            )
             lines.extend(f"UNCERTAINTY {item}" for item in packet_dict["uncertainties"])
             coverage = packet_dict["coverage"]
             lines.append(
@@ -764,6 +1075,9 @@ class GroundTruthTreatment(BareTreatment):
                 item["source_excerpt"] = str(item.get("source_excerpt") or "")[:240]
             for item in packet_dict["inspection_candidates"]:
                 item["source_excerpt"] = str(item.get("source_excerpt") or "")[:160]
+            for group_name in ("inspection_public_surface", "inspection_integration"):
+                for item in packet_dict[group_name]:
+                    item["source_excerpt"] = str(item.get("source_excerpt") or "")[:160]
             packet_dict["truncated"] = True
             rendered = encode()
         if too_large():
@@ -771,11 +1085,16 @@ class GroundTruthTreatment(BareTreatment):
                 item["source_excerpt"] = ""
             for item in packet_dict["inspection_candidates"]:
                 item["source_excerpt"] = ""
+            for group_name in ("inspection_public_surface", "inspection_integration"):
+                for item in packet_dict[group_name]:
+                    item["source_excerpt"] = ""
             packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:2]
             packet_dict["execution_paths"] = packet_dict["execution_paths"][:2]
             packet_dict["change_surface"] = packet_dict["change_surface"][:4]
             packet_dict["affected_tests"] = packet_dict["affected_tests"][:3]
             packet_dict["validation_plan"] = packet_dict["validation_plan"][:3]
+            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:2]
+            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:3]
             packet_dict["uncertainties"] = packet_dict["uncertainties"][:4]
             rendered = encode()
         if too_large():
@@ -800,6 +1119,8 @@ class GroundTruthTreatment(BareTreatment):
                 for group in (
                     packet_dict["primary_edit_targets"],
                     packet_dict["inspection_candidates"],
+                    packet_dict["inspection_public_surface"],
+                    packet_dict["inspection_integration"],
                     packet_dict["supporting_files"],
                     packet_dict["relationships"],
                     packet_dict["semantic_facts"],
@@ -816,6 +1137,28 @@ class GroundTruthTreatment(BareTreatment):
                 raise self._unavailable(receipt, "context_evidence_empty")
             self.context_dirty = False
             return ""
+        delivered_features = {
+            "exact_edit_targets": packet_dict["primary_edit_targets"],
+            "inspection_candidates": packet_dict["inspection_candidates"],
+            "public_surface": packet_dict["inspection_public_surface"],
+            "integration": packet_dict["inspection_integration"],
+            "supporting_files": packet_dict["supporting_files"],
+            "semantic_facts": packet_dict["semantic_facts"],
+            "process": packet_dict["execution_paths"],
+            "impact": packet_dict["change_surface"],
+            "affected_tests": packet_dict["affected_tests"],
+            "validation": packet_dict["validation_plan"],
+            "proposed_new_file": packet_dict["proposed_new_files"],
+            "uncovered_facet": packet_dict["uncovered_facets"],
+        }
+        for feature, values in delivered_features.items():
+            if not values:
+                continue
+            paths = feature_paths(values)
+            self._feature_transition(feature, FeatureState.DELIVERED, paths=paths)
+            self._feature_transition(
+                feature, FeatureState.AVAILABLE_TO_AGENT, paths=paths
+            )
         self.delivered_claim_ids.update(delivered)
         self.delivery_count += 1
         self.delivery_calls.append(delivered_before_call)
@@ -967,6 +1310,27 @@ class GroundTruthTreatment(BareTreatment):
             self.validation_state = "pass"
         observed = self.service.status()
         repository_changed = observed.build_status is GraphStatus.STALE
+        observed_paths = set(paths)
+        changed_now = {
+            _normalize_relative_path(path)
+            for path in getattr(observed, "git_status_paths", ())
+            if path
+        }
+        for feature, feature_path_set in self.feature_paths.items():
+            if observed_paths & feature_path_set:
+                self._feature_transition(feature, FeatureState.FOLLOWED)
+            if repository_changed and (changed_now | observed_paths) & feature_path_set:
+                self._feature_transition(feature, FeatureState.EDITED)
+            if diagnostic_lines and observed_paths & feature_path_set:
+                self._feature_transition(feature, FeatureState.CONTRADICTED)
+        if validation_passed:
+            for feature, current in tuple(self.feature_states.items()):
+                if current in {
+                    FeatureState.FOLLOWED.value,
+                    FeatureState.EDITED.value,
+                    FeatureState.CONTRADICTED.value,
+                }:
+                    self._feature_transition(feature, FeatureState.VALIDATED)
         if diagnostic_lines or diagnostics_cleared or discovered_new_path or repository_changed:
             self.context_dirty = True
         # The delivery budget limits provider-visible text, not graph freshness.
@@ -1000,6 +1364,16 @@ class GroundTruthTreatment(BareTreatment):
 
     def finalize(self, result: Any) -> dict[str, Any]:
         receipt = self.service.status()
+        feature_states = dict(self.feature_states)
+        if result is not None:
+            feature_states = {
+                feature: (
+                    FeatureState.IGNORED.value
+                    if state == FeatureState.AVAILABLE_TO_AGENT.value
+                    else state
+                )
+                for feature, state in feature_states.items()
+            }
         return {
             "schema": "gt.treatment_receipt.v2",
             "treatment": self.treatment_id,
@@ -1031,6 +1405,13 @@ class GroundTruthTreatment(BareTreatment):
             "dense_query_receipts": list(self.dense_query_receipts),
             "dense_error": self.dense_error or None,
             "graph_projection_receipts": list(self.projection_receipts),
+            "feature_lifecycle_schema": "gt.feature_lifecycle.v1",
+            "feature_states": feature_states,
+            "feature_paths": {
+                feature: sorted(paths)
+                for feature, paths in sorted(self.feature_paths.items())
+            },
+            "feature_transitions": list(self.feature_transitions),
             "errors": list(dict.fromkeys(self.errors)),
             "delivered_claim_ids": sorted(self.delivered_claim_ids),
             "initial_context": self.initial_context,

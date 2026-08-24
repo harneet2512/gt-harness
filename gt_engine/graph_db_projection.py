@@ -251,8 +251,46 @@ class PersistedGraphProjector:
     ) -> None:
         self.service = service
         self.limits = limits or GraphProjectionLimits()
+        self._session_graph: GraphReceipt | None = None
+        self._session_connection: sqlite3.Connection | None = None
+        self._exact_calls_cache: tuple[
+            tuple[_ExactEdge, ...], int, int, tuple[str, ...], dict[str, int]
+        ] | None = None
+        self._impact_edges_cache: tuple[
+            tuple[_ImpactEdge, ...], dict[str, int], int, tuple[str, ...]
+        ] | None = None
+
+    def __enter__(self) -> PersistedGraphProjector:
+        if self._session_connection is None:
+            graph, connection = self._open()
+            self._session_graph = graph
+            self._session_connection = connection
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        session_graph = self._session_graph
+        if self._session_connection is not None:
+            self._session_connection.close()
+        self._session_graph = None
+        self._session_connection = None
+        self._exact_calls_cache = None
+        self._impact_edges_cache = None
+        if session_graph is not None:
+            current = self.service.status()
+            if (
+                not current.query_ready
+                or current.source_revision != session_graph.source_revision
+                or current.graph_checksum_or_identity
+                != session_graph.graph_checksum_or_identity
+            ):
+                reasons = ",".join(current.degraded_reasons) or current.build_status.value
+                raise GraphNotReadyError(
+                    "graph changed during projection session: " + reasons
+                )
 
     def _open(self) -> tuple[GraphReceipt, sqlite3.Connection]:
+        if self._session_graph is not None and self._session_connection is not None:
+            return self._session_graph, self._session_connection
         receipt = self.service.status()
         if not receipt.query_ready:
             reasons = ",".join(receipt.degraded_reasons) or receipt.build_status.value
@@ -646,17 +684,21 @@ class PersistedGraphProjector:
         token = str(symbol or "").strip()
         selected_file = str(file_path or "").strip().replace("\\", "/")
         graph, connection = self._open()
+        session_connection = connection is self._session_connection
         try:
             status, anchor, ambiguous = self._resolve_anchor(connection, token, selected_file)
+            if self._exact_calls_cache is None:
+                self._exact_calls_cache = self._load_exact_calls(connection)
             (
                 calls,
                 exact_count,
                 rejected_count,
                 unsupported,
                 resolution_outcomes,
-            ) = self._load_exact_calls(connection)
+            ) = self._exact_calls_cache
         finally:
-            connection.close()
+            if not session_connection:
+                connection.close()
         reasons: set[str] = set()
         evidence: dict[str, Any] = {
             "exact_calls": exact_count,
@@ -888,18 +930,20 @@ class PersistedGraphProjector:
         token = str(symbol or "").strip()
         selected_file = str(file_path or "").strip().replace("\\", "/")
         graph, connection = self._open()
+        session_connection = connection is self._session_connection
         try:
             status, anchor, ambiguous = self._resolve_anchor(connection, token, selected_file)
-            relationships, exact_counts, rejected, unsupported = self._load_exact_impact_edges(
-                connection
-            )
+            if self._impact_edges_cache is None:
+                self._impact_edges_cache = self._load_exact_impact_edges(connection)
+            relationships, exact_counts, rejected, unsupported = self._impact_edges_cache
             cochange_by_path, cochange_count = (
                 self._cochange_rank_evidence(connection, anchor.file_path)
                 if anchor is not None
                 else ({}, 0)
             )
         finally:
-            connection.close()
+            if not session_connection:
+                connection.close()
         reasons: set[str] = set()
         evidence: dict[str, Any] = {
             "exact_relationships": exact_counts,

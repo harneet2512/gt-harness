@@ -13,6 +13,7 @@ from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
     ContextStatus,
     RepositoryContextCompiler,
+    compile_task_facets,
 )
 
 
@@ -441,3 +442,178 @@ def test_compiler_deduplicates_transitive_copy_of_direct_relationship() -> None:
     ]
     assert len(relationships) == 1
     assert relationships[0].relation == "CALLS"
+
+
+def test_compiler_separates_public_surface_from_edit_targets() -> None:
+    public_export = StructuralLink(
+        source_path="src/awilix.ts",
+        target_path="src/container.ts",
+        relation="RE_EXPORTS",
+        confidence=1.0,
+        certified=True,
+        verification_status="verified",
+        source_symbol="AwilixContainer",
+        target_symbol="AwilixContainer",
+        source_start_line=1,
+        target_start_line=10,
+        source_content_sha256="a" * 64,
+        target_content_sha256="b" * 64,
+        source_evidence_origin="preexisting_repository",
+        target_evidence_origin="preexisting_repository",
+        origin="program",
+        resolution_outcome="exact",
+        resolution_method="re_export",
+        candidate_count=1,
+    )
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "src/container.ts",
+                "AwilixContainer",
+                "export interface AwilixContainer { initialize(): Promise<void> }",
+            ),
+            _document(
+                "src/awilix.ts",
+                "AwilixContainer",
+                "export { AwilixContainer } from './container'",
+            ),
+        ),
+        structural_links=(public_export,),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=2,
+        document_chars=160,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Add `AwilixContainer.initialize` to the public API"),
+    )
+
+    assert [item.path for item in packet.inspection_public_surface] == ["src/awilix.ts"]
+    assert packet.inspection_public_surface[0].localization_role == "PUBLIC_SURFACE"
+    assert all(
+        item.path != "src/awilix.ts" for item in packet.primary_edit_targets
+    )
+
+
+def test_task_facets_keep_unresolved_api_and_map_its_existing_owner() -> None:
+    documents = (
+        _document(
+            "core/engine/src/evaluation.rs",
+            "EvaluationHandle",
+            "pub struct EvaluationHandle { cancelled: bool }",
+        ),
+        _document(
+            "core/engine/src/job.rs",
+            "run_jobs",
+            "pub fn run_jobs(context: &mut Context) {}",
+        ),
+    )
+
+    facets = compile_task_facets(
+        "Add `EvaluationHandle::cancel_with_reason` and "
+        "`run_jobs_with_evaluation` while preserving `run_jobs`.",
+        documents,
+    )
+
+    unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
+    owners = {symbol for facet in facets for symbol in facet.owning_symbols}
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    assert "EvaluationHandle::cancel_with_reason" in unresolved
+    assert "run_jobs_with_evaluation" in unresolved
+    assert "EvaluationHandle" in owners
+    assert "run_jobs" in exact
+
+
+def test_task_facets_capture_unquoted_case_significant_symbols() -> None:
+    facets = compile_task_facets(
+        "Wire HybridRetriever into GroundTruthTreatment",
+        _repository().documents,
+    )
+
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    assert {"HybridRetriever", "GroundTruthTreatment"} <= exact
+
+
+def test_compiler_separates_integration_callers_from_edit_targets() -> None:
+    call = StructuralLink(
+        source_path="src/job.rs",
+        target_path="src/evaluation.rs",
+        relation="CALLS",
+        confidence=1.0,
+        certified=True,
+        verification_status="verified",
+        source_symbol="run_jobs",
+        target_symbol="evaluate",
+        source_start_line=20,
+        target_start_line=5,
+        source_content_sha256="a" * 64,
+        target_content_sha256="b" * 64,
+        source_evidence_origin="preexisting_repository",
+        target_evidence_origin="preexisting_repository",
+        origin="program",
+        resolution_outcome="exact",
+        resolution_method="exact_symbol",
+        candidate_count=1,
+    )
+    repository = HybridRepository(
+        documents=(
+            _document("src/evaluation.rs", "evaluate", "pub fn evaluate() {}"),
+            _document("src/job.rs", "run_jobs", "pub fn run_jobs() { evaluate(); }"),
+        ),
+        structural_links=(call,),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=2,
+        document_chars=96,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Change `evaluate` cancellation behavior"),
+    )
+
+    assert [item.path for item in packet.inspection_integration] == ["src/job.rs"]
+    assert packet.inspection_integration[0].localization_role == "INTEGRATION"
+    assert all(item.path != "src/job.rs" for item in packet.primary_edit_targets)
+
+
+def test_compiler_marks_greenfield_rust_file_as_proposal_not_repository_fact() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "core/engine/src/job.rs",
+                "run_jobs",
+                "pub fn run_jobs(context: &mut Context) {}",
+            ),
+            _document(
+                "core/engine/src/lib.rs",
+                "Context",
+                "pub struct Context; pub mod job;",
+            ),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=2,
+        document_chars=120,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request(
+            "Add `EvaluationHandle::cancel_with_reason` and "
+            "`run_jobs_with_evaluation` while preserving `run_jobs`."
+        ),
+    )
+
+    assert packet.proposed_new_files == ("core/engine/src/evaluation.rs",)
+    assert all(
+        item.path != "core/engine/src/evaluation.rs"
+        for item in packet.evidence_items
+    )
+    assert packet.uncovered_facets

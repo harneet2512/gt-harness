@@ -481,6 +481,42 @@ def test_projection_abstains_and_receipts_missing_exact_edge_provenance(
     assert "exact_impact_provenance_unavailable" in impact.receipt.truncation_reasons
 
 
+def test_projection_session_loads_persisted_edge_sets_once_for_multiple_anchors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projector = PersistedGraphProjector(
+        _service(_repository(tmp_path), tmp_path / "state")
+    )
+    original_calls = PersistedGraphProjector._load_exact_calls
+    original_impacts = PersistedGraphProjector._load_exact_impact_edges
+    loads = {"calls": 0, "impacts": 0}
+
+    def load_calls(connection):
+        loads["calls"] += 1
+        return original_calls(connection)
+
+    def load_impacts(connection):
+        loads["impacts"] += 1
+        return original_impacts(connection)
+
+    monkeypatch.setattr(
+        PersistedGraphProjector, "_load_exact_calls", staticmethod(load_calls)
+    )
+    monkeypatch.setattr(
+        PersistedGraphProjector,
+        "_load_exact_impact_edges",
+        staticmethod(load_impacts),
+    )
+
+    with projector:
+        projector.project_processes("dispatch", file_path="service.py")
+        projector.project_processes("work", file_path="service.py")
+        projector.project_impact("dispatch", file_path="service.py")
+        projector.project_impact("work", file_path="service.py")
+
+    assert loads == {"calls": 1, "impacts": 1}
+
+
 def test_impact_projection_traverses_typed_exact_edges_and_keeps_cochange_rank_only(
     tmp_path: Path,
 ) -> None:
