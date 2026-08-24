@@ -790,10 +790,9 @@ def _matching_facet_ids(
                 for candidate in facet.unresolved_symbols
             )
         )
-        if (
-            symbol_match
-            and (not owner_scoped or normalized_path in facet.owning_modules)
-        ) or normalized_path in facet.owning_modules:
+        if symbol_match and (
+            not owner_scoped or normalized_path in facet.owning_modules
+        ):
             matched.append(facet.facet_id)
     return tuple(matched)
 

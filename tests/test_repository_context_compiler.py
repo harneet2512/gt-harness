@@ -14,6 +14,7 @@ from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
     ContextStatus,
     RepositoryContextCompiler,
+    _matching_facet_ids,
     compile_task_facets,
 )
 
@@ -545,6 +546,7 @@ def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:
         _document("core/engine/src/script.rs", "Script", "pub struct Script;"),
         _document("core/engine/src/script.rs", "evaluate", "pub fn evaluate() {}"),
         _document("core/ast/src/source.rs", "Script", "pub struct Script;"),
+        _document("core/ast/src/source.rs", "Module", "pub struct Module;"),
         _document("core/ast/src/source.rs", "evaluate", "pub fn evaluate() {}"),
     )
 
@@ -707,6 +709,31 @@ def test_owner_scoped_exact_facts_are_seeded_when_rank_window_omits_them(
         "core/engine/src/module/mod.rs",
         "core/engine/src/script.rs",
     }
+
+
+def test_file_location_cannot_substitute_for_owner_symbol_match() -> None:
+    documents = (
+        _document("core/ast/src/source.rs", "Module", "pub struct Module;"),
+        _document("core/ast/src/source.rs", "Script", "pub struct Script;"),
+        _document("core/ast/src/source.rs", "evaluate", "pub fn evaluate() {}"),
+    )
+    facets = compile_task_facets(
+        "Add `Script::evaluate_with_evaluation`.",
+        documents,
+    )
+    script_facet = next(
+        facet
+        for facet in facets
+        if "Script::evaluate_with_evaluation" in facet.unresolved_symbols
+    )
+
+    matched = _matching_facet_ids(
+        symbol="Module",
+        path="core/ast/src/source.rs",
+        facets=facets,
+    )
+
+    assert script_facet.facet_id not in matched
 
 
 def test_qualified_owner_prefers_case_exact_type_over_lowercase_namesakes() -> None:
