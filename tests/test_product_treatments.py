@@ -515,6 +515,79 @@ def test_provider_context_v5_keeps_edit_public_integration_and_new_file_roles_se
     assert "UNCOVERED_FACET facet-new role=EDIT unresolved=EvaluationHandle" in rendered
 
 
+def test_provider_context_v5_prunes_within_budget_without_losing_roles(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    def item(index: int, role: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=role.lower(),
+            path=f"packages/very_long_subsystem_name_{role.lower()}/source_{index}.ts",
+            start_line=index + 1,
+            end_line=index + 1,
+            symbol=f"VeryLongRepositorySymbol{role}{index}",
+            relation="",
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="b" * 64,
+            graph_revision="c" * 64,
+            evidence_sha256=f"{index:x}" * 64,
+            decision_reason=f"verified_role_complete_{role.lower()}_task_facet",
+            completeness="exact_identity",
+            localization_role=role,
+            facet_ids=(f"facet-{role.lower()}-{index}",),
+        )
+
+    edits = tuple(item(index, "EDIT") for index in range(3))
+    public = tuple(item(index + 3, "PUBLIC_SURFACE") for index in range(6))
+    integration = tuple(item(index + 9, "INTEGRATION") for index in range(6))
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        primary_edit_targets=edits,
+        inspection_public_surface=public,
+        inspection_integration=integration,
+        proposed_new_files=(
+            "packages/very_long_subsystem_name_edit/new_evaluation_handle.ts",
+            "packages/very_long_subsystem_name_edit/new_cancellation_state.ts",
+        ),
+        uncovered_facets=tuple(
+            f"facet-{index} role=EDIT unresolved=VeryLongUnresolvedSymbol{index}"
+            for index in range(6)
+        ),
+        evidence_items=(*edits, *public, *integration),
+        uncertainties=tuple(f"explicit_uncertainty_reason_{index}" for index in range(10)),
+        coverage={"dense_index": {"status": "DISABLED", "query_ready": False}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= treatment.start_token_budget
+    assert "EXACT_EDIT_TARGET " in rendered
+    assert "INSPECT_PUBLIC_SURFACE " in rendered
+    assert "INSPECT_INTEGRATION " in rendered
+    assert "PROPOSED_NEW_FILE " in rendered
+    assert "UNCOVERED_FACET " in rendered
+
+
 def test_persisted_graph_projection_uses_multiple_role_diverse_anchors(
     tmp_path: Path, monkeypatch
 ) -> None:

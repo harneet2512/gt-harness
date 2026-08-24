@@ -1106,6 +1106,33 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict["relationships"] = []
             rendered = encode()
         if too_large():
+            # Preserve one representative from each task role before keeping
+            # multiple rows from any role.  This is the final compact provider
+            # view; the complete packet remains in the local receipt.
+            packet_dict["inspection_candidates"] = []
+            packet_dict["inspection_public_surface"] = packet_dict[
+                "inspection_public_surface"
+            ][:1]
+            packet_dict["inspection_integration"] = packet_dict[
+                "inspection_integration"
+            ][:1]
+            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
+            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:2]
+            packet_dict["uncertainties"] = packet_dict["uncertainties"][:2]
+            rendered = encode()
+        if too_large():
+            packet_dict["primary_edit_targets"] = packet_dict[
+                "primary_edit_targets"
+            ][:2]
+            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
+            packet_dict["uncertainties"] = packet_dict["uncertainties"][:1]
+            rendered = encode()
+        if too_large():
+            packet_dict["primary_edit_targets"] = packet_dict[
+                "primary_edit_targets"
+            ][:1]
+            rendered = encode()
+        if too_large():
             # Never leave a process/impact assertion visible after dropping
             # its evidence record. A too-small budget is an explicit abstain.
             self.errors.append("context_budget_too_small")
