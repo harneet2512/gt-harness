@@ -1,6 +1,6 @@
 # GroundTruth Performance Audit
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Linux 32-GB Codespace, frozen clean repositories. Times are milliseconds;
 RSS and graph sizes are peak/process bytes and persisted DB bytes.
@@ -23,4 +23,10 @@ query p95 remain below 80 ms. Correctness currently wins over file-keyed update
 speed: post-edit updates are full atomic rebuilds and are explicitly receipted as
 `full_fallback_unproven_incremental_parity`.
 
-Receipt: `audit/receipts/codespaces-79321e0/real-repository-matrix.json`.
+In live run `32680131105`, trajectory-backed execution used 691 provider calls,
+32,841,716 input tokens (31,488,320 cached), 712,920 output tokens, and 41 GT
+deliveries. The different-model frozen baseline used 1,041 calls and 65,625,578
+input+output tokens. This is directional only: two GT treatments were invalid and
+the provider/model differed, so no causal efficiency claim is certified.
+
+Receipt: `audit/receipts/codespaces-8931876/receipts/real-repository-matrix.json`.

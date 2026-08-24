@@ -1,6 +1,6 @@
 # GroundTruth Graph Truth Audit
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Verdict: **PASS for the bounded independent corpus; universal recall is not claimed**.
 
@@ -26,4 +26,4 @@ callers, callees, imports, re-exports, and subclasses. Static stale-edge rate is
 not measured here; lifecycle tests establish zero stale sampled edges after
 modify/delete operations.
 
-Receipt: `audit/receipts/codespaces-79321e0/graph-truth.json`.
+Receipt: `audit/receipts/codespaces-8931876/receipts/graph-truth.json`.

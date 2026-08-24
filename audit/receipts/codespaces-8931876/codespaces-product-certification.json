@@ -1,0 +1,115 @@
+{
+  "branch": "",
+  "commit_sha": "8931876541ec82ec96799f6c4462b5c0726e4518",
+  "completed": "2026-08-24T03:06:40.667034Z",
+  "platform": "Linux-6.8.0-1052-azure-x86_64-with-glibc2.39",
+  "provider_calls": 0,
+  "provider_credentials_inspected": false,
+  "python": "3.12.1",
+  "receipts": [
+    "/tmp/gt-cert-8931876-final/receipts/failure-campaign.json",
+    "/tmp/gt-cert-8931876-final/receipts/graph-lifecycle.json",
+    "/tmp/gt-cert-8931876-final/receipts/graph-truth.json",
+    "/tmp/gt-cert-8931876-final/receipts/harness-e2e.json",
+    "/tmp/gt-cert-8931876-final/receipts/language-lifecycle.json",
+    "/tmp/gt-cert-8931876-final/receipts/product-certification.json",
+    "/tmp/gt-cert-8931876-final/receipts/real-repository-matrix.json"
+  ],
+  "repository": "https://github.com/harneet2512/gt-harness",
+  "schema": "gt.codespaces_product_certification.v1",
+  "status": "PASS",
+  "steps": [
+    {
+      "completed": "2026-08-24T02:57:31Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/install.log",
+      "name": "install",
+      "started": "2026-08-24T02:57:21Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T02:57:40Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/doctor.log",
+      "name": "doctor",
+      "started": "2026-08-24T02:57:31Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T02:59:33Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/python_tests.log",
+      "name": "python_tests",
+      "started": "2026-08-24T02:57:40Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T02:59:37Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/go_tests.log",
+      "name": "go_tests",
+      "started": "2026-08-24T02:59:33Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T02:59:39Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/canonical_lint.log",
+      "name": "canonical_lint",
+      "started": "2026-08-24T02:59:37Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:04:38Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/repository_matrix.log",
+      "name": "repository_matrix",
+      "started": "2026-08-24T02:59:39Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:04:40Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/graph_truth.log",
+      "name": "graph_truth",
+      "started": "2026-08-24T03:04:38Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:04:44Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/graph_lifecycle.log",
+      "name": "graph_lifecycle",
+      "started": "2026-08-24T03:04:40Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:05:40Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/language_lifecycle.log",
+      "name": "language_lifecycle",
+      "started": "2026-08-24T03:04:44Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:05:44Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/dense_model.log",
+      "name": "dense_model",
+      "started": "2026-08-24T03:05:40Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:06:27Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/harness_e2e.log",
+      "name": "harness_e2e",
+      "started": "2026-08-24T03:05:44Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:06:40Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/failure_campaign.log",
+      "name": "failure_campaign",
+      "started": "2026-08-24T03:06:27Z",
+      "status": "PASS"
+    },
+    {
+      "completed": "2026-08-24T03:06:40Z",
+      "log": "/tmp/gt-cert-8931876-final/logs/product_certifier.log",
+      "name": "product_certifier",
+      "started": "2026-08-24T03:06:40Z",
+      "status": "PASS"
+    }
+  ],
+  "working_tree_state": "clean"
+}

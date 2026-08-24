@@ -1,0 +1,9 @@
+?   	github.com/harneet2512/groundtruth/gt-index/cmd/gt-index	[no test files]
+?   	github.com/harneet2512/groundtruth/gt-index/internal/closure	[no test files]
+ok  	github.com/harneet2512/groundtruth/gt-index/internal/parser	(cached)
+ok  	github.com/harneet2512/groundtruth/gt-index/internal/resolver	(cached)
+ok  	github.com/harneet2512/groundtruth/gt-index/internal/specs	(cached)
+?   	github.com/harneet2512/groundtruth/gt-index/internal/specs/cobol	[no test files]
+?   	github.com/harneet2512/groundtruth/gt-index/internal/specs/scheme	[no test files]
+?   	github.com/harneet2512/groundtruth/gt-index/internal/store	[no test files]
+ok  	github.com/harneet2512/groundtruth/gt-index/internal/walker	(cached)

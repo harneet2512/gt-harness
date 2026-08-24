@@ -1,0 +1,190 @@
+{
+  "certified_language_scope": [
+    "python",
+    "javascript",
+    "typescript",
+    "go",
+    "rust",
+    "java"
+  ],
+  "completed": "2026-08-24T03:05:40.782799Z",
+  "languages": [
+    {
+      "add_status": "READY",
+      "cold_build_ms": 539.922,
+      "cold_graph_status": "READY",
+      "commit_sha": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "degraded_reasons": [],
+      "delete_status": "READY",
+      "language": "python",
+      "modify_status": "READY",
+      "parser_limitations": [],
+      "repository_id": "python-small-itsdangerous",
+      "stale_edges_after_delete": 0,
+      "stale_edges_after_modify": 0,
+      "status": "PASS",
+      "update_latency_ms": {
+        "add": 402.181,
+        "delete": 388.732,
+        "modify": 388.762
+      },
+      "update_modes": [
+        "full_fallback_unproven_incremental_parity"
+      ],
+      "warm_graph_identity_match": true
+    },
+    {
+      "add_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "cold_build_ms": 1438.121,
+      "cold_graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "commit_sha": "023767fe9872e029271df1418f73401bff20ff40",
+      "degraded_reasons": [
+        "parser_limitations:3"
+      ],
+      "delete_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "language": "javascript",
+      "modify_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "parser_limitations": [
+        "examples/ejs/views/footer.html: tree_sitter_syntax_error_recovered",
+        "examples/ejs/views/header.html: tree_sitter_syntax_error_recovered",
+        "examples/ejs/views/users.html: tree_sitter_syntax_error_recovered"
+      ],
+      "repository_id": "javascript-express",
+      "stale_edges_after_delete": 0,
+      "stale_edges_after_modify": 0,
+      "status": "PASS",
+      "update_latency_ms": {
+        "add": 1380.018,
+        "delete": 1331.458,
+        "modify": 1364.426
+      },
+      "update_modes": [
+        "full_fallback_unproven_incremental_parity"
+      ],
+      "warm_graph_identity_match": true
+    },
+    {
+      "add_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "cold_build_ms": 1634.386,
+      "cold_graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "commit_sha": "71606661ac515bdd64c199a6bb508401c7cf736f",
+      "degraded_reasons": [
+        "parser_limitations:5",
+        "too_large:1"
+      ],
+      "delete_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "language": "typescript",
+      "modify_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "parser_limitations": [
+        "examples/counter-ts/src/App.test.tsx: tree_sitter_syntax_error_recovered",
+        "examples/counter-ts/src/App.tsx: tree_sitter_syntax_error_recovered",
+        "examples/counter-ts/src/features/counter/Counter.tsx: tree_sitter_syntax_error_recovered",
+        "examples/counter-ts/src/index.tsx: tree_sitter_syntax_error_recovered",
+        "src/types/store.ts: tree_sitter_syntax_error_recovered"
+      ],
+      "repository_id": "typescript-redux",
+      "stale_edges_after_delete": 0,
+      "stale_edges_after_modify": 0,
+      "status": "PASS",
+      "update_latency_ms": {
+        "add": 1586.135,
+        "delete": 1591.186,
+        "modify": 1609.908
+      },
+      "update_modes": [
+        "full_fallback_unproven_incremental_parity"
+      ],
+      "warm_graph_identity_match": true
+    },
+    {
+      "add_status": "READY",
+      "cold_build_ms": 932.998,
+      "cold_graph_status": "READY",
+      "commit_sha": "db9d1d0073d27a0a2d9a8c1bc52aa0af4374d265",
+      "degraded_reasons": [],
+      "delete_status": "READY",
+      "language": "go",
+      "modify_status": "READY",
+      "parser_limitations": [],
+      "repository_id": "go-gorilla-mux",
+      "stale_edges_after_delete": 0,
+      "stale_edges_after_modify": 0,
+      "status": "PASS",
+      "update_latency_ms": {
+        "add": 946.667,
+        "delete": 962.444,
+        "modify": 981.473
+      },
+      "update_modes": [
+        "full_fallback_unproven_incremental_parity"
+      ],
+      "warm_graph_identity_match": true
+    },
+    {
+      "add_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "cold_build_ms": 4323.758,
+      "cold_graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "commit_sha": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "degraded_reasons": [
+        "parser_limitations:2",
+        "non_regular_file:1"
+      ],
+      "delete_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "language": "rust",
+      "modify_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "parser_limitations": [
+        "ci/test-complete: tree_sitter_syntax_error_recovered",
+        "crates/core/flags/complete/encodings.sh: tree_sitter_syntax_error_recovered"
+      ],
+      "repository_id": "rust-ripgrep",
+      "stale_edges_after_delete": 0,
+      "stale_edges_after_modify": 0,
+      "status": "PASS",
+      "update_latency_ms": {
+        "add": 4295.657,
+        "delete": 4357.002,
+        "modify": 4250.34
+      },
+      "update_modes": [
+        "full_fallback_unproven_incremental_parity"
+      ],
+      "warm_graph_identity_match": true
+    },
+    {
+      "add_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "cold_build_ms": 4593.197,
+      "cold_graph_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "commit_sha": "dae37cf0fe12235b76fb09f01118a0a8c8823f42",
+      "degraded_reasons": [
+        "parser_limitations:3",
+        "language_unresolved:1"
+      ],
+      "delete_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "language": "java",
+      "modify_status": "READY_WITH_DECLARED_LIMITATIONS",
+      "parser_limitations": [
+        "proto/src/test/protobuf/annotations.proto: tree_sitter_syntax_error_recovered",
+        "proto/src/test/protobuf/bag.proto: tree_sitter_syntax_error_recovered",
+        "proto/src/test/protobuf/json_test_proto2.proto: tree_sitter_syntax_error_recovered"
+      ],
+      "repository_id": "java-gson",
+      "stale_edges_after_delete": 0,
+      "stale_edges_after_modify": 0,
+      "status": "PASS",
+      "update_latency_ms": {
+        "add": 4708.231,
+        "delete": 4692.76,
+        "modify": 4546.266
+      },
+      "update_modes": [
+        "full_fallback_unproven_incremental_parity"
+      ],
+      "warm_graph_identity_match": true
+    }
+  ],
+  "manifest": "/workspaces/gt-harness/audit/language_lifecycle_matrix.v1.json",
+  "provider_calls": 0,
+  "provider_credentials_inspected": false,
+  "schema": "gt.language_support_audit_receipt.v1",
+  "status": "PASS"
+}

@@ -2,7 +2,7 @@
 
 Status: **bounded direct comparison complete; final live outcome comparison pending**.
 
-Certified GT implementation: `79321e0da09174805a0909f69dc695dd129a5ebf`.
+Current certified GT implementation: `8931876541ec82ec96799f6c4462b5c0726e4518`.
 
 ## Direct fact comparison already completed
 

@@ -1,0 +1,7 @@
+{"language": "python", "status": "PASS"}
+{"language": "javascript", "status": "PASS"}
+{"language": "typescript", "status": "PASS"}
+{"language": "go", "status": "PASS"}
+{"language": "rust", "status": "PASS"}
+{"language": "java", "status": "PASS"}
+{"status": "PASS", "receipt": "/tmp/gt-cert-8931876-final/receipts/language-lifecycle.json"}

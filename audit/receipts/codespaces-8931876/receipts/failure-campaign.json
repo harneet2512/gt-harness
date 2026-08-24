@@ -1,0 +1,154 @@
+{
+  "cases": [
+    {
+      "case": "missing indexer binary",
+      "degraded_reasons": [
+        "missing_binary",
+        "graph_build_failed",
+        ""
+      ],
+      "expected": "FAILED and non-queryable",
+      "observed": "FAILED",
+      "status": "PASS"
+    },
+    {
+      "case": "corrupt indexer binary",
+      "degraded_reasons": [
+        "build_failed",
+        "OSError",
+        ""
+      ],
+      "expected": "FAILED and non-queryable",
+      "observed": "FAILED",
+      "status": "PASS"
+    },
+    {
+      "case": "corrupt graph database / wrong checksum",
+      "expected": "FAILED, then atomic rebuild",
+      "observed": "FAILED -> READY",
+      "status": "PASS"
+    },
+    {
+      "case": "corrupt graph receipt",
+      "expected": "FAILED, then atomic rebuild",
+      "observed": "FAILED -> READY",
+      "status": "PASS"
+    },
+    {
+      "case": "deleted graph cache",
+      "expected": "FAILED, then rebuild",
+      "observed": "FAILED -> READY",
+      "status": "PASS"
+    },
+    {
+      "case": "exclusive graph DB lock",
+      "expected": "correct immutable read or explicit failure; READY after release",
+      "observed": "consistent READY read -> READY",
+      "status": "PASS"
+    },
+    {
+      "case": "malformed source",
+      "expected": "READY_WITH_DECLARED_LIMITATIONS with file evidence",
+      "observed": "READY_WITH_DECLARED_LIMITATIONS",
+      "status": "PASS"
+    },
+    {
+      "case": "oversized source file",
+      "expected": "READY_WITH_DECLARED_LIMITATIONS and too_large receipt",
+      "observed": "READY_WITH_DECLARED_LIMITATIONS",
+      "status": "PASS"
+    },
+    {
+      "case": "generated source",
+      "expected": "READY_WITH_DECLARED_LIMITATIONS and generated receipt",
+      "observed": "READY_WITH_DECLARED_LIMITATIONS",
+      "status": "PASS"
+    },
+    {
+      "case": "mixed-language repository",
+      "expected": "query-ready with exact cross-language inventory",
+      "observed": "READY",
+      "status": "PASS"
+    },
+    {
+      "case": "process killed during update",
+      "expected": "non-queryable partial state; atomic recovery",
+      "observed": "FAILED -> READY",
+      "status": "PASS"
+    },
+    {
+      "case": "graph build timeout",
+      "degraded_reasons": [
+        "build_failed",
+        "run_index_false",
+        "GroundTruth: gt-index timed out after 1s"
+      ],
+      "expected": "FAILED and non-queryable",
+      "observed": "FAILED",
+      "status": "PASS"
+    },
+    {
+      "case": "unsupported-only repository",
+      "degraded_reasons": [
+        "no_supported_source",
+        "graph_build_failed",
+        ""
+      ],
+      "expected": "explicit non-queryable failure/degradation",
+      "observed": "FAILED",
+      "status": "PASS"
+    },
+    {
+      "case": "Git linked worktree / detached HEAD",
+      "expected": "repository-bound query-ready graph",
+      "observed": "READY",
+      "status": "PASS"
+    },
+    {
+      "case": "Git submodule",
+      "expected": "query-ready parent with explicit non_regular_file limitation",
+      "observed": "READY_WITH_DECLARED_LIMITATIONS",
+      "status": "PASS"
+    },
+    {
+      "case": "source symlink and symlink loop",
+      "expected": "READY_WITH_DECLARED_LIMITATIONS; no external authority",
+      "observed": "READY_WITH_DECLARED_LIMITATIONS",
+      "status": "PASS"
+    },
+    {
+      "case": "unreadable source permission",
+      "expected": "declared limitation/degradation with exact path",
+      "observed": "DEGRADED",
+      "status": "PASS"
+    },
+    {
+      "case": "state-directory permission denial",
+      "expected": "structured FAILED CLI payload",
+      "observed": "PermissionError",
+      "status": "PASS"
+    }
+  ],
+  "completed": "2026-08-24T03:06:40.382466Z",
+  "external_receipts": {
+    "cold_build_interruption": "graph-lifecycle-2b1b648e.json",
+    "concurrent_reads_update": "graph-lifecycle-2b1b648e.json",
+    "huge_repository": "matrix-2b1b648e.json: Django and pnpm",
+    "shallow_clone": "all ten repositories in matrix-2b1b648e.json",
+    "uncommitted_changes": "graph-lifecycle-2b1b648e.json"
+  },
+  "frozen_commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+  "non_applicable": {
+    "broken_language_server": "canonical graph does not invoke LSP",
+    "corrupt_model": "canonical graph does not invoke embeddings or ONNX",
+    "missing_language_server": "canonical graph does not invoke LSP",
+    "missing_model": "canonical graph does not invoke embeddings or ONNX",
+    "wrong_model_checksum": "canonical graph does not invoke embeddings or ONNX"
+  },
+  "platform_gaps": [],
+  "provider_calls": 0,
+  "provider_credentials_inspected": false,
+  "schema": "gt.failure_campaign_receipt.v1",
+  "status": "PASS",
+  "test_repository": "/tmp/gt-cert-8931876-final/workspace/failure-run/repository"
+}

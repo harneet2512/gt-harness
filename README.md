@@ -2,7 +2,16 @@
 
 GT-Harness is a model-agnostic benchmarking product for measuring whether deterministic GroundTruth repository intelligence helps coding agents. The prerelease product owns graph construction, readiness, delivery, run receipts, and paired comparison; it does not depend on a particular model or provider.
 
-The clean-Linux certified implementation is `79321e0da09174805a0909f69dc695dd129a5ebf`, with verdict `CERTIFIED_WITH_DECLARED_LIMITATIONS`. It includes the canonical decision-context compiler, real pinned dense retrieval, persisted process/impact projection, and same-observation Mini-SWE delivery. Certified graph-language scope is Python, JavaScript, TypeScript, Go, Rust, and Java. The one final 20-task prerelease smoke is authorized but has not been dispatched; general competitive release remains `HOLD`.
+The clean-Linux certified implementation is
+`8931876541ec82ec96799f6c4462b5c0726e4518`, with verdict
+`CERTIFIED_WITH_DECLARED_LIMITATIONS`. It includes the canonical decision-context
+compiler, real pinned dense retrieval, persisted process/impact projection,
+same-observation Mini-SWE delivery, operation-aware Harbor deadlines, and external
+terminal-receipt supervision. Certified graph-language scope is Python,
+JavaScript, TypeScript, Go, Rust, and Java. The latest 20-task GT smoke scored a
+raw 12/20 but failed final attestation with two nonterminal product receipts; those
+causes are fixed at the current SHA but not paid-replayed. General competitive
+release remains `HOLD` and another paid run is not authorized.
 
 ## What is currently being built?
 

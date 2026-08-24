@@ -1,36 +1,48 @@
 # Same-20 validation report
 
+Current repaired subject: `8931876541ec82ec96799f6c4462b5c0726e4518`.
+
 ## Decision
 
-The paid 20-task gate remains blocked until the current candidate receives an
-exact pushed-SHA provider-free proof. No new paid rerun is represented here.
+The latest live GT-only run failed final attestation. The demonstrated causes are
+fixed and exact-SHA provider-free certification passes, but another paid run is
+`NOT_AUTHORIZED`. Release remains `HOLD`.
 
-## Latest archived cohort
+## Executed cohort
 
-Workflow `32455040841` returned all 20 task rows: 17 had verifier rewards and
-three ended in provider connection errors. Current code replay passes 20/20
-central deterministic receipts and 20/20 delivery audits. The historical
-terminal release gate passes 16/20 rows; count has a real graph-refresh failure,
-and FEAL, regex-chess, and schemelike are incomplete because provider transport
-ended their trajectories.
+Workflow [32680131105](https://github.com/harneet2512/gt-harness/actions/runs/32680131105)
+ran the frozen repair20 task set, Mini-SWE-Agent 2.2.8, Ox Alpha through OpenRouter,
+one attempt, and 20-way parallelism against subject `b6e1609`.
 
-Those archived errors are censored infrastructure rows, not solved/unsolved
-outcomes. The historical cohort cannot certify the current candidate because
-its runtime predates the current repairs.
+- raw reward: 12/20;
+- valid terminal treatment reward: 11/20;
+- artifacts: 20 Harbor results, 20 adapter receipts, 20 GT receipts, 20 full
+  trajectories;
+- GT lifecycle: 18 terminal receipts and two invalid `RUNNING` receipts;
+- trajectory usage: 691 API attempts, 33,554,636 input+output tokens;
+- delivery: 14 active treatments, six explicit abstentions, 41 GT packets, 31
+  weak inspection-only updates suppressed.
 
-## Outcome and causal boundary
+No fabricated or dummy source text was found. Seven file-path-derived facts across
+five tasks incorrectly inherited symbol-level authority. Current code renders those
+facts as file identity only.
 
-The prior fully graded matched cohort recorded 13 both-solve, one GT-only
-(`largest-eigenval`), four baseline-only, and two both-fail tasks. This is raw
-quadrant accounting. Baseline action trajectories are absent, so no positive or
-negative flip has confirmed GT causality. See
-[negative-flip autopsy](04_GT_NEGATIVE_FLIP_AUTOPSY.md) and
-[positive-flip autopsy](05_GT_POSITIVE_FLIP_AUTOPSY.md).
+## Failure-to-fix ledger
 
-## Current implementation proof status
+| Observed failure | Root cause | Current deterministic fix |
+| --- | --- | --- |
+| Scheme reward 1 but GT receipt `RUNNING` after exit 137 | adapter raised without terminalizing durable checkpoint | atomic external supervisor changes only `RUNNING` to evidenced `ERROR` and reconciles trajectory usage |
+| Corewars receipt `RUNNING` at Harbor timeout | retries/provider/tool operation could cross inner deadline | one model attempt; provider timeout <= 60 s or remaining time; shell timeout <= 30 s or remaining time; 90 s shutdown gap |
+| portfolio/sanitize call mismatch | format-error attempts have no assistant message | compare receipt calls to `trajectory.info.model_stats.api_calls` |
+| exact path displayed arbitrary symbol/line | compiler promoted representative symbol for a path-only anchor | path-only anchors emit `file_identity`, line 1, empty symbol/excerpt |
 
-Local focused witnesses cover graph refresh, routing, observed-fact accounting,
-typed outcomes, workflow security, and documentation completeness. The exact
-final full-suite, Linux source-build, pinned ONNX, release freeze, and hosted
-provider-free results belong in this report only after they execute. Until then
-the honest state is `IMPLEMENTED_UNVERIFIED`.
+The real Scheme receipt was replayed through the new supervisor and became a
+terminal, trajectory-consistent error. Full local provider-free Python, targeted
+lint, and Go passed. Clean Codespaces certification passed all 13 gates.
+
+## Causal boundary
+
+The frozen local repair20 baseline solved 17/20 but used another model. Its outcome,
+1,041 calls, and 65,625,578 tokens are directional context only. No same-model
+GT-off run exists, so neither solve-rate regression nor efficiency uplift is
+causally assigned to GroundTruth.

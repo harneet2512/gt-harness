@@ -1,6 +1,6 @@
 # GT Harness End-to-End Audit
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Verdict: **PASS** through the actual `gt-harness run` / Mini-SWE treatment seam.
 
@@ -26,4 +26,18 @@ Observed facts:
 - Provider/network calls by graph+dense/treatment: `0/0`.
 - Provider credentials inspected: `false`.
 
-Receipt: `audit/receipts/codespaces-79321e0/harness-e2e.json`.
+Receipt: `audit/receipts/codespaces-8931876/receipts/harness-e2e.json`.
+
+## Live Harbor qualification
+
+Run `32680131105` exercised the actual adapter on all 20 repair tasks: all 20
+adapter receipts, GT receipts, and Mini-SWE trajectories were recovered. Fourteen
+treatments built a query-ready graph+dense index and delivered 41 context packets;
+six explicitly abstained. Eighteen product receipts terminated normally. Scheme
+exit 137 and Corewars outer timeout left two receipts `RUNNING`, so the live run is
+not an E2E PASS for its older subject SHA `b6e1609`.
+
+The current subject adds external process/cancellation finalization, dynamic
+provider/action deadlines, and trajectory-backed call accounting. These boundaries
+are regression tested and the real killed Scheme receipt was replayed successfully,
+but the current SHA has not received a third paid live run.

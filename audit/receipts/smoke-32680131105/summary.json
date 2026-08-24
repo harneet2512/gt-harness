@@ -1,0 +1,48 @@
+{
+  "schema": "gt.repair20_smoke_audit_summary.v1",
+  "run_id": "32680131105",
+  "url": "https://github.com/harneet2512/gt-harness/actions/runs/32680131105",
+  "workflow_head_sha": "8e8b6493e3cfd684eceebfc6fc0d38ab3a59e349",
+  "workflow_conclusion": "failure",
+  "subject_sha": "b6e16099a827449953670b053d9ac873d4f6f367",
+  "task_set_sha256": "36d5c8945f6f8d9ae23fe2cea759f16da0c0cea424a98f710cfaa0d9d6fd0303",
+  "task_count": 20,
+  "raw_solved": 12,
+  "valid_terminal_treatment_solved": 11,
+  "product_receipts": 20,
+  "full_trajectories": 20,
+  "receipt_states": {"COMPLETED": 18, "RUNNING": 2},
+  "trajectory_provider_calls": 691,
+  "assistant_messages": 689,
+  "input_tokens": 32841716,
+  "output_tokens": 712920,
+  "cached_tokens": 31488320,
+  "uncached_input_tokens": 1353396,
+  "total_input_output_tokens": 33554636,
+  "active_treatments": 14,
+  "not_applicable_treatments": 6,
+  "gt_deliveries": 41,
+  "suppressed_inspection_only_updates": 31,
+  "artifact_file_count": 395,
+  "artifact_bytes": 67826021,
+  "artifact_manifest_definition": "sha256 of UTF-8, LF-terminated, lexicographically sorted '<file_sha256>  <relative_posix_path>' rows",
+  "artifact_manifest_sha256": "e5974ebbdd238180f2394d0df70a281b00226d20d0d10f8e9df48440351e4606",
+  "attestation_status": "FAIL",
+  "attestation_errors": [
+    "provider_call_receipt_mismatch:portfolio-optimization",
+    "provider_call_receipt_mismatch:sanitize-git-repo",
+    "nonterminal_product_receipt:winning-avg-corewars",
+    "nonterminal_product_receipt:schemelike-metacircular-eval"
+  ],
+  "adjudication": {
+    "provider_call_receipt_mismatches": "attestation bug; both receipt counts equal trajectory.info.model_stats.api_calls",
+    "schemelike_metacircular_eval": "reward 1 but invalid treatment; exit 137 left RUNNING receipt with checkpoint 58 versus trajectory 57 calls",
+    "winning_avg_corewars": "Harbor AgentTimeoutError left RUNNING receipt"
+  },
+  "context_audit": {
+    "dummy_or_fabricated_source_text_found": false,
+    "exact_path_claims_with_unjustified_symbol_authority": 7,
+    "affected_tasks": 5,
+    "fixed_in_sha": "8931876541ec82ec96799f6c4462b5c0726e4518"
+  }
+}

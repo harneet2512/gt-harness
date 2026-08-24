@@ -5,7 +5,7 @@ Status: Gate 13 research complete. This is a primary-source capability audit, no
 Access date: `2026-08-23`
 
 GroundTruth subject entering this gate: `3e2185d3f4ba0a228c740ab2a6d23a287cfc5380`.
-Implementation response certified afterward: `79321e0da09174805a0909f69dc695dd129a5ebf`.
+Current implementation response: `8931876541ec82ec96799f6c4462b5c0726e4518`.
 
 ## Certified implementation response
 

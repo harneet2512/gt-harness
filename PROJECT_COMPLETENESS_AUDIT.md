@@ -1,11 +1,13 @@
 # GroundTruth Project Completeness Audit
 
-Implementation subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Implementation subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Observed: `2026-08-24` in a clean 32-GB Linux Codespace.
 
 Verdict: **complete prerelease product with declared limitations**. This does not
-establish agent solve-rate uplift; the final 20-task run has not been dispatched.
+establish agent solve-rate uplift. Two GT-only 20-task smokes were dispatched; the
+latest found lifecycle defects that are fixed and provider-free certified here but
+not yet live-replayed.
 
 | Component | Exists | Production reachable | Tested | Real-world verified | Canonical | Disposition |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -20,7 +22,7 @@ establish agent solve-rate uplift; the final 20-task run has not been dispatched
 | Bounded impact projection | Yes | Yes | Yes | Persisted exact relations | Yes | PRODUCTION |
 | Semantic graph | Yes | Yes | Yes | Python source facts; duplicate-fact regression | Yes | PRODUCTION WITH LANGUAGE LIMITS |
 | Mini-SWE treatment seam | Yes | Yes | Yes | Same-observation edit/update/restart | Yes | PRODUCTION |
-| Harbor adapter | Yes | Yes | Yes | Provider-free contract tests; paid run pending | Yes | PRODUCTION BENCHMARK ADAPTER |
+| Harbor adapter | Yes | Yes | Yes | 20-task live run plus process/cancellation regression replay | Yes | PRODUCTION BENCHMARK ADAPTER |
 | Product certifier | Yes | Yes | Yes | Accepted exact Linux bundle with zero errors | Yes | PRODUCTION |
 | MCP server | No | No | N/A | N/A | No | REMOVED; not the product |
 | Nano agent path | No tracked product source | No | Static workflow rejection | N/A | No | REMOVED/EXCLUDED |
@@ -57,6 +59,21 @@ establish agent solve-rate uplift; the final 20-task run has not been dispatched
 11. The first dense Codespaces gate used authenticated `gh release download`, which
     fails inside an unauthenticated Codespace. It now downloads the public assets over
     HTTPS and independently verifies both pinned SHA-256 values.
+12. Live task edits could make the graph stale and abort the treatment instead of
+    converging before delivery. Updates now rebuild to the exact current source
+    revision and weak inspection-only changes are suppressed.
+13. The Linux indexer artifact was not portable to QEMU Alpine. The workflow now
+    produces and verifies a static musl binary.
+14. Product exit/cancellation could strand a durable receipt in `RUNNING`. External
+    supervision now changes only nonterminal checkpoints to atomic evidenced errors
+    and reconciles usage from the persisted full trajectory.
+15. Provider retries and shell actions were not bounded by remaining GT time. The
+    native Harbor ceiling remains authoritative while each operation now shrinks to
+    the inner deadline and GT reserves 90 seconds for receipt/trajectory shutdown.
+16. Exact task file paths inherited a representative graph symbol and line, creating
+    false symbol authority. File-only task anchors now carry only file identity.
+17. Final attestation equated API calls with assistant messages and rejected valid
+    format-error attempts. It now validates against trajectory model statistics.
 
 ## Canonical boundary and retained work
 
@@ -67,5 +84,5 @@ product and tracked Nano ambiguity were removed. This preserves useful prior wor
 without leaving multiple production answers.
 
 Raw Linux receipts are committed under
-`audit/receipts/codespaces-79321e0/`. All campaign steps report `PASS`, the checkout
+`audit/receipts/codespaces-8931876/`. All campaign steps report `PASS`, the checkout
 was clean, provider calls were `0`, and provider credentials were not inspected.

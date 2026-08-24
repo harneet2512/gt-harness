@@ -1,6 +1,6 @@
 # GroundTruth Graph Lifecycle Audit
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Verdict: **PASS (9/9 phases)**.
 
@@ -20,4 +20,4 @@ Updates deliberately use atomic full rebuilds until file-keyed incremental
 relationship parity is proven. That is slower than an incremental writer but
 correct: no SHA-A graph is served as current for SHA B.
 
-Receipt: `audit/receipts/codespaces-79321e0/graph-lifecycle.json`.
+Receipt: `audit/receipts/codespaces-8931876/receipts/graph-lifecycle.json`.

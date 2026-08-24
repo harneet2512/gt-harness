@@ -1,0 +1,34 @@
+{
+  "schema": "gt.repair20_smoke_audit_summary.v1",
+  "run_id": "32676409425",
+  "url": "https://github.com/harneet2512/gt-harness/actions/runs/32676409425",
+  "workflow_conclusion": "failure",
+  "subject_sha": "49cce4dee7ef4c57011b522c8c00404cdf480bd9",
+  "task_set_sha256": "36d5c8945f6f8d9ae23fe2cea759f16da0c0cea424a98f710cfaa0d9d6fd0303",
+  "task_count": 20,
+  "raw_solved": 7,
+  "product_receipts": 19,
+  "full_trajectories": 19,
+  "receipt_states": {"COMPLETED": 4, "ERROR": 11, "RUNNING": 4},
+  "missing_task_artifact": "qemu-alpine-ssh",
+  "trajectory_provider_calls": 434,
+  "assistant_messages": 433,
+  "input_tokens": 16112029,
+  "output_tokens": 508324,
+  "cached_tokens": 15093312,
+  "artifact_file_count": 402,
+  "artifact_bytes": 49667311,
+  "artifact_manifest_definition": "sha256 of UTF-8, LF-terminated, lexicographically sorted '<file_sha256>  <relative_posix_path>' rows",
+  "artifact_manifest_sha256": "38924a840ad89562eee515a345f480fb7d304c0e1ba542e7301dfdb8f684bec2",
+  "attestation_status": "FAIL",
+  "attestation_errors": [
+    "adapter_receipt_task_set_mismatch",
+    "product_receipt_task_set_mismatch"
+  ],
+  "diagnosis": [
+    "11 stale-after-edit treatment aborts",
+    "glibc-linked indexer could not start in QEMU Alpine",
+    "four outer-timeout checkpoints remained RUNNING",
+    "weak inspection-only updates repeated"
+  ]
+}

@@ -3,15 +3,13 @@ Wall time: 0.3 seconds
 Output:
 # Final regression control and benchmark-readiness record
 
-> Current-state note (2026-08-21): the source research and historical evidence
-> below remain valid for their named commits/runs, but their candidate-status
-> wording is superseded by the
-> [complete implementation record](../GT_COMPLETE_IMPLEMENTATION_RECORD_2026-08-21.md)
-> and [final handoff](../GT_FINAL_HANDOFF_REMAINING_WORK_2026-08-21.md). The
-> active release identity is always `eval/release/active_release.json`.
+> Current-state note (2026-08-24): this file is a retained historical central-engine
+> research record. It is not the GT Harness release authority. The current product
+> boundary and decision are [canonical architecture](../../CANONICAL_ARCHITECTURE.md)
+> and [final release decision](../../FINAL_RELEASE_DECISION.md). The legacy
+> `eval/release/active_release.json` applies only to its central experiment.
 
-Status: **implementation candidate; paid benchmark remains blocked until the
-exact committed candidate passes the source-built Linux provider-free gate.**
+Status: **historical research snapshot; superseded for product status.**
 
 Audit date: 2026-08-19.
 

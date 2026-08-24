@@ -1,6 +1,6 @@
 # GroundTruth Graph Build Audit
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Verdict: **PASS** on the frozen ten-repository Linux matrix.
 
@@ -27,4 +27,4 @@ files. Every skip and parser limitation remains in the receipt. No repository
 had a failed attempted file. `READY_WITH_DECLARED_LIMITATIONS` is intentional
 and queryable; `DEGRADED`, `FAILED`, `STALE`, `ABSENT`, and `BUILDING` are not.
 
-Receipt: `audit/receipts/codespaces-79321e0/real-repository-matrix.json`.
+Receipt: `audit/receipts/codespaces-8931876/receipts/real-repository-matrix.json`.

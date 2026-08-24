@@ -1,6 +1,6 @@
 # GroundTruth Failure Campaign
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Verdict: **PASS (18/18 attacks)**.
 
@@ -29,4 +29,16 @@ No case produced apparently healthy but silently invalid intelligence. Corrupt,
 deleted, and interrupted state recovered atomically; unsupported or permission
 failures remained non-queryable and explicit.
 
-Receipt: `audit/receipts/codespaces-79321e0/failure-campaign.json`.
+Additional live failures found and repaired after this 18-case campaign:
+
+- a musl/QEMU task could not execute the glibc-linked indexer; the workflow now
+  builds and verifies a static indexer;
+- process exit 137 could preserve only a `RUNNING` checkpoint; the adapter now
+  atomically terminalizes it without rewriting an already terminal receipt;
+- Harbor cancellation could occur while provider retries or a shell operation were
+  in flight; model attempts, transport time, and actions are now bounded by actual
+  remaining GT time beneath the unchanged Harbor ceiling; and
+- format-error API attempts were invisible to assistant-row counting; attestation
+  now uses Mini-SWE trajectory statistics.
+
+Receipt: `audit/receipts/codespaces-8931876/receipts/failure-campaign.json`.

@@ -1,6 +1,6 @@
 # GroundTruth Language Support Audit
 
-Subject: `79321e0da09174805a0909f69dc695dd129a5ebf`
+Subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
 
 Verdict: **PASS for six structural graph languages with declared parser limits**.
 
@@ -18,4 +18,4 @@ deletion, and warm-reuse gates. The higher semantic-graph layer currently emits
 Python AST facts only; other languages retain structural graph intelligence and
 explicitly declare the semantic-language limitation.
 
-Receipt: `audit/receipts/codespaces-79321e0/language-lifecycle.json`.
+Receipt: `audit/receipts/codespaces-8931876/receipts/language-lifecycle.json`.

@@ -1,0 +1,35 @@
+{
+  "git": {
+    "path": "/usr/local/bin/git",
+    "status": "READY"
+  },
+  "go": {
+    "path": "/usr/local/go/bin/go",
+    "status": "READY"
+  },
+  "indexer": {
+    "binary_path": "/home/codespace/.groundtruth/bin/source-b8c66604d39fe1bd/gt-index",
+    "binary_sha256": "f72a8ffad85d70426b69df1e28948a0e03031f312d1a7f6b467508915fb75ba3",
+    "build_duration_ms": 8770.133,
+    "build_id": "source-b8c66604d39fe1bd",
+    "cached": true,
+    "diagnostic": "",
+    "go_path": "/usr/local/go/bin/go",
+    "go_version": "go version go1.26.1 linux/amd64",
+    "observed_source_files": 83,
+    "observed_source_tree_sha256": "b8c66604d39fe1bda0a40c03ff4d12730560c26f81136f8a7e1fb42f30bcd859",
+    "source_git_object": "b8c66604d39fe1bda0a40c03ff4d12730560c26f81136f8a7e1fb42f30bcd859",
+    "source_path": "/workspaces/gt-harness/vendor/gt-index-src",
+    "source_tree_sha256": "b8c66604d39fe1bda0a40c03ff4d12730560c26f81136f8a7e1fb42f30bcd859",
+    "status": "READY"
+  },
+  "provider_calls": 0,
+  "provider_credentials_required": false,
+  "python": {
+    "executable": "/home/codespace/.python/current/bin/python",
+    "status": "READY",
+    "version": "3.12.1"
+  },
+  "schema": "gt.doctor.v1",
+  "status": "READY"
+}

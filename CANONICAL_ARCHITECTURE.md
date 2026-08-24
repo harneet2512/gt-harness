@@ -1,6 +1,8 @@
 # GroundTruth Canonical Architecture
 
-Status: canonical prerelease architecture. The certified implementation is `79321e0da09174805a0909f69dc695dd129a5ebf`; its clean Linux receipt bundle is committed under `audit/receipts/codespaces-79321e0/`.
+Status: canonical prerelease architecture. The certified implementation is
+`8931876541ec82ec96799f6c4462b5c0726e4518`; its clean Linux receipt bundle is
+committed under `audit/receipts/codespaces-8931876/`.
 
 ## Product boundary
 
@@ -54,7 +56,11 @@ repository working tree
   -> GroundTruthTreatment in gt-harness run
   -> pinned Mini-SWE-Agent 2.2.8 action loop
      (initial context accompanies the task; subsequent context is appended to
-      the exact tool observation that triggered it; raw output is preserved)
+      the exact tool observation that triggered it; raw output is preserved;
+      model and shell operations are bounded by actual remaining GT time)
+  -> Harbor adapter supervision
+     (task.toml remains the outer authority; GT reserves a 90-second shutdown gap;
+      process exit/cancellation terminalizes only a durable RUNNING checkpoint)
 ```
 
 No provider credential or provider call is required to build, validate, update, persist, or query the graph.
