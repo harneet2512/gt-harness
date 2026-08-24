@@ -137,10 +137,13 @@ run_step language_lifecycle python scripts/language_lifecycle_matrix.py \
 run_step dense_model bash -c '
   set -euo pipefail
   mkdir -p "$1"
-  gh release download gt-retrieval-runtime-v1 \
-    --repo harneet2512/gt-harness \
-    --pattern model.onnx --pattern tokenizer.json --pattern manifest.json \
-    --dir "$1"
+  release="https://github.com/harneet2512/gt-harness/releases/download/gt-retrieval-runtime-v1"
+  curl --fail --location --silent --show-error \
+    "$release/model.onnx" --output "$1/model.onnx"
+  curl --fail --location --silent --show-error \
+    "$release/tokenizer.json" --output "$1/tokenizer.json"
+  curl --fail --location --silent --show-error \
+    "$release/manifest.json" --output "$1/manifest.json"
   echo "$2  $1/model.onnx" | sha256sum -c -
   echo "$3  $1/tokenizer.json" | sha256sum -c -
 ' _ "$MODEL_DIR" "$SNOWFLAKE_MODEL_SHA256" "$SNOWFLAKE_TOKENIZER_SHA256"

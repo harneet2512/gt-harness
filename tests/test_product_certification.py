@@ -174,3 +174,20 @@ def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
         "harness_dense_lifecycle",
         "harness_dense_query",
     }
+
+
+def test_codespaces_campaign_provisions_public_pinned_dense_asset() -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "codespaces_product_certification.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "gh release download" not in script
+    assert (
+        "https://github.com/harneet2512/gt-harness/releases/download/"
+        "gt-retrieval-runtime-v1"
+    ) in script
+    assert "curl --fail --location --silent --show-error" in script
+    assert "564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971" in script
+    assert "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854" in script
