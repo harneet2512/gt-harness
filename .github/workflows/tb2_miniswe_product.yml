@@ -155,8 +155,80 @@ jobs:
           path: repair20-plan.json
           if-no-files-found: error
 
-  task:
+  provider_gate:
     needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for the pinned provider route
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENROUTER_NEW }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: |
+          set -uo pipefail
+          attempts=0
+          success=false
+          status_codes=""
+          while [ "$attempts" -lt 20 ]; do
+            attempts=$((attempts + 1))
+            status="$({
+              curl --silent --show-error --max-time 90 \
+                --output "$RUNNER_TEMP/provider-gate-response.json" \
+                --write-out '%{http_code}' \
+                https://openrouter.ai/api/v1/chat/completions \
+                --header "Authorization: Bearer $OPENAI_API_KEY" \
+                --header 'Content-Type: application/json' \
+                --data '{"model":"stealth/ox-alpha","messages":[{"role":"user","content":"Reply OK."}],"max_tokens":1,"temperature":0}'
+            } 2>/dev/null || true)"
+            status_codes="${status_codes}${status_codes:+,}${status:-000}"
+            case "$status" in
+              2??)
+                success=true
+                break
+                ;;
+              429|500|502|503|504|000)
+                sleep 60
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done
+          export ATTEMPTS="$attempts" STATUS_CODES="$status_codes" SUCCESS="$success"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          receipt = {
+              "schema": "gt.provider_availability_gate.v1",
+              "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "model": "stealth/ox-alpha",
+              "attempts": int(os.environ["ATTEMPTS"]),
+              "http_statuses": [
+                  int(value) for value in os.environ["STATUS_CODES"].split(",") if value
+              ],
+              "provider_calls_outside_task_metrics": int(os.environ["ATTEMPTS"]),
+          }
+          Path("provider-gate.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(receipt, indent=2, sort_keys=True))
+          PY
+          test "$success" = true
+
+      - name: Upload the provider availability receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-provider-gate-${{ github.run_id }}
+          path: provider-gate.json
+          if-no-files-found: error
+
+  task:
+    needs: [plan, provider_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 600
     strategy:
@@ -265,13 +337,19 @@ jobs:
 
   attest:
     if: always()
-    needs: [plan, task]
+    needs: [plan, provider_gate, task]
     runs-on: ubuntu-latest
     steps:
       - name: Download the task-plan receipt
         uses: actions/download-artifact@v4
         with:
           name: gt-harness-repair20-plan-${{ github.run_id }}
+          path: attestation
+
+      - name: Download the provider availability receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: gt-harness-provider-gate-${{ github.run_id }}
           path: attestation
 
       - name: Download all task artifacts
@@ -294,6 +372,9 @@ jobs:
 
           root = Path("attestation")
           plan = json.loads((root / "repair20-plan.json").read_text(encoding="utf-8"))
+          provider_gate = json.loads(
+              (root / "provider-gate.json").read_text(encoding="utf-8")
+          )
           expected = list(plan["task_ids"])
           expected_set = set(expected)
           expected_budgets = {
@@ -301,6 +382,10 @@ jobs:
               for row in plan["matrix"]
           }
           errors = []
+          if provider_gate.get("status") != "PASS":
+              errors.append("provider_gate_failed")
+          if provider_gate.get("source_sha") != os.environ["SOURCE_SHA"]:
+              errors.append("provider_gate_source_sha_mismatch")
 
           trial_rows = []
           for path in (root / "tasks").rglob("result.json"):
@@ -421,6 +506,7 @@ jobs:
               "effective_model": plan["effective_model"],
               "agent": plan["agent"],
               "agent_scaffold_version": plan["agent_scaffold_version"],
+              "provider_gate": provider_gate,
               "observed_trial_tasks": sorted(observed_trials),
               "adapter_receipt_tasks": sorted(adapters),
               "product_receipt_tasks": sorted(product_runs),

@@ -204,7 +204,7 @@ def test_product_model_calls_are_transport_bounded_and_boundedly_retried(
     )
 
     assert agent.model.config.model_kwargs["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
-    assert os.environ["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] == "3"
+    assert os.environ["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] == "6"
 
 
 def test_query_near_deadline_shrinks_provider_transport_timeout(monkeypatch) -> None:

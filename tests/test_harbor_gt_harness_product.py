@@ -204,6 +204,9 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
 
     assert "workflow_dispatch:" in workflow
     assert "max-parallel: 4" in workflow
+    assert "provider_gate:" in workflow
+    assert "gt-harness-provider-gate-${{ github.run_id }}" in workflow
+    assert "needs: [plan, provider_gate]" in workflow
     assert "mini-swe-agent==2.2.8" in workflow
     assert "stealth/ox-alpha" in workflow
     assert "secrets.OPENROUTER_NEW" in workflow
@@ -250,7 +253,7 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     )
     assert 'canonical = "\\n".join(sorted(tasks)) + "\\n"' in workflow
     assert 'hashlib.sha256(canonical.encode("utf-8"))' in workflow
-    assert workflow.count("OPENROUTER_NEW") == 1
+    assert workflow.count("OPENROUTER_NEW") == 2
     assert "${{ secrets.OPENROUTER_NEW }}" in workflow
     assert "provider_secret" not in workflow
     for forbidden_trigger in ("push:", "pull_request:", "schedule:"):
@@ -309,4 +312,4 @@ def test_canonical_workflow_embedded_python_is_syntactically_valid() -> None:
             source = script.split(marker, 1)[1].rsplit("\nPY", 1)[0].lstrip("\n")
             ast.parse(source)
             parsed += 1
-    assert parsed == 2
+    assert parsed == 3
