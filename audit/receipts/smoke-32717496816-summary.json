@@ -1,0 +1,106 @@
+{
+  "schema": "gt.official_repair20_summary.v1",
+  "workflow_run_id": "32717496816",
+  "workflow_url": "https://github.com/harneet2512/gt-harness/actions/runs/32717496816",
+  "source_sha": "c0b296f9f95f1e7b162b36d81063dafb8860e693",
+  "attestation": "PASS",
+  "task_count": 20,
+  "requested_model": "stealth/ox-alpha",
+  "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+  "agent_scaffold_version": "2.2.8",
+  "attempts_per_task": 1,
+  "max_parallel": 20,
+  "task_set": "repair20-v1",
+  "task_set_sha256": "36d5c8945f6f8d9ae23fe2cea759f16da0c0cea424a98f710cfaa0d9d6fd0303",
+  "solved": 13,
+  "provider_calls": 627,
+  "input_tokens": 21644806,
+  "output_tokens": 688587,
+  "input_output_tokens": 22333393,
+  "errors": {
+    "Timeout": 1,
+    "ProductProcessExitError": 1
+  },
+  "treatment": {
+    "active": 14,
+    "not_applicable": 6,
+    "failed": 1,
+    "graph_available": 14,
+    "graph_unavailable_explicit": 6,
+    "evidence_items_delivered": 155,
+    "delivery_count": 43
+  },
+  "baseline": {
+    "artifact": "eval/frozen_baselines/tb2_miniswe_20260731.json",
+    "run_id": "30665246698",
+    "model": "deepseek-v4-flash",
+    "solved": 17,
+    "provider_calls": 1041,
+    "input_tokens": 64282496,
+    "output_tokens": 1343082,
+    "input_output_tokens": 65625578
+  },
+  "paired_task_comparison": {
+    "baseline_only_solved": [
+      "extract-elf",
+      "regex-chess",
+      "video-processing",
+      "winning-avg-corewars",
+      "write-compressor"
+    ],
+    "gt_only_solved": [
+      "count-dataset-tokens"
+    ],
+    "both_solved": [
+      "cobol-modernization",
+      "feal-linear-cryptanalysis",
+      "fix-code-vulnerability",
+      "headless-terminal",
+      "llm-inference-batching-scheduler",
+      "mcmc-sampling-stan",
+      "portfolio-optimization",
+      "prove-plus-comm",
+      "qemu-alpine-ssh",
+      "sanitize-git-repo",
+      "schemelike-metacircular-eval",
+      "torch-tensor-parallelism"
+    ],
+    "both_unsolved": [
+      "largest-eigenval",
+      "torch-pipeline-parallelism"
+    ]
+  },
+  "tasks": [
+    {"task":"cobol-modernization","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":32,"input_tokens":627247,"output_tokens":28111,"error":null},
+    {"task":"count-dataset-tokens","baseline":0,"gt":1,"gt_status":"NOT_APPLICABLE","graph_status":"STALE","provider_calls":13,"input_tokens":103606,"output_tokens":4771,"error":null},
+    {"task":"extract-elf","baseline":1,"gt":0,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":24,"input_tokens":465661,"output_tokens":19388,"error":null},
+    {"task":"feal-linear-cryptanalysis","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":30,"input_tokens":1627185,"output_tokens":63693,"error":null},
+    {"task":"fix-code-vulnerability","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY","provider_calls":20,"input_tokens":139023,"output_tokens":3208,"error":null},
+    {"task":"headless-terminal","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":22,"input_tokens":408261,"output_tokens":24346,"error":null},
+    {"task":"largest-eigenval","baseline":0,"gt":0,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":37,"input_tokens":573720,"output_tokens":27425,"error":null},
+    {"task":"llm-inference-batching-scheduler","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":27,"input_tokens":1038651,"output_tokens":51089,"error":null},
+    {"task":"mcmc-sampling-stan","baseline":1,"gt":1,"gt_status":"NOT_APPLICABLE","graph_status":"STALE","provider_calls":59,"input_tokens":973015,"output_tokens":22517,"error":null},
+    {"task":"portfolio-optimization","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":34,"input_tokens":708604,"output_tokens":20838,"error":null},
+    {"task":"prove-plus-comm","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":10,"input_tokens":24462,"output_tokens":2474,"error":null},
+    {"task":"qemu-alpine-ssh","baseline":1,"gt":1,"gt_status":"NOT_APPLICABLE","graph_status":"STALE","provider_calls":43,"input_tokens":613455,"output_tokens":15225,"error":null},
+    {"task":"regex-chess","baseline":1,"gt":0,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":13,"input_tokens":602314,"output_tokens":64246,"error":"Timeout"},
+    {"task":"sanitize-git-repo","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":35,"input_tokens":564105,"output_tokens":8824,"error":null},
+    {"task":"schemelike-metacircular-eval","baseline":1,"gt":1,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":43,"input_tokens":2807377,"output_tokens":72039,"error":null},
+    {"task":"torch-pipeline-parallelism","baseline":0,"gt":0,"gt_status":"NOT_APPLICABLE","graph_status":"STALE","provider_calls":22,"input_tokens":440495,"output_tokens":26629,"error":null},
+    {"task":"torch-tensor-parallelism","baseline":1,"gt":1,"gt_status":"NOT_APPLICABLE","graph_status":"STALE","provider_calls":23,"input_tokens":274201,"output_tokens":23173,"error":null},
+    {"task":"video-processing","baseline":1,"gt":0,"gt_status":"NOT_APPLICABLE","graph_status":"STALE","provider_calls":100,"input_tokens":6995145,"output_tokens":84260,"error":null},
+    {"task":"winning-avg-corewars","baseline":1,"gt":0,"gt_status":"ACTIVE","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":35,"input_tokens":2623486,"output_tokens":99945,"error":null},
+    {"task":"write-compressor","baseline":1,"gt":0,"gt_status":"FAILED","graph_status":"READY_WITH_DECLARED_LIMITATIONS","provider_calls":5,"input_tokens":34793,"output_tokens":26386,"error":"ProductProcessExitError"}
+  ],
+  "interpretation": {
+    "baseline_model_differs": true,
+    "causal_solve_claim": "not_identified",
+    "context_integrity": "repository-derived; no fabricated source text observed",
+    "known_weaknesses": [
+      "inspection-only and weak semantic packets can still be delivered at repository start",
+      "source-less task repositories explicitly abstain, so GT cannot add value there",
+      "regex-chess ended in a timeout after GT updates",
+      "write-compressor ended with supervisor product_process_exit_124"
+    ]
+  }
+}

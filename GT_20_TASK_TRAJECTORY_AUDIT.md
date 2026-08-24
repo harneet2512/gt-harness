@@ -2,11 +2,11 @@
 
 Audit date: 2026-08-24
 
-Canonical run: `32700056236`
+Canonical run: `32717496816`
 
-Run subject: `1fd7efae7eca064cbec56ba319f2169eb81a9ceb`
+Run subject: `c0b296f9f95f1e7b162b36d81063dafb8860e693`
 
-Current repaired implementation: `1fd7efae7eca064cbec56ba319f2169eb81a9ceb`
+Current repaired implementation: `c0b296f9f95f1e7b162b36d81063dafb8860e693`
 
 Agent: `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent`
 
@@ -14,19 +14,23 @@ Model request: `stealth/ox-alpha` through OpenRouter
 
 Parallelism/attempts: `20 / 1`
 
-The latest authoritative rerun passed the final attestation. It produced 20
-terminal GT receipts and 20 full trajectories. Raw Harbor reward was 9/20.
+The latest official run [32717496816](https://github.com/harneet2512/gt-harness/actions/runs/32717496816)
+passed the final attestation. It produced 20 product receipts and 20 full
+trajectories. Raw Harbor reward was 13/20.
 The frozen local baseline for the same task set was 17/20, but used a different
 model route (`deepseek-v4-flash` versus GT's `stealth/ox-alpha`).
 
-The prior tables are retained for audit history; the latest table is in
-`FINAL_BENCHMARK_REPORT.md` and the receipt
-`audit/receipts/smoke-32700056236-summary.json`.
+The machine-readable receipt is
+`audit/receipts/smoke-32717496816-summary.json`. Earlier tables are retained
+below for audit history.
 
-The retry repair changed Mini-SWE transport retries from one to three. It removed
-the two prior OpenRouter read-timeout failures, but the solve rate remained 9/20.
-The latest two product-process errors were COBOL and Corewars. The frozen 17/20
-baseline remains a different model route and is not a causal GT comparison.
+The bounded retry repair removed the earlier provider read-timeout failures. The
+dense-update fallback prevented the prior treatment-unavailable failure. The
+final run still recorded one Harbor `Timeout` (`regex-chess`) and one
+`ProductProcessExitError` (`write-compressor`). The frozen 17/20 baseline uses a
+different model route and is not a causal GT comparison.
+
+### Historical task table: superseded run `32700056236`
 
 | Task | Reward | GT status | Calls | Delivery | Graph |
 | --- | ---: | --- | ---: | ---: | --- |
@@ -57,18 +61,25 @@ graph and dense index before its first provider delivery.
 
 ## Latest authoritative-run findings
 
-The latest attested run recorded 20 terminal receipts and 20 full trajectories.
-It solved 9/20 with 591 provider calls and 22,153,615 input/output tokens. Two
-tasks ended with explicit product-process errors (`cobol-modernization` and
-`winning-avg-corewars`); no provider read-timeout error remained. Active-treatment
-packets contained repository-derived text and query-ready dense indexes; the
-NOT_APPLICABLE tasks explicitly abstained because the graph had no supported
-source after repository changes. No dummy or fabricated context was observed.
+The final attested run recorded 20 terminal receipts and 20 full trajectories. It
+solved 13/20 with 627 provider calls and 22,333,393 input/output tokens. The two
+explicit errors were `regex-chess: Timeout` and
+`write-compressor: ProductProcessExitError` with
+`SUPERVISOR:product_process_exit_124`. Active-treatment packets contained
+repository-derived text and query-ready dense indexes. Six source-less tasks
+explicitly abstained with `NOT_APPLICABLE:graph_not_ready:FAILED`; no stale or
+partial graph was represented as healthy and no dummy or fabricated context was
+observed.
 
-The latest baseline-only task set is COBOL, FEAL, Headless Terminal, QEMU,
-Largest Eigenval, Regex Chess, Scheme, Video Processing, Winning Average
-CoreWars, and Write Compressor; this list is directional because the baseline
-model differs.
+Against the frozen baseline, GT solved one baseline miss (`count-dataset-tokens`)
+but lost five baseline solves: `extract-elf`, `regex-chess`, `video-processing`,
+`winning-avg-corewars`, and `write-compressor`. This is a cross-model directional
+comparison, not a causal result.
+
+The final baseline-only task set is `extract-elf`, `regex-chess`,
+`video-processing`, `winning-avg-corewars`, and `write-compressor`; the only
+GT-only solve is `count-dataset-tokens`. This list is directional because the
+baseline model differs.
 
 ## Full-text findings
 
@@ -99,10 +110,11 @@ QEMU startup failure. Remaining failures were product lifecycle boundaries:
    outer cancellation; and
 3. final attestation counted assistant messages rather than Mini-SWE API attempts.
 
-The retry repair is live-verified by run `32700056236`. The dense-update fallback
-is live-verified by run `32711664602`; its attestation passed. The initial-packet
-abstention policy is deliberately narrow and remains subject to the next live
-replay.
+The retry repair is live-verified by runs `32700056236` and `32717496816`. The
+dense-update fallback is live-verified by runs `32711664602` and `32717496816`;
+the final attestation passed. The final run still shows that weak
+inspection-only initial packets can be delivered, so delivery quality remains a
+known prerelease limitation.
 
 ## Baseline interpretation
 

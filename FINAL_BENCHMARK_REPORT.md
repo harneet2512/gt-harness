@@ -2,38 +2,48 @@
 
 Status: `OFFICIAL_REPAIR20_SMOKE_ATTESTED_BASELINE_COMPARISON_COMPLETE`
 
-Current implementation under audit: `1fd7efae7eca064cbec56ba319f2169eb81a9ceb`.
+Current implementation under audit: `c0b296f9f95f1e7b162b36d81063dafb8860e693`.
 
-## Latest official rerun after the transport-retry repair
+## Canonical final official run
 
-The official GitHub Actions/Harbor run [32700056236](https://github.com/harneet2512/gt-harness/actions/runs/32700056236)
-ran the same frozen `repair20-v1` task set with Mini-SWE-Agent 2.2.8,
+The official GitHub Actions/Harbor run [32717496816](https://github.com/harneet2512/gt-harness/actions/runs/32717496816)
+ran the immutable `repair20-v1` task set with Mini-SWE-Agent 2.2.8,
 `stealth/ox-alpha` through OpenRouter, one attempt per task, and max parallelism
-20. The final attestation was `PASS`; all 20 task receipts and trajectories were
-present. The source change under test was the bounded retry repair: Mini-SWE
-provider calls now allow three transport attempts instead of one, so transient
-OpenRouter read timeouts are not terminal on the first failure.
+20. Attestation was `PASS`, all 20 task jobs completed, and all 20 product
+receipts and trajectories were present. The source SHA was verified in the
+attestation. The machine-readable receipt is
+`audit/receipts/smoke-32717496816-summary.json`.
 
-| Metric | Frozen baseline | Prior GT run | Latest GT run | Latest vs prior |
-| --- | ---: | ---: | ---: | ---: |
-| Solved | 17/20 | 9/20 | 9/20 | unchanged |
-| Provider calls | 1,041 | 651 | 591 | -60 |
-| Input + output tokens | 65,625,578 | 30,111,583 | 22,153,615 | -7,957,968 |
-| GT product error receipts | n/a | 2/20 | 2/20 | same count, different tasks |
-| Attestation | n/a | PASS | PASS | maintained |
+| Metric | Frozen baseline | Final GT run | Difference |
+| --- | ---: | ---: | ---: |
+| Solved | 17/20 | 13/20 | -4 tasks |
+| Provider calls | 1,041 | 627 | -414 (-39.8%) |
+| Input + output tokens | 65,625,578 | 22,333,393 | -43,292,185 (-66.0%) |
+| GT product error receipts | n/a | 2/20 | timeout, product_process_exit_124 |
+| Attestation | n/a | PASS | official |
 
-The retry repair removed the two prior OpenRouter timeout errors (headless and
-tensor); the latest errors are product-process exits on COBOL and Corewars.
-Solve rate did not improve, so retry policy was a real reliability defect but
-not the whole solve-rate explanation. The frozen baseline still uses
-`deepseek-v4-flash`, while both GT runs use `stealth/ox-alpha`; solve-rate
-differences remain directional rather than causal.
+The bounded retry repair removed the earlier provider read-timeout failures.
+The dense-update repair prevented the prior `fix-code-vulnerability` treatment
+unavailability. The final run still exposed two product-facing weaknesses:
+`regex-chess` ended in a Harbor `Timeout`, and `write-compressor` ended with
+`ProductProcessExitError` / `SUPERVISOR:product_process_exit_124`. These are
+explicit receipts, not silent success. The final run also shows that the current
+initial-packet policy still permits some weak, inspection-only context packets.
 
-The current run also exposed a delivery-quality defect: packets are only
-abstained when they explicitly report both `no_decision_relevant_evidence` and
-`no_complete_evidence` alongside insufficient support. Real inspection or
-semantic packets remain deliverable; certified edit targets, relationships,
-impact, tests, and validation facts are never discarded.
+The baseline uses `deepseek-v4-flash`, while GT uses `stealth/ox-alpha`; the
+solve-rate delta is therefore descriptive, not a same-model causal result.
+
+### Paired task result
+
+GT-only solved: `count-dataset-tokens` (1). Baseline-only solved:
+`extract-elf`, `regex-chess`, `video-processing`, `winning-avg-corewars`, and
+`write-compressor` (5). Both failed: `largest-eigenval` and
+`torch-pipeline-parallelism` (2). The remaining 12 tasks were solved by both.
+
+No fabricated repository text was found. Active packets were sourced from the
+task files/graph and carried revision/checksum identities. Six source-less tasks
+explicitly abstained with `NOT_APPLICABLE:graph_not_ready:FAILED`; they were not
+represented as healthy graphs.
 
 ## Historical authoritative corrected run (superseded by 32700056236)
 
@@ -142,18 +152,20 @@ identities, and limitations came from the task repository or persisted graph.
 No placeholder, template-only, fabricated source text, or provider-authored graph
 fact was found.
 
-The packets were not all epistemically correct. Seven `exact_task_path` claims
+The packets were not all epistemically correct. Earlier runs had seven
+`exact_task_path` claims
 across five tasks attached a representative symbol/range to a path that the task
 named without naming that symbol. The file was real and relevant; the symbol-level
 authority was not justified. The clearest case was `fix-code-vulnerability`, which
 rendered `bottle.py:1056#wsgi` even though the named fact was only `bottle.py` and
-the vulnerability was elsewhere. Current SHA `8931876` emits path-only anchors as
+the vulnerability was elsewhere. The historical path-only-anchor correction from
+SHA `8931876` emits those anchors as
 `file_identity` at line 1 with no symbol or excerpt. Exact quoted/symbol anchors
 retain symbol authority.
 
 ## Historical fixes after the second run
 
-Current SHA `8931876`:
+Historical correction series ending at `8931876`:
 
 1. uses Mini-SWE 2.2.8 only;
 2. preserves Harbor's task-owned `task.toml` ceiling and reserves a 90-second
@@ -178,20 +190,19 @@ it became terminal `ERROR`, preserved its transcript, and reconciled to the
 trajectory's 57 provider calls. The complete Python suite, targeted lint, and all
 Go packages pass locally. Exact-SHA Codespaces certification is recorded separately.
 
-The latest source adds two further controls. `1fd7efae` restores three bounded
-Mini-SWE transport retries for transient provider read timeouts. The uncommitted
-follow-up in the current workspace then abstains from initial inspection-only
-packets when independent support is absent, preventing weak candidates from
-being presented as actionable repository context.
+The later source series adds two further controls. `1fd7efae` restores three
+bounded Mini-SWE transport retries for transient provider read timeouts.
+`c0b296f` adds the dense-update fallback and narrows initial abstention. The
+official run above verifies both controls, while also showing that weak
+inspection-only packets can still be delivered in some cases.
 
 ## Directional baseline only
 
 The frozen local repair20 baseline used the same Mini-SWE-Agent 2.2.8 task set but
 `deepseek-v4-flash`, not Ox Alpha. It solved 17/20 with 1,041 calls and 65,625,578
-input+output tokens. Comparing it to the second GT run's raw 12/20, 691 calls, and
-33,554,636 tokens is not a causal GT-on/GT-off comparison because the model differs
-and two GT treatments were invalid. It shows a reason to investigate outcomes and
-efficiency; it cannot prove either regression or uplift caused by GT.
+input+output tokens. The final GT run solved 13/20 with 627 calls and 22,333,393
+tokens. This remains a descriptive cross-model comparison, not a causal GT-on/
+GT-off result.
 
 ## Conclusion
 
