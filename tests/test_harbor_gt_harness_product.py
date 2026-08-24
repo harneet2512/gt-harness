@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import hashlib
 import re
 from pathlib import Path
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from harbor.agents.installed.base import NonZeroAgentExitCodeError
 from harbor.models.agent.context import AgentContext
 
 from eval.harbor_gt_harness_adapter import (
@@ -100,6 +102,54 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
 
 
 @pytest.mark.asyncio
+async def test_harbor_adapter_finalizes_a_sigkill_checkpoint_before_raising(
+    tmp_path: Path,
+) -> None:
+    commands: list[str] = []
+
+    class Environment:
+        async def exec(self, command, *, env=None, **kwargs):
+            commands.append(command)
+            if len(commands) == 1:
+                return SimpleNamespace(return_code=137, stdout="", stderr="")
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+
+    with pytest.raises(NonZeroAgentExitCodeError, match="exit 137"):
+        await agent._exec_product_secret_safe(Environment(), "product", {})
+
+    assert len(commands) == 2
+    assert "gt_harness.supervision" in commands[1]
+    assert "--return-code 137" in commands[1]
+    assert "/logs/agent/gt-run.json" in commands[1]
+    assert "/logs/agent/gt-run.trajectory.json" in commands[1]
+
+
+@pytest.mark.asyncio
+async def test_harbor_adapter_finalizes_checkpoint_when_harbor_cancels_it(
+    tmp_path: Path,
+) -> None:
+    commands: list[str] = []
+
+    class Environment:
+        async def exec(self, command, *, env=None, **kwargs):
+            commands.append(command)
+            if len(commands) == 1:
+                raise asyncio.CancelledError
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent._exec_product_secret_safe(Environment(), "product", {})
+
+    assert len(commands) == 2
+    assert "--return-code 124" in commands[1]
+    assert "--supervisor harbor_adapter_timeout" in commands[1]
+
+
+@pytest.mark.asyncio
 async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_indexer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -162,9 +212,11 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert '--ak product_source_sha="${{ needs.plan.outputs.source_sha }}"' in workflow
     assert "GT_RETRIEVAL_MODE" in workflow
     assert "hybrid_required" in workflow
-    assert "from scripts.resolve_harbor_budget import resolve_budget" in workflow
+    assert "from scripts.resolve_harbor_budget import (" in workflow
+    assert "resolve_budget," in workflow
     assert '"time_budget_seconds": max(' in workflow
-    assert 'float(budget["execution_budget_sec"]) - 60.0' in workflow
+    assert "SUPERVISOR_GRACE_SECONDS" in workflow
+    assert '- float(SUPERVISOR_GRACE_SECONDS)' in workflow
     assert '--ak time_budget_seconds="${{ matrix.time_budget_seconds }}"' in workflow
     assert "--ak time_budget_seconds=720" not in workflow
     assert "musl-tools" in workflow
@@ -181,6 +233,8 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert "nonterminal_product_receipt" in workflow
     assert "missing_full_trajectory" in workflow
     assert "provider_call_receipt_mismatch" in workflow
+    assert 'trajectory.get("info")' in workflow
+    assert 'model_stats.get("api_calls")' in workflow
     assert "gt_treatment_unavailable" in workflow
     assert "active_graph_not_ready" in workflow
     assert "active_dense_not_ready" in workflow

@@ -380,11 +380,12 @@ def _identity_item(
     request: ContextCompileRequest,
     *,
     decision_reason: str,
+    file_only: bool = False,
 ) -> ContextEvidenceItem:
     candidate = _exact_candidate(ranked) or ranked.representative
-    start = max(1, int(candidate.start_line or 1))
-    end = max(start, int(candidate.end_line or start))
-    symbol = str(candidate.symbol or "")
+    start = 1 if file_only else max(1, int(candidate.start_line or 1))
+    end = start if file_only else max(start, int(candidate.end_line or start))
+    symbol = "" if file_only else str(candidate.symbol or "")
     evidence_sha = _sha(
         "identity",
         candidate.path,
@@ -407,7 +408,7 @@ def _identity_item(
         evidence_sha256=evidence_sha,
         decision_reason=decision_reason,
         completeness="exact_identity",
-        source_excerpt=str(candidate.text or "").strip()[:600],
+        source_excerpt="" if file_only else str(candidate.text or "").strip()[:600],
     )
 
 
@@ -621,6 +622,7 @@ class RepositoryContextCompiler:
                     if row in exact_path_rows
                     else "exact_repository_identity"
                 ),
+                file_only=row in exact_path_rows and row not in exact_symbol_rows,
             )
             for row in primary_rows
         )

@@ -4,7 +4,11 @@ import os
 import subprocess
 import sys
 
-from gt_harness.miniswe_runner import TreatmentMiniSweAgent
+from gt_harness.miniswe_runner import (
+    MODEL_REQUEST_TIMEOUT_SECONDS,
+    TreatmentMiniSweAgent,
+    build_miniswe_agent,
+)
 from gt_harness.treatments import BareTreatment
 
 
@@ -147,6 +151,47 @@ def test_time_budget_exits_cleanly_before_harbor_kills_the_agent() -> None:
     assert result["exit_status"] == "LimitsExceeded"
     assert result["limit_reason"] == "time_budget"
     assert agent.messages[-1]["content"] == "TimeBudgetExceeded"
+
+
+def test_product_model_calls_are_transport_bounded_and_not_retried(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT", "10")
+
+    agent = build_miniswe_agent(
+        model="openai/test-model",
+        root=tmp_path,
+        treatment=BareTreatment(),
+        base_url="https://example.invalid/v1",
+        temperature=1.0,
+        max_iterations=3,
+        time_budget_seconds=720,
+        trajectory_path=None,
+    )
+
+    assert agent.model.config.model_kwargs["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
+    assert os.environ["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] == "1"
+
+
+def test_query_near_deadline_shrinks_provider_transport_timeout(monkeypatch) -> None:
+    model = _Model()
+    model.config = type("Config", (), {"model_kwargs": {"timeout": 60.0}})()
+    agent = TreatmentMiniSweAgent(
+        model,
+        _Environment(),
+        system_template="system",
+        instance_template="task={{task}}",
+        step_limit=3,
+        cost_limit=0.0,
+        treatment=_Treatment(),
+        time_budget_seconds=20,
+    )
+    agent._started_clock = 100.0
+    monkeypatch.setattr("gt_harness.miniswe_runner.time.monotonic", lambda: 115.0)
+
+    agent.query()
+
+    assert model.config.model_kwargs["timeout"] == 5.0
 
 
 def test_miniswe_product_import_is_quiet_under_non_utf8_console(tmp_path) -> None:

@@ -7,6 +7,7 @@ Mini-SWE-Agent version pinned by the package contract.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -226,15 +227,59 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             "Running canonical GT Harness product command",
             extra={"env_keys": sorted(merged_env), "credential_values_logged": False},
         )
-        result = await environment.exec(
-            command=f"set -o pipefail; {command}",
-            env=merged_env,
-        )
+        try:
+            result = await environment.exec(
+                command=f"set -o pipefail; {command}",
+                env=merged_env,
+            )
+        except asyncio.CancelledError:
+            try:
+                await asyncio.shield(
+                    self._finalize_nonterminal_product(
+                        environment,
+                        return_code=124,
+                        supervisor="harbor_adapter_timeout",
+                    )
+                )
+            except Exception:
+                self.logger.exception(
+                    "Failed to finalize product receipt after Harbor cancellation"
+                )
+            raise
         if result.return_code != 0:
+            await self._finalize_nonterminal_product(
+                environment,
+                return_code=int(result.return_code),
+                supervisor="harbor_adapter",
+            )
             raise NonZeroAgentExitCodeError(
                 f"Canonical GT Harness product command failed (exit {result.return_code})\n"
                 f"stdout: {self._truncate_output(result.stdout)}\n"
                 f"stderr: {self._truncate_output(result.stderr)}"
+            )
+
+    async def _finalize_nonterminal_product(
+        self,
+        environment: BaseEnvironment,
+        *,
+        return_code: int,
+        supervisor: str,
+    ) -> None:
+        finalize = (
+            f"{_REMOTE_PYTHON} -m gt_harness.supervision "
+            "--receipt /logs/agent/gt-run.json "
+            "--trajectory /logs/agent/gt-run.trajectory.json "
+            f"--return-code {int(return_code)} "
+            f"--supervisor {shlex.quote(supervisor)}"
+        )
+        result = await environment.exec(command=finalize, env=dict(UTF8_ENV))
+        if result.return_code != 0:
+            self.logger.error(
+                "Failed to finalize a nonterminal product receipt",
+                extra={
+                    "product_return_code": return_code,
+                    "finalizer_return_code": result.return_code,
+                },
             )
 
     @with_prompt_template

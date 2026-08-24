@@ -6,6 +6,7 @@ Harbor 0.20 wraps ``BaseAgent.run`` in this deadline but does not expose it in
 passes the resolved value as an agent kwarg.  Missing or ambiguous input fails
 closed; this script never invents a timeout or changes Harbor's configured one.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,6 +15,10 @@ import json
 import tomllib
 from pathlib import Path
 from typing import Any
+
+# Harbor owns the real task ceiling. GT stops new work this much earlier so
+# trajectory/receipt finalization can complete without stealing material solve time.
+SUPERVISOR_GRACE_SECONDS = 90
 
 
 def resolve_budget(

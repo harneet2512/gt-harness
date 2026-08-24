@@ -147,6 +147,20 @@ def test_prose_technology_name_is_not_promoted_to_exact_edit_authority() -> None
         for item in packet.primary_edit_targets
     )
 
+    exact_path_packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Repair /app/bottle.py"),
+    )
+    path_target = next(
+        item
+        for item in exact_path_packet.primary_edit_targets
+        if item.decision_reason == "exact_task_path"
+    )
+    assert path_target.path == "bottle.py"
+    assert path_target.kind == "file_identity"
+    assert path_target.symbol == ""
+    assert path_target.start_line == 1
+
 
 def test_hybrid_similarity_is_an_inspection_candidate_not_a_verified_edit_target() -> None:
     repository = HybridRepository(

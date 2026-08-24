@@ -49,6 +49,9 @@ _SENSITIVE_ENV = {
     "OPENROUTER_API_KEY",
 }
 
+MODEL_REQUEST_TIMEOUT_SECONDS = 60.0
+MODEL_RETRY_ATTEMPTS = 1
+
 
 def _sensitive(name: str) -> bool:
     upper = str(name or "").upper()
@@ -139,10 +142,8 @@ class TreatmentMiniSweAgent(DefaultAgent):
         return super().run(effective_task, **kwargs)
 
     def query(self) -> dict:
-        if (
-            self.time_budget_seconds is not None
-            and time.monotonic() - self._started_clock >= self.time_budget_seconds
-        ):
+        remaining = self._remaining_seconds()
+        if remaining is not None and remaining <= 0:
             raise LimitsExceeded(
                 {
                     "role": "exit",
@@ -154,16 +155,59 @@ class TreatmentMiniSweAgent(DefaultAgent):
                     },
                 }
             )
+        if remaining is not None:
+            # A request beginning near the inner deadline must not consume the
+            # supervisor gap. Litellm query kwargs override the static cap.
+            self.model.config.model_kwargs["timeout"] = max(
+                1.0, min(MODEL_REQUEST_TIMEOUT_SECONDS, remaining)
+            )
         # Integrity barrier only. Context updates belong to the observation
         # that produced them; injecting a synthetic user turn here weakens
         # causal attribution and makes the model reason one step too late.
         self.treatment.before_model_call(self.n_calls + 1)
         return super().query()
 
+    def _remaining_seconds(self) -> float | None:
+        if self.time_budget_seconds is None:
+            return None
+        return self.time_budget_seconds - (time.monotonic() - self._started_clock)
+
     def execute_actions(self, message: dict) -> list[dict]:
         outputs: list[dict[str, Any]] = []
         for action in message.get("extra", {}).get("actions", []):
-            output = self.env.execute(action)
+            remaining = self._remaining_seconds()
+            action_timeout = None
+            if remaining is not None:
+                if remaining <= 0:
+                    raise LimitsExceeded(
+                        {
+                            "role": "exit",
+                            "content": "TimeBudgetExceeded",
+                            "extra": {
+                                "exit_status": "LimitsExceeded",
+                                "limit_reason": "time_budget",
+                                "submission": "",
+                            },
+                        }
+                    )
+                action_timeout = max(1, min(30, int(remaining)))
+            if action_timeout is None:
+                output = self.env.execute(action)
+            else:
+                output = self.env.execute(action, timeout=action_timeout)
+            remaining = self._remaining_seconds()
+            if remaining is not None and remaining <= 0:
+                raise LimitsExceeded(
+                    {
+                        "role": "exit",
+                        "content": "TimeBudgetExceeded",
+                        "extra": {
+                            "exit_status": "LimitsExceeded",
+                            "limit_reason": "time_budget",
+                            "submission": "",
+                        },
+                    }
+                )
             raw_text = str(output.get("output") or output.get("exception_info") or "")
             augmentation = self.treatment.after_action(
                 "bash",
@@ -227,6 +271,11 @@ def build_miniswe_agent(
     config = _templates()
     model_name = str(model)
     model_kwargs = dict(config.get("model", {}).get("model_kwargs") or {})
+    if time_budget_seconds is not None:
+        model_kwargs["timeout"] = MODEL_REQUEST_TIMEOUT_SECONDS
+        os.environ["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] = str(
+            MODEL_RETRY_ATTEMPTS
+        )
     if temperature is not None:
         model_kwargs["temperature"] = float(temperature)
     if base_url:
@@ -289,6 +338,8 @@ __all__ = [
     "BASH_TOOL",
     "CredentialIsolatedEnvironment",
     "MiniSweRunResult",
+    "MODEL_REQUEST_TIMEOUT_SECONDS",
+    "MODEL_RETRY_ATTEMPTS",
     "TreatmentMiniSweAgent",
     "build_miniswe_agent",
     "run_miniswe_agent",
