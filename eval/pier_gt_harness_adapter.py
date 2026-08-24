@@ -9,11 +9,66 @@ the canonical product adapter.
 
 from __future__ import annotations
 
+from typing import Any
+
 from eval.harbor_gt_harness_adapter import GtHarnessMiniSwe228Agent
+
+
+class _PierAgentScopedEnvironment:
+    """Apply Pier's filtered-egress variables to installed-agent commands.
+
+    GT's shared product adapter inherits Harbor's installed-agent base so the
+    same implementation remains usable by Terminal-Bench.  Pier's fork adds
+    ``environment.agent_process_env`` at execution time; Harbor's base does
+    not call it.  This proxy supplies that one compatibility behavior without
+    forking installation or product execution.
+    """
+
+    def __init__(self, environment: Any) -> None:
+        self._environment = environment
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._environment, name)
+
+    async def exec(self, command: str, **kwargs: Any) -> Any:
+        env = kwargs.pop("env", None)
+        kwargs["env"] = self._environment.agent_process_env(env)
+        return await self._environment.exec(command, **kwargs)
 
 
 class PierGtHarnessMiniSwe228Agent(GtHarnessMiniSwe228Agent):
     """Expose the canonical GT Harness product through Pier's agent hooks."""
+
+    @staticmethod
+    def _scoped_environment(environment: Any) -> _PierAgentScopedEnvironment:
+        if isinstance(environment, _PierAgentScopedEnvironment):
+            return environment
+        return _PierAgentScopedEnvironment(environment)
+
+    async def _exec(
+        self,
+        environment,
+        command: str,
+        user=None,
+        env=None,
+        cwd=None,
+        timeout_sec=None,
+    ):
+        return await super()._exec(
+            self._scoped_environment(environment),
+            command,
+            user=user,
+            env=env,
+            cwd=cwd,
+            timeout_sec=timeout_sec,
+        )
+
+    async def _exec_product_secret_safe(self, environment, command, env) -> None:
+        await super()._exec_product_secret_safe(
+            self._scoped_environment(environment),
+            command,
+            env,
+        )
 
     def install_spec(self):
         # Installation is performed by the inherited, source-uploading
@@ -29,8 +84,10 @@ class PierGtHarnessMiniSwe228Agent(GtHarnessMiniSwe228Agent):
         # setup; no arbitrary task egress is granted.
         return NetworkAllowlist(
             domains=[
+                ".githubusercontent.com",
                 "astral.sh",
                 "files.pythonhosted.org",
+                "github.com",
                 "openrouter.ai",
                 "pypi.org",
             ]

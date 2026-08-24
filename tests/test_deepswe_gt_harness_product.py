@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,15 +20,59 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
     adapter_source = (ROOT / "eval" / "pier_gt_harness_adapter.py").read_text(
         encoding="utf-8"
     )
-    for domain in ("openrouter.ai", "pypi.org", "files.pythonhosted.org"):
+    for domain in (
+        ".githubusercontent.com",
+        "astral.sh",
+        "files.pythonhosted.org",
+        "github.com",
+        "openrouter.ai",
+        "pypi.org",
+    ):
         assert domain in adapter_source
     pytest.importorskip("pier.models.agent.network")
     allowlist = PierGtHarnessMiniSwe228Agent.network_allowlist(
         PierGtHarnessMiniSwe228Agent.__new__(PierGtHarnessMiniSwe228Agent)
     )
-    assert "openrouter.ai" in allowlist.domains
-    assert "pypi.org" in allowlist.domains
-    assert "files.pythonhosted.org" in allowlist.domains
+    assert set(allowlist.domains) == {
+        ".githubusercontent.com",
+        "astral.sh",
+        "files.pythonhosted.org",
+        "github.com",
+        "openrouter.ai",
+        "pypi.org",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pier_adapter_scopes_install_and_product_exec_through_egress_proxy(
+    tmp_path: Path,
+) -> None:
+    from eval.pier_gt_harness_adapter import PierGtHarnessMiniSwe228Agent
+
+    observed: list[dict[str, str]] = []
+
+    class PierEnvironment:
+        def agent_process_env(self, env):
+            return {
+                **dict(env or {}),
+                "HTTPS_PROXY": "http://agent:ephemeral-token@pier-egress-proxy:8080",
+            }
+
+        async def exec(self, command, *, env=None, **kwargs):
+            observed.append(dict(env or {}))
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    environment = PierEnvironment()
+    agent = PierGtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+
+    await agent.exec_as_agent(environment, "curl -fsSL https://astral.sh/")
+    await agent._exec_product_secret_safe(environment, "gt-harness run", {})
+
+    assert len(observed) == 2
+    assert all(
+        env.get("HTTPS_PROXY", "").endswith("@pier-egress-proxy:8080")
+        for env in observed
+    )
 
 
 def test_deepswe_smoke20_manifest_is_balanced_frozen_and_baseline_bound() -> None:
