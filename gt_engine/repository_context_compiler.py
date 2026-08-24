@@ -414,39 +414,22 @@ def compile_task_facets(
             if row not in available.setdefault(key, []):
                 available[key].append(row)
 
-    facets: list[TaskFacet] = []
-    for obligation_id, text in rows:
-        associated = _associated_entities(text)
-        associated_members = {
-            re.split(r"(?:::|[.#])", entity)[-1].casefold()
-            for entity in associated
-        }
-        entities = list(associated)
-        entities.extend(match.group(1) for match in _CODE_ENTITY.finditer(text))
-        for match in _SYMBOL_CUE.finditer(text):
-            candidate = match.group(1)
-            if candidate.casefold() in available or _code_shaped(candidate):
-                entities.append(candidate)
-        for token in _EXPLICIT_TOKEN.findall(text):
-            token = token.strip("`'\".,:;()[]{}")
-            if (
-                token
-                and token.casefold() not in associated_members
-                and "/" not in token
-                and "\\" not in token
-                and _code_shaped(token)
-            ):
-                entities.append(token)
-        entities = list(dict.fromkeys(entities))
+    def resolve_entities(
+        entity_values: tuple[str, ...],
+    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
         exact: list[str] = []
         unresolved: list[str] = []
         owners: list[str] = []
         modules: list[str] = []
-        for entity in entities:
+        for entity in entity_values:
             segments = re.split(r"(?:::|[.#])", entity)
             leaf = segments[-1]
             direct = available.get(entity.casefold(), [])
-            owner_rows = available.get(segments[0].casefold(), []) if len(segments) > 1 else []
+            owner_rows = (
+                available.get(segments[0].casefold(), [])
+                if len(segments) > 1
+                else []
+            )
             leaf_rows = available.get(leaf.casefold(), [])
             if direct:
                 exact.extend(symbol for symbol, _path in direct)
@@ -472,8 +455,7 @@ def compile_task_facets(
                 {
                     row
                     for key, values in available.items()
-                    if len(key) >= 4
-                    and leaf.casefold().startswith(key + "_")
+                    if len(key) >= 4 and leaf.casefold().startswith(key + "_")
                     for row in values
                     if not owner_paths or row[1] in owner_paths
                 }
@@ -486,6 +468,38 @@ def compile_task_facets(
                 exact.append(analog)
                 if analog_path:
                     modules.append(analog_path)
+        return (
+            tuple(dict.fromkeys(exact)),
+            tuple(dict.fromkeys(unresolved)),
+            tuple(dict.fromkeys(owners)),
+            tuple(dict.fromkeys(modules)),
+        )
+
+    facets: list[TaskFacet] = []
+    for obligation_id, text in rows:
+        associated = _associated_entities(text)
+        associated_members = {
+            re.split(r"(?:::|[.#])", entity)[-1].casefold()
+            for entity in associated
+        }
+        entities = list(associated)
+        entities.extend(match.group(1) for match in _CODE_ENTITY.finditer(text))
+        for match in _SYMBOL_CUE.finditer(text):
+            candidate = match.group(1)
+            if candidate.casefold() in available or _code_shaped(candidate):
+                entities.append(candidate)
+        for token in _EXPLICIT_TOKEN.findall(text):
+            token = token.strip("`'\".,:;()[]{}")
+            if (
+                token
+                and token.casefold() not in associated_members
+                and "/" not in token
+                and "\\" not in token
+                and _code_shaped(token)
+            ):
+                entities.append(token)
+        entity_values = tuple(dict.fromkeys(entities))
+        exact, unresolved, owners, modules = resolve_entities(entity_values)
         digest = hashlib.sha256(
             f"{obligation_id}\0{text}".encode()
         ).hexdigest()[:16]
@@ -494,13 +508,40 @@ def compile_task_facets(
                 facet_id=f"facet-{digest}",
                 obligation_ids=(obligation_id,),
                 role=_facet_role(text),
-                exact_symbols=tuple(dict.fromkeys(exact)),
-                unresolved_symbols=tuple(dict.fromkeys(unresolved)),
+                exact_symbols=exact,
+                unresolved_symbols=unresolved,
                 query_terms=significant_tokens(text)[:12],
-                owning_symbols=tuple(dict.fromkeys(owners)),
-                owning_modules=tuple(dict.fromkeys(modules)),
+                owning_symbols=owners,
+                owning_modules=modules,
             )
         )
+        qualified_by_owner: dict[str, list[str]] = {}
+        for entity in entity_values:
+            segments = re.split(r"(?:::|[.#])", entity)
+            if len(segments) > 1:
+                qualified_by_owner.setdefault(segments[0], []).append(entity)
+        if len(qualified_by_owner) > 1:
+            for owner, owner_entities in list(qualified_by_owner.items())[:12]:
+                child_exact, child_unresolved, child_owners, child_modules = (
+                    resolve_entities(tuple(dict.fromkeys(owner_entities)))
+                )
+                child_digest = hashlib.sha256(
+                    f"{obligation_id}\0{text}\0{owner}".encode()
+                ).hexdigest()[:16]
+                facets.append(
+                    TaskFacet(
+                        facet_id=f"facet-{child_digest}",
+                        obligation_ids=(obligation_id,),
+                        role=_facet_role(text),
+                        exact_symbols=child_exact,
+                        unresolved_symbols=child_unresolved,
+                        query_terms=significant_tokens(
+                            " ".join(owner_entities)
+                        )[:12],
+                        owning_symbols=child_owners,
+                        owning_modules=child_modules,
+                    )
+                )
     return tuple(facets)
 
 

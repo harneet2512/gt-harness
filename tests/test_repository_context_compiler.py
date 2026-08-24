@@ -568,6 +568,40 @@ Cancellation must be first-wins.""",
     assert "PUBLIC_SURFACE" in roles
 
 
+def test_task_facets_split_multi_owner_api_surface_for_bounded_set_cover() -> None:
+    documents = (
+        _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
+        _document("core/engine/src/context/mod.rs", "run_jobs", "pub fn run_jobs() {}"),
+        _document("core/engine/src/module/mod.rs", "Module", "pub struct Module;"),
+        _document(
+            "core/engine/src/module/mod.rs",
+            "load_link_evaluate",
+            "pub fn load_link_evaluate() {}",
+        ),
+        _document("core/engine/src/script.rs", "Script", "pub struct Script;"),
+        _document("core/engine/src/script.rs", "evaluate", "pub fn evaluate() {}"),
+    )
+
+    facets = compile_task_facets(
+        "Public capabilities include "
+        "`Context::run_jobs_with_evaluation`, "
+        "`Module::load_link_evaluate_with_evaluation`, and "
+        "`Script::evaluate_with_evaluation`.",
+        documents,
+    )
+
+    owner_facets = {
+        facet.owning_symbols[0]: facet
+        for facet in facets
+        if len(facet.owning_symbols) == 1
+        and facet.owning_symbols[0] in {"Context", "Module", "Script"}
+    }
+    assert set(owner_facets) == {"Context", "Module", "Script"}
+    assert owner_facets["Context"].exact_symbols == ("run_jobs",)
+    assert owner_facets["Module"].exact_symbols == ("load_link_evaluate",)
+    assert owner_facets["Script"].exact_symbols == ("evaluate",)
+
+
 def test_qualified_unresolved_owner_does_not_claim_unrelated_leaf_symbol() -> None:
     documents = (
         _document("core/runtime/src/abort/mod.rs", "is_cancelled", "pub fn is_cancelled()"),
