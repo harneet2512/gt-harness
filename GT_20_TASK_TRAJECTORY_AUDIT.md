@@ -2,17 +2,22 @@
 
 Audit date: 2026-08-24
 
-Canonical run: `32680131105`
+Canonical run: `32695000605`
 
 Run subject: `b6e16099a827449953670b053d9ac873d4f6f367`
 
-Current repaired implementation: `8931876541ec82ec96799f6c4462b5c0726e4518`
+Current repaired implementation: `d78f4d2e7d1ebe45abe23b92c4b5cc89ead4c776`
 
 Agent: `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent`
 
 Model request: `stealth/ox-alpha` through OpenRouter
 
 Parallelism/attempts: `20 / 1`
+
+The authoritative corrected run passed the final attestation. It produced 20
+terminal GT receipts and 20 full trajectories. Raw Harbor reward was 9/20.
+The frozen local baseline for the same task set was 17/20, but used a different
+model route (`deepseek-v4-flash` versus GT's `stealth/ox-alpha`).
 
 The complete run contained 20 Harbor results, 20 GT receipts, 20 adapter receipts,
 and 20 full Mini-SWE trajectories. Raw reward was 12/20. Valid terminal treatment

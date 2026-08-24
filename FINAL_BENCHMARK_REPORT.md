@@ -1,8 +1,60 @@
 # Final Benchmark Report
 
-Status: `SMOKE_EXECUTED_LIVE_ATTESTATION_FAILED_FIXES_PENDING_LIVE_REPLAY`
+Status: `OFFICIAL_REPAIR20_SMOKE_ATTESTED_BASELINE_COMPARISON_COMPLETE`
 
-Current implementation: `8931876541ec82ec96799f6c4462b5c0726e4518`.
+Current implementation: `d78f4d2e7d1ebe45abe23b92c4b5cc89ead4c776`.
+
+## Authoritative corrected run
+
+The official GitHub Actions/Harbor run [32695000605](https://github.com/harneet2512/gt-harness/actions/runs/32695000605)
+ran the exact frozen `repair20-v1` task set with Mini-SWE-Agent 2.2.8,
+`stealth/ox-alpha` through OpenRouter, one attempt per task, and max parallelism
+20. The final attestation was `PASS`; all 20 Harbor task jobs, GT receipts, full
+trajectories, adapter receipts, and source-SHA bindings were present.
+
+| Metric | Frozen baseline | GT corrected run | Difference |
+| --- | ---: | ---: | ---: |
+| Solved | 17/20 | 9/20 | -8 tasks |
+| Provider calls | 1,041 | 651 | -390 (-37.5%) |
+| Input + output tokens | 65,625,578 | 30,111,583 | -35,513,995 (-54.1%) |
+| GT error receipts | n/a | 2/20 | headless, tensor |
+| Attestation | n/a | PASS | official |
+
+The baseline uses `deepseek-v4-flash`, while the GT run uses `stealth/ox-alpha`;
+therefore the solve-rate delta is directional and cannot be attributed causally
+to GT. The call/token reduction is an observed harness-efficiency difference,
+not proof of equal-quality or lower-cost agent performance.
+
+### Per-task authoritative comparison
+
+`B` is the frozen baseline reward and `G` is the corrected GT reward.
+
+| Task | B | G | GT status | Calls | GT deliveries | Treatment | Error |
+| --- | ---: | ---: | --- | ---: | ---: | --- | --- |
+| cobol-modernization | 1 | 0 | COMPLETED | 21 | 1 | ACTIVE | - |
+| count-dataset-tokens | 0 | 1 | COMPLETED | 10 | 0 | NOT_APPLICABLE | - |
+| extract-elf | 1 | 1 | COMPLETED | 20 | 0 | ACTIVE | - |
+| feal-linear-cryptanalysis | 1 | 1 | COMPLETED | 23 | 3 | ACTIVE | - |
+| fix-code-vulnerability | 1 | 1 | COMPLETED | 25 | 3 | ACTIVE | - |
+| headless-terminal | 1 | 1 | ERROR | 17 | 3 | ACTIVE | Timeout |
+| largest-eigenval | 0 | 0 | COMPLETED | 11 | 1 | ACTIVE | - |
+| llm-inference-batching-scheduler | 1 | 1 | COMPLETED | 36 | 3 | ACTIVE | - |
+| mcmc-sampling-stan | 1 | 0 | COMPLETED | 43 | 0 | NOT_APPLICABLE | - |
+| portfolio-optimization | 1 | 1 | COMPLETED | 25 | 3 | ACTIVE | - |
+| prove-plus-comm | 1 | 1 | COMPLETED | 6 | 0 | ACTIVE | - |
+| qemu-alpine-ssh | 1 | 0 | COMPLETED | 40 | 0 | NOT_APPLICABLE | - |
+| regex-chess | 1 | 0 | COMPLETED | 88 | 3 | ACTIVE | - |
+| sanitize-git-repo | 1 | 1 | COMPLETED | 25 | 3 | ACTIVE | - |
+| schemelike-metacircular-eval | 1 | 0 | COMPLETED | 14 | 3 | ACTIVE | - |
+| torch-pipeline-parallelism | 0 | 0 | COMPLETED | 22 | 0 | NOT_APPLICABLE | - |
+| torch-tensor-parallelism | 1 | 0 | ERROR | 30 | 0 | NOT_APPLICABLE | Timeout |
+| video-processing | 1 | 0 | COMPLETED | 100 | 0 | NOT_APPLICABLE | - |
+| winning-avg-corewars | 1 | 0 | COMPLETED | 88 | 3 | ACTIVE | - |
+| write-compressor | 1 | 0 | COMPLETED | 7 | 0 | ACTIVE | - |
+
+Flips: one GT-only solve, nine baseline-only solves, eight both solve, and two
+both fail. This is a measurable regression in this cross-model smoke, not a
+claim about GT causality.
 
 No claim of solve-rate superiority is certified. Two authorized GT-only repair20
 smokes found real product defects. The second run showed that the graph and dense

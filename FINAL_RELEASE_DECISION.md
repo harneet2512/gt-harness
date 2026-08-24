@@ -2,14 +2,14 @@
 
 Verdict: `HOLD`
 
-Exact implementation SHA: `8931876541ec82ec96799f6c4462b5c0726e4518`.
+Exact implementation SHA: `d78f4d2e7d1ebe45abe23b92c4b5cc89ead4c776`.
 
-GT Harness is suitable for continued controlled prerelease engineering. It is not
-ready for a broad competitive release. The second live smoke proved that graph and
-dense delivery work on real Harbor tasks and that the major stale/QEMU failures
-were repaired, but it also found two nonterminal product receipts. Their causes are
-fixed and provider-free certified at the implementation SHA, not yet live-replayed.
-Causal solve-rate uplift and GitNexus superiority remain unproven.
+GT Harness is suitable for continued controlled prerelease engineering. The
+corrected official smoke now passes end-to-end attestation, but it solved 9/20
+against the frozen 17/20 baseline while using a different model route. This is
+not a causal GT regression measurement, but it is sufficient evidence that solve
+rate superiority has not been demonstrated. GitNexus superiority and a controlled
+same-model causal uplift remain unproven.
 
 | Question | Answer | Confidence |
 | --- | --- | --- |
@@ -41,11 +41,9 @@ Causal solve-rate uplift and GitNexus superiority remain unproven.
 
 ## Remaining release blockers
 
-1. Replay a bounded live smoke on `8931876` and require all GT product receipts to
-   be terminal, all call counts trajectory-backed, and final attestation PASS.
-2. Run a controlled same-model Bare versus GT experiment before making solve-rate
+1. Run a controlled same-model Bare versus GT experiment before making solve-rate
    or efficiency claims.
-3. Re-run the direct repository-intelligence comparison when claiming superiority
+2. Re-run the direct repository-intelligence comparison when claiming superiority
    over a particular GitNexus release; do not substitute vendor feature names.
 
 No third paid repair20 run was launched while producing this decision.
