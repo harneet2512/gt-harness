@@ -9,9 +9,20 @@ inspection obligation from graph-proven edit authority.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_BUNDLER_INPUT = re.compile(
+    r"\binput\s*:\s*(?:path\.resolve\([^,]+,\s*)?['\"]([^'\"]+)['\"]"
+)
+_BUNDLER_CONFIGS = (
+    "rollup.config.js",
+    "rollup.config.mjs",
+    "rollup.config.cjs",
+    "rollup.config.ts",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +106,25 @@ class PublicSurfaceResolver:
                 path = self._relative_file(manifest.parent / raw)
                 if path and path not in {item.path for item in rows}:
                     rows.append(PublicSurfaceCandidate(path, "package_manifest_entrypoint"))
+            for config_name in _BUNDLER_CONFIGS:
+                config = manifest.parent / config_name
+                try:
+                    body = config.read_text(encoding="utf-8")
+                except (FileNotFoundError, OSError, UnicodeError):
+                    continue
+                if len(body) > 1_000_000:
+                    continue
+                for match in _BUNDLER_INPUT.finditer(body):
+                    raw = match.group(1)
+                    if any(marker in raw for marker in ("*", "${")):
+                        continue
+                    path = self._relative_file(manifest.parent / raw)
+                    if path and path not in {item.path for item in rows}:
+                        rows.append(
+                            PublicSurfaceCandidate(
+                                path, "bundler_source_entrypoint"
+                            )
+                        )
 
         for anchor in anchors:
             suffix = anchor.suffix.casefold()

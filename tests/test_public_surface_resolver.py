@@ -38,3 +38,29 @@ def test_resolver_finds_existing_rust_crate_root_for_anchor(tmp_path: Path) -> N
     assert [(item.path, item.reason) for item in candidates] == [
         ("core/engine/src/lib.rs", "rust_crate_or_module_surface")
     ]
+
+
+def test_resolver_uses_existing_rollup_source_entry_when_manifest_points_to_build(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "container.ts").write_text(
+        "export function register() {}\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "awilix.ts").write_text(
+        "export { register } from './container'\n", encoding="utf-8"
+    )
+    (tmp_path / "package.json").write_text(
+        '{"main":"lib/awilix.js","module":"lib/awilix.module.mjs"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "rollup.config.mjs").write_text(
+        "export default [{ input: 'src/awilix.ts' }]\n",
+        encoding="utf-8",
+    )
+
+    candidates = PublicSurfaceResolver(tmp_path).resolve(("src/container.ts",))
+
+    assert [(item.path, item.reason) for item in candidates] == [
+        ("src/awilix.ts", "bundler_source_entrypoint")
+    ]
