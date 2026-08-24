@@ -30,6 +30,26 @@ def _emit(value: object, *, pretty: bool = True) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2 if pretty else None))
 
 
+def _trajectory_api_calls(path: Path) -> int | None:
+    """Read the authoritative provider-call count after an interrupted run.
+
+    Mini-SWE persists the trajectory in a finally block.  If the runner raises
+    while waiting for a model response, ``result.iterations`` is unavailable
+    and the checkpoint callback can be one call behind the durable trajectory.
+    Reconcile from that trajectory so error receipts remain independently
+    auditable.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = (payload.get("info") or {}).get("model_stats", {}).get("api_calls")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gt-harness",
@@ -468,6 +488,13 @@ def _run_agent(args: argparse.Namespace) -> int:
                     f"finalize_failed:{type(receipt_exc).__name__}",
                 ],
             }
+        trajectory_calls = _trajectory_api_calls(
+            output_path.with_suffix(".trajectory.json")
+        )
+        provider_calls = max(
+            checkpoint_provider_calls,
+            trajectory_calls if trajectory_calls is not None else 0,
+        )
         receipt = {
             "schema": "gt.run_receipt.v1",
             "run_id": run_id,
@@ -493,7 +520,7 @@ def _run_agent(args: argparse.Namespace) -> int:
             "repository_end": _run_repository_identity(root),
             "treatment": args.treatment,
             "resolved": None,
-            "provider_calls": checkpoint_provider_calls,
+            "provider_calls": provider_calls,
             "input_tokens": checkpoint_input_tokens,
             "output_tokens": checkpoint_output_tokens,
             "cached_tokens": checkpoint_cached_tokens,
@@ -512,7 +539,7 @@ def _run_agent(args: argparse.Namespace) -> int:
                 "run_id": run_id,
                 "status": receipt["status"],
                 "error_type": receipt["error_type"],
-                "provider_calls": checkpoint_provider_calls,
+                "provider_calls": provider_calls,
                 "receipt_path": str(output_path),
                 "treatment_receipt_present": True,
             }

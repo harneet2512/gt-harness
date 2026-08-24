@@ -609,7 +609,11 @@ def test_run_cli_preserves_provider_usage_and_transcript_on_runtime_error(
 
     output = tmp_path / "gt-run.json"
 
+    trajectory_path = None
+
     def build(**kwargs):
+        nonlocal trajectory_path
+        trajectory_path = kwargs["trajectory_path"]
         return SimpleNamespace(
             config=SimpleNamespace(system_template="system", instance_template="task"),
             on_message=kwargs["on_message"],
@@ -639,6 +643,11 @@ def test_run_cli_preserves_provider_usage_and_transcript_on_runtime_error(
                 "extra": {"returncode": 0},
             }
         )
+        assert trajectory_path is not None
+        trajectory_path.write_text(
+            json.dumps({"info": {"model_stats": {"api_calls": 2}}, "messages": []}),
+            encoding="utf-8",
+        )
         raise TreatmentUnavailableError("FAILED:unobserved_repository_change")
 
     monkeypatch.setattr(runner, "build_miniswe_agent", build)
@@ -662,7 +671,7 @@ def test_run_cli_preserves_provider_usage_and_transcript_on_runtime_error(
     assert _run_agent(args) == 1
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["status"] == "ERROR"
-    assert receipt["provider_calls"] == 1
+    assert receipt["provider_calls"] == 2
     assert receipt["input_tokens"] == 12
     assert receipt["output_tokens"] == 3
     assert receipt["cached_tokens"] == 4
