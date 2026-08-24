@@ -90,6 +90,7 @@ class PierGtHarnessMiniSwe228Agent(GtHarnessMiniSwe228Agent):
                 "github.com",
                 "openrouter.ai",
                 "pypi.org",
+                "releases.astral.sh",
             ]
         )
 

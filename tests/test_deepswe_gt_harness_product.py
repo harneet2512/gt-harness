@@ -27,6 +27,7 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
         "github.com",
         "openrouter.ai",
         "pypi.org",
+        "releases.astral.sh",
     ):
         assert domain in adapter_source
     pytest.importorskip("pier.models.agent.network")
@@ -40,6 +41,7 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
         "github.com",
         "openrouter.ai",
         "pypi.org",
+        "releases.astral.sh",
     }
 
 
