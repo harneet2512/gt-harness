@@ -22,7 +22,7 @@ from typing import Any
 from gt_harness._miniswe_import_guard import restore_environment
 
 import yaml
-from minisweagent.agents.default import AgentConfig, DefaultAgent
+from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded
 from minisweagent.config import builtin_config_dir
 from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentConfig
 from minisweagent.models.litellm_model import BASH_TOOL, LitellmModel
@@ -143,7 +143,17 @@ class TreatmentMiniSweAgent(DefaultAgent):
             self.time_budget_seconds is not None
             and time.monotonic() - self._started_clock >= self.time_budget_seconds
         ):
-            raise TimeoutError("Mini-SWE run time budget exhausted")
+            raise LimitsExceeded(
+                {
+                    "role": "exit",
+                    "content": "TimeBudgetExceeded",
+                    "extra": {
+                        "exit_status": "LimitsExceeded",
+                        "limit_reason": "time_budget",
+                        "submission": "",
+                    },
+                }
+            )
         # Integrity barrier only. Context updates belong to the observation
         # that produced them; injecting a synthetic user turn here weakens
         # causal attribution and makes the model reason one step too late.

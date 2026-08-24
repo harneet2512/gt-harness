@@ -112,11 +112,40 @@ def test_compiler_does_not_treat_issue_verbs_as_symbol_anchors() -> None:
 
     packet = RepositoryContextCompiler().compile(
         repository,
-        _request("Change answer without breaking callers"),
+        _request("Change `answer` without breaking callers"),
     )
 
     assert packet.primary_edit_targets[0].symbol == "answer"
     assert all(item.symbol != "Change" for item in packet.primary_edit_targets)
+
+
+def test_prose_technology_name_is_not_promoted_to_exact_edit_authority() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document("bottle.py", "wsgi", "def wsgi(self, environ, start_response): ..."),
+            _document("bottle.py", "_hkey", "def _hkey(key): return key.title()"),
+            _document("bottle.py", "_hval", "def _hval(value): return value"),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=1,
+        document_chars=180,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request(
+            "Bottle is a lightweight WSGI web framework. Identify and fix the "
+            "vulnerability in /app/bottle.py."
+        ),
+    )
+
+    assert all(
+        not (item.symbol.lower() == "wsgi" and item.decision_reason == "exact_task_symbol")
+        for item in packet.primary_edit_targets
+    )
 
 
 def test_hybrid_similarity_is_an_inspection_candidate_not_a_verified_edit_target() -> None:

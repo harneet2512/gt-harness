@@ -153,6 +153,13 @@ class GTContextPacket:
 
 
 _EXPLICIT_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_./:-]{2,}")
+_QUOTED_IDENTIFIER = re.compile(
+    r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_.:]{1,})(?:`|'|\")"
+)
+_SYMBOL_CUE = re.compile(
+    r"(?i)\b(?:class|constant|function|interface|method|module|symbol|type|variable)\s+"
+    r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_.:]{1,})(?:`|'|\")?"
+)
 _ISSUE_LANGUAGE_WORDS = frozenset(
     {
         "add",
@@ -288,6 +295,34 @@ def _explicit_identifiers(request: ContextCompileRequest) -> dict[str, int]:
                     continue
                 identifiers.setdefault(identifier, len(identifiers))
     return identifiers
+
+
+def _authoritative_symbol_identifiers(request: ContextCompileRequest) -> frozenset[str]:
+    """Return symbols the task actually identifies, not incidental prose words."""
+
+    identifiers: set[str] = set()
+
+    def add(value: str) -> None:
+        token = str(value or "").strip("`'\"")
+        if not token or "/" in token or "\\" in token:
+            return
+        lowered = token.lower()
+        if lowered in _ISSUE_LANGUAGE_WORDS:
+            return
+        identifiers.add(lowered)
+        identifiers.add(token.rsplit(".", 1)[-1].rsplit("::", 1)[-1].lower())
+
+    for symbol in request.active_symbols:
+        add(symbol)
+    for pattern in (_QUOTED_IDENTIFIER, _SYMBOL_CUE):
+        for match in pattern.finditer(request.task):
+            add(match.group(1))
+    for token in _EXPLICIT_TOKEN.findall(request.task):
+        if "_" in token or "::" in token or (
+            not token.isupper() and any(character.isupper() for character in token[1:])
+        ):
+            add(token)
+    return frozenset(item for item in identifiers if item)
 
 
 def _concrete_identifiers(request: ContextCompileRequest) -> frozenset[str]:
@@ -536,6 +571,7 @@ class RepositoryContextCompiler:
             character_budget=max(1, int(request.character_budget)),
         )
         identifiers = _explicit_identifiers(request)
+        authoritative_symbols = _authoritative_symbol_identifiers(request)
         concrete_identifiers = _concrete_identifiers(request)
         ranked = tuple(sorted(retrieval.ranked_files, key=lambda row: _rank_key(row, identifiers)))
 
@@ -544,7 +580,7 @@ class RepositoryContextCompiler:
             for row in ranked
             if (candidate := _exact_candidate(row)) is not None
             and bool(candidate.symbol)
-            and str(candidate.symbol).lower() in identifiers
+            and str(candidate.symbol).lower() in authoritative_symbols
         )
         exact_path_rows = tuple(
             row

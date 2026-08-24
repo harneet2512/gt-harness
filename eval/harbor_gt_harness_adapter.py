@@ -67,7 +67,6 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         EnvVar(
             kwarg="time_budget_seconds",
             env="GT_HARBOR_TIME_BUDGET_SECONDS",
-            default="35400",
         ),
     ]
 
@@ -168,6 +167,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             "attempt": 1,
             "product_command": "gt-harness run",
             "product_source_sha": product_source_sha,
+            "time_budget_seconds": time_budget_seconds,
         }
         receipt = json.dumps(identity, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         write_receipt = (
@@ -257,6 +257,13 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         product_source_sha = adapter_env.get("GT_PRODUCT_SOURCE_SHA", "").strip()
         if not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
             raise ValueError("Harbor must provide the exact 40-character product source SHA")
+        time_budget_seconds = adapter_env.get("GT_HARBOR_TIME_BUDGET_SECONDS", "").strip()
+        try:
+            valid_time_budget = float(time_budget_seconds) > 0
+        except ValueError:
+            valid_time_budget = False
+        if not valid_time_budget:
+            raise ValueError("Harbor must provide a positive task-derived time budget")
         environment_vars = {
             **host_env,
             **UTF8_ENV,
@@ -277,7 +284,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
                 task_id=task_id,
                 temperature=adapter_env["GT_HARBOR_TEMPERATURE"],
                 max_iterations=adapter_env["GT_HARBOR_MAX_ITERATIONS"],
-                time_budget_seconds=adapter_env["GT_HARBOR_TIME_BUDGET_SECONDS"],
+                time_budget_seconds=time_budget_seconds,
                 product_source_sha=product_source_sha,
             ),
             environment_vars,

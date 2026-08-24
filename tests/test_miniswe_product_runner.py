@@ -130,6 +130,25 @@ def test_gt_update_is_appended_to_same_observation_without_mutating_raw_output()
     )
 
 
+def test_time_budget_exits_cleanly_before_harbor_kills_the_agent() -> None:
+    agent = TreatmentMiniSweAgent(
+        _Model(),
+        _Environment(),
+        system_template="system",
+        instance_template="task={{task}}",
+        step_limit=3,
+        cost_limit=0.0,
+        treatment=_Treatment(),
+        time_budget_seconds=-1,
+    )
+
+    result = agent.run("fix it")
+
+    assert result["exit_status"] == "LimitsExceeded"
+    assert result["limit_reason"] == "time_budget"
+    assert agent.messages[-1]["content"] == "TimeBudgetExceeded"
+
+
 def test_miniswe_product_import_is_quiet_under_non_utf8_console(tmp_path) -> None:
     env = dict(os.environ)
     env.pop("MSWEA_SILENT_STARTUP", None)

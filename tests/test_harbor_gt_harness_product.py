@@ -63,6 +63,7 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
         model_name="stealth/ox-alpha",
         task_id="fix-code-vulnerability",
         product_source_sha="a" * 40,
+        time_budget_seconds="840",
     )
     monkeypatch.setattr(
         agent.logger,
@@ -91,6 +92,8 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
     assert environment["GT_EFFECTIVE_MODEL"] == "openai/stealth/ox-alpha"
     assert environment["GT_RETRIEVAL_MODE"] == "hybrid_required"
     assert environment["GT_DENSE_MODEL_DIR"] == "/installed-agent/snowflake-arctic-embed-m"
+    assert environment["GT_HARBOR_TIME_BUDGET_SECONDS"] == "840"
+    assert '"time_budget_seconds": "840"' in command
     assert "test-key" not in command
     assert "/logs/agent/harbor-adapter.json" in command
     assert all("test-key" not in repr(record) for record in log_records)
@@ -159,6 +162,15 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert '--ak product_source_sha="${{ needs.plan.outputs.source_sha }}"' in workflow
     assert "GT_RETRIEVAL_MODE" in workflow
     assert "hybrid_required" in workflow
+    assert "from scripts.resolve_harbor_budget import resolve_budget" in workflow
+    assert '"time_budget_seconds": max(' in workflow
+    assert 'float(budget["execution_budget_sec"]) - 60.0' in workflow
+    assert '--ak time_budget_seconds="${{ matrix.time_budget_seconds }}"' in workflow
+    assert "--ak time_budget_seconds=720" not in workflow
+    assert "musl-tools" in workflow
+    assert "CC: musl-gcc" in workflow
+    assert '-extldflags "-static"' in workflow
+    assert "statically linked" in workflow
     assert "-n 1" in workflow
     assert "-l 1" in workflow
     assert REPAIR20_SHA256 in workflow

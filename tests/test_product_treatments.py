@@ -274,7 +274,7 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
 
     treatment = GroundTruthTreatment(tmp_path)
     treatment.service = FakeService()
-    treatment.task = "Change answer without breaking callers"
+    treatment.task = "Change `answer` without breaking callers"
 
     rendered = treatment._render(update=False, budget=4_000, delivered_before_call=1)
 
@@ -318,10 +318,10 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=root, check=True)
 
     treatment = GroundTruthTreatment(root, state_dir=tmp_path / "state")
-    initial = treatment.prepare("Change answer without breaking invoke")
+    initial = treatment.prepare("Change `answer` without breaking invoke")
     compile_count = treatment.context_compile_count
     delivery_count = treatment.delivery_count
-    assert treatment.prepare("Change answer without breaking invoke") == initial
+    assert treatment.prepare("Change `answer` without breaking invoke") == initial
     assert treatment.context_compile_count == compile_count
     assert treatment.delivery_count == delivery_count
     initial_revision = treatment.finalize(None)["source_revision"]
@@ -352,6 +352,42 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
     assert receipt["initial_context_sha256"]
     assert augmentation.context_token_count <= 350
     assert receipt["delivery_receipts"][-1]["same_observation"] is True
+
+
+@pytest.mark.real_graph
+def test_groundtruth_treatment_refreshes_after_delivery_budget_is_exhausted(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repository"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+    (root / "app.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=root, check=True)
+
+    treatment = GroundTruthTreatment(root, state_dir=tmp_path / "state")
+    treatment.prepare("Change `answer`")
+    initial_revision = treatment.finalize(None)["source_revision"]
+    treatment.max_delivery_count = treatment.delivery_count
+
+    (root / "app.py").write_text(
+        "def answer(value: int = 1):\n    return 41 + value\n",
+        encoding="utf-8",
+    )
+    augmentation = treatment.after_action(
+        "bash",
+        {"command": "python changed app.py"},
+        "updated app.py",
+        False,
+    )
+
+    assert augmentation is None
+    assert treatment.before_model_call(2) == ""
+    receipt = treatment.finalize(None)
+    assert receipt["graph_status"] in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}
+    assert receipt["source_revision"] != initial_revision
 
 
 def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
@@ -477,3 +513,74 @@ def test_run_cli_checkpoints_receipt_before_agent_finishes(
     assert json.loads(output.read_text(encoding="utf-8"))["status"] == "COMPLETED"
     if os.name != "nt":
         assert output.stat().st_mode & stat.S_IROTH
+
+
+def test_run_cli_preserves_provider_usage_and_transcript_on_runtime_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import gt_harness.miniswe_runner as runner
+    from gt_harness.cli import _run_agent
+
+    output = tmp_path / "gt-run.json"
+
+    def build(**kwargs):
+        return SimpleNamespace(
+            config=SimpleNamespace(system_template="system", instance_template="task"),
+            on_message=kwargs["on_message"],
+            treatment=kwargs["treatment"],
+        )
+
+    def run(agent, _task):
+        agent.on_message(
+            {
+                "role": "assistant",
+                "content": "working",
+                "extra": {
+                    "response": {
+                        "usage": {
+                            "prompt_tokens": 12,
+                            "completion_tokens": 3,
+                            "prompt_tokens_details": {"cached_tokens": 4},
+                        }
+                    }
+                },
+            }
+        )
+        agent.on_message(
+            {
+                "role": "tool",
+                "content": "changed app.py",
+                "extra": {"returncode": 0},
+            }
+        )
+        raise TreatmentUnavailableError("FAILED:unobserved_repository_change")
+
+    monkeypatch.setattr(runner, "build_miniswe_agent", build)
+    monkeypatch.setattr(runner, "run_miniswe_agent", run)
+    args = SimpleNamespace(
+        task="Do work",
+        model="provider/model",
+        base_url="https://provider.invalid",
+        max_iterations=3,
+        time_budget_seconds=30.0,
+        root=str(tmp_path),
+        temperature=0.0,
+        run_id="runtime-error",
+        task_id="task-runtime-error",
+        trial_id="1",
+        output=str(output),
+        state_dir=None,
+        treatment="bare",
+    )
+
+    assert _run_agent(args) == 1
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+    assert receipt["status"] == "ERROR"
+    assert receipt["provider_calls"] == 1
+    assert receipt["input_tokens"] == 12
+    assert receipt["output_tokens"] == 3
+    assert receipt["cached_tokens"] == 4
+    assert [event.get("role") for event in receipt["transcript"][:2]] == [
+        "assistant",
+        "tool",
+    ]

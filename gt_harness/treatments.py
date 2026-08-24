@@ -805,18 +805,7 @@ class GroundTruthTreatment(BareTreatment):
     def _refresh_and_render_update(self) -> str:
         """Refresh stale graph state and render evidence for this observation."""
 
-        observed = self.service.status()
-        if observed.build_status is GraphStatus.STALE:
-            self.changed_paths = list(
-                dict.fromkeys((*self.changed_paths, *observed.git_status_paths))
-            )[-20:]
-            try:
-                observed = self.service.build()
-            except Exception as exc:  # noqa: BLE001 - treatment must fail closed
-                raise self._unavailable(
-                    observed, f"graph_update_failed:{type(exc).__name__}"
-                ) from exc
-            self._ensure_dense_ready()
+        observed = self._refresh_stale_graph(self.service.status())
         if not observed.query_ready:
             raise self._unavailable(
                 observed, f"graph_update_not_ready:{observed.build_status.value}"
@@ -828,6 +817,22 @@ class GroundTruthTreatment(BareTreatment):
             budget=max(0, self.update_char_budget),
             delivered_before_call=self.action_count,
         )
+
+    def _refresh_stale_graph(self, observed: Any) -> Any:
+        """Refresh repository state even when no further context may be delivered."""
+
+        if observed.build_status is GraphStatus.STALE:
+            self.changed_paths = list(
+                dict.fromkeys((*self.changed_paths, *observed.git_status_paths))
+            )[-20:]
+            try:
+                observed = self.service.build()
+            except Exception as exc:  # noqa: BLE001 - treatment must fail closed
+                raise self._unavailable(
+                    observed, f"graph_update_failed:{type(exc).__name__}"
+                ) from exc
+            self._ensure_dense_ready()
+        return observed
 
     def after_action(
         self,
@@ -881,6 +886,12 @@ class GroundTruthTreatment(BareTreatment):
         repository_changed = observed.build_status is GraphStatus.STALE
         if diagnostic_lines or diagnostics_cleared or discovered_new_path or repository_changed:
             self.context_dirty = True
+        # The delivery budget limits provider-visible text, not graph freshness.
+        # Always consume an observed repository mutation before returning so a
+        # later integrity barrier cannot mistake the agent's own edit for an
+        # out-of-band change.
+        if repository_changed and self.treatment_status is TreatmentStatus.ACTIVE:
+            self._refresh_stale_graph(observed)
         if (
             not self.context_dirty
             or self.treatment_status is not TreatmentStatus.ACTIVE

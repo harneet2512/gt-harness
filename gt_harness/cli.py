@@ -317,6 +317,7 @@ def _run_agent(args: argparse.Namespace) -> int:
     checkpoint_provider_calls = 0
     checkpoint_input_tokens = 0
     checkpoint_output_tokens = 0
+    checkpoint_cached_tokens = 0
     checkpoint_repository_end = repository_start
     initial_context = ""
 
@@ -361,7 +362,7 @@ def _run_agent(args: argparse.Namespace) -> int:
                 "provider_calls": checkpoint_provider_calls,
                 "input_tokens": checkpoint_input_tokens,
                 "output_tokens": checkpoint_output_tokens,
-                "cached_tokens": 0,
+                "cached_tokens": checkpoint_cached_tokens,
                 "treatment_receipt": treatment_receipt,
                 "treatment_receipt_present": True,
                 "transcript": list(checkpoint_events),
@@ -372,12 +373,22 @@ def _run_agent(args: argparse.Namespace) -> int:
         nonlocal checkpoint_provider_calls
         nonlocal checkpoint_input_tokens
         nonlocal checkpoint_output_tokens
+        nonlocal checkpoint_cached_tokens
         nonlocal checkpoint_repository_end
         normalized = _receipt_event(message)
         checkpoint_events.append(normalized)
         role = str(normalized.get("role") or "")
         if role == "assistant":
             checkpoint_provider_calls += 1
+            extra = normalized.get("extra")
+            response = extra.get("response") if isinstance(extra, dict) else None
+            usage = response.get("usage") if isinstance(response, dict) else None
+            if isinstance(usage, dict):
+                checkpoint_input_tokens += int(usage.get("prompt_tokens") or 0)
+                checkpoint_output_tokens += int(usage.get("completion_tokens") or 0)
+                details = usage.get("prompt_tokens_details")
+                if isinstance(details, dict):
+                    checkpoint_cached_tokens += int(details.get("cached_tokens") or 0)
         if role in {"tool", "user"} and normalized.get("extra"):
             try:
                 checkpoint_repository_end = _run_repository_identity(root)
@@ -444,7 +455,7 @@ def _run_agent(args: argparse.Namespace) -> int:
         return 1
     try:
         result = run_miniswe_agent(agent, args.task)
-    except Exception as exc:  # noqa: BLE001 - pre-provider failure needs a receipt
+    except Exception as exc:  # noqa: BLE001 - preserve all durable runtime evidence
         try:
             treatment_receipt = treatment.finalize(None)
         except Exception as receipt_exc:  # noqa: BLE001 - preserve the primary error
@@ -482,13 +493,14 @@ def _run_agent(args: argparse.Namespace) -> int:
             "repository_end": _run_repository_identity(root),
             "treatment": args.treatment,
             "resolved": None,
-            "provider_calls": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cached_tokens": 0,
+            "provider_calls": checkpoint_provider_calls,
+            "input_tokens": checkpoint_input_tokens,
+            "output_tokens": checkpoint_output_tokens,
+            "cached_tokens": checkpoint_cached_tokens,
             "treatment_receipt": treatment_receipt,
             "treatment_receipt_present": True,
             "transcript": [
+                *checkpoint_events,
                 {"type": "error", "message": f"{type(exc).__name__}: {exc}"},
                 {"type": "treatment_receipt", "receipt": treatment_receipt},
             ],
@@ -500,7 +512,7 @@ def _run_agent(args: argparse.Namespace) -> int:
                 "run_id": run_id,
                 "status": receipt["status"],
                 "error_type": receipt["error_type"],
-                "provider_calls": 0,
+                "provider_calls": checkpoint_provider_calls,
                 "receipt_path": str(output_path),
                 "treatment_receipt_present": True,
             }
