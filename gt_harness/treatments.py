@@ -323,11 +323,28 @@ class GroundTruthTreatment(BareTreatment):
                     for candidate in dense_query.candidates
                 )
             elif self.retrieval_mode == "hybrid_required":
-                raise self._unavailable(
-                    receipt,
-                    "dense_query_not_ready:"
-                    + ",".join(dense_query.degraded_reasons),
-                )
+                # A normal source edit can make the persisted dense index
+                # temporarily stale while the graph has already been
+                # refreshed.  Do not abort the treatment or deliver stale
+                # vectors: updates may use the current sparse/structural
+                # graph projection with an explicit degradation receipt.
+                # Initial startup still fails closed when hybrid retrieval is
+                # required and no dense index is available.
+                if update and dense_query.status.value == "STALE":
+                    reason = ",".join(dense_query.degraded_reasons) or "dense_index_stale"
+                    self.errors.append(f"dense_retrieval_degraded_on_update:{reason}")
+                    self.dense_receipt = {
+                        **self.dense_receipt,
+                        "status": "DEGRADED",
+                        "query_ready": False,
+                        "reason": reason,
+                    }
+                else:
+                    raise self._unavailable(
+                        receipt,
+                        "dense_query_not_ready:"
+                        + ",".join(dense_query.degraded_reasons),
+                    )
         state = ContextCompileRequest(
             task=self.task,
             source_revision=receipt.source_revision,
