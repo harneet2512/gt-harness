@@ -1,6 +1,6 @@
 # GroundTruth Project Completeness Audit
 
-Implementation subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
+Implementation subject: `2bab25973fd1e4e90372aac30231bbbe3009b863`
 
 Observed: `2026-08-24` in a clean 32-GB Linux Codespace.
 
@@ -39,9 +39,10 @@ not yet live-replayed.
    or path identities become edit targets; ranked candidates are explicitly inspection-only.
 4. Context updates arrived at the next provider boundary. They are now attached to
    the exact tool observation that created the evidence; raw tool output is preserved.
-5. Provider context was verbose and weakly structured. The v4 ledger emits compact
-   edit targets, inspection candidates, verified relations, process paths, impacts,
-   tests, validation facts, limitations, and revision receipts under 500/350 tokens.
+5. Provider context was verbose and weakly structured. The v5 ledger emits compact
+   role-typed edit, public-surface, integration, validation, and uncertain evidence,
+   plus verified relations, process paths, impacts, limitations, and revision
+   receipts under 500/350 tokens.
 6. Process and impact context used shallow local approximations. It now projects from
    the persisted graph with hard depth, branch, expansion, result, and evidence limits.
 7. Python imported calls could be falsely marked ambiguous because the same target
@@ -74,6 +75,20 @@ not yet live-replayed.
     false symbol authority. File-only task anchors now carry only file identity.
 17. Final attestation equated API calls with assistant messages and rejected valid
     format-error attempts. It now validates against trajectory model statistics.
+18. Long tasks could crowd explicitly named owners out of the bounded FTS/BM25
+    projection. A direct read-only graph identity channel now seeds syntax-marked
+    owners and longest existing API prefixes before downstream owner validation.
+19. A later unqualified clarification could bind a qualified requested API to a
+    same-named symbol in another subsystem. Qualified ownership is now task-wide
+    and authoritative.
+20. File co-location could substitute for a symbol match and make an unrelated type
+    satisfy a facet. Facet coverage now requires both symbol evidence and, where
+    scoped, owner-path agreement.
+21. Edit, public surface, integration, and verification candidates were collapsed
+    into one list. They now remain separate through one-per-role provider compaction.
+22. Feature lifecycle credited reading or unrelated edits as implementation progress.
+    Transitions are now tied to content hashes of attributed paths and applicable
+    post-edit validation.
 
 ## Canonical boundary and retained work
 
@@ -83,6 +98,8 @@ research evidence; it cannot certify or enter the final workflow. The obsolete M
 product and tracked Nano ambiguity were removed. This preserves useful prior work
 without leaving multiple production answers.
 
-Raw Linux receipts are committed under
-`audit/receipts/codespaces-8931876/`. All campaign steps report `PASS`, the checkout
-was clean, provider calls were `0`, and provider credentials were not inspected.
+The complete predecessor Linux campaign is committed under
+`audit/receipts/codespaces-8931876/`. The current delta receipt is
+`audit/receipts/localization-v5-2bab259.json`: 1,954 provider-free tests passed,
+two were explicitly skipped, five external-evidence tests were deselected, and
+exact archived-task replays passed on Awilix and Boa with no wrong-subsystem target.

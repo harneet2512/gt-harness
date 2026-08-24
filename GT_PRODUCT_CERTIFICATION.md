@@ -2,7 +2,7 @@
 
 Verdict: `CERTIFIED_WITH_DECLARED_LIMITATIONS`
 
-Implementation subject: `8931876541ec82ec96799f6c4462b5c0726e4518`
+Implementation subject: `2bab25973fd1e4e90372aac30231bbbe3009b863`
 
 Observed on clean Linux: `2026-08-24`.
 
@@ -23,6 +23,8 @@ Certified scope:
   exit or Harbor cancellation;
 - trajectory-backed call accounting, including provider format-error attempts; and
 - path-only edit authority for task-named files unless a symbol is independently exact.
+- localization-v5 owner/facet coverage with role-separated provider delivery and
+  content-attributable feature lifecycle.
 
 Declared limitations:
 
@@ -31,10 +33,13 @@ Declared limitations:
 - parser recovery/exclusions are explicit `READY_WITH_DECLARED_LIMITATIONS`;
 - semantic AST facts are currently Python-specific;
 - large Django/pnpm cold builds remain material;
-- the current deadline/supervision/path-authority repair has not been verified by a
-  third paid 20-task run;
+- the current localization-v5 repair has not yet been verified by the newly
+  authorized 20-task live smoke;
 - broad competitive superiority and causal solve-rate uplift are not certified.
 
-The exact-SHA certificate has zero provider calls and does not inspect provider
-credentials. Raw receipt:
+The exact-SHA delta verification has zero provider calls and does not inspect
+provider credentials. It selected 1,956 tests: 1,954 passed and two skipped; five
+external-evidence tests were deselected and the historical frozen-artifact suite
+was excluded by path. Current receipt: `audit/receipts/localization-v5-2bab259.json`.
+The predecessor complete campaign is retained at
 `audit/receipts/codespaces-8931876/codespaces-product-certification.json`.

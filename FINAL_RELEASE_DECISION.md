@@ -2,7 +2,8 @@
 
 Verdict: `HOLD`
 
-Exact implementation SHA under latest official verification: `c0b296f9f95f1e7b162b36d81063dafb8860e693`.
+Exact implementation SHA under current provider-free verification:
+`2bab25973fd1e4e90372aac30231bbbe3009b863`.
 
 GT Harness is suitable for continued controlled prerelease engineering. The
 latest official smoke [32717496816](https://github.com/harneet2512/gt-harness/actions/runs/32717496816)
@@ -11,6 +12,10 @@ while using a different model route. The retry and dense-update repairs are
 live-verified. This is not a causal GT regression measurement; solve-rate
 superiority, GitNexus superiority, and a controlled same-model causal uplift
 remain unproven. Two task-level errors remain explicit in the receipts.
+
+Localization v5 is verified provider-free and on exact archived Awilix/Boa
+replays. The next official 20-task smoke is authorized but not yet represented
+in this verdict; `HOLD` remains until that run and its trajectories are audited.
 
 | Question | Answer | Confidence |
 | --- | --- | --- |
@@ -39,6 +44,7 @@ remain unproven. Two task-level errors remain explicit in the receipts.
 - current graph truth: precision/recall `1.0/1.0` over 62 expected relationships;
 - lifecycle: 9/9; language matrix: 6/6; failure campaign: 18/18;
 - current exact-SHA Codespaces certification: see
+  `audit/receipts/localization-v5-2bab259.json` and the predecessor full campaign
   `audit/receipts/codespaces-8931876/codespaces-product-certification.json`.
 
 ## Remaining release blockers
@@ -48,4 +54,5 @@ remain unproven. Two task-level errors remain explicit in the receipts.
 2. Re-run the direct repository-intelligence comparison when claiming superiority
    over a particular GitNexus release; do not substitute vendor feature names.
 
-No third paid repair20 run was launched while producing this decision.
+One new official repair20 run is authorized after the current documentation freeze;
+its run ID and result will replace this pending statement after trajectory audit.

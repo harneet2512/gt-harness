@@ -1,17 +1,18 @@
 # Paid Benchmark Authorization
 
-Verdict: `NOT_AUTHORIZED`
+Verdict: `AUTHORIZED`
 
-Current implementation: `8931876541ec82ec96799f6c4462b5c0726e4518`.
+Current implementation: `2bab25973fd1e4e90372aac30231bbbe3009b863`.
 
 The previous limited authorization was consumed by GT-only repair20 runs
 [32676409425](https://github.com/harneet2512/gt-harness/actions/runs/32676409425)
 and [32680131105](https://github.com/harneet2512/gt-harness/actions/runs/32680131105).
 The latter failed final attestation with two genuinely nonterminal product receipts.
 
-Current code fixes the demonstrated causes and passes provider-free exact-SHA
-certification. A new paid run is still a separate experiment and requires explicit
-user authorization. Broad Bare/GT/GitNexus or DeepSWE spending is not authorized.
+Current code fixes the demonstrated causes, passes provider-free exact-SHA delta
+certification, and has explicit user authorization for one official GT-only
+20-task repair smoke through the canonical GitHub Actions workflow. Broad
+Bare/GT/GitNexus or DeepSWE spending remains unauthorized.
 
 Before a future authorization:
 
@@ -23,4 +24,6 @@ Before a future authorization:
    same-model outcome comparison; and
 5. forbid using a different-model local baseline as causal evidence.
 
-No paid run was dispatched for `8931876` while producing this document.
+Authorization is limited to `.github/workflows/tb2_miniswe_product.yml`, the frozen
+repair20 task set, Mini-SWE-Agent 2.2.8, one attempt, `stealth/ox-alpha`, full
+trajectories, and exact source SHA. The resulting run ID must be added after dispatch.

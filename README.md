@@ -2,16 +2,18 @@
 
 GT-Harness is a model-agnostic benchmarking product for measuring whether deterministic GroundTruth repository intelligence helps coding agents. The prerelease product owns graph construction, readiness, delivery, run receipts, and paired comparison; it does not depend on a particular model or provider.
 
-The clean-Linux certified implementation is
-`8931876541ec82ec96799f6c4462b5c0726e4518`, with verdict
+The current provider-free certified implementation is
+`2bab25973fd1e4e90372aac30231bbbe3009b863`, with verdict
 `CERTIFIED_WITH_DECLARED_LIMITATIONS`. It includes the canonical decision-context
 compiler, real pinned dense retrieval, persisted process/impact projection,
 same-observation Mini-SWE delivery, operation-aware Harbor deadlines, and external
 terminal-receipt supervision. Certified graph-language scope is Python,
-JavaScript, TypeScript, Go, Rust, and Java. The latest 20-task GT smoke scored a
-raw 12/20 but failed final attestation with two nonterminal product receipts; those
-causes are fixed at the current SHA but not paid-replayed. General competitive
-release remains `HOLD` and another paid run is not authorized.
+JavaScript, TypeScript, Go, Rust, and Java. Localization v5 separates edit,
+public-surface, integration, validation, and uncertain roles; retains explicit
+owners outside statistical rank windows; and records content-attributable feature
+lifecycle. The latest completed 20-task GT smoke scored 13/20 and passed final
+attestation. A new official smoke is authorized for the current frozen SHA;
+general competitive release remains `HOLD` until its results are audited.
 
 ## What is currently being built?
 
@@ -21,7 +23,9 @@ The current system combines:
 - exact symbol search and source-evidenced structural graph queries;
 - persistent revision-bound dense retrieval fused with exact/BM25/lexical/structural
   retrieval by deterministic reciprocal-rank fusion;
-- bounded decision packets containing edit targets, certified process paths, change surface, affected tests, validation facts, uncertainty, and revision-bound evidence;
+- bounded v5 decision packets containing owner-scoped edit targets, distinct
+  public/integration/validation roles, certified process paths, change surface,
+  affected tests, validation facts, uncertainty, and revision-bound evidence;
 - preflight and postflight command classification;
 - exact source-revision tracking and fail-closed full graph convergence after edits;
 - replayable receipts containing request hashes, evidence, timing, and token accounting.

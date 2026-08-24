@@ -710,10 +710,22 @@ def test_query_builder_materializes_qualified_owner_and_existing_api_analogs(
         connection.executemany(
             "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?)",
             (
-                (1, "Context", "core/engine/src/context/mod.rs", 1, 1, "pub struct Context", "rust", 0),
-                (2, "run_jobs", "core/engine/src/context/mod.rs", 2, 2, "pub fn run_jobs", "rust", 0),
-                (3, "Module", "core/engine/src/module/mod.rs", 1, 1, "pub struct Module", "rust", 0),
-                (4, "load_link_evaluate", "core/engine/src/module/mod.rs", 2, 2, "pub fn load_link_evaluate", "rust", 0),
+                (
+                    1, "Context", "core/engine/src/context/mod.rs", 1, 1,
+                    "pub struct Context", "rust", 0,
+                ),
+                (
+                    2, "run_jobs", "core/engine/src/context/mod.rs", 2, 2,
+                    "pub fn run_jobs", "rust", 0,
+                ),
+                (
+                    3, "Module", "core/engine/src/module/mod.rs", 1, 1,
+                    "pub struct Module", "rust", 0,
+                ),
+                (
+                    4, "load_link_evaluate", "core/engine/src/module/mod.rs", 2, 2,
+                    "pub fn load_link_evaluate", "rust", 0,
+                ),
                 (5, "Script", "core/engine/src/script.rs", 1, 1, "pub struct Script", "rust", 0),
                 (6, "evaluate", "core/engine/src/script.rs", 2, 2, "pub fn evaluate", "rust", 0),
             ),

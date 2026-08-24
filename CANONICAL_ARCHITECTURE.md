@@ -1,8 +1,10 @@
 # GroundTruth Canonical Architecture
 
-Status: canonical prerelease architecture. The certified implementation is
-`8931876541ec82ec96799f6c4462b5c0726e4518`; its clean Linux receipt bundle is
-committed under `audit/receipts/codespaces-8931876/`.
+Status: canonical prerelease architecture. The current implementation is
+`2bab25973fd1e4e90372aac30231bbbe3009b863`; its localization-v5 delta receipt is
+`audit/receipts/localization-v5-2bab259.json`. The preceding complete clean-Linux
+campaign remains under `audit/receipts/codespaces-8931876/`; all applicable
+provider-free gates were rerun on the current implementation.
 
 ## Product boundary
 
@@ -40,19 +42,22 @@ repository working tree
   -> persistent repository-wide Snowflake ONNX dense index
      (exact source/model/checksum identity; release mode fails closed)
   -> bounded HybridRepository projection from exact checkout bytes
+     (FTS/BM25 candidates plus direct read-only SQLite identity seeding for
+      syntax-marked owners and existing API prefixes)
   -> HybridRetriever + dense/sparse file fusion
      (exact identity + BM25 + lexical + certified structural + dense ranks,
       deterministic reciprocal-rank fusion and budgeted selection; dense
       candidates are inspection hints and never edit authority)
   -> RepositoryContextCompiler
-     (production-path ranking, exact symbol anchors, certified direct relationships,
-      persisted bounded CALLS processes, exact impact/change/test projections,
-      uncertainty and evidence ledger)
+     (task facets; owner-scoped exact symbols; bounded set cover; distinct EDIT,
+      PUBLIC_SURFACE, INTEGRATION, VALIDATION, and UNCERTAIN roles; production-path
+      ranking; certified direct relationships; persisted bounded CALLS processes;
+      exact impact/change/test projections; uncertainty and evidence ledger)
   -> bounded SemanticGraph projection over the selected exact source spans
      (Python AST value/return/control flow, uniquely bound local call arguments,
       explicit tensor-shape assertions, and versioned library contracts;
       source-revision receipt, no model-authored evidence, no guessed method binding)
-  -> compact gt.agent_context.v4 provider packet
+  -> compact gt.agent_context.v5 provider packet
   -> GroundTruthTreatment in gt-harness run
   -> pinned Mini-SWE-Agent 2.2.8 action loop
      (initial context accompanies the task; subsequent context is appended to
@@ -78,6 +83,12 @@ integrity barrier and never performs late context injection. Ordinary output
 containing words such as `error` does not trigger a diagnostic frame, and
 unrelated relationships from an anchored file are not admitted unless their
 exact endpoint symbol is anchored.
+
+Localization lifecycle states are content-attributable. Reading an advised file
+can move a feature to `FOLLOWED`; only a content change to an attributed path can
+move it to `EDITED`; and only applicable passing validation after such a change
+can move it to `VALIDATED`. Unrelated dirty files and read-only test runs cannot
+manufacture progress.
 
 ## Readiness invariant
 

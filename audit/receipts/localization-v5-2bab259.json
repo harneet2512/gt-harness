@@ -1,0 +1,44 @@
+{
+  "schema": "gt.localization_v5_delta_receipt.v1",
+  "observed_at": "2026-08-24",
+  "implementation_sha": "2bab25973fd1e4e90372aac30231bbbe3009b863",
+  "environment": {
+    "kind": "github_codespace",
+    "name": "gt-final-cert-9411ed1-5rwq4r5jjv7f4gxp",
+    "memory_gb": 32,
+    "provider_calls": 0
+  },
+  "provider_free_suite": {
+    "selected": 1956,
+    "passed": 1954,
+    "skipped": 2,
+    "deselected_external_evidence": 5,
+    "ignored_paths": ["tests/test_gt_finalstand.py"],
+    "status": "PASS"
+  },
+  "replays": {
+    "awilix": {
+      "repository_commit": "82ac179c1de4c216c4e333093044fac643303f0c",
+      "task_sha256": "9cace2139a042c37b0381384358e9c71642eea6b62dacaec08fe0e1b67771143",
+      "graph_identity": "70a12d713f590ca59d5cfcfa4f9e9e3cb291e1d788be09f647dd2fa1dd25d833",
+      "remote_receipt_sha256": "ae924514c3d341f0f3e43041987e0e8cf5ab9ea429beed25a981486880a8436e",
+      "existing_oracle_recall": 1.0,
+      "wrong_subsystem_targets": 0,
+      "status": "PASS"
+    },
+    "boa": {
+      "repository_commit": "70409a5052984325dccfdc5f6520818568a81f39",
+      "task_sha256": "3b20d9499fd1c67d67880b92da834fc4148e441b79bd695e029fa8ef2abd5522",
+      "graph_identity": "182142477860bb1a2ef712d502b35ae8eb74232ed2f1d263f2551cab4e103283",
+      "remote_receipt_sha256": "9ab55a9b1c79f4727c1123392adfaf884a7280bb28355bc471528636885e4e1c",
+      "existing_oracle_recall": 0.5,
+      "wrong_subsystem_targets": 0,
+      "status": "PASS_WITH_DECLARED_COMPACTNESS_LIMIT"
+    }
+  },
+  "smoke_authorization": {
+    "status": "AUTHORIZED",
+    "scope": "one canonical Mini-SWE-Agent 2.2.8 repair20 GitHub Actions run",
+    "workflow": ".github/workflows/tb2_miniswe_product.yml"
+  }
+}
