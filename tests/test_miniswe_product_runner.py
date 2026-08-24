@@ -192,7 +192,7 @@ def test_timed_shell_action_terminates_descendants(tmp_path) -> None:
     assert not marker.exists()
 
 
-def test_product_model_calls_are_transport_bounded_and_not_retried(
+def test_product_model_calls_are_transport_bounded_and_boundedly_retried(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setenv("MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT", "10")
@@ -209,7 +209,7 @@ def test_product_model_calls_are_transport_bounded_and_not_retried(
     )
 
     assert agent.model.config.model_kwargs["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
-    assert os.environ["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] == "1"
+    assert os.environ["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] == "3"
 
 
 def test_query_near_deadline_shrinks_provider_transport_timeout(monkeypatch) -> None:

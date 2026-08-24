@@ -51,7 +51,10 @@ _SENSITIVE_ENV = {
 }
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 60.0
-MODEL_RETRY_ATTEMPTS = 1
+# A single attempt made transient OpenRouter read timeouts terminal in the
+# official repair20 smoke.  Keep retries bounded (and inside Harbor's native
+# ceiling) instead of inheriting Mini-SWE's unbounded-looking default of ten.
+MODEL_RETRY_ATTEMPTS = 3
 
 
 def _sensitive(name: str) -> bool:
