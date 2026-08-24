@@ -32,12 +32,13 @@ CASES = {
 registrations with automatic dependency-aware startup ordering.
 
 The API adds an initializer to asClass/asFunction registrations and
-container.initialize({ concurrency }). Initialization is idempotent,
+`container.register`, `asClass`, `asFunction`, resolver `initializer`, and
+`container.initialize({ concurrency })`. Initialization is idempotent,
 dependency-level ordered, concurrent within each level, and rolls back already
-initialized services in reverse order after a failure. Add
+initialized services using `dispose` in reverse order after a failure. Add
 AwilixNotInitializedError and AwilixInitializationError behavior. Circular
-dependency failures during graph construction must remain retryable. Expose the
-public API and verify the behavior.""",
+dependency failures throw `AwilixResolutionError` during graph construction and
+must remain retryable. Expose the public API and verify the behavior.""",
         existing_oracle_paths=(
             "src/container.ts",
             "src/errors.ts",
@@ -118,6 +119,13 @@ def replay(case_name: str, repository: Path, state_dir: Path) -> dict[str, objec
     )
     context = treatment.prepare(case.task)
     receipt = treatment.finalize(None)
+    diagnostic = GroundTruthTreatment(
+        repository, state_dir=state_dir, retrieval_mode="sparse_only"
+    )
+    diagnostic.task = case.task
+    diagnostic.service.build()
+    packet = diagnostic._context(update=False, budget=6_000)
+    packet_dict = packet.as_dict()
     delivered = _path_lines(context)
     existing_hits = tuple(
         path for path in case.existing_oracle_paths if path in delivered
@@ -134,8 +142,31 @@ def replay(case_name: str, repository: Path, state_dir: Path) -> dict[str, objec
         "source_revision": receipt.get("source_revision"),
         "graph_identity": receipt.get("graph_identity"),
         "treatment_status": receipt.get("treatment_status"),
+        "treatment_errors": receipt.get("errors"),
         "context_schema_v5": 'schema="gt.agent_context.v5"' in context,
         "context": context,
+        "packet_status": packet_dict["status"],
+        "task_facets": packet_dict["task_facets"],
+        "packet_candidates": {
+            name: [
+                {
+                    "path": item["path"],
+                    "symbol": item["symbol"],
+                    "role": item["localization_role"],
+                    "facets": item["facet_ids"],
+                    "reason": item["decision_reason"],
+                }
+                for item in packet_dict[name]
+            ]
+            for name in (
+                "primary_edit_targets",
+                "inspection_candidates",
+                "inspection_public_surface",
+                "inspection_integration",
+                "supporting_files",
+            )
+        },
+        "packet_uncertainties": packet_dict["uncertainties"],
         "delivered_paths": delivered,
         "existing_oracle_paths": case.existing_oracle_paths,
         "existing_hits": existing_hits,
