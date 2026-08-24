@@ -21,6 +21,7 @@ from gt_engine.hybrid_retrieval import (
     RetrievalIntent,
     RetrievalState,
     StructuralLink,
+    retrieval_exact_identifiers,
     retrieval_query_terms,
 )
 from gt_engine.task_contract import Obligation, TaskContract, extract_task_contract
@@ -98,6 +99,72 @@ _NON_FATAL_BUILD_REASONS = frozenset({"chunk_character_limit"})
 _EXTERNAL_EVIDENCE_MARKERS = frozenset(
     {"builtin", "stdlib", "third_party", "third-party", "external", "framework"}
 )
+
+
+def _exact_task_node_ids(
+    graph: Path,
+    state: RetrievalState,
+    *,
+    limit: int,
+) -> tuple[int, ...]:
+    """Resolve syntax-marked owners and existing API prefixes directly.
+
+    FTS/BM25 is intentionally bounded and a long task can crowd an explicitly
+    named owner out of that candidate window.  Exact SQLite identity lookup is
+    an independent recall path.  New suffixed APIs also seed their longest
+    existing underscore prefixes (``run_jobs_with_evaluation`` ->
+    ``run_jobs``); the context compiler must still prove owner/path alignment
+    before any result can become an edit target.
+    """
+
+    identifiers: list[str] = []
+    for identifier in retrieval_exact_identifiers(state):
+        parts = identifier.split("_")
+        candidates = [identifier]
+        while len(parts) > 1:
+            parts = parts[:-1]
+            analog = "_".join(parts)
+            if len(analog) >= 4:
+                candidates.append(analog)
+        for candidate in candidates:
+            if candidate not in identifiers:
+                identifiers.append(candidate)
+    if not identifiers:
+        return ()
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{graph.as_posix()}?mode=ro", uri=True)
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        columns = _columns(connection, "nodes")
+        if "nodes" not in tables or not {"id", "name"} <= columns:
+            return ()
+        predicates = [
+            "LOWER(COALESCE(name,'')) IN ("
+            + ",".join("?" for _ in identifiers)
+            + ")"
+        ]
+        if "is_test" in columns and state.intent is not RetrievalIntent.VALIDATION_CONTEXT:
+            predicates.append("COALESCE(is_test,0)=0")
+        if "label" in columns:
+            predicates.append("LOWER(COALESCE(label,''))<>'file'")
+        order = "LOWER(COALESCE(file_path,'')),COALESCE(start_line,0),id"
+        rows = connection.execute(
+            "SELECT id FROM nodes WHERE "
+            + " AND ".join(predicates)
+            + f" ORDER BY {order} LIMIT ?",
+            (*identifiers, max(1, int(limit))),
+        )
+        return tuple(int(row[0]) for row in rows)
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return ()
+    finally:
+        if connection is not None:
+            connection.close()
 _AMBIGUOUS_RESOLUTION_MARKERS = frozenset(
     {"ambiguous", "multiple", "global_fallback", "global_unique", "workspace_unique"}
 )
@@ -908,9 +975,24 @@ def build_query_hybrid_repository(
         projection = _merge_graph_projections(legacy_projection, literal_projection)
     else:
         projection = legacy_projection
+    node_limit = max(8, int(candidate_limit) * 4)
+    exact_node_ids = _exact_task_node_ids(
+        graph,
+        state,
+        limit=node_limit,
+    )
     ordered_node_ids = tuple(
-        dict.fromkeys(fact.node_id for fact in projection.semantic_facts if int(fact.node_id) > 0)
-    )[: max(8, int(candidate_limit) * 4)]
+        dict.fromkeys(
+            (
+                *exact_node_ids,
+                *(
+                    fact.node_id
+                    for fact in projection.semantic_facts
+                    if int(fact.node_id) > 0
+                ),
+            )
+        )
+    )[:node_limit]
     dense_paths = tuple(
         dict.fromkeys(
             path

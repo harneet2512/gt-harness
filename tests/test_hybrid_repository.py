@@ -686,3 +686,55 @@ def test_query_builder_augments_without_displacing_legacy_graph_candidates(
         "src/allocator.py",
         "tests/test_allocator.py",
     }
+
+
+def test_query_builder_materializes_qualified_owner_and_existing_api_analogs(
+    tmp_path,
+):
+    paths = {
+        "core/engine/src/context/mod.rs": "pub struct Context;\npub fn run_jobs() {}\n",
+        "core/engine/src/module/mod.rs": "pub struct Module;\npub fn load_link_evaluate() {}\n",
+        "core/engine/src/script.rs": "pub struct Script;\npub fn evaluate() {}\n",
+    }
+    for relative, body in paths.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    connection = sqlite3.connect(graph)
+    try:
+        connection.execute(
+            "CREATE TABLE nodes (id INTEGER PRIMARY KEY,name TEXT,file_path TEXT,"
+            "start_line INTEGER,end_line INTEGER,signature TEXT,language TEXT,is_test BOOLEAN)"
+        )
+        connection.executemany(
+            "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?)",
+            (
+                (1, "Context", "core/engine/src/context/mod.rs", 1, 1, "pub struct Context", "rust", 0),
+                (2, "run_jobs", "core/engine/src/context/mod.rs", 2, 2, "pub fn run_jobs", "rust", 0),
+                (3, "Module", "core/engine/src/module/mod.rs", 1, 1, "pub struct Module", "rust", 0),
+                (4, "load_link_evaluate", "core/engine/src/module/mod.rs", 2, 2, "pub fn load_link_evaluate", "rust", 0),
+                (5, "Script", "core/engine/src/script.rs", 1, 1, "pub struct Script", "rust", 0),
+                (6, "evaluate", "core/engine/src/script.rs", 2, 2, "pub fn evaluate", "rust", 0),
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    repository = build_query_hybrid_repository(
+        tmp_path,
+        graph,
+        RetrievalState(
+            task_text=(
+                "Add `Context::run_jobs_with_evaluation`, "
+                "`Module::load_link_evaluate_with_evaluation`, and "
+                "`Script::evaluate_with_evaluation`."
+            ),
+            intent=RetrievalIntent.IMPLEMENTATION_CONTEXT,
+            source_revision="source-1",
+        ),
+        candidate_limit=8,
+    )
+
+    assert {document.path for document in repository.documents} == set(paths)

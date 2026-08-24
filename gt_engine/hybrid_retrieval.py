@@ -534,6 +534,37 @@ def retrieval_query_terms(
     return tuple(ranked[:maximum])
 
 
+def retrieval_exact_identifiers(
+    state: RetrievalState,
+    *,
+    limit: int = 64,
+) -> tuple[str, ...]:
+    """Return syntax-marked identifiers for exact graph candidate seeding.
+
+    This surface is deliberately narrower than sparse query terms: only code
+    entities explicitly marked by the task/trajectory are eligible.  It is
+    used to ensure a long issue cannot BM25-crowd named owners and APIs out of
+    the bounded graph projection.  Downstream owner/facet checks still decide
+    whether a matching repository symbol is relevant enough to expose.
+    """
+
+    ordered: list[str] = []
+    sections = (
+        state.task_text,
+        *state.active_symbols,
+        *state.diagnostics,
+    )
+    eligible = _explicit_identifiers(state)
+    for section in sections:
+        for token in _TOKEN_RE.findall(str(section or "")):
+            lowered = token.casefold()
+            if lowered in eligible and lowered not in ordered:
+                ordered.append(lowered)
+                if len(ordered) >= max(1, int(limit)):
+                    return tuple(ordered)
+    return tuple(ordered)
+
+
 @dataclass(frozen=True)
 class RepositoryDocument:
     path: str

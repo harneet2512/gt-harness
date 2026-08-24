@@ -602,6 +602,53 @@ def test_task_facets_split_multi_owner_api_surface_for_bounded_set_cover() -> No
     assert owner_facets["Script"].exact_symbols == ("evaluate",)
 
 
+def test_owner_scoped_exact_analogs_survive_global_retrieval_crowding() -> None:
+    documents = (
+        _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
+        _document("core/engine/src/context/mod.rs", "run_jobs", "pub fn run_jobs() {}"),
+        _document("core/engine/src/module/mod.rs", "Module", "pub struct Module;"),
+        _document(
+            "core/engine/src/module/mod.rs",
+            "load_link_evaluate",
+            "pub fn load_link_evaluate() {}",
+        ),
+        _document("core/engine/src/script.rs", "Script", "pub struct Script;"),
+        _document("core/engine/src/script.rs", "evaluate", "pub fn evaluate() {}"),
+        *tuple(
+            _document(
+                f"aaa/noise_{index:03d}.rs",
+                "evaluate",
+                "pub fn evaluate() {}",
+            )
+            for index in range(160)
+        ),
+    )
+    repository = HybridRepository(
+        documents=documents,
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=len(documents),
+        document_chars=sum(len(document.text) for document in documents),
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request(
+            "Add `Context::run_jobs_with_evaluation`, "
+            "`Script::evaluate_with_evaluation`, and "
+            "`Module::load_link_evaluate_with_evaluation`."
+        ),
+    )
+
+    assert {item.path for item in packet.primary_edit_targets} == {
+        "core/engine/src/context/mod.rs",
+        "core/engine/src/module/mod.rs",
+        "core/engine/src/script.rs",
+    }
+
+
 def test_qualified_owner_prefers_case_exact_type_over_lowercase_namesakes() -> None:
     documents = (
         _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
