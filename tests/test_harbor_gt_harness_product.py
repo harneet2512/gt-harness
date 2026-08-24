@@ -178,6 +178,12 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"' in workflow
     assert "SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}" in workflow
     assert "SOURCE_SHA: ${{ github.sha }}" not in workflow
+    assert "nonterminal_product_receipt" in workflow
+    assert "missing_full_trajectory" in workflow
+    assert "provider_call_receipt_mismatch" in workflow
+    assert "gt_treatment_unavailable" in workflow
+    assert "active_graph_not_ready" in workflow
+    assert "active_dense_not_ready" in workflow
     task_block = workflow.split("          tasks = [", 1)[1].split("          ]", 1)[0]
     observed_tasks = tuple(re.findall(r'^\s+"([^"]+)",$', task_block, re.MULTILINE))
     assert observed_tasks == REPAIR20_TASKS
