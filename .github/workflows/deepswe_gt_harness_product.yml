@@ -309,22 +309,30 @@ jobs:
 
       - name: Authenticate public ECR for DeepSWE task image pulls
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # DeepSWE task images are public.ecr.aws images. Docker Hub login
           # does not authorize this registry. The public registry token keeps
           # the 20-task matrix from falling back to anonymous ECR pulls.
+          # The registry's bearer token endpoint is not a Docker Basic-auth
+          # endpoint; piping its bearer token to `docker login` returns HTTP
+          # 400 on GitHub-hosted runners.  Anonymous pulls are supported, so
+          # do not turn an optional optimization into a task failure.  The
+          # stagger below prevents the 20-job matrix from creating a burst.
           token="$(curl --fail --silent --show-error \
             'https://public.ecr.aws/token/?scope=repository:d3j8x8q7/swe-bench-202605:pull&service=public.ecr.aws' \
-            | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
-          test -n "$token"
-          printf '%s' "$token" | docker login public.ecr.aws --username AWS --password-stdin
+            | python -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)"
+          if [ -n "$token" ] && printf '%s' "$token" | docker login public.ecr.aws --username AWS --password-stdin; then
+            echo "Public ECR authentication configured"
+          else
+            echo "Public ECR authenticated pull unavailable; using staggered anonymous pull"
+          fi
 
       - name: Stagger Docker task-image pulls
         run: |
           set -euo pipefail
           # GitHub-hosted runners have isolated Docker daemons. Keep all 20
           # jobs parallel, but avoid a synchronized Docker Hub pull burst.
-          delay=$(( (ORDINAL - 1) * 15 ))
+          delay=$(( (ORDINAL - 1) * 30 ))
           echo "Waiting ${delay}s before the task image pull"
           sleep "$delay"
 
