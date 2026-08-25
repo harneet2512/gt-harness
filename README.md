@@ -85,7 +85,7 @@ not typed in by an operator.
 
 `gt-harness run` is the sole coding-agent product boundary. GT Harness does not
 ship an MCP server: benchmark treatments run through the pinned Mini-SWE-Agent
-2.2.8 loop so graph delivery, trajectories, costs, and solve outcomes share one
+2.4.6 loop so graph delivery, trajectories, costs, and solve outcomes share one
 auditable path.
 
 The legacy file-keyed incremental indexer and historical benchmark/control paths remain in the repository for parity analysis, but they are not the canonical graph lifecycle. See `CANONICAL_ARCHITECTURE.md` for the authoritative boundary.

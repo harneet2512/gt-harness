@@ -28,9 +28,9 @@ from minisweagent.config import builtin_config_dir
 from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentConfig
 from minisweagent.models.litellm_model import BASH_TOOL, LitellmModel
 
-from gt_harness.treatments import BareTreatment
+from gt_harness.treatments import ActionObservation, BareTreatment
 
-# Mini-SWE 2.2.8 prints a Unicode startup banner and loads a user-global .env
+# Mini-SWE 2.4.6 prints a Unicode startup banner and loads a user-global .env
 # at import time.  The guard is imported before Mini-SWE (ruff sorts this
 # before the scaffold imports, then this restores the explicit process environment.
 restore_environment()
@@ -225,6 +225,7 @@ class TreatmentMiniSweAgent(DefaultAgent):
 
     def execute_actions(self, message: dict) -> list[dict]:
         outputs: list[dict[str, Any]] = []
+        observations: list[ActionObservation] = []
         for action in message.get("extra", {}).get("actions", []):
             remaining = self._remaining_seconds()
             action_timeout = None
@@ -260,18 +261,27 @@ class TreatmentMiniSweAgent(DefaultAgent):
                     }
                 )
             raw_text = str(output.get("output") or output.get("exception_info") or "")
-            augmentation = self.treatment.after_action(
-                "bash",
-                dict(action),
-                raw_text,
-                int(output.get("returncode") or 0) != 0,
+            observations.append(
+                ActionObservation(
+                    name="bash",
+                    arguments=dict(action),
+                    output=raw_text,
+                    is_error=int(output.get("returncode") or 0) != 0,
+                )
             )
             provider_output = deepcopy(output)
-            if augmentation is not None:
-                separator = "\n\n" if raw_text else ""
-                provider_output["output"] = raw_text + separator + augmentation.content
-                provider_output["gt_delivery_receipt"] = augmentation.as_dict()
             outputs.append(provider_output)
+        augmentation = self.treatment.after_actions(tuple(observations))
+        if augmentation is not None and outputs:
+            raw_text = str(outputs[-1].get("output") or outputs[-1].get("exception_info") or "")
+            separator = "\n\n" if raw_text else ""
+            outputs[-1]["output"] = raw_text + separator + augmentation.content
+            # Mini-SWE only carries output["extra"] into the trajectory. Keep
+            # the immutable environment output and receipt there so the exact
+            # provider-visible observation can be independently reconciled.
+            output_extra = outputs[-1].setdefault("extra", {})
+            output_extra["gt_raw_output"] = raw_text
+            output_extra["gt_delivery_receipt"] = augmentation.as_dict()
         return self.add_messages(
             *self.model.format_observation_messages(
                 message, outputs, self.get_template_vars()

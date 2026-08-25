@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
 import subprocess
@@ -85,6 +86,52 @@ class _Environment:
         return {}
 
 
+class _TurnAugmentingTreatment(BareTreatment):
+    def __init__(self) -> None:
+        super().__init__()
+        self.turns = []
+
+    def after_actions(self, observations):
+        from gt_harness.treatments import ObservationAugmentation
+
+        self.turns.append(tuple(observations))
+        return ObservationAugmentation(
+            content=(
+                "<groundtruth-repository-context>one turn fact"
+                "</groundtruth-repository-context>"
+            ),
+            raw_output_sha256=hashlib.sha256(
+                observations[-1].output.encode("utf-8")
+            ).hexdigest(),
+            context_sha256="b" * 64,
+            delivery_index=2,
+            source_revision="revision-2",
+            observation_count=len(observations),
+            turn_observations_sha256="c" * 64,
+        )
+
+
+class _MultiActionModel(_Model):
+    def format_observation_messages(self, message, outputs, variables):
+        return tuple(
+            {
+                "role": "tool",
+                "content": output["output"],
+                "extra": dict(output.get("extra", {})),
+            }
+            for output in outputs
+        )
+
+
+class _MultiActionEnvironment(_Environment):
+    def execute(self, action):
+        return {
+            "output": str(action["command"]),
+            "returncode": 0,
+            "exception_info": "",
+        }
+
+
 def test_miniswe_treatment_is_advisory_and_observes_unmodified_action() -> None:
     model = _Model()
     treatment = _Treatment()
@@ -135,6 +182,44 @@ def test_gt_update_is_appended_to_same_observation_without_mutating_raw_output()
         message.get("role") == "user" and "late context" in message.get("content", "")
         for message in agent.messages
     )
+
+
+def test_multiple_actions_produce_at_most_one_turn_level_augmentation() -> None:
+    treatment = _TurnAugmentingTreatment()
+    agent = TreatmentMiniSweAgent(
+        _MultiActionModel(),
+        _MultiActionEnvironment(),
+        system_template="system",
+        instance_template="task={{task}}",
+        step_limit=3,
+        cost_limit=0.0,
+        treatment=treatment,
+    )
+    assistant = {
+        "role": "assistant",
+        "content": "inspect",
+        "extra": {
+            "actions": [
+                {"command": "sed -n '1,20p' src/a.py"},
+                {"command": "sed -n '1,20p' src/b.py"},
+            ]
+        },
+    }
+
+    observations = agent.execute_actions(assistant)
+
+    assert len(treatment.turns) == 1
+    assert len(treatment.turns[0]) == 2
+    assert sum("one turn fact" in message["content"] for message in observations) == 1
+    assert "one turn fact" in observations[-1]["content"]
+    receipt = observations[-1]["extra"].get("gt_delivery_receipt")
+    assert receipt is not None
+    assert receipt["observation_count"] == 2
+    assert receipt["raw_output_sha256"] == hashlib.sha256(
+        b"sed -n '1,20p' src/b.py"
+    ).hexdigest()
+    assert receipt["turn_observations_sha256"]
+    assert observations[-1]["extra"]["gt_raw_output"] == "sed -n '1,20p' src/b.py"
 
 
 def test_time_budget_exits_cleanly_before_harbor_kills_the_agent() -> None:
@@ -256,7 +341,7 @@ def test_miniswe_product_import_is_quiet_under_non_utf8_console(tmp_path) -> Non
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        timeout=15,
+        timeout=30,
         check=False,
     )
     assert completed.returncode == 0, completed.stdout

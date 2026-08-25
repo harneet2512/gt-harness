@@ -317,8 +317,6 @@ def _normalized_path(path: str) -> str:
 
 def _facet_role(text: str) -> LocalizationRole:
     lowered = str(text or "").lower()
-    if re.search(r"\b(?:test|verify|validate|regression)\b", lowered):
-        return LocalizationRole.VALIDATION
     if re.search(
         r"\b(?:public api|public capabilities|public entry points|public surface|"
         r"crate surface|export|re-export|reexport)\b",
@@ -327,7 +325,36 @@ def _facet_role(text: str) -> LocalizationRole:
         return LocalizationRole.PUBLIC_SURFACE
     if re.search(r"\b(?:integrat|wire|lifecycle|execution path|data flow)\w*\b", lowered):
         return LocalizationRole.INTEGRATION
+    # A test runner, test fixture, or failing test can itself be the product
+    # code being edited.  Only an explicit verification action is validation
+    # work; the mere noun "test" is not enough to change localization roles.
+    if (
+        re.search(r"\b(?:verify|validate|confirm)\b", lowered)
+        or re.search(
+            r"\b(?:add|create|write|update)\s+(?:an?\s+|the\s+)?"
+            r"(?:(?:unit|integration|regression|acceptance)\s+)?tests?\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:run|execute)\s+(?:the\s+)?(?:tests?|pytest|go test|cargo test)\b",
+            lowered,
+        )
+        or re.search(r"\btests?\s+(?:pass|passes|passing|cover|covers)\b", lowered)
+        or re.search(r"\bregression\s+(?:coverage|tests?)\b", lowered)
+    ):
+        return LocalizationRole.VALIDATION
     return LocalizationRole.EDIT
+
+
+def _requires_implementation_edit(text: str) -> bool:
+    """Return whether an inspection/public obligation also changes code."""
+
+    return bool(
+        re.search(
+            r"(?i)\b(?:add|change|fix|implement|modify|remove|replace|wire|integrate)\b",
+            str(text or ""),
+        )
+    )
 
 
 def _code_shaped(value: str) -> bool:
@@ -355,6 +382,30 @@ def _associated_entities(text: str) -> tuple[str, ...]:
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", member):
                 entities.append(f"{owner}::{member}")
     return tuple(dict.fromkeys(entities))
+
+
+def _quoted_entity_is_literal(text: str, match: re.Match[str]) -> bool:
+    """Reject quoted values that describe configuration rather than code.
+
+    Backticks are formatting, not proof of symbol identity.  Simple lowercase
+    values next to a value-bearing noun stay retrieval terms even if a
+    same-named repository symbol happens to exist.  Qualified and code-shaped
+    names remain eligible for exact repository resolution.
+    """
+
+    entity = match.group(1)
+    if _code_shaped(entity):
+        return False
+    prefix = text[max(0, match.start() - 80) : match.start()].lower()
+    suffix = text[match.end() : min(len(text), match.end() + 50)].lower()
+    value_noun = (
+        r"(?:mode|option|flag|setting|value|literal|header|key|format|strategy|"
+        r"level|state|status|kind|type)"
+    )
+    return bool(
+        re.search(value_noun + r"\s+(?:to\s+|as\s+|is\s+|=\s*)?$", prefix)
+        or re.match(r"\s+" + value_noun + r"\b", suffix)
+    )
 
 
 def _symbol_bearing_segments(task: str) -> tuple[str, ...]:
@@ -518,7 +569,11 @@ def compile_task_facets(
             for entity in associated
         }
         entities = list(associated)
-        entities.extend(match.group(1) for match in _CODE_ENTITY.finditer(text))
+        entities.extend(
+            match.group(1)
+            for match in _CODE_ENTITY.finditer(text)
+            if not _quoted_entity_is_literal(text, match)
+        )
         for match in _SYMBOL_CUE.finditer(text):
             candidate = match.group(1)
             if candidate.casefold() in available or _code_shaped(candidate):
@@ -538,18 +593,38 @@ def compile_task_facets(
         digest = hashlib.sha256(
             f"{obligation_id}\0{text}".encode()
         ).hexdigest()[:16]
-        facets.append(
-            TaskFacet(
-                facet_id=f"facet-{digest}",
-                obligation_ids=(obligation_id,),
-                role=_facet_role(text),
-                exact_symbols=exact,
-                unresolved_symbols=unresolved,
-                query_terms=significant_tokens(text)[:12],
-                owning_symbols=owners,
-                owning_modules=modules,
-            )
+        role = _facet_role(text)
+        facet = TaskFacet(
+            facet_id=f"facet-{digest}",
+            obligation_ids=(obligation_id,),
+            role=role,
+            exact_symbols=exact,
+            unresolved_symbols=unresolved,
+            query_terms=significant_tokens(text)[:12],
+            owning_symbols=owners,
+            owning_modules=modules,
         )
+        facets.append(facet)
+        # Public-surface and integration work often has two independent
+        # responsibilities: change an implementation owner and inspect/update
+        # the boundary.  Preserve both instead of coercing the whole clause
+        # into one candidate list.  Export-only inspection does not authorize
+        # editing the underlying definition.
+        if (
+            role in {LocalizationRole.PUBLIC_SURFACE, LocalizationRole.INTEGRATION}
+            and _requires_implementation_edit(text)
+            and (exact or unresolved or owners)
+        ):
+            edit_digest = hashlib.sha256(
+                f"{obligation_id}\0{text}\0edit".encode()
+            ).hexdigest()[:16]
+            facets.append(
+                replace(
+                    facet,
+                    facet_id=f"facet-{edit_digest}",
+                    role=LocalizationRole.EDIT,
+                )
+            )
         qualified_by_owner: dict[str, list[str]] = {}
         for entity in entity_values:
             segments = re.split(r"(?:::|[.#])", entity)
@@ -567,7 +642,7 @@ def compile_task_facets(
                     TaskFacet(
                         facet_id=f"facet-{child_digest}",
                         obligation_ids=(obligation_id,),
-                        role=_facet_role(text),
+                        role=role,
                         exact_symbols=child_exact,
                         unresolved_symbols=child_unresolved,
                         query_terms=significant_tokens(
@@ -1234,14 +1309,41 @@ class RepositoryContextCompiler:
                 or matches_concrete_anchor(row)
             )
         )
-        authoritative_rows = exact_symbol_rows or exact_path_rows
+        authoritative_rows = tuple(
+            dict.fromkeys((*exact_symbol_rows, *exact_path_rows))
+        )
+        facets_by_id = {facet.facet_id: facet for facet in task_facets}
+
+        def row_facet_ids(row: RankedFile) -> tuple[str, ...]:
+            candidate = _exact_candidate(row) or row.representative
+            return _matching_facet_ids(
+                symbol=str(candidate.symbol or ""),
+                path=row.path,
+                facets=task_facets,
+            )
+
+        def row_roles(row: RankedFile) -> frozenset[LocalizationRole]:
+            return frozenset(
+                facets_by_id[facet_id].role
+                for facet_id in row_facet_ids(row)
+                if facet_id in facets_by_id
+            )
+
         non_public_rows = tuple(
             row for row in authoritative_rows if row.path not in public_surface_paths
         )
         validation_rows = tuple(row for row in non_public_rows if _is_test(row.path))
-        edit_rows = tuple(row for row in non_public_rows if not _is_test(row.path))
+        edit_rows = tuple(
+            row
+            for row in non_public_rows
+            if not _is_test(row.path)
+            and (
+                LocalizationRole.EDIT in row_roles(row)
+                or (row in exact_path_rows and not row_facet_ids(row))
+            )
+        )
         primary_rows = _select_role_complete_rows(
-            tuple(edit_rows or (row for row in authoritative_rows if not _is_test(row.path))),
+            edit_rows,
             task_facets,
             limit=3,
         )
@@ -1324,6 +1426,34 @@ class RepositoryContextCompiler:
             )
         )
         inspection_items: list[ContextEvidenceItem] = []
+        for row in non_public_rows:
+            roles = row_roles(row)
+            role = next(
+                (
+                    candidate
+                    for candidate in (
+                        LocalizationRole.PUBLIC_SURFACE,
+                        LocalizationRole.INTEGRATION,
+                        LocalizationRole.VALIDATION,
+                    )
+                    if candidate in roles
+                ),
+                None,
+            )
+            if role is None or row in primary_rows:
+                continue
+            inspection_items.append(
+                replace(
+                    _identity_item(
+                        row,
+                        request,
+                        decision_reason="exact_task_identity_inspection_only",
+                        file_only=row in exact_path_rows and row not in exact_symbol_rows,
+                    ),
+                    localization_role=role.value,
+                    facet_ids=row_facet_ids(row),
+                )
+            )
         for fused in fusion_rows:
             path = str(fused["path"])
             sparse_entry = sparse_by_path.get(path)
@@ -1360,7 +1490,7 @@ class RepositoryContextCompiler:
             )
             if len(inspection_items) >= 3:
                 break
-        inspection = tuple(inspection_items)
+        inspection = tuple(inspection_items[:3])
         anchors = (*primary, *inspection)
         anchor_paths = frozenset(item.path for item in anchors)
         anchor_symbols = frozenset(item.symbol for item in anchors if item.symbol)
@@ -1628,6 +1758,38 @@ class RepositoryContextCompiler:
             fact.rendered for fact in projection.validation_facts[:5]
         )
         semantic_projection = projection.semantic_graph
+        facet_ids_by_path: dict[str, tuple[str, ...]] = {}
+        for item in (*anchors, *supporting):
+            if item.path and item.facet_ids:
+                facet_ids_by_path[item.path] = tuple(
+                    dict.fromkeys(
+                        (*facet_ids_by_path.get(item.path, ()), *item.facet_ids)
+                    )
+                )
+        scoped_link_items = tuple(
+            replace(
+                item,
+                facet_ids=tuple(
+                    dict.fromkeys(
+                        (
+                            *_matching_facet_ids(
+                                symbol=item.source_symbol,
+                                path=item.source_path,
+                                facets=task_facets,
+                            ),
+                            *_matching_facet_ids(
+                                symbol=item.symbol,
+                                path=item.path,
+                                facets=task_facets,
+                            ),
+                            *facet_ids_by_path.get(item.source_path, ()),
+                            *facet_ids_by_path.get(item.path, ()),
+                        )
+                    )
+                ),
+            )
+            for item in link_items
+        )
         semantic_items = tuple(
             ContextEvidenceItem(
                 kind="semantic_fact",
@@ -1646,6 +1808,16 @@ class RepositoryContextCompiler:
                 source_path=fact.path,
                 source_symbol=fact.scope,
                 source_excerpt=fact.evidence,
+                localization_role=LocalizationRole.UNCERTAIN.value,
+                facet_ids=(
+                    _matching_facet_ids(
+                        symbol=fact.scope or fact.subject,
+                        path=fact.path,
+                        facets=task_facets,
+                    )
+                    or facet_ids_by_path.get(fact.path, ())
+                    or anchor_facet_ids
+                ),
             )
             for fact in (semantic_projection.facts if semantic_projection else ())
         )
@@ -1658,7 +1830,7 @@ class RepositoryContextCompiler:
                     *generic_supporting,
                     *public_surface,
                     *integration,
-                    *link_items,
+                    *scoped_link_items,
                     *semantic_items,
                 )
             }.values()

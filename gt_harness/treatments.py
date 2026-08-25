@@ -29,6 +29,7 @@ from gt_engine.repository_context_compiler import (
 )
 from gt_engine.repository_graph_service import GraphStatus, RepositoryGraphService
 from gt_engine.snowflake_onnx import SnowflakeOnnxDenseBackend
+from gt_engine.task_contract import extract_task_contract
 
 
 class TreatmentStatus(StrEnum):
@@ -84,6 +85,12 @@ _VALIDATION_COMMAND = re.compile(
 _VALIDATION_SUCCESS = re.compile(
     r"(?i)(?:\b\d+\s+passed\b|\btests?\s+passed\b|\bbuild\s+success(?:ful)?\b|^ok\b)"
 )
+_INSPECTION_COMMAND = re.compile(
+    r"(?i)(?:^|\s|&&|;)(?:cat|bat|head|tail|less|more|nl)\b|"
+    r"(?:^|\s|&&|;)sed\s+(?!-i\b)|"
+    r"(?:^|\s|&&|;)(?:rg|grep)\s+(?!--files\b)|"
+    r"\bgit\s+(?:diff|show|status)\b"
+)
 
 
 def _bounded_token_count(text: str) -> int:
@@ -125,6 +132,29 @@ class BareTreatment:
     ) -> ObservationAugmentation | None:
         return None
 
+    def after_actions(
+        self,
+        observations: tuple[ActionObservation, ...],
+    ) -> ObservationAugmentation | None:
+        """Observe one complete provider turn and emit at most one delta.
+
+        The default preserves compatibility for simple treatments. The GT
+        treatment overrides this method so graph refresh and delivery happen
+        once after all actions from the same assistant response.
+        """
+
+        augmentation = None
+        for observation in observations:
+            candidate = self.after_action(
+                observation.name,
+                observation.arguments,
+                observation.output,
+                observation.is_error,
+            )
+            if candidate is not None:
+                augmentation = candidate
+        return augmentation
+
     def finalize(self, result: Any) -> dict[str, Any]:
         return {
             "schema": "gt.treatment_receipt.v1",
@@ -147,6 +177,16 @@ class BareTreatment:
 
 
 @dataclass(frozen=True, slots=True)
+class ActionObservation:
+    """One immutable action/result pair inside a Mini-SWE provider turn."""
+
+    name: str
+    arguments: dict[str, Any]
+    output: str
+    is_error: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ObservationAugmentation:
     """Context attached to the exact tool observation that caused it.
 
@@ -161,16 +201,28 @@ class ObservationAugmentation:
     delivery_index: int
     source_revision: str
     context_token_count: int = 0
+    delivered_before_call: int = 0
+    serialized_claim_ids: tuple[str, ...] = ()
+    provider_visible_feature_counts: dict[str, int] = field(default_factory=dict)
+    observation_count: int = 1
+    turn_observations_sha256: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema": "gt.delivery_receipt.v2",
+            "schema": "gt.delivery_receipt.v3",
             "delivery_index": self.delivery_index,
             "source_revision": self.source_revision,
             "raw_output_sha256": self.raw_output_sha256,
             "context_sha256": self.context_sha256,
             "same_observation": True,
             "context_token_count": self.context_token_count,
+            "delivered_before_call": self.delivered_before_call,
+            "serialized_claim_ids": list(self.serialized_claim_ids),
+            "provider_visible_feature_counts": dict(
+                self.provider_visible_feature_counts
+            ),
+            "observation_count": self.observation_count,
+            "turn_observations_sha256": self.turn_observations_sha256,
         }
 
 
@@ -182,7 +234,7 @@ class GroundTruthTreatment(BareTreatment):
     update_char_budget: int = 4_000
     max_delivery_count: int = 4
     start_token_budget: int = 500
-    update_token_budget: int = 350
+    update_token_budget: int = 500
     retrieval_mode: str | None = None
     treatment_id: str = field(default="groundtruth", init=False)
     service: RepositoryGraphService = field(init=False, repr=False)
@@ -200,6 +252,10 @@ class GroundTruthTreatment(BareTreatment):
     delivery_char_count: int = field(default=0, init=False)
     delivery_calls: list[int] = field(default_factory=list, init=False)
     delivery_receipts: list[dict[str, Any]] = field(default_factory=list, init=False)
+    provider_delivery_receipts: list[dict[str, Any]] = field(
+        default_factory=list, init=False
+    )
+    current_provider_call: int = field(default=1, init=False)
     errors: list[str] = field(default_factory=list, init=False)
     delivered_claim_ids: set[str] = field(default_factory=set, init=False, repr=False)
     active_paths: list[str] = field(default_factory=list, init=False, repr=False)
@@ -230,6 +286,13 @@ class GroundTruthTreatment(BareTreatment):
     feature_transitions: list[dict[str, Any]] = field(
         default_factory=list, init=False, repr=False
     )
+    _last_delivery_claim_ids: tuple[str, ...] = field(
+        default=(), init=False, repr=False
+    )
+    _last_delivery_feature_counts: dict[str, int] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _last_delivery_before_call: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.feature_states.update(
@@ -290,7 +353,10 @@ class GroundTruthTreatment(BareTreatment):
         normalized_paths = tuple(
             dict.fromkeys(_normalize_relative_path(path) for path in paths if path)
         )
-        if normalized_paths:
+        # Candidate generation is private compiler state. Only paths whose
+        # facts actually crossed the provider boundary may participate in
+        # follow-through, edit, or validation attribution.
+        if normalized_paths and state is not FeatureState.CANDIDATE:
             self.feature_paths.setdefault(feature, set()).update(normalized_paths)
         if current == state.value:
             return
@@ -393,37 +459,82 @@ class GroundTruthTreatment(BareTreatment):
         receipt = self.service.status()
         dense_candidates: tuple[tuple[str, float], ...] = ()
         if self.dense_index is not None:
-            dense_query = self.dense_index.query(
-                "\n".join(
-                    item
-                    for item in (
-                        self.task,
-                        *self.diagnostics[-6:],
-                        *self.active_paths[-10:],
-                    )
-                    if item
-                ),
-                limit=12,
-            )
-            self.dense_query_receipts.append(
-                {
-                    "query_ready": dense_query.query_ready,
-                    "status": dense_query.status.value,
-                    "source_revision": dense_query.source_revision,
-                    "model_identity": dense_query.model_identity,
-                    "candidate_count": len(dense_query.candidates),
-                    "candidate_paths": [
-                        candidate.path for candidate in dense_query.candidates[:12]
-                    ],
-                    "degraded_reasons": list(dense_query.degraded_reasons),
-                }
-            )
-            if dense_query.query_ready:
-                dense_candidates = tuple(
-                    (candidate.path, candidate.score)
-                    for candidate in dense_query.candidates
+            contract = extract_task_contract(self.task)
+            query_rows: list[tuple[str, str]] = [
+                (obligation.obligation_id, obligation.text)
+                for obligation in contract.obligations[:6]
+                if obligation.text.strip()
+            ]
+            if not query_rows:
+                query_rows.append(("task", self.task))
+            dynamic_query = "\n".join(
+                item
+                for item in (
+                    *self.diagnostics[-6:],
+                    *self.active_paths[-10:],
+                    *self.changed_paths[-10:],
                 )
-            elif self.retrieval_mode == "hybrid_required":
+                if item
+            )
+            if dynamic_query:
+                query_rows.append(("observed-state", dynamic_query))
+            unique_queries = tuple(
+                dict.fromkeys(
+                    (identifier, text.strip())
+                    for identifier, text in query_rows
+                    if text.strip()
+                )
+            )[:8]
+            dense_queries = []
+            for query_id, query_text in unique_queries:
+                dense_query = self.dense_index.query(query_text, limit=8)
+                dense_queries.append(dense_query)
+                self.dense_query_receipts.append(
+                    {
+                        "query_id": query_id,
+                        "query_sha256": hashlib.sha256(
+                            query_text.encode("utf-8")
+                        ).hexdigest(),
+                        "query_ready": dense_query.query_ready,
+                        "status": dense_query.status.value,
+                        "source_revision": dense_query.source_revision,
+                        "model_identity": dense_query.model_identity,
+                        "candidate_count": len(dense_query.candidates),
+                        "candidate_paths": [
+                            candidate.path for candidate in dense_query.candidates[:8]
+                        ],
+                        "degraded_reasons": list(dense_query.degraded_reasons),
+                    }
+                )
+            self.dense_query_receipts = self.dense_query_receipts[-64:]
+            ready_queries = [query for query in dense_queries if query.query_ready]
+            if ready_queries:
+                rrf_scores: dict[str, float] = {}
+                similarity_scores: dict[str, float] = {}
+                for query in ready_queries:
+                    for rank, candidate in enumerate(query.candidates, start=1):
+                        rrf_scores[candidate.path] = (
+                            rrf_scores.get(candidate.path, 0.0) + 1.0 / (60 + rank)
+                        )
+                        similarity_scores[candidate.path] = max(
+                            similarity_scores.get(candidate.path, 0.0),
+                            float(candidate.score),
+                        )
+                dense_candidates = tuple(
+                    (path, similarity_scores[path])
+                    for path in sorted(
+                        rrf_scores,
+                        key=lambda candidate_path: (
+                            -rrf_scores[candidate_path],
+                            -similarity_scores[candidate_path],
+                            candidate_path.lower(),
+                            candidate_path,
+                        ),
+                    )[:16]
+                )
+            failed_queries = [query for query in dense_queries if not query.query_ready]
+            if failed_queries and self.retrieval_mode == "hybrid_required":
+                dense_query = failed_queries[0]
                 # A normal source edit can make the persisted dense index
                 # temporarily stale while the graph has already been
                 # refreshed.  Do not abort the treatment or deliver stale
@@ -491,6 +602,13 @@ class GroundTruthTreatment(BareTreatment):
             tuple(item.path for item in packet.primary_edit_targets)
         )
         existing = {item.path for item in packet.inspection_public_surface}
+        primary_facet_ids = tuple(
+            dict.fromkeys(
+                facet_id
+                for item in packet.primary_edit_targets
+                for facet_id in item.facet_ids
+            )
+        )
         additions: list[ContextEvidenceItem] = []
         for candidate in candidates:
             if candidate.path in existing:
@@ -531,6 +649,7 @@ class GroundTruthTreatment(BareTreatment):
                     completeness="existing_public_surface_file",
                     source_excerpt=body.strip()[:400],
                     localization_role="PUBLIC_SURFACE",
+                    facet_ids=primary_facet_ids,
                 )
             )
         if not additions:
@@ -730,6 +849,11 @@ class GroundTruthTreatment(BareTreatment):
                             process.process_id,
                             f"{process.process_id} lower_bound=true anchor="
                             f"{anchor.path}#{anchor.symbol} "
+                            + (
+                                "req=" + ",".join(anchor.facet_ids) + " "
+                                if anchor.facet_ids
+                                else ""
+                            )
                             + " -> ".join(nodes)
                             + " ["
                             + ";".join(edge_receipts)
@@ -751,7 +875,12 @@ class GroundTruthTreatment(BareTreatment):
                     )
                     line = (
                         f"{fact.impact_id} anchor={anchor.path}#{anchor.symbol} "
-                        f"depth={fact.depth} {fact.relationship} "
+                        + (
+                            "req=" + ",".join(anchor.facet_ids) + " "
+                            if anchor.facet_ids
+                            else ""
+                        )
+                        + f"depth={fact.depth} {fact.relationship} "
                         f"{fact.impacted.file_path}#{fact.impacted.name} "
                         f"direction={fact.traversal_direction} edge={edge_identity}{receiver}"
                     )
@@ -905,6 +1034,8 @@ class GroundTruthTreatment(BareTreatment):
                 "source_excerpt": item["source_excerpt"],
                 "evidence_id": item["evidence_sha256"][:16],
                 "decision_reason": item["decision_reason"],
+                "role": item["localization_role"],
+                "requirements": list(item["facet_ids"]),
             }
 
         # The normalized packet retains every field for local consumers. The
@@ -951,6 +1082,8 @@ class GroundTruthTreatment(BareTreatment):
                 "target": item["path"]
                 + (":" + item["symbol"] if item["symbol"] else ""),
                 "scope": item["completeness"],
+                "role": item["localization_role"],
+                "requirements": list(item["facet_ids"]),
             }
             for item in normalized_packet["evidence_items"]
             if item["kind"] == "relationship"
@@ -964,12 +1097,14 @@ class GroundTruthTreatment(BareTreatment):
             {
                 "fact": fact,
                 "evidence_id": semantic_evidence[index]["evidence_sha256"][:16],
+                "requirements": list(semantic_evidence[index]["facet_ids"]),
             }
             for index, fact in enumerate(normalized_packet["semantic_facts"])
             if index < len(semantic_evidence)
         ]
         packet_dict = {
             "status": normalized_packet["status"],
+            "task_facets": normalized_packet["task_facets"],
             "primary_edit_targets": [
                 compact_target(item)
                 for item in normalized_packet["primary_edit_targets"]
@@ -1022,10 +1157,12 @@ class GroundTruthTreatment(BareTreatment):
             self.context_dirty = False
             return ""
 
+        compact_output = False
+
         def encode() -> str:
             kind = "repository_update" if update else "repository_start"
             lines = [
-                '<groundtruth-repository-context schema="gt.agent_context.v5" '
+                '<groundtruth-repository-context schema="gt.agent_context.v6" '
                 f'kind="{kind}">',
                 "RECEIPT "
                 f"repository={Path(receipt.repository).name or receipt.repository} "
@@ -1037,14 +1174,56 @@ class GroundTruthTreatment(BareTreatment):
             if limitations:
                 lines.append("LIMITATIONS " + "; ".join(limitations))
 
+            referenced_requirements = {
+                requirement
+                for group_name in (
+                    "primary_edit_targets",
+                    "inspection_candidates",
+                    "inspection_public_surface",
+                    "inspection_integration",
+                    "supporting_files",
+                    "relationships",
+                    "semantic_facts",
+                )
+                for item in packet_dict[group_name]
+                for requirement in item.get("requirements", ())
+            }
+            visible_facets = [
+                facet
+                for facet in packet_dict["task_facets"]
+                if facet["facet_id"] in referenced_requirements
+                or facet.get("unresolved_symbols")
+            ][:12]
+            for facet in visible_facets:
+                details: list[str] = []
+                for label, key in (
+                    ("exact", "exact_symbols"),
+                    ("unresolved", "unresolved_symbols"),
+                    ("owners", "owning_symbols"),
+                ):
+                    values = facet.get(key) or []
+                    if values:
+                        details.append(f"{label}=" + ",".join(values[:4]))
+                suffix = " " + " ".join(details) if details else ""
+                lines.append(
+                    f"REQUIREMENT {facet['facet_id']} role={facet['role']}{suffix}"
+                )
+
             def target_line(prefix: str, item: dict[str, Any]) -> str:
                 location = item["path"] + ":" + str(item["lines"][0])
                 if item["symbol"]:
                     location += "#" + item["symbol"]
                 excerpt = " ".join(str(item.get("source_excerpt") or "").split())
                 suffix = f" | {excerpt}" if excerpt else ""
+                requirements = ",".join(item.get("requirements") or ()) or "unscoped"
+                if compact_output:
+                    return (
+                        f"{prefix} {location} claim={item['evidence_id']} "
+                        f"req={requirements}"
+                    )
                 return (
                     f"{prefix} {location} claim={item['evidence_id']} "
+                    f"req={requirements} "
                     f"reason={item['decision_reason']}{suffix}"
                 )
 
@@ -1061,14 +1240,20 @@ class GroundTruthTreatment(BareTreatment):
             for item in packet_dict["supporting_files"]:
                 lines.append(target_line("SUPPORTING_FILE", item))
             for item in packet_dict["relationships"]:
-                lines.append(
+                relationship = (
                     "VERIFIED_RELATION "
                     f"{item['source']} {item['relation']} {item['target']} "
-                    f"claim={item['evidence_id']} scope={item['scope']}"
+                    f"claim={item['evidence_id']} "
+                    f"req={','.join(item.get('requirements') or ()) or 'unscoped'}"
                 )
+                if not compact_output:
+                    relationship += f" scope={item['scope']}"
+                lines.append(relationship)
             for item in packet_dict["semantic_facts"]:
                 lines.append(
-                    f"SEMANTIC_FACT claim={item['evidence_id']} {item['fact']}"
+                    f"SEMANTIC_FACT claim={item['evidence_id']} "
+                    f"req={','.join(item.get('requirements') or ()) or 'unscoped'} "
+                    f"{item['fact']}"
                 )
             lines.extend(f"BOUNDED_PROCESS {item}" for item in packet_dict["execution_paths"])
             lines.extend(f"BOUNDED_IMPACT {item}" for item in packet_dict["change_surface"])
@@ -1083,13 +1268,20 @@ class GroundTruthTreatment(BareTreatment):
             )
             lines.extend(f"UNCERTAINTY {item}" for item in packet_dict["uncertainties"])
             coverage = packet_dict["coverage"]
-            lines.append(
-                "RETRIEVAL "
-                f"mode={coverage.get('retrieval_mode', self.retrieval_mode)} "
-                f"dense={coverage.get('dense_status', 'UNAVAILABLE')} "
-                f"dense_ready={str(bool(coverage.get('dense_query_ready', False))).lower()} "
-                f"truncated={str(bool(packet_dict['truncated'])).lower()}"
-            )
+            if compact_output:
+                lines.append(
+                    "RETRIEVAL "
+                    f"mode={coverage.get('retrieval_mode', self.retrieval_mode)} "
+                    f"truncated={str(bool(packet_dict['truncated'])).lower()}"
+                )
+            else:
+                lines.append(
+                    "RETRIEVAL "
+                    f"mode={coverage.get('retrieval_mode', self.retrieval_mode)} "
+                    f"dense={coverage.get('dense_status', 'UNAVAILABLE')} "
+                    f"dense_ready={str(bool(coverage.get('dense_query_ready', False))).lower()} "
+                    f"truncated={str(bool(packet_dict['truncated'])).lower()}"
+                )
             lines.append("</groundtruth-repository-context>")
             return "\n".join(lines)
 
@@ -1102,6 +1294,7 @@ class GroundTruthTreatment(BareTreatment):
             return len(rendered) > budget or _bounded_token_count(rendered) > token_ceiling
 
         if too_large():
+            compact_output = True
             packet_dict["coverage"] = {
                 "retrieval_mode": provider_coverage["retrieval_mode"],
                 "dense_status": provider_coverage["dense_status"],
@@ -1109,73 +1302,77 @@ class GroundTruthTreatment(BareTreatment):
             }
             packet_dict["semantic_graph_receipt"] = {}
             packet_dict["supporting_files"] = []
-            packet_dict["inspection_candidates"] = packet_dict[
-                "inspection_candidates"
-            ][:2]
+            packet_dict["inspection_candidates"] = packet_dict["inspection_candidates"][:1]
+            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
+            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:2]
+            packet_dict["uncertainties"] = packet_dict["uncertainties"][:4]
             for item in packet_dict["primary_edit_targets"]:
-                item["source_excerpt"] = str(item.get("source_excerpt") or "")[:240]
-            for item in packet_dict["inspection_candidates"]:
                 item["source_excerpt"] = str(item.get("source_excerpt") or "")[:160]
+            for item in packet_dict["inspection_candidates"]:
+                item["source_excerpt"] = str(item.get("source_excerpt") or "")[:80]
             for group_name in ("inspection_public_surface", "inspection_integration"):
                 for item in packet_dict[group_name]:
-                    item["source_excerpt"] = str(item.get("source_excerpt") or "")[:160]
+                    item["source_excerpt"] = str(item.get("source_excerpt") or "")[:80]
             packet_dict["truncated"] = True
             rendered = encode()
         if too_large():
-            for item in packet_dict["primary_edit_targets"]:
-                item["source_excerpt"] = ""
-            for item in packet_dict["inspection_candidates"]:
-                item["source_excerpt"] = ""
-            for group_name in ("inspection_public_surface", "inspection_integration"):
+            for group_name in (
+                "primary_edit_targets",
+                "inspection_candidates",
+                "inspection_public_surface",
+                "inspection_integration",
+            ):
                 for item in packet_dict[group_name]:
                     item["source_excerpt"] = ""
-            packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:2]
-            packet_dict["execution_paths"] = packet_dict["execution_paths"][:2]
-            packet_dict["change_surface"] = packet_dict["change_surface"][:4]
-            packet_dict["affected_tests"] = packet_dict["affected_tests"][:3]
-            packet_dict["validation_plan"] = packet_dict["validation_plan"][:3]
-            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:2]
-            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:3]
-            packet_dict["uncertainties"] = packet_dict["uncertainties"][:4]
-            rendered = encode()
-        if too_large():
-            packet_dict["semantic_facts"] = []
-            packet_dict["execution_paths"] = []
-            packet_dict["change_surface"] = []
-            packet_dict["affected_tests"] = []
-            packet_dict["validation_plan"] = []
-            packet_dict["relationships"] = []
-            rendered = encode()
-        if too_large():
-            # Preserve one representative from each task role before keeping
-            # multiple rows from any role.  This is the final compact provider
-            # view; the complete packet remains in the local receipt.
             packet_dict["inspection_candidates"] = []
+            packet_dict["uncertainties"] = packet_dict["uncertainties"][:2]
+            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
+            for group_name in (
+                "primary_edit_targets",
+                "inspection_public_surface",
+                "inspection_integration",
+            ):
+                for item in packet_dict[group_name]:
+                    reason = str(item.get("decision_reason") or "")
+                    item["decision_reason"] = (
+                        "verified" if reason.startswith("verified_") else reason[:32]
+                    )
+            rendered = encode()
+        if too_large():
+            # Decision facts replace repository exploration. Preserve at least
+            # one row from every available decision role before retaining
+            # rank-only candidates or verbose limitation metadata.
+            packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:2]
             packet_dict["inspection_public_surface"] = packet_dict[
                 "inspection_public_surface"
             ][:1]
             packet_dict["inspection_integration"] = packet_dict[
                 "inspection_integration"
             ][:1]
-            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
-            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:2]
-            packet_dict["uncertainties"] = packet_dict["uncertainties"][:2]
-            rendered = encode()
-        if too_large():
-            packet_dict["primary_edit_targets"] = packet_dict[
-                "primary_edit_targets"
-            ][:2]
-            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
-            packet_dict["uncertainties"] = packet_dict["uncertainties"][:1]
-            rendered = encode()
-        if too_large():
-            packet_dict["primary_edit_targets"] = packet_dict[
-                "primary_edit_targets"
+            packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:2]
+            packet_dict["execution_paths"] = packet_dict["execution_paths"][:1]
+            packet_dict["change_surface"] = packet_dict["change_surface"][:2]
+            packet_dict["affected_tests"] = packet_dict["affected_tests"][:2]
+            packet_dict["validation_plan"] = packet_dict["validation_plan"][:2]
+            packet_dict["relationships"] = packet_dict["relationships"][:2]
+            packet_dict["proposed_new_files"] = packet_dict[
+                "proposed_new_files"
             ][:1]
+            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
+            packet_dict["uncertainties"] = []
             rendered = encode()
         if too_large():
-            # Never leave a process/impact assertion visible after dropping
-            # its evidence record. A too-small budget is an explicit abstain.
+            packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:1]
+            packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:1]
+            packet_dict["change_surface"] = packet_dict["change_surface"][:1]
+            packet_dict["affected_tests"] = packet_dict["affected_tests"][:1]
+            packet_dict["validation_plan"] = packet_dict["validation_plan"][:1]
+            packet_dict["relationships"] = packet_dict["relationships"][:1]
+            rendered = encode()
+        if too_large():
+            # A budget too small for one row of each available decision role
+            # is not permission to silently turn a graph treatment into a list
+            # of filenames. Fail closed and make the missing treatment visible.
             self.errors.append("context_budget_too_small")
             if not update:
                 raise self._unavailable(receipt, "context_budget_too_small")
@@ -1197,9 +1394,12 @@ class GroundTruthTreatment(BareTreatment):
                 if item.get("evidence_id") in evidence_identity
             )
         )
-        delivered = tuple(
-            dict.fromkeys((*delivered, *normalized_packet["projection_claim_ids"]))
+        visible_projection_claims = tuple(
+            claim
+            for claim in normalized_packet["projection_claim_ids"]
+            if claim and claim in rendered
         )
+        delivered = tuple(dict.fromkeys((*delivered, *visible_projection_claims)))
         if not delivered:
             if not update:
                 raise self._unavailable(receipt, "context_evidence_empty")
@@ -1233,6 +1433,33 @@ class GroundTruthTreatment(BareTreatment):
         self.delivery_calls.append(delivered_before_call)
         self.delivery_char_count += len(rendered)
         self.evidence_items_delivered += len(delivered)
+        visible_feature_counts = {
+            feature: len(values)
+            for feature, values in delivered_features.items()
+            if values
+        }
+        self._last_delivery_claim_ids = delivered
+        self._last_delivery_feature_counts = visible_feature_counts
+        self._last_delivery_before_call = delivered_before_call
+        self.provider_delivery_receipts.append(
+            {
+                "schema": "gt.provider_delivery.v1",
+                "delivery_index": self.delivery_count,
+                "kind": "repository_update" if update else "repository_start",
+                "delivered_before_call": delivered_before_call,
+                "source_revision": receipt.source_revision,
+                "context_sha256": hashlib.sha256(
+                    rendered.encode("utf-8")
+                ).hexdigest(),
+                "context_token_count": _bounded_token_count(rendered),
+                "context_char_count": len(rendered),
+                "serialized_claim_ids": list(delivered),
+                "provider_claim_tokens": list(
+                    dict.fromkeys(re.findall(r"\bclaim=([A-Za-z0-9_-]+)", rendered))
+                ),
+                "provider_visible_feature_counts": visible_feature_counts,
+            }
+        )
         self.context_dirty = False
         self.treatment_status = TreatmentStatus.ACTIVE
         if not update:
@@ -1281,6 +1508,7 @@ class GroundTruthTreatment(BareTreatment):
         update must be attached to the tool observation which established the
         new evidence, so timing and uptake remain auditable.
         """
+        self.current_provider_call = max(1, int(iteration))
         if iteration <= 1:
             return ""
         if self.treatment_status is TreatmentStatus.NOT_APPLICABLE:
@@ -1310,7 +1538,7 @@ class GroundTruthTreatment(BareTreatment):
         return self._render(
             update=True,
             budget=max(0, self.update_char_budget),
-            delivered_before_call=self.action_count,
+            delivered_before_call=max(2, self.current_provider_call + 1),
         )
 
     def _refresh_stale_graph(self, observed: Any) -> Any:
@@ -1336,25 +1564,54 @@ class GroundTruthTreatment(BareTreatment):
         output: str,
         is_error: bool,
     ) -> ObservationAugmentation | None:
-        # Observation only. The action and its output remain immutable.
-        self.action_count += 1
-        text = " ".join(
+        return self.after_actions(
             (
-                " ".join(str(value or "") for value in arguments.values()),
-                str(output or "")[:20_000],
+                ActionObservation(
+                    name=name,
+                    arguments=dict(arguments),
+                    output=str(output or ""),
+                    is_error=bool(is_error),
+                ),
             )
         )
+
+    def after_actions(
+        self,
+        observations: tuple[ActionObservation, ...],
+    ) -> ObservationAugmentation | None:
+        """Observe a complete assistant turn and deliver at most one update."""
+
+        if not observations:
+            return None
+        # Observation only. Actions and their raw outputs remain immutable.
+        self.action_count += len(observations)
+        output = "\n\n".join(observation.output for observation in observations)
+        is_error = any(observation.is_error for observation in observations)
         repository_root = Path(self.service.root).resolve()
         paths: list[str] = []
-        for match in _PATH_TOKEN.finditer(text):
-            normalized = _normalize_relative_path(match.group(1))
-            candidate = Path(normalized)
-            if not normalized or candidate.is_absolute() or ".." in candidate.parts:
+        for observation in observations:
+            observation_command = " ".join(
+                str(value or "") for value in observation.arguments.values()
+            )
+            path_relevant = bool(
+                observation.name != "bash"
+                or _INSPECTION_COMMAND.search(observation_command)
+                or _VALIDATION_COMMAND.search(observation_command)
+                or observation.is_error
+                or _DIAGNOSTIC_LINE.search(observation.output)
+            )
+            if not path_relevant:
                 continue
-            resolved = (repository_root / candidate).resolve()
-            if not resolved.is_relative_to(repository_root) or not resolved.is_file():
-                continue
-            paths.append(normalized)
+            text = " ".join((observation_command, observation.output[:20_000]))
+            for match in _PATH_TOKEN.finditer(text):
+                normalized = _normalize_relative_path(match.group(1))
+                candidate = Path(normalized)
+                if not normalized or candidate.is_absolute() or ".." in candidate.parts:
+                    continue
+                resolved = (repository_root / candidate).resolve()
+                if not resolved.is_relative_to(repository_root) or not resolved.is_file():
+                    continue
+                paths.append(normalized)
         prior_paths = set(self.active_paths)
         self.active_paths = list(dict.fromkeys((*self.active_paths, *paths)))[-20:]
         discovered_new_path = any(path not in prior_paths for path in paths)
@@ -1366,7 +1623,10 @@ class GroundTruthTreatment(BareTreatment):
         if diagnostic_lines:
             self.diagnostics = [*self.diagnostics, *diagnostic_lines][-12:]
             self.validation_state = "fail"
-        command = " ".join(str(value or "") for value in arguments.values())
+        command = "\n".join(
+            " ".join(str(value or "") for value in observation.arguments.values())
+            for observation in observations
+        )
         validation_passed = bool(
             not diagnostic_lines
             and not is_error
@@ -1394,15 +1654,11 @@ class GroundTruthTreatment(BareTreatment):
             if diagnostic_lines and observed_paths & feature_path_set:
                 self._feature_transition(feature, FeatureState.CONTRADICTED)
         if validation_passed:
-            repository_wide_validation = not observed_paths
             for feature, current in tuple(self.feature_states.items()):
                 if current in {
                     FeatureState.EDITED.value,
                     FeatureState.CONTRADICTED.value,
-                } and (
-                    repository_wide_validation
-                    or observed_paths & self.feature_paths.get(feature, set())
-                ):
+                } and observed_paths & self.feature_paths.get(feature, set()):
                     self._feature_transition(
                         feature,
                         FeatureState.VALIDATED,
@@ -1430,7 +1686,25 @@ class GroundTruthTreatment(BareTreatment):
         rendered = self._refresh_and_render_update()
         if not rendered:
             return None
-        raw_hash = hashlib.sha256(str(output or "").encode("utf-8")).hexdigest()
+        # The augmentation is physically attached to the final observation,
+        # so raw_output_sha256 binds that exact immutable value. A separate
+        # turn hash binds every action/result used to compile the update.
+        raw_hash = hashlib.sha256(
+            observations[-1].output.encode("utf-8")
+        ).hexdigest()
+        turn_hash = hashlib.sha256(
+            repr(
+                tuple(
+                    (
+                        observation.name,
+                        tuple(sorted(observation.arguments.items())),
+                        observation.output,
+                        observation.is_error,
+                    )
+                    for observation in observations
+                )
+            ).encode("utf-8")
+        ).hexdigest()
         context_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         receipt = self.service.status()
         augmentation = ObservationAugmentation(
@@ -1440,12 +1714,29 @@ class GroundTruthTreatment(BareTreatment):
             delivery_index=self.delivery_count,
             source_revision=receipt.source_revision,
             context_token_count=_bounded_token_count(rendered),
+            delivered_before_call=self._last_delivery_before_call,
+            serialized_claim_ids=self._last_delivery_claim_ids,
+            provider_visible_feature_counts=dict(
+                self._last_delivery_feature_counts
+            ),
+            observation_count=len(observations),
+            turn_observations_sha256=turn_hash,
         )
         self.delivery_receipts.append(augmentation.as_dict())
         return augmentation
 
     def finalize(self, result: Any) -> dict[str, Any]:
         receipt = self.service.status()
+        serialized_claim_ids = {
+            str(claim)
+            for delivery in self.provider_delivery_receipts
+            for claim in delivery.get("serialized_claim_ids", ())
+        }
+        delivery_reconciliation = (
+            "PASS"
+            if serialized_claim_ids == self.delivered_claim_ids
+            else "FAIL"
+        )
         feature_states = dict(self.feature_states)
         if result is not None:
             feature_states = {
@@ -1457,7 +1748,7 @@ class GroundTruthTreatment(BareTreatment):
                 for feature, state in feature_states.items()
             }
         return {
-            "schema": "gt.treatment_receipt.v2",
+            "schema": "gt.treatment_receipt.v3",
             "treatment": self.treatment_id,
             "treatment_status": self.treatment_status.value,
             "provider_calls": 0,
@@ -1473,6 +1764,8 @@ class GroundTruthTreatment(BareTreatment):
             "delivery_count": self.delivery_count,
             "delivery_calls": list(self.delivery_calls),
             "delivery_receipts": list(self.delivery_receipts),
+            "provider_delivery_receipts": list(self.provider_delivery_receipts),
+            "delivery_reconciliation": delivery_reconciliation,
             "delivery_char_count": self.delivery_char_count,
             "evidence_items_delivered": self.evidence_items_delivered,
             "suppressed_inspection_only_updates": (
@@ -1507,6 +1800,7 @@ class GroundTruthTreatment(BareTreatment):
 
 
 __all__ = [
+    "ActionObservation",
     "BareTreatment",
     "GroundTruthTreatment",
     "ObservationAugmentation",

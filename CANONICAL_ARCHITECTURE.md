@@ -1,10 +1,9 @@
 # GroundTruth Canonical Architecture
 
-Status: canonical prerelease architecture. The current implementation is
-`84be516dee2111f8394ed311fd59abe2e0391d27`; its localization-v5 delta receipt is
-`audit/receipts/localization-v5-2bab259.json`. The preceding complete clean-Linux
-campaign remains under `audit/receipts/codespaces-8931876/`; all applicable
-provider-free gates were rerun on the current implementation.
+Status: canonical prerelease architecture. The historical clean-Linux campaign
+remains under `audit/receipts/codespaces-8931876/`. Context-v6 changes require a
+new exact-SHA Codespaces receipt before a paid benchmark is dispatched; old
+receipts are historical evidence, not certification of the current candidate.
 
 ## Product boundary
 
@@ -13,7 +12,7 @@ GroundTruth is a model-agnostic **benchmarking product**. The sole product execu
 - `gt-harness doctor`: verifies Python, Git, Go, and the content-addressed source build of `gt-index`.
 - `gt-harness graph build|status|query`: operates the canonical repository graph.
 - `gt-harness run`: the only coding-agent product boundary. It runs the pinned
-  Mini-SWE-Agent 2.2.8 loop and attaches deterministic GT evidence to tool
+  Mini-SWE-Agent 2.4.6 loop and attaches deterministic GT evidence to tool
   observations. The former product MCP adapter was removed because GT Harness
   is a benchmark treatment, not an MCP product.
 - `gt-harness run --treatment bare|groundtruth`: runs one common model-agnostic coding-agent scaffold. The two arms use the same prompt, tools, limits, provider adapter, and action semantics. The GroundTruth arm may only add bounded deterministic evidence and record observations.
@@ -46,7 +45,8 @@ repository working tree
       syntax-marked owners and existing API prefixes)
   -> HybridRetriever + dense/sparse file fusion
      (exact identity + BM25 + lexical + certified structural + dense ranks,
-      deterministic reciprocal-rank fusion and budgeted selection; dense
+      one dense query per task obligation followed by deterministic reciprocal-
+      rank fusion and budgeted selection; dense
       candidates are inspection hints and never edit authority)
   -> RepositoryContextCompiler
      (task facets; owner-scoped exact symbols; bounded set cover; distinct EDIT,
@@ -57,11 +57,14 @@ repository working tree
      (Python AST value/return/control flow, uniquely bound local call arguments,
       explicit tensor-shape assertions, and versioned library contracts;
       source-revision receipt, no model-authored evidence, no guessed method binding)
-  -> compact gt.agent_context.v5 provider packet
+  -> compact gt.agent_context.v6 provider packet
+     (requirement roles bind edit/public/integration facts; serialized claim IDs
+      and visible feature counts are reconciled against delivery receipts)
   -> GroundTruthTreatment in gt-harness run
-  -> pinned Mini-SWE-Agent 2.2.8 action loop
+  -> pinned Mini-SWE-Agent 2.4.6 action loop
      (initial context accompanies the task; subsequent context is appended to
-      the exact tool observation that triggered it; raw output is preserved;
+      the final exact tool observation of the assistant turn that triggered it;
+      at most one augmentation is emitted per provider turn; raw output is preserved;
       model and shell operations are bounded by actual remaining GT time)
   -> Harbor adapter supervision
      (task.toml remains the outer authority; GT reserves a 90-second shutdown gap;
@@ -133,11 +136,11 @@ anchors, so a same-named constructor cannot make a class query ambiguous.
 | `gt_engine/repository_graph_service.py` | PRODUCTION | Sole graph readiness/lifecycle/query boundary |
 | `vendor/gt-index-src/` | PRODUCTION | Source-built graph writer; upstream provenance plus audited overlay |
 | `src/groundtruth/` | PRODUCTION SUPPORT / MIGRATION SOURCE | First-party GT capabilities retained; only code reached from the canonical service is production until migration finishes |
-| `eval/harbor_gt_harness_adapter.py` | PRODUCTION BENCHMARK ADAPTER | Canonical Harbor adapter; uploads the exact checkout and pinned dense model, installs Mini-SWE 2.2.8, and receipts the product SHA |
+| `eval/harbor_gt_harness_adapter.py` | PRODUCTION BENCHMARK ADAPTER | Canonical Harbor adapter; uploads the exact checkout and pinned dense model, installs Mini-SWE 2.4.6, and receipts the product SHA |
 | `eval/miniswe_agent.py` | LEGACY BENCHMARK | Historical Harbor integration; not used by the canonical final workflow |
 | `eval/gt_central_agent.py` | BENCHMARK / RESEARCH | Mini-SWE-compatible deterministic treatment laboratory; not a separate agent scaffold |
 | `gt_engine/indexer.py:refresh_index_files`, `gt_engine/bridge.py`, central runtime and historical control layers | LEGACY / RESEARCH pending parity audit | File-keyed refresh and older control paths are not the official product lifecycle; retain as research evidence until unique behavior is classified |
-| `.github/workflows/tb2_miniswe_product.yml` | PRODUCTION BENCHMARK WORKFLOW | Sole final paid-run path; Mini-SWE 2.2.8, exact repair20 set, exact source SHA, one attempt, full trajectories, and hybrid-required dense retrieval |
+| `.github/workflows/tb2_miniswe_product.yml` | PRODUCTION BENCHMARK WORKFLOW | Sole final paid-run path; Mini-SWE 2.4.6, exact repair20 set, exact source SHA, one attempt, full trajectories, and hybrid-required dense retrieval |
 | other `.github/workflows/tb2_miniswe_*.yml` | LEGACY BENCHMARK EVIDENCE | Not authorized for the final run and cannot certify the prerelease |
 | historical central workflows and `gt_finalstand/` | LEGACY evidence | Cannot certify the prerelease and are not authorized paid treatment paths |
 | generated head-to-head outputs, historical run artifacts, broken `artifact_deepswe` configs | DELETE (completed) | Removed after zero production consumers and missing referenced modules were verified; frozen tag retains recovery history |

@@ -46,7 +46,7 @@ workflow or merge script owns a second dated “active” prediction path.
 ## Product bound by the current Harness subject
 
 - Agent: `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent`
-- Scaffold: Mini-SWE-Agent 2.2.8 only
+- Scaffold: Mini-SWE-Agent 2.4.6 only
 - Treatment: `gt-harness run --treatment groundtruth`, `hybrid_required`
 - Denominator: `repair20-v1`, exactly 20 tasks
 - Selection: deterministic, revision-bound decision-context compiler

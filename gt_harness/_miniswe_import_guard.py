@@ -1,4 +1,4 @@
-"""Isolate Mini-SWE 2.2.8 import-time environment side effects."""
+"""Isolate Mini-SWE 2.4.6 import-time environment side effects."""
 
 from __future__ import annotations
 

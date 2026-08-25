@@ -99,6 +99,12 @@ contain the exact observations delivered to the model and its provider-call
 accounting must match `gt-run.json`. The official verifier result must bind the
 same task and patch.
 
+For an ACTIVE context-v6 treatment, the union of
+`provider_delivery_receipts[].serialized_claim_ids` must exactly equal
+`delivered_claim_ids`, every receipt must identify `delivered_before_call`, and
+the trajectory may contain at most one GT augmentation for each assistant
+provider turn. Candidate-only paths do not count as delivered or followed.
+
 The suite attestation must fail when any expected task, receipt, trajectory,
 official reward, or source identity is absent. Upload artifacts under `always()`
 even when the task or product fails so failures remain diagnosable.

@@ -150,12 +150,19 @@ def _check_specialized_receipt(
         if missing:
             fail("languages_missing", ", ".join(missing))
     elif filename == "harness-e2e.json":
-        if value.get("agent_scaffold_version") != "2.2.8":
-            fail("harness_scaffold_mismatch", "Mini-SWE 2.2.8 was not exercised")
+        if value.get("agent_scaffold_version") != "2.4.6":
+            fail("harness_scaffold_mismatch", "Mini-SWE 2.4.6 was not exercised")
         if value.get("same_observation") is not True:
             fail("harness_delivery_timing", "GT update was not on the action observation")
+        if value.get("context_schema_v6") is not True:
+            fail("harness_context_schema", "context-v6 was not exercised end to end")
         if value.get("raw_output_preserved") is not True:
             fail("harness_observation_mutated", "raw action output was not preserved")
+        if value.get("trajectory_delivery_receipt_preserved") is not True:
+            fail(
+                "harness_trajectory_receipt",
+                "trajectory did not preserve the exact GT observation receipt",
+            )
         if value.get("restart_reused_current_graph") is not True:
             fail("harness_restart_failed", "updated graph identity was not reused")
         if value.get("retrieval_mode") != "hybrid_required":
@@ -171,8 +178,40 @@ def _check_specialized_receipt(
             fail("harness_dense_query", "no non-empty exact-revision dense query receipt")
         if int(value.get("initial_context_token_count", 501)) > 500:
             fail("harness_initial_context_budget", "initial GT context exceeded 500 tokens")
-        if int(value.get("update_context_token_count", 351)) > 350:
-            fail("harness_update_context_budget", "GT update exceeded 350 tokens")
+        if int(value.get("update_context_token_count", 501)) > 500:
+            fail("harness_update_context_budget", "GT update exceeded 500 tokens")
+        provider_deliveries = _rows(value, "provider_delivery_receipts")
+        serialized_claims = {
+            str(claim)
+            for delivery in provider_deliveries
+            for claim in delivery.get("serialized_claim_ids", ())
+        }
+        delivered_claims = {
+            str(claim) for claim in value.get("delivered_claim_ids", ())
+        }
+        if (
+            value.get("delivery_reconciliation") != "PASS"
+            or not provider_deliveries
+            or serialized_claims != delivered_claims
+        ):
+            fail(
+                "harness_delivery_reconciliation",
+                "serialized provider claims do not equal the delivered claim ledger",
+            )
+        delivery_calls = [
+            int(delivery.get("delivered_before_call", 0))
+            for delivery in provider_deliveries
+        ]
+        if delivery_calls[:1] != [1] or any(
+            current <= previous
+            for previous, current in zip(
+                delivery_calls, delivery_calls[1:], strict=False
+            )
+        ):
+            fail(
+                "harness_provider_call_timing",
+                f"invalid provider delivery calls: {delivery_calls}",
+            )
     elif filename == "failure-campaign.json":
         cases = _rows(value, "cases", "checks", "results")
         if len(cases) < 18 or any(row.get("status") != "PASS" for row in cases):

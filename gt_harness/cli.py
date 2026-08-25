@@ -316,7 +316,7 @@ def _run_agent(args: argparse.Namespace) -> int:
         "max_iterations": int(args.max_iterations),
         "time_budget_seconds": args.time_budget_seconds,
         "agent_scaffold": "minisweagent.agents.default.DefaultAgent",
-        "agent_scaffold_version": "2.2.8",
+        "agent_scaffold_version": "2.4.6",
         "system_prompt_sha256": None,
         "tool_policy_sha256": _sha256_json(BASH_TOOL),
     }

@@ -55,15 +55,29 @@ def _bundle(tmp_path: Path, repository: Path) -> Path:
         },
         "harness-e2e.json": {
             **common,
-            "agent_scaffold_version": "2.2.8",
+            "agent_scaffold_version": "2.4.6",
             "same_observation": True,
+            "context_schema_v6": True,
             "raw_output_preserved": True,
+            "trajectory_delivery_receipt_preserved": True,
             "restart_reused_current_graph": True,
             "retrieval_mode": "hybrid_required",
             "dense_lifecycle_ready": True,
             "dense_queries": [{"query_ready": True, "candidate_count": 3}],
             "initial_context_token_count": 500,
-            "update_context_token_count": 350,
+            "update_context_token_count": 500,
+            "provider_delivery_receipts": [
+                {
+                    "delivered_before_call": 1,
+                    "serialized_claim_ids": ["claim-1"],
+                },
+                {
+                    "delivered_before_call": 2,
+                    "serialized_claim_ids": ["claim-2"],
+                },
+            ],
+            "delivered_claim_ids": ["claim-1", "claim-2"],
+            "delivery_reconciliation": "PASS",
         },
         "failure-campaign.json": {
             **common,
@@ -164,6 +178,9 @@ def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
     e2e["retrieval_mode"] = "sparse_only"
     e2e["dense_lifecycle_ready"] = False
     e2e["dense_queries"] = [{"query_ready": True, "candidate_count": 0}]
+    e2e["context_schema_v6"] = False
+    e2e["delivered_claim_ids"] = ["claim-not-serialized"]
+    e2e["provider_delivery_receipts"][1]["delivered_before_call"] = 1
     _write(e2e_path, e2e)
     monkeypatch.setattr("gt_harness.product_certification.platform.platform", lambda: "Linux-test")
 
@@ -173,6 +190,9 @@ def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
         "harness_retrieval_mode",
         "harness_dense_lifecycle",
         "harness_dense_query",
+        "harness_context_schema",
+        "harness_delivery_reconciliation",
+        "harness_provider_call_timing",
     }
 
 

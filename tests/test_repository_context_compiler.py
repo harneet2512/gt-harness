@@ -13,6 +13,7 @@ from gt_engine.hybrid_retrieval import (
 from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
     ContextStatus,
+    LocalizationRole,
     RepositoryContextCompiler,
     _matching_facet_ids,
     compile_task_facets,
@@ -500,6 +501,49 @@ def test_compiler_separates_public_surface_from_edit_targets() -> None:
     )
 
 
+def test_export_only_requirement_does_not_make_definition_an_edit_target() -> None:
+    public_export = StructuralLink(
+        source_path="src/index.ts",
+        target_path="src/answer.ts",
+        relation="RE_EXPORTS",
+        confidence=1.0,
+        certified=True,
+        verification_status="verified",
+        source_symbol="answer",
+        target_symbol="answer",
+        source_start_line=1,
+        target_start_line=1,
+        source_content_sha256="a" * 64,
+        target_content_sha256="b" * 64,
+        source_evidence_origin="preexisting_repository",
+        target_evidence_origin="preexisting_repository",
+        origin="program",
+        resolution_outcome="exact",
+        resolution_method="re_export",
+        candidate_count=1,
+    )
+    repository = HybridRepository(
+        documents=(
+            _document("src/answer.ts", "answer", "export const answer = 42"),
+            _document("src/index.ts", "answer", "export { answer } from './answer'"),
+        ),
+        structural_links=(public_export,),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=2,
+        document_chars=80,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Export `answer` from the public API."),
+    )
+
+    assert packet.primary_edit_targets == ()
+    assert [item.path for item in packet.inspection_public_surface] == ["src/index.ts"]
+
+
 def test_task_facets_keep_unresolved_api_and_map_its_existing_owner() -> None:
     documents = (
         _document(
@@ -537,6 +581,41 @@ def test_task_facets_capture_unquoted_case_significant_symbols() -> None:
 
     exact = {symbol for facet in facets for symbol in facet.exact_symbols}
     assert {"HybridRetriever", "GroundTruthTreatment"} <= exact
+
+
+def test_test_subject_is_not_misclassified_as_validation_work() -> None:
+    documents = (
+        _document(
+            "src/runner.py",
+            "execute_task",
+            "def execute_task():\n    return run_test_process()",
+        ),
+    )
+
+    facets = compile_task_facets(
+        "Fix the test runner timeout inside `execute_task`.",
+        documents,
+    )
+
+    matching = [facet for facet in facets if "execute_task" in facet.exact_symbols]
+    assert matching
+    assert all(facet.role is LocalizationRole.EDIT for facet in matching)
+
+
+def test_quoted_configuration_literal_is_not_promoted_to_exact_symbol() -> None:
+    documents = (
+        _document("src/parser.py", "parse_options", "def parse_options(): pass"),
+        _document("src/noise.py", "strict", "def strict(): pass"),
+    )
+
+    facets = compile_task_facets(
+        "Set the parser mode to `strict` in `parse_options`.",
+        documents,
+    )
+
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    assert "parse_options" in exact
+    assert "strict" not in exact
 
 
 def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:

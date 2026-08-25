@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -28,8 +29,11 @@ from gt_engine.repository_context_compiler import (
 )
 from gt_engine.repository_graph_service import GraphStatus
 from gt_harness.treatments import (
+    ActionObservation,
     BareTreatment,
+    FeatureState,
     GroundTruthTreatment,
+    TreatmentStatus,
     TreatmentUnavailableError,
     _bounded_token_count,
 )
@@ -94,9 +98,12 @@ def test_update_suppresses_inspection_only_packet_instead_of_spending_delivery(
         source_revision = "b" * 64
         graph_checksum_or_identity = "c" * 64
         degraded_reasons = ()
+        receipt_schema = "gt.graph_receipt.v1"
+        graph_builder_version = "test"
 
     class FakeService:
         root = tmp_path
+        receipt_path = tmp_path / "graph-receipt.json"
 
         def status(self):
             return FakeReceipt()
@@ -310,6 +317,71 @@ def test_hybrid_required_abstains_when_repository_has_no_indexable_source(
     ]
 
 
+def test_dense_retrieval_queries_each_requirement_and_rrf_fuses_results(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        source_revision = "s" * 64
+        graph_checksum_or_identity = "g" * 64
+
+    class FakeService:
+        root = tmp_path
+        graph_path = tmp_path / "graph.sqlite3"
+
+        def status(self):
+            return FakeReceipt()
+
+    class FakeDenseIndex:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def query(self, query: str, *, limit: int):
+            self.queries.append(query)
+            index = len(self.queries)
+            candidates = (
+                SimpleNamespace(path="src/shared.py", score=0.70),
+                SimpleNamespace(path=f"src/only_{index}.py", score=0.95),
+            )
+            return SimpleNamespace(
+                query_ready=True,
+                status=SimpleNamespace(value="READY"),
+                source_revision="s" * 64,
+                model_identity="model",
+                candidates=candidates[:limit],
+                degraded_reasons=(),
+            )
+
+    captured: dict[str, object] = {}
+
+    class FakeCompiler:
+        def compile(self, _repository, request):
+            captured["dense_candidates"] = request.dense_candidates
+            return GTContextPacket(
+                status=ContextStatus.ABSTAIN,
+                repository_identity={"source_revision": "s" * 64},
+            )
+
+    monkeypatch.setattr(
+        "gt_harness.treatments.build_query_hybrid_repository",
+        lambda *_args, **_kwargs: SimpleNamespace(),
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    dense_index = FakeDenseIndex()
+    treatment.dense_index = dense_index
+    treatment.compiler = FakeCompiler()
+    treatment.task = "Implement parser recovery. Add renderer fallback."
+
+    treatment._context(update=False, budget=4_000)
+
+    assert len(dense_index.queries) >= 2
+    assert dense_index.queries[0] != dense_index.queries[1]
+    candidates = captured["dense_candidates"]
+    assert candidates[0][0] == "src/shared.py"
+    assert len(treatment.dense_query_receipts) == len(dense_index.queries)
+    assert all(row["query_sha256"] for row in treatment.dense_query_receipts)
+
+
 def test_groundtruth_observes_only_real_repository_paths_and_real_diagnostics(
     tmp_path: Path,
 ) -> None:
@@ -352,6 +424,26 @@ def test_groundtruth_observes_only_real_repository_paths_and_real_diagnostics(
     assert treatment.diagnostics == []
     assert treatment.validation_state == "pass"
     assert treatment.context_dirty is True
+
+
+def test_directory_listing_does_not_trigger_repository_context_update(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src" / "feature.py"
+    source.parent.mkdir()
+    source.write_text("def feature():\n    return 1\n", encoding="utf-8")
+    treatment = GroundTruthTreatment(tmp_path)
+
+    augmentation = treatment.after_action(
+        "bash",
+        {"command": "ls -la src"},
+        "src/feature.py\n",
+        False,
+    )
+
+    assert augmentation is None
+    assert treatment.active_paths == []
+    assert treatment.context_dirty is False
 
 
 def test_groundtruth_delivers_valid_composed_relationship_context(
@@ -435,10 +527,21 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
 
     assert len(rendered) <= 4_000
     assert rendered.endswith("</groundtruth-repository-context>")
-    assert 'schema="gt.agent_context.v5"' in rendered
+    assert 'schema="gt.agent_context.v6"' in rendered
+    assert "REQUIREMENT facet-" in rendered
     assert "EXACT_EDIT_TARGET app.py:1#answer" in rendered
+    assert any(
+        "req=facet-" in line
+        for line in rendered.splitlines()
+        if line.startswith("EXACT_EDIT_TARGET")
+    )
     assert "INSPECT_INTEGRATION caller.py:1#invoke" in rendered
     assert "VERIFIED_RELATION caller.py:invoke CALLS app.py:answer" in rendered
+    assert not any(
+        "req=unscoped" in line
+        for line in rendered.splitlines()
+        if line.startswith(("VERIFIED_RELATION", "SEMANTIC_FACT"))
+    )
     assert "UNCERTAINTY graph_projection_failed" in rendered
     assert _bounded_token_count(rendered) <= 500
     treatment.max_delivery_count = 1
@@ -449,7 +552,7 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
     assert "context_delivery_limit_reached" in treatment.errors
 
 
-def test_provider_context_v5_keeps_edit_public_integration_and_new_file_roles_separate(
+def test_provider_context_v6_keeps_edit_public_integration_and_new_file_roles_separate(
     tmp_path: Path, monkeypatch
 ) -> None:
     class FakeReceipt:
@@ -507,7 +610,7 @@ def test_provider_context_v5_keeps_edit_public_integration_and_new_file_roles_se
 
     rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
 
-    assert 'schema="gt.agent_context.v5"' in rendered
+    assert 'schema="gt.agent_context.v6"' in rendered
     assert "EXACT_EDIT_TARGET src/container.ts:1#AwilixContainer" in rendered
     assert "INSPECT_PUBLIC_SURFACE src/awilix.ts:1#AwilixContainer" in rendered
     assert "INSPECT_INTEGRATION src/load-modules.ts:1#loadModules" in rendered
@@ -515,7 +618,7 @@ def test_provider_context_v5_keeps_edit_public_integration_and_new_file_roles_se
     assert "UNCOVERED_FACET facet-new role=EDIT unresolved=EvaluationHandle" in rendered
 
 
-def test_provider_context_v5_prunes_within_budget_without_losing_roles(
+def test_provider_context_v6_prunes_within_budget_without_losing_roles(
     tmp_path: Path, monkeypatch
 ) -> None:
     class FakeReceipt:
@@ -586,6 +689,150 @@ def test_provider_context_v5_prunes_within_budget_without_losing_roles(
     assert "INSPECT_INTEGRATION " in rendered
     assert "PROPOSED_NEW_FILE " in rendered
     assert "UNCOVERED_FACET " in rendered
+
+
+def test_provider_context_preserves_decision_facts_before_candidate_noise(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The provider boundary, not the internal packet, defines feature delivery."""
+
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    def item(kind: str, path: str, symbol: str, digest: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=kind,
+            path=path,
+            start_line=1,
+            end_line=1,
+            symbol=symbol,
+            relation="CALLS" if kind == "relationship" else "",
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="b" * 64,
+            graph_revision="c" * 64,
+            evidence_sha256=digest * 64,
+            decision_reason=f"verified_{kind}",
+            completeness="certified_direct_edge" if kind == "relationship" else "exact_identity",
+            source_path="src/caller.ts" if kind == "relationship" else "",
+            source_symbol="callFeature" if kind == "relationship" else "",
+            source_excerpt="export function feature(value: string): Result",
+            facet_ids=("requirement-1",),
+        )
+
+    edit = item("symbol_identity", "src/feature.ts", "feature", "a")
+    public = item("public_surface", "src/index.ts", "feature", "b")
+    integration = item("integration_surface", "src/caller.ts", "callFeature", "c")
+    relation = item("relationship", "src/feature.ts", "feature", "d")
+    semantic = item("semantic_fact", "src/feature.ts", "feature", "e")
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        primary_edit_targets=(edit,),
+        inspection_public_surface=(public,),
+        inspection_integration=(integration,),
+        semantic_facts=("src/feature.ts:1 feature argument value flows to parse.value",),
+        execution_paths=(
+            "gt-process-one lower_bound=true src/caller.ts#callFeature -> src/feature.ts#feature",
+        ),
+        change_surface=(
+            "gt-impact-one depth=1 CALLS src/caller.ts#callFeature direction=incoming",
+        ),
+        affected_tests=("tests/feature.test.ts",),
+        validation_plan=("npm test -- tests/feature.test.ts checks requirement-1",),
+        uncertainties=tuple(f"low_value_retrieval_uncertainty_{index}" for index in range(16)),
+        evidence_items=(edit, public, integration, relation, semantic),
+        projection_claim_ids=("gt-process-one", "gt-impact-one"),
+        coverage={
+            "documents_considered": 400,
+            "ranked_files": 40,
+            "certified_edges_selected": 6,
+            "rejected_edges": 120,
+            "retrieval_mode": "hybrid_required",
+            "dense_candidates": 12,
+            "dense_index": {"status": "READY", "query_ready": True},
+        },
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    treatment.start_token_budget = 400
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= treatment.start_token_budget
+    assert "SEMANTIC_FACT " in rendered
+    assert "BOUNDED_PROCESS " in rendered
+    assert "BOUNDED_IMPACT " in rendered
+    assert "AFFECTED_TEST " in rendered
+    assert "VALIDATE " in rendered
+    assert "VERIFIED_RELATION " in rendered
+
+
+def test_delivered_claim_ids_equal_provider_visible_claims_after_compaction(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    edit = ContextEvidenceItem(
+        kind="symbol_identity",
+        path="src/feature.ts",
+        start_line=1,
+        end_line=1,
+        symbol="feature",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="a" * 64,
+        decision_reason="exact_task_symbol",
+        completeness="exact_identity",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        primary_edit_targets=(edit,),
+        projection_claim_ids=("gt-process-not-serialized",),
+        evidence_items=(edit,),
+        uncertainties=tuple("noise-" + ("x" * 80) + str(index) for index in range(20)),
+        coverage={"dense_index": {"status": "READY", "query_ready": True}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = treatment.treatment_status.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    visible = {"a" * 64}
+    assert treatment.delivered_claim_ids == visible
 
 
 def test_persisted_graph_projection_uses_multiple_role_diverse_anchors(
@@ -809,6 +1056,7 @@ def test_treatment_adds_manifest_public_surface_as_inspection_only(
         evidence_sha256="d" * 64,
         decision_reason="exact_task_symbol",
         completeness="exact_identity",
+        facet_ids=("facet-container",),
     )
     packet = GTContextPacket(
         status=ContextStatus.READY,
@@ -824,6 +1072,7 @@ def test_treatment_adds_manifest_public_surface_as_inspection_only(
         "src/index.ts"
     ]
     assert updated.inspection_public_surface[0].localization_role == "PUBLIC_SURFACE"
+    assert updated.inspection_public_surface[0].facet_ids == edit.facet_ids
     assert updated.primary_edit_targets == (edit,)
 
 
@@ -960,6 +1209,117 @@ def test_feature_receipt_tracks_delivery_and_behavioral_follow_through(
     assert treatment.feature_states["public_surface"] == "FOLLOWED"
 
 
+def test_provider_delivery_receipts_reconcile_visible_facts_and_call_timing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+        receipt_schema = "gt.graph_receipt.v1"
+        graph_builder_version = "test"
+
+    class FakeService:
+        root = tmp_path
+        receipt_path = tmp_path / "graph-receipt.json"
+
+        def status(self):
+            return FakeReceipt()
+
+    source = tmp_path / "src" / "engine.py"
+    source.parent.mkdir()
+    source.write_text("def execute_task():\n    return 1\n", encoding="utf-8")
+    identity = ContextEvidenceItem(
+        kind="symbol_identity",
+        path="src/engine.py",
+        start_line=1,
+        end_line=2,
+        symbol="execute_task",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="exact_task_symbol",
+        completeness="exact_identity",
+        facet_ids=("facet-execute",),
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        primary_edit_targets=(identity,),
+        evidence_items=(identity,),
+        coverage={"dense_index": {"status": "DISABLED", "query_ready": False}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    treatment._render(update=False, budget=4_000, delivered_before_call=1)
+    treatment.before_model_call(1)
+    treatment.context_dirty = True
+    augmentation = treatment.after_actions(
+        (
+            ActionObservation(
+                name="bash",
+                arguments={"command": "sed -n '1,20p' src/engine.py"},
+                output="first observation",
+                is_error=False,
+            ),
+            ActionObservation(
+                name="bash",
+                arguments={"command": "sed -n '1,20p' src/engine.py"},
+                output="final observation",
+                is_error=False,
+            ),
+        )
+    )
+    assert augmentation is not None
+    assert augmentation.observation_count == 2
+    assert augmentation.raw_output_sha256 == hashlib.sha256(
+        b"final observation"
+    ).hexdigest()
+    assert augmentation.turn_observations_sha256
+    receipt = treatment.finalize(None)
+
+    assert receipt["delivery_calls"] == [1, 2]
+    assert [row["delivered_before_call"] for row in receipt["provider_delivery_receipts"]] == [1, 2]
+    serialized = {
+        claim
+        for row in receipt["provider_delivery_receipts"]
+        for claim in row["serialized_claim_ids"]
+    }
+    assert serialized == set(receipt["delivered_claim_ids"])
+    assert receipt["delivery_reconciliation"] == "PASS"
+
+def test_candidate_only_feature_cannot_be_reported_as_followed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "src" / "decoy.py"
+    path.parent.mkdir()
+    path.write_text("def decoy():\n    return 1\n", encoding="utf-8")
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment._feature_transition(
+        "semantic_facts",
+        FeatureState.CANDIDATE,
+        paths=("src/decoy.py",),
+    )
+
+    treatment.after_action(
+        "bash",
+        {"command": "sed -n '1,20p' src/decoy.py"},
+        "src/decoy.py:1:def decoy():",
+        False,
+    )
+
+    assert treatment.feature_states["semantic_facts"] == "CANDIDATE"
+
 def test_feature_receipt_does_not_attribute_unrelated_edit_to_observed_path(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1070,7 +1430,7 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
         "updated app.py",
         False,
     )
-    assert augmentation is not None
+    assert augmentation is not None, json.dumps(treatment.finalize(None), sort_keys=True)
     updated = augmentation.content
     assert treatment.before_model_call(2) == ""
     assert updated, json.dumps(treatment.finalize(None), sort_keys=True)
@@ -1082,12 +1442,13 @@ def test_groundtruth_treatment_rebuilds_and_delivers_updated_real_graph(
     assert receipt["source_revision"] != initial_revision
     assert receipt["initial_context"] == initial
     assert receipt["initial_context_sha256"]
-    assert augmentation.context_token_count <= 350
+    assert augmentation.context_token_count <= treatment.update_token_budget
+    assert "context_budget_too_small" not in receipt["errors"]
     assert receipt["delivery_receipts"][-1]["same_observation"] is True
     assert treatment.feature_states["exact_edit_targets"] == "EDITED"
 
     treatment.after_action("bash", {"command": "pytest -q"}, "1 passed", False)
-    assert treatment.feature_states["exact_edit_targets"] == "VALIDATED"
+    assert treatment.feature_states["exact_edit_targets"] == "EDITED"
 
 
 @pytest.mark.real_graph
@@ -1190,6 +1551,7 @@ def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
         receipt["agent_scaffold"] == "minisweagent.agents.default.DefaultAgent"
         for receipt in receipts
     )
+    assert all(receipt["agent_scaffold_version"] == "2.4.6" for receipt in receipts)
     assert len({receipt["system_prompt_sha256"] for receipt in receipts}) == 1
     assert len({receipt["tool_policy_sha256"] for receipt in receipts}) == 1
     assert len({receipt["repository_start"]["source_revision"] for receipt in receipts}) == 1

@@ -133,10 +133,13 @@ def run_campaign(
     )[0]
     after = treatment.finalize(None)
     content = str(observation.get("content") or "")
+    observation_extra = observation.get("extra") or {}
     same_observation = bool(
         content.startswith(environment.raw_output)
         and "<groundtruth-repository-context" in content
         and 'kind="repository_update"' in content
+        and observation_extra.get("gt_raw_output") == environment.raw_output
+        and isinstance(observation_extra.get("gt_delivery_receipt"), dict)
     )
     if not same_observation:
         raise RuntimeError("GT update was not bound to the raw action observation")
@@ -193,12 +196,31 @@ def run_campaign(
         raise RuntimeError("dense index/query lifecycle was not exact and provider-free")
 
     delivery = after["delivery_receipts"][-1]
+    trajectory_delivery_receipt = observation_extra["gt_delivery_receipt"]
+    provider_deliveries = after["provider_delivery_receipts"]
+    serialized_claims = {
+        str(claim)
+        for provider_delivery in provider_deliveries
+        for claim in provider_delivery.get("serialized_claim_ids", ())
+    }
+    delivery_reconciliation = bool(
+        after.get("delivery_reconciliation") == "PASS"
+        and serialized_claims == set(after.get("delivered_claim_ids", ()))
+        and provider_deliveries
+        and provider_deliveries[0].get("delivered_before_call") == 1
+        and provider_deliveries[-1].get("delivered_before_call") == 2
+        and set(delivery.get("serialized_claim_ids", ()))
+        == set(provider_deliveries[-1].get("serialized_claim_ids", ()))
+        and trajectory_delivery_receipt == delivery
+    )
+    if not delivery_reconciliation:
+        raise RuntimeError("provider-visible claims or call timing did not reconcile")
     receipt = {
         "schema": "gt.harness_e2e_audit_receipt.v1",
         "status": "PASS",
         "product_boundary": "gt-harness run / TreatmentMiniSweAgent",
         "agent_scaffold": "mini-swe-agent",
-        "agent_scaffold_version": "2.2.8",
+        "agent_scaffold_version": "2.4.6",
         "repository": str(run_dir),
         "commit_sha": exact_commit,
         "target": target,
@@ -207,11 +229,19 @@ def run_campaign(
         "initial_source_revision": before["source_revision"],
         "updated_source_revision": after["source_revision"],
         "same_observation": same_observation,
+        "context_schema_v6": bool(
+            'schema="gt.agent_context.v6"' in initial
+            and 'schema="gt.agent_context.v6"' in content
+        ),
         "raw_output_preserved": content.startswith(environment.raw_output),
         "raw_output_sha256": hashlib.sha256(
             environment.raw_output.encode("utf-8")
         ).hexdigest(),
         "delivery_receipt": delivery,
+        "trajectory_delivery_receipt_preserved": True,
+        "provider_delivery_receipts": provider_deliveries,
+        "delivered_claim_ids": after["delivered_claim_ids"],
+        "delivery_reconciliation": "PASS",
         "initial_context_token_count": _bounded_token_count(initial),
         "update_context_token_count": int(delivery["context_token_count"]),
         "before_model_call_injected_context": False,

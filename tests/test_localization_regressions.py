@@ -58,7 +58,7 @@ def test_awilix_shape_keeps_implementation_public_surface_and_test_roles(
     assert "src/awilix.ts" not in "\n".join(
         line for line in context.splitlines() if line.startswith("EXACT_EDIT_TARGET")
     )
-    assert 'schema="gt.agent_context.v5"' in context
+    assert 'schema="gt.agent_context.v6"' in context
 
 
 @pytest.mark.real_graph
