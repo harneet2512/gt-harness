@@ -114,9 +114,10 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "datacurve-pier==0.3.1" in source
     assert "stealth/ox-alpha" in source
     assert "secrets.OPENROUTER_NEW" in source
-    assert "docker/login-action@v3" in source
     assert "secrets.DOCKERHUB_USERNAME" in source
     assert "secrets.DOCKERHUB_TOKEN" in source
+    assert "secrets.DOCKERHUB_USERNAME_ROTATION" in source
+    assert "secrets.DOCKERHUB_TOKEN_ROTATION" in source
     assert "Stagger Docker task-image pulls" in source
     assert "max-parallel: 20" in source
     assert "provider_gate:" in source
