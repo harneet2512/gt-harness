@@ -444,7 +444,7 @@ def test_deepswe_product_workflow_uses_pier_v11_verifier_protocol():
     assert "pier run \\" in workflow
     assert "-p deepswe-bench/tasks \\" in workflow
     assert '--include-task-name "$TASK"' in workflow
-    assert "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent" in workflow
+    assert "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent" in workflow
     assert "gt-harness run" in workflow
     assert "harbor run -p deepswe-bench/tasks" not in workflow
 
@@ -652,9 +652,9 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
     assert "workflow_call:" in workflow
     assert 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"' in workflow
     assert "eval/deepswe_smoke20_v1.json" in workflow
-    assert '"agent_scaffold_version": "2.2.8"' in workflow
-    assert '"max_parallel": 4' in workflow
-    assert "max-parallel: 4" in workflow
+    assert '"agent_scaffold_version": "2.4.6"' in workflow
+    assert '"max_parallel": 20' in workflow
+    assert "max-parallel: 20" in workflow
     assert "stealth/ox-alpha" in workflow
     assert "OPENAI_BASE_URL: https://openrouter.ai/api/v1" in workflow
     assert "--ak max_iterations=300" in workflow
@@ -4710,7 +4710,7 @@ def test_paid_workflow_uses_external_central_agent_and_frozen_version():
     assert 'AGENT="eval.gt_central_agent:MiniSweCentralAgent"' in workflow
     assert '--agent-import-path "$AGENT"' in workflow
     assert '-a "$AGENT"' not in workflow
-    assert '"mini-swe-agent==2.2.8"' in workflow
+    assert '"mini-swe-agent==2.4.6"' in workflow
     assert "eval.miniswe_agent:MiniSweEngineAgent" not in workflow
     assert (
         "options: [off, audit, certified_context, certified_controllers, certified_full]"

@@ -140,11 +140,13 @@ def test_prerelease_matrix_runs_full_provider_free_regression() -> None:
     workflow = (ROOT / ".github/workflows/prerelease_product_matrix.yml").read_text(
         encoding="utf-8"
     )
-
-    assert "pytest -m 'not external_evidence' -q" in workflow
-    assert 'go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index"' in workflow
-    assert 'export GT_INDEX_BINARY="$RUNNER_TEMP/gt-index"' in workflow
-    assert "(cd vendor/gt-index-src && go test ./...)" in workflow
-    assert workflow.index("Run complete provider-free Python and Go regression") < (
-        workflow.index("Run frozen real-repository matrix")
+    campaign = (ROOT / "scripts/codespaces_product_certification.sh").read_text(
+        encoding="utf-8"
     )
+
+    assert "scripts/codespaces_product_certification.sh" in workflow
+    assert 'test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"' in workflow
+    assert "if: always()" in workflow
+    assert "python -m pytest -q -m 'not external_evidence'" in campaign
+    assert "go test ./..." in campaign
+    assert "scripts/product_repository_matrix.py" in campaign

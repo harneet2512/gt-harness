@@ -14,6 +14,7 @@ from gt_harness.miniswe_runner import (
     build_miniswe_agent,
 )
 from gt_harness.treatments import BareTreatment
+from scripts.harness_real_repository_campaign import _ObservationModel
 
 
 class _Treatment(BareTreatment):
@@ -130,6 +131,27 @@ class _MultiActionEnvironment(_Environment):
             "returncode": 0,
             "exception_info": "",
         }
+
+
+def test_provider_free_campaign_model_preserves_miniswe_trajectory_metadata() -> None:
+    receipt = {"schema": "gt.observation_augmentation.v3", "delivery_index": 2}
+
+    message = _ObservationModel().format_observation_messages(
+        {},
+        [
+            {
+                "output": "raw output\n\n<groundtruth-repository-context />",
+                "extra": {
+                    "gt_raw_output": "raw output",
+                    "gt_delivery_receipt": receipt,
+                },
+            }
+        ],
+        {},
+    )[0]
+
+    assert message["extra"]["gt_raw_output"] == "raw output"
+    assert message["extra"]["gt_delivery_receipt"] == receipt
 
 
 def test_miniswe_treatment_is_advisory_and_observes_unmodified_action() -> None:

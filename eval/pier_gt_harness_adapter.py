@@ -106,8 +106,4 @@ class PierGtHarnessMiniSwe246Agent(GtHarnessMiniSwe246Agent):
         )
 
 
-# Compatibility alias for archived callers; the DeepSWE workflow is explicit
-# about the 2.4.6 adapter and never dispatches this legacy spelling.
-PierGtHarnessMiniSwe228Agent = PierGtHarnessMiniSwe246Agent
-
 __all__ = ["PierGtHarnessMiniSwe246Agent"]

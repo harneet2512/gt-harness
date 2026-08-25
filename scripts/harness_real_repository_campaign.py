@@ -49,7 +49,18 @@ class _ObservationModel:
         return {}
 
     def format_observation_messages(self, _message, outputs, _variables):
-        return ({"role": "user", "content": outputs[0]["output"], "extra": {}},)
+        return (
+            {
+                "role": "user",
+                "content": outputs[0]["output"],
+                # Match Mini-SWE 2.4.6's production formatter: output metadata
+                # is copied into the trajectory message's ``extra`` mapping.
+                # Dropping it here made the certifier reject a healthy product
+                # seam because its provider-free witness was weaker than the
+                # real Mini-SWE boundary.
+                "extra": dict(outputs[0].get("extra", {})),
+            },
+        )
 
     def serialize(self) -> dict[str, Any]:
         return {}

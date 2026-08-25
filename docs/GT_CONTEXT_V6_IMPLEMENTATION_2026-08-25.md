@@ -1,7 +1,8 @@
 # GT context v6 implementation record
 
-Status: implemented locally; exact-SHA Codespaces verification is required
-before paid benchmark dispatch.
+Status: implemented locally; exact-SHA Linux product certification is required
+before paid benchmark dispatch. The canonical command is identical in a
+Codespace or the registered prerelease GitHub Actions fallback.
 
 ## Defects demonstrated
 
@@ -91,3 +92,23 @@ candidate SHA before any paid smoke:
 The subsequent 20-task smoke is evaluation, not implementation proof. It is
 valid only after these checks pass and only against an identical 2.4.6
 baseline/task/model/budget/verifier set.
+
+## First hosted certification finding
+
+The first exact-SHA hosted run, `32911041329` at `7eaab4f`, correctly returned
+`NOT_CERTIFIED`. Ten real-repository matrix cases, graph truth, graph
+lifecycle, all six language lifecycles, dense model checksum, Go, lint, and the
+failure campaign passed. The blockers were independently reproduced:
+
+- the provider-free E2E witness discarded Mini-SWE's output `extra` metadata,
+  then falsely reported that GT had failed to preserve its trajectory receipt;
+- three historical assertions still demanded Mini-SWE 2.2.8 after the product
+  and all canonical benchmark workflows moved to 2.4.6; and
+- one assertion still demanded DeepSWE parallelism 4 after the canonical
+  workflow moved to the frozen smoke requirement of 20.
+
+The E2E witness now mirrors Mini-SWE 2.4.6 by copying output metadata into the
+trajectory message, with direct regression coverage. Obsolete 2.2.8 and
+parallelism-4 assertions were replaced with the current product contract, and
+the unused 2.2.8 Pier adapter alias was removed. A later run must certify the
+new exact SHA; the failed run is retained as evidence and is not relabeled.
