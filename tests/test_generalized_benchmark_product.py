@@ -162,3 +162,41 @@ def test_official_result_normalizer_binds_runner_reward_to_product_receipt(
     assert receipt["solved"] is (expected == 1)
     assert receipt["runner_result_sha256"]
     assert (agent / "official-verifier-result.json").is_file()
+
+
+def test_official_result_normalizer_prefers_harbor_aggregate_over_trial_result(
+    tmp_path: Path,
+) -> None:
+    from scripts.standardize_benchmark_result import standardize_result
+
+    root = tmp_path / "results"
+    job = root / "job"
+    agent = job / "agent"
+    trial = job / "task__trial"
+    agent.mkdir(parents=True)
+    trial.mkdir(parents=True)
+    (agent / "gt-run.json").write_text(
+        json.dumps({"schema": "gt.run_receipt.v1", "task_id": "task-a"}),
+        encoding="utf-8",
+    )
+    (job / "result.json").write_text(
+        json.dumps({
+            "n_total_trials": 1,
+            "stats": {"evals": {"task": {"metrics": [{"reward": 1}]}}},
+        }),
+        encoding="utf-8",
+    )
+    (trial / "result.json").write_text(
+        json.dumps({"task_id": "task-a", "trial_name": "task__trial"}),
+        encoding="utf-8",
+    )
+
+    receipt = standardize_result(
+        root=root,
+        suite="deepswe",
+        task_id="task-a",
+        source_sha="a" * 40,
+    )
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["reward"] is None

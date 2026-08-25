@@ -41,9 +41,28 @@ def standardize_result(
         for path in sorted(root.rglob("result.json"))
         if "agent" not in path.parts and "verifier" not in path.parts
     ]
-    if len(result_paths) != 1:
-        raise ValueError(f"expected exactly one runner result, found {len(result_paths)}")
-    result_bytes = result_paths[0].read_bytes()
+    # Harbor writes both the aggregate run result (with ``stats`` and
+    # ``n_total_trials``) and a per-trial result.json.  The aggregate is the
+    # official verifier output; treating the implementation detail as an
+    # ambiguity incorrectly fails otherwise valid tasks.
+    canonical_result_paths = []
+    for path in result_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if "stats" in payload and "n_total_trials" in payload:
+            canonical_result_paths.append(path)
+    if len(canonical_result_paths) == 1:
+        result_path = canonical_result_paths[0]
+    elif len(result_paths) == 1:
+        result_path = result_paths[0]
+    else:
+        raise ValueError(
+            f"expected exactly one canonical runner result, found {len(canonical_result_paths)} "
+            f"among {len(result_paths)} result files"
+        )
+    result_bytes = result_path.read_bytes()
     runner_result = json.loads(result_bytes)
     reward = _reward(runner_result)
     receipt: dict[str, object] = {
@@ -55,7 +74,7 @@ def standardize_result(
         "reward": reward,
         "solved": reward == 1 if reward is not None else None,
         "runner_result_sha256": hashlib.sha256(result_bytes).hexdigest(),
-        "runner_result_path": str(result_paths[0].relative_to(root)).replace("\\", "/"),
+        "runner_result_path": str(result_path.relative_to(root)).replace("\\", "/"),
     }
     target = product_paths[0].with_name("official-verifier-result.json")
     temporary = target.with_suffix(f"{target.suffix}.tmp.{os.getpid()}")
