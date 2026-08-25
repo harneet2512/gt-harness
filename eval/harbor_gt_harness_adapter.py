@@ -164,6 +164,9 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         time_budget_seconds: str,
         product_source_sha: str,
     ) -> str:
+        treatment = os.environ.get("GT_TREATMENT", "groundtruth").strip().lower()
+        if treatment not in {"bare", "groundtruth"}:
+            raise ValueError(f"unsupported GT_TREATMENT: {treatment!r}")
         identity = {
             "schema": "gt.harbor_product_adapter.v1",
             "adapter": f"{__name__}:{type(self).__name__}",
@@ -175,6 +178,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
             "task_id": task_id,
             "attempt": 1,
             "product_command": "gt-harness run",
+            "treatment": treatment,
             "product_source_sha": product_source_sha,
             "time_budget_seconds": time_budget_seconds,
         }
@@ -204,7 +208,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
                 "--time-budget-seconds",
                 shlex.quote(time_budget_seconds),
                 "--treatment",
-                "groundtruth",
+                treatment,
                 "--root",
                 '"$PWD"',
                 "--state-dir",

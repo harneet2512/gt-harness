@@ -7,6 +7,11 @@ on:
         description: "Immutable GT Harness commit or branch to evaluate"
         required: false
         type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: string
+        default: groundtruth
 
 permissions:
   contents: read
@@ -22,4 +27,5 @@ jobs:
     uses: ./.github/workflows/deepswe_gt_harness_product.yml
     with:
       code_ref: ${{ inputs.code_ref || github.sha }}
+      treatment: ${{ inputs.treatment || 'groundtruth' }}
     secrets: inherit

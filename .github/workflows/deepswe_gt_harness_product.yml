@@ -7,12 +7,22 @@ on:
         description: "Immutable GT Harness commit or branch to evaluate"
         required: false
         type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: string
+        default: groundtruth
   workflow_call:
     inputs:
       code_ref:
         description: "Immutable GT Harness commit or branch to evaluate"
         required: false
         type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: string
+        default: groundtruth
 
 permissions:
   contents: read
@@ -55,6 +65,7 @@ jobs:
         id: cohort
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -114,6 +125,9 @@ jobs:
               raise SystemExit(
                   f"DeepSWE language balance mismatch: {language_counts!r}"
               )
+          treatment = os.environ["TREATMENT"].strip().lower()
+          if treatment not in {"bare", "groundtruth"}:
+              raise SystemExit(f"unsupported treatment: {treatment!r}")
 
           receipt = {
               "schema": "gt.deepswe_gt_harness_plan.v1",
@@ -128,6 +142,7 @@ jobs:
               "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent",
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.2.8",
+              "treatment": treatment,
               "requested_model": "stealth/ox-alpha",
               "effective_model": "openai/stealth/ox-alpha",
               "baseline": manifest["baseline"],
@@ -231,6 +246,7 @@ jobs:
       ORDINAL: ${{ matrix.ordinal }}
       MODEL: stealth/ox-alpha
       GT_RETRIEVAL_MODE: hybrid_required
+      GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -437,6 +453,8 @@ jobs:
               adapters[task] = row
               if row.get("product_command") != "gt-harness run" or row.get("attempt") != 1:
                   errors.append(f"adapter_contract_mismatch:{task}")
+              if row.get("treatment") != plan.get("treatment"):
+                  errors.append(f"adapter_treatment_mismatch:{task}")
               if row.get("requested_model") != "stealth/ox-alpha":
                   errors.append(f"requested_model_mismatch:{task}")
               if row.get("effective_model") != "openai/stealth/ox-alpha":
@@ -551,6 +569,7 @@ jobs:
               "effective_model": plan["effective_model"],
               "agent": plan["agent"],
               "agent_scaffold_version": plan["agent_scaffold_version"],
+              "treatment": plan["treatment"],
               "provider_gate": provider_gate,
               "baseline": plan["baseline"],
               "graded": graded,

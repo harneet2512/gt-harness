@@ -102,6 +102,32 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
 
 
 @pytest.mark.asyncio
+async def test_harbor_adapter_can_run_the_matched_bare_control_arm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GT_TREATMENT", "bare")
+    commands: list[str] = []
+
+    class Environment:
+        async def exec(self, command, *, env=None, **kwargs):
+            commands.append(command)
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    agent = GtHarnessMiniSwe228Agent(
+        logs_dir=tmp_path / "logs",
+        model_name="stealth/ox-alpha",
+        task_id="matched-control",
+        product_source_sha="b" * 40,
+        time_budget_seconds="840",
+    )
+    await agent.run("Run the matched control.", Environment(), AgentContext())
+
+    assert len(commands) == 1
+    assert "--treatment bare" in commands[0]
+    assert '"treatment": "bare"' in commands[0]
+
+
+@pytest.mark.asyncio
 async def test_harbor_adapter_finalizes_a_sigkill_checkpoint_before_raising(
     tmp_path: Path,
 ) -> None:
