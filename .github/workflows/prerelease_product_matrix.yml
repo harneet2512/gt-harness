@@ -14,7 +14,7 @@ permissions:
 jobs:
   real_repository_matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 360
     env:
       PYTHONUTF8: "1"
       # The `runner` expression context is unavailable while GitHub parses
@@ -26,6 +26,12 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      - name: Bind certification to exact SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"
+          test -z "$(git status --porcelain)"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -35,38 +41,20 @@ jobs:
           go-version-file: vendor/gt-index-src/go.mod
           cache-dependency-path: vendor/gt-index-src/go.sum
 
-      - name: Install exact prerelease source
+      - name: Run complete provider-free product certification
         run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,eval,miniswe,gt]'
+          set -o pipefail
+          bash scripts/codespaces_product_certification.sh \
+            "$RUNNER_TEMP/gt-codespaces-certification" \
+            2>&1 | tee "$RUNNER_TEMP/gt-codespaces-certification.log"
 
-      - name: Verify source-built product runtime
-        run: gt-harness doctor
-
-      - name: Run complete provider-free Python and Go regression
-        run: |
-          set -euo pipefail
-          (cd vendor/gt-index-src && \
-            go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/)
-          export GT_INDEX_BINARY="$RUNNER_TEMP/gt-index"
-          pytest -m 'not external_evidence' -q
-          (cd vendor/gt-index-src && go test ./...)
-
-      - name: Run frozen real-repository matrix
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/gt-product-receipts"
-          python scripts/product_repository_matrix.py \
-            --workspace "$RUNNER_TEMP/gt-product-matrix" \
-            --output "$RUNNER_TEMP/gt-product-receipts/real-repository-matrix.json" \
-            --timeout 900
-
-      - name: Upload observed matrix receipt
+      - name: Upload complete certification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gt-real-repository-matrix-${{ github.run_id }}
-          path: ${{ runner.temp }}/gt-product-receipts/
+          name: gt-product-certification-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gt-codespaces-certification/
+            ${{ runner.temp }}/gt-codespaces-certification.log
           if-no-files-found: error
           retention-days: 30

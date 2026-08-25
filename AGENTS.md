@@ -148,11 +148,10 @@ pytest -q tests/test_harbor_gt_harness_product.py tests/test_deepswe_gt_harness_
 pytest -q -m "not external_evidence" --ignore=tests/test_gt_finalstand.py
 ```
 
-If GitHub billing prevents a Codespace from starting, dispatch
-`codespaces_product_certification.yml` at the exact candidate SHA. It invokes
+If GitHub billing prevents a Codespace from starting, dispatch the registered
+`prerelease_product_matrix.yml` workflow at the exact candidate SHA. It invokes
 the same `scripts/codespaces_product_certification.sh` Linux campaign and
-uploads the complete receipt/log tree under `always()`; the lighter prerelease
-matrix is not a substitute for this gate.
+uploads the complete receipt/log tree under `always()`.
 
 Parse every current workflow with PyYAML, build the Go indexer with
 `sqlite_fts5`, provision and checksum the pinned ONNX assets, and run a real

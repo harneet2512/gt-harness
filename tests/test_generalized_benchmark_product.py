@@ -13,9 +13,7 @@ WORKFLOWS = {
     "deepswe": ROOT / ".github" / "workflows" / "deepswe_gt_harness_product.yml",
     "swe-live-lite": ROOT / ".github" / "workflows" / "swe_live_lite_gt_harness_product.yml",
 }
-CERTIFICATION_WORKFLOW = (
-    ROOT / ".github" / "workflows" / "codespaces_product_certification.yml"
-)
+CERTIFICATION_WORKFLOW = ROOT / ".github" / "workflows" / "prerelease_product_matrix.yml"
 
 
 def test_one_machine_contract_binds_all_benchmark_suites_to_one_product() -> None:
