@@ -13,6 +13,9 @@ WORKFLOWS = {
     "deepswe": ROOT / ".github" / "workflows" / "deepswe_gt_harness_product.yml",
     "swe-live-lite": ROOT / ".github" / "workflows" / "swe_live_lite_gt_harness_product.yml",
 }
+CERTIFICATION_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "codespaces_product_certification.yml"
+)
 
 
 def test_one_machine_contract_binds_all_benchmark_suites_to_one_product() -> None:
@@ -34,6 +37,16 @@ def test_one_machine_contract_binds_all_benchmark_suites_to_one_product() -> Non
         "READY_WITH_DECLARED_LIMITATIONS",
     ]
     assert contract["delivery_invariant"]["query_ready"] is True
+
+
+def test_full_linux_certification_runs_exact_sha_and_uploads_all_evidence() -> None:
+    source = CERTIFICATION_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "ref: ${{ inputs.ref }}" in source
+    assert 'test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"' in source
+    assert "scripts/codespaces_product_certification.sh" in source
+    assert "if: always()" in source
+    assert "gt-codespaces-certification/" in source
 
 
 def test_all_current_benchmark_workflows_use_the_same_product_not_old_seams() -> None:

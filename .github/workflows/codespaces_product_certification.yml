@@ -1,0 +1,58 @@
+name: GT Harness full product certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact GT commit SHA to certify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONUTF8: "1"
+      GT_HARNESS_CACHE_DIR: /tmp/gt-harness-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Bind certification to exact SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
+
+      - name: Run complete provider-free product certification
+        run: |
+          set -o pipefail
+          bash scripts/codespaces_product_certification.sh \
+            "$RUNNER_TEMP/gt-codespaces-certification" \
+            2>&1 | tee "$RUNNER_TEMP/gt-codespaces-certification.log"
+
+      - name: Upload complete certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-product-certification-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gt-codespaces-certification/
+            ${{ runner.temp }}/gt-codespaces-certification.log
+          if-no-files-found: error
+          retention-days: 30
