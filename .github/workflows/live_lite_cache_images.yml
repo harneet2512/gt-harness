@@ -59,12 +59,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-        continue-on-error: true
+      - name: Log in to Docker Hub account for this cache batch
+        env:
+          DOCKERHUB_USERNAME_PRIMARY: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN_PRIMARY: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME_ROTATION: ${{ secrets.DOCKERHUB_USERNAME_ROTATION }}
+          DOCKERHUB_TOKEN_ROTATION: ${{ secrets.DOCKERHUB_TOKEN_ROTATION }}
+        run: |
+          set -euo pipefail
+          if [ "$(( ${{ matrix.batch_id }} % 2 ))" -eq 0 ]; then
+            user="$DOCKERHUB_USERNAME_PRIMARY"
+            token="$DOCKERHUB_TOKEN_PRIMARY"
+          else
+            user="$DOCKERHUB_USERNAME_ROTATION"
+            token="$DOCKERHUB_TOKEN_ROTATION"
+          fi
+          test -n "$user" -a -n "$token"
+          printf '%s' "$token" | docker login docker.io --username "$user" --password-stdin
 
       - name: Pull from Docker Hub, push to GHCR
         run: |
@@ -78,8 +89,8 @@ jobs:
 
           pull_with_retry() {
             local IMAGE="$1"
-            local MAX_RETRIES=3
-            local DELAY=10
+            local MAX_RETRIES=5
+            local DELAY=15
             for i in $(seq 1 $MAX_RETRIES); do
               if docker pull "$IMAGE" 2>/dev/null; then
                 return 0
