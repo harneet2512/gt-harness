@@ -1,4 +1,4 @@
-name: "GT Harness: canonical Mini-SWE 2.2.8 repair20"
+name: "GT Harness: canonical Mini-SWE 2.4.6 repair20"
 
 on:
   workflow_dispatch:
@@ -130,9 +130,9 @@ jobs:
                   f"{SUPERVISOR_GRACE_SECONDS} seconds"
               ),
               "dataset": "terminal-bench@2.0",
-              "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+              "agent": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe246Agent",
               "agent_scaffold": "mini-swe-agent",
-              "agent_scaffold_version": "2.2.8",
+              "agent_scaffold_version": "2.4.6",
               "requested_model": "stealth/ox-alpha",
               "effective_model": "openai/stealth/ox-alpha",
               "matrix": matrix_rows,
@@ -242,7 +242,7 @@ jobs:
     env:
       TASK: ${{ matrix.task }}
       MODEL: stealth/ox-alpha
-      MINISWE_AGENT_VERSION: "2.2.8"
+      MINISWE_AGENT_VERSION: "2.4.6"
       GT_RETRIEVAL_MODE: hybrid_required
     steps:
       - uses: actions/checkout@v4
@@ -284,7 +284,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e '.[retrieval,eval]' \
-            "mini-swe-agent==2.2.8" "harbor==0.20.0"
+            "mini-swe-agent==2.4.6" "harbor==0.20.0"
 
       - name: Provision the pinned local retrieval model
         env:
@@ -311,7 +311,7 @@ jobs:
           set -euo pipefail
           harbor run \
             -d terminal-bench@2.0 \
-            --agent-import-path eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent \
+            --agent-import-path eval.harbor_gt_harness_adapter:GtHarnessMiniSwe246Agent \
             -m "$MODEL" \
             -o results/terminal-bench \
             --job-name "gt-harness-repair20-task-${{ matrix.ordinal }}-${GITHUB_RUN_ID}" \
@@ -422,7 +422,7 @@ jobs:
                   errors.append(f"requested_model_mismatch:{task}")
               if row.get("effective_model") != "openai/stealth/ox-alpha":
                   errors.append(f"effective_model_mismatch:{task}")
-              if row.get("agent_scaffold_version") != "2.2.8":
+              if row.get("agent_scaffold_version") != "2.4.6":
                   errors.append(f"scaffold_version_mismatch:{task}")
               if row.get("attempt") != 1 or row.get("product_command") != "gt-harness run":
                   errors.append(f"adapter_contract_mismatch:{task}")

@@ -21,7 +21,7 @@ def test_one_machine_contract_binds_all_benchmark_suites_to_one_product() -> Non
     assert contract["schema"] == "gt.benchmark_product_contract.v1"
     assert contract["product_command"] == "gt-harness run"
     assert contract["agent_scaffold"] == "mini-swe-agent"
-    assert contract["agent_scaffold_version"] == "2.2.8"
+    assert contract["agent_scaffold_version"] == "2.4.6"
     assert contract["retrieval_mode"] == "hybrid_required"
     assert set(contract["benchmark_suites"]) == set(WORKFLOWS)
     assert set(contract["required_receipts"]) >= {
@@ -48,7 +48,7 @@ def test_all_current_benchmark_workflows_use_the_same_product_not_old_seams() ->
     for suite, path in WORKFLOWS.items():
         source = path.read_text(encoding="utf-8")
         assert "gt-harness run" in source, suite
-        assert "mini-swe-agent==2.2.8" in source, suite
+        assert "mini-swe-agent==2.4.6" in source, suite
         assert "GT_RETRIEVAL_MODE" in source, suite
         assert "hybrid_required" in source, suite
         assert "gt-run.json" in source, suite
@@ -107,7 +107,7 @@ def test_agents_file_gives_the_exact_runtime_integration_contract() -> None:
         assert path.name in source
     for required in (
         "gt-harness run",
-        "mini-swe-agent==2.2.8",
+        "mini-swe-agent==2.4.6",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
         "GT_INDEX_BINARY",

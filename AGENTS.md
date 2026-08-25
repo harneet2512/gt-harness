@@ -1,7 +1,7 @@
 # GT Harness benchmark integration contract
 
 This repository has one current benchmark product: **GT Harness 0.9.0 running
-Mini-SWE-Agent 2.2.8 through `gt-harness run`**. Benchmark runners may provision
+Mini-SWE-Agent 2.4.6 through `gt-harness run`**. Benchmark runners may provision
 repositories and grade patches differently, but they must not replace, patch,
 or reimplement the GT treatment or the Mini-SWE agent loop.
 
@@ -13,8 +13,8 @@ stop before provider spend and fix the workflow.
 
 | Suite | Current workflow | Orchestration adapter |
 | --- | --- | --- |
-| terminal-bench-2 | `tb2_miniswe_product.yml` | `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent` |
-| deepswe | `deepswe_gt_harness_product.yml` | `eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent` |
+| terminal-bench-2 | `tb2_miniswe_product.yml` | `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe246Agent` |
+| deepswe | `deepswe_gt_harness_product.yml` | `eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent` |
 | swe-live-lite | `swe_live_lite_gt_harness_product.yml` | `eval.swe_live_lite_gt_harness_adapter` |
 
 DeepSWE uses the registered dispatch wrapper
@@ -25,7 +25,7 @@ not a permitted runtime architecture.
 ## Runtime integration
 
 Every task must install the checked-out GT Harness source plus exactly
-`mini-swe-agent==2.2.8`. It must provision the source-built static `gt-index`
+`mini-swe-agent==2.4.6`. It must provision the source-built static `gt-index`
 binary and the checksum-pinned Snowflake ONNX model before the model is called.
 
 The task environment must contain:
@@ -119,7 +119,7 @@ ignored in the recorded trajectory.
 
 ## Forbidden production paths
 
-- Do not use Nano. Mini-SWE-Agent 2.2.8 is the only current scaffold.
+- Do not use Nano. Mini-SWE-Agent 2.4.6 is the only current scaffold.
 - Do not use MCP as the benchmark treatment boundary.
 - Do not use `gt_mini_patch.py` or `gt_headless_runner.py`.
 - Do not use `eval.gt_central_agent` or `eval.pier_gt_adapter`.

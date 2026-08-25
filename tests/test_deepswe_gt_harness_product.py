@@ -14,9 +14,9 @@ MANIFEST = ROOT / "eval" / "deepswe_smoke20_v1.json"
 
 
 def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
-    from eval.pier_gt_harness_adapter import PierGtHarnessMiniSwe228Agent
+    from eval.pier_gt_harness_adapter import PierGtHarnessMiniSwe246Agent
 
-    assert PierGtHarnessMiniSwe228Agent.name() == "gt-harness-miniswe-2.2.8"
+    assert PierGtHarnessMiniSwe246Agent.name() == "gt-harness-miniswe-2.4.6"
     adapter_source = (ROOT / "eval" / "pier_gt_harness_adapter.py").read_text(
         encoding="utf-8"
     )
@@ -31,8 +31,8 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
     ):
         assert domain in adapter_source
     pytest.importorskip("pier.models.agent.network")
-    allowlist = PierGtHarnessMiniSwe228Agent.network_allowlist(
-        PierGtHarnessMiniSwe228Agent.__new__(PierGtHarnessMiniSwe228Agent)
+    allowlist = PierGtHarnessMiniSwe246Agent.network_allowlist(
+        PierGtHarnessMiniSwe246Agent.__new__(PierGtHarnessMiniSwe246Agent)
     )
     assert set(allowlist.domains) == {
         ".githubusercontent.com",
@@ -49,7 +49,7 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
 async def test_pier_adapter_scopes_install_and_product_exec_through_egress_proxy(
     tmp_path: Path,
 ) -> None:
-    from eval.pier_gt_harness_adapter import PierGtHarnessMiniSwe228Agent
+    from eval.pier_gt_harness_adapter import PierGtHarnessMiniSwe246Agent
 
     observed: list[dict[str, str]] = []
 
@@ -65,7 +65,7 @@ async def test_pier_adapter_scopes_install_and_product_exec_through_egress_proxy
             return SimpleNamespace(return_code=0, stdout="", stderr="")
 
     environment = PierEnvironment()
-    agent = PierGtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+    agent = PierGtHarnessMiniSwe246Agent(logs_dir=tmp_path / "logs")
 
     await agent.exec_as_agent(environment, "curl -fsSL https://astral.sh/")
     await agent._exec_product_secret_safe(environment, "gt-harness run", {})
@@ -109,8 +109,8 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "eval/deepswe_smoke20_v1.json" in source
     assert "repository: datacurve-ai/deep-swe" in source
     assert "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9" in source
-    assert "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent" in source
-    assert "mini-swe-agent==2.2.8" in source
+    assert "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent" in source
+    assert "mini-swe-agent==2.4.6" in source
     assert "datacurve-pier==0.3.1" in source
     assert "stealth/ox-alpha" in source
     assert "secrets.OPENROUTER_NEW" in source

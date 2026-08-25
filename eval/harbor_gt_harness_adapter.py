@@ -26,7 +26,7 @@ from harbor.models.agent.context import AgentContext
 from eval._env import UTF8_ENV, clean_env_value, provider_env
 from gt_harness.indexer_setup import ensure_source_indexer
 
-CANONICAL_MINISWE_VERSION = "2.2.8"
+CANONICAL_MINISWE_VERSION = "2.4.6"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_SOURCE = "/installed-agent/gt-harness"
@@ -57,7 +57,7 @@ def _effective_model(requested_model: str, base_url: str) -> str:
     return requested
 
 
-class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
+class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
     """Harbor installed-agent boundary for the production GT Harness runner."""
 
     ENV_VARS = [
@@ -73,7 +73,7 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
 
     @staticmethod
     def name() -> str:
-        return "gt-harness-miniswe-2.2.8"
+        return "gt-harness-miniswe-2.4.6"
 
     def get_version_command(self) -> str | None:
         return (
@@ -348,4 +348,8 @@ class GtHarnessMiniSwe228Agent(BaseInstalledAgent):
         )
 
 
-__all__ = ["CANONICAL_MINISWE_VERSION", "GtHarnessMiniSwe228Agent"]
+# Compatibility alias for archived TB2 callers.  All released benchmark
+# workflows use the explicit 2.4.6 class above.
+GtHarnessMiniSwe228Agent = GtHarnessMiniSwe246Agent
+
+__all__ = ["CANONICAL_MINISWE_VERSION", "GtHarnessMiniSwe246Agent"]

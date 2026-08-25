@@ -14,6 +14,7 @@ from harbor.models.agent.context import AgentContext
 
 from eval.harbor_gt_harness_adapter import (
     CANONICAL_MINISWE_VERSION,
+    GtHarnessMiniSwe246Agent,
     GtHarnessMiniSwe228Agent,
 )
 
@@ -75,7 +76,7 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
 
     await agent.run("Repair the repository.", Environment(), AgentContext())
 
-    assert CANONICAL_MINISWE_VERSION == "2.2.8"
+    assert CANONICAL_MINISWE_VERSION == "2.4.6"
     assert len(commands) == 1
     command, environment = commands[0]
     assert "gt-harness\" run" in command
@@ -211,10 +212,10 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
     await agent.install(Environment())
 
     install = commands[-1]
-    assert '--with "mini-swe-agent==2.2.8"' in install
+    assert '--with "mini-swe-agent==2.4.6"' in install
     assert '--with "onnxruntime==1.28.0"' in install
     assert '--with "tokenizers==0.23.1"' in install
-    assert "m.version('mini-swe-agent') == '2.2.8'" in install
+    assert "m.version('mini-swe-agent') == '2.4.6'" in install
     assert "mini-swe-agent==2.3" not in install
     assert "/installed-agent/gt-index -root /installed-agent/gt-harness/gt_engine" in install
     assert "test -s /tmp/gt-harbor-install-smoke.db" in install
@@ -289,10 +290,10 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
     assert "provider_gate:" in workflow
     assert "gt-harness-provider-gate-${{ github.run_id }}" in workflow
     assert "needs: [plan, provider_gate]" in workflow
-    assert "mini-swe-agent==2.2.8" in workflow
+    assert "mini-swe-agent==2.4.6" in workflow
     assert "stealth/ox-alpha" in workflow
     assert "secrets.OPENROUTER_NEW" in workflow
-    assert "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent" in workflow
+    assert "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe246Agent" in workflow
     assert '--ak task_id="$TASK"' in workflow
     assert '--ak product_source_sha="${{ needs.plan.outputs.source_sha }}"' in workflow
     assert "GT_RETRIEVAL_MODE" in workflow

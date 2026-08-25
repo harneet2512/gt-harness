@@ -139,9 +139,9 @@ jobs:
               "language_counts": language_counts,
               "attempts_per_task": 1,
               "max_parallel": 20,
-              "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent",
+              "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent",
               "agent_scaffold": "mini-swe-agent",
-              "agent_scaffold_version": "2.2.8",
+              "agent_scaffold_version": "2.4.6",
               "treatment": treatment,
               "requested_model": "stealth/ox-alpha",
               "effective_model": "openai/stealth/ox-alpha",
@@ -341,8 +341,8 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e '.[retrieval,eval]' \
-            "mini-swe-agent==2.2.8" "harbor==0.20.0" "datacurve-pier==0.3.1"
-          test "$(python -c 'import importlib.metadata as m; print(m.version("mini-swe-agent"))')" = "2.2.8"
+            "mini-swe-agent==2.4.6" "harbor==0.20.0" "datacurve-pier==0.3.1"
+          test "$(python -c 'import importlib.metadata as m; print(m.version("mini-swe-agent"))')" = "2.4.6"
           test "$(python -c 'import importlib.metadata as m; print(m.version("datacurve-pier"))')" = "0.3.1"
 
       - name: Provision the pinned local retrieval model
@@ -371,7 +371,7 @@ jobs:
           pier run \
             -p deepswe-bench/tasks \
             --include-task-name "$TASK" \
-            --agent-import-path eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent \
+            --agent-import-path eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent \
             -m "$MODEL" \
             -o results/deepswe \
             --job-name "deepswe-gt-harness-${GITHUB_RUN_ID}-${TASK}" \
@@ -479,7 +479,7 @@ jobs:
                   errors.append(f"requested_model_mismatch:{task}")
               if row.get("effective_model") != "openai/stealth/ox-alpha":
                   errors.append(f"effective_model_mismatch:{task}")
-              if row.get("agent_scaffold_version") != "2.2.8":
+              if row.get("agent_scaffold_version") != "2.4.6":
                   errors.append(f"scaffold_version_mismatch:{task}")
               if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
                   errors.append(f"adapter_source_sha_mismatch:{task}")

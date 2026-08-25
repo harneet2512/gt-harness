@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install "harbor==0.20.0" "mini-swe-agent==2.2.8"
+          pip install "harbor==0.20.0" "mini-swe-agent==2.4.6"
 
       - name: Verify exact Ox Alpha Mini-SWE tool route
         run: |
@@ -234,7 +234,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -e '.[retrieval]' \
-            "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+            "mini-swe-agent==2.4.6" "harbor==0.20.0" \
             "pytest==9.1.1" "pytest-asyncio==1.4.0"
 
       - name: Provision pinned local dense backend

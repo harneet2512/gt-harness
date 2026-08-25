@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from eval.harbor_gt_harness_adapter import GtHarnessMiniSwe228Agent
+from eval.harbor_gt_harness_adapter import GtHarnessMiniSwe246Agent
 
 
 class _PierAgentScopedEnvironment:
@@ -36,7 +36,7 @@ class _PierAgentScopedEnvironment:
         return await self._environment.exec(command, **kwargs)
 
 
-class PierGtHarnessMiniSwe228Agent(GtHarnessMiniSwe228Agent):
+class PierGtHarnessMiniSwe246Agent(GtHarnessMiniSwe246Agent):
     """Expose the canonical GT Harness product through Pier's agent hooks."""
 
     @staticmethod
@@ -101,9 +101,13 @@ class PierGtHarnessMiniSwe228Agent(GtHarnessMiniSwe228Agent):
         model_info = ModelInfo(name=requested, provider="openrouter") if requested else None
         return AgentInfo(
             name=self.name(),
-            version=self.version() or "0.9.0/miniswe-2.2.8",
+            version=self.version() or "0.9.0/miniswe-2.4.6",
             model_info=model_info,
         )
 
 
-__all__ = ["PierGtHarnessMiniSwe228Agent"]
+# Compatibility alias for archived callers; the DeepSWE workflow is explicit
+# about the 2.4.6 adapter and never dispatches this legacy spelling.
+PierGtHarnessMiniSwe228Agent = PierGtHarnessMiniSwe246Agent
+
+__all__ = ["PierGtHarnessMiniSwe246Agent"]

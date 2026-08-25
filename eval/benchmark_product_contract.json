@@ -4,17 +4,17 @@
   "product_version": "0.9.0",
   "product_command": "gt-harness run",
   "agent_scaffold": "mini-swe-agent",
-  "agent_scaffold_version": "2.2.8",
+  "agent_scaffold_version": "2.4.6",
   "retrieval_mode": "hybrid_required",
   "benchmark_suites": {
     "terminal-bench-2": {
       "orchestrator": "harbor==0.20.0",
-      "adapter": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent",
+      "adapter": "eval.harbor_gt_harness_adapter:GtHarnessMiniSwe246Agent",
       "workflow": ".github/workflows/tb2_miniswe_product.yml"
     },
     "deepswe": {
       "orchestrator": "datacurve-pier==0.3.1",
-      "adapter": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe228Agent",
+      "adapter": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent",
       "workflow": ".github/workflows/deepswe_gt_harness_product.yml"
     },
     "swe-live-lite": {

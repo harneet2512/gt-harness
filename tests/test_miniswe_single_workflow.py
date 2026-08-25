@@ -17,7 +17,7 @@ def test_single_witness_workflow_is_closed_and_exactly_one_trial():
     assert "${{ inputs." not in text
     assert 'MODEL: "deepseek-v4-flash"' in text
     assert 'TASK_ID: "fix-code-vulnerability"' in text
-    assert 'MINISWE_AGENT_VERSION: "2.2.8"' in text
+    assert 'MINISWE_AGENT_VERSION: "2.4.6"' in text
     assert "-a eval.miniswe_agent:MiniSweGtAgent" in text
     assert '-i "$TASK_ID"' in text
     assert '-n "1"' in text

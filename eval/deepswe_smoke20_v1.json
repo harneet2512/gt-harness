@@ -68,6 +68,6 @@
       "testem-per-launcher-reports": 1,
       "pest-character-class-coalescing": 1
     },
-    "comparison_limit": "The baseline uses Mini-SWE-Agent 2.4.6 while the released GT Harness pins 2.2.8; task-level comparison is directional, not a controlled causal A/B."
+    "comparison_limit": "The GT-on treatment and the GT-off baseline both use Mini-SWE-Agent 2.4.6. This is an apples-to-apples comparison only when task cohort, revision, model route, time budget, and environment receipts also match."
   }
 }

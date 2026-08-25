@@ -1,7 +1,7 @@
 # Terminal-Bench 2.0 MINI-SWE BASELINE, sharded across runners (GT-OFF).
 #
 # Cloned from tb2_baseline_sharded.yml with the harness swapped to
-# eval.miniswe_agent:MiniSweAgent (mini-swe-agent==2.2.8 installed in-container
+# eval.miniswe_agent:MiniSweAgent (mini-swe-agent==2.4.6 installed in-container
 # by uv, runs scripts/miniswe_gt_run.py --gt-off). Fans the 89-task dataset
 # across N runners, each running its own harbor job over a disjoint slice, then
 # merges the shard results into one score. The plan job enumerates the dataset,

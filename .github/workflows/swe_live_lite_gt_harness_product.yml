@@ -137,7 +137,7 @@ jobs:
               "model": "stealth/ox-alpha",
               "effective_model": "openai/stealth/ox-alpha",
               "agent_scaffold": "mini-swe-agent",
-              "agent_scaffold_version": "2.2.8",
+              "agent_scaffold_version": "2.4.6",
               "adapter": "eval.swe_live_lite_gt_harness_adapter",
               "matrix": matrix["include"],
           }
@@ -335,11 +335,11 @@ jobs:
               curl -LsSf https://astral.sh/uv/0.11.32/install.sh | sh
               export PATH="$HOME/.local/bin:$PATH"
               uv tool install --python 3.12.13 \
-                --with "mini-swe-agent==2.2.8" --with "numpy==2.5.1" \
+                --with "mini-swe-agent==2.4.6" --with "numpy==2.5.1" \
                 --with "onnxruntime==1.28.0" --with "tokenizers==0.23.1" \
                 /installed-agent/gt-harness
               product_python="$HOME/.local/share/uv/tools/gt-harness/bin/python"
-              "$product_python" -c "import importlib.metadata as m; assert m.version(\"mini-swe-agent\")==\"2.2.8\""
+              "$product_python" -c "import importlib.metadata as m; assert m.version(\"mini-swe-agent\")==\"2.4.6\""
               "$product_python" -m eval.swe_live_lite_gt_harness_adapter \
                 --instruction-file /logs/agent/issue.txt \
                 --root "$repo_root" \
@@ -379,7 +379,7 @@ jobs:
               target.write(json.dumps({
                   "instance_id": sys.argv[1],
                   "model_patch": open(sys.argv[2], encoding="utf-8").read(),
-                  "model_name_or_path": "GT Harness 0.9.0 + Mini-SWE-Agent 2.2.8 + Ox Alpha",
+                  "model_name_or_path": "GT Harness 0.9.0 + Mini-SWE-Agent 2.4.6 + Ox Alpha",
               }) + "\n")
           PY
             image="$(python -c 'import json,os; print(json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"product-output","agent","task-image.json")))["task_image_repo_digest"])')"
@@ -470,7 +470,7 @@ jobs:
               adapters[task] = row
               if row.get("product_command") != "gt-harness run" or row.get("attempt") != 1:
                   errors.append(f"adapter_contract_mismatch:{task}")
-              if row.get("agent_scaffold_version") != "2.2.8" or row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+              if row.get("agent_scaffold_version") != "2.4.6" or row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
                   errors.append(f"adapter_identity_mismatch:{task}")
           for path in (root / "tasks").rglob("gt-run.json"):
               row = json.loads(path.read_text(encoding="utf-8")); task = str(row.get("task_id") or "")
@@ -501,7 +501,7 @@ jobs:
               "task_count": len(expected),
               "task_ids": plan["task_ids"],
               "task_order_sha256": plan["task_order_sha256"],
-              "agent_scaffold_version": "2.2.8",
+              "agent_scaffold_version": "2.4.6",
               "product_command": "gt-harness run",
               "solved": solved,
               "errors": errors,

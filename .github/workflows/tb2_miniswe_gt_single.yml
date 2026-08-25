@@ -1,4 +1,4 @@
-# One provider-bound matched witness for the historical Mini-SWE 2.2.8
+# One provider-bound matched witness for Mini-SWE 2.4.6
 # fix-code-vulnerability baseline. This workflow is deliberately closed: the
 # task, model, served snapshot, budgets, cardinality, and treatment are not
 # dispatch inputs.
@@ -21,7 +21,7 @@ jobs:
       BASELINE_SYSTEM_FINGERPRINT: "fp_a18b46594c_prod0820_fp8_kvcache_20260402"
       TASK_ID: "fix-code-vulnerability"
       EXPECTED_TASK_CHECKSUM: "13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119"
-      MINISWE_AGENT_VERSION: "2.2.8"
+      MINISWE_AGENT_VERSION: "2.4.6"
       GT_RL_PROFILE: "2"
       GT_MODE: "advisory"
 
@@ -76,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install -e . "harbor==0.20.0" "mini-swe-agent==2.2.8"
+          pip install -e . "harbor==0.20.0" "mini-swe-agent==2.4.6"
           python - <<'PY'
           import importlib.metadata as metadata
           import inspect
@@ -84,7 +84,7 @@ jobs:
           from minisweagent.agents.default import AgentConfig
           from scripts.miniswe_gt_run import build_agent
 
-          assert metadata.version("mini-swe-agent") == "2.2.8"
+          assert metadata.version("mini-swe-agent") == "2.4.6"
           assert inspect.signature(build_agent).parameters["step_limit"].default == 100
           assert AgentConfig.model_fields["cost_limit"].default == 3.0
           PY

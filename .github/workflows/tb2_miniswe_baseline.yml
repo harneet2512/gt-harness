@@ -1,8 +1,8 @@
-# Terminal-Bench 2.0 MINI-SWE BASELINE: Mini-SWE-Agent 2.2.8, GT-OFF, via Harbor.
+# Terminal-Bench 2.0 MINI-SWE BASELINE: Mini-SWE-Agent 2.4.6, GT-OFF, via Harbor.
 #
 # Cloned from tb2_baseline.yml with the harness swapped to eval.miniswe_agent:
 #MiniSweAgent (uploads scripts/ + eval/ + pyproject.toml, installs
-# mini-swe-agent==2.2.8 with uv inside every task container, and runs
+# mini-swe-agent==2.4.6 with uv inside every task container, and runs
 # scripts/miniswe_gt_run.py --gt-off). The preflight exercises miniswe's OWN
 # model path (LitellmModel) and records the served model id + system_fingerprint
 # so the paired GT-on arm can be verified against the same served snapshot.
@@ -77,7 +77,7 @@ jobs:
             /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           sudo docker image prune -af
 
-      # The [miniswe] extra puts mini-swe-agent 2.2.8 on the RUNNER so the
+      # The [miniswe] extra puts mini-swe-agent 2.4.6 on the RUNNER so the
       # preflight can exercise the exact model path the agent will use
       # in-container. The container itself installs mini-swe-agent via uv.
       - name: Install GT Harness + Harbor
