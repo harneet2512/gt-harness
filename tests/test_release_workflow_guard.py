@@ -143,5 +143,8 @@ def test_canonical_gt_workflow_uses_mini_swe_central_ox_alpha_release_manifest()
     assert "eval/release/ox_alpha_smoke20.json" in workflow
     assert "expected 20 unique contract tasks" in workflow
     assert "max-parallel: 20" in workflow
+    assert "secrets.DOCKERHUB_USERNAME_ROTATION" in workflow
+    assert "secrets.DOCKERHUB_TOKEN_ROTATION" in workflow
+    assert "Stagger Docker task-image pulls" in workflow
     assert "execution_budget_sec" in workflow
     assert "GT_PROVIDER_ROUTE_ID: openrouter:native:openrouter.ai" in workflow

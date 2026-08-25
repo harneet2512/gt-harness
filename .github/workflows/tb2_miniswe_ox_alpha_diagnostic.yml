@@ -204,6 +204,31 @@ jobs:
           chmod +x "$RUNNER_TEMP/gt-index"
           echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
 
+      - name: Authenticate Docker Hub account for task image pulls
+        env:
+          DOCKERHUB_USERNAME_PRIMARY: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN_PRIMARY: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME_ROTATION: ${{ secrets.DOCKERHUB_USERNAME_ROTATION }}
+          DOCKERHUB_TOKEN_ROTATION: ${{ secrets.DOCKERHUB_TOKEN_ROTATION }}
+        run: |
+          set -euo pipefail
+          if [ "$(( ORDINAL % 2 ))" -eq 0 ]; then
+            user="$DOCKERHUB_USERNAME_PRIMARY"
+            token="$DOCKERHUB_TOKEN_PRIMARY"
+          else
+            user="$DOCKERHUB_USERNAME_ROTATION"
+            token="$DOCKERHUB_TOKEN_ROTATION"
+          fi
+          test -n "$user" -a -n "$token"
+          printf '%s' "$token" | docker login docker.io --username "$user" --password-stdin
+
+      - name: Stagger Docker task-image pulls
+        run: |
+          set -euo pipefail
+          delay=$(( (ORDINAL - 1) * 15 ))
+          echo "Waiting ${delay}s before the task image pull"
+          sleep "$delay"
+
       - name: Install exact Mini-SWE and GT runtime
         run: |
           set -euo pipefail
