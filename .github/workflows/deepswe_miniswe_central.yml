@@ -310,7 +310,7 @@ jobs:
               "execution_budget_sec": 5400,
               "runner": "datacurve-pier==0.3.1",
               "workspace_prompt_contract": "resolved_workspace_v1",
-              "miniswe_version": "2.2.8",
+              "miniswe_version": "2.4.6",
               "executor_retry_policy": "provider_once_no_retry",
               "protocol_class": "matched_diagnostic",
               "rollouts_per_task": 1,
@@ -414,7 +414,7 @@ jobs:
           python-version: "3.12"
       - name: Install exact Mini-SWE provider adapter
         run: |
-          python -m pip install "mini-swe-agent==2.2.8" "harbor==0.20.0"
+          python -m pip install "mini-swe-agent==2.4.6" "harbor==0.20.0"
           python -m pip install -e .
       - name: Resolve provider route
         run: |
@@ -605,7 +605,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" "datacurve-pier==0.3.1" pytest pytest-asyncio \
+          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.4.6" "harbor==0.20.0" "datacurve-pier==0.3.1" pytest pytest-asyncio \
             vendor/groundtruth_mcp-*.whl
           test "$(python -c 'import importlib.metadata as m; print(m.version("datacurve-pier"))')" = "0.3.1"
       - name: Provision and verify pinned Snowflake ONNX backend
@@ -1208,7 +1208,7 @@ jobs:
                               "execution_budget_sec": 5400,
                               "runner": "datacurve-pier==0.3.1",
                                "workspace_prompt_contract": "resolved_workspace_v1",
-                               "miniswe_version": "2.2.8",
+                               "miniswe_version": "2.4.6",
                                "executor_retry_policy": "provider_once_no_retry",
                                "protocol_class": "matched_diagnostic",
                                "rollouts_per_task": 1,

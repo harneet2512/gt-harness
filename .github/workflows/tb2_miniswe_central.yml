@@ -149,7 +149,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           chmod +x vendor/gt-index-linux-amd64
-          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.4.6" "harbor==0.20.0" \
             vendor/groundtruth_mcp-*.whl
 
       - name: Provision pinned Snowflake ONNX runtime asset
@@ -317,7 +317,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           chmod +x vendor/gt-index-linux-amd64
-          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.4.6" "harbor==0.20.0" \
             vendor/groundtruth_mcp-*.whl
 
       - name: Provision pinned Snowflake ONNX runtime asset in task job

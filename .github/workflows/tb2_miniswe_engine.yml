@@ -107,7 +107,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           chmod +x vendor/gt-index-linux-amd64
-          pip install -e . "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+          pip install -e . "mini-swe-agent==2.4.6" "harbor==0.20.0" \
             "pytest==9.1.1" "pytest-asyncio==1.4.0" vendor/groundtruth_mcp-*.whl
 
       - name: Provider-free semantic readiness gate
@@ -286,7 +286,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           chmod +x vendor/gt-index-linux-amd64
-          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+          python -m pip install -e '.[retrieval]' "mini-swe-agent==2.4.6" "harbor==0.20.0" \
             "pytest-asyncio==1.4.0" vendor/groundtruth_mcp-*.whl
 
       - name: Provision pinned Snowflake ONNX runtime asset

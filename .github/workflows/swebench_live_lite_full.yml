@@ -1633,7 +1633,7 @@ jobs:
               echo "[GT] repo root: $REPO_ROOT"
 
               # Install mini-swe-agent (not in task images — they are bare repos).
-              # mini-swe-agent 2.4.5 requires Python >=3.10, but 155/300 Live Lite
+              # mini-swe-agent 2.4.6 requires Python >=3.10, but 155/300 Live Lite
               # images ship Python 3.6/3.8/3.9 (audited via the registry config blob),
               # where `pip install mini-swe-agent` FAILS. So the uv fallback MUST
               # provision its own managed Python 3.11 (`--python 3.11`) — deterministic
@@ -1649,10 +1649,10 @@ jobs:
               # (system pip + uv tool venv), else every task rewards 0 at step 1. The GT_PY-targeted
               # belt AFTER interpreter resolution (below) is the load-bearing guarantee; these --with/
               # pip additions cover the happy path. GUARD: single-quoted docker block — NO apostrophe.
-              python -m pip install --quiet datacurve-pier mini-swe-agent==2.4.5 fastapi orjson 2>/dev/null || python -m pip install --quiet mini-swe-agent==2.4.5 fastapi orjson 2>/dev/null || {
+              python -m pip install --quiet datacurve-pier mini-swe-agent==2.4.6 fastapi orjson 2>/dev/null || python -m pip install --quiet mini-swe-agent==2.4.6 fastapi orjson 2>/dev/null || {
                 curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>/dev/null
                 export PATH="$HOME/.local/bin:/root/.local/bin:$PATH"
-                uv tool install --python 3.11 --with fastapi --with orjson mini-swe-agent==2.4.5 2>/dev/null || uv tool install --with fastapi --with orjson mini-swe-agent==2.4.5 2>/dev/null
+                uv tool install --python 3.11 --with fastapi --with orjson mini-swe-agent==2.4.6 2>/dev/null || uv tool install --with fastapi --with orjson mini-swe-agent==2.4.6 2>/dev/null
               }
               # Verify installation
               if ! command -v mini-swe-agent >/dev/null 2>&1; then
@@ -2008,7 +2008,7 @@ jobs:
             }
           fi
           if [ "${GT_BASELINE_FLAG:-0}" != "1" ] && [ "${GT_PROFILE_ABSENT:-0}" != "1" ]; then
-            python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); sys.exit(0 if d.get("schema")=="gt.batch_activation.v1" and d.get("required") is True and d.get("wrapper_attached") is True and d.get("result")=="installed" and d.get("mini_swe_version")=="2.4.5" else 1)' /tmp/gt_out/gt_batch_activation.json || {
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); sys.exit(0 if d.get("schema")=="gt.batch_activation.v1" and d.get("required") is True and d.get("wrapper_attached") is True and d.get("result")=="installed" and d.get("mini_swe_version")=="2.4.6" else 1)' /tmp/gt_out/gt_batch_activation.json || {
               _gt_uncitable gt_batch_unproven "GT_BATCH_UNPROVEN: batch activation receipt is invalid or version-mismatched; task is not citable (METRICS/PROOF, job not failed)"
             }
           fi
@@ -2707,7 +2707,7 @@ jobs:
               and batch.get("required") is True
               and batch.get("wrapper_attached") is True
               and batch.get("result") == "installed"
-              and batch.get("mini_swe_version") == "2.4.5"
+              and batch.get("mini_swe_version") == "2.4.6"
           ):
               raise SystemExit("GT_TASK_COMPLETION_INVALID:batch_activation")
           parity = identity.get("commit_parity_recorded")

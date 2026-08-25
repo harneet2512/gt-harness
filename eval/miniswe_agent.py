@@ -4,8 +4,7 @@ The two Harbor agents install the same pinned treatment bundle. ``MiniSweAgent``
 runs the stock loop with ``--gt-off`` and never activates or imports GT in the
 runner. ``MiniSweGtAgent`` activates the advisory session and forwards only the
 GT state/index configuration. This makes activation—not package drift—the A/B
-treatment. Version 2.3.0 is the default; a closed 2.2.8 override exists only
-for execution matched to the historical baseline.
+treatment. Mini-SWE-Agent 2.4.6 is the sole released treatment version.
 
 ``uv tool install`` does not emit a ~/.local/bin/python shim; the tool venv's
 interpreter lives at the layout GTNanoAgent already relies on.
@@ -36,8 +35,8 @@ _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
-_DEFAULT_MINISWE_AGENT_VERSION = "2.3.0"
-_ALLOWED_MINISWE_AGENT_VERSIONS = frozenset({"2.2.8", "2.3.0"})
+_DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
+_ALLOWED_MINISWE_AGENT_VERSIONS = frozenset({"2.4.6"})
 _UV_INSTALL = f"https://astral.sh/uv/{_UV_VERSION}/install.sh"
 # After the uv tool install the staged checkout is removed (the tool venv holds
 # the installed wheel copy). Leaving it readable lets a root task model
