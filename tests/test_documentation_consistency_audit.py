@@ -8,7 +8,7 @@ def test_authoritative_release_documentation_is_complete_and_linked() -> None:
     report = audit_documentation(root)
 
     assert report["status"] == "PASS", report["failures"]
-    assert report["checked_documents"] == 23
+    assert report["checked_documents"] == 25
 
 
 def test_documentation_audit_rejects_unearned_outcome_guarantee(tmp_path) -> None:

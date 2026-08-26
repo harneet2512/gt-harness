@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from gt_engine.hybrid_repository import HybridRepository
@@ -287,6 +288,123 @@ _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS = _ISSUE_LANGUAGE_WORDS | frozenset(
         "task",
     }
 )
+
+# Task-prose nouns that describe code concepts generically.  A bare lowercase
+# occurrence of one of these words names a concept, not a repository symbol,
+# so it must stay retrieval vocabulary and never bind symbol identity.
+_GENERIC_IDENTITY_NOUNS = frozenset(
+    {
+        "array",
+        "arrays",
+        "attribute",
+        "boolean",
+        "class",
+        "config",
+        "configuration",
+        "constant",
+        "content",
+        "context",
+        "count",
+        "data",
+        "depth",
+        "entry",
+        "error",
+        "errors",
+        "field",
+        "function",
+        "handler",
+        "index",
+        "input",
+        "interface",
+        "item",
+        "items",
+        "key",
+        "keys",
+        "kind",
+        "length",
+        "level",
+        "method",
+        "mode",
+        "module",
+        "name",
+        "node",
+        "nodes",
+        "number",
+        "object",
+        "objects",
+        "option",
+        "options",
+        "order",
+        "output",
+        "parser",
+        "path",
+        "paths",
+        "property",
+        "setting",
+        "settings",
+        "size",
+        "state",
+        "string",
+        "symbol",
+        "target",
+        "test",
+        "tests",
+        "token",
+        "type",
+        "validator",
+        "value",
+        "values",
+        "variable",
+    }
+)
+
+
+def _is_generic_identity_noun(token: str) -> bool:
+    """Return whether a bare lowercase token is prose vocabulary, not a name."""
+
+    return bool(token) and token == token.lower() and token in _GENERIC_IDENTITY_NOUNS
+
+
+def _is_short_acronym(token: str) -> bool:
+    """Return whether a token is a short ALL-CAPS abbreviation such as CWE."""
+
+    return bool(token) and len(token) <= 5 and token.isupper()
+
+
+def _task_cites_path(task: str, path: str) -> bool:
+    """Return whether the task text literally cites this file path or name."""
+
+    normalized = _normalized_path(path).casefold()
+    name = normalized.rsplit("/", 1)[-1]
+    text = " ".join(str(task or "").split()).casefold()
+    return bool(normalized and normalized in text) or bool(name and name in text)
+
+
+def _segment_identity_eligible(segment: str) -> bool:
+    """Return whether a task-text segment may bind repository symbols."""
+
+    token = str(segment or "").strip()
+    return bool(token) and not _is_generic_identity_noun(token)
+
+
+# Entities introduced by a throw/raise verb name an exception the obligation
+# must produce.  They are consumption vocabulary, never edit identity.
+_THROW_CUE = re.compile(
+    r"(?i)\b(?:throw|raise|raises|thrown)\s+(?:an?\s+|the\s+)?['\"`]?([A-Za-z_][\w.]*)"
+)
+
+
+def _exception_cue_tokens(text: str) -> frozenset[str]:
+    tokens: set[str] = set()
+    for match in _THROW_CUE.finditer(str(text or "")):
+        value = match.group(1)
+        while value:
+            tokens.add(value)
+            tokens.add(value.casefold())
+            if "." not in value:
+                break
+            value = value.rsplit(".", 1)[-1]
+    return frozenset(tokens)
 _TEST_SEGMENTS = ("/test/", "/tests/", "/__tests__/")
 _LEGACY_SEGMENTS = (
     "/benchmark/",
@@ -499,10 +617,15 @@ def compile_task_facets(
         entity_values: tuple[str, ...],
     ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
         def spelling_preferred(
-            key: str, spelling: str
+            key: str,
+            spelling: str,
+            *,
+            exact_case_only: bool = False,
         ) -> list[tuple[str, str]]:
             rows = available.get(key.casefold(), [])
             exact_case = [row for row in rows if row[0] == spelling]
+            if exact_case_only:
+                return exact_case
             return exact_case or rows
 
         exact: list[str] = []
@@ -520,22 +643,50 @@ def compile_task_facets(
                 len(segments) == 1
                 and leaf.casefold() in qualified_task_leaves
             )
+            bindable_segments = [
+                _segment_identity_eligible(segment) for segment in segments
+            ]
+            owner_exact_case = _is_short_acronym(segments[0])
+            leaf_exact_case = _is_short_acronym(leaf)
             direct = (
                 []
                 if qualified_shadow
-                else spelling_preferred(entity, entity)
+                or not all(bindable_segments)
+                else spelling_preferred(
+                    entity,
+                    entity,
+                    exact_case_only=any(
+                        _is_short_acronym(segment) for segment in segments
+                    ),
+                )
             )
             owner_rows = (
-                spelling_preferred(segments[0], segments[0])
-                if len(segments) > 1
+                spelling_preferred(
+                    segments[0],
+                    segments[0],
+                    exact_case_only=owner_exact_case,
+                )
+                if len(segments) > 1 and bindable_segments[0]
                 else []
             )
-            leaf_rows = spelling_preferred(leaf, leaf)
+            leaf_rows = (
+                spelling_preferred(
+                    leaf,
+                    leaf,
+                    exact_case_only=leaf_exact_case,
+                )
+                if bindable_segments[-1]
+                else []
+            )
             if direct:
                 exact.extend(symbol for symbol, _path in direct)
                 modules.extend(path for _symbol, path in direct if path)
                 continue
-            if len(segments) == 1 and leaf_rows and not qualified_shadow:
+            if (
+                len(segments) == 1
+                and leaf_rows
+                and not qualified_shadow
+            ):
                 exact.extend(symbol for symbol, _path in leaf_rows)
                 modules.extend(path for _symbol, path in leaf_rows if path)
                 continue
@@ -619,7 +770,10 @@ def compile_task_facets(
             ):
                 entities.append(token)
         entity_values = tuple(dict.fromkeys(entities))
-        exact, unresolved, owners, modules = resolve_entities(entity_values)
+        exception_tokens = _exception_cue_tokens(text)
+        exact, unresolved, owners, modules = resolve_entities(
+            tuple(e for e in entity_values if e not in exception_tokens)
+        )
         digest = hashlib.sha256(
             f"{obligation_id}\0{text}".encode()
         ).hexdigest()[:16]
@@ -932,9 +1086,29 @@ def _matching_facet_ids(
     path: str,
     facets: tuple[TaskFacet, ...],
 ) -> tuple[str, ...]:
+    matched, _has_unscoped = _matching_facet_scopes(
+        symbol=symbol, path=path, facets=facets
+    )
+    return matched
+
+
+def _matching_facet_scopes(
+    *,
+    symbol: str,
+    path: str,
+    facets: tuple[TaskFacet, ...],
+) -> tuple[tuple[str, ...], bool]:
+    """Return (matched facet ids, whether any match is globally unscoped).
+
+    A facet whose qualified obligation pins an owning module scopes its
+    symbol matches to that module; such matches survive cross-file name
+    collisions.  A purely global name match does not.
+    """
+
     keys = _symbol_keys(symbol)
     normalized_path = _normalized_path(path)
     matched: list[str] = []
+    has_unscoped = False
     for facet in facets:
         symbol_match = bool(
             keys
@@ -954,7 +1128,9 @@ def _matching_facet_ids(
             not owner_scoped or normalized_path in facet.owning_modules
         ):
             matched.append(facet.facet_id)
-    return tuple(matched)
+            if not owner_scoped:
+                has_unscoped = True
+    return tuple(matched), has_unscoped
 
 
 def _path_terms(path: str) -> frozenset[str]:
@@ -1363,6 +1539,27 @@ class RepositoryContextCompiler:
             )
         )
 
+        def _entry_file_symbol(path: str, symbol: str) -> bool:
+            """An all-lowercase symbol naming its own file or filename token
+            (katex.js#katex, remarkable-katex.js#katex) is package entry,
+            plugin, or barrel evidence: inspection only, not edit identity.
+
+            CamelCase symbols sharing their module filename (Rust's
+            ``script.rs`` defining ``Script``) stay fully eligible."""
+
+            raw_symbol = str(symbol or "").strip()
+            if not raw_symbol or raw_symbol != raw_symbol.lower():
+                return False
+            symbol_key = raw_symbol.casefold()
+            stem = Path(str(path)).stem.strip().casefold()
+            if stem == symbol_key:
+                return True
+            parts = frozenset(
+                part for part in re.split(r"[_.-]+", Path(str(path)).name.casefold())
+                if part
+            )
+            return symbol_key in parts
+
         exact_symbol_rows = tuple(
             row
             for row in ranked
@@ -1378,6 +1575,68 @@ class RepositoryContextCompiler:
                 )
             )
         )
+
+        def _export_connected(first: str, second: str, symbol: str) -> bool:
+            symbol_key = symbol.casefold()
+            for link in repository.structural_links:
+                if not _safe_link(link):
+                    continue
+                relation = str(link.relation or "").upper()
+                if relation not in {"RE_EXPORTS", "EXPORTS"}:
+                    continue
+                if {link.source_path, link.target_path} != {first, second}:
+                    continue
+                if symbol_key in {
+                    str(link.source_symbol or "").casefold(),
+                    str(link.target_symbol or "").casefold(),
+                }:
+                    return True
+            return False
+
+        # The same unqualified symbol name in several mutually unrelated files
+        # is ambiguous identity evidence.  Demote a name group to inspection
+        # only when every member's facet match is globally unscoped AND no
+        # certified export structure connects the files (a facade); owner-
+        # module-scoped matches survive cross-file collisions by design.
+        rows_by_symbol: dict[str, list[RankedFile]] = {}
+        for row in exact_symbol_rows:
+            symbol_key = str(_exact_candidate(row).symbol).casefold()
+            rows_by_symbol.setdefault(symbol_key, []).append(row)
+        ambiguous_symbols = set()
+        for symbol_key, rows in rows_by_symbol.items():
+            if len({row.path for row in rows}) <= 1:
+                continue
+            all_scoped = True
+            for row in rows:
+                candidate = _exact_candidate(row)
+                _ids, has_unscoped = _matching_facet_scopes(
+                    symbol=str(candidate.symbol),
+                    path=row.path,
+                    facets=task_facets,
+                )
+                if has_unscoped:
+                    all_scoped = False
+                    break
+            if not all_scoped:
+                continue
+            connected = any(
+                _export_connected(
+                    first.path,
+                    second.path,
+                    str(_exact_candidate(first).symbol),
+                )
+                for index, first in enumerate(rows)
+                for second in rows[index + 1 :]
+            )
+            if not connected:
+                ambiguous_symbols.add(symbol_key)
+        if ambiguous_symbols:
+            exact_symbol_rows = tuple(
+                row
+                for row in exact_symbol_rows
+                if str(_exact_candidate(row).symbol).casefold()
+                not in ambiguous_symbols
+            )
         exact_path_rows = tuple(
             row
             for row in ranked
@@ -1450,13 +1709,29 @@ class RepositoryContextCompiler:
             row for row in authoritative_rows if row.path not in public_surface_paths
         )
         validation_rows = tuple(row for row in non_public_rows if _is_test(row.path))
+        # Edit authority requires an obligation-backed facet match.  A bare
+        # exact-path token match with no facet coverage is inspection evidence
+        # only, unless the task itself cites the file path or file name; a
+        # literally cited file is decisive user intent.  An entry-file symbol
+        # (katex.js#katex) is package/barrel evidence and never edit authority.
+        def _is_entry_symbol_row(row: RankedFile) -> bool:
+            candidate = _exact_candidate(row)
+            return candidate is not None and _entry_file_symbol(
+                row.path, str(candidate.symbol)
+            )
+
         edit_rows = tuple(
             row
             for row in non_public_rows
             if not _is_test(row.path)
+            and not _is_entry_symbol_row(row)
             and (
                 LocalizationRole.EDIT in row_roles(row)
-                or (row in exact_path_rows and not row_facet_ids(row))
+                or (
+                    row in exact_path_rows
+                    and not row_facet_ids(row)
+                    and _task_cites_path(request.task, row.path)
+                )
             )
         )
         primary_rows = _select_role_complete_rows(
@@ -1563,20 +1838,27 @@ class RepositoryContextCompiler:
                 ),
                 None,
             )
-            if role is None or row in primary_rows:
+            is_entry_symbol = _is_entry_symbol_row(row)
+            if (role is None and not is_entry_symbol) or row in primary_rows:
                 continue
-            inspection_items.append(
-                replace(
-                    _identity_item(
-                        row,
-                        request,
-                        decision_reason="exact_task_identity_inspection_only",
-                        file_only=row in exact_path_rows and row not in exact_symbol_rows,
-                    ),
-                    localization_role=role.value,
-                    facet_ids=row_facet_ids(row),
+            if role is not None:
+                inspection_items.append(
+                    replace(
+                        _identity_item(
+                            row,
+                            request,
+                            decision_reason="exact_task_identity_inspection_only",
+                            file_only=row in exact_path_rows
+                            and row not in exact_symbol_rows,
+                        ),
+                        localization_role=role.value,
+                        facet_ids=row_facet_ids(row),
+                    )
                 )
-            )
+            else:
+                # Entry/barrel symbols keep their retrieval value as explicit
+                # inspection evidence without ever becoming edit authority.
+                inspection_items.append(_inspection_item(row, request))
         for fused in fusion_rows:
             path = str(fused["path"])
             sparse_entry = sparse_by_path.get(path)

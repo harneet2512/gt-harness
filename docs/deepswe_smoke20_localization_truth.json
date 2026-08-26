@@ -1,0 +1,945 @@
+{
+  "summary": {
+    "schema": "gt.localization_truth_report.v1",
+    "compiler_fingerprint": "1c1c5de687b292c90c08f6723427443cf628763238c3602dfdc9b1180cadb22d",
+    "cases_run": 20,
+    "case_failures": [],
+    "mean_edit_target_precision": 1.0,
+    "tasks_with_wrong_edit_targets": [],
+    "zero_target_tasks": [
+      "arktype-json-schema-refs-dependencies",
+      "csstree-shorthand-expansion-compression",
+      "abs-stepped-slices",
+      "katex-multicolumn-array-spans",
+      "fd-deterministic-multi-key-sorting",
+      "actionlint-action-pinning-lint",
+      "bandit-incremental-cache-control",
+      "oxvg-structural-selector-preservation",
+      "anko-default-function-arguments",
+      "bandit-interprocedural-taint-checks",
+      "claude-code-by-agents-recursive-delegation"
+    ],
+    "treatment_failures": []
+  },
+  "results": [
+    {
+      "task_id": "abs-module-cache-flags",
+      "commit": "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "repl/repl.go",
+          "symbol": "BeginRepl"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 4,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.25,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "repl/repl.go"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "object/environment.go"
+        ],
+        "INSPECT_INTEGRATION": [
+          "main.go"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-a365ddb07ac2"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-e2ac4cace499"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "evaluator/functions.go",
+        "evaluator/module_loader.go",
+        "repl/repl.go",
+        "util/util.go"
+      ],
+      "token_count": 423
+    },
+    {
+      "task_id": "adaptix-name-mapping-aliases",
+      "commit": "a691069fcadf9131e5f7a5a130a022dc678f3e1d",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "src/adaptix/_internal/morphing/facade/provider.py",
+          "symbol": "name_mapping"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 8,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.125,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "AFFECTED_TEST": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "src/adaptix/_internal/morphing/facade/provider.py"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "src/adaptix/__init__.py"
+        ],
+        "INSPECT_INTEGRATION": [
+          "src/adaptix/_internal/morphing/enum_provider.py"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-8d29dbc69116"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-e3cc9adbf2c7"
+        ],
+        "AFFECTED_TEST": [
+          "tests/integration/morphing/test_attrs.py"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "src/adaptix/_internal/morphing/facade/provider.py",
+        "src/adaptix/_internal/morphing/facade/retort.py",
+        "src/adaptix/_internal/morphing/model/crown_definitions.py",
+        "src/adaptix/_internal/morphing/model/loader_gen.py",
+        "src/adaptix/_internal/morphing/model/loader_provider.py",
+        "src/adaptix/_internal/morphing/name_layout/base.py",
+        "src/adaptix/_internal/morphing/name_layout/component.py",
+        "src/adaptix/_internal/morphing/name_layout/provider.py"
+      ],
+      "token_count": 484
+    },
+    {
+      "task_id": "arktype-json-schema-refs-dependencies",
+      "commit": "04355e8b26d1ad5264ef62314a2bc46c4de58ed8",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 7,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "ark/type/keywords/FormData.ts"
+        ],
+        "INSPECT_INTEGRATION": [
+          "ark/type/scope.ts"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-b538c80fcf0e"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-d321491163a7"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "ark/json-schema/array.ts",
+        "ark/json-schema/common.ts",
+        "ark/json-schema/composition.ts",
+        "ark/json-schema/json.ts",
+        "ark/json-schema/object.ts",
+        "ark/json-schema/scope.ts",
+        "ark/json-schema/utils.ts"
+      ],
+      "token_count": 476
+    },
+    {
+      "task_id": "csstree-shorthand-expansion-compression",
+      "commit": "88e3d965c0b1628642a30a841745b410d6835052",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 3,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "BOUNDED_PROCESS": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "lib/__tests/lexer-match-property.js"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-2870ef1d97ef"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "lib/lexer/Lexer.js",
+        "lib/lexer/shorthand-config.js",
+        "lib/lexer/shorthand.js"
+      ],
+      "token_count": 377
+    },
+    {
+      "task_id": "boa-hierarchical-evaluation-cancellation",
+      "commit": "70409a5052984325dccfdc5f6520818568a81f39",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "core/engine/src/context/mod.rs",
+          "symbol": "Context"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 7,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.14285714285714285,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "BOUNDED_PROCESS": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "core/engine/src/context/mod.rs"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "core/engine/src/job.rs"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "core/engine/src/builtins/mod.rs"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-99a6073b56c8"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "core/engine/src/context/evaluation.rs",
+        "core/engine/src/context/mod.rs",
+        "core/engine/src/job.rs",
+        "core/engine/src/lib.rs",
+        "core/engine/src/module/mod.rs",
+        "core/engine/src/script.rs",
+        "core/engine/src/vm/mod.rs"
+      ],
+      "token_count": 418
+    },
+    {
+      "task_id": "abs-stepped-slices",
+      "commit": "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 3,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "UNCOVERED_FACET": 2
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "ast/ast.go"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "ast/ast.go",
+        "evaluator/evaluator.go",
+        "parser/parser.go"
+      ],
+      "token_count": 217
+    },
+    {
+      "task_id": "aiomonitor-task-snapshots-diff",
+      "commit": "b73fea2e0682803bda7531c93cd1dfb360839175",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "aiomonitor/monitor.py",
+          "symbol": "format_running_task_list"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 5,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.2,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "AFFECTED_TEST": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "aiomonitor/monitor.py"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "aiomonitor/termui/completion.py"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "aiomonitor/__init__.py"
+        ],
+        "INSPECT_INTEGRATION": [
+          "aiomonitor/types.py"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-e637ff59a876"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-5ca7205bdd56"
+        ],
+        "AFFECTED_TEST": [
+          "examples/extension.py"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "aiomonitor/monitor.py",
+        "aiomonitor/termui/commands.py",
+        "aiomonitor/types.py",
+        "aiomonitor/webui/app.py",
+        "aiomonitor/webui/templates/snapshots.html"
+      ],
+      "token_count": 455
+    },
+    {
+      "task_id": "awilix-async-container-initialization",
+      "commit": "82ac179c1de4c216c4e333093044fac643303f0c",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "src/resolvers.ts",
+          "symbol": "asClass"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 4,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.25,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "AFFECTED_TEST": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "src/resolvers.ts"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "src/awilix.ts"
+        ],
+        "INSPECT_INTEGRATION": [
+          "src/container.ts"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-29dc86f9cb8e"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-77db52a748ab"
+        ],
+        "AFFECTED_TEST": [
+          "src/__tests__/container.test.ts"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "src/awilix.ts",
+        "src/container.ts",
+        "src/errors.ts",
+        "src/resolvers.ts"
+      ],
+      "token_count": 485
+    },
+    {
+      "task_id": "katex-multicolumn-array-spans",
+      "commit": "89bede495dc2c85e1c57ba627a18526f71d57396",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 4,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "src/ParseError.ts"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "src/environments/array.ts",
+        "src/functions.ts",
+        "src/functions/multicolumn.ts",
+        "src/parseNode.ts"
+      ],
+      "token_count": 472
+    },
+    {
+      "task_id": "fd-deterministic-multi-key-sorting",
+      "commit": "227883606023d62275fb48701aeac90f2b604143",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 5,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "UNCOVERED_FACET": 2
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "src/cli.rs"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "src/cli.rs",
+        "src/config.rs",
+        "src/main.rs",
+        "src/sort.rs",
+        "src/walk.rs"
+      ],
+      "token_count": 228
+    },
+    {
+      "task_id": "actionlint-action-pinning-lint",
+      "commit": "0bdc95715fa58f64e3fd6e63b0f89be8733cbbab",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 4,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "UNCOVERED_FACET": 2
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "testdata/examples/.github/actions/my-invalid-action/action.yml"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-89287f125b6c"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-b4f9d9ba3252"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "command.go",
+        "config.go",
+        "linter.go",
+        "rule_action_pinning.go"
+      ],
+      "token_count": 435
+    },
+    {
+      "task_id": "bandit-incremental-cache-control",
+      "commit": "765f00d3f202f83f61d03f882f80a2d5142d81f8",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 6,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "bandit/cli/config_generator.py"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "bandit/cli/main.py",
+        "bandit/core/cache_manager.py",
+        "bandit/core/issue.py",
+        "bandit/core/manager.py",
+        "bandit/core/metrics.py",
+        "bandit/formatters/json.py"
+      ],
+      "token_count": 400
+    },
+    {
+      "task_id": "clack-async-autocomplete-options",
+      "commit": "8a96e2dcd7f821d1250b58cf71c327679f94de25",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 2,
+      "edit_targets": [
+        {
+          "path": "packages/core/src/prompts/autocomplete.ts",
+          "symbol": "AutocompletePrompt"
+        },
+        {
+          "path": "packages/prompts/src/autocomplete.ts",
+          "symbol": "autocompleteMultiselect"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 4,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.5,
+      "roles": {
+        "EXACT_EDIT_TARGET": 2,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "BOUNDED_PROCESS": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "packages/core/src/prompts/autocomplete.ts",
+          "packages/prompts/src/autocomplete.ts"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "packages/core/src/prompts/prompt.ts"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "packages/core/package.json"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-12d0688b18e6"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "packages/core/src/prompts/autocomplete-async.ts",
+        "packages/core/src/prompts/autocomplete.ts",
+        "packages/core/src/prompts/prompt.ts",
+        "packages/prompts/src/autocomplete.ts"
+      ],
+      "token_count": 449
+    },
+    {
+      "task_id": "testem-bail-on-test-failure",
+      "commit": "06a1adb7a70e85e7322d8cfae3181508785de95d",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "lib/app.js",
+          "symbol": "getExitCode"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 18,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.05555555555555555,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "AFFECTED_TEST": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "lib/app.js"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "tests/runners/browser_test_runner_tests.js"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "lib/api.js"
+        ],
+        "INSPECT_INTEGRATION": [
+          "lib/browser_tap_consumer.js"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-619aec4b2195"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-6c92538df20d"
+        ],
+        "AFFECTED_TEST": [
+          "tests/ci/ci_tests.js"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "lib/app.js",
+        "lib/config.js",
+        "lib/reporters/dot_reporter.js",
+        "lib/reporters/tap_reporter.js",
+        "lib/reporters/teamcity_reporter.js",
+        "lib/reporters/xunit_reporter.js",
+        "lib/runners/browser_test_runner.js",
+        "lib/runners/process_test_runner.js",
+        "lib/runners/tap_process_test_runner.js",
+        "lib/server/index.js",
+        "lib/utils/displayutils.js",
+        "lib/utils/reporter.js",
+        "public/testem/jasmine2_adapter.js",
+        "public/testem/mocha_adapter.js",
+        "public/testem/qunit_adapter.js",
+        "public/testem/testem_client.js",
+        "public/testem/testem_connection.js",
+        "testem.js"
+      ],
+      "token_count": 480
+    },
+    {
+      "task_id": "oxvg-structural-selector-preservation",
+      "commit": "1fd7fab851ecc975e008be0e3e279568ce4e2b51",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 3,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "crates/oxvg_lint/src/rules/no_unknown_elements.rs"
+        ]
+      },
+      "oracle_paths": [
+        "crates/oxvg_ast/src/style.rs",
+        "crates/oxvg_optimiser/src/jobs/collapse_groups.rs",
+        "crates/oxvg_optimiser/src/jobs/remove_empty_containers.rs"
+      ],
+      "token_count": 208
+    },
+    {
+      "task_id": "anko-default-function-arguments",
+      "commit": "9d2d84bb1564e9513287998c56ccf16c01c19008",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 3,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "vm/vmExprFunction.go"
+        ]
+      },
+      "oracle_paths": [
+        "core/core.go",
+        "parser/default_args.go",
+        "parser/lexer.go"
+      ],
+      "token_count": 192
+    },
+    {
+      "task_id": "bandit-interprocedural-taint-checks",
+      "commit": "b46fa3a2723635aa29cc012538df4867ac2ac006",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 9,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_PROCESS": 1,
+        "BOUNDED_IMPACT": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "bandit/plugins/markupsafe_markup_xss.py"
+        ],
+        "INSPECT_INTEGRATION": [
+          "bandit/__init__.py"
+        ],
+        "BOUNDED_PROCESS": [
+          "gt-process-1c6acc4c95e0"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-93f70889f646"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "bandit/core/issue.py",
+        "bandit/core/node_visitor.py",
+        "bandit/core/taint.py",
+        "bandit/plugins/taint_path_traversal.py",
+        "bandit/plugins/taint_shell_injection.py",
+        "bandit/plugins/taint_sql_injection.py",
+        "bandit/plugins/taint_ssrf.py",
+        "bandit/plugins/taint_xss.py",
+        "setup.cfg"
+      ],
+      "token_count": 490
+    },
+    {
+      "task_id": "claude-code-by-agents-recursive-delegation",
+      "commit": "5e0a2247d446c49a9951a06bb83b6e956dc7eb41",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 0,
+      "edit_targets": [],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 4,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
+      "roles": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_IMPACT": 1,
+        "AFFECTED_TEST": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "backend/handlers/multiAgentChat.ts"
+        ],
+        "INSPECT_INTEGRATION": [
+          "backend/app.ts"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-60f3cb7de6ff"
+        ],
+        "AFFECTED_TEST": [
+          "backend/tests/handlers/multiAgentChat.test.ts"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "backend/handlers/multiAgentChat.ts",
+        "backend/providers/anthropic.ts",
+        "backend/providers/registry.ts",
+        "backend/providers/types.ts"
+      ],
+      "token_count": 411
+    },
+    {
+      "task_id": "testem-per-launcher-reports",
+      "commit": "158f61ea91c9613d2011c41ee9be40ada1d7a307",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "lib/utils/report-file.js",
+          "symbol": "ReportFile"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 6,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.16666666666666666,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_PUBLIC_SURFACE": 1,
+        "INSPECT_INTEGRATION": 1,
+        "BOUNDED_IMPACT": 1,
+        "AFFECTED_TEST": 1,
+        "UNCOVERED_FACET": 1
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "lib/utils/report-file.js"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "tests/ci/reporter_tests.js"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "lib/api.js"
+        ],
+        "INSPECT_INTEGRATION": [
+          "lib/utils/reporter.js"
+        ],
+        "BOUNDED_IMPACT": [
+          "gt-impact-ce297d6fd0fd"
+        ],
+        "AFFECTED_TEST": [
+          "tests/ci/report_file_tests.js"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "lib/config.js",
+        "lib/launcher.js",
+        "lib/reporters/tap_reporter.js",
+        "lib/reporters/xunit_reporter.js",
+        "lib/utils/report-file.js",
+        "lib/utils/reporter.js"
+      ],
+      "token_count": 496
+    },
+    {
+      "task_id": "pest-character-class-coalescing",
+      "commit": "79dd30d11aab6f0fba3cd79bd48f456209b966b3",
+      "treatment_status": "ACTIVE",
+      "graph_available": true,
+      "context_schema_v6": true,
+      "edit_target_count": 1,
+      "edit_targets": [
+        {
+          "path": "meta/src/optimizer/mod.rs",
+          "symbol": "OptimizedExpr"
+        }
+      ],
+      "wrong_edit_targets": [],
+      "oracle_path_count": 5,
+      "edit_target_precision": 1.0,
+      "edit_target_recall": 0.2,
+      "roles": {
+        "EXACT_EDIT_TARGET": 1,
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
+        "INSPECT_PUBLIC_SURFACE": 2,
+        "UNCOVERED_FACET": 2
+      },
+      "role_paths": {
+        "EXACT_EDIT_TARGET": [
+          "meta/src/optimizer/mod.rs"
+        ],
+        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
+          "meta/src/optimizer/restorer.rs"
+        ],
+        "INSPECT_PUBLIC_SURFACE": [
+          "meta/src/lib.rs",
+          "pest/src/lib.rs"
+        ],
+        "UNCOVERED_FACET": [
+          "role=EDIT"
+        ]
+      },
+      "oracle_paths": [
+        "generator/src/generator.rs",
+        "grammars/src/lib.rs",
+        "meta/src/optimizer/coalescer.rs",
+        "meta/src/optimizer/mod.rs",
+        "vm/src/lib.rs"
+      ],
+      "token_count": 370
+    }
+  ]
+}

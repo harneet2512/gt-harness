@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_DOCUMENTS = (
+    Path("arch_type.md"),
+    Path("CANONICAL_ARCHITECTURE.md"),
     Path("docs/GT_MECHANICAL_COMPLETENESS_CONTRACT.md"),
     Path("docs/GT_RELEASE_DOSSIER.md"),
     Path("docs/GT_COMPLETE_IMPLEMENTATION_RECORD_2026-08-21.md"),
@@ -35,6 +37,19 @@ DEFAULT_DOCUMENTS = (
     Path("docs/gt_gitnexus_program/20_FINAL_REGRESSION_CONTROL_AND_BENCHMARK_READINESS.md"),
 )
 _REQUIRED_TERMS = {
+    "arch_type.md": (
+        "## Definition of `arch_type`",
+        "## End-to-end production flow",
+        "## Layer 3: structural graph substrate",
+        "## Layer 6: provider-visible delivery",
+        "## Failure policy",
+        "## Verification map",
+    ),
+    "CANONICAL_ARCHITECTURE.md": (
+        "[`arch_type.md`](arch_type.md)",
+        "eval/benchmark_product_contract.json",
+        "emitted exact-SHA receipts",
+    ),
     "GT_MECHANICAL_COMPLETENESS_CONTRACT.md": (
         "gt.task_execution_certificate.v1",
         "PROVEN_NOT_APPLICABLE",

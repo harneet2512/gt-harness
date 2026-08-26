@@ -1,5 +1,16 @@
 # GT Harness benchmark integration contract
 
+## `arch_type`: authoritative architecture contract
+
+`arch_type` means the product's complete architecture contract: intended
+outcome, canonical runtime path, component boundaries, graph/dense/context
+invariants, benchmark adapters, receipts, failure states, language limits, and
+verification gates. Read [`arch_type.md`](arch_type.md) before changing the GT
+treatment, graph, retrieval, context compiler, Mini-SWE integration, benchmark
+workflow, receipt schema, or release gate. A change is complete only when the
+implementation, executable product contract, tests, receipts, and `arch_type`
+remain consistent.
+
 This repository has one current benchmark product: **GT Harness 0.9.0 running
 Mini-SWE-Agent 2.4.6 through `gt-harness run`**. Benchmark runners may provision
 repositories and grade patches differently, but they must not replace, patch,

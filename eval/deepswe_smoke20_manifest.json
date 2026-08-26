@@ -1,0 +1,142 @@
+[
+    {
+        "task_id":  "abs-module-cache-flags",
+        "repository":  "D:/tmp/opencode/smoke20_repos/abs-module-cache-flags",
+        "base_sha":  "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/abs-module-cache-flags.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/abs-module-cache-flags.solution.patch"
+    },
+    {
+        "task_id":  "adaptix-name-mapping-aliases",
+        "repository":  "D:/tmp/opencode/smoke20_repos/adaptix-name-mapping-aliases",
+        "base_sha":  "a691069fcadf9131e5f7a5a130a022dc678f3e1d",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/adaptix-name-mapping-aliases.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/adaptix-name-mapping-aliases.solution.patch"
+    },
+    {
+        "task_id":  "arktype-json-schema-refs-dependencies",
+        "repository":  "D:/tmp/opencode/smoke20_repos/arktype-json-schema-refs-dependencies",
+        "base_sha":  "04355e8b26d1ad5264ef62314a2bc46c4de58ed8",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/arktype-json-schema-refs-dependencies.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/arktype-json-schema-refs-dependencies.solution.patch"
+    },
+    {
+        "task_id":  "csstree-shorthand-expansion-compression",
+        "repository":  "D:/tmp/opencode/smoke20_repos/csstree-shorthand-expansion-compression",
+        "base_sha":  "88e3d965c0b1628642a30a841745b410d6835052",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/csstree-shorthand-expansion-compression.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/csstree-shorthand-expansion-compression.solution.patch"
+    },
+    {
+        "task_id":  "boa-hierarchical-evaluation-cancellation",
+        "repository":  "D:/tmp/opencode/smoke20_repos/boa-hierarchical-evaluation-cancellation",
+        "base_sha":  "70409a5052984325dccfdc5f6520818568a81f39",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/boa-hierarchical-evaluation-cancellation.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/boa-hierarchical-evaluation-cancellation.solution.patch"
+    },
+    {
+        "task_id":  "abs-stepped-slices",
+        "repository":  "D:/tmp/opencode/smoke20_repos/abs-stepped-slices",
+        "base_sha":  "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/abs-stepped-slices.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/abs-stepped-slices.solution.patch"
+    },
+    {
+        "task_id":  "aiomonitor-task-snapshots-diff",
+        "repository":  "D:/tmp/opencode/smoke20_repos/aiomonitor-task-snapshots-diff",
+        "base_sha":  "b73fea2e0682803bda7531c93cd1dfb360839175",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/aiomonitor-task-snapshots-diff.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/aiomonitor-task-snapshots-diff.solution.patch"
+    },
+    {
+        "task_id":  "awilix-async-container-initialization",
+        "repository":  "D:/tmp/opencode/smoke20_repos/awilix-async-container-initialization",
+        "base_sha":  "82ac179c1de4c216c4e333093044fac643303f0c",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/awilix-async-container-initialization.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/awilix-async-container-initialization.solution.patch"
+    },
+    {
+        "task_id":  "katex-multicolumn-array-spans",
+        "repository":  "D:/tmp/opencode/smoke20_repos/katex-multicolumn-array-spans",
+        "base_sha":  "89bede495dc2c85e1c57ba627a18526f71d57396",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/katex-multicolumn-array-spans.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/katex-multicolumn-array-spans.solution.patch"
+    },
+    {
+        "task_id":  "fd-deterministic-multi-key-sorting",
+        "repository":  "D:/tmp/opencode/smoke20_repos/fd-deterministic-multi-key-sorting",
+        "base_sha":  "227883606023d62275fb48701aeac90f2b604143",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/fd-deterministic-multi-key-sorting.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/fd-deterministic-multi-key-sorting.solution.patch"
+    },
+    {
+        "task_id":  "actionlint-action-pinning-lint",
+        "repository":  "D:/tmp/opencode/smoke20_repos/actionlint-action-pinning-lint",
+        "base_sha":  "0bdc95715fa58f64e3fd6e63b0f89be8733cbbab",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/actionlint-action-pinning-lint.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/actionlint-action-pinning-lint.solution.patch"
+    },
+    {
+        "task_id":  "bandit-incremental-cache-control",
+        "repository":  "D:/tmp/opencode/smoke20_repos/bandit-incremental-cache-control",
+        "base_sha":  "765f00d3f202f83f61d03f882f80a2d5142d81f8",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/bandit-incremental-cache-control.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/bandit-incremental-cache-control.solution.patch"
+    },
+    {
+        "task_id":  "clack-async-autocomplete-options",
+        "repository":  "D:/tmp/opencode/smoke20_repos/clack-async-autocomplete-options",
+        "base_sha":  "8a96e2dcd7f821d1250b58cf71c327679f94de25",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/clack-async-autocomplete-options.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/clack-async-autocomplete-options.solution.patch"
+    },
+    {
+        "task_id":  "testem-bail-on-test-failure",
+        "repository":  "D:/tmp/opencode/smoke20_repos/testem-bail-on-test-failure",
+        "base_sha":  "06a1adb7a70e85e7322d8cfae3181508785de95d",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/testem-bail-on-test-failure.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/testem-bail-on-test-failure.solution.patch"
+    },
+    {
+        "task_id":  "oxvg-structural-selector-preservation",
+        "repository":  "D:/tmp/opencode/smoke20_repos/oxvg-structural-selector-preservation",
+        "base_sha":  "1fd7fab851ecc975e008be0e3e279568ce4e2b51",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/oxvg-structural-selector-preservation.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/oxvg-structural-selector-preservation.solution.patch"
+    },
+    {
+        "task_id":  "anko-default-function-arguments",
+        "repository":  "D:/tmp/opencode/smoke20_repos/anko-default-function-arguments",
+        "base_sha":  "9d2d84bb1564e9513287998c56ccf16c01c19008",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/anko-default-function-arguments.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/anko-default-function-arguments.solution.patch"
+    },
+    {
+        "task_id":  "bandit-interprocedural-taint-checks",
+        "repository":  "D:/tmp/opencode/smoke20_repos/bandit-interprocedural-taint-checks",
+        "base_sha":  "b46fa3a2723635aa29cc012538df4867ac2ac006",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/bandit-interprocedural-taint-checks.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/bandit-interprocedural-taint-checks.solution.patch"
+    },
+    {
+        "task_id":  "claude-code-by-agents-recursive-delegation",
+        "repository":  "D:/tmp/opencode/smoke20_repos/claude-code-by-agents-recursive-delegation",
+        "base_sha":  "5e0a2247d446c49a9951a06bb83b6e956dc7eb41",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/claude-code-by-agents-recursive-delegation.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/claude-code-by-agents-recursive-delegation.solution.patch"
+    },
+    {
+        "task_id":  "testem-per-launcher-reports",
+        "repository":  "D:/tmp/opencode/smoke20_repos/testem-per-launcher-reports",
+        "base_sha":  "158f61ea91c9613d2011c41ee9be40ada1d7a307",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/testem-per-launcher-reports.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/testem-per-launcher-reports.solution.patch"
+    },
+    {
+        "task_id":  "pest-character-class-coalescing",
+        "repository":  "D:/tmp/opencode/smoke20_repos/pest-character-class-coalescing",
+        "base_sha":  "79dd30d11aab6f0fba3cd79bd48f456209b966b3",
+        "instruction":  "D:/tmp/opencode/smoke20_repos/pest-character-class-coalescing.instruction.md",
+        "solution":  "D:/tmp/opencode/smoke20_repos/pest-character-class-coalescing.solution.patch"
+    }
+]

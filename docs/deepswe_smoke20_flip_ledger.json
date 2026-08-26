@@ -1,0 +1,928 @@
+{
+  "localization_audit": {
+    "mean_edit_target_precision": 0.6429,
+    "regressed_task_precision": {
+      "arktype-json-schema-refs-dependencies": 0.0,
+      "awilix-async-container-initialization": 1.0,
+      "bandit-interprocedural-taint-checks": 1.0,
+      "boa-hierarchical-evaluation-cancellation": 1.0,
+      "pest-character-class-coalescing": 1.0,
+      "testem-bail-on-test-failure": 1.0
+    },
+    "solved_task_precision": {
+      "abs-module-cache-flags": 1.0,
+      "adaptix-name-mapping-aliases": 1.0,
+      "aiomonitor-task-snapshots-diff": 1.0,
+      "clack-async-autocomplete-options": 1.0,
+      "fd-deterministic-multi-key-sorting": 0.0,
+      "katex-multicolumn-array-spans": 0.0,
+      "testem-per-launcher-reports": 0.0
+    },
+    "tasks_with_edit_targets": 14
+  },
+  "quadrants": {
+    "baseline_only": [
+      "actionlint-action-pinning-lint",
+      "arktype-json-schema-refs-dependencies",
+      "awilix-async-container-initialization",
+      "bandit-interprocedural-taint-checks",
+      "boa-hierarchical-evaluation-cancellation",
+      "pest-character-class-coalescing",
+      "testem-bail-on-test-failure"
+    ],
+    "both_failed": [
+      "bandit-incremental-cache-control",
+      "claude-code-by-agents-recursive-delegation",
+      "csstree-shorthand-expansion-compression"
+    ],
+    "both_solved": [
+      "abs-module-cache-flags",
+      "abs-stepped-slices",
+      "aiomonitor-task-snapshots-diff",
+      "anko-default-function-arguments",
+      "clack-async-autocomplete-options",
+      "fd-deterministic-multi-key-sorting",
+      "katex-multicolumn-array-spans",
+      "testem-per-launcher-reports"
+    ],
+    "gt_only": [
+      "adaptix-name-mapping-aliases",
+      "oxvg-structural-selector-preservation"
+    ]
+  },
+  "schema": "gt.deepswe_smoke_flip_ledger.v1",
+  "tasks": [
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "repl/repl.go:90#BeginRepl",
+          "path": "repl/repl.go",
+          "requirement": "R1",
+          "symbol": "BeginRepl"
+        }
+      ],
+      "gt_patch_paths": [
+        "docs/src/docs/misc/runtime.md",
+        "docs/src/docs/types/builtin-function.md",
+        "evaluator/functions.go",
+        "evaluator/module.go",
+        "evaluator/module_test.go",
+        "repl/repl.go",
+        "repl/repl_test.go",
+        "util/util.go",
+        "util/util_test.go"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "docs/src/docs/types/builtin-function.md",
+        "docs/src/introduction/how-to-run-abs-code.md",
+        "evaluator/functions.go",
+        "evaluator/modules.go",
+        "evaluator/modules_test.go",
+        "repl/repl.go",
+        "repl/repl_test.go",
+        "util/util.go"
+      ],
+      "provider_calls": 85,
+      "quadrant": "both_solved",
+      "task_id": "abs-module-cache-flags",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 0.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "src/adaptix/_internal/morphing/facade/provider.py:190#name_mapping",
+          "path": "src/adaptix/_internal/morphing/facade/provider.py",
+          "requirement": "R2",
+          "symbol": "name_mapping"
+        }
+      ],
+      "gt_patch_paths": [
+        "docs/changelog/fragments/+aliases.feature.rst",
+        "docs/examples/loading-and-dumping/extended_usage/field_alias_style.py",
+        "docs/examples/loading-and-dumping/extended_usage/field_aliases.py",
+        "docs/loading-and-dumping/extended-usage.rst",
+        "src/adaptix/_internal/morphing/facade/provider.py",
+        "src/adaptix/_internal/morphing/facade/retort.py",
+        "src/adaptix/_internal/morphing/model/crown_definitions.py",
+        "src/adaptix/_internal/morphing/model/loader_gen.py",
+        "src/adaptix/_internal/morphing/name_layout/base.py",
+        "src/adaptix/_internal/morphing/name_layout/component.py",
+        "src/adaptix/_internal/provider/overlay_schema.py",
+        "src/adaptix/_internal/utils.py",
+        "tests/integration/morphing/test_aliases.py",
+        "tests/unit/morphing/name_layout/test_aliases.py"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "docs/changelog/fragments/388.feature.rst",
+        "docs/examples/loading-and-dumping/extended_usage/field_aliases.py",
+        "docs/examples/loading-and-dumping/extended_usage/field_aliases_conflict.py",
+        "docs/examples/loading-and-dumping/extended_usage/field_aliases_style.py",
+        "docs/loading-and-dumping/extended-usage.rst",
+        "src/adaptix/_internal/morphing/facade/provider.py",
+        "src/adaptix/_internal/morphing/facade/retort.py",
+        "src/adaptix/_internal/morphing/model/crown_definitions.py",
+        "src/adaptix/_internal/morphing/model/loader_gen.py",
+        "src/adaptix/_internal/morphing/name_layout/component.py",
+        "src/adaptix/_internal/morphing/name_layout/name_mapping.py",
+        "tests/integration/morphing/test_aliases.py",
+        "tests/unit/morphing/model/test_loader_provider.py",
+        "tests/unit/morphing/name_layout/test_provider.py"
+      ],
+      "provider_calls": 174,
+      "quadrant": "gt_only",
+      "task_id": "adaptix-name-mapping-aliases",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "ark/attest/assert/chainableAssertions.ts:254#type",
+          "path": "ark/attest/assert/chainableAssertions.ts",
+          "requirement": "R1",
+          "symbol": "type"
+        }
+      ],
+      "gt_patch_paths": [
+        "ark/json-schema/CHANGELOG.md",
+        "ark/json-schema/README.md",
+        "ark/json-schema/__tests__/common.test.ts",
+        "ark/json-schema/__tests__/conditional.test.ts",
+        "ark/json-schema/__tests__/dependencies.test.ts",
+        "ark/json-schema/__tests__/ref.test.ts",
+        "ark/json-schema/common.ts",
+        "ark/json-schema/conditional.ts",
+        "ark/json-schema/dependencies.ts",
+        "ark/json-schema/errors.ts",
+        "ark/json-schema/index.ts",
+        "ark/json-schema/json.ts",
+        "ark/json-schema/keywords.ts",
+        "ark/json-schema/object.ts",
+        "ark/json-schema/ref.ts",
+        "ark/json-schema/scope.ts",
+        "ark/schema/shared/jsonSchema.ts"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "ark/json-schema/CHANGELOG.md",
+        "ark/json-schema/README.md",
+        "ark/json-schema/__tests__/common.test.ts",
+        "ark/json-schema/__tests__/conditional.test.ts",
+        "ark/json-schema/__tests__/object.test.ts",
+        "ark/json-schema/__tests__/ref.test.ts",
+        "ark/json-schema/common.ts",
+        "ark/json-schema/conditional.ts",
+        "ark/json-schema/errors.ts",
+        "ark/json-schema/index.ts",
+        "ark/json-schema/json.ts",
+        "ark/json-schema/object.ts",
+        "ark/json-schema/ref.ts",
+        "ark/json-schema/scope.ts",
+        "ark/schema/shared/jsonSchema.ts"
+      ],
+      "provider_calls": 135,
+      "quadrant": "baseline_only",
+      "task_id": "arktype-json-schema-refs-dependencies",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 0.0,
+      "delivery_count": 4,
+      "edit_targets": [],
+      "gt_patch_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "lib/__tests/lexer-shorthand.js",
+        "lib/lexer/Lexer.js",
+        "lib/lexer/shorthand.js"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "docs/readme.md",
+        "docs/shorthand.md",
+        "lib/__tests/lexer-shorthand.js",
+        "lib/lexer/Lexer.js",
+        "lib/lexer/shorthand-data.js",
+        "lib/lexer/shorthand.js"
+      ],
+      "provider_calls": 62,
+      "quadrant": "both_failed",
+      "task_id": "csstree-shorthand-expansion-compression",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "core/engine/src/context/mod.rs:94#Context",
+          "path": "core/engine/src/context/mod.rs",
+          "requirement": "R2,R3,+2",
+          "symbol": "Context"
+        }
+      ],
+      "gt_patch_paths": [],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "core/engine/src/builtins/promise/mod.rs",
+        "core/engine/src/context/mod.rs",
+        "core/engine/src/error/mod.rs",
+        "core/engine/src/evaluation.rs",
+        "core/engine/src/job.rs",
+        "core/engine/src/lib.rs",
+        "core/engine/src/module/mod.rs",
+        "core/engine/src/script.rs",
+        "core/engine/src/vm/mod.rs",
+        "core/engine/tests/evaluation_cancellation.rs"
+      ],
+      "provider_calls": 138,
+      "quadrant": "baseline_only",
+      "task_id": "boa-hierarchical-evaluation-cancellation",
+      "treatment_status": "FAILED"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [],
+      "gt_patch_paths": [
+        "ast/ast.go",
+        "docs/src/docs/types/array.md",
+        "docs/src/docs/types/string.md",
+        "evaluator/evaluator.go",
+        "evaluator/evaluator_test.go",
+        "parser/parser.go",
+        "parser/parser_test.go",
+        "tests/test-assign-index.abs"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "ast/ast.go",
+        "docs/src/docs/types/array.md",
+        "docs/src/docs/types/string.md",
+        "evaluator/evaluator.go",
+        "evaluator/evaluator_test.go",
+        "examples/index_ranges.abs",
+        "parser/parser.go",
+        "parser/parser_test.go",
+        "tests/test-assign-index.abs"
+      ],
+      "provider_calls": 88,
+      "quadrant": "both_solved",
+      "task_id": "abs-stepped-slices",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "aiomonitor/monitor.py:236#format_running_task_list",
+          "path": "aiomonitor/monitor.py",
+          "requirement": "R2",
+          "symbol": "format_running_task_list"
+        }
+      ],
+      "gt_patch_paths": [
+        "README.rst",
+        "aiomonitor/__init__.py",
+        "aiomonitor/monitor.py",
+        "aiomonitor/termui/commands.py",
+        "aiomonitor/termui/completion.py",
+        "aiomonitor/types.py",
+        "aiomonitor/webui/app.py",
+        "aiomonitor/webui/templates/snapshots.html",
+        "aiomonitor/webui/utils.py",
+        "changes/456.feature",
+        "docs/index.rst",
+        "docs/reference/monitor.rst",
+        "tests/test_monitor.py"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "README.rst",
+        "aiomonitor/monitor.py",
+        "aiomonitor/termui/commands.py",
+        "aiomonitor/termui/completion.py",
+        "aiomonitor/types.py",
+        "aiomonitor/webui/app.py",
+        "aiomonitor/webui/templates/snapshot-diff.html",
+        "aiomonitor/webui/templates/snapshots.html",
+        "aiomonitor/webui/utils.py",
+        "changes/456.feature",
+        "docs/reference/monitor.rst",
+        "docs/tutorial.rst",
+        "tests/test_snapshot.py"
+      ],
+      "provider_calls": 63,
+      "quadrant": "both_solved",
+      "task_id": "aiomonitor-task-snapshots-diff",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "src/resolvers.ts:194#asClass",
+          "path": "src/resolvers.ts",
+          "requirement": "R1,R2",
+          "symbol": "asClass"
+        }
+      ],
+      "gt_patch_paths": [
+        "README.md",
+        "src/__tests__/container.initialization.test.ts",
+        "src/awilix.ts",
+        "src/container.ts",
+        "src/errors.ts",
+        "src/resolvers.ts"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "src/__tests__/container.initialization.test.ts",
+        "src/awilix.ts",
+        "src/container.ts",
+        "src/errors.ts",
+        "src/resolvers.ts"
+      ],
+      "provider_calls": 81,
+      "quadrant": "baseline_only",
+      "task_id": "awilix-async-container-initialization",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "src/ParseError.ts:1#ParseError",
+          "path": "src/ParseError.ts",
+          "requirement": "facet-11b333fa14c5468b",
+          "symbol": "ParseError"
+        }
+      ],
+      "gt_patch_paths": [
+        "docs/support_table.md",
+        "docs/supported.md",
+        "src/environments/array.ts",
+        "src/parseNode.ts",
+        "src/styles/katex.scss",
+        "test/katex-spec.ts",
+        "test/screenshotter/ss_data.yaml"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "docs/support_table.md",
+        "docs/supported.md",
+        "src/domTree.ts",
+        "src/environments/array.ts",
+        "src/parseNode.ts",
+        "test/__snapshots__/mathml-spec.ts.snap",
+        "test/katex-spec.ts",
+        "test/mathml-spec.ts",
+        "test/screenshotter/ss_data.yaml"
+      ],
+      "provider_calls": 117,
+      "quadrant": "both_solved",
+      "task_id": "katex-multicolumn-array-spans",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "src/dir_entry.rs:42#path",
+          "path": "src/dir_entry.rs",
+          "requirement": "facet-1ffa7d04a001327a,facet-cbb175c5f6ae9309",
+          "symbol": "path"
+        }
+      ],
+      "gt_patch_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "contrib/completion/_fd",
+        "doc/fd.1",
+        "src/cli.rs",
+        "src/config.rs",
+        "src/main.rs",
+        "src/sort.rs",
+        "src/walk.rs",
+        "tests/testenv/mod.rs",
+        "tests/tests.rs"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "contrib/completion/_fd",
+        "doc/fd.1",
+        "src/cli.rs",
+        "src/config.rs",
+        "src/main.rs",
+        "src/sort.rs",
+        "src/walk.rs",
+        "tests/sort_tests.rs"
+      ],
+      "provider_calls": 105,
+      "quadrant": "both_solved",
+      "task_id": "fd-deterministic-multi-key-sorting",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [],
+      "gt_patch_paths": [
+        "README.md",
+        "command.go",
+        "command_test.go",
+        "config.go",
+        "config_test.go",
+        "docs/checks.md",
+        "docs/config.md",
+        "linter.go",
+        "man/actionlint.1.ronn",
+        "rule_action_pinning.go",
+        "rule_action_pinning_test.go",
+        "testdata/format/test.sarif",
+        "testdata/projects/action_pinning.out",
+        "testdata/projects/action_pinning/.github/actions/my-action/action.yml",
+        "testdata/projects/action_pinning/actionlint.yaml",
+        "testdata/projects/action_pinning/workflows/commit_sha.yaml",
+        "testdata/projects/action_pinning/workflows/default.yaml",
+        "testdata/projects/action_pinning/workflows/nested/major_minor.yaml"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "command.go",
+        "command_test.go",
+        "config.go",
+        "config_test.go",
+        "docs/checks.md",
+        "docs/config.md",
+        "docs/usage.md",
+        "linter.go",
+        "man/actionlint.1.ronn",
+        "rule_action_pinning.go",
+        "rule_action_pinning_test.go",
+        "testdata/format/test.sarif",
+        "testdata/projects/action_pinning.out",
+        "testdata/projects/action_pinning/.github/actions/my-action/action.yml",
+        "testdata/projects/action_pinning/actionlint.yaml",
+        "testdata/projects/action_pinning/workflows/call_ok.yaml",
+        "testdata/projects/action_pinning/workflows/default.yaml",
+        "testdata/projects/action_pinning/workflows/strict.yaml"
+      ],
+      "provider_calls": 131,
+      "quadrant": "baseline_only",
+      "task_id": "actionlint-action-pinning-lint",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 0.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "bandit/core/config.py:1#config",
+          "path": "bandit/core/config.py",
+          "requirement": "facet-74294062d06eedec",
+          "symbol": "config"
+        }
+      ],
+      "gt_patch_paths": [
+        ".gitignore",
+        "bandit/cli/main.py",
+        "bandit/core/cache.py",
+        "bandit/core/incremental.py",
+        "bandit/core/manager.py",
+        "bandit/core/metrics.py",
+        "bandit/formatters/json.py",
+        "bandit/formatters/screen.py",
+        "bandit/formatters/text.py",
+        "bandit/formatters/utils.py",
+        "bandit/formatters/yaml.py",
+        "doc/source/man/bandit.rst",
+        "tests/functional/test_incremental.py",
+        "tests/unit/core/test_incremental.py"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        ".gitignore",
+        "bandit/cli/main.py",
+        "bandit/core/cache.py",
+        "bandit/core/incremental_cache.py",
+        "bandit/core/manager.py",
+        "bandit/core/metrics.py",
+        "bandit/formatters/json.py",
+        "bandit/formatters/screen.py",
+        "bandit/formatters/text.py",
+        "bandit/formatters/utils.py",
+        "bandit/formatters/yaml.py",
+        "doc/source/config.rst",
+        "doc/source/man/bandit.rst",
+        "tests/functional/test_incremental.py",
+        "tests/unit/core/test_cache.py",
+        "tests/unit/core/test_incremental_manager.py"
+      ],
+      "provider_calls": 100,
+      "quadrant": "both_failed",
+      "task_id": "bandit-incremental-cache-control",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "packages/core/src/prompts/autocomplete.ts:63#AutocompletePrompt",
+          "path": "packages/core/src/prompts/autocomplete.ts",
+          "requirement": "facet-731a7967cdd6f624",
+          "symbol": "AutocompletePrompt"
+        },
+        {
+          "location": "packages/prompts/src/autocomplete.ts:241#autocompleteMultiselect",
+          "path": "packages/prompts/src/autocomplete.ts",
+          "requirement": "facet-551d34104881c1aa",
+          "symbol": "autocompleteMultiselect"
+        }
+      ],
+      "gt_patch_paths": [
+        ".changeset/lucky-pears-search.md",
+        "examples/basic/autocomplete-async.ts",
+        "examples/basic/package.json",
+        "packages/core/src/index.ts",
+        "packages/core/src/prompts/autocomplete.ts",
+        "packages/core/test/prompts/autocomplete-async.test.ts",
+        "packages/prompts/src/autocomplete.ts",
+        "packages/prompts/test/autocomplete-async.test.ts"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        ".changeset/async-autocomplete-options.md",
+        "examples/basic/autocomplete-async.ts",
+        "examples/basic/package.json",
+        "packages/core/src/index.ts",
+        "packages/core/src/prompts/autocomplete.ts",
+        "packages/core/src/prompts/prompt.ts",
+        "packages/core/test/prompts/autocomplete-async.test.ts",
+        "packages/prompts/src/autocomplete.ts",
+        "packages/prompts/test/autocomplete-async.test.ts"
+      ],
+      "provider_calls": 80,
+      "quadrant": "both_solved",
+      "task_id": "clack-async-autocomplete-options",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "lib/app.js:429#getExitCode",
+          "path": "lib/app.js",
+          "requirement": "R1",
+          "symbol": "getExitCode"
+        }
+      ],
+      "gt_patch_paths": [
+        "README.md",
+        "docs/config_file.md",
+        "lib/api.js",
+        "lib/app.js",
+        "lib/config.js",
+        "lib/reporters/bail_support.js",
+        "lib/reporters/dot_reporter.js",
+        "lib/reporters/tap_reporter.js",
+        "lib/reporters/teamcity_reporter.js",
+        "lib/reporters/xunit_reporter.js",
+        "lib/runners/browser_test_runner.js",
+        "lib/runners/process_test_runner.js",
+        "lib/runners/tap_process_test_runner.js",
+        "lib/server/index.js",
+        "lib/utils/displayutils.js",
+        "lib/utils/reporter.js",
+        "public/testem/jasmine2_adapter.js",
+        "public/testem/mocha_adapter.js",
+        "public/testem/qunit_adapter.js",
+        "public/testem/testem_client.js",
+        "public/testem/testem_connection.js",
+        "testem.js",
+        "tests/bail_on_test_failure_tests.js",
+        "tests/fixtures/bail-on-test-failure/tap_tests.js",
+        "tests/fixtures/bail-on-test-failure/testem.json"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "README.md",
+        "docs/config_file.md",
+        "lib/app.js",
+        "lib/config.js",
+        "lib/reporters/dot_reporter.js",
+        "lib/reporters/tap_reporter.js",
+        "lib/reporters/teamcity_reporter.js",
+        "lib/reporters/xunit_reporter.js",
+        "lib/runners/browser_test_runner.js",
+        "lib/runners/process_test_runner.js",
+        "lib/runners/tap_process_test_runner.js",
+        "lib/server/index.js",
+        "lib/utils/bail.js",
+        "lib/utils/displayutils.js",
+        "lib/utils/reporter.js",
+        "public/testem/jasmine2_adapter.js",
+        "public/testem/mocha_adapter.js",
+        "public/testem/qunit_adapter.js",
+        "public/testem/testem_client.js",
+        "public/testem/testem_connection.js",
+        "testem.js",
+        "tests/bail_tests.js",
+        "tests/fixtures/bail/testem.json",
+        "tests/fixtures/bail/tests.js"
+      ],
+      "provider_calls": 104,
+      "quadrant": "baseline_only",
+      "task_id": "testem-bail-on-test-failure",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 0.0,
+      "delivery_count": 4,
+      "edit_targets": [],
+      "gt_patch_paths": [
+        "crates/oxvg_ast/src/selectors.rs",
+        "crates/oxvg_ast/src/visitor.rs",
+        "crates/oxvg_optimiser/src/jobs/collapse_groups.rs",
+        "crates/oxvg_optimiser/src/jobs/remove_empty_containers.rs",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-15.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-16.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-17.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-18.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-19.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__remove_empty_containers__remove_empty_containers-10.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__remove_empty_containers__remove_empty_containers-8.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__remove_empty_containers__remove_empty_containers-9.snap",
+        "packages/correctness/README.md"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "crates/oxvg_ast/src/lib.rs",
+        "crates/oxvg_ast/src/selectors.rs",
+        "crates/oxvg_ast/src/structure.rs",
+        "crates/oxvg_ast/src/visitor.rs",
+        "crates/oxvg_optimiser/src/jobs/collapse_groups.rs",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-15.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-16.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-17.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-18.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-19.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-20.snap",
+        "crates/oxvg_optimiser/src/jobs/snapshots/oxvg_optimiser__jobs__collapse_groups__collapse_groups-21.snap"
+      ],
+      "provider_calls": 151,
+      "quadrant": "gt_only",
+      "task_id": "oxvg-structural-selector-preservation",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [],
+      "gt_patch_paths": [
+        "README.md",
+        "_example/scripts/default-args.ank",
+        "ast/astutil/walk.go",
+        "ast/expr.go",
+        "parser/lexer.go",
+        "vm/vmExprFunction.go",
+        "vm/vmFunctions_test.go"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "README.md",
+        "_example/scripts/default-args.ank",
+        "ast/astutil/walk.go",
+        "ast/expr.go",
+        "parser/funcParams.go",
+        "parser/lexer.go",
+        "parser/parser.go",
+        "parser/parser.go.y",
+        "vm/vmDefaultArguments_test.go",
+        "vm/vmExprFunction.go"
+      ],
+      "provider_calls": 153,
+      "quadrant": "both_solved",
+      "task_id": "anko-default-function-arguments",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "bandit/core/issue.py:10#Cwe",
+          "path": "bandit/core/issue.py",
+          "requirement": "R1",
+          "symbol": "Cwe"
+        }
+      ],
+      "gt_patch_paths": [
+        "bandit/core/context.py",
+        "bandit/core/issue.py",
+        "bandit/core/node_visitor.py",
+        "bandit/core/taint.py",
+        "bandit/plugins/taint_path_traversal.py",
+        "bandit/plugins/taint_shell_injection.py",
+        "bandit/plugins/taint_sql_injection.py",
+        "bandit/plugins/taint_ssrf.py",
+        "bandit/plugins/taint_xss.py",
+        "doc/source/plugins/b620_taint_sql_injection.rst",
+        "doc/source/plugins/b621_taint_shell_injection.rst",
+        "doc/source/plugins/b622_taint_path_traversal.rst",
+        "doc/source/plugins/b623_taint_ssrf.rst",
+        "doc/source/plugins/b624_taint_xss.rst",
+        "examples/taint_import_aliases.py",
+        "examples/taint_path_traversal.py",
+        "examples/taint_shell_injection.py",
+        "examples/taint_sql_injection.py",
+        "examples/taint_ssrf.py",
+        "examples/taint_xss.py",
+        "setup.cfg",
+        "tests/functional/test_taint_injection.py",
+        "tests/unit/core/test_taint.py"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "bandit/core/issue.py",
+        "bandit/core/taint.py",
+        "bandit/plugins/injection_taint_path.py",
+        "bandit/plugins/injection_taint_shell.py",
+        "bandit/plugins/injection_taint_sql.py",
+        "bandit/plugins/injection_taint_ssrf.py",
+        "bandit/plugins/injection_taint_xss.py",
+        "doc/source/plugins/b620_taint_sql_injection.rst",
+        "doc/source/plugins/b621_taint_shell_injection.rst",
+        "doc/source/plugins/b622_taint_path_traversal.rst",
+        "doc/source/plugins/b623_taint_ssrf.rst",
+        "doc/source/plugins/b624_taint_xss.rst",
+        "examples/taint_path_traversal.py",
+        "examples/taint_shell_injection.py",
+        "examples/taint_sql_injection.py",
+        "examples/taint_ssrf.py",
+        "examples/taint_xss.py",
+        "setup.cfg",
+        "tests/functional/test_functional.py",
+        "tests/unit/core/test_taint.py"
+      ],
+      "provider_calls": 148,
+      "quadrant": "baseline_only",
+      "task_id": "bandit-interprocedural-taint-checks",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 0.0,
+      "delivery_count": 4,
+      "edit_targets": [],
+      "gt_patch_paths": [
+        "CLAUDE.md",
+        "backend/handlers/multiAgentChat.ts",
+        "backend/tests/handlers/multiAgentDelegation.test.ts"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "CLAUDE.md",
+        "backend/handlers/multiAgentChat.ts",
+        "backend/providers/anthropic.ts",
+        "backend/providers/claude-code.ts",
+        "backend/providers/delegationTool.ts",
+        "backend/providers/openai.ts",
+        "backend/providers/types.ts",
+        "backend/tests/handlers/multiAgentDelegation.test.ts",
+        "backend/tests/integration/delegationFlow.test.ts",
+        "backend/tests/providers/anthropic.test.ts"
+      ],
+      "provider_calls": 58,
+      "quadrant": "both_failed",
+      "task_id": "claude-code-by-agents-recursive-delegation",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "examples/metadata_reporter/testem.js:1#testem",
+          "path": "examples/metadata_reporter/testem.js",
+          "requirement": "R1",
+          "symbol": "testem"
+        }
+      ],
+      "gt_patch_paths": [
+        "README.md",
+        "docs/config_file.md",
+        "lib/api.js",
+        "lib/app.js",
+        "lib/config.js",
+        "lib/launcher.js",
+        "lib/reporters/tap_reporter.js",
+        "lib/reporters/xunit_reporter.js",
+        "lib/utils/report-file.js",
+        "lib/utils/reporter.js",
+        "tests/ci/reporter_tests.js",
+        "tests/config_tests.js",
+        "tests/launcher_tests.js",
+        "tests/utils/report-file_tests.js",
+        "tests/utils/reporter_tests.js"
+      ],
+      "gt_reward": 1.0,
+      "oracle_patch_paths": [
+        "README.md",
+        "docs/config_file.md",
+        "lib/app.js",
+        "lib/config.js",
+        "lib/launcher.js",
+        "lib/reporters/tap_reporter.js",
+        "lib/reporters/xunit_reporter.js",
+        "lib/utils/report-file.js",
+        "lib/utils/reporter.js",
+        "tests/ci/report_file_tests.js",
+        "tests/ci/reporter_tests.js",
+        "tests/config_tests.js",
+        "tests/launcher_tests.js",
+        "tests/utils/report-file_tests.js",
+        "tests/utils/reporter_tests.js"
+      ],
+      "provider_calls": 91,
+      "quadrant": "both_solved",
+      "task_id": "testem-per-launcher-reports",
+      "treatment_status": "ACTIVE"
+    },
+    {
+      "baseline_reward": 1.0,
+      "delivery_count": 4,
+      "edit_targets": [
+        {
+          "location": "meta/src/optimizer/mod.rs:126#OptimizedExpr",
+          "path": "meta/src/optimizer/mod.rs",
+          "requirement": "facet-4b2288a57fc1a64e",
+          "symbol": "OptimizedExpr"
+        }
+      ],
+      "gt_patch_paths": [
+        "derive/tests/char_class.pest",
+        "derive/tests/char_class.rs",
+        "generator/src/generator.rs",
+        "grammars/src/lib.rs",
+        "meta/src/optimizer/coalescer.rs",
+        "meta/src/optimizer/mod.rs",
+        "vm/src/lib.rs",
+        "vm/tests/char_class.pest",
+        "vm/tests/char_class.rs"
+      ],
+      "gt_reward": 0.0,
+      "oracle_patch_paths": [
+        "derive/tests/char_class.pest",
+        "derive/tests/char_class.rs",
+        "generator/src/generator.rs",
+        "grammars/src/lib.rs",
+        "meta/src/optimizer/coalescer.rs",
+        "meta/src/optimizer/mod.rs",
+        "vm/src/lib.rs",
+        "vm/tests/char_class.pest",
+        "vm/tests/char_class.rs"
+      ],
+      "provider_calls": 143,
+      "quadrant": "baseline_only",
+      "task_id": "pest-character-class-coalescing",
+      "treatment_status": "ACTIVE"
+    }
+  ],
+  "totals": {
+    "baseline_solved": 15,
+    "gt_solved": 10,
+    "quadrant_counts": {
+      "baseline_only": 7,
+      "both_failed": 3,
+      "both_solved": 8,
+      "gt_only": 2
+    },
+    "tasks": 20,
+    "ungraded": []
+  },
+  "treatment_failures": [
+    {
+      "status": "FAILED",
+      "task": "boa-hierarchical-evaluation-cancellation"
+    }
+  ]
+}

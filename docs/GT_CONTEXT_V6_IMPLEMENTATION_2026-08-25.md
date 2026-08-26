@@ -24,7 +24,7 @@ The deterministic causes were:
 4. generic directory listings dirtied localization state;
 5. candidate paths were eligible for `FOLLOWED`, and a repository-wide test
    pass could manufacture feature-level `VALIDATED`;
-6. every occurrence of the noun “test” was typed as validation work;
+6. every occurrence of the noun â€œtestâ€ was typed as validation work;
 7. backticks were treated as symbol authority, including configuration values;
 8. dense retrieval embedded the entire task as one query instead of preserving
    independent requirements; and
@@ -67,8 +67,8 @@ facts. This is explicit limitation behavior, not silent semantic support.
 
 No GitNexus code was copied. GT retains its own exact-revision graph, pinned
 local dense index, fail-closed readiness, lifecycle refresh, and claim-level
-delivery proof. The adopted lesson is the product behavior—compact
-process/change/test answers delivered at the decision point—not GitNexus's
+delivery proof. The adopted lesson is the product behaviorâ€”compact
+process/change/test answers delivered at the decision pointâ€”not GitNexus's
 implementation or its weaker stale/delivery accounting.
 
 ## Verification contract
@@ -170,7 +170,7 @@ boundary found a separate relevance defect. On
 unqualified `agent_id` prefix to a generic `Agent`/`agent` symbol, first
 selecting an unrelated Swift model and later a generic chat-local variable.
 The exact retrieval channel also classified natural file-name token overlap as
-an “exact candidate”; the context compiler then excluded that rank-only row
+an â€œexact candidateâ€; the context compiler then excluded that rank-only row
 from both edit and inspection sets. Consequently the strongest deterministic
 artifact match, `backend/handlers/multiAgentChat.ts`, disappeared.
 
@@ -334,3 +334,40 @@ mid-token projection truncation. The complete Python suite, Ruff, and all Go
 module packages pass locally. This correction remains uncertified until it is
 committed and a new exact-SHA hosted product certification succeeds; no
 replacement paid smoke may start before that gate.
+
+## Run 32928374228 mislocalization regressions and the localization truth gate
+
+The completed DeepSWE smoke at exact SHA eac111b graded 20/20 tasks with
+every treatment mechanically valid, yet produced 10 solves against the frozen
+baseline's 15: eight both-solve tasks, two positive flips
+(daptix-name-mapping-aliases, oxvg-structural-selector-preservation),
+three both-fail tasks, and seven baseline-only regressions. Post-run artifact
+audits plus a provider-free replay of all twenty cohort tasks at their exact
+revisions attributed the losses:
+
+- rktype-json-schema-refs-dependencies: the quoted prose noun 'type'
+  bound as an exact symbol and promoted an unrelated attest assertion helper;
+- andit-interprocedural-taint-checks: the qualified acronym owner in
+  CWE.SQL_INJECTION case-matched a same-named repository class and granted
+  it edit authority;
+- oa-hierarchical-evaluation-cancellation: treatment timeout at the task
+  wall clock (empty patch), not mislocalization;
+- 	estem-bail-on-test-failure, wilix-async-container-initialization,
+  pest-character-class-coalescing, ctionlint-action-pinning-lint:
+  correct or honestly-absent localization; implementation-depth losses.
+
+The compiler now blocks generic lowercase prose nouns from symbol identity,
+requires exact-case matches for short ALL-CAPS tokens, demotes entry-file
+self-named symbols to inspection evidence, keeps throw/raise exception cues
+as retrieval vocabulary only, demotes globally unscoped cross-file name
+collisions unless certified export structure connects them, grants zero-
+facet exact-path rows edit authority only when the task cites the file, and
+orders decision-grade roles ahead of rank-only rows during compaction.
+
+The standing pre-dispatch gate is now
+[scripts/localization_truth_gate.py](../../scripts/localization_truth_gate.py)
+verifying the committed, fingerprint-bound
+[smoke20 truth report](deepswe_smoke20_localization_truth.json): after the
+repairs the provider-free cohort replay delivers 20/20 treatments, zero wrong
+edit targets, and mean edit-target precision 1.0. The typed flip ledger for
+the paid run is [deepswe_smoke20_flip_ledger.json](deepswe_smoke20_flip_ledger.json).
