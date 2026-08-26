@@ -283,3 +283,54 @@ and original task text produces an `ACTIVE` 457-token packet with the exact
 boundary, verified import edge, bounded process, impact, and uncovered cache
 API facet. The dense index is `READY`, the graph is
 `READY_WITH_DECLARED_LIMITATIONS`, and provider calls remain zero.
+
+## Awilix multi-obligation overflow and semantic compaction
+
+Exact-SHA certification run `32924707649` passed every provider-free product
+gate at commit `170792cc350f8acd9a4ee13956b93ece10873566`. The replacement
+DeepSWE smoke, run `32925444016`, was then cancelled after its first terminal
+task exposed another pre-provider overflow. Task
+`awilix-async-container-initialization` built a real `READY` graph at repository
+commit `82ac179c1de4c216c4e333093044fac643303f0c` (69 discovered files, 62
+graph inputs) and a `READY` dense index (48/48 documents, zero failures), but
+the treatment failed with `FAILED:context_budget_too_small`. Mini-SWE-Agent was
+the required version `2.4.6`; provider calls and provider tokens were both
+zero. The task is therefore an invalid treatment execution, not an agent loss.
+
+The exact task text, repository revision, checked-in graph indexer, pinned
+Snowflake ONNX model, and `hybrid_required` mode reproduce the failure locally.
+After the ABS correction, the Awilix packet's final decision-grade floor was
+still 564 bounded tokens. The residual excess had four deterministic causes:
+
+- equivalent natural-language obligations serialized identical requirements
+  more than once;
+- facts could reference aliases whose requirement definition was not visible;
+- long process/impact claim IDs and an opaque uncovered-facet ID consumed
+  provider tokens despite being fully persisted in receipts; and
+- impact text could be cut in the middle of a token.
+
+The provider serializer now groups equivalent requirements by their readable
+role/symbol signature and binds duplicate facets to one packet-local alias.
+Only declared aliases can appear in provider facts; omitted distinct
+requirements are represented as `+N`. Full task-facet and projection claim IDs
+remain in the persisted treatment receipt, while the provider sees unambiguous
+packet-local prefixes. Uncovered facets expose their actionable role and
+unresolved symbols without implying that an uncovered obligation was satisfied
+by a delivered requirement. Process and impact truncation both end on a
+complete boundary and state `truncated=true`. If the hard ceiling is still
+exceeded, phrase/rank-only inspection is removed before verified edit,
+public-surface, integration, relationship, process, impact, or affected-test
+facts.
+
+The exact real Awilix reproduction now returns `ACTIVE`, one delivery, zero
+errors, and a 499/500-token packet. It retains `src/resolvers.ts#asClass` as the
+edit target, `src/awilix.ts` as the public surface, `src/container.ts#container`
+as the integration boundary, the verified import of
+`AwilixResolutionError`, a bounded process, bounded impact, an affected test,
+and an explicit uncovered initialization facet. Regression coverage reproduces
+the duplicate-obligation and dense-role shape, verifies that every referenced
+alias is declared, preserves full projection claims in the receipt, and rejects
+mid-token projection truncation. The complete Python suite, Ruff, and all Go
+module packages pass locally. This correction remains uncertified until it is
+committed and a new exact-SHA hosted product certification succeeds; no
+replacement paid smoke may start before that gate.

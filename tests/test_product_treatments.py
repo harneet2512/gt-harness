@@ -865,6 +865,226 @@ def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
     assert not process_line.endswith("evaluator/eva truncated=true")
 
 
+def test_compaction_deduplicates_requirements_and_drops_rank_only_noise(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A dense real-task packet must remain usable at the release ceiling."""
+
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    def item(
+        *,
+        kind: str,
+        path: str,
+        symbol: str,
+        digest: str,
+        role: str,
+        facets: tuple[str, ...],
+        source_path: str = "",
+        source_symbol: str = "",
+        relation: str = "",
+        reason: str = "verified_exact_identity",
+    ) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=kind,
+            path=path,
+            start_line=1,
+            end_line=1,
+            symbol=symbol,
+            relation=relation,
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="b" * 64,
+            graph_revision="c" * 64,
+            evidence_sha256=digest * 64,
+            decision_reason=reason,
+            completeness="exact_identity",
+            source_path=source_path,
+            source_symbol=source_symbol,
+            localization_role=role,
+            facet_ids=facets,
+        )
+
+    facets = (
+        TaskFacet(
+            facet_id="facet-register-a",
+            obligation_ids=("obligation-a",),
+            role=LocalizationRole.EDIT,
+            exact_symbols=("register",),
+            unresolved_symbols=("container.register",),
+            owning_symbols=("container",),
+        ),
+        TaskFacet(
+            facet_id="facet-register-b",
+            obligation_ids=("obligation-b",),
+            role=LocalizationRole.EDIT,
+            exact_symbols=("register",),
+            unresolved_symbols=("container.register",),
+            owning_symbols=("container",),
+        ),
+        TaskFacet(
+            facet_id="facet-function",
+            obligation_ids=("obligation-c",),
+            role=LocalizationRole.EDIT,
+            exact_symbols=("asFunction",),
+        ),
+        TaskFacet(
+            facet_id="facet-error",
+            obligation_ids=("obligation-d",),
+            role=LocalizationRole.EDIT,
+            exact_symbols=("AwilixResolutionError",),
+        ),
+        TaskFacet(
+            facet_id="facet-init",
+            obligation_ids=("obligation-e",),
+            role=LocalizationRole.EDIT,
+            unresolved_symbols=("initialize",),
+        ),
+        TaskFacet(
+            facet_id="facet-rollback",
+            obligation_ids=("obligation-f",),
+            role=LocalizationRole.EDIT,
+            unresolved_symbols=("rollback",),
+        ),
+    )
+    edit = item(
+        kind="symbol_identity",
+        path="src/resolvers.ts",
+        symbol="asClass",
+        digest="d",
+        role="EDIT",
+        facets=("facet-register-a", "facet-function"),
+    )
+    candidate = item(
+        kind="symbol_identity",
+        path="src/__tests__/resolvers.test.ts",
+        symbol="resolvers.test",
+        digest="e",
+        role="INSPECT",
+        facets=(),
+        reason="task_path_phrase_inspection",
+    )
+    public = item(
+        kind="symbol_identity",
+        path="src/awilix.ts",
+        symbol="",
+        digest="f",
+        role="PUBLIC_SURFACE",
+        facets=("facet-register-a", "facet-function", "facet-error"),
+    )
+    integration = item(
+        kind="symbol_identity",
+        path="src/container.ts",
+        symbol="container",
+        digest="1",
+        role="INTEGRATION",
+        facets=(
+            "facet-register-a",
+            "facet-register-b",
+            "facet-init",
+            "facet-rollback",
+        ),
+    )
+    relationship = item(
+        kind="relationship",
+        path="src/errors.ts",
+        symbol="AwilixResolutionError",
+        digest="2",
+        role="INTEGRATION",
+        facets=(
+            "facet-register-a",
+            "facet-register-b",
+            "facet-init",
+            "facet-rollback",
+            "facet-error",
+        ),
+        source_path="src/container.ts",
+        source_symbol="container",
+        relation="IMPORTS",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        task_facets=facets,
+        primary_edit_targets=(edit,),
+        inspection_candidates=(candidate,),
+        inspection_public_surface=(public,),
+        inspection_integration=(integration,),
+        execution_paths=(
+            "gt-process-0123456789abcdef01234567 lower_bound=true "
+            "anchor=src/resolvers.ts#asClass "
+            "req=facet-register-a src/__tests__/container.test.ts#it -> "
+            "src/container.ts#container -> src/resolvers.ts#asClass "
+            "[edge=100,resolution=exact;edge=101,resolution=exact]",
+        ),
+        change_surface=(
+            "gt-impact-fedcba9876543210fedcba98 anchor=src/resolvers.ts#asClass "
+            "req=facet-register-a depth=1 CALLS "
+            "src/__tests__/container.test.ts#it direction=reverse edge=100",
+        ),
+        affected_tests=("src/__tests__/awilix.test.ts",),
+        uncovered_facets=(
+            "facet-rollback role=EDIT "
+            "unresolved=container.register,DatabasePool,instance.connect",
+        ),
+        evidence_items=(edit, candidate, public, integration, relationship),
+        projection_claim_ids=(
+            "gt-process-0123456789abcdef01234567",
+            "gt-impact-fedcba9876543210fedcba98",
+        ),
+        coverage={"dense_index": {"status": "READY", "query_ready": True}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= 500
+    assert rendered.count("exact=register unresolved=container.register owners=container") == 1
+    declared = {
+        line.split()[1]
+        for line in rendered.splitlines()
+        if line.startswith("REQUIREMENT ")
+    }
+    referenced = {
+        alias
+        for alias in __import__("re").findall(r"\bR\d+\b", rendered)
+    }
+    assert referenced <= declared
+    assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY" not in rendered
+    assert "EXACT_EDIT_TARGET src/resolvers.ts:1#asClass" in rendered
+    assert "INSPECT_PUBLIC_SURFACE src/awilix.ts:1" in rendered
+    assert "INSPECT_INTEGRATION src/container.ts:1#container" in rendered
+    assert "VERIFIED_RELATION src/container.ts:container IMPORTS" in rendered
+    assert "BOUNDED_PROCESS gt-process-0123456789ab" in rendered
+    assert "gt-process-0123456789abcdef01234567" not in rendered
+    assert "BOUNDED_IMPACT gt-impact-fedcba987654" in rendered
+    assert "gt-impact-fedcba9876543210fedcba98" not in rendered
+    assert {
+        "gt-process-0123456789abcdef01234567",
+        "gt-impact-fedcba9876543210fedcba98",
+    } <= treatment.delivered_claim_ids
+    impact_line = next(
+        line for line in rendered.splitlines() if line.startswith("BOUNDED_IMPACT ")
+    )
+    assert not impact_line.endswith(" dire")
+
+
 def test_provider_context_preserves_decision_facts_before_candidate_noise(
     tmp_path: Path, monkeypatch
 ) -> None:
