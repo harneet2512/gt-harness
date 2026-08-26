@@ -26,6 +26,8 @@ from gt_engine.repository_context_compiler import (
     ContextEvidenceItem,
     ContextStatus,
     GTContextPacket,
+    LocalizationRole,
+    TaskFacet,
 )
 from gt_engine.repository_graph_service import GraphStatus
 from gt_harness.treatments import (
@@ -689,6 +691,108 @@ def test_provider_context_v6_prunes_within_budget_without_losing_roles(
     assert "INSPECT_INTEGRATION " in rendered
     assert "PROPOSED_NEW_FILE " in rendered
     assert "UNCOVERED_FACET " in rendered
+
+
+def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Many unresolved requirements must not crowd out graph facts."""
+
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY_WITH_DECLARED_LIMITATIONS
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ("generated:1", "excluded_directory_files:162")
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    target = ContextEvidenceItem(
+        kind="symbol_identity",
+        path="repl/repl.go",
+        start_line=90,
+        end_line=100,
+        symbol="BeginRepl",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="exact_task_symbol",
+        completeness="exact_identity",
+        facet_ids=("facet-repl",),
+    )
+    facets = (
+        TaskFacet(
+            facet_id="facet-repl",
+            obligation_ids=("obligation-repl",),
+            role=LocalizationRole.EDIT,
+            exact_symbols=("BeginRepl",),
+        ),
+        *(
+            TaskFacet(
+                facet_id=f"facet-unresolved-{index}",
+                obligation_ids=(f"obligation-{index}",),
+                role=LocalizationRole.EDIT,
+                unresolved_symbols=(f"VeryLongUnresolvedSymbol{index}",),
+            )
+            for index in range(12)
+        ),
+    )
+    process = (
+        "gt-process-strong lower_bound=true anchor=repl/repl.go#BeginRepl "
+        "req=facet-repl main.go#main -> repl/repl.go#BeginRepl -> "
+        "repl/repl.go#Run -> runner/runner.go#Run -> "
+        "evaluator/evaluator.go#BeginEval -> evaluator/evaluator.go#Eval "
+        "[edge=817,resolution=exact;edge=1233,resolution=exact;"
+        "edge=1223,resolution=exact;edge=1240,resolution=exact]"
+    )
+    impact = (
+        "gt-impact-strong anchor=repl/repl.go#BeginRepl req=facet-repl "
+        "depth=1 CALLS main.go#main direction=reverse edge=817"
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        task_facets=facets,
+        primary_edit_targets=(target,),
+        execution_paths=(process,),
+        change_surface=(impact,),
+        uncovered_facets=tuple(
+            f"facet-unresolved-{index} role=EDIT "
+            f"unresolved=VeryLongUnresolvedSymbol{index}"
+            for index in range(12)
+        ),
+        evidence_items=(target,),
+        projection_claim_ids=("gt-process-strong", "gt-impact-strong"),
+        uncertainties=(
+            "chunk_character_limit",
+            "no_decision_relevant_evidence",
+            "no_complete_evidence",
+            "unverified_edge_rejected",
+        ),
+        coverage={"dense_index": {"status": "READY", "query_ready": True}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= 500
+    assert "EXACT_EDIT_TARGET repl/repl.go:90#BeginRepl" in rendered
+    assert "BOUNDED_PROCESS gt-process-strong" in rendered
+    assert "BOUNDED_IMPACT gt-impact-strong" in rendered
+    assert "REQUIREMENT facet-repl" in rendered
+    assert "REQUIREMENT facet-unresolved-0" not in rendered
 
 
 def test_provider_context_preserves_decision_facts_before_candidate_noise(
@@ -1611,6 +1715,52 @@ def test_run_cli_checkpoints_receipt_before_agent_finishes(
     assert json.loads(output.read_text(encoding="utf-8"))["status"] == "COMPLETED"
     if os.name != "nt":
         assert output.stat().st_mode & stat.S_IROTH
+
+
+def test_run_cli_setup_failure_preserves_reason_and_treatment_receipt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import gt_harness.miniswe_runner as runner
+    from gt_harness.cli import _run_agent
+
+    output = tmp_path / "gt-run.json"
+
+    def build(**kwargs):
+        return SimpleNamespace(
+            config=SimpleNamespace(system_template="system", instance_template="task"),
+            treatment=kwargs["treatment"],
+        )
+
+    def fail_prepare(self, _task):
+        self.treatment_status = TreatmentStatus.FAILED
+        self.errors.append("FAILED:context_budget_too_small")
+        raise TreatmentUnavailableError("FAILED:context_budget_too_small")
+
+    monkeypatch.setattr(runner, "build_miniswe_agent", build)
+    monkeypatch.setattr(GroundTruthTreatment, "prepare", fail_prepare)
+    args = SimpleNamespace(
+        task="Do complex work",
+        model="provider/model",
+        base_url="https://provider.invalid",
+        max_iterations=3,
+        time_budget_seconds=30.0,
+        root=str(tmp_path),
+        temperature=0.0,
+        run_id="setup-error",
+        task_id="task-setup-error",
+        trial_id="1",
+        output=str(output),
+        state_dir=None,
+        treatment="groundtruth",
+    )
+
+    assert _run_agent(args) == 1
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+    assert receipt["status"] == "ERROR"
+    assert receipt["error_type"] == "TreatmentUnavailableError"
+    assert receipt["error"] == "FAILED:context_budget_too_small"
+    assert receipt["treatment_receipt_present"] is True
+    assert "FAILED:context_budget_too_small" in receipt["treatment_receipt"]["errors"]
 
 
 def test_run_cli_preserves_provider_usage_and_transcript_on_runtime_error(

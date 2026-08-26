@@ -444,6 +444,18 @@ def _run_agent(args: argparse.Namespace) -> int:
         # Persist the pair identity and current graph state before any work.
         write_checkpoint()
     except Exception as exc:  # noqa: BLE001 - setup failure must still leave a receipt
+        try:
+            treatment_receipt = treatment.finalize(None)
+        except Exception as receipt_exc:  # noqa: BLE001 - preserve the primary error
+            treatment_receipt = {
+                "schema": "gt.treatment_receipt.v1",
+                "treatment": args.treatment,
+                "treatment_status": "FAILED",
+                "errors": [
+                    f"{type(exc).__name__}:{exc}",
+                    f"finalize_failed:{type(receipt_exc).__name__}",
+                ],
+            }
         receipt = {
             "schema": "gt.run_receipt.v1",
             "run_id": run_id,
@@ -453,6 +465,7 @@ def _run_agent(args: argparse.Namespace) -> int:
             "task": args.task,
             "status": "ERROR",
             "error_type": type(exc).__name__,
+            "error": " ".join(str(exc).split())[:2000],
             "started": started,
             "completed": _now(),
             "duration_ms": round((time.perf_counter() - started_clock) * 1000, 3),
@@ -469,6 +482,15 @@ def _run_agent(args: argparse.Namespace) -> int:
             "treatment": args.treatment,
             "resolved": None,
             "provider_calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_tokens": 0,
+            "treatment_receipt": treatment_receipt,
+            "treatment_receipt_present": True,
+            "transcript": [
+                {"type": "error", "message": f"{type(exc).__name__}: {exc}"},
+                {"type": "treatment_receipt", "receipt": treatment_receipt},
+            ],
         }
         _write_json_atomic(output_path, receipt)
         _emit({**receipt, "receipt_path": str(output_path)})

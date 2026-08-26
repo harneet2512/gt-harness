@@ -209,5 +209,42 @@ def test_official_result_normalizer_prefers_harbor_aggregate_over_trial_result(
         source_sha="a" * 40,
     )
 
+    assert receipt["status"] == "GRADED"
+    assert receipt["reward"] == 1
+    assert receipt["solved"] is True
+
+
+def test_official_result_normalizer_rejects_conflicting_reward_representations(
+    tmp_path: Path,
+) -> None:
+    from scripts.standardize_benchmark_result import standardize_result
+
+    root = tmp_path / "results"
+    agent = root / "job" / "agent"
+    agent.mkdir(parents=True)
+    (agent / "gt-run.json").write_text(
+        json.dumps({"schema": "gt.run_receipt.v1", "task_id": "task-a"}),
+        encoding="utf-8",
+    )
+    (root / "job" / "result.json").write_text(
+        json.dumps(
+            {
+                "reward": 0,
+                "n_total_trials": 1,
+                "stats": {
+                    "evals": {"task": {"metrics": [{"reward": 1.0}]}}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    receipt = standardize_result(
+        root=root,
+        suite="deepswe",
+        task_id="task-a",
+        source_sha="a" * 40,
+    )
+
     assert receipt["status"] == "ERROR"
     assert receipt["reward"] is None

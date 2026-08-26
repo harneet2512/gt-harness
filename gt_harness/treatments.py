@@ -1192,7 +1192,6 @@ class GroundTruthTreatment(BareTreatment):
                 facet
                 for facet in packet_dict["task_facets"]
                 if facet["facet_id"] in referenced_requirements
-                or facet.get("unresolved_symbols")
             ][:12]
             for facet in visible_facets:
                 details: list[str] = []
@@ -1255,7 +1254,19 @@ class GroundTruthTreatment(BareTreatment):
                     f"req={','.join(item.get('requirements') or ()) or 'unscoped'} "
                     f"{item['fact']}"
                 )
-            lines.extend(f"BOUNDED_PROCESS {item}" for item in packet_dict["execution_paths"])
+            def projection_line(item: str) -> str:
+                if not compact_output:
+                    return item
+                # Edge IDs remain in the persisted projection receipt. The
+                # provider needs the bounded path and claim, not a repeated
+                # per-hop proof ledger that can consume the entire context
+                # budget on a deep call chain.
+                return re.sub(r"\s+\[[^\]]+\]\s*$", "", item)
+
+            lines.extend(
+                f"BOUNDED_PROCESS {projection_line(item)}"
+                for item in packet_dict["execution_paths"]
+            )
             lines.extend(f"BOUNDED_IMPACT {item}" for item in packet_dict["change_surface"])
             lines.extend(f"AFFECTED_TEST {item}" for item in packet_dict["affected_tests"])
             lines.extend(f"VALIDATE {item}" for item in packet_dict["validation_plan"])

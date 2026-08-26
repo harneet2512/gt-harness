@@ -618,6 +618,69 @@ def test_quoted_configuration_literal_is_not_promoted_to_exact_symbol() -> None:
     assert "strict" not in exact
 
 
+def test_new_snake_case_api_does_not_promote_case_mismatched_analog() -> None:
+    documents = (
+        _document("object/object.go", "Reset", "func (e *Environment) Reset() {}"),
+        _document("evaluator/functions.go", "require", "func require() {}"),
+    )
+
+    facets = compile_task_facets(
+        "Expose `reset_require_cache()` and `require_cache_info()`.",
+        documents,
+    )
+
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
+    assert "Reset" not in exact
+    assert "reset_require_cache" in unresolved
+    assert "require" in exact
+
+
+def test_new_api_does_not_promote_generic_unqualified_prefixes() -> None:
+    documents = (
+        _document("web/static/bundle.js", "delete", "function delete() {}"),
+        _document("src/format.py", "format", "def format(): pass"),
+        _document("src/task.py", "task", "def task(): pass"),
+    )
+
+    facets = compile_task_facets(
+        "Add `delete_snapshot`, `format_snapshot_task_list`, and `task_id`.",
+        documents,
+    )
+
+    exact = {symbol for facet in facets for symbol in facet.exact_symbols}
+    unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
+    assert not {"delete", "format", "task"} & exact
+    assert {
+        "delete_snapshot",
+        "format_snapshot_task_list",
+        "task_id",
+    } <= unresolved
+
+
+def test_symbol_bearing_paragraph_does_not_duplicate_extracted_obligation() -> None:
+    documents = (
+        _document(
+            "src/monitor.py",
+            "format_running_task_list",
+            "def format_running_task_list(): pass",
+        ),
+    )
+
+    facets = compile_task_facets(
+        "Monitor methods must mirror `format_running_task_list`.\n\n"
+        "Add `capture_snapshot` and return its ID.",
+        documents,
+    )
+
+    matching = [
+        facet
+        for facet in facets
+        if "format_running_task_list" in facet.exact_symbols
+    ]
+    assert len(matching) == 1
+
+
 def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:
     documents = (
         _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),

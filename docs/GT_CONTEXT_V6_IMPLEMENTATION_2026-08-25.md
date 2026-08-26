@@ -112,3 +112,54 @@ trajectory message, with direct regression coverage. Obsolete 2.2.8 and
 parallelism-4 assertions were replaced with the current product contract, and
 the unused 2.2.8 Pier adapter alias was removed. A later run must certify the
 new exact SHA; the failed run is retained as evidence and is not relabeled.
+
+## DeepSWE smoke delivery and grading defects
+
+DeepSWE run `32913521485` at source SHA
+`ca068e11a8ea000df38c5e776ef1c472a0372636` exposed two independent harness
+defects. This run is retained as failed experimental evidence and is not a
+valid solve-rate comparison.
+
+First, twelve early tasks built query-ready exact-revision graphs but failed
+before the first provider call with `FAILED:context_budget_too_small`. The
+failure was deterministic context serialization, not provider or model
+behavior. Reproduction on the exact ABS and aiomonitor repositories found four
+causes:
+
+1. every unresolved task facet was serialized even when no delivered fact
+   referenced it;
+2. compact process rows repeated their persisted per-edge proof ledger;
+3. unqualified new APIs such as `delete_snapshot`,
+   `format_snapshot_task_list`, and `task_id` promoted unrelated generic
+   symbols named `delete`, `format`, and `task`; and
+4. paragraph-level symbol facets duplicated sentence-level task-contract
+   obligations, while rank-only inspection edges could inherit task authority.
+
+The correction serializes only requirements referenced by delivered evidence,
+keeps the full edge ledger in the persisted graph-projection receipt while
+removing it from compact provider text, blocks generic unqualified prefix
+analogs, deduplicates paragraph/sentence obligations, and requires an
+integration edge to touch a primary task identity. Unscoped relationships are
+not provider-visible facts. The exact local witnesses now produce:
+
+- ABS Go task: `ACTIVE`, 448/500 bounded tokens, exact `BeginRepl` target,
+  bounded process, and impact evidence;
+- aiomonitor Python sparse path: `ACTIVE`, 439/500 tokens, no errors; and
+- aiomonitor production `hybrid_required` path with the checksum-pinned
+  Snowflake model: dense `READY`, `ACTIVE`, 490/500 tokens, with the real
+  monitor target, package surface, CLI integration, certified import edge,
+  value-flow fact, and bounded process.
+
+Second, Pier completed two later tasks and wrote official rewards under its
+canonical aggregate schema
+`stats.evals.<agent/model/dataset>.metrics[].reward`, but GT's result
+standardizer ignored that field and emitted `ERROR` verifier receipts. The
+actual aggregate result gives `abs-stepped-slices` reward `1.0` and
+`claude-code-by-agents-recursive-delegation` reward `0.0`. The standardizer now
+reads the aggregate schema, rejects conflicting reward representations, and
+has regression coverage for both behavior classes.
+
+The setup-failure path also now preserves the normalized error reason, zeroed
+usage, full treatment receipt, and transcript receipt. These changes remain
+uncertified until a new exact-SHA Linux product certification passes. No paid
+rerun may use them before that gate.

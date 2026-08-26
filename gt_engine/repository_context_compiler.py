@@ -278,6 +278,14 @@ _ISSUE_LANGUAGE_WORDS = frozenset(
         "write",
     }
 )
+_UNQUALIFIED_ANALOG_PREFIX_STOPWORDS = _ISSUE_LANGUAGE_WORDS | frozenset(
+    {
+        "format",
+        "get",
+        "set",
+        "task",
+    }
+)
 _TEST_SEGMENTS = ("/test/", "/tests/", "/__tests__/")
 _LEGACY_SEGMENTS = (
     "/benchmark/",
@@ -443,14 +451,21 @@ def compile_task_facets(
         (obligation.obligation_id, obligation.text)
         for obligation in contract.obligations
     )
-    represented = "\n".join(text for _identifier, text in obligation_rows).casefold()
     symbol_rows = tuple(
         (
             "symbols-" + hashlib.sha256(segment.encode()).hexdigest()[:12],
             segment,
         )
         for segment in _symbol_bearing_segments(task)
-        if segment.casefold() not in represented
+        # Task-contract obligations are sentence-level while symbol-bearing
+        # segments are paragraph-level.  Comparing the whole paragraph to the
+        # obligation corpus duplicated every code-bearing obligation as a
+        # second facet.  Only retain a segment when no extracted obligation is
+        # already contained in it.
+        if not any(
+            text.casefold() in segment.casefold()
+            for _identifier, text in obligation_rows
+        )
     )
     rows = obligation_rows + symbol_rows or (("task", str(task or "").strip()),)
     task_qualified_entities = (
@@ -541,6 +556,17 @@ def compile_task_facets(
                     for key, values in available.items()
                     if len(key) >= 4 and leaf.casefold().startswith(key + "_")
                     for row in values
+                    if leaf.startswith(row[0] + "_")
+                    # An unqualified new API such as delete_snapshot or
+                    # format_snapshot_task_list must not promote unrelated
+                    # generic symbols named delete/format/task.  Qualified
+                    # owner-scoped analogs remain valid because the existing
+                    # owner independently constrains their subsystem.
+                    if not (
+                        len(segments) == 1
+                        and row[0].casefold()
+                        in _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS
+                    )
                     if not owner_paths or row[1] in owner_paths
                 }
                 if len(segments) == 1 or owner_paths
@@ -1640,6 +1666,17 @@ class RepositoryContextCompiler:
         for link in safe_links:
             if str(link.relation or "").upper() not in {"CALLS", "IMPORTS"}:
                 continue
+            # A rank-only inspection anchor can have many valid repository
+            # relationships that are unrelated to the task. Do not relabel
+            # those neighbors as task integration surfaces or inherit the
+            # primary facet merely because both were in the bounded retrieval
+            # set. Integration authority requires a certified edge touching a
+            # primary task identity.
+            if (
+                link.source_path not in primary_paths
+                and link.target_path not in primary_paths
+            ):
+                continue
             for path in (link.source_path, link.target_path):
                 if path not in primary_paths and path in role_candidates_by_path:
                     integration_paths.append(path)
@@ -1767,28 +1804,31 @@ class RepositoryContextCompiler:
                     )
                 )
         scoped_link_items = tuple(
-            replace(
-                item,
-                facet_ids=tuple(
-                    dict.fromkeys(
-                        (
-                            *_matching_facet_ids(
-                                symbol=item.source_symbol,
-                                path=item.source_path,
-                                facets=task_facets,
-                            ),
-                            *_matching_facet_ids(
-                                symbol=item.symbol,
-                                path=item.path,
-                                facets=task_facets,
-                            ),
-                            *facet_ids_by_path.get(item.source_path, ()),
-                            *facet_ids_by_path.get(item.path, ()),
-                        )
-                    )
-                ),
-            )
+            scoped
             for item in link_items
+            if (
+                scoped := replace(
+                    item,
+                    facet_ids=tuple(
+                        dict.fromkeys(
+                            (
+                                *_matching_facet_ids(
+                                    symbol=item.source_symbol,
+                                    path=item.source_path,
+                                    facets=task_facets,
+                                ),
+                                *_matching_facet_ids(
+                                    symbol=item.symbol,
+                                    path=item.path,
+                                    facets=task_facets,
+                                ),
+                                *facet_ids_by_path.get(item.source_path, ()),
+                                *facet_ids_by_path.get(item.path, ()),
+                            )
+                        )
+                    ),
+                )
+            ).facet_ids
         )
         semantic_items = tuple(
             ContextEvidenceItem(

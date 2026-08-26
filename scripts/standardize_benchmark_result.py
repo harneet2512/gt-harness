@@ -12,15 +12,37 @@ from typing import Any
 
 
 def _reward(payload: dict[str, Any]) -> int | None:
-    candidates = (
+    candidates: list[Any] = [
         ((payload.get("verifier_result") or {}).get("rewards") or {}).get("reward"),
         (payload.get("rewards") or {}).get("reward"),
         payload.get("reward"),
-    )
-    for value in candidates:
-        if value in (0, 0.0, 1, 1.0):
-            return int(value)
-    return None
+    ]
+    # Pier/Harbor's canonical run-level result stores the official verifier
+    # metric under stats.evals.<agent/model/dataset>.metrics.  Per-task GT jobs
+    # have exactly one trial, but the eval key is intentionally dynamic.
+    # Ignoring this schema turned real reward=1 results into ERROR receipts.
+    stats = payload.get("stats") or {}
+    evals = stats.get("evals") or {}
+    if isinstance(evals, dict):
+        for evaluation in evals.values():
+            if not isinstance(evaluation, dict):
+                continue
+            metrics = evaluation.get("metrics") or []
+            if not isinstance(metrics, list):
+                continue
+            candidates.extend(
+                metric.get("reward")
+                for metric in metrics
+                if isinstance(metric, dict)
+            )
+    rewards = {
+        int(value)
+        for value in candidates
+        if value in (0, 0.0, 1, 1.0)
+    }
+    # Conflicting representations are corruption, not permission to select a
+    # convenient result.  The caller records an explicit ERROR receipt.
+    return next(iter(rewards)) if len(rewards) == 1 else None
 
 
 def standardize_result(
