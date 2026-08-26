@@ -1,10 +1,11 @@
 {
   "summary": {
     "schema": "gt.localization_truth_report.v1",
-    "compiler_fingerprint": "7ded0f252c79ffc12a4dd24079d5e2a96be6375477d2f2b7b76c7a9b751cad77",
+    "compiler_fingerprint": "783a56466cceb5f700db1127edd1649c4be08a83a1136042d2626d4430d56277",
     "cases_run": 20,
     "case_failures": [],
     "mean_edit_target_precision": 1.0,
+    "mean_edit_target_recall": 0.0845,
     "tasks_with_wrong_edit_targets": [],
     "zero_target_tasks": [
       "arktype-json-schema-refs-dependencies",
@@ -151,23 +152,20 @@
       "edit_target_recall": 0.0,
       "roles": {
         "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
-        "INSPECT_INTEGRATION": 1,
         "BOUNDED_PROCESS": 1,
-        "BOUNDED_IMPACT": 1,
+        "BOUNDED_IMPACT": 2,
         "UNCOVERED_FACET": 1
       },
       "role_paths": {
         "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
-          "ark/type/keywords/FormData.ts"
-        ],
-        "INSPECT_INTEGRATION": [
-          "ark/type/scope.ts"
+          "ark/json-schema/object.ts"
         ],
         "BOUNDED_PROCESS": [
           "gt-process-b538c80fcf0e"
         ],
         "BOUNDED_IMPACT": [
-          "gt-impact-d321491163a7"
+          "gt-impact-6ae4621e2c65",
+          "gt-impact-f7ebc17895f5"
         ],
         "UNCOVERED_FACET": [
           "role=EDIT"
@@ -182,7 +180,7 @@
         "ark/json-schema/scope.ts",
         "ark/json-schema/utils.ts"
       ],
-      "token_count": 476
+      "token_count": 475
     },
     {
       "task_id": "csstree-shorthand-expansion-compression",
@@ -856,7 +854,7 @@
           "lib/api.js"
         ],
         "INSPECT_INTEGRATION": [
-          "lib/utils/reporter.js"
+          "lib/utils/strutils.js"
         ],
         "BOUNDED_IMPACT": [
           "gt-impact-ce297d6fd0fd"
@@ -876,7 +874,7 @@
         "lib/utils/report-file.js",
         "lib/utils/reporter.js"
       ],
-      "token_count": 496
+      "token_count": 421
     },
     {
       "task_id": "pest-character-class-coalescing",

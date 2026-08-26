@@ -25,6 +25,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--min-precision", type=float, default=0.7)
+    parser.add_argument("--min-recall", type=float, default=0.5)
     args = parser.parse_args()
 
     failures: list[str] = []
@@ -56,12 +57,17 @@ def main() -> int:
         failures.append(f"treatment failures: {summary['treatment_failures']}")
 
     precision = summary.get("mean_edit_target_precision")
+    recall = summary.get("mean_edit_target_recall")
     if precision is None:
         failures.append("no audited edit-target precision in report")
     elif float(precision) < args.min_precision:
         failures.append(
             f"precision {precision} below floor {args.min_precision}"
         )
+    if recall is None:
+        failures.append("no audited edit-target recall in report")
+    elif float(recall) < args.min_recall:
+        failures.append(f"recall {recall} below floor {args.min_recall}")
 
     if failures:
         for failure in failures:
@@ -75,8 +81,10 @@ def main() -> int:
                 "status": "PASS",
                 "cases_run": summary.get("cases_run"),
                 "mean_edit_target_precision": precision,
+                "mean_edit_target_recall": recall,
                 "zero_target_tasks": len(summary.get("zero_target_tasks") or ()),
                 "min_precision_floor": args.min_precision,
+                "min_recall_floor": args.min_recall,
                 "compiler_fingerprint": _compiler_fingerprint(),
             },
             sort_keys=True,

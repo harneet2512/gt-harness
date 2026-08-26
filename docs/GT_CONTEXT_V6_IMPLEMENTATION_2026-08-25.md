@@ -24,7 +24,7 @@ The deterministic causes were:
 4. generic directory listings dirtied localization state;
 5. candidate paths were eligible for `FOLLOWED`, and a repository-wide test
    pass could manufacture feature-level `VALIDATED`;
-6. every occurrence of the noun â€œtestâ€ was typed as validation work;
+6. every occurrence of the noun Ã¢â‚¬Å“testÃ¢â‚¬Â was typed as validation work;
 7. backticks were treated as symbol authority, including configuration values;
 8. dense retrieval embedded the entire task as one query instead of preserving
    independent requirements; and
@@ -67,8 +67,8 @@ facts. This is explicit limitation behavior, not silent semantic support.
 
 No GitNexus code was copied. GT retains its own exact-revision graph, pinned
 local dense index, fail-closed readiness, lifecycle refresh, and claim-level
-delivery proof. The adopted lesson is the product behaviorâ€”compact
-process/change/test answers delivered at the decision pointâ€”not GitNexus's
+delivery proof. The adopted lesson is the product behaviorÃ¢â‚¬â€compact
+process/change/test answers delivered at the decision pointÃ¢â‚¬â€not GitNexus's
 implementation or its weaker stale/delivery accounting.
 
 ## Verification contract
@@ -170,7 +170,7 @@ boundary found a separate relevance defect. On
 unqualified `agent_id` prefix to a generic `Agent`/`agent` symbol, first
 selecting an unrelated Swift model and later a generic chat-local variable.
 The exact retrieval channel also classified natural file-name token overlap as
-an â€œexact candidateâ€; the context compiler then excluded that rank-only row
+an Ã¢â‚¬Å“exact candidateÃ¢â‚¬Â; the context compiler then excluded that rank-only row
 from both edit and inspection sets. Consequently the strongest deterministic
 artifact match, `backend/handlers/multiAgentChat.ts`, disappeared.
 
@@ -371,3 +371,57 @@ verifying the committed, fingerprint-bound
 repairs the provider-free cohort replay delivers 20/20 treatments, zero wrong
 edit targets, and mean edit-target precision 1.0. The typed flip ledger for
 the paid run is [deepswe_smoke20_flip_ledger.json](deepswe_smoke20_flip_ledger.json).
+## Latent-regression sweep and benchmark-readiness gates (2026-08-26)
+
+A provider-free sweep of the compiler, task contract, delivery layer, test
+suite, and workflows surfaced latent major-regression risks beyond the
+localization recall gap. Repairs landed in this batch:
+
+1. **Obligation dedup** (gt_engine/task_contract.py): substring dedup
+   dropped a distinct obligation whose normalized key contained an earlier
+   key (Create foo.txt.bak behind Create foo.txt). Dedup is now exact-key
+   only, so every distinct obligation becomes a facet.
+2. **Directive coverage**: _DIRECTIVE_RE missed the edit family
+   (ix/update/patch/refactor/bug); non-bullet prose obligations such as
+   Fix NPE in Foo when config is null never entered extract_task_contract
+   and thus never produced a facet. The directive set now covers them.
+3. **Path-citation false positive**: _task_cites_path matched a bare
+   extensionless filename token (config) against the prose word in
+   Fix config handling, granting a wrong zero-facet edit target. The bare
+   filename now requires a word boundary; full normalized paths still match
+   as substrings.
+4. **Dense file-anchor poisoning**: a dense-inspection candidate could seed
+   graph-expansion ile_anchors, so certified RE_EXPORTS/CALLS from a
+   semantically-similar-but-irrelevant file promoted spurious
+   public-surface/integration rows. Dense-only file anchors are now excluded
+   from ile_anchors.
+5. **Truncation honesty**: packet 	runcated ignored repository-side
+   branch/expansion truncation, so a high-fan-out graph could claim
+   	runcated=false with a partial process/impact view. Repository
+   truncation reasons now propagate to the packet.
+6. **Ambiguity demotion correctness** (from the prior localization batch):
+   the per-symbol-group demotion previously demoted owner-module-scoped
+   members and kept globally-unscoped collisions as edit targets; it now
+   demotes per-row members with any globally unscoped facet match unless a
+   certified export edge connects the files (facade).
+7. **Non-vacuous tests**: every localization regression test now carries a
+   positive control proving the guarded binding occurs before asserting its
+   absence, so an empty/broken compiler cannot pass.
+
+### Benchmark-readiness gates
+
+scripts/localization_truth_gate.py now enforces both precision (>= 0.7)
+and recall (>= 0.5) on the fingerprint-bound smoke20 truth report, with
+scripts/replay_smoke20_localization.py reporting mean_edit_target_recall
+in the summary. The gate is a hosted certification step via
+scripts/codespaces_product_certification.sh.
+
+Current measured state: mean edit-target precision 1.0, mean recall 0.0845,
+12/20 zero-target tasks. Recall remains red against the 0.5 floor and is the
+remaining blocker to benchmark-ready status. The recall work is the
+decision-point delivery of bounded process/impact/test answers on file-read
+observations (the GitNexus 
+ative_augment lesson), typed
+AMBIGUOUS_IDENTITY rows, inspection structural-relevance filtering, and
+truth-report regeneration under hybrid_required. No paid benchmark was
+run; readiness is proven by the provider-free gates above.

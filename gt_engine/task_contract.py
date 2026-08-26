@@ -23,7 +23,8 @@ _DIRECTIVE_RE = re.compile(
     r"(?i)\b(?:must|should|required|ensure|implement|create|write|install|support|"
     r"supports|has support|keep|do not|don't|never|be careful|has to|need to|"
     r"make sure|call your|put it in|produce|generate|replace|remove|reconstruct|"
-    r"source the|mimics?)\b"
+    r"source the|mimics?|fix|fixes|fixed|fixing|update|updates|updated|updating|"
+    r"patch|patches|patched|patching|refactor|bug|bugs|bugged)\b"
 )
 
 _HARNESS_SCAFFOLD_HEADINGS = frozenset(
@@ -772,8 +773,10 @@ def extract_task_contract(issue_text: str) -> TaskContract:
             or _is_workflow_noise(text)
         ):
             continue
-        # Do not add nested copies of a row already retained.
-        if any(key in existing or existing in key for existing in seen):
+        # Do not add nested copies of a row already retained — exact key only
+        # (substring match dropped "Create foo.txt.bak with retries" when
+        # "Create foo.txt" already existed, losing a distinct obligation).
+        if key in seen:
             continue
         seen.add(key)
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]

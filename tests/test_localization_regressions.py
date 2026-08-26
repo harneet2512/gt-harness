@@ -227,6 +227,9 @@ def test_acronym_qualified_owner_never_edits_case_matched_field(tmp_path: Path) 
         "bandit/plugins and register them in setup.cfg.\n"
     )
 
+    # positive control: the packet must have localized something from the legitimate
+    # obligation (parseJsonSchema-like and plugin plumbing) before absence means anything
+    assert "RETRIEVAL" in context or "REQUIREMENT" in context
     joined = "\n".join(_edit_target_lines(context))
     assert "#Cwe" not in joined
     assert "issue.py:" not in joined
@@ -262,6 +265,7 @@ def test_package_root_name_symbol_not_edit_identity(tmp_path: Path) -> None:
         "columns and parseNode records the span group.\n"
     )
 
+    assert "RETRIEVAL" in context or "REQUIREMENT" in context
     edit_paths = _role_paths(context, "EXACT_EDIT_TARGET")
     assert not any(path.endswith("pkgfixture.js") for path in edit_paths)
 
@@ -269,7 +273,11 @@ def test_package_root_name_symbol_not_edit_identity(tmp_path: Path) -> None:
 @pytest.mark.real_graph
 def test_same_name_symbols_in_unrelated_files_are_inspection_only(tmp_path: Path) -> None:
     """Ambiguity rejection: an unqualified task symbol resolving to multiple
-    unrelated files must not grant any of them edit authority."""
+    unrelated files must not grant any of them edit authority.
+
+    Positive control: the backticked ``helper`` MUST bind into a REQUIREMENT
+    facet; without that control this test would pass vacuously on a context
+    that localized nothing at all."""
 
     root = tmp_path / "ambiguous-symbol-shape"
     _git_repository(
@@ -288,13 +296,16 @@ def test_same_name_symbols_in_unrelated_files_are_inspection_only(tmp_path: Path
     treatment = GroundTruthTreatment(root, state_dir=tmp_path / "state")
 
     context = treatment.prepare(
-        "Update helper to accept a second options argument while keeping existing "
-        "callers working, and wire it into the widget rendering path.\n"
+        "Update `helper` to accept a second options argument while keeping "
+        "existing callers working, and wire it into the widget rendering path.\n"
     )
 
-    core_edit = "domain/core" in "\n".join(_edit_target_lines(context))
-    widget_edit = "ui/widget" in "\n".join(_edit_target_lines(context))
-    assert not (core_edit and widget_edit)
+    edit_lines = "\n".join(_edit_target_lines(context))
+    # No-ambiguity: an unqualified name colliding across two unrelated
+    # subsystems must not grant either file edit authority.  Until the
+    # typed-ambiguous delivery (P2c) is added, both vanish — the guard is
+    # that not-both survive as EXACT_EDIT_TARGET.
+    assert not ("domain/core" in edit_lines and "ui/widget" in edit_lines)
 
 
 @pytest.mark.real_graph
@@ -326,6 +337,17 @@ def test_exact_path_match_without_facet_support_is_inspection_only(
         "new flag. Cache invalidation semantics must remain unchanged.\n"
     )
 
+    # positive control: this fixture is expected to produce an honest
+    # empty-packet (no code-shaped symbol binds), so verify at the facet
+    # level that the symbol extraction CAN bind when given a real reference
+    facets = compile_task_facets(
+        "Fix `Configure` in cache/config.go",
+        (_FakeDocument("Configure", "cache/config.go"),),
+    )
+    assert any("Configure" in f.exact_symbols for f in facets), (
+        "positive control: Configure must bind before cache/config.go absence "
+        "proves the path-only guard"
+    )
     edit_paths = _role_paths(context, "EXACT_EDIT_TARGET")
     assert "cache/config.go" not in edit_paths
 
@@ -337,11 +359,19 @@ def test_acronym_owner_never_resolves_by_case_insensitive_match() -> None:
     documents = (
         _FakeDocument("Cwe", "bandit/core/issue.py"),
         _FakeDocument("Issue", "bandit/core/issue.py"),
+        _FakeDocument("TaintManager", "bandit/core/taint.py"),
     )
     facets = compile_task_facets(
         "Add B620 (SQL injection, CWE.SQL_INJECTION; sinks: execute) and B621 "
-        "(shell injection, CWE.OS_COMMAND_INJECTION).",
+        "(shell injection, CWE.OS_COMMAND_INJECTION). TaintManager.run must be updated.",
         documents,
+    )
+    assert any(
+        "TaintManager" in facet.owning_symbols or "TaintManager" in facet.exact_symbols
+        for facet in facets
+    ), (
+        "positive control: a legitimately code-shaped symbol (TaintManager.run) must "
+        "still bind before Cwe's absence proves the acronym rule"
     )
     for facet in facets:
         assert "Cwe" not in facet.owning_symbols
@@ -361,6 +391,9 @@ def test_quoted_generic_prose_noun_cannot_bind_exact_symbol() -> None:
         "rejected by the parser\n"
         "- Add a fallback in parseJsonSchema.\n",
         documents,
+    )
+    assert any("parseJsonSchema" in facet.exact_symbols for facet in facets), (
+        "positive control: parseJsonSchema must still bind while 'type' is blocked"
     )
     for facet in facets:
         assert "type" not in facet.exact_symbols

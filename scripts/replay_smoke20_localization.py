@@ -173,6 +173,7 @@ def main() -> int:
     wrong_symbol_tasks = [
         r["task_id"] for r in results if r["wrong_edit_targets"]
     ]
+    meaningful = [r for r in results if r["edit_target_recall"] is not None]
     summary = {
         "schema": "gt.localization_truth_report.v1",
         "compiler_fingerprint": _compiler_fingerprint(),
@@ -183,6 +184,13 @@ def main() -> int:
                 sum(r["edit_target_precision"] for r in audited) / len(audited), 4
             )
             if audited
+            else None
+        ),
+        "mean_edit_target_recall": (
+            round(
+                sum(r["edit_target_recall"] for r in meaningful) / len(meaningful), 4
+            )
+            if meaningful
             else None
         ),
         "tasks_with_wrong_edit_targets": wrong_symbol_tasks,

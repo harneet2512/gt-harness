@@ -600,10 +600,39 @@ The release gate therefore includes the committed
 [smoke20 localization truth report](docs/deepswe_smoke20_localization_truth.json)
 verified by `scripts/localization_truth_gate.py` as a certification step.
 The report is fingerprint-bound to the context compiler, must show zero
-wrong edit targets and zero case failures, and must hold mean edit-target
-precision at or above 0.7 across the frozen cohort replay. Regenerating the
-report is a deterministic, provider-free local action against the exact
-cohort revisions.
+wrong edit targets and zero case failures, must hold mean edit-target
+precision at or above 0.7, and must hold mean edit-target recall at or
+above 0.5 across the frozen cohort replay. Regenerating the report is a
+deterministic, provider-free local action against the exact cohort
+revisions.
+
+### Latent-regression sweep (2026-08-26)
+
+A second sweep found and repaired latent major-regression risks that a
+paid run would otherwise have surfaced:
+
+- distinct obligations were dropped by substring deduplication
+  (`Create foo.txt.bak` vanished behind `Create foo.txt`); dedup is now
+  exact-key only;
+- `_DIRECTIVE_RE` missed `fix/update/patch/refactor/bug` prose, so plain
+  non-bullet obligations like `Fix NPE in Foo when config is null` never
+  became a facet; the directive set now covers the edit family;
+- `_task_cites_path` matched an extensionless filename token (script
+  `config`) against the prose word `config`, granting a wrong edit target;
+  the bare filename now requires a word boundary;
+- a dense inspection candidate could seed graph-expansion file anchors and
+  promote spurious certified public-surface/integration rows; dense-only
+  file anchors are excluded from `file_anchors`;
+- packet `truncated` ignored repository-side branch/expansion truncation,
+  so high-fan-out graphs could claim `truncated=false`; repository
+  truncation reasons now propagate to the packet.
+
+Remaining open work before the recall gate passes (recall measured at
+0.08 vs the 0.5 floor): decision-point delivery of bounded
+process/impact/test answers on file-read observations (GitNexus
+`native_augment` lesson, adopted), typed `AMBIGUOUS_IDENTITY` rows with
+candidates, inspection-candidate structural-relevance filtering, and
+regeneration of the truth report under `hybrid_required` production mode.
 
 GT Harness is complete only when the substrate is exact, the delivered facts
 are decision-useful, the integration is faithful, and controlled results show

@@ -372,12 +372,22 @@ def _is_short_acronym(token: str) -> bool:
 
 
 def _task_cites_path(task: str, path: str) -> bool:
-    """Return whether the task text literally cites this file path or name."""
+    """Return whether the task text literally cites this file path or name.
+
+    The full normalized path is checked as a substring (task literally cites
+    ``cache/config.go``).  The bare filename is checked with word boundaries
+    so an extensionless script ``config`` does not hijack edit authority from
+    the prose word ``config`` in ``Fix config handling``.
+    """
 
     normalized = _normalized_path(path).casefold()
     name = normalized.rsplit("/", 1)[-1]
     text = " ".join(str(task or "").split()).casefold()
-    return bool(normalized and normalized in text) or bool(name and name in text)
+    if normalized and normalized in text:
+        return True
+    if name and re.search(rf"\b{re.escape(name)}\b", text):
+        return True
+    return False
 
 
 def _package_echo_symbol(task: str, path: str, symbol: str) -> bool:
@@ -1926,7 +1936,11 @@ class RepositoryContextCompiler:
         anchor_identities = frozenset(
             (item.path, item.symbol) for item in anchors if item.symbol
         )
-        file_anchors = frozenset(item.path for item in anchors if not item.symbol)
+        file_anchors = frozenset(
+            item.path
+            for item in anchors
+            if not item.symbol and item.decision_reason != "dense_semantic_inspection"
+        )
 
         def related_to_anchor(link: StructuralLink) -> bool:
             return bool(
@@ -2395,6 +2409,7 @@ class RepositoryContextCompiler:
             truncated=bool(
                 projection.truncated_count
                 or len(certified_relevant_links) > len(safe_links)
+                or any("truncated" in reason for reason in repository.reason_codes)
                 or retrieval.reason_codes
                 and any("budget" in reason for reason in retrieval.reason_codes)
             ),
