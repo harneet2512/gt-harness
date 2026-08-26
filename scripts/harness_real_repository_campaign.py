@@ -28,6 +28,7 @@ from gt_harness.treatments import GroundTruthTreatment, _bounded_token_count
 
 _TARGET = re.compile(r"^EXACT_EDIT_TARGET ([^:]+):\d+#", re.MULTILINE)
 _EXPECTED_MINISWE_VERSION = "2.4.6"
+_E2E_TASK = "Change `Signer` behavior after inspecting its callers"
 
 
 def _run(*args: str, cwd: Path | None = None) -> str:
@@ -122,7 +123,7 @@ def run_campaign(
         raise RuntimeError("pinned dense model assets are missing")
     os.environ["GT_DENSE_MODEL_DIR"] = str(dense_model_dir)
     treatment = GroundTruthTreatment(run_dir, state_dir=state, retrieval_mode="hybrid_required")
-    initial = treatment.prepare("Inspect `Signer` behavior and its callers before changing it")
+    initial = treatment.prepare(_E2E_TASK)
     match = _TARGET.search(initial)
     if match is None:
         raise RuntimeError("GT did not produce an exact source target")
@@ -163,9 +164,7 @@ def run_campaign(
         raise RuntimeError("GT attempted late synthetic-user context injection")
 
     restarted = GroundTruthTreatment(run_dir, state_dir=state, retrieval_mode="hybrid_required")
-    restart_context = restarted.prepare(
-        "Inspect `Signer` behavior and its callers before changing it"
-    )
+    restart_context = restarted.prepare(_E2E_TASK)
     reopened = restarted.finalize(None)
     restart_reused_current_graph = bool(
         reopened["graph_available"]

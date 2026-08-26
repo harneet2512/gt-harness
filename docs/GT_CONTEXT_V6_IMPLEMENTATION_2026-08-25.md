@@ -445,3 +445,36 @@ delivery uses `gt.provider_delivery.v2` plus `gt.treatment_receipt.v4`.
 Historical v6 truth metrics above are not reused as candidate evidence. The
 hosted campaign must regenerate and gate the frozen cohort under the exact new
 SHA and `hybrid_required` mode.
+
+## Exact-SHA run 33013230307 corrections (2026-08-26)
+
+The next full provider-free Linux run failed four independent gates and was not
+rounded up to certification. The observed causes and repairs are:
+
+1. `graph_lifecycle_campaign.py` and `failure_campaign.py` watched the obsolete
+   mutable receipt instead of the v5 `build-attempt.json`. They now isolate and
+   terminate the complete build process tree and assert the resulting graph is
+   non-queryable (`ABSENT`/`FAILED` for cold interruption, `STALE` for an
+   interrupted real update).
+2. The real-repository E2E prompt expressed inspection intent but expected
+   exact edit authority. It now expresses a real change request and still
+   requires caller inspection, so the assertion matches the task contract.
+3. The localization report now emits top-level `status`, `provider_calls: 0`,
+   and `provider_credentials_inspected: false`, as required by the product
+   certifier.
+4. Source-backed inspection of the three failing localization cases found that
+   unquoted PascalCase behavioral subjects were not seeding graph retrieval,
+   same-named test/example definitions could displace the production identity,
+   and three owner slots were chosen by flat ranking rather than requirement
+   coverage. The compiler now recognizes only behavior subjects that exist in
+   the exact repository, prefers the best production identity tier, keeps
+   qualification inspection-only without an edit directive, and applies
+   bounded greedy facet cover across exact, task-path, and hybrid owners.
+
+Local proof after these changes is 500/500 Python tests, Ruff clean, all Go
+indexer packages green, product-wheel equality PASS, real CLI lifecycle PASS,
+real Mini-SWE-Agent 2.4.6 E2E PASS, and applicable interruption campaigns PASS.
+The three previously failing localization cases each score 1.0 exact-edit
+precision and 1.0 required-path coverage at the actual 500-token provider
+boundary. Full twenty-case and Linux failure evidence remains pending until the
+new immutable SHA completes `prerelease_product_matrix.yml`.

@@ -84,6 +84,11 @@ _PATH_LITERAL_RE = re.compile(
 _BACKTICK_ENTITY_RE = re.compile(r"`([^`\r\n]{1,160})`")
 _CALL_ENTITY_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _UPPER_ENTITY_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{3,})(?![A-Za-z0-9_])")
+_BEHAVIOR_SUBJECT_RE = re.compile(
+    r"\b([A-Z][A-Za-z0-9]*)\b(?=[^\n.]{0,56}\b(?:adds?|accepts?|bails?|constructor|"
+    r"detects?|emits?|exposes?|gates?|implements?|must|records?|returns?|should|"
+    r"supports?|validates?)\b)"
+)
 
 
 def _looks_code_shaped_identifier(value: str) -> bool:
@@ -110,6 +115,12 @@ def _explicit_identifier_tokens(value: str) -> set[str]:
         entities.update(token.lower() for token in _TOKEN_RE.findall(match.group(1)))
     entities.update(match.group(1).lower() for match in _CALL_ENTITY_RE.finditer(text))
     entities.update(match.group(1).lower() for match in _UPPER_ENTITY_RE.finditer(text))
+    entities.update(
+        entity
+        for match in _BEHAVIOR_SUBJECT_RE.finditer(text)
+        for entity in (match.group(1).lower(),)
+        if entity not in _QUERY_GLUE
+    )
     return entities
 
 

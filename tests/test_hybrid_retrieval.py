@@ -23,6 +23,7 @@ from gt_engine.hybrid_retrieval import (
     build_preemptive_frame,
     filter_provider_known_context,
     reciprocal_rank_fusion,
+    retrieval_exact_identifiers,
     retrieval_query_terms,
 )
 
@@ -297,6 +298,21 @@ def test_ordinary_task_prose_cannot_be_promoted_to_exact_symbol_authority():
 
     assert "exact_symbol" not in by_symbol["clear"].provenance
     assert "exact_symbol" in by_symbol["require_cache_info"].provenance
+
+
+def test_behavior_subject_pascal_types_seed_exact_graph_retrieval() -> None:
+    state = _state(
+        task_text=(
+            "The Reporter constructor validates this config. Config adds template "
+            "validation. Bottle is a lightweight framework."
+        )
+    )
+
+    identifiers = retrieval_exact_identifiers(state)
+
+    assert "reporter" in identifiers
+    assert "config" in identifiers
+    assert "bottle" not in identifiers
 
 
 def test_exact_path_certification_requires_a_complete_path_token():

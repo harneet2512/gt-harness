@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -75,6 +76,26 @@ def _wait_building(receipt_path: Path, process: subprocess.Popen[str]) -> None:
             pass
         time.sleep(0.005)
     raise RuntimeError("could not intercept update after BUILDING receipt")
+
+
+def _isolated_process_kwargs() -> dict[str, Any]:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        os.killpg(process.pid, signal.SIGKILL)
 
 
 def _markdown(report: dict[str, Any], receipt_path: Path) -> str:
@@ -367,6 +388,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
 
+    killed_update_probe = repository / "gt_killed_update_probe.py"
+    killed_update_probe.write_text(
+        "def killed_update_probe():\n    return 'new-revision'\n",
+        encoding="utf-8",
+    )
+    _require(
+        service.status().build_status is GraphStatus.STALE,
+        "pre-kill source mutation did not stale the current generation",
+    )
     update_process = subprocess.Popen(
         [
             sys.executable,
@@ -387,9 +417,10 @@ def main(argv: list[str] | None = None) -> int:
         text=True,
         encoding="utf-8",
         errors="replace",
+        **_isolated_process_kwargs(),
     )
-    _wait_building(service.receipt_path, update_process)
-    update_process.kill()
+    _wait_building(service.build_attempt_path, update_process)
+    _kill_process_tree(update_process)
     update_process.communicate(timeout=30)
     killed_update = RepositoryGraphService(repository, state_dir=state).status()
     _require(not killed_update.query_ready, "killed update exposed a queryable old/partial graph")

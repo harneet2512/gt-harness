@@ -349,10 +349,27 @@ def main() -> int:
             if args.retrieval_mode == "hybrid_required" and not result["dense_query_ready"]
         ],
     }
+    report_status = (
+        "PASS"
+        if not failures
+        and len(results) == len(selected)
+        and not missing_oracles
+        and not extra_oracles
+        and not summary["treatment_failures"]
+        and not summary["dense_not_ready_tasks"]
+        else "FAIL"
+    )
     args.out_json.parent.mkdir(parents=True, exist_ok=True)
     args.out_json.write_text(
         json.dumps(
-            {"schema": REPORT_SCHEMA, "summary": summary, "results": results},
+            {
+                "schema": REPORT_SCHEMA,
+                "status": report_status,
+                "provider_calls": 0,
+                "provider_credentials_inspected": False,
+                "summary": summary,
+                "results": results,
+            },
             indent=2,
         )
         + "\n",

@@ -21,6 +21,10 @@ from gt_harness.treatments import BareTreatment
 from scripts.harness_real_repository_campaign import _ObservationModel
 
 
+def test_provider_free_campaign_uses_explicit_edit_intent() -> None:
+    assert harness_campaign._E2E_TASK.startswith("Change `Signer`")
+
+
 def test_harness_campaign_rejects_an_unpinned_miniswe_scaffold(
     tmp_path: Path, monkeypatch
 ) -> None:

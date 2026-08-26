@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -88,6 +89,26 @@ def _await_building(receipt_path: Path, process: subprocess.Popen[str]) -> bool:
             pass
         time.sleep(0.005)
     return False
+
+
+def _isolated_process_kwargs() -> dict[str, Any]:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        os.killpg(process.pid, signal.SIGKILL)
 
 
 def _markdown(report: dict[str, Any], receipt_path: Path) -> str:
@@ -281,15 +302,17 @@ def main(argv: list[str] | None = None) -> int:
         text=True,
         encoding="utf-8",
         errors="replace",
+        **_isolated_process_kwargs(),
     )
-    saw_building = _await_building(crash_state / "graph-receipt.json", process)
+    saw_building = _await_building(crash_state / "build-attempt.json", process)
     _require(saw_building, "could not intercept graph build after BUILDING publication")
-    process.kill()
+    _kill_process_tree(process)
     process.communicate(timeout=30)
     interrupted_service = RepositoryGraphService(repository, state_dir=crash_state)
     interrupted = interrupted_service.status()
     _require(
-        interrupted.build_status in {GraphStatus.BUILDING, GraphStatus.FAILED}
+        interrupted.build_status
+        in {GraphStatus.ABSENT, GraphStatus.BUILDING, GraphStatus.FAILED}
         and not interrupted.query_ready,
         "interrupted graph was presented as healthy or queryable",
     )

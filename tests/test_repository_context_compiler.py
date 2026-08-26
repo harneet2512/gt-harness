@@ -666,6 +666,130 @@ def test_dependency_type_is_not_granted_edit_authority() -> None:
     )
 
 
+def test_unquoted_pascal_case_behavior_subjects_bind_existing_repository_types() -> None:
+    documents = (
+        _document("lib/config.js", "Config", "class Config {}"),
+        _document("lib/launcher.js", "Launcher", "class Launcher {}"),
+        _document("lib/utils/report-file.js", "ReportFile", "class ReportFile {}"),
+        _document("lib/utils/reporter.js", "reporter", "module file"),
+        _document("lib/utils/reporter.js", "Reporter", "class Reporter {}"),
+        _document("examples/demo.js", "Reporter", "function Reporter() {}"),
+        _document("tests/reporter_tests.js", "Reporter", "function Reporter() {}"),
+    )
+    task = (
+        "The Reporter constructor validates this config and Reporter must partition output. "
+        "Config adds template validation. Launcher adds getSanitizedName(). "
+        "ReportFile constructor accepts expansion options."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=240,
+        ),
+        _request(task),
+    )
+
+    assert packet.primary_edit_targets
+    assert {item.path for item in packet.primary_edit_targets}.issubset(
+        {
+            "lib/config.js",
+            "lib/launcher.js",
+            "lib/utils/report-file.js",
+            "lib/utils/reporter.js",
+        }
+    )
+    assert any(item.path == "lib/utils/reporter.js" for item in packet.primary_edit_targets)
+    assert any(item.symbol == "Reporter" for item in packet.primary_edit_targets)
+    assert all(
+        not item.path.startswith(("examples/", "tests/"))
+        for item in packet.primary_edit_targets
+    )
+
+
+def test_symbol_sentence_after_contract_obligation_is_not_discarded_with_paragraph() -> None:
+    documents = (
+        _document("lib/config.js", "Config", "class Config {}"),
+        _document("lib/utils/reporter.js", "Reporter", "class Reporter {}"),
+    )
+    task = (
+        "Add bail_on_test_failure to config defaults. "
+        "The Reporter constructor validates this config and Reporter must bail."
+    )
+
+    facets = compile_task_facets(task, documents)
+
+    assert any("Reporter" in facet.exact_symbols for facet in facets)
+
+
+def test_unresolved_qualified_member_keeps_owner_as_inspection_not_edit_authority() -> None:
+    documents = (
+        _document("lib/app.js", "App", "class App {}"),
+        _document("lib/server/index.js", "Server", "class Server {}"),
+    )
+    task = (
+        "App exposes resetBailState and resets the server via Server.resetAbort(), "
+        "which does not exist yet."
+    )
+
+    facets = compile_task_facets(task, documents)
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=2,
+            document_chars=80,
+        ),
+        _request(task),
+    )
+
+    assert all("Server" not in facet.edit_symbols for facet in facets)
+    assert all(item.path != "lib/server/index.js" for item in packet.primary_edit_targets)
+    assert any(
+        item.path == "lib/server/index.js"
+        for item in packet.inspection_implementation_owners
+    )
+
+
+def test_declared_domain_artifact_localizes_generic_named_owner_module() -> None:
+    documents = (
+        _document("src/environments/array.ts", "parseArray", "function parseArray() {}"),
+        _document("src/mathMLTree.ts", "MathNode", "class MathNode {}"),
+        _document("src/buildMathML.ts", "buildMathML", "function buildMathML() {}"),
+    )
+    task = (
+        "Add multicolumn support outside array-like environments. "
+        "Supported environments: array, matrix, pmatrix, bmatrix. "
+        "For MathML output, add columnspan and columnalign attributes."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=3,
+            document_chars=120,
+        ),
+        _request(task),
+    )
+
+    assert any(
+        item.path == "src/environments/array.ts"
+        for item in packet.inspection_implementation_owners
+    )
+
+
 def test_argument_noun_is_not_granted_edit_authority() -> None:
     documents = (
         _document(
@@ -867,7 +991,7 @@ def test_multi_token_task_path_match_remains_inspection_evidence() -> None:
     assert not packet.primary_edit_targets
     candidate = packet.inspection_implementation_owners[0]
     assert candidate.path == "backend/handlers/multiAgentChat.ts"
-    assert candidate.decision_reason == "task_scoped_implementation_owner_candidate"
+    assert candidate.decision_reason == "task_path_implementation_owner_candidate"
     assert candidate.localization_role == "IMPLEMENTATION_OWNER"
     assert candidate.facet_ids
     assert [item.path for item in packet.inspection_integration] == [
@@ -914,7 +1038,7 @@ def test_long_distinctive_task_path_token_is_inspection_not_edit_authority() -> 
     assert not packet.primary_edit_targets
     candidate = packet.inspection_implementation_owners[0]
     assert candidate.path == "lib/lexer/shorthand.js"
-    assert candidate.decision_reason == "task_scoped_implementation_owner_candidate"
+    assert candidate.decision_reason == "task_path_implementation_owner_candidate"
     assert candidate.facet_ids
     assert all("/__tests/" not in item.path for item in packet.inspection_implementation_owners)
 

@@ -652,3 +652,33 @@ the candidate SHA can be called benchmark-ready.
 GT Harness is complete only when the substrate is exact, the delivered facts
 are decision-useful, the integration is faithful, and controlled results show
 that those facts improve or preserve outcomes efficiently.
+
+## Hosted-certification drift correction (2026-08-26)
+
+The v5 graph architecture publishes build progress in `build-attempt.json` and
+only publishes an immutable generation through `CURRENT` after validation.
+Run `33013230307` proved that two audit programs still watched the obsolete
+mutable receipt path. That was verifier drift: the graph correctly refused to
+publish a partial generation, but the campaigns could not deterministically
+intercept the build. Both campaigns now launch an isolated process group,
+observe the durable attempt journal, terminate the whole build tree, and assert
+that no interrupted generation is queryable. An interrupted cold build may
+terminalize to `ABSENT`; an interrupted update must expose the existing
+generation as `STALE`, never current.
+
+The same run exposed a delivery defect, not missing substrate facts. Task prose
+often names a repository type as the grammatical subject of a behavior clause
+without quoting it, for example `Reporter constructor ...`. Context v7 now
+admits that form only when an exact repository symbol exists. Identity
+selection then prefers production definitions over test/example/generated
+homonyms while preserving same-tier production ambiguity. Exact identity,
+task-path, and hybrid retrieval owner candidates remain inspection/edit typed
+and are selected with bounded facet cover. This raises decision-point recall
+without turning arbitrary capitalized prose or graph proximity into edit
+authority.
+
+The invariant remains conservative: qualification alone does not authorize an
+edit. A referenced future call such as `via Server.resetAbort()` keeps `Server`
+as an inspection owner unless a sentence-scoped edit directive names it. Thus
+the recall repair preserves the architecture's separation between where the
+agent may edit and what it should inspect, verify, or understand.

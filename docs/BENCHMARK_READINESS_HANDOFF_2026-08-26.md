@@ -35,6 +35,8 @@ The authoritative boundaries are:
 | Product surface | Wheel contents, runtime imports, console entry point, schemas, budgets, languages, and the exact five workflows are allowlisted | `gt.product_surface_verification.v1` receipt |
 | Workflow surface | One workflow per suite, both treatments through Mini-SWE 2.4.6; obsolete central, Nano, baseline-only, split, and diagnostic dispatch files removed | workflow equality, YAML, adapter, and attestation tests |
 | User-level verification | Project-local verification skill exercises doctor, cold build, definition query, edit-to-STALE, rebuild-to-new-generation, and cleanup on a real temporary Git repository | `gt.cli_verification.v1` receipt |
+| Crash certification | Lifecycle and failure campaigns observe the durable v5 `build-attempt.json`, isolate the build process group, kill the complete tree, and require a non-queryable terminal state | real interrupted-build and interrupted-update campaigns |
+| Decision-point recall | Existing PascalCase repository types used as behavioral subjects seed exact graph retrieval; production definitions outrank test/example homonyms; exact, path, and hybrid owner candidates are selected by bounded facet cover | source-backed regressions plus the exact 500-token provider-boundary replay |
 
 Historical source remains recoverable in Git. `src/groundtruth`, old central
 agents, Nano paths, and MCP experiments are not installed, imported by the
@@ -46,14 +48,35 @@ facts must be composed and delivered at a decision point.
 
 ## Current evidence
 
-- canonical Python product suite: 495 passed after the final certification
-  receipt additions;
+- canonical Python product suite: 500 collected and passed after the hosted
+  failure corrections;
 - Go indexer: `go test -tags sqlite_fts5 ./...` passed locally;
 - built wheel: exact equality with `production-surface.toml`, with no legacy
   module present;
 - real CLI verification: PASS; stale status returned nonzero and the rebuild
   published a different immutable generation;
 - provider calls during all of the above: 0.
+
+The first full Linux certification of the preceding SHA was GitHub Actions run
+`33013230307`. It was useful precisely because it failed. It exposed four
+product-certification defects rather than a provider/model failure:
+
+- both crash campaigns still polled the removed mutable graph receipt instead
+  of the v5 build-attempt journal;
+- the E2E fixture asked only to inspect a symbol while demanding an exact edit
+  target;
+- the localization replay omitted the top-level provider-free certification
+  fields; and
+- three of twenty localization cases exposed one false edit target and three
+  incomplete owner sets at the real 500-token delivery boundary.
+
+The candidate now fixes those causes. Local real-runtime proofs passed for an
+interrupted build, an interrupted stale-revision update, and the complete
+Mini-SWE-Agent 2.4.6 prepare/deliver/update/restart path. A source-backed replay
+of the three failing localization cases now gives exact-edit precision 1.0 and
+required-path coverage 1.0 for each case within the 500-token ceiling. These
+focused results are not substituted for the full twenty-case Linux receipt;
+the new exact-SHA hosted run remains the authority.
 
 The old localization report (precision 1.0, recall 0.0845) predates context v7
 and remains historical evidence. It must not be relabeled. The Linux campaign
@@ -63,12 +86,12 @@ dense-readiness, or task-set gates do not pass.
 
 ## Remaining release actions
 
-1. Run the full local Python, Ruff, Go, wheel-surface, workflow, and CLI gates.
-2. Commit and push the exact candidate SHA to `harneet2512/gt-harness`.
-3. Dispatch `prerelease_product_matrix.yml` at that immutable SHA.
-4. Inspect every uploaded receipt. If a gate fails, reproduce and correct the
+1. Commit and push the locally verified candidate SHA to
+   `harneet2512/gt-harness`.
+2. Dispatch `prerelease_product_matrix.yml` at that immutable SHA.
+3. Inspect every uploaded receipt. If a gate fails, reproduce and correct the
    cause, add regression coverage, create a new SHA, and repeat.
-5. Only after the provider-free product bundle certifies may a controlled paid
+4. Only after the provider-free product bundle certifies may a controlled paid
    smoke be considered. Utility still requires identical bare/GT task,
    revision, model, scaffold, budget, environment, and official verifier.
 
