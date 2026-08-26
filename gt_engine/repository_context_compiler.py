@@ -283,6 +283,7 @@ _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS = _ISSUE_LANGUAGE_WORDS | frozenset(
         "format",
         "get",
         "set",
+        "agent",
         "task",
     }
 )
@@ -564,8 +565,11 @@ def compile_task_facets(
                     # owner independently constrains their subsystem.
                     if not (
                         len(segments) == 1
-                        and row[0].casefold()
-                        in _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS
+                        and (
+                            row[0].casefold()
+                            in _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS
+                            or leaf.casefold().endswith("_id")
+                        )
                     )
                     if not owner_paths or row[1] in owner_paths
                 }
@@ -840,6 +844,45 @@ def _exact_candidate(ranked: RankedFile):
     return dict(ranked.channel_candidates).get(RetrievalChannel.EXACT)
 
 
+def _exact_identity_candidate(ranked: RankedFile):
+    candidate = _exact_candidate(ranked)
+    if candidate is None:
+        return None
+    if candidate.authority is EvidenceAuthority.IDENTITY_ONLY or (
+        "facet_exact_symbol" in set(candidate.provenance)
+    ):
+        return candidate
+    return None
+
+
+def _task_path_match_count(ranked: RankedFile) -> int:
+    """Return the exact channel's deterministic task/path token overlap."""
+
+    candidate = _exact_candidate(ranked)
+    if candidate is None or candidate.authority is not EvidenceAuthority.RANKING_SUPPORT:
+        return 0
+    for item in candidate.provenance:
+        if not item.startswith("exact_path_token_count:"):
+            continue
+        try:
+            return max(0, int(item.rsplit(":", 1)[-1]))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _strong_task_path_candidate(ranked: RankedFile) -> bool:
+    """Return whether task prose matches at least two path-name tokens.
+
+    Exact-channel path-token overlap is ranking evidence, not symbol/path
+    identity.  Keeping the count lets the context compiler distinguish a
+    strong natural artifact name such as multiAgentChat from a one-token match
+    such as chat without falsely authorizing either as an edit target.
+    """
+
+    return _task_path_match_count(ranked) >= 2
+
+
 def _rank_key(ranked: RankedFile, identifiers: dict[str, int]) -> tuple[Any, ...]:
     exact = _exact_candidate(ranked)
     symbol = str(exact.symbol if exact is not None else ranked.representative.symbol or "")
@@ -901,6 +944,31 @@ def _matching_facet_ids(
         ):
             matched.append(facet.facet_id)
     return tuple(matched)
+
+
+def _path_terms(path: str) -> frozenset[str]:
+    expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", _normalized_path(path))
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", expanded)
+    return frozenset(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", expanded)
+        if len(token) >= 4 and token.casefold() not in _ISSUE_LANGUAGE_WORDS
+    )
+
+
+def _matching_path_facet_ids(
+    *, path: str, facets: tuple[TaskFacet, ...]
+) -> tuple[str, ...]:
+    """Scope strong natural artifact names to obligations, never edit identity."""
+
+    terms = _path_terms(path)
+    if not terms:
+        return ()
+    return tuple(
+        facet.facet_id
+        for facet in facets
+        if len(terms & frozenset(facet.query_terms)) >= 2
+    )
 
 
 def _facet_seed_rows(
@@ -1315,6 +1383,8 @@ class RepositoryContextCompiler:
             )
         )
         def matches_concrete_anchor(row: RankedFile) -> bool:
+            if _strong_task_path_candidate(row):
+                return True
             candidate = _exact_candidate(row) or row.representative
             haystack = " ".join(
                 (
@@ -1328,7 +1398,11 @@ class RepositoryContextCompiler:
         inspection_rows = tuple(
             row
             for row in ranked
-            if _exact_candidate(row) is None
+            # The Exact retrieval channel also carries rank-only natural path
+            # token matches.  Only identity-authoritative exact candidates are
+            # excluded here; otherwise the strongest file-name match vanishes
+            # from both the edit and inspection sets.
+            if _exact_identity_candidate(row) is None
             and len(row.channel_ranks) >= 2
             and (
                 not concrete_identifiers
@@ -1433,6 +1507,11 @@ class RepositoryContextCompiler:
             fusion_rows.append(
                 {
                     "path": path,
+                    "task_path_token_count": (
+                        _task_path_match_count(sparse_entry[1])
+                        if sparse_entry is not None
+                        else 0
+                    ),
                     "rrf_score": (
                         (1.0 / (rrf_k + sparse_entry[0]) if sparse_entry else 0.0)
                         + (1.0 / (rrf_k + dense_entry[0]) if dense_entry else 0.0)
@@ -1445,6 +1524,7 @@ class RepositoryContextCompiler:
             )
         fusion_rows.sort(
             key=lambda item: (
+                -int(item["task_path_token_count"]),
                 -float(item["rrf_score"]),
                 _path_penalty(str(item["path"])),
                 str(item["path"]).lower(),
@@ -1489,7 +1569,9 @@ class RepositoryContextCompiler:
                     sparse_entry[1],
                     request,
                     decision_reason=(
-                        "hybrid_rrf_inspection"
+                        "task_path_phrase_inspection"
+                        if _strong_task_path_candidate(sparse_entry[1])
+                        else "hybrid_rrf_inspection"
                         if dense_entry is not None
                         else "hybrid_retrieval_inspection"
                     ),
@@ -1507,10 +1589,21 @@ class RepositoryContextCompiler:
                 replace(
                     item,
                     localization_role=LocalizationRole.UNCERTAIN.value,
-                    facet_ids=_matching_facet_ids(
-                        symbol=item.symbol,
-                        path=item.path,
-                        facets=task_facets,
+                    facet_ids=(
+                        _matching_facet_ids(
+                            symbol=item.symbol,
+                            path=item.path,
+                            facets=task_facets,
+                        )
+                        or (
+                            _matching_path_facet_ids(
+                                path=item.path,
+                                facets=task_facets,
+                            )
+                            if sparse_entry is not None
+                            and _strong_task_path_candidate(sparse_entry[1])
+                            else ()
+                        )
                     ),
                 )
             )
@@ -1518,6 +1611,15 @@ class RepositoryContextCompiler:
                 break
         inspection = tuple(inspection_items[:3])
         anchors = (*primary, *inspection)
+        task_scope_inspection = tuple(
+            item
+            for item in inspection
+            if item.decision_reason == "task_path_phrase_inspection"
+            and item.facet_ids
+        )
+        task_scope_inspection_paths = frozenset(
+            item.path for item in task_scope_inspection
+        )
         anchor_paths = frozenset(item.path for item in anchors)
         anchor_symbols = frozenset(item.symbol for item in anchors if item.symbol)
         anchor_identities = frozenset(
@@ -1531,6 +1633,10 @@ class RepositoryContextCompiler:
                 or (link.target_path, str(link.target_symbol or "")) in anchor_identities
                 or link.source_path in file_anchors
                 or link.target_path in file_anchors
+                # A task/path phrase match scopes the file, not the arbitrary
+                # representative symbol selected for its retrieval span.
+                or link.source_path in task_scope_inspection_paths
+                or link.target_path in task_scope_inspection_paths
             )
 
         relevant_links = tuple(
@@ -1642,25 +1748,35 @@ class RepositoryContextCompiler:
             item.path: item for item in (*inspection, *supporting)
         }
         primary_paths = frozenset(item.path for item in primary)
+        task_scope_paths = frozenset(
+            item.path for item in (*primary, *task_scope_inspection)
+        )
         anchor_facet_ids = tuple(
-            dict.fromkeys(facet_id for item in primary for facet_id in item.facet_ids)
+            dict.fromkeys(
+                facet_id
+                for item in (*primary, *task_scope_inspection)
+                for facet_id in item.facet_ids
+            )
         )
         public_surface = tuple(
-            replace(
-                role_candidates_by_path[link.source_path],
-                kind="public_surface",
-                localization_role=LocalizationRole.PUBLIC_SURFACE.value,
-                decision_reason="certified_reexport_public_surface",
-                completeness="certified_public_surface_edge",
-                facet_ids=(
-                    role_candidates_by_path[link.source_path].facet_ids
-                    or anchor_facet_ids
-                ),
-            )
+            surfaced
             for link in safe_links
             if str(link.relation or "").upper() == "RE_EXPORTS"
             and link.source_path in role_candidates_by_path
             and link.source_path not in primary_paths
+            if (
+                surfaced := replace(
+                    role_candidates_by_path[link.source_path],
+                    kind="public_surface",
+                    localization_role=LocalizationRole.PUBLIC_SURFACE.value,
+                    decision_reason="certified_reexport_public_surface",
+                    completeness="certified_public_surface_edge",
+                    facet_ids=(
+                        role_candidates_by_path[link.source_path].facet_ids
+                        or anchor_facet_ids
+                    ),
+                )
+            ).facet_ids
         )
         integration_paths: list[str] = []
         for link in safe_links:
@@ -1673,25 +1789,28 @@ class RepositoryContextCompiler:
             # set. Integration authority requires a certified edge touching a
             # primary task identity.
             if (
-                link.source_path not in primary_paths
-                and link.target_path not in primary_paths
+                link.source_path not in task_scope_paths
+                and link.target_path not in task_scope_paths
             ):
                 continue
             for path in (link.source_path, link.target_path):
-                if path not in primary_paths and path in role_candidates_by_path:
+                if path not in task_scope_paths and path in role_candidates_by_path:
                     integration_paths.append(path)
         integration = tuple(
-            replace(
-                role_candidates_by_path[path],
-                kind="integration_surface",
-                localization_role=LocalizationRole.INTEGRATION.value,
-                decision_reason="certified_integration_relationship",
-                completeness="certified_integration_edge",
-                facet_ids=(
-                    role_candidates_by_path[path].facet_ids or anchor_facet_ids
-                ),
-            )
+            integrated
             for path in dict.fromkeys(integration_paths)
+            if (
+                integrated := replace(
+                    role_candidates_by_path[path],
+                    kind="integration_surface",
+                    localization_role=LocalizationRole.INTEGRATION.value,
+                    decision_reason="certified_integration_relationship",
+                    completeness="certified_integration_edge",
+                    facet_ids=(
+                        role_candidates_by_path[path].facet_ids or anchor_facet_ids
+                    ),
+                )
+            ).facet_ids
         )
         role_paths = frozenset(
             item.path for item in (*public_surface, *integration)

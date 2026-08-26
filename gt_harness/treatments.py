@@ -1015,6 +1015,9 @@ class GroundTruthTreatment(BareTreatment):
         ) or any(
             item.get("kind") == "relationship"
             for item in normalized_packet["evidence_items"]
+        ) or any(
+            item.get("decision_reason") == "task_path_phrase_inspection"
+            for item in normalized_packet["inspection_candidates"]
         )
         if (
             not update
@@ -1151,6 +1154,9 @@ class GroundTruthTreatment(BareTreatment):
                 "affected_tests",
                 "validation_plan",
             )
+        ) or any(
+            item.get("decision_reason") == "task_path_phrase_inspection"
+            for item in packet_dict["inspection_candidates"]
         )
         if update and not decision_grade_update:
             self.suppressed_inspection_only_updates += 1
@@ -1203,7 +1209,13 @@ class GroundTruthTreatment(BareTreatment):
                     values = facet.get(key) or []
                     if values:
                         details.append(f"{label}=" + ",".join(values[:4]))
-                suffix = " " + " ".join(details) if details else ""
+                # A facet with no provider-readable identity only contributes
+                # an opaque internal ID. Keep its mapping in the persisted
+                # packet receipt, but spend provider tokens on repository
+                # facts the agent can act on.
+                if not details:
+                    continue
+                suffix = " " + " ".join(details)
                 lines.append(
                     f"REQUIREMENT {facet['facet_id']} role={facet['role']}{suffix}"
                 )
@@ -1313,7 +1325,11 @@ class GroundTruthTreatment(BareTreatment):
             }
             packet_dict["semantic_graph_receipt"] = {}
             packet_dict["supporting_files"] = []
-            packet_dict["inspection_candidates"] = packet_dict["inspection_candidates"][:1]
+            packet_dict["inspection_candidates"] = sorted(
+                packet_dict["inspection_candidates"],
+                key=lambda item: item.get("decision_reason")
+                != "task_path_phrase_inspection",
+            )[:1]
             packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
             packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:2]
             packet_dict["uncertainties"] = packet_dict["uncertainties"][:4]
@@ -1335,7 +1351,11 @@ class GroundTruthTreatment(BareTreatment):
             ):
                 for item in packet_dict[group_name]:
                     item["source_excerpt"] = ""
-            packet_dict["inspection_candidates"] = []
+            packet_dict["inspection_candidates"] = [
+                item
+                for item in packet_dict["inspection_candidates"]
+                if item.get("decision_reason") == "task_path_phrase_inspection"
+            ][:1]
             packet_dict["uncertainties"] = packet_dict["uncertainties"][:2]
             packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
             for group_name in (
@@ -1378,6 +1398,9 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict["change_surface"] = packet_dict["change_surface"][:1]
             packet_dict["affected_tests"] = packet_dict["affected_tests"][:1]
             packet_dict["validation_plan"] = packet_dict["validation_plan"][:1]
+            packet_dict["relationships"] = packet_dict["relationships"][:2]
+            rendered = encode()
+        if too_large():
             packet_dict["relationships"] = packet_dict["relationships"][:1]
             rendered = encode()
         if too_large():

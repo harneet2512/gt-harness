@@ -241,7 +241,7 @@ def test_dense_and_sparse_rankings_are_fused_with_auditable_rrf() -> None:
         source_revision="source-1",
         complete=True,
         reason_codes=(),
-        source_file_count=3,
+        source_file_count=5,
         document_chars=200,
     )
     request = replace(
@@ -641,20 +641,22 @@ def test_new_api_does_not_promote_generic_unqualified_prefixes() -> None:
         _document("web/static/bundle.js", "delete", "function delete() {}"),
         _document("src/format.py", "format", "def format(): pass"),
         _document("src/task.py", "task", "def task(): pass"),
+        _document("src/agent.ts", "agent", "const agent = registry.get(id)"),
     )
 
     facets = compile_task_facets(
-        "Add `delete_snapshot`, `format_snapshot_task_list`, and `task_id`.",
+        "Add `delete_snapshot`, `format_snapshot_task_list`, `task_id`, and `agent_id`.",
         documents,
     )
 
     exact = {symbol for facet in facets for symbol in facet.exact_symbols}
     unresolved = {symbol for facet in facets for symbol in facet.unresolved_symbols}
-    assert not {"delete", "format", "task"} & exact
+    assert not {"agent", "delete", "format", "task"} & exact
     assert {
         "delete_snapshot",
         "format_snapshot_task_list",
         "task_id",
+        "agent_id",
     } <= unresolved
 
 
@@ -679,6 +681,95 @@ def test_symbol_bearing_paragraph_does_not_duplicate_extracted_obligation() -> N
         if "format_running_task_list" in facet.exact_symbols
     ]
     assert len(matching) == 1
+
+
+def test_multi_token_task_path_match_remains_inspection_evidence() -> None:
+    registry_link = StructuralLink(
+        source_path="backend/handlers/multiAgentChat.ts",
+        target_path="backend/providers/registry.ts",
+        relation="IMPORTS",
+        confidence=1.0,
+        certified=True,
+        verification_status="verified",
+        source_symbol="multiAgentChat",
+        target_symbol="globalRegistry",
+        source_start_line=1,
+        target_start_line=1,
+        source_content_sha256="a" * 64,
+        target_content_sha256="b" * 64,
+        source_evidence_origin="preexisting_repository",
+        target_evidence_origin="preexisting_repository",
+        origin="program",
+        resolution_outcome="exact",
+        resolution_method="exact_symbol",
+        candidate_count=1,
+    )
+    documents = (
+        _document(
+            "backend/handlers/multiAgentChat.ts",
+            "executeMultiAgentChat",
+            "async function executeMultiAgentChat(agentId: string) { return agentId; }",
+        ),
+        _document(
+            "backend/handlers/chat.ts",
+            "agent",
+            "const agent = availableAgents.find(item => item.id === agentId);",
+        ),
+        _document("backend/lambda.ts", "lambda", "export const lambda = true;"),
+        _document(
+            "backend/providers/registry.ts",
+            "globalRegistry",
+            "export const globalRegistry = new ProviderRegistry();",
+        ),
+        _document(
+            "ClaudeAgentHub/ClaudeAgentHub/ViewModels/ChatViewModel.swift",
+            "sendMessage",
+            "func sendMessage() { let agentId = selectedAgent.id }",
+        ),
+    )
+    repository = HybridRepository(
+        documents=documents,
+        structural_links=(registry_link,),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=3,
+        document_chars=sum(len(document.text) for document in documents),
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        replace(
+            _request(
+                "Implement recursive agent delegation in the multi-agent chat flow. "
+                "The delegate_task input contains agent_id."
+            ),
+            dense_candidates=(
+                (
+                    "ClaudeAgentHub/ClaudeAgentHub/ViewModels/ChatViewModel.swift",
+                    0.99,
+                ),
+                ("backend/handlers/multiAgentChat.ts", 0.80),
+            ),
+        ),
+    )
+
+    assert not packet.primary_edit_targets
+    candidate = packet.inspection_candidates[0]
+    assert candidate.path == "backend/handlers/multiAgentChat.ts"
+    assert candidate.decision_reason == "task_path_phrase_inspection"
+    assert candidate.localization_role == "UNCERTAIN"
+    assert candidate.facet_ids
+    assert [item.path for item in packet.inspection_integration] == [
+        "backend/providers/registry.ts"
+    ]
+    assert packet.inspection_integration[0].facet_ids == candidate.facet_ids
+    assert any(
+        item.kind == "relationship"
+        and item.path == "backend/providers/registry.ts"
+        and item.facet_ids == candidate.facet_ids
+        for item in packet.evidence_items
+    )
 
 
 def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:

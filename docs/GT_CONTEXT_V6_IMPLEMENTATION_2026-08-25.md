@@ -163,3 +163,40 @@ The setup-failure path also now preserves the normalized error reason, zeroed
 usage, full treatment receipt, and transcript receipt. These changes remain
 uncertified until a new exact-SHA Linux product certification passes. No paid
 rerun may use them before that gate.
+
+Trajectory inspection of the first two tasks that crossed the provider
+boundary found a separate relevance defect. On
+`claude-code-by-agents-recursive-delegation`, the old packet promoted an
+unqualified `agent_id` prefix to a generic `Agent`/`agent` symbol, first
+selecting an unrelated Swift model and later a generic chat-local variable.
+The exact retrieval channel also classified natural file-name token overlap as
+an “exact candidate”; the context compiler then excluded that rank-only row
+from both edit and inspection sets. Consequently the strongest deterministic
+artifact match, `backend/handlers/multiAgentChat.ts`, disappeared.
+
+The follow-up correction makes identity authority explicit, blocks generic and
+`*_id` unqualified prefix analogs, retains multi-token task/path matches as
+inspection evidence only, and ranks stronger path agreement ahead of repeated
+dense matches from an unrelated subsystem. A strong path match can scope
+certified adjacent graph edges without becoming edit authority; unscoped
+public, integration, and relationship facts remain hidden. Compaction retains
+that causal starting file and up to two certified relationships before
+secondary impact rows.
+
+The exact-revision production witness at repository SHA
+`5e0a2247d446c49a9951a06bb83b6e956dc7eb41` now emits an `ACTIVE` 419-token
+packet containing:
+
+- `backend/handlers/multiAgentChat.ts` as explicitly non-edit-authoritative
+  inspection evidence;
+- `backend/app.ts` as its certified integration surface;
+- the certified `app.ts -> multiAgentChat.ts` import;
+- the certified `multiAgentChat.ts -> providers/registry.ts` import;
+- bounded impact through the existing multi-agent test; and
+- `backend/tests/handlers/multiAgentChat.test.ts` as an affected test.
+
+Independent reference-patch inspection confirms that the actual change touches
+`multiAgentChat.ts`, `providers/registry.ts`, `providers/anthropic.ts`, and
+`providers/types.ts`. GT therefore now provides the correct starting subsystem
+and one of its true changed dependencies without injecting or reading the
+reference patch at runtime. The reference patch is audit evidence only.

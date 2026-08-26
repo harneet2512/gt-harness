@@ -967,15 +967,21 @@ class ExactRetrievalChannel:
         for document, path_tokens, symbol_tokens, text in self._prepared:
             score = 0.0
             reasons: list[str] = []
+            task_path_overlap = query_tokens & path_tokens
             path_overlap = {
                 token
-                for token in query_tokens & path_tokens
+                for token in task_path_overlap
                 if self._path_document_frequency[token] <= self._distinctive_path_frequency
             }
             symbol_overlap = query_tokens & symbol_tokens
             if path_overlap:
                 score += 5.0 * len(path_overlap)
                 reasons.append("exact_path_token")
+                # Preserve the full task/path agreement for downstream
+                # inspection ranking. The score still uses only distinctive
+                # tokens, so common directory vocabulary cannot manufacture
+                # identity authority.
+                reasons.append(f"exact_path_token_count:{len(task_path_overlap)}")
             if symbol_overlap:
                 score += 6.0 * len(symbol_overlap)
                 reasons.append("exact_symbol_token")

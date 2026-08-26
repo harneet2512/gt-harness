@@ -211,6 +211,64 @@ def test_initial_context_abstains_without_decision_grade_evidence(
     ]
 
 
+def test_strong_task_path_inspection_is_delivered_without_edit_authority(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    item = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="backend/handlers/multiAgentChat.ts",
+        start_line=1,
+        end_line=80,
+        symbol="executeMultiAgentChat",
+        relation="",
+        confidence=None,
+        verification_status="ranked",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="task_path_phrase_inspection",
+        completeness="ranked_candidate_not_edit_target",
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        inspection_candidates=(item,),
+        uncertainties=(
+            "insufficient_independent_support",
+            "no_decision_relevant_evidence",
+            "no_complete_evidence",
+        ),
+        evidence_items=(item,),
+        coverage={"dense_index": {"status": "READY", "query_ready": True}},
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=4_000, delivered_before_call=1)
+
+    assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY " in rendered
+    assert "backend/handlers/multiAgentChat.ts" in rendered
+    assert "EXACT_EDIT_TARGET" not in rendered
+    assert treatment.treatment_status is TreatmentStatus.ACTIVE
+
+
 def test_run_cli_records_not_applicable_treatment_and_runs_provider(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -840,6 +898,7 @@ def test_provider_context_preserves_decision_facts_before_candidate_noise(
     public = item("public_surface", "src/index.ts", "feature", "b")
     integration = item("integration_surface", "src/caller.ts", "callFeature", "c")
     relation = item("relationship", "src/feature.ts", "feature", "d")
+    relation_two = item("relationship", "src/parser.ts", "parseFeature", "f")
     semantic = item("semantic_fact", "src/feature.ts", "feature", "e")
     packet = GTContextPacket(
         status=ContextStatus.READY,
@@ -857,7 +916,7 @@ def test_provider_context_preserves_decision_facts_before_candidate_noise(
         affected_tests=("tests/feature.test.ts",),
         validation_plan=("npm test -- tests/feature.test.ts checks requirement-1",),
         uncertainties=tuple(f"low_value_retrieval_uncertainty_{index}" for index in range(16)),
-        evidence_items=(edit, public, integration, relation, semantic),
+        evidence_items=(edit, public, integration, relation, relation_two, semantic),
         projection_claim_ids=("gt-process-one", "gt-impact-one"),
         coverage={
             "documents_considered": 400,
@@ -872,7 +931,7 @@ def test_provider_context_preserves_decision_facts_before_candidate_noise(
     treatment = GroundTruthTreatment(tmp_path)
     treatment.service = FakeService()
     treatment.treatment_status = treatment.treatment_status.ACTIVE
-    treatment.start_token_budget = 400
+    treatment.start_token_budget = 500
     monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
 
     rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
@@ -883,7 +942,7 @@ def test_provider_context_preserves_decision_facts_before_candidate_noise(
     assert "BOUNDED_IMPACT " in rendered
     assert "AFFECTED_TEST " in rendered
     assert "VALIDATE " in rendered
-    assert "VERIFIED_RELATION " in rendered
+    assert rendered.count("VERIFIED_RELATION ") == 2
 
 
 def test_delivered_claim_ids_equal_provider_visible_claims_after_compaction(
