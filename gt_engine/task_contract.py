@@ -20,7 +20,7 @@ from gt_engine.language_registry import is_validation_source
 _BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?P<text>.+?)\s*$")
 _FENCE_RE = re.compile(r"^\s*```")
 _DIRECTIVE_RE = re.compile(
-    r"(?i)\b(?:must|should|required|ensure|implement|create|write|install|support|"
+    r"(?i)\b(?:must|should|required|ensure|add|implement|create|write|install|support|"
     r"supports|has support|keep|do not|don't|never|be careful|has to|need to|"
     r"make sure|call your|put it in|produce|generate|replace|remove|reconstruct|"
     r"source the|mimics?|fix|fixes|fixed|fixing|update|updates|updated|updating|"
@@ -544,6 +544,22 @@ def significant_tokens(text: str) -> tuple[str, ...]:
         low = token.lower().strip(".-")
         if len(low) >= 4 and low not in _STOPWORDS and not low.isdigit():
             tokens.add(low)
+        # Repository paths and task prose must use the same identifier
+        # vocabulary.  Keeping only the raw ``multi-agent`` token while paths
+        # expose ``multi`` and ``agent`` made a strong compound artifact lose
+        # to an unrelated dense result containing only ``chat``.  Preserve the
+        # original token for exact lookup and add deterministic component
+        # terms for camel, snake, kebab, and dotted spellings.
+        expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", token)
+        expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", expanded)
+        for component in re.findall(r"[A-Za-z0-9]+", expanded):
+            normalized = component.casefold()
+            if (
+                len(normalized) >= 4
+                and normalized not in _STOPWORDS
+                and not normalized.isdigit()
+            ):
+                tokens.add(normalized)
     return tuple(sorted(tokens))
 
 
@@ -641,6 +657,7 @@ def _markdown_candidates(issue_text: str) -> list[tuple[str, str]]:
         if stripped.lower() in {
             "background",
             "goal",
+            "expected feature:",
             "baseline",
             "cost model",
             "deliverables",
@@ -671,49 +688,42 @@ def _markdown_candidates(issue_text: str) -> list[tuple[str, str]]:
     return candidates
 
 
-def _normative_issue_text(issue_text: str) -> str:
-    """Remove explicitly non-normative Markdown sections before GT extraction."""
-    kept: list[str] = []
-    skip = False
-    for raw in (issue_text or "").splitlines():
-        stripped = raw.strip()
-        heading = re.match(r"^\*\*(?P<name>[^*]+)\*\*(?P<tail>.*)$", stripped)
-        if heading:
-            name = heading.group("name").strip().lower()
-            skip = name in {"background", "baseline", "cost model"}
-            if not skip and heading.group("tail").strip():
-                kept.append(heading.group("tail").strip())
-            continue
-        if not skip:
-            kept.append(raw)
-    return "\n".join(kept)
-
-
 def _engine_candidates(issue_text: str) -> list[tuple[str, str]]:
-    try:
-        from groundtruth.pretask.spec import extract_spec_v2
+    # The former source was the pre-v5 GroundTruth package. Its useful grammar
+    # has been superseded by ``_markdown_candidates`` below, which preserves
+    # complete normative clauses and short directive bullets. Keeping a second
+    # extractor produced duplicate obligation identities and made an excluded
+    # legacy package part of the benchmark runtime.
+    return []
 
-        spec = extract_spec_v2(_normative_issue_text(issue_text))
-        rows = spec.to_serializable(version=2)
-    except Exception:
-        return []
-    out: list[tuple[str, str]] = []
-    for row in rows:
-        if not isinstance(row, dict) or row.get("region", "normative") != "normative":
-            continue
-        text = _clean(str(row.get("verbatim_text") or "")).rstrip(".")
-        if text:
-            out.append(("engine_v2", text))
-    return out
+
+_PROSE_TEST_NAME_RE = re.compile(
+    r"(?i:\btest_\w+\b)|(?i:\b\w+_test\b)|\bTest[A-Z]\w*\b|\btest[A-Z]\w*\b"
+    r"|\b\w[\w.\-]*\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)\b"
+    r"|[\w/\\+\-]+\.[A-Za-z0-9_]+::[\w.\[\]\-]+|\b\w+::tests?::\w"
+    r"|\b(?:test|tests|__tests__|__test__|spec|specs|e2e)[\\/]"
+    r"|\#\[\s*tests?\b|\b(?:it|describe|context)\(\s*['\"]"
+)
+_PROSE_ASSERT_RE = re.compile(r"\bassert(?:_\w+|[A-Z]\w*|!|\s*\()")
+_TEST_SOURCE_PATH_RE = re.compile(
+    r"[\w./\\+\-]+\.(?:py|go|rs|js|jsx|ts|tsx|rb|java)\b", re.IGNORECASE
+)
+_TEST_FILE_RE = re.compile(
+    r"(?:^|/)(?:test|tests|__tests__|__test__|spec|specs|e2e)(?:/|$)"
+    r"|(?:^test_.*|.*_test\.(?:py|go|rb)|.*\.(?:test|spec)\."
+    r"(?:js|jsx|ts|tsx|mjs|cjs)|.*Test\.java|.*_spec\.rb|conftest\.py)$",
+    re.IGNORECASE,
+)
 
 
 def _leaks_test_identity(text: str) -> bool:
-    try:
-        from groundtruth.runtime.native_render import prose_leaks_test_identity
-
-        return bool(prose_leaks_test_identity(text or ""))
-    except Exception:
+    value = text or ""
+    if _PROSE_TEST_NAME_RE.search(value) or _PROSE_ASSERT_RE.search(value):
         return True
+    return any(
+        _TEST_FILE_RE.search(path.replace("\\", "/"))
+        for path in _TEST_SOURCE_PATH_RE.findall(value)
+    )
 
 
 def _role(issue_text: str) -> str:

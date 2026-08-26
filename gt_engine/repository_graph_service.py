@@ -10,10 +10,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
 import sqlite3
 import subprocess
 import tempfile
 from collections.abc import Iterable
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -25,7 +28,7 @@ from gt_engine.indexer import ensure_index_with_receipt
 from gt_harness.indexer_setup import GT_INDEX_BUILD_ID
 
 GRAPH_BUILDER_VERSION = f"gt-index-{GT_INDEX_BUILD_ID}-repository-identity-v4"
-GRAPH_RECEIPT_SCHEMA = "gt.graph_receipt.v4"
+GRAPH_RECEIPT_SCHEMA = "gt.graph_receipt.v5"
 CANONICAL_QUERY_MODES = (
     "definition",
     "callers",
@@ -59,6 +62,9 @@ SUPPORTED_QUERY_MODES = tuple((*CANONICAL_QUERY_MODES, *QUERY_MODE_ALIASES))
 _TYPE_ANCHOR_LABELS = ("class", "interface", "trait", "struct", "enum", "type")
 PUBLIC_GRAPH_RECEIPT_FIELDS = (
     "receipt_schema",
+    "generation_id",
+    "build_attempt_id",
+    "manifest_sha256",
     "repository",
     "commit_sha",
     "working_tree_state",
@@ -190,6 +196,9 @@ class GraphReceipt:
     parser_runtime: str = "gt-index/tree-sitter"
     graph_bytes: int = 0
     source_bytes: int = 0
+    generation_id: str = ""
+    build_attempt_id: str = ""
+    manifest_sha256: str = ""
     receipt_schema: str = GRAPH_RECEIPT_SCHEMA
 
     def __post_init__(self) -> None:
@@ -200,6 +209,8 @@ class GraphReceipt:
             or not self.source_revision
             or not self.persistent_graph_path
             or not self.graph_checksum_or_identity
+            or not self.generation_id
+            or not self.manifest_sha256
         ):
             raise ValueError("a READY receipt requires repository and graph identities")
         if not 0.0 <= float(self.coverage) <= 1.0:
@@ -611,6 +622,60 @@ def _inventory_repository_identity(root: Path, stored: GraphReceipt) -> Reposito
     )
 
 
+def _lock_file(handle: Any, *, blocking: bool) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+        msvcrt.locking(handle.fileno(), mode, 1)
+        return
+    import fcntl
+
+    mode = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+    fcntl.flock(handle.fileno(), mode)
+
+
+def _unlock_file(handle: Any) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _exclusive_file_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as handle:
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        _lock_file(handle, blocking=True)
+        try:
+            yield
+        finally:
+            _unlock_file(handle)
+
+
+def _file_lock_held(path: Path) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as handle:
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        try:
+            _lock_file(handle, blocking=False)
+        except OSError:
+            return True
+        _unlock_file(handle)
+        return False
+
+
 class RepositoryGraphService:
     """Build, reopen, certify, and query the one canonical graph database."""
 
@@ -624,9 +689,41 @@ class RepositoryGraphService:
         self.state_dir = (
             Path(state_dir).resolve() if state_dir is not None else self.root / ".groundtruth"
         )
-        self.graph_path = self.state_dir / "graph.db"
-        self.receipt_path = self.state_dir / "graph-receipt.json"
+        self._legacy_graph_path = self.state_dir / "graph.db"
+        self._legacy_receipt_path = self.state_dir / "graph-receipt.json"
+        self.generations_dir = self.state_dir / "generations"
+        self.current_path = self.state_dir / "CURRENT"
+        self.build_attempt_path = self.state_dir / "build-attempt.json"
+        self.lifecycle_lock_path = self.state_dir / "graph-build.lock"
         self._verified_graph_fingerprint: tuple[str, int, int, str] | None = None
+
+    def _current_generation_dir(self) -> Path | None:
+        try:
+            generation = self.current_path.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeError):
+            return None
+        if not re.fullmatch(r"[0-9a-f]{64}", generation):
+            return None
+        candidate = self.generations_dir / generation
+        try:
+            candidate.resolve().relative_to(self.generations_dir.resolve())
+        except (OSError, ValueError):
+            return None
+        return candidate if candidate.is_dir() else None
+
+    @property
+    def graph_path(self) -> Path:
+        generation = self._current_generation_dir()
+        return generation / "graph.db" if generation is not None else self._legacy_graph_path
+
+    @property
+    def receipt_path(self) -> Path:
+        generation = self._current_generation_dir()
+        return (
+            generation / "graph-receipt.json"
+            if generation is not None
+            else self._legacy_receipt_path
+        )
 
     @staticmethod
     def file_sha256(path: str | os.PathLike[str]) -> str:
@@ -640,8 +737,9 @@ class RepositoryGraphService:
     def _now() -> str:
         return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
-    def _write_receipt(self, receipt: GraphReceipt) -> None:
-        self.state_dir.mkdir(parents=True, exist_ok=True)
+    def _write_receipt(self, receipt: GraphReceipt, *, path: Path | None = None) -> None:
+        destination = path or self.receipt_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
         payload = (
             json.dumps(receipt.as_dict(), ensure_ascii=False, sort_keys=True, indent=2).encode(
                 "utf-8"
@@ -649,13 +747,53 @@ class RepositoryGraphService:
             + b"\n"
         )
         with tempfile.NamedTemporaryFile(
-            mode="wb", dir=self.state_dir, prefix=".graph-receipt.", delete=False
+            mode="wb", dir=destination.parent, prefix=".graph-receipt.", delete=False
         ) as handle:
             temporary = Path(handle.name)
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, self.receipt_path)
+        os.replace(temporary, destination)
+
+    def _write_build_attempt(self, receipt: GraphReceipt) -> None:
+        self._write_receipt(receipt, path=self.build_attempt_path)
+
+    def _publish_generation(self, receipt: GraphReceipt, candidate_graph: Path) -> GraphReceipt:
+        manifest = candidate_graph.with_suffix(".manifest.json")
+        if not manifest.is_file():
+            raise OSError("graph_manifest_missing")
+        generation_dir = self.generations_dir / receipt.generation_id
+        self.generations_dir.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=".generation-", dir=self.generations_dir))
+        try:
+            shutil.copy2(candidate_graph, temporary / "graph.db")
+            shutil.copy2(manifest, temporary / "graph.manifest.json")
+            published = replace(
+                receipt,
+                persistent_graph_path=str(generation_dir / "graph.db"),
+            )
+            self._write_receipt(published, path=temporary / "graph-receipt.json")
+            for child in temporary.iterdir():
+                with open(child, "r+b") as handle:
+                    os.fsync(handle.fileno())
+            if generation_dir.exists():
+                shutil.rmtree(temporary)
+            else:
+                os.replace(temporary, generation_dir)
+            pointer = receipt.generation_id.encode("ascii") + b"\n"
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=self.state_dir, prefix=".CURRENT.", delete=False
+            ) as handle:
+                pointer_path = Path(handle.name)
+                handle.write(pointer)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(pointer_path, self.current_path)
+            self._verified_graph_fingerprint = None
+            return published
+        finally:
+            if temporary.exists():
+                shutil.rmtree(temporary, ignore_errors=True)
 
     def _empty_receipt(
         self,
@@ -698,6 +836,15 @@ class RepositoryGraphService:
         )
 
     def status(self) -> GraphReceipt:
+        if self.build_attempt_path.is_file():
+            if _file_lock_held(self.lifecycle_lock_path):
+                current = compute_repository_identity(self.root, canonical_root=True)
+                return self._empty_receipt(GraphStatus.BUILDING, current, "graph_build_in_progress")
+            # A durable attempt with no lock owner is an interrupted writer.
+            # The immutable CURRENT pointer still names either the complete
+            # prior generation or no generation at all; terminalize the stale
+            # attempt before evaluating that state.
+            self.build_attempt_path.unlink(missing_ok=True)
         if not self.receipt_path.is_file():
             current = compute_repository_identity(
                 self.root,
@@ -727,6 +874,17 @@ class RepositoryGraphService:
             stale.append("source_revision_mismatch")
         if stored.graph_builder_version != GRAPH_BUILDER_VERSION:
             stale.append("graph_builder_version_mismatch")
+        generation = self._current_generation_dir()
+        if generation is not None:
+            if stored.generation_id != generation.name:
+                stale.append("graph_generation_mismatch")
+            manifest = generation / "graph.manifest.json"
+            try:
+                manifest_sha256 = self.file_sha256(manifest)
+            except OSError:
+                manifest_sha256 = ""
+            if not manifest_sha256 or manifest_sha256 != stored.manifest_sha256:
+                stale.append("graph_manifest_checksum_mismatch")
         if stale:
             return replace(
                 stored,
@@ -1011,6 +1169,10 @@ class RepositoryGraphService:
                 reasons.append(f"excluded_directory_files:{len(stats.excluded_directories)}")
         else:
             status = GraphStatus.READY
+        manifest_path = graph.with_suffix(".manifest.json")
+        manifest_sha256 = str(getattr(index, "graph_manifest_sha256", "") or "")
+        if not manifest_sha256 and manifest_path.is_file():
+            manifest_sha256 = self.file_sha256(manifest_path)
         result = GraphReceipt(
             repository=after.repository,
             commit_sha=after.commit_sha,
@@ -1056,8 +1218,22 @@ class RepositoryGraphService:
             update_mode=update_mode,
             graph_bytes=graph.stat().st_size,
             source_bytes=after.source_bytes,
+            generation_id=hashlib.sha256(
+                "\0".join(
+                    (
+                        before.source_revision,
+                        index.graph_db_sha256 or self.file_sha256(graph),
+                        stats.schema,
+                        GRAPH_BUILDER_VERSION,
+                        manifest_sha256,
+                    )
+                ).encode("utf-8")
+            ).hexdigest(),
+            build_attempt_id=hashlib.sha256(
+                f"{before.source_revision}\0{started}".encode()
+            ).hexdigest()[:24],
+            manifest_sha256=manifest_sha256,
         )
-        self._write_receipt(result)
         return result
 
     def build(
@@ -1072,36 +1248,58 @@ class RepositoryGraphService:
             return current
         if not force and current.build_status is GraphStatus.STALE:
             return self.update(timeout=timeout)
-        before = compute_repository_identity(self.root)
-        started = self._now()
-        self._write_receipt(self._empty_receipt(GraphStatus.BUILDING, before, "build_in_progress"))
-        index = ensure_index_with_receipt(
-            self.root,
-            state_dir=self.state_dir,
-            source_revision=before.source_revision,
-            timeout=timeout,
-            exact_state_dir=True,
-        )
-        after = compute_repository_identity(self.root)
-        if not index.graph_db:
-            result = replace(
-                self._empty_receipt(
-                    GraphStatus.FAILED,
-                    after,
-                    index.status.value,
-                    index.error_type or "graph_build_failed",
-                    index.error_diagnostic,
-                ),
+        with _exclusive_file_lock(self.lifecycle_lock_path):
+            # Another writer may have completed while this process waited.
+            current = self.status()
+            if not force and current.query_ready:
+                return current
+            before = compute_repository_identity(self.root)
+            started = self._now()
+            attempt = replace(
+                self._empty_receipt(GraphStatus.BUILDING, before, "build_in_progress"),
                 build_started=started,
-                build_completed=self._now(),
-                build_duration_ms=index.elapsed_ms,
-                files_attempted=index.indexable_files,
-                files_failed=index.parser_failures,
-                update_mode=_update_mode,
+                build_attempt_id=hashlib.sha256(
+                    f"{before.source_revision}\0{started}".encode()
+                ).hexdigest()[:24],
             )
-            self._write_receipt(result)
-            return result
-        return self._finalize_graph_receipt(index, before, after, started, update_mode=_update_mode)
+            self._write_build_attempt(attempt)
+            try:
+                index = ensure_index_with_receipt(
+                    self.root,
+                    state_dir=self.state_dir,
+                    source_revision=before.source_revision,
+                    timeout=timeout,
+                    exact_state_dir=True,
+                )
+                after = compute_repository_identity(self.root)
+                if not index.graph_db:
+                    result = replace(
+                        self._empty_receipt(
+                            GraphStatus.FAILED,
+                            after,
+                            index.status.value,
+                            index.error_type or "graph_build_failed",
+                            index.error_diagnostic,
+                        ),
+                        build_started=started,
+                        build_completed=self._now(),
+                        build_duration_ms=index.elapsed_ms,
+                        files_attempted=index.indexable_files,
+                        files_failed=index.parser_failures,
+                        update_mode=_update_mode,
+                        build_attempt_id=attempt.build_attempt_id,
+                    )
+                    self._write_receipt(result, path=self._legacy_receipt_path)
+                    return result
+                result = self._finalize_graph_receipt(
+                    index, before, after, started, update_mode=_update_mode
+                )
+                if not result.query_ready:
+                    self._write_receipt(result, path=self._legacy_receipt_path)
+                    return result
+                return self._publish_generation(result, Path(index.graph_db).resolve())
+            finally:
+                self.build_attempt_path.unlink(missing_ok=True)
 
     def update(self, *, timeout: float = 120.0) -> GraphReceipt:
         """Converge a stale graph without exposing partial relationship updates.

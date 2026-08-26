@@ -1,0 +1,92 @@
+schema = "gt.product_surface.v1"
+
+python_modules = [
+  "eval._env",
+  "eval.harbor_gt_harness_adapter",
+  "eval.pier_gt_harness_adapter",
+  "eval.swe_live_lite_gt_harness_adapter",
+  "gt_engine.contributions",
+  "gt_engine.dense_semantic_index",
+  "gt_engine.graph_context",
+  "gt_engine.graph_db_projection",
+  "gt_engine.graph_evidence",
+  "gt_engine.graph_identity",
+  "gt_engine.graph_inputs",
+  "gt_engine.hybrid_repository",
+  "gt_engine.hybrid_retrieval",
+  "gt_engine.indexer",
+  "gt_engine.language_registry",
+  "gt_engine.public_surface",
+  "gt_engine.repository_context",
+  "gt_engine.repository_context_compiler",
+  "gt_engine.repository_graph_service",
+  "gt_engine.repository_intelligence",
+  "gt_engine.semantic_evidence",
+  "gt_engine.semantic_graph",
+  "gt_engine.snowflake_onnx",
+  "gt_engine.task_contract",
+  "gt_harness._miniswe_import_guard",
+  "gt_harness.analysis.delivery",
+  "gt_harness.analysis.metrics",
+  "gt_harness.analysis.uptake",
+  "gt_harness.cli",
+  "gt_harness.comparison",
+  "gt_harness.indexer_setup",
+  "gt_harness.localization_truth",
+  "gt_harness.miniswe_runner",
+  "gt_harness.outcomes",
+  "gt_harness.product_certification",
+  "gt_harness.supervision",
+  "gt_harness.treatments",
+]
+
+console_entry_points = ["gt-harness=gt_harness.cli:main"]
+
+benchmark_adapters = [
+  "eval.harbor_gt_harness_adapter",
+  "eval.pier_gt_harness_adapter",
+  "eval.swe_live_lite_gt_harness_adapter",
+]
+
+dispatchable_workflows = [
+  "deepswe_gt_harness_product.yml",
+  "prerelease_product_matrix.yml",
+  "repository_intelligence_audit.yml",
+  "swe_live_lite_gt_harness_product.yml",
+  "tb2_miniswe_product.yml",
+]
+
+forbidden_modules = [
+  "eval.gt_central_agent",
+  "eval.pier_gt_adapter",
+  "gt_engine.bridge",
+  "gt_engine.engine",
+  "groundtruth",
+]
+
+[schemas]
+graph_receipt = "gt.graph_receipt.v5"
+agent_context = "gt.agent_context.v7"
+provider_delivery = "gt.provider_delivery.v2"
+treatment_receipt = "gt.treatment_receipt.v4"
+benchmark_product_contract = "gt.benchmark_product_contract.v2"
+feature_lifecycle = "gt.feature_lifecycle.v2"
+delivery_uptake = "gt.delivery_uptake.v1"
+
+[budgets]
+initial_tokens = 500
+update_tokens = 350
+total_tokens = 1200
+max_deliveries = 4
+max_updates = 3
+
+[languages]
+structural_certification_candidates = [
+  "python",
+  "javascript",
+  "typescript",
+  "go",
+  "rust",
+  "java",
+]
+semantic_certification_candidates = ["python"]

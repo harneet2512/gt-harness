@@ -8,6 +8,9 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
+from gt_harness.analysis.delivery import DeliveryAuditError, audit_treatment_delivery
+from gt_harness.analysis.uptake import measure_delivery_uptake
+
 
 class ComparisonError(ValueError):
     """Raised when receipts cannot support a controlled paired comparison."""
@@ -136,6 +139,7 @@ def compare_receipts(
     pairs = sorted(baseline)
     configuration_mismatches: list[str] = []
     delivery_failures: list[str] = []
+    uptake_rows: list[dict[str, Any]] = []
     both = baseline_only = treatment_only = neither = 0
     for key in pairs:
         left = baseline[key]
@@ -168,26 +172,26 @@ def compare_receipts(
         gt = right.get("treatment_receipt")
         if not right.get("treatment_receipt_present") or not isinstance(gt, dict):
             delivery_failures.append(f"{key}:treatment_receipt_missing")
-        elif gt.get("schema") != "gt.treatment_receipt.v1":
-            delivery_failures.append(f"{key}:treatment_receipt_schema")
-        elif gt.get("treatment") != "groundtruth":
-            delivery_failures.append(f"{key}:treatment_receipt_identity")
-        elif gt.get("treatment_status") != "ACTIVE":
-            delivery_failures.append(f"{key}:treatment_not_active")
-        elif not gt.get("graph_available"):
-            delivery_failures.append(f"{key}:graph_unavailable")
-        elif gt.get("graph_status") not in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}:
-            delivery_failures.append(f"{key}:graph_status")
-        elif gt.get("graph_commit_sha") != (right.get("repository_end") or {}).get("commit_sha"):
-            delivery_failures.append(f"{key}:graph_commit_mismatch")
-        elif gt.get("source_revision") != (right.get("repository_end") or {}).get(
-            "source_revision"
-        ):
-            delivery_failures.append(f"{key}:graph_source_revision_mismatch")
-        elif int(gt.get("delivery_count") or 0) < 1:
-            delivery_failures.append(f"{key}:evidence_not_delivered")
-        elif int(gt.get("evidence_items_delivered") or 0) < 1:
-            delivery_failures.append(f"{key}:evidence_items_not_delivered")
+        else:
+            try:
+                audit = audit_treatment_delivery(
+                    gt,
+                    initial_context=(
+                        str(right.get("initial_context") or "")
+                        if "initial_context" in right
+                        else None
+                    ),
+                    repository_end=(
+                        right.get("repository_end")
+                        if isinstance(right.get("repository_end"), dict)
+                        else None
+                    ),
+                )
+            except DeliveryAuditError as exc:
+                delivery_failures.append(f"{key}:receipt_invalid:{exc}")
+            else:
+                delivery_failures.extend(f"{key}:{reason}" for reason in audit["failures"])
+                uptake_rows.append(measure_delivery_uptake(right))
 
     count = len(pairs)
     baseline_solved = both + baseline_only
@@ -250,6 +254,22 @@ def compare_receipts(
                 "groundtruth_mean": _mean(list(treatment.values()), field),
             }
             for field in efficiency_fields
+        },
+        "uptake": {
+            "measurement": "exact_relative_path_in_durable_assistant_action",
+            "runs_measured": len(uptake_rows),
+            "mean_path_uptake_rate": (
+                round(
+                    fmean(
+                        float(row["path_uptake_rate"])
+                        for row in uptake_rows
+                        if row.get("path_uptake_rate") is not None
+                    ),
+                    6,
+                )
+                if any(row.get("path_uptake_rate") is not None for row in uptake_rows)
+                else None
+            ),
         },
         "provider_credentials_inspected": False,
         "provider_calls_performed_by_comparison": 0,

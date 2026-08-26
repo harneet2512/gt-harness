@@ -10,6 +10,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+_TERMINATION_KINDS = {
+    "TIMEOUT",
+    "CANCELLED",
+    "PROCESS_EXIT",
+    "PROVIDER_TRANSPORT",
+    "PRODUCT_ERROR",
+}
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -17,9 +25,7 @@ def _now() -> str:
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
+    handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
             json.dump(payload, stream, ensure_ascii=False, indent=2, sort_keys=True)
@@ -69,6 +75,7 @@ def finalize_nonterminal_receipt(
     trajectory_path: Path,
     return_code: int,
     supervisor: str,
+    termination_kind: str | None = None,
 ) -> bool:
     """Convert only a durable RUNNING checkpoint into an evidenced ERROR."""
 
@@ -79,10 +86,22 @@ def finalize_nonterminal_receipt(
         return False
 
     completed = _now()
+    inferred_kind = str(termination_kind or "").strip().upper()
+    if not inferred_kind:
+        supervisor_key = supervisor.casefold()
+        inferred_kind = (
+            "TIMEOUT"
+            if return_code == 124 or "timeout" in supervisor_key
+            else "CANCELLED"
+            if "cancel" in supervisor_key
+            else "PROVIDER_TRANSPORT"
+            if "provider" in supervisor_key
+            else "PROCESS_EXIT"
+        )
+    if inferred_kind not in _TERMINATION_KINDS:
+        raise ValueError(f"unsupported termination kind: {inferred_kind}")
     error = f"SUPERVISOR:product_process_exit_{return_code}"
-    provider_calls, input_tokens, output_tokens, cached_tokens = _trajectory_usage(
-        trajectory_path
-    )
+    provider_calls, input_tokens, output_tokens, cached_tokens = _trajectory_usage(trajectory_path)
     if provider_calls is not None:
         receipt["provider_calls"] = provider_calls
         receipt["input_tokens"] = input_tokens
@@ -127,6 +146,15 @@ def finalize_nonterminal_receipt(
                 "supervisor": supervisor,
                 "trajectory_present": trajectory_path.is_file(),
             },
+            "termination": {
+                "schema": "gt.termination.v1",
+                "kind": inferred_kind,
+                "authority": supervisor,
+                "return_code": return_code,
+                "provider_calls_observed": provider_calls,
+                "trajectory_present": trajectory_path.is_file(),
+                "completed": completed,
+            },
         }
     )
     _write_json_atomic(receipt_path, receipt)
@@ -139,6 +167,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trajectory", type=Path, required=True)
     parser.add_argument("--return-code", type=int, required=True)
     parser.add_argument("--supervisor", required=True)
+    parser.add_argument("--termination-kind", choices=sorted(_TERMINATION_KINDS))
     return parser.parse_args(argv)
 
 
@@ -149,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         trajectory_path=args.trajectory,
         return_code=args.return_code,
         supervisor=args.supervisor,
+        termination_kind=args.termination_kind,
     )
     return 0
 

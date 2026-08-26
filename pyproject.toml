@@ -22,8 +22,7 @@ dev = [
   "zstandard==0.25.0",
 ]
 eval = ["harbor==0.20.0", "swebench==4.1.0"]
-# GroundTruth is first-party source in src/groundtruth. NumPy remains optional:
-# the bounded task-start brief abstains correct-or-quiet when it is unavailable.
+# Optional numeric runtime used by the deterministic dense-retrieval path.
 gt = ["numpy==2.5.1"]
 # Local dense retrieval used by the ARB workflow and optional runtime seam.
 # The model weights are separately content-addressed; these are inference-only
@@ -42,11 +41,88 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["eval", "gt_engine", "gt_harness", "src/groundtruth"]
+sources = ["."]
+only-include = [
+  "eval/__init__.py",
+  "eval/_env.py",
+  "eval/harbor_gt_harness_adapter.py",
+  "eval/pier_gt_harness_adapter.py",
+  "eval/swe_live_lite_gt_harness_adapter.py",
+  "gt_engine/__init__.py",
+  "gt_engine/contributions.py",
+  "gt_engine/dense_semantic_index.py",
+  "gt_engine/graph_context.py",
+  "gt_engine/graph_db_projection.py",
+  "gt_engine/graph_evidence.py",
+  "gt_engine/graph_identity.py",
+  "gt_engine/graph_inputs.py",
+  "gt_engine/hybrid_repository.py",
+  "gt_engine/hybrid_retrieval.py",
+  "gt_engine/indexer.py",
+  "gt_engine/language_registry.py",
+  "gt_engine/public_surface.py",
+  "gt_engine/repository_context.py",
+  "gt_engine/repository_context_compiler.py",
+  "gt_engine/repository_graph_service.py",
+  "gt_engine/repository_intelligence.py",
+  "gt_engine/semantic_evidence.py",
+  "gt_engine/semantic_graph.py",
+  "gt_engine/snowflake_onnx.py",
+  "gt_engine/task_contract.py",
+  "gt_harness/__init__.py",
+  "gt_harness/_miniswe_import_guard.py",
+  "gt_harness/analysis/__init__.py",
+  "gt_harness/analysis/delivery.py",
+  "gt_harness/analysis/metrics.py",
+  "gt_harness/analysis/uptake.py",
+  "gt_harness/cli.py",
+  "gt_harness/comparison.py",
+  "gt_harness/indexer_setup.py",
+  "gt_harness/localization_truth.py",
+  "gt_harness/miniswe_runner.py",
+  "gt_harness/outcomes.py",
+  "gt_harness/product_certification.py",
+  "gt_harness/supervision.py",
+  "gt_harness/treatments.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"
+python_files = [
+  "test_deepswe_gt_harness_product.py",
+  "test_dense_semantic_index.py",
+  "test_env_hardening.py",
+  "test_generalized_benchmark_product.py",
+  "test_graph_db_projection.py",
+  "test_graph_identity.py",
+  "test_graph_retrieval_repairs.py",
+  "test_graph_truth_audit.py",
+  "test_gt_benchmark_language_contract.py",
+  "test_gt_contributions.py",
+  "test_gt_language_resolution.py",
+  "test_gt_repository_intelligence.py",
+  "test_gt_task_contract.py",
+  "test_harbor_budget.py",
+  "test_harbor_gt_harness_product.py",
+  "test_hybrid_repository.py",
+  "test_hybrid_retrieval.py",
+  "test_localization_regression_replay.py",
+  "test_localization_regressions.py",
+  "test_localization_truth.py",
+  "test_prerelease_product_contract.py",
+  "test_product_*.py",
+  "test_public_surface_resolver.py",
+  "test_repository_context.py",
+  "test_repository_context_compiler.py",
+  "test_repository_graph_real.py",
+  "test_repository_graph_service.py",
+  "test_semantic_evidence.py",
+  "test_semantic_graph.py",
+  "test_snowflake_onnx_backend.py",
+  "test_task_contract_noise.py",
+  "test_terminal_outcomes.py",
+]
 markers = [
   "external_evidence: requires a pinned external benchmark package or hosted historical artifact and is excluded from provider-free product certification",
   "gt_all17: deterministic ten-trigger campaign covering all 17 GT identities",

@@ -1,8 +1,7 @@
 """Auto-detect a code repository and build the gateway's graph.db.
 
-Uses ``groundtruth._binary.run_index`` (the Go gt-index binary) - NEVER the
-``groundtruth index`` CLI, which builds the MCP SymbolStore index.db, a
-DIFFERENT database the gateway cannot read.
+Invokes the source-certified Go ``gt-index`` binary directly. It never calls
+the historical GroundTruth CLI or its separate SymbolStore database.
 
 Binary resolution is find_binary()'s: $GT_INDEX_BINARY -> PATH -> local build
 -> release download. Because find_binary's "local build" probe is cwd-relative,
@@ -18,7 +17,6 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -26,7 +24,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
-from contextlib import contextmanager, redirect_stderr
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -281,6 +279,31 @@ def _resolved_binary_path() -> str:
         _seed_binary_env()
         candidate = os.environ.get("GT_INDEX_BINARY") or ""
     return candidate
+
+
+def _run_index_binary(root: str, output: str, *, timeout: int) -> tuple[bool, str]:
+    """Run the already-certified product binary without a legacy Python shim."""
+
+    binary = _resolved_binary_path()
+    if not binary:
+        return False, "gt-index binary is unavailable"
+    try:
+        result = subprocess.run(
+            [binary, "-root", root, "-output", output],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"gt-index timed out after {timeout}s"
+    except OSError as exc:
+        return False, f"gt-index execution failed: {type(exc).__name__}: {exc}"
+    diagnostic = str(result.stderr or result.stdout or "")[:2000]
+    return result.returncode == 0, diagnostic
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
@@ -921,15 +944,6 @@ def ensure_index_with_receipt(
         return receipt(coverage.status, coverage=coverage)
     try:
         _seed_binary_env()
-        try:
-            from groundtruth._binary import run_index
-        except (ImportError, ModuleNotFoundError, AttributeError) as exc:
-            return receipt(
-                IndexBuildStatus.MISSING_RUNTIME,
-                error_type=type(exc).__name__,
-                coverage=coverage,
-            )
-
         binary = _binary_certification()
         if not binary["binary_sha256"]:
             return receipt(IndexBuildStatus.MISSING_BINARY, coverage=coverage)
@@ -961,20 +975,18 @@ def ensure_index_with_receipt(
         ) as handle:
             candidate = Path(handle.name)
         candidate.unlink(missing_ok=True)
-        diagnostic_stream = io.StringIO()
-        with redirect_stderr(diagnostic_stream):
-            index_ok = run_index(
-                root_text,
-                str(candidate),
-                timeout=int(max(1.0, float(timeout))),
-            )
+        index_ok, index_diagnostic = _run_index_binary(
+            root_text,
+            str(candidate),
+            timeout=int(max(1.0, float(timeout))),
+        )
         if not index_ok:
             candidate.unlink(missing_ok=True)
             return receipt(
                 IndexBuildStatus.BUILD_FAILED,
                 binary_sha256=binary["binary_sha256"],
                 error_type="run_index_false",
-                error_diagnostic=diagnostic_stream.getvalue(),
+                error_diagnostic=index_diagnostic,
                 coverage=coverage,
             )
         if not candidate.is_file():

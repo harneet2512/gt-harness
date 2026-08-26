@@ -1,4 +1,9 @@
-# GT context v6 implementation record
+# GT context v6 historical implementation record
+
+> Historical note: context v6 was superseded by the typed requirement ledger
+> in `gt.agent_context.v7`. This file preserves causal evidence from earlier
+> revisions; `arch_type.md` and `production-surface.toml` define the current
+> product.
 
 Status: implemented locally; exact-SHA Linux product certification is required
 before paid benchmark dispatch. The canonical command is identical in a
@@ -425,3 +430,18 @@ ative_augment lesson), typed
 AMBIGUOUS_IDENTITY rows, inspection structural-relevance filtering, and
 truth-report regeneration under hybrid_required. No paid benchmark was
 run; readiness is proven by the provider-free gates above.
+
+## Context v7 closure (2026-08-26)
+
+The prerelease candidate replaces facet-only provider serialization with a
+typed requirement ledger. Each requirement now records its intent, entity,
+resolution, coverage, and deterministic mechanism. Provider-visible evidence
+binds requirement IDs; `AMBIGUOUS_IDENTITY`, uncovered requirements, and
+new-file obligations remain explicit without granting edit authority. Edit,
+inspection, public-surface, integration, and validation roles are separate.
+
+Graph publication is also now generation-atomic (`gt.graph_receipt.v5`), and
+delivery uses `gt.provider_delivery.v2` plus `gt.treatment_receipt.v4`.
+Historical v6 truth metrics above are not reused as candidate evidence. The
+hosted campaign must regenerate and gate the frozen cohort under the exact new
+SHA and `hybrid_required` mode.

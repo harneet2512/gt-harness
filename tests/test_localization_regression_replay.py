@@ -13,7 +13,7 @@ def test_replay_extracts_only_role_bearing_delivery_paths() -> None:
     paths = _path_lines(
         "\n".join(
             (
-                'GROUNDTRUTH_CONTEXT schema="gt.agent_context.v6"',
+                'GROUNDTRUTH_CONTEXT schema="gt.agent_context.v7"',
                 "EXACT_EDIT_TARGET src/container.ts:1#symbol",
                 "INSPECT_PUBLIC_SURFACE src/awilix.ts reason=manifest",
                 "PROPOSED_NEW_FILE core/engine/src/evaluation.rs fact=false",

@@ -77,6 +77,41 @@ def test_supervisor_converts_running_checkpoint_to_evidenced_error(
     assert receipt["transcript"][-1]["type"] == "supervisor_error"
     assert receipt["treatment_receipt"]["treatment_status"] == "FAILED"
     assert receipt["supervisor_finalization"]["return_code"] == 137
+    assert receipt["termination"] == {
+        "schema": "gt.termination.v1",
+        "kind": "PROCESS_EXIT",
+        "authority": "harbor_adapter",
+        "return_code": 137,
+        "provider_calls_observed": 2,
+        "trajectory_present": True,
+        "completed": receipt["completed"],
+    }
+
+
+def test_supervisor_records_timeout_as_typed_terminal_state(tmp_path: Path) -> None:
+    receipt_path = tmp_path / "gt-run.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schema": "gt.run_receipt.v1",
+                "status": "RUNNING",
+                "treatment_receipt": {"treatment_status": "ACTIVE", "errors": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert finalize_nonterminal_receipt(
+        receipt_path,
+        trajectory_path=tmp_path / "missing.json",
+        return_code=137,
+        supervisor="pier_adapter_timeout",
+    )
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["status"] == "ERROR"
+    assert receipt["termination"]["kind"] == "TIMEOUT"
+    assert receipt["termination"]["trajectory_present"] is False
 
 
 def test_supervisor_never_rewrites_a_terminal_receipt(tmp_path: Path) -> None:

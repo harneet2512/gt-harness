@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import groundtruth._binary as binary
 import gt_engine.indexer as indexer
 from gt_engine.indexer import (
     IndexBuildReceipt,
@@ -58,10 +57,9 @@ def test_failed_index_binary_preserves_bounded_diagnostic(tmp_path, monkeypatch)
     (tmp_path / "query.sql").write_text("select 1;\n", encoding="utf-8")
 
     def fail_index(root, output, *, timeout=600):
-        sys.stderr.write("GroundTruth: gt-index failed: SQL parser exploded on query.sql\n")
-        return False
+        return False, "gt-index failed: SQL parser exploded on query.sql"
 
-    monkeypatch.setattr(binary, "run_index", fail_index)
+    monkeypatch.setattr(indexer, "_run_index_binary", fail_index)
     monkeypatch.setattr(
         indexer,
         "_binary_certification",
@@ -1251,9 +1249,9 @@ def test_full_index_forwards_the_host_budget_to_the_binary(monkeypatch, tmp_path
 
     def bounded_index(root, output, *, timeout):
         observed.update(root=root, output=output, timeout=timeout)
-        return False
+        return False, "bounded failure"
 
-    monkeypatch.setattr(binary, "run_index", bounded_index)
+    monkeypatch.setattr(indexer, "_run_index_binary", bounded_index)
     monkeypatch.setattr(indexer, "_binary_certification", lambda: {
         "path_sha256": "a" * 64,
         "binary_sha256": "b" * 64,

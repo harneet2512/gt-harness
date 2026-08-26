@@ -77,7 +77,7 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
 
     def get_version_command(self) -> str | None:
         return (
-            f"{_REMOTE_PYTHON} -c \"import importlib.metadata as m; "
+            f'{_REMOTE_PYTHON} -c "import importlib.metadata as m; '
             "print(m.version('gt-harness'), m.version('mini-swe-agent'))\""
         )
 
@@ -97,9 +97,7 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
 
     async def install(self, environment: BaseEnvironment) -> None:
         indexer = self._indexer_host_path()
-        dense_model = Path(
-            clean_env_value(os.environ.get("GT_DENSE_MODEL_DIR"))
-        ).resolve()
+        dense_model = Path(clean_env_value(os.environ.get("GT_DENSE_MODEL_DIR"))).resolve()
         required_dense = tuple(dense_model / name for name in ("model.onnx", "tokenizer.json"))
         if not dense_model.is_dir() or not all(path.is_file() for path in required_dense):
             raise FileNotFoundError(
@@ -139,7 +137,7 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
             '--with "onnxruntime==1.28.0" '
             '--with "tokenizers==0.23.1" '
             f"{_REMOTE_SOURCE} && "
-            f"{_REMOTE_PYTHON} -c \"import importlib.metadata as m, sys; "
+            f'{_REMOTE_PYTHON} -c "import importlib.metadata as m, sys; '
             f"assert sys.version_info[:3] == (3, 12, 13); "
             f"assert m.version('mini-swe-agent') == '{CANONICAL_MINISWE_VERSION}'; "
             "assert m.version('gt-harness') == '0.9.0'\" && "
@@ -251,6 +249,7 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
                         environment,
                         return_code=124,
                         supervisor="harbor_adapter_timeout",
+                        termination_kind="TIMEOUT",
                     )
                 )
             except Exception:
@@ -263,6 +262,7 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
                 environment,
                 return_code=int(result.return_code),
                 supervisor="harbor_adapter",
+                termination_kind="PROCESS_EXIT",
             )
             raise NonZeroAgentExitCodeError(
                 f"Canonical GT Harness product command failed (exit {result.return_code})\n"
@@ -276,13 +276,15 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
         *,
         return_code: int,
         supervisor: str,
+        termination_kind: str,
     ) -> None:
         finalize = (
             f"{_REMOTE_PYTHON} -m gt_harness.supervision "
             "--receipt /logs/agent/gt-run.json "
             "--trajectory /logs/agent/gt-run.trajectory.json "
             f"--return-code {int(return_code)} "
-            f"--supervisor {shlex.quote(supervisor)}"
+            f"--supervisor {shlex.quote(supervisor)} "
+            f"--termination-kind {shlex.quote(termination_kind)}"
         )
         result = await environment.exec(command=finalize, env=dict(UTF8_ENV))
         if result.return_code != 0:
@@ -347,9 +349,5 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
             environment_vars,
         )
 
-
-# Compatibility alias for archived TB2 callers.  All released benchmark
-# workflows use the explicit 2.4.6 class above.
-GtHarnessMiniSwe228Agent = GtHarnessMiniSwe246Agent
 
 __all__ = ["CANONICAL_MINISWE_VERSION", "GtHarnessMiniSwe246Agent"]

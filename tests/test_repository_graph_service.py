@@ -110,7 +110,72 @@ def _receipt(root: Path, graph: Path) -> GraphReceipt:
         graph_input_fingerprints=identity.graph_input_fingerprints,
         git_status_paths=identity.git_status_paths,
         submodule_state=identity.submodule_state,
+        generation_id="a" * 64,
+        manifest_sha256="b" * 64,
     )
+
+
+def _publish_test_generation(
+    root: Path, state: Path
+) -> tuple[RepositoryGraphService, GraphReceipt]:
+    state.mkdir(exist_ok=True)
+    candidate = state / "candidate.db"
+    _database(candidate)
+    manifest = candidate.with_suffix(".manifest.json")
+    manifest.write_text('{"schema":"gt.graph_certification.v1"}\n', encoding="utf-8")
+    service = RepositoryGraphService(root, state_dir=state)
+    receipt = replace(
+        _receipt(root, candidate),
+        generation_id=RepositoryGraphService.file_sha256(candidate),
+        manifest_sha256=RepositoryGraphService.file_sha256(manifest),
+    )
+    return service, service._publish_generation(receipt, candidate)
+
+
+def test_ready_graph_is_published_as_one_immutable_generation(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    state = tmp_path / "state"
+    service, published = _publish_test_generation(root, state)
+
+    assert service.current_path.read_text(encoding="ascii").strip() == published.generation_id
+    assert service.graph_path.parent.name == published.generation_id
+    assert service.receipt_path.parent == service.graph_path.parent
+    assert Path(published.persistent_graph_path) == service.graph_path
+    assert service.status().query_ready is True
+
+
+def test_generation_manifest_corruption_revokes_query_readiness(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    service, _published = _publish_test_generation(root, tmp_path / "state")
+    service.graph_path.with_name("graph.manifest.json").write_text(
+        '{"corrupt":true}\n', encoding="utf-8"
+    )
+
+    observed = service.status()
+
+    assert observed.build_status is GraphStatus.STALE
+    assert observed.query_ready is False
+    assert "graph_manifest_checksum_mismatch" in observed.degraded_reasons
+    with pytest.raises(GraphNotReadyError):
+        service.query("definition", "answer")
+
+
+def test_interrupted_build_attempt_recovers_prior_complete_generation(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    service, published = _publish_test_generation(root, tmp_path / "state")
+    attempt = replace(
+        published,
+        build_status=GraphStatus.BUILDING,
+        query_ready=False,
+        degraded_reasons=("build_in_progress",),
+    )
+    service._write_build_attempt(attempt)
+
+    observed = service.status()
+
+    assert service.build_attempt_path.exists() is False
+    assert observed.generation_id == published.generation_id
+    assert observed.query_ready is True
 
 
 def test_source_revision_includes_dirty_and_untracked_graph_inputs(tmp_path: Path) -> None:
@@ -545,6 +610,8 @@ def test_parser_recovery_is_declared_and_cannot_report_unqualified_ready(
     state.mkdir()
     graph = state / "graph.db"
     _database(graph)
+    manifest = graph.with_suffix(".manifest.json")
+    manifest.write_text('{"schema":"gt.graph_certification.v1"}\n', encoding="utf-8")
     monkeypatch.setattr(
         "gt_engine.repository_graph_service.ensure_index_with_receipt",
         lambda *_args, **_kwargs: SimpleNamespace(
@@ -555,6 +622,7 @@ def test_parser_recovery_is_declared_and_cannot_report_unqualified_ready(
             elapsed_ms=1.0,
             schema_valid=True,
             graph_db_sha256=RepositoryGraphService.file_sha256(graph),
+            graph_manifest_sha256=RepositoryGraphService.file_sha256(manifest),
         ),
     )
     limitation = "app.py: tree_sitter_syntax_error_recovered"

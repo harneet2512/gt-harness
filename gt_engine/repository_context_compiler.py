@@ -56,6 +56,41 @@ class LocalizationRole(StrEnum):
     UNCERTAIN = "UNCERTAIN"
 
 
+class IdentityResolutionStatus(StrEnum):
+    """Provider-safe outcome of resolving a task identity."""
+
+    EXACT_UNIQUE = "EXACT_UNIQUE"
+    EXACT_CONNECTED_SET = "EXACT_CONNECTED_SET"
+    AMBIGUOUS_IDENTITY = "AMBIGUOUS_IDENTITY"
+    UNRESOLVED_NEW_SYMBOL = "UNRESOLVED_NEW_SYMBOL"
+    UNRESOLVED = "UNRESOLVED"
+
+
+class FacetCoverageStatus(StrEnum):
+    COVERED_EXACT_EDIT = "COVERED_EXACT_EDIT"
+    COVERED_OWNER_CANDIDATE = "COVERED_OWNER_CANDIDATE"
+    COVERED_PUBLIC_SURFACE = "COVERED_PUBLIC_SURFACE"
+    COVERED_INTEGRATION = "COVERED_INTEGRATION"
+    COVERED_VALIDATION = "COVERED_VALIDATION"
+    COVERED_AMBIGUOUS = "COVERED_AMBIGUOUS"
+    COVERED_NEW_FILE_PRECEDENT = "COVERED_NEW_FILE_PRECEDENT"
+    UNCOVERED = "UNCOVERED"
+
+
+class RequirementIntent(StrEnum):
+    EDIT_EXISTING = "EDIT_EXISTING"
+    ADD_SYMBOL = "ADD_SYMBOL"
+    INSPECT_OWNER = "INSPECT_OWNER"
+    INSPECT_PUBLIC_SURFACE = "INSPECT_PUBLIC_SURFACE"
+    INSPECT_INTEGRATION = "INSPECT_INTEGRATION"
+    VALIDATE = "VALIDATE"
+
+
+class RequirementCoverageStatus(StrEnum):
+    COVERED = "COVERED"
+    UNCOVERED = "UNCOVERED"
+
+
 @dataclass(frozen=True, slots=True)
 class TaskFacet:
     """One deterministic repository question implied by a task obligation."""
@@ -64,6 +99,10 @@ class TaskFacet:
     obligation_ids: tuple[str, ...]
     role: LocalizationRole
     exact_symbols: tuple[str, ...] = ()
+    # Existing identities that the task text actually authorizes changing.
+    # ``exact_symbols`` is deliberately broader: dependency types and values
+    # remain useful retrieval facts without becoming edit instructions.
+    edit_symbols: tuple[str, ...] = ()
     unresolved_symbols: tuple[str, ...] = ()
     query_terms: tuple[str, ...] = ()
     owning_symbols: tuple[str, ...] = ()
@@ -72,6 +111,41 @@ class TaskFacet:
     def as_dict(self) -> dict[str, Any]:
         row = asdict(self)
         row["role"] = self.role.value
+        return row
+
+
+@dataclass(frozen=True, slots=True)
+class TaskRequirement:
+    requirement_id: str
+    facet_id: str
+    obligation_ids: tuple[str, ...]
+    intent: RequirementIntent
+    entity: str
+    query_terms: tuple[str, ...]
+    resolution: IdentityResolutionStatus
+    exact_candidate_paths: tuple[str, ...] = ()
+    inspection_candidate_paths: tuple[str, ...] = ()
+    proposed_paths: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["intent"] = self.intent.value
+        row["resolution"] = self.resolution.value
+        return row
+
+
+@dataclass(frozen=True, slots=True)
+class RequirementCoverage:
+    requirement_id: str
+    status: RequirementCoverageStatus
+    mechanism: str
+    paths: tuple[str, ...] = ()
+    evidence_claim_ids: tuple[str, ...] = ()
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["status"] = self.status.value
         return row
 
 
@@ -133,15 +207,69 @@ class ContextEvidenceItem:
 
 
 @dataclass(frozen=True, slots=True)
+class AmbiguousIdentityCandidate:
+    path: str
+    line: int
+    symbol: str
+    kind: str
+    evidence_sha256: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class AmbiguousIdentityGroup:
+    entity: str
+    facet_ids: tuple[str, ...]
+    candidates: tuple[AmbiguousIdentityCandidate, ...]
+    total_candidates: int
+    truncated: bool
+    reason: str
+    next_action: str
+    evidence_sha256: str
+    status: IdentityResolutionStatus = IdentityResolutionStatus.AMBIGUOUS_IDENTITY
+
+    def as_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["status"] = self.status.value
+        return row
+
+
+@dataclass(frozen=True, slots=True)
+class FacetCoverage:
+    facet_id: str
+    role: LocalizationRole
+    status: FacetCoverageStatus
+    paths: tuple[str, ...] = ()
+    evidence_claim_ids: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "facet_id": self.facet_id,
+            "role": self.role.value,
+            "status": self.status.value,
+            "paths": list(self.paths),
+            "evidence_claim_ids": list(self.evidence_claim_ids),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class GTContextPacket:
     status: ContextStatus
     repository_identity: dict[str, Any]
     task_facets: tuple[TaskFacet, ...] = ()
+    task_requirements: tuple[TaskRequirement, ...] = ()
+    requirement_coverage: tuple[RequirementCoverage, ...] = ()
+    uncovered_requirements: tuple[str, ...] = ()
     task_anchors: tuple[ContextEvidenceItem, ...] = ()
     primary_edit_targets: tuple[ContextEvidenceItem, ...] = ()
+    inspection_implementation_owners: tuple[ContextEvidenceItem, ...] = ()
     inspection_candidates: tuple[ContextEvidenceItem, ...] = ()
     inspection_public_surface: tuple[ContextEvidenceItem, ...] = ()
     inspection_integration: tuple[ContextEvidenceItem, ...] = ()
+    ambiguous_identities: tuple[AmbiguousIdentityGroup, ...] = ()
+    facet_coverage: tuple[FacetCoverage, ...] = ()
     proposed_new_files: tuple[str, ...] = ()
     uncovered_facets: tuple[str, ...] = ()
     supporting_files: tuple[ContextEvidenceItem, ...] = ()
@@ -169,19 +297,21 @@ class GTContextPacket:
             "status": self.status.value,
             "repository_identity": dict(self.repository_identity),
             "task_facets": [facet.as_dict() for facet in self.task_facets],
+            "task_requirements": [item.as_dict() for item in self.task_requirements],
+            "requirement_coverage": [item.as_dict() for item in self.requirement_coverage],
+            "uncovered_requirements": list(self.uncovered_requirements),
             "task_anchors": [item.as_dict() for item in self.task_anchors],
-            "primary_edit_targets": [
-                item.as_dict() for item in self.primary_edit_targets
+            "primary_edit_targets": [item.as_dict() for item in self.primary_edit_targets],
+            "inspection_implementation_owners": [
+                item.as_dict() for item in self.inspection_implementation_owners
             ],
-            "inspection_candidates": [
-                item.as_dict() for item in self.inspection_candidates
-            ],
+            "inspection_candidates": [item.as_dict() for item in self.inspection_candidates],
             "inspection_public_surface": [
                 item.as_dict() for item in self.inspection_public_surface
             ],
-            "inspection_integration": [
-                item.as_dict() for item in self.inspection_integration
-            ],
+            "inspection_integration": [item.as_dict() for item in self.inspection_integration],
+            "ambiguous_identities": [item.as_dict() for item in self.ambiguous_identities],
+            "facet_coverage": [item.as_dict() for item in self.facet_coverage],
             "proposed_new_files": list(self.proposed_new_files),
             "uncovered_facets": list(self.uncovered_facets),
             "supporting_files": [item.as_dict() for item in self.supporting_files],
@@ -203,9 +333,7 @@ class GTContextPacket:
 
 
 _EXPLICIT_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_./:-]{2,}")
-_QUOTED_IDENTIFIER = re.compile(
-    r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_.:]{1,})(?:`|'|\")"
-)
+_QUOTED_IDENTIFIER = re.compile(r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_.:]{1,})(?:`|'|\")")
 _SYMBOL_CUE = re.compile(
     r"(?i)\b(?:class|constant|function|interface|method|module|symbol|type|variable)\s+"
     r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_.:]{1,})(?:`|'|\")?"
@@ -213,9 +341,7 @@ _SYMBOL_CUE = re.compile(
 _CODE_ENTITY = re.compile(
     r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)(?:`|'|\")"
 )
-_ASSOCIATED_GROUP = re.compile(
-    r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_]*)::\{([^}]+)\}(?:`|'|\")?"
-)
+_ASSOCIATED_GROUP = re.compile(r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_]*)::\{([^}]+)\}(?:`|'|\")?")
 _ISSUE_LANGUAGE_WORDS = frozenset(
     {
         "add",
@@ -357,6 +483,32 @@ _GENERIC_IDENTITY_NOUNS = frozenset(
         "variable",
     }
 )
+_PATH_OWNER_STOPWORDS = (
+    _GENERIC_IDENTITY_NOUNS
+    | _ISSUE_LANGUAGE_WORDS
+    | frozenset(
+        {
+            "apply",
+            "document",
+            "element",
+            "expression",
+            "from",
+            "import",
+            "imports",
+            "main",
+            "action",
+            "job",
+            "reusable",
+            "root",
+            "rule",
+            "step",
+            "that",
+            "time",
+            "with",
+            "workflow",
+        }
+    )
+)
 
 
 def _is_generic_identity_noun(token: str) -> bool:
@@ -401,10 +553,15 @@ def _package_echo_symbol(task: str, path: str, symbol: str) -> bool:
     if not raw_symbol or raw_symbol != raw_symbol.lower():
         return False
     stem = Path(str(path)).stem.strip().casefold()
-    parts = frozenset(
-        part for part in re.split(r"[_.-]+", stem) if len(part) >= 4
-    )
+    parts = frozenset(part for part in re.split(r"[_.-]+", stem) if len(part) >= 4)
     if not parts:
+        return False
+    # The guard applies only when the candidate symbol itself echoes its
+    # module/package name.  A task that says "widget" must not suppress an
+    # explicitly named ``helper`` merely because one helper is defined in
+    # widget.js; doing so erases the second identity before ambiguity can be
+    # represented.
+    if raw_symbol.casefold() != stem and raw_symbol.casefold() not in parts:
         return False
     plain_words = re.sub(r"`[^`]*`", " ", str(task or "")).casefold().split()
     return any(part in plain_words for part in parts)
@@ -435,7 +592,17 @@ def _exception_cue_tokens(text: str) -> frozenset[str]:
                 break
             value = value.rsplit(".", 1)[-1]
     return frozenset(tokens)
-_TEST_SEGMENTS = ("/test/", "/tests/", "/__tests__/")
+
+
+_TEST_SEGMENTS = (
+    "/test/",
+    "/tests/",
+    "/__tests/",
+    "/__tests__/",
+    "/testdata/",
+    "/fixture/",
+    "/fixtures/",
+)
 _LEGACY_SEGMENTS = (
     "/benchmark/",
     "/benchmarks/",
@@ -522,10 +689,7 @@ def _code_shaped(value: str) -> bool:
             "_" in token
             or "::" in token
             or "." in token
-            or (
-                not token.isupper()
-                and any(character.isupper() for character in token[1:])
-            )
+            or (not token.isupper() and any(character.isupper() for character in token[1:]))
         )
     )
 
@@ -565,6 +729,58 @@ def _quoted_entity_is_literal(text: str, match: re.Match[str]) -> bool:
     )
 
 
+_EDIT_ACTION = (
+    r"(?:add|change|extend|fix|implement|modify|patch|refactor|remove|replace|"
+    r"support|update|wire)"
+)
+_EDIT_PREDICATE = (
+    r"(?:accepts?|adds?|changes?|gains?|implements?|must|needs?|removes?|"
+    r"returns?|should|supports?|updates?)"
+)
+_DEPENDENCY_NOUN = (
+    r"(?:argument|arguments|enum|instance|instances|interface|option|options|"
+    r"type|types|value|values)"
+)
+
+
+def _entity_is_edit_directed(text: str, entity: str) -> bool:
+    """Return whether prose grants an entity edit authority.
+
+    Backticks prove that text is code-shaped, not that its definition should
+    be changed.  In particular, dependency types in parenthetical argument
+    descriptions and generic argument nouns are inspection facts.  Authority
+    requires a qualified/code-shaped identity or a direct edit predicate, and
+    dependency syntax always wins over that weaker shape heuristic.
+    """
+
+    value = str(entity or "").strip()
+    if not value:
+        return False
+    leaf = re.split(r"(?:::|[.#])", value)[-1]
+    quoted = rf"(?:`|'|\")?{re.escape(value)}(?:`|'|\")?"
+    leaf_quoted = rf"(?:`|'|\")?{re.escape(leaf)}(?:`|'|\")?"
+    explicit_leaf = rf"(?:`{re.escape(leaf)}`|'{re.escape(leaf)}'|\"{re.escape(leaf)}\")"
+
+    # ``alias_style (NameStyle value or values)`` describes the accepted
+    # dependency type; changing NameStyle is not part of that obligation.
+    if re.search(
+        rf"(?i){quoted}\s+(?:{_DEPENDENCY_NOUN})\b",
+        text,
+    ):
+        return False
+
+    if "::" in value or "." in value:
+        return True
+    if _code_shaped(value):
+        return True
+    if any(match.group(1).casefold() == leaf.casefold() for match in _SYMBOL_CUE.finditer(text)):
+        return True
+    return bool(
+        re.search(rf"(?i)\b{_EDIT_ACTION}\b[^.\n]{{0,48}}{leaf_quoted}", text)
+        or re.search(rf"(?i){explicit_leaf}\s+{_EDIT_PREDICATE}\b", text)
+    )
+
+
 def _symbol_bearing_segments(task: str) -> tuple[str, ...]:
     segments: list[str] = []
     for raw in re.split(r"\n\s*\n", str(task or "")):
@@ -597,8 +813,7 @@ def compile_task_facets(
 
     contract = extract_task_contract(task)
     obligation_rows = tuple(
-        (obligation.obligation_id, obligation.text)
-        for obligation in contract.obligations
+        (obligation.obligation_id, obligation.text) for obligation in contract.obligations
     )
     symbol_rows = tuple(
         (
@@ -611,10 +826,7 @@ def compile_task_facets(
         # obligation corpus duplicated every code-bearing obligation as a
         # second facet.  Only retain a segment when no extracted obligation is
         # already contained in it.
-        if not any(
-            text.casefold() in segment.casefold()
-            for _identifier, text in obligation_rows
-        )
+        if not any(text.casefold() in segment.casefold() for _identifier, text in obligation_rows)
     )
     rows = obligation_rows + symbol_rows or (("task", str(task or "").strip()),)
     task_qualified_entities = (
@@ -626,8 +838,7 @@ def compile_task_facets(
         ),
     )
     qualified_task_leaves = frozenset(
-        re.split(r"(?:::|[.#])", entity)[-1].casefold()
-        for entity in task_qualified_entities
+        re.split(r"(?:::|[.#])", entity)[-1].casefold() for entity in task_qualified_entities
     )
     available: dict[str, list[tuple[str, str]]] = {}
     for document in documents:
@@ -642,6 +853,19 @@ def compile_task_facets(
             row = (symbol, path)
             if row not in available.setdefault(key, []):
                 available[key].append(row)
+
+    def owner_path_affinity(owner: str, path: str) -> bool:
+        expanded_owner = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", owner)
+        expanded_owner = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", expanded_owner)
+        owner_terms = tuple(
+            token.casefold() for token in re.findall(r"[A-Za-z0-9]+", expanded_owner) if token
+        )
+        path_terms = frozenset(
+            token.casefold()
+            for token in re.findall(r"[A-Za-z0-9]+", _normalized_path(path))
+            if token
+        )
+        return bool(owner_terms) and all(term in path_terms for term in owner_terms)
 
     def resolve_entities(
         entity_values: tuple[str, ...],
@@ -669,25 +893,17 @@ def compile_task_facets(
             # example EvaluationHandle::cancel), a later unqualified
             # clarification must not bind that leaf to a same-named symbol in
             # another subsystem.  The qualified owner is the stronger fact.
-            qualified_shadow = (
-                len(segments) == 1
-                and leaf.casefold() in qualified_task_leaves
-            )
-            bindable_segments = [
-                _segment_identity_eligible(segment) for segment in segments
-            ]
+            qualified_shadow = len(segments) == 1 and leaf.casefold() in qualified_task_leaves
+            bindable_segments = [_segment_identity_eligible(segment) for segment in segments]
             owner_exact_case = _is_short_acronym(segments[0])
             leaf_exact_case = _is_short_acronym(leaf)
             direct = (
                 []
-                if qualified_shadow
-                or not all(bindable_segments)
+                if qualified_shadow or not all(bindable_segments)
                 else spelling_preferred(
                     entity,
                     entity,
-                    exact_case_only=any(
-                        _is_short_acronym(segment) for segment in segments
-                    ),
+                    exact_case_only=any(_is_short_acronym(segment) for segment in segments),
                 )
             )
             owner_rows = (
@@ -699,6 +915,12 @@ def compile_task_facets(
                 if len(segments) > 1 and bindable_segments[0]
                 else []
             )
+            if len(owner_rows) > 1:
+                path_affine_rows = [
+                    row for row in owner_rows if owner_path_affinity(segments[0], row[1])
+                ]
+                if path_affine_rows:
+                    owner_rows = path_affine_rows
             leaf_rows = (
                 spelling_preferred(
                     leaf,
@@ -712,11 +934,7 @@ def compile_task_facets(
                 exact.extend(symbol for symbol, _path in direct)
                 modules.extend(path for _symbol, path in direct if path)
                 continue
-            if (
-                len(segments) == 1
-                and leaf_rows
-                and not qualified_shadow
-            ):
+            if len(segments) == 1 and leaf_rows and not qualified_shadow:
                 exact.extend(symbol for symbol, _path in leaf_rows)
                 modules.extend(path for _symbol, path in leaf_rows if path)
                 continue
@@ -725,9 +943,7 @@ def compile_task_facets(
             if owner_rows:
                 owners.extend(symbol for symbol, _path in owner_rows)
                 modules.extend(owner_paths)
-                colocated_leaf_rows = [
-                    row for row in leaf_rows if row[1] and row[1] in owner_paths
-                ]
+                colocated_leaf_rows = [row for row in leaf_rows if row[1] and row[1] in owner_paths]
                 exact.extend(symbol for symbol, _path in colocated_leaf_rows)
                 modules.extend(path for _symbol, path in colocated_leaf_rows if path)
             # New APIs commonly extend an existing sibling name. Keep the
@@ -747,8 +963,7 @@ def compile_task_facets(
                     if not (
                         len(segments) == 1
                         and (
-                            row[0].casefold()
-                            in _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS
+                            row[0].casefold() in _UNQUALIFIED_ANALOG_PREFIX_STOPWORDS
                             or leaf.casefold().endswith("_id")
                         )
                     )
@@ -776,8 +991,7 @@ def compile_task_facets(
     for obligation_id, text in rows:
         associated = _associated_entities(text)
         associated_members = {
-            re.split(r"(?:::|[.#])", entity)[-1].casefold()
-            for entity in associated
+            re.split(r"(?:::|[.#])", entity)[-1].casefold() for entity in associated
         }
         entities = list(associated)
         entities.extend(
@@ -804,15 +1018,22 @@ def compile_task_facets(
         exact, unresolved, owners, modules = resolve_entities(
             tuple(e for e in entity_values if e not in exception_tokens)
         )
-        digest = hashlib.sha256(
-            f"{obligation_id}\0{text}".encode()
-        ).hexdigest()[:16]
+        directed_entities = tuple(
+            entity
+            for entity in entity_values
+            if entity not in exception_tokens and _entity_is_edit_directed(text, entity)
+        )
+        directed_exact, _directed_unresolved, directed_owners, _directed_modules = resolve_entities(
+            directed_entities
+        )
+        digest = hashlib.sha256(f"{obligation_id}\0{text}".encode()).hexdigest()[:16]
         role = _facet_role(text)
         facet = TaskFacet(
             facet_id=f"facet-{digest}",
             obligation_ids=(obligation_id,),
             role=role,
             exact_symbols=exact,
+            edit_symbols=tuple(dict.fromkeys((*directed_exact, *directed_owners))),
             unresolved_symbols=unresolved,
             query_terms=significant_tokens(text)[:12],
             owning_symbols=owners,
@@ -829,9 +1050,7 @@ def compile_task_facets(
             and _requires_implementation_edit(text)
             and (exact or unresolved or owners)
         ):
-            edit_digest = hashlib.sha256(
-                f"{obligation_id}\0{text}\0edit".encode()
-            ).hexdigest()[:16]
+            edit_digest = hashlib.sha256(f"{obligation_id}\0{text}\0edit".encode()).hexdigest()[:16]
             facets.append(
                 replace(
                     facet,
@@ -846,9 +1065,15 @@ def compile_task_facets(
                 qualified_by_owner.setdefault(segments[0], []).append(entity)
         if len(qualified_by_owner) > 1:
             for owner, owner_entities in list(qualified_by_owner.items())[:12]:
-                child_exact, child_unresolved, child_owners, child_modules = (
-                    resolve_entities(tuple(dict.fromkeys(owner_entities)))
+                child_exact, child_unresolved, child_owners, child_modules = resolve_entities(
+                    tuple(dict.fromkeys(owner_entities))
                 )
+                child_directed = tuple(
+                    entity
+                    for entity in dict.fromkeys(owner_entities)
+                    if _entity_is_edit_directed(text, entity)
+                )
+                child_directed_exact, _, child_directed_owners, _ = resolve_entities(child_directed)
                 child_digest = hashlib.sha256(
                     f"{obligation_id}\0{text}\0{owner}".encode()
                 ).hexdigest()[:16]
@@ -858,10 +1083,11 @@ def compile_task_facets(
                         obligation_ids=(obligation_id,),
                         role=role,
                         exact_symbols=child_exact,
+                        edit_symbols=tuple(
+                            dict.fromkeys((*child_directed_exact, *child_directed_owners))
+                        ),
                         unresolved_symbols=child_unresolved,
-                        query_terms=significant_tokens(
-                            " ".join(owner_entities)
-                        )[:12],
+                        query_terms=significant_tokens(" ".join(owner_entities))[:12],
                         owning_symbols=child_owners,
                         owning_modules=child_modules,
                     )
@@ -877,17 +1103,17 @@ def _snake_case_type(value: str) -> str:
     return token.replace("-", "_").casefold().strip("_")
 
 
-def _proposed_rust_files(
+def _proposed_rust_file_by_symbol(
     facets: tuple[TaskFacet, ...],
     documents: tuple[Any, ...],
-) -> tuple[str, ...]:
+) -> dict[str, str]:
     rust_paths = tuple(
         _normalized_path(str(getattr(document, "path", "") or ""))
         for document in documents
         if str(getattr(document, "path", "") or "").lower().endswith(".rs")
     )
     if not rust_paths:
-        return ()
+        return {}
     existing = frozenset(rust_paths)
 
     def source_root(path: str) -> str:
@@ -899,12 +1125,10 @@ def _proposed_rust_files(
 
     root_counts = Counter(source_root(path) for path in rust_paths)
     default_root = min(root_counts, key=lambda value: (-root_counts[value], value))
-    proposals: list[str] = []
+    proposals: dict[str, str] = {}
     for facet in facets:
         facet_roots = Counter(
-            source_root(path)
-            for path in facet.owning_modules
-            if path.lower().endswith(".rs")
+            source_root(path) for path in facet.owning_modules if path.lower().endswith(".rs")
         )
         parent = (
             min(facet_roots, key=lambda value: (-facet_roots[value], value))
@@ -924,11 +1148,24 @@ def _proposed_rust_files(
             if not stem:
                 continue
             path = f"{parent}/{stem}.rs" if parent else f"{stem}.rs"
-            if path not in existing and path not in proposals:
-                proposals.append(path)
+            if path not in existing and path not in proposals.values():
+                proposals[symbol] = path
             if len(proposals) >= 2:
-                return tuple(proposals)
-    return tuple(proposals)
+                return proposals
+    return proposals
+
+
+def _proposed_rust_files(
+    facets: tuple[TaskFacet, ...],
+    documents: tuple[Any, ...],
+) -> tuple[str, ...]:
+    """Return bounded proposed paths while retaining entity-level ownership.
+
+    Coverage uses :func:`_proposed_rust_file_by_symbol`; this compatibility
+    projection exists only for the rendered list of proposed files.
+    """
+
+    return tuple(dict.fromkeys(_proposed_rust_file_by_symbol(facets, documents).values()))
 
 
 def _is_test(path: str) -> bool:
@@ -994,8 +1231,10 @@ def _authoritative_symbol_identifiers(request: ContextCompileRequest) -> frozens
         for match in pattern.finditer(request.task):
             add(match.group(1))
     for token in _EXPLICIT_TOKEN.findall(request.task):
-        if "_" in token or "::" in token or (
-            not token.isupper() and any(character.isupper() for character in token[1:])
+        if (
+            "_" in token
+            or "::" in token
+            or (not token.isupper() and any(character.isupper() for character in token[1:]))
         ):
             add(token)
     return frozenset(item for item in identifiers if item)
@@ -1082,13 +1321,8 @@ def _rank_key(ranked: RankedFile, identifiers: dict[str, int]) -> tuple[Any, ...
     exact = _exact_candidate(ranked)
     symbol = str(exact.symbol if exact is not None else ranked.representative.symbol or "")
     exact_symbol = bool(symbol and symbol.lower() in identifiers)
-    facet_seed = bool(
-        exact is not None and "facet_exact_symbol" in set(exact.provenance)
-    )
-    exact_path = bool(
-        exact is not None
-        and "exact_path" in set(exact.provenance)
-    )
+    facet_seed = bool(exact is not None and "facet_exact_symbol" in set(exact.provenance))
+    exact_path = bool(exact is not None and "exact_path" in set(exact.provenance))
     return (
         0 if exact_symbol else 1 if exact_path else 2,
         0 if facet_seed else 1,
@@ -1103,11 +1337,7 @@ def _rank_key(ranked: RankedFile, identifiers: dict[str, int]) -> tuple[Any, ...
 
 def _symbol_keys(value: str) -> frozenset[str]:
     token = str(value or "").strip()
-    return frozenset(
-        item.casefold()
-        for item in (token, *re.split(r"(?:::|[.#])", token))
-        if item
-    )
+    return frozenset(item.casefold() for item in (token, *re.split(r"(?:::|[.#])", token)) if item)
 
 
 def _matching_facet_ids(
@@ -1116,10 +1346,34 @@ def _matching_facet_ids(
     path: str,
     facets: tuple[TaskFacet, ...],
 ) -> tuple[str, ...]:
-    matched, _has_unscoped = _matching_facet_scopes(
-        symbol=symbol, path=path, facets=facets
-    )
+    matched, _has_unscoped = _matching_facet_scopes(symbol=symbol, path=path, facets=facets)
     return matched
+
+
+def _matching_edit_facet_ids(
+    *,
+    symbol: str,
+    path: str,
+    facets: tuple[TaskFacet, ...],
+) -> tuple[str, ...]:
+    """Match only identities that task prose authorizes changing."""
+
+    keys = _symbol_keys(symbol)
+    normalized_path = _normalized_path(path)
+    matched: list[str] = []
+    for facet in facets:
+        if facet.role is not LocalizationRole.EDIT:
+            continue
+        symbol_match = bool(
+            keys and any(keys & _symbol_keys(candidate) for candidate in facet.edit_symbols)
+        )
+        owner_scoped = bool(
+            facet.owning_modules
+            and any("::" in candidate or "." in candidate for candidate in facet.unresolved_symbols)
+        )
+        if symbol_match and (not owner_scoped or normalized_path in facet.owning_modules):
+            matched.append(facet.facet_id)
+    return tuple(matched)
 
 
 def _matching_facet_scopes(
@@ -1149,14 +1403,9 @@ def _matching_facet_scopes(
         )
         owner_scoped = bool(
             facet.owning_modules
-            and any(
-                "::" in candidate or "." in candidate
-                for candidate in facet.unresolved_symbols
-            )
+            and any("::" in candidate or "." in candidate for candidate in facet.unresolved_symbols)
         )
-        if symbol_match and (
-            not owner_scoped or normalized_path in facet.owning_modules
-        ):
+        if symbol_match and (not owner_scoped or normalized_path in facet.owning_modules):
             matched.append(facet.facet_id)
             if not owner_scoped:
                 has_unscoped = True
@@ -1173,9 +1422,20 @@ def _path_terms(path: str) -> frozenset[str]:
     )
 
 
-def _matching_path_facet_ids(
-    *, path: str, facets: tuple[TaskFacet, ...]
-) -> tuple[str, ...]:
+def _related_path_term(first: str, second: str) -> bool:
+    """Match stable lexical variants such as lint/linter and sort/sorting."""
+
+    left = str(first or "").casefold()
+    right = str(second or "").casefold()
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    shorter, longer = sorted((left, right), key=len)
+    return len(shorter) >= 4 and longer.startswith(shorter)
+
+
+def _matching_path_facet_ids(*, path: str, facets: tuple[TaskFacet, ...]) -> tuple[str, ...]:
     """Scope strong natural artifact names to obligations, never edit identity."""
 
     terms = _path_terms(path)
@@ -1186,10 +1446,7 @@ def _matching_path_facet_ids(
         for facet in facets
         if (
             len(terms & frozenset(facet.query_terms)) >= 2
-            or any(
-                len(token) >= 8
-                for token in terms & frozenset(facet.query_terms)
-            )
+            or any(len(token) >= 8 for token in terms & frozenset(facet.query_terms))
         )
     )
 
@@ -1224,11 +1481,7 @@ def _facet_seed_rows(
         keys = _symbol_keys(symbol)
         matched: list[str] = []
         owner_affinity = 0
-        normalized_parts = frozenset(
-            part.casefold()
-            for part in re.split(r"[/_.-]+", path)
-            if part
-        )
+        normalized_parts = frozenset(part.casefold() for part in re.split(r"[/_.-]+", path) if part)
         for facet in facets:
             exact_keys = frozenset(
                 key
@@ -1240,10 +1493,7 @@ def _facet_seed_rows(
             if facet.owning_modules and path not in facet.owning_modules:
                 continue
             matched.append(facet.facet_id)
-            if any(
-                owner.casefold() in normalized_parts
-                for owner in facet.owning_symbols
-            ):
+            if any(owner.casefold() in normalized_parts for owner in facet.owning_symbols):
                 owner_affinity = 1
         if matched:
             candidates.append(
@@ -1271,9 +1521,7 @@ def _facet_seed_rows(
         key=lambda item: (-item[0], -item[1], item[2].casefold(), item[3]),
     )[: max(1, int(limit))]
     rows: list[RankedFile] = []
-    for rank, (coverage, affinity, path, _line, document, _facets) in enumerate(
-        selected, start=1
-    ):
+    for rank, (coverage, affinity, path, _line, document, _facets) in enumerate(selected, start=1):
         candidate = RetrievalCandidate(
             path=path,
             start_line=getattr(document, "start_line", 1),
@@ -1547,9 +1795,7 @@ class RepositoryContextCompiler:
         identifiers = _explicit_identifiers(request)
         authoritative_symbols = _authoritative_symbol_identifiers(request)
         facet_exact_symbols = frozenset(
-            symbol.casefold()
-            for facet in task_facets
-            for symbol in facet.exact_symbols
+            symbol.casefold() for facet in task_facets for symbol in facet.exact_symbols
         )
         concrete_identifiers = _concrete_identifiers(request)
         seeded = _facet_seed_rows(
@@ -1557,9 +1803,7 @@ class RepositoryContextCompiler:
             task_facets,
             request,
         )
-        ranked_by_path: dict[str, RankedFile] = {
-            row.path: row for row in seeded
-        }
+        ranked_by_path: dict[str, RankedFile] = {row.path: row for row in seeded}
         for row in retrieval.ranked_files:
             ranked_by_path.setdefault(row.path, row)
         ranked = tuple(
@@ -1577,8 +1821,8 @@ class RepositoryContextCompiler:
             for row in ranked
             if (candidate := _exact_candidate(row)) is not None
             and bool(candidate.symbol)
-            and str(candidate.symbol).casefold()
-            in (authoritative_symbols | facet_exact_symbols)
+            and not _entry_file_symbol(row.path, str(candidate.symbol))
+            and str(candidate.symbol).casefold() in (authoritative_symbols | facet_exact_symbols)
             and bool(
                 _matching_facet_ids(
                     symbol=str(candidate.symbol),
@@ -1614,7 +1858,8 @@ class RepositoryContextCompiler:
         for row in exact_symbol_rows:
             symbol_key = str(_exact_candidate(row).symbol).casefold()
             rows_by_symbol.setdefault(symbol_key, []).append(row)
-        ambiguous_symbols = set()
+        ambiguous_symbols: set[str] = set()
+        ambiguous_identities: list[AmbiguousIdentityGroup] = []
         for symbol_key, rows in rows_by_symbol.items():
             if len({row.path for row in rows}) <= 1:
                 continue
@@ -1629,26 +1874,106 @@ class RepositoryContextCompiler:
                 if has_unscoped:
                     all_scoped = False
                     break
-            if not all_scoped:
+            # Owner/module-qualified matches are independently disambiguated.
+            # Any globally unscoped name collision must prove that *all*
+            # candidate paths belong to one certified export component; one
+            # connected pair is not enough to bless an unrelated homonym.
+            if all_scoped:
                 continue
-            connected = any(
-                _export_connected(
-                    first.path,
-                    second.path,
-                    str(_exact_candidate(first).symbol),
-                )
-                for index, first in enumerate(rows)
-                for second in rows[index + 1 :]
+            paths = sorted({row.path for row in rows})
+            connected_paths = {paths[0]}
+            changed = True
+            while changed:
+                changed = False
+                for first in rows:
+                    for second in rows:
+                        if first.path == second.path:
+                            continue
+                        if (
+                            first.path in connected_paths
+                            and second.path not in connected_paths
+                            and _export_connected(
+                                first.path,
+                                second.path,
+                                str(_exact_candidate(first).symbol),
+                            )
+                        ):
+                            connected_paths.add(second.path)
+                            changed = True
+            if len(connected_paths) == len(paths):
+                continue
+            ambiguous_symbols.add(symbol_key)
+            candidate_rows = sorted(
+                rows,
+                key=lambda row: (
+                    _path_penalty(row.path),
+                    row.path.casefold(),
+                    row.path,
+                    max(1, int((_exact_candidate(row) or row.representative).start_line or 1)),
+                ),
             )
-            if not connected:
-                ambiguous_symbols.add(symbol_key)
+            facet_ids = tuple(
+                dict.fromkeys(
+                    facet_id
+                    for row in candidate_rows
+                    for facet_id in _matching_facet_ids(
+                        symbol=str((_exact_candidate(row) or row.representative).symbol or ""),
+                        path=row.path,
+                        facets=task_facets,
+                    )
+                )
+            )
+            candidates = tuple(
+                AmbiguousIdentityCandidate(
+                    path=row.path,
+                    line=max(
+                        1,
+                        int((_exact_candidate(row) or row.representative).start_line or 1),
+                    ),
+                    symbol=str((_exact_candidate(row) or row.representative).symbol or ""),
+                    kind="repository_symbol",
+                    evidence_sha256=_sha(
+                        "ambiguous_candidate",
+                        row.path,
+                        str((_exact_candidate(row) or row.representative).symbol or ""),
+                        request.source_revision,
+                    ),
+                )
+                for row in candidate_rows[:5]
+            )
+            ambiguous_identities.append(
+                AmbiguousIdentityGroup(
+                    entity=str(
+                        (
+                            _exact_candidate(candidate_rows[0]) or candidate_rows[0].representative
+                        ).symbol
+                        or symbol_key
+                    ),
+                    facet_ids=facet_ids,
+                    candidates=candidates,
+                    total_candidates=len(candidate_rows),
+                    truncated=len(candidate_rows) > len(candidates),
+                    reason="unqualified_symbol_resolves_to_disconnected_definitions",
+                    next_action="inspect_candidates_to_disambiguate",
+                    evidence_sha256=_sha(
+                        "ambiguous_identity",
+                        symbol_key,
+                        *(row.path for row in candidate_rows),
+                        request.source_revision,
+                    ),
+                )
+            )
         if ambiguous_symbols:
             exact_symbol_rows = tuple(
                 row
                 for row in exact_symbol_rows
-                if str(_exact_candidate(row).symbol).casefold()
-                not in ambiguous_symbols
+                if str(_exact_candidate(row).symbol).casefold() not in ambiguous_symbols
             )
+        ambiguous_group_count = len(ambiguous_identities)
+        ambiguous_identities = sorted(
+            ambiguous_identities,
+            key=lambda item: (-len(item.facet_ids), item.entity.casefold(), item.entity),
+        )[:3]
         exact_path_rows = tuple(
             row
             for row in ranked
@@ -1670,6 +1995,7 @@ class RepositoryContextCompiler:
                 or str(link.source_symbol or "").lower() in authoritative_symbols
             )
         )
+
         def matches_concrete_anchor(row: RankedFile) -> bool:
             if _strong_task_path_candidate(row):
                 return True
@@ -1691,15 +2017,10 @@ class RepositoryContextCompiler:
             # excluded here; otherwise the strongest file-name match vanishes
             # from both the edit and inspection sets.
             if _exact_identity_candidate(row) is None
-            and len(row.channel_ranks) >= 2
-            and (
-                not concrete_identifiers
-                or matches_concrete_anchor(row)
-            )
+            and (len(row.channel_ranks) >= 2 or _strong_task_path_candidate(row))
+            and (not concrete_identifiers or matches_concrete_anchor(row))
         )
-        authoritative_rows = tuple(
-            dict.fromkeys((*exact_symbol_rows, *exact_path_rows))
-        )
+        authoritative_rows = tuple(dict.fromkeys((*exact_symbol_rows, *exact_path_rows)))
         facets_by_id = {facet.facet_id: facet for facet in task_facets}
 
         def row_facet_ids(row: RankedFile) -> tuple[str, ...]:
@@ -1717,10 +2038,19 @@ class RepositoryContextCompiler:
                 if facet_id in facets_by_id
             )
 
+        def row_edit_facet_ids(row: RankedFile) -> tuple[str, ...]:
+            candidate = _exact_candidate(row) or row.representative
+            return _matching_edit_facet_ids(
+                symbol=str(candidate.symbol or ""),
+                path=row.path,
+                facets=task_facets,
+            )
+
         non_public_rows = tuple(
             row for row in authoritative_rows if row.path not in public_surface_paths
         )
         validation_rows = tuple(row for row in non_public_rows if _is_test(row.path))
+
         # Edit authority requires an obligation-backed facet match.  A bare
         # exact-path token match with no facet coverage is inspection evidence
         # only, unless the task itself cites the file path or file name; a
@@ -1728,9 +2058,7 @@ class RepositoryContextCompiler:
         # (katex.js#katex) is package/barrel evidence and never edit authority.
         def _is_entry_symbol_row(row: RankedFile) -> bool:
             candidate = _exact_candidate(row)
-            return candidate is not None and _entry_file_symbol(
-                row.path, str(candidate.symbol)
-            )
+            return candidate is not None and _entry_file_symbol(row.path, str(candidate.symbol))
 
         edit_rows = tuple(
             row
@@ -1738,7 +2066,7 @@ class RepositoryContextCompiler:
             if not _is_test(row.path)
             and not _is_entry_symbol_row(row)
             and (
-                LocalizationRole.EDIT in row_roles(row)
+                bool(row_edit_facet_ids(row))
                 or (
                     row in exact_path_rows
                     and not row_facet_ids(row)
@@ -1766,13 +2094,7 @@ class RepositoryContextCompiler:
                     file_only=row in exact_path_rows and row not in exact_symbol_rows,
                 ),
                 localization_role=LocalizationRole.EDIT.value,
-                facet_ids=_matching_facet_ids(
-                    symbol=str(
-                        (_exact_candidate(row) or row.representative).symbol or ""
-                    ),
-                    path=row.path,
-                    facets=task_facets,
-                ),
+                facet_ids=row_edit_facet_ids(row),
             )
             for row in primary_rows
         )
@@ -1812,9 +2134,7 @@ class RepositoryContextCompiler:
                 {
                     "path": path,
                     "task_path_token_count": (
-                        _task_path_match_count(sparse_entry[1])
-                        if sparse_entry is not None
-                        else 0
+                        _task_path_match_count(sparse_entry[1]) if sparse_entry is not None else 0
                     ),
                     "rrf_score": (
                         (1.0 / (rrf_k + sparse_entry[0]) if sparse_entry else 0.0)
@@ -1828,6 +2148,7 @@ class RepositoryContextCompiler:
             )
         fusion_rows.sort(
             key=lambda item: (
+                _is_test(str(item["path"])),
                 -int(item["task_path_token_count"]),
                 -float(item["rrf_score"]),
                 _path_penalty(str(item["path"])),
@@ -1860,8 +2181,7 @@ class RepositoryContextCompiler:
                             row,
                             request,
                             decision_reason="exact_task_identity_inspection_only",
-                            file_only=row in exact_path_rows
-                            and row not in exact_symbol_rows,
+                            file_only=row in exact_path_rows and row not in exact_symbol_rows,
                         ),
                         localization_role=role.value,
                         facet_ids=row_facet_ids(row),
@@ -1925,17 +2245,12 @@ class RepositoryContextCompiler:
         task_scope_inspection = tuple(
             item
             for item in inspection
-            if item.decision_reason == "task_path_phrase_inspection"
-            and item.facet_ids
+            if item.decision_reason == "task_path_phrase_inspection" and item.facet_ids
         )
-        task_scope_inspection_paths = frozenset(
-            item.path for item in task_scope_inspection
-        )
+        task_scope_inspection_paths = frozenset(item.path for item in task_scope_inspection)
         anchor_paths = frozenset(item.path for item in anchors)
         anchor_symbols = frozenset(item.symbol for item in anchors if item.symbol)
-        anchor_identities = frozenset(
-            (item.path, item.symbol) for item in anchors if item.symbol
-        )
+        anchor_identities = frozenset((item.path, item.symbol) for item in anchors if item.symbol)
         file_anchors = frozenset(
             item.path
             for item in anchors
@@ -2025,9 +2340,7 @@ class RepositoryContextCompiler:
             ):
                 if path in anchor_paths or any(item.path == path for item in supporting):
                     continue
-                document = documents_by_identity.get(
-                    (path, symbol)
-                ) or documents_by_path.get(path)
+                document = documents_by_identity.get((path, symbol)) or documents_by_path.get(path)
                 if document is None:
                     continue
                 supporting.append(
@@ -2059,13 +2372,9 @@ class RepositoryContextCompiler:
             if len(supporting) >= 5:
                 break
 
-        role_candidates_by_path = {
-            item.path: item for item in (*inspection, *supporting)
-        }
+        role_candidates_by_path = {item.path: item for item in (*inspection, *supporting)}
         primary_paths = frozenset(item.path for item in primary)
-        task_scope_paths = frozenset(
-            item.path for item in (*primary, *task_scope_inspection)
-        )
+        task_scope_paths = frozenset(item.path for item in (*primary, *task_scope_inspection))
         anchor_facet_ids = tuple(
             dict.fromkeys(
                 facet_id
@@ -2087,8 +2396,7 @@ class RepositoryContextCompiler:
                     decision_reason="certified_reexport_public_surface",
                     completeness="certified_public_surface_edge",
                     facet_ids=(
-                        role_candidates_by_path[link.source_path].facet_ids
-                        or anchor_facet_ids
+                        role_candidates_by_path[link.source_path].facet_ids or anchor_facet_ids
                     ),
                 )
             ).facet_ids
@@ -2121,30 +2429,168 @@ class RepositoryContextCompiler:
                     localization_role=LocalizationRole.INTEGRATION.value,
                     decision_reason="certified_integration_relationship",
                     completeness="certified_integration_edge",
-                    facet_ids=(
-                        role_candidates_by_path[path].facet_ids or anchor_facet_ids
-                    ),
+                    facet_ids=(role_candidates_by_path[path].facet_ids or anchor_facet_ids),
                 )
             ).facet_ids
         )
-        role_paths = frozenset(
-            item.path for item in (*public_surface, *integration)
+        role_paths = frozenset(item.path for item in (*public_surface, *integration))
+        retrieved_owner_inspection = tuple(
+            replace(
+                item,
+                localization_role="IMPLEMENTATION_OWNER",
+                decision_reason="task_scoped_implementation_owner_candidate",
+            )
+            for item in inspection
+            if item.path not in role_paths
+            and not _is_test(item.path)
+            and item.facet_ids
+            and item.decision_reason in {"task_path_phrase_inspection", "hybrid_rrf_inspection"}
+        )
+
+        # Repository maps and graph systems are useful because they keep a
+        # small module-level fallback when no exact symbol exists. Build that
+        # fallback from source paths plus graph centrality, never from model
+        # judgment. A direct module name (lexer/Lexer.js, config.go) or two
+        # independent task/path terms is required, tests/generated files are
+        # excluded, and every row remains inspection-only authority.
+        task_terms = frozenset(
+            token.casefold()
+            for facet in task_facets
+            for token in facet.query_terms
+            if len(token) >= 4
+            and not any(_related_path_term(token, stopword) for stopword in _PATH_OWNER_STOPWORDS)
+        )
+        graph_degree: Counter[str] = Counter()
+        for link in repository.structural_links:
+            if _safe_link(link):
+                graph_degree[link.source_path] += 1
+                graph_degree[link.target_path] += 1
+        documents_by_path_for_affinity: dict[str, list[Any]] = {}
+        for document in repository.documents:
+            documents_by_path_for_affinity.setdefault(document.path, []).append(document)
+        path_affinity_rows: list[tuple[tuple[Any, ...], ContextEvidenceItem]] = []
+        for path, path_documents in documents_by_path_for_affinity.items():
+            if (
+                path in primary_paths
+                or path in role_paths
+                or _is_test(path)
+                or _path_penalty(path) >= 2
+                or "/examples/" in ("/" + _normalized_path(path).casefold())
+            ):
+                continue
+            path_tokens = frozenset(
+                token
+                for token in _path_terms(path)
+                if not any(
+                    _related_path_term(token, stopword) for stopword in _PATH_OWNER_STOPWORDS
+                )
+            )
+            matched_terms = {
+                path_term
+                for path_term in path_tokens
+                if any(_related_path_term(path_term, task_term) for task_term in task_terms)
+            }
+            normalized = _normalized_path(path)
+            basename = Path(normalized).stem.casefold()
+            parent = Path(normalized).parent.name.casefold()
+            direct_module_match = (
+                any(_related_path_term(basename, task_term) for task_term in task_terms)
+                and basename not in _PATH_OWNER_STOPWORDS
+            )
+            eponymous_module = bool(
+                parent
+                and _related_path_term(basename, parent)
+                and any(_related_path_term(parent, task_term) for task_term in task_terms)
+            )
+            if len(matched_terms) < 2 and not direct_module_match and not eponymous_module:
+                continue
+            facet_scores: list[tuple[int, str]] = []
+            for facet in task_facets:
+                if facet.role is not LocalizationRole.EDIT:
+                    continue
+                overlap = sum(
+                    any(_related_path_term(path_term, query) for query in facet.query_terms)
+                    for path_term in path_tokens
+                )
+                if overlap:
+                    facet_scores.append((overlap, facet.facet_id))
+            if not facet_scores:
+                continue
+            best_overlap = max(score for score, _facet_id in facet_scores)
+            facet_ids = tuple(
+                facet_id for score, facet_id in facet_scores if score == best_overlap
+            )[:3]
+            representative = min(
+                path_documents,
+                key=lambda document: (
+                    not any(
+                        _related_path_term(token, str(document.symbol or ""))
+                        for token in path_tokens
+                    ),
+                    max(1, int(document.start_line or 1)),
+                    str(document.symbol or "").casefold(),
+                ),
+            )
+            evidence = ContextEvidenceItem(
+                kind="inspection_candidate",
+                path=path,
+                start_line=max(1, int(representative.start_line or 1)),
+                end_line=max(
+                    1,
+                    int(representative.end_line or representative.start_line or 1),
+                ),
+                symbol=str(representative.symbol or ""),
+                relation="",
+                confidence=None,
+                verification_status="verified_path_identity",
+                source_revision=request.source_revision,
+                graph_revision=request.graph_revision,
+                evidence_sha256=_sha("path_owner", path, request.source_revision),
+                decision_reason="task_path_module_owner_candidate",
+                completeness="inspection_only_path_affinity",
+                source_excerpt=str(representative.text or "").strip()[:400],
+                localization_role="IMPLEMENTATION_OWNER",
+                facet_ids=facet_ids,
+            )
+            path_affinity_rows.append(
+                (
+                    (
+                        not direct_module_match,
+                        not eponymous_module,
+                        -graph_degree[path],
+                        -len(matched_terms),
+                        path.casefold(),
+                        path,
+                    ),
+                    evidence,
+                )
+            )
+        path_owner_inspection = tuple(
+            item
+            for _rank, item in sorted(path_affinity_rows, key=lambda row: row[0])
+            if item.path not in role_paths
+        )[:3]
+        implementation_owner_inspection = tuple(
+            {
+                item.path: item for item in (*path_owner_inspection, *retrieved_owner_inspection)
+            }.values()
+        )[:3]
+        implementation_owner_paths = frozenset(
+            item.path for item in implementation_owner_inspection
         )
         generic_inspection = tuple(
-            item for item in inspection if item.path not in role_paths
+            item
+            for item in inspection
+            if item.path not in role_paths and item.path not in implementation_owner_paths
         )
-        generic_supporting = tuple(
-            item for item in supporting if item.path not in role_paths
-        )
+        generic_supporting = tuple(item for item in supporting if item.path not in role_paths)
 
         definitions = tuple(
             {
                 "path": item.path,
                 "line": item.start_line,
                 "symbol": item.symbol,
-                "signature": item.source_excerpt.splitlines()[0]
-                if item.source_excerpt
-                else "",
+                "signature": item.source_excerpt.splitlines()[0] if item.source_excerpt else "",
                 "origin": "program",
                 "resolution_outcome": "exact",
                 "provenance": ("hybrid_exact_identity", "checkout_source"),
@@ -2174,9 +2620,7 @@ class RepositoryContextCompiler:
             )
             for row in ranked[:20]
         )
-        semantic_paths = frozenset(
-            item.path for item in (*anchors, *supporting) if item.path
-        )
+        semantic_paths = frozenset(item.path for item in (*anchors, *supporting) if item.path)
         snapshot = RepositorySnapshot(
             source_revision=request.source_revision,
             graph_revision=request.graph_revision,
@@ -2188,9 +2632,7 @@ class RepositoryContextCompiler:
             ),
             retrieval_rank_hints=hints,
             documents=tuple(
-                document
-                for document in repository.documents
-                if document.path in semantic_paths
+                document for document in repository.documents if document.path in semantic_paths
             ),
         )
         projection = RepositoryContextEngine(
@@ -2225,17 +2667,13 @@ class RepositoryContextCompiler:
                 )
             )
         )[:5]
-        validation_plan = tuple(
-            fact.rendered for fact in projection.validation_facts[:5]
-        )
+        validation_plan = tuple(fact.rendered for fact in projection.validation_facts[:5])
         semantic_projection = projection.semantic_graph
         facet_ids_by_path: dict[str, tuple[str, ...]] = {}
         for item in (*anchors, *supporting):
             if item.path and item.facet_ids:
                 facet_ids_by_path[item.path] = tuple(
-                    dict.fromkeys(
-                        (*facet_ids_by_path.get(item.path, ()), *item.facet_ids)
-                    )
+                    dict.fromkeys((*facet_ids_by_path.get(item.path, ()), *item.facet_ids))
                 )
         scoped_link_items = tuple(
             scoped
@@ -2300,6 +2738,7 @@ class RepositoryContextCompiler:
                 item.evidence_sha256: item
                 for item in (
                     *primary,
+                    *implementation_owner_inspection,
                     *generic_inspection,
                     *generic_supporting,
                     *public_surface,
@@ -2320,22 +2759,293 @@ class RepositoryContextCompiler:
             for reason in retrieval.reason_codes
             if reason not in {"selected_bounded_context", "already_visible_or_delivered"}
         )
-        uncertainty_reasons.extend(
-            _link_rejection_reason(link) for link in unsafe_links
-        )
+        uncertainty_reasons.extend(_link_rejection_reason(link) for link in unsafe_links)
         if len(certified_relevant_links) > len(safe_links):
             uncertainty_reasons.append("certified_edge_delivery_limit")
         if projection.status is RepositoryContextStatus.ABSTAIN:
             uncertainty_reasons.extend(projection.reason_codes)
-        status = ContextStatus.READY if evidence_items else ContextStatus.ABSTAIN
-        proposed_new_files = _proposed_rust_files(task_facets, repository.documents)
-        uncovered_facets = tuple(
-            (
-                f"{facet.facet_id} role={facet.role.value} unresolved="
-                + ",".join(facet.unresolved_symbols)
+        if ambiguous_group_count > len(ambiguous_identities):
+            uncertainty_reasons.append("ambiguous_identity_group_limit")
+        status = (
+            ContextStatus.READY if evidence_items or ambiguous_identities else ContextStatus.ABSTAIN
+        )
+        proposed_file_by_symbol = _proposed_rust_file_by_symbol(task_facets, repository.documents)
+        proposed_new_files = tuple(dict.fromkeys(proposed_file_by_symbol.values()))
+        validation_facet_ids = frozenset(
+            facet_id for row in validation_rows for facet_id in row_facet_ids(row)
+        )
+        facet_coverage_rows: list[FacetCoverage] = []
+        for facet in task_facets:
+            exact_items = tuple(item for item in primary if facet.facet_id in item.facet_ids)
+            owner_items = tuple(
+                item for item in implementation_owner_inspection if facet.facet_id in item.facet_ids
             )
-            for facet in task_facets
-            if facet.unresolved_symbols
+            ambiguity_items = tuple(
+                item for item in ambiguous_identities if facet.facet_id in item.facet_ids
+            )
+            public_items = tuple(
+                item for item in public_surface if facet.facet_id in item.facet_ids
+            )
+            integration_items = tuple(
+                item for item in integration if facet.facet_id in item.facet_ids
+            )
+            proposed_symbols = tuple(
+                symbol for symbol in facet.unresolved_symbols if symbol in proposed_file_by_symbol
+            )
+            if facet.unresolved_symbols and len(proposed_symbols) == len(facet.unresolved_symbols):
+                coverage_status = FacetCoverageStatus.COVERED_NEW_FILE_PRECEDENT
+                coverage_paths = tuple(
+                    dict.fromkeys(proposed_file_by_symbol[symbol] for symbol in proposed_symbols)
+                )
+                coverage_claims = ()
+            elif exact_items:
+                coverage_status = FacetCoverageStatus.COVERED_EXACT_EDIT
+                coverage_paths = tuple(dict.fromkeys(item.path for item in exact_items))
+                coverage_claims = tuple(dict.fromkeys(item.evidence_sha256 for item in exact_items))
+            elif owner_items:
+                coverage_status = FacetCoverageStatus.COVERED_OWNER_CANDIDATE
+                coverage_paths = tuple(dict.fromkeys(item.path for item in owner_items))
+                coverage_claims = tuple(dict.fromkeys(item.evidence_sha256 for item in owner_items))
+            elif ambiguity_items:
+                coverage_status = FacetCoverageStatus.COVERED_AMBIGUOUS
+                coverage_paths = tuple(
+                    dict.fromkeys(
+                        candidate.path for item in ambiguity_items for candidate in item.candidates
+                    )
+                )
+                coverage_claims = tuple(
+                    dict.fromkeys(item.evidence_sha256 for item in ambiguity_items)
+                )
+            elif public_items:
+                coverage_status = FacetCoverageStatus.COVERED_PUBLIC_SURFACE
+                coverage_paths = tuple(dict.fromkeys(item.path for item in public_items))
+                coverage_claims = tuple(
+                    dict.fromkeys(item.evidence_sha256 for item in public_items)
+                )
+            elif integration_items:
+                coverage_status = FacetCoverageStatus.COVERED_INTEGRATION
+                coverage_paths = tuple(dict.fromkeys(item.path for item in integration_items))
+                coverage_claims = tuple(
+                    dict.fromkeys(item.evidence_sha256 for item in integration_items)
+                )
+            elif facet.facet_id in validation_facet_ids and affected_tests:
+                coverage_status = FacetCoverageStatus.COVERED_VALIDATION
+                coverage_paths = affected_tests
+                coverage_claims = ()
+            else:
+                coverage_status = FacetCoverageStatus.UNCOVERED
+                coverage_paths = ()
+                coverage_claims = ()
+            facet_coverage_rows.append(
+                FacetCoverage(
+                    facet_id=facet.facet_id,
+                    role=facet.role,
+                    status=coverage_status,
+                    paths=coverage_paths,
+                    evidence_claim_ids=coverage_claims,
+                )
+            )
+            # A mixed obligation can contain both an existing identity and a
+            # genuinely new owner.  Preserve the proposed-file fact without
+            # allowing it to cover its unresolved siblings.  These
+            # requirement-scoped rows are the compatibility representation
+            # consumed by v6 callers until the v7 requirement fields below
+            # become their sole source.
+            for symbol in proposed_symbols:
+                requirement_suffix = hashlib.sha256(symbol.encode()).hexdigest()[:12]
+                facet_coverage_rows.append(
+                    FacetCoverage(
+                        facet_id=f"{facet.facet_id}:requirement-{requirement_suffix}",
+                        role=facet.role,
+                        status=FacetCoverageStatus.COVERED_NEW_FILE_PRECEDENT,
+                        paths=(proposed_file_by_symbol[symbol],),
+                        evidence_claim_ids=(),
+                    )
+                )
+        base_coverage_by_facet = {
+            row.facet_id: row for row in facet_coverage_rows if ":requirement-" not in row.facet_id
+        }
+        uncovered_facets = tuple(
+            dict.fromkeys(
+                (
+                    f"{facet.facet_id} role={facet.role.value} unresolved="
+                    + ",".join(
+                        symbol
+                        for symbol in facet.unresolved_symbols
+                        if symbol not in proposed_file_by_symbol
+                    )
+                )
+                for facet in task_facets
+                if (
+                    base_coverage_by_facet[facet.facet_id].status is FacetCoverageStatus.UNCOVERED
+                    or any(
+                        symbol not in proposed_file_by_symbol for symbol in facet.unresolved_symbols
+                    )
+                )
+                and any(
+                    symbol not in proposed_file_by_symbol for symbol in facet.unresolved_symbols
+                )
+            )
+        )
+        ambiguous_by_entity = {item.entity.casefold(): item for item in ambiguous_identities}
+        task_requirements: list[TaskRequirement] = []
+        requirement_coverage: list[RequirementCoverage] = []
+
+        def requirement_intent(facet: TaskFacet, *, unresolved: bool) -> RequirementIntent:
+            if facet.role is LocalizationRole.PUBLIC_SURFACE:
+                return RequirementIntent.INSPECT_PUBLIC_SURFACE
+            if facet.role is LocalizationRole.INTEGRATION:
+                return RequirementIntent.INSPECT_INTEGRATION
+            if facet.role is LocalizationRole.VALIDATION:
+                return RequirementIntent.VALIDATE
+            if unresolved:
+                return RequirementIntent.ADD_SYMBOL
+            return RequirementIntent.EDIT_EXISTING
+
+        for facet in task_facets:
+            entities = tuple(dict.fromkeys((*facet.exact_symbols, *facet.unresolved_symbols)))
+            if not entities:
+                entities = ("repository-responsibility",)
+            for entity in entities:
+                unresolved = entity in facet.unresolved_symbols
+                requirement_id = (
+                    "requirement-"
+                    + hashlib.sha256(f"{facet.facet_id}\0{entity}".encode()).hexdigest()[:16]
+                )
+                entity_keys = _symbol_keys(entity)
+                exact_items = tuple(
+                    item
+                    for item in primary
+                    if facet.facet_id in item.facet_ids and entity_keys & _symbol_keys(item.symbol)
+                )
+                owner_items = tuple(
+                    item
+                    for item in implementation_owner_inspection
+                    if facet.facet_id in item.facet_ids
+                )
+                public_items = tuple(
+                    item for item in public_surface if facet.facet_id in item.facet_ids
+                )
+                integration_items = tuple(
+                    item for item in integration if facet.facet_id in item.facet_ids
+                )
+                validation_paths = tuple(
+                    dict.fromkeys(
+                        row.path for row in validation_rows if facet.facet_id in row_facet_ids(row)
+                    )
+                )
+                ambiguity = ambiguous_by_entity.get(re.split(r"(?:::|[.#])", entity)[-1].casefold())
+                proposal = proposed_file_by_symbol.get(entity)
+                if ambiguity is not None:
+                    resolution = IdentityResolutionStatus.AMBIGUOUS_IDENTITY
+                    exact_paths = tuple(candidate.path for candidate in ambiguity.candidates)
+                elif exact_items or public_items or integration_items:
+                    resolved_items = (*exact_items, *public_items, *integration_items)
+                    exact_paths = tuple(dict.fromkeys(item.path for item in resolved_items))
+                    resolution = (
+                        IdentityResolutionStatus.EXACT_CONNECTED_SET
+                        if len(exact_paths) > 1
+                        else IdentityResolutionStatus.EXACT_UNIQUE
+                    )
+                elif unresolved and proposal:
+                    exact_paths = ()
+                    resolution = IdentityResolutionStatus.UNRESOLVED_NEW_SYMBOL
+                else:
+                    exact_paths = ()
+                    resolution = IdentityResolutionStatus.UNRESOLVED
+                requirement = TaskRequirement(
+                    requirement_id=requirement_id,
+                    facet_id=facet.facet_id,
+                    obligation_ids=facet.obligation_ids,
+                    intent=requirement_intent(facet, unresolved=unresolved),
+                    entity=entity,
+                    query_terms=facet.query_terms,
+                    resolution=resolution,
+                    exact_candidate_paths=exact_paths,
+                    inspection_candidate_paths=tuple(
+                        dict.fromkeys(
+                            (
+                                *(item.path for item in owner_items),
+                                *(item.path for item in public_items),
+                                *(item.path for item in integration_items),
+                                *validation_paths,
+                            )
+                        )
+                    ),
+                    proposed_paths=(proposal,) if proposal else (),
+                )
+                task_requirements.append(requirement)
+                if ambiguity is not None:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.COVERED,
+                        mechanism="AMBIGUITY_SET",
+                        paths=exact_paths,
+                        evidence_claim_ids=(ambiguity.evidence_sha256,),
+                        reason="complete_disconnected_identity_candidates",
+                    )
+                elif exact_items:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.COVERED,
+                        mechanism="EXACT_EDIT",
+                        paths=exact_paths,
+                        evidence_claim_ids=tuple(
+                            dict.fromkeys(item.evidence_sha256 for item in exact_items)
+                        ),
+                        reason="exact_revision_identity",
+                    )
+                elif public_items:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.COVERED,
+                        mechanism="PUBLIC_SURFACE",
+                        paths=tuple(dict.fromkeys(item.path for item in public_items)),
+                        evidence_claim_ids=tuple(
+                            dict.fromkeys(item.evidence_sha256 for item in public_items)
+                        ),
+                        reason="certified_reexport_public_surface",
+                    )
+                elif integration_items:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.COVERED,
+                        mechanism="INTEGRATION_SURFACE",
+                        paths=tuple(dict.fromkeys(item.path for item in integration_items)),
+                        evidence_claim_ids=tuple(
+                            dict.fromkeys(item.evidence_sha256 for item in integration_items)
+                        ),
+                        reason="certified_integration_relationship",
+                    )
+                elif validation_paths:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.COVERED,
+                        mechanism="VALIDATION_SURFACE",
+                        paths=validation_paths,
+                        reason="task_scoped_validation_file",
+                    )
+                elif proposal:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.COVERED,
+                        mechanism="NEW_FILE_PRECEDENT",
+                        paths=(proposal,),
+                        reason="qualified_new_owner_file_precedent",
+                    )
+                else:
+                    coverage = RequirementCoverage(
+                        requirement_id=requirement_id,
+                        status=RequirementCoverageStatus.UNCOVERED,
+                        mechanism="NONE",
+                        paths=tuple(dict.fromkeys(item.path for item in owner_items)),
+                        reason="no_authoritative_repository_fact",
+                    )
+                requirement_coverage.append(coverage)
+        uncovered_requirements = tuple(
+            item.requirement_id
+            for item in requirement_coverage
+            if item.status is RequirementCoverageStatus.UNCOVERED
         )
         selected_tokens = sum(
             max(1, len(item.source_excerpt.split())) for item in evidence_items
@@ -2344,20 +3054,23 @@ class RepositoryContextCompiler:
             status=status,
             repository_identity=identity,
             task_facets=task_facets,
+            task_requirements=tuple(task_requirements),
+            requirement_coverage=tuple(requirement_coverage),
+            uncovered_requirements=uncovered_requirements,
             task_anchors=primary,
             primary_edit_targets=primary,
+            inspection_implementation_owners=implementation_owner_inspection,
             inspection_candidates=generic_inspection,
-            inspection_public_surface=tuple(
-                {item.path: item for item in public_surface}.values()
-            ),
+            inspection_public_surface=tuple({item.path: item for item in public_surface}.values()),
             inspection_integration=integration,
+            ambiguous_identities=tuple(ambiguous_identities),
+            facet_coverage=tuple(facet_coverage_rows),
             proposed_new_files=proposed_new_files,
             uncovered_facets=uncovered_facets,
             supporting_files=generic_supporting,
             symbol_contracts=primary,
             semantic_facts=tuple(
-                fact.rendered
-                for fact in (semantic_projection.facts if semantic_projection else ())
+                fact.rendered for fact in (semantic_projection.facts if semantic_projection else ())
             ),
             semantic_graph_receipt=(
                 semantic_projection.receipt.as_dict() if semantic_projection else {}
@@ -2403,11 +3116,23 @@ class RepositoryContextCompiler:
                         for item in fusion_rows[:20]
                     ],
                 },
+                "identity_resolution": {
+                    "ambiguous_group_count": ambiguous_group_count,
+                    "ambiguous_groups_selected": len(ambiguous_identities),
+                    "ambiguous_candidate_count": sum(
+                        item.total_candidates for item in ambiguous_identities
+                    ),
+                },
+                "facet_coverage": {
+                    status.value: sum(item.status is status for item in facet_coverage_rows)
+                    for status in FacetCoverageStatus
+                },
             },
             selected_token_count=selected_tokens,
             retrieval_channel_count=len(retrieval.channel_receipts),
             truncated=bool(
                 projection.truncated_count
+                or ambiguous_group_count > len(ambiguous_identities)
                 or len(certified_relevant_links) > len(safe_links)
                 or any("truncated" in reason for reason in repository.reason_codes)
                 or retrieval.reason_codes
@@ -2417,10 +3142,15 @@ class RepositoryContextCompiler:
 
 
 __all__ = [
+    "AmbiguousIdentityCandidate",
+    "AmbiguousIdentityGroup",
     "ContextCompileRequest",
     "ContextEvidenceItem",
     "ContextStatus",
+    "FacetCoverage",
+    "FacetCoverageStatus",
     "GTContextPacket",
+    "IdentityResolutionStatus",
     "LocalizationRole",
     "RepositoryContextCompiler",
     "TaskFacet",

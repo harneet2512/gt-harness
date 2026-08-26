@@ -52,6 +52,8 @@ class FeatureState(StrEnum):
 
 _FEATURE_NAMES = (
     "exact_edit_targets",
+    "implementation_owner_candidates",
+    "ambiguous_identity",
     "inspection_candidates",
     "public_surface",
     "integration",
@@ -62,6 +64,7 @@ _FEATURE_NAMES = (
     "affected_tests",
     "validation",
     "proposed_new_file",
+    "uncovered_requirement",
     "uncovered_facet",
 )
 
@@ -98,11 +101,7 @@ def _bounded_token_count(text: str) -> int:
 
     count = 0
     for token in re.findall(r"\w+|[^\w\s]", str(text or ""), re.UNICODE):
-        count += (
-            max(1, (len(token) + 3) // 4)
-            if re.fullmatch(r"\w+", token, re.UNICODE)
-            else 1
-        )
+        count += max(1, (len(token) + 3) // 4) if re.fullmatch(r"\w+", token, re.UNICODE) else 1
     return count
 
 
@@ -157,7 +156,7 @@ class BareTreatment:
 
     def finalize(self, result: Any) -> dict[str, Any]:
         return {
-            "schema": "gt.treatment_receipt.v1",
+            "schema": "gt.treatment_receipt.v4",
             "treatment": self.treatment_id,
             "provider_calls": 0,
             "treatment_provider_calls": 0,
@@ -218,9 +217,7 @@ class ObservationAugmentation:
             "context_token_count": self.context_token_count,
             "delivered_before_call": self.delivered_before_call,
             "serialized_claim_ids": list(self.serialized_claim_ids),
-            "provider_visible_feature_counts": dict(
-                self.provider_visible_feature_counts
-            ),
+            "provider_visible_feature_counts": dict(self.provider_visible_feature_counts),
             "observation_count": self.observation_count,
             "turn_observations_sha256": self.turn_observations_sha256,
         }
@@ -233,28 +230,28 @@ class GroundTruthTreatment(BareTreatment):
     start_char_budget: int = 6_000
     update_char_budget: int = 4_000
     max_delivery_count: int = 4
+    max_update_delivery_count: int = 3
     start_token_budget: int = 500
-    update_token_budget: int = 500
+    update_token_budget: int = 350
+    total_context_token_budget: int = 1_200
     retrieval_mode: str | None = None
     treatment_id: str = field(default="groundtruth", init=False)
     service: RepositoryGraphService = field(init=False, repr=False)
     compiler: RepositoryContextCompiler = field(init=False, repr=False)
     task: str = field(default="", init=False)
-    treatment_status: TreatmentStatus = field(
-        default=TreatmentStatus.FAILED, init=False
-    )
+    treatment_status: TreatmentStatus = field(default=TreatmentStatus.FAILED, init=False)
     delivery_count: int = field(default=0, init=False)
     context_compile_count: int = field(default=0, init=False)
     retrieval_channel_count: int = field(default=0, init=False)
     action_count: int = field(default=0, init=False)
     evidence_items_delivered: int = field(default=0, init=False)
     suppressed_inspection_only_updates: int = field(default=0, init=False)
+    initial_delivery_disposition: str = field(default="NOT_ATTEMPTED", init=False)
+    initial_delivery_reasons: list[str] = field(default_factory=list, init=False)
     delivery_char_count: int = field(default=0, init=False)
     delivery_calls: list[int] = field(default_factory=list, init=False)
     delivery_receipts: list[dict[str, Any]] = field(default_factory=list, init=False)
-    provider_delivery_receipts: list[dict[str, Any]] = field(
-        default_factory=list, init=False
-    )
+    provider_delivery_receipts: list[dict[str, Any]] = field(default_factory=list, init=False)
     current_provider_call: int = field(default=1, init=False)
     errors: list[str] = field(default_factory=list, init=False)
     delivered_claim_ids: set[str] = field(default_factory=set, init=False, repr=False)
@@ -267,28 +264,19 @@ class GroundTruthTreatment(BareTreatment):
     _prepared_task: str | None = field(default=None, init=False, repr=False)
     _prepared_context: str = field(default="", init=False, repr=False)
     _prepare_complete: bool = field(default=False, init=False, repr=False)
-    dense_index: PersistentDenseSemanticIndex | None = field(
-        default=None, init=False, repr=False
-    )
+    dense_index: PersistentDenseSemanticIndex | None = field(default=None, init=False, repr=False)
     dense_receipt: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     dense_error: str = field(default="", init=False, repr=False)
-    dense_query_receipts: list[dict[str, Any]] = field(
-        default_factory=list, init=False, repr=False
-    )
-    projection_receipts: list[dict[str, Any]] = field(
-        default_factory=list, init=False, repr=False
-    )
+    dense_query_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    projection_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    compile_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     feature_states: dict[str, str] = field(default_factory=dict, init=False)
     feature_paths: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False)
     feature_content_identities: dict[str, dict[str, str]] = field(
         default_factory=dict, init=False, repr=False
     )
-    feature_transitions: list[dict[str, Any]] = field(
-        default_factory=list, init=False, repr=False
-    )
-    _last_delivery_claim_ids: tuple[str, ...] = field(
-        default=(), init=False, repr=False
-    )
+    feature_transitions: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    _last_delivery_claim_ids: tuple[str, ...] = field(default=(), init=False, repr=False)
     _last_delivery_feature_counts: dict[str, int] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -304,11 +292,11 @@ class GroundTruthTreatment(BareTreatment):
                 self.state_dir = override
         self.service = RepositoryGraphService(self.root, state_dir=self.state_dir)
         self.compiler = RepositoryContextCompiler()
-        mode = str(
-            self.retrieval_mode
-            or os.environ.get("GT_RETRIEVAL_MODE")
-            or "hybrid_if_available"
-        ).strip().lower()
+        mode = (
+            str(self.retrieval_mode or os.environ.get("GT_RETRIEVAL_MODE") or "hybrid_if_available")
+            .strip()
+            .lower()
+        )
         if mode not in {"hybrid_required", "hybrid_if_available", "sparse_only"}:
             raise ValueError(f"unsupported GT retrieval mode: {mode}")
         self.retrieval_mode = mode
@@ -383,9 +371,7 @@ class GroundTruthTreatment(BareTreatment):
             return f"unreadable:{type(exc).__name__}"
         return hashlib.sha256(payload).hexdigest()
 
-    def _snapshot_feature_content(
-        self, feature: str, paths: tuple[str, ...]
-    ) -> None:
+    def _snapshot_feature_content(self, feature: str, paths: tuple[str, ...]) -> None:
         identities = self.feature_content_identities.setdefault(feature, {})
         for path in paths:
             identities.setdefault(path, self._feature_content_identity(path))
@@ -406,9 +392,7 @@ class GroundTruthTreatment(BareTreatment):
             }
         else:
             self.dense_receipt = self.dense_index.ensure().as_dict()
-        if self.retrieval_mode == "hybrid_required" and not self.dense_receipt.get(
-            "query_ready"
-        ):
+        if self.retrieval_mode == "hybrid_required" and not self.dense_receipt.get("query_ready"):
             receipt = self.service.status()
             if self._not_applicable(receipt):
                 # A repository can become empty or unsupported after the
@@ -430,9 +414,7 @@ class GroundTruthTreatment(BareTreatment):
 
     @staticmethod
     def _not_applicable(receipt: Any) -> bool:
-        reasons = " ".join(
-            str(item) for item in getattr(receipt, "degraded_reasons", ())
-        ).lower()
+        reasons = " ".join(str(item) for item in getattr(receipt, "degraded_reasons", ())).lower()
         return int(getattr(receipt, "files_attempted", -1)) == 0 and any(
             marker in reasons
             for marker in ("no_supported_source", "no_indexable", "unsupported_language")
@@ -449,9 +431,17 @@ class GroundTruthTreatment(BareTreatment):
         return TreatmentUnavailableError(error)
 
     def _abstain(self, reason: str) -> str:
-        """Record an honest no-treatment result without aborting the agent."""
+        """Record a genuinely unsupported treatment without aborting the agent."""
         self.treatment_status = TreatmentStatus.NOT_APPLICABLE
         self.errors.append(f"NOT_APPLICABLE:{reason}")
+        self.context_dirty = False
+        return ""
+
+    def _abstain_initial_delivery(self, *reasons: str) -> str:
+        """Deliver nothing initially while keeping a healthy substrate active."""
+
+        self.initial_delivery_disposition = "ABSTAINED"
+        self.initial_delivery_reasons = list(dict.fromkeys(reason for reason in reasons if reason))
         self.context_dirty = False
         return ""
 
@@ -480,9 +470,7 @@ class GroundTruthTreatment(BareTreatment):
                 query_rows.append(("observed-state", dynamic_query))
             unique_queries = tuple(
                 dict.fromkeys(
-                    (identifier, text.strip())
-                    for identifier, text in query_rows
-                    if text.strip()
+                    (identifier, text.strip()) for identifier, text in query_rows if text.strip()
                 )
             )[:8]
             dense_queries = []
@@ -492,9 +480,7 @@ class GroundTruthTreatment(BareTreatment):
                 self.dense_query_receipts.append(
                     {
                         "query_id": query_id,
-                        "query_sha256": hashlib.sha256(
-                            query_text.encode("utf-8")
-                        ).hexdigest(),
+                        "query_sha256": hashlib.sha256(query_text.encode("utf-8")).hexdigest(),
                         "query_ready": dense_query.query_ready,
                         "status": dense_query.status.value,
                         "source_revision": dense_query.source_revision,
@@ -513,8 +499,8 @@ class GroundTruthTreatment(BareTreatment):
                 similarity_scores: dict[str, float] = {}
                 for query in ready_queries:
                     for rank, candidate in enumerate(query.candidates, start=1):
-                        rrf_scores[candidate.path] = (
-                            rrf_scores.get(candidate.path, 0.0) + 1.0 / (60 + rank)
+                        rrf_scores[candidate.path] = rrf_scores.get(candidate.path, 0.0) + 1.0 / (
+                            60 + rank
                         )
                         similarity_scores[candidate.path] = max(
                             similarity_scores.get(candidate.path, 0.0),
@@ -554,8 +540,7 @@ class GroundTruthTreatment(BareTreatment):
                 else:
                     raise self._unavailable(
                         receipt,
-                        "dense_query_not_ready:"
-                        + ",".join(dense_query.degraded_reasons),
+                        "dense_query_not_ready:" + ",".join(dense_query.degraded_reasons),
                     )
         state = ContextCompileRequest(
             task=self.task,
@@ -604,9 +589,7 @@ class GroundTruthTreatment(BareTreatment):
         existing = {item.path for item in packet.inspection_public_surface}
         primary_facet_ids = tuple(
             dict.fromkeys(
-                facet_id
-                for item in packet.primary_edit_targets
-                for facet_id in item.facet_ids
+                facet_id for item in packet.primary_edit_targets for facet_id in item.facet_ids
             )
         )
         additions: list[ContextEvidenceItem] = []
@@ -638,12 +621,8 @@ class GroundTruthTreatment(BareTreatment):
                     relation="",
                     confidence=1.0,
                     verification_status="verified_source_identity",
-                    source_revision=str(
-                        packet.repository_identity.get("source_revision") or ""
-                    ),
-                    graph_revision=str(
-                        packet.repository_identity.get("graph_revision") or ""
-                    ),
+                    source_revision=str(packet.repository_identity.get("source_revision") or ""),
+                    graph_revision=str(packet.repository_identity.get("graph_revision") or ""),
                     evidence_sha256=digest,
                     decision_reason=candidate.reason,
                     completeness="existing_public_surface_file",
@@ -656,21 +635,18 @@ class GroundTruthTreatment(BareTreatment):
             return packet
         coverage = dict(packet.coverage)
         coverage["deterministic_public_surfaces"] = [
-            {"path": item.path, "reason": item.decision_reason}
-            for item in additions
+            {"path": item.path, "reason": item.decision_reason} for item in additions
         ]
         return replace(
             packet,
             inspection_public_surface=tuple(
                 {
-                    item.path: item
-                    for item in (*additions, *packet.inspection_public_surface)
+                    item.path: item for item in (*additions, *packet.inspection_public_surface)
                 }.values()
             ),
             evidence_items=tuple(
                 {
-                    item.evidence_sha256: item
-                    for item in (*packet.evidence_items, *additions)
+                    item.evidence_sha256: item for item in (*packet.evidence_items, *additions)
                 }.values()
             ),
             coverage=coverage,
@@ -683,6 +659,7 @@ class GroundTruthTreatment(BareTreatment):
             return packet
         groups = (
             packet.primary_edit_targets,
+            packet.inspection_implementation_owners,
             packet.inspection_public_surface,
             packet.inspection_integration,
             packet.inspection_candidates,
@@ -736,9 +713,7 @@ class GroundTruthTreatment(BareTreatment):
                         processes = projector.project_processes(
                             anchor.symbol, file_path=anchor.path
                         )
-                        impact = projector.project_impact(
-                            anchor.symbol, file_path=anchor.path
-                        )
+                        impact = projector.project_impact(anchor.symbol, file_path=anchor.path)
                     except Exception as exc:  # noqa: BLE001 - one facet fails closed
                         reasons.append(
                             "graph_projection_failed:"
@@ -752,9 +727,7 @@ class GroundTruthTreatment(BareTreatment):
                 execution_paths=(),
                 change_surface=(),
                 uncertainties=tuple(
-                    dict.fromkeys(
-                        (*reasons, f"graph_projection_failed:{type(exc).__name__}")
-                    )
+                    dict.fromkeys((*reasons, f"graph_projection_failed:{type(exc).__name__}"))
                 ),
             )
 
@@ -777,9 +750,7 @@ class GroundTruthTreatment(BareTreatment):
         )
         if results and not any(
             (
-                (item.get("anchors") or [{}])[0].get("process", {}).get(
-                    "source_revision", ""
-                ),
+                (item.get("anchors") or [{}])[0].get("process", {}).get("source_revision", ""),
                 tuple(
                     (anchor.get("path", ""), anchor.get("symbol", ""))
                     for anchor in item.get("anchors", [])
@@ -817,14 +788,11 @@ class GroundTruthTreatment(BareTreatment):
                 )
             if impact.status is not ProjectionStatus.READY:
                 reasons.append(
-                    f"impact_projection_{impact.status.value.lower()}:"
-                    f"{anchor.path}#{anchor.symbol}"
+                    f"impact_projection_{impact.status.value.lower()}:{anchor.path}#{anchor.symbol}"
                 )
             reasons.extend(processes.receipt.truncation_reasons)
             reasons.extend(impact.receipt.truncation_reasons)
-            truncated = bool(
-                truncated or processes.receipt.truncated or impact.receipt.truncated
-            )
+            truncated = bool(truncated or processes.receipt.truncated or impact.receipt.truncated)
 
             anchor_processes: list[tuple[str, str]] = []
             if processes.status is ProjectionStatus.READY:
@@ -837,9 +805,7 @@ class GroundTruthTreatment(BareTreatment):
                         if index == 0:
                             nodes.append(f"{step.source.file_path}#{step.source.name}")
                         nodes.append(f"{step.target.file_path}#{step.target.name}")
-                        receiver = (
-                            f",receiver={step.receiver_type}" if step.receiver_type else ""
-                        )
+                        receiver = f",receiver={step.receiver_type}" if step.receiver_type else ""
                         edge_receipts.append(
                             f"edge={step.evidence.edge_id},resolution="
                             f"{step.evidence.resolution_outcome}{receiver}"
@@ -867,26 +833,18 @@ class GroundTruthTreatment(BareTreatment):
                 for fact in impact.impacts:
                     if fact.impact_id in exposed:
                         continue
-                    receiver = (
-                        f" receiver={fact.receiver_type}" if fact.receiver_type else ""
-                    )
+                    receiver = f" receiver={fact.receiver_type}" if fact.receiver_type else ""
                     edge_identity = fact.evidence.edge_id or (
                         "assertion:" + str(fact.evidence.assertion_id)
                     )
                     line = (
                         f"{fact.impact_id} anchor={anchor.path}#{anchor.symbol} "
-                        + (
-                            "req=" + ",".join(anchor.facet_ids) + " "
-                            if anchor.facet_ids
-                            else ""
-                        )
+                        + ("req=" + ",".join(anchor.facet_ids) + " " if anchor.facet_ids else "")
                         + f"depth={fact.depth} {fact.relationship} "
                         f"{fact.impacted.file_path}#{fact.impacted.name} "
                         f"direction={fact.traversal_direction} edge={edge_identity}{receiver}"
                     )
-                    anchor_impacts.append(
-                        (fact.impact_id, fact.impacted.file_path, line)
-                    )
+                    anchor_impacts.append((fact.impact_id, fact.impacted.file_path, line))
                     if fact.impacted.is_test:
                         affected_tests.append(fact.impacted.file_path)
             impact_candidates.append(anchor_impacts)
@@ -920,9 +878,7 @@ class GroundTruthTreatment(BareTreatment):
             packet,
             execution_paths=tuple(line for _claim, line in selected_processes),
             change_surface=tuple(line for _claim, _path, line in selected_impacts),
-            affected_tests=tuple(
-                dict.fromkeys((*packet.affected_tests, *affected_tests))
-            )[:5],
+            affected_tests=tuple(dict.fromkeys((*packet.affected_tests, *affected_tests)))[:5],
             uncertainties=tuple(dict.fromkeys(reasons)),
             coverage=coverage,
             projection_claim_ids=tuple(dict.fromkeys(projection_claims)),
@@ -930,7 +886,13 @@ class GroundTruthTreatment(BareTreatment):
         )
 
     def _render(self, *, update: bool, budget: int, delivered_before_call: int) -> str:
-        if update and self.delivery_count >= max(1, self.max_delivery_count):
+        update_deliveries = sum(
+            item.get("kind") == "repository_update" for item in self.provider_delivery_receipts
+        )
+        if update and (
+            self.delivery_count >= max(1, self.max_delivery_count)
+            or update_deliveries >= max(0, self.max_update_delivery_count)
+        ):
             self.errors.append("context_delivery_limit_reached")
             self.context_dirty = False
             return ""
@@ -945,22 +907,58 @@ class GroundTruthTreatment(BareTreatment):
             raise self._unavailable(
                 receipt, f"context_compile_failed:{type(exc).__name__}"
             ) from exc
+        self.compile_receipts.append(
+            {
+                "schema": "gt.context_compile_receipt.v1",
+                "kind": "repository_update" if update else "repository_start",
+                "source_revision": receipt.source_revision,
+                "graph_revision": receipt.graph_checksum_or_identity,
+                "retrieval_mode": self.retrieval_mode,
+                "packet": packet.as_dict(),
+            }
+        )
+        self.compile_receipts = self.compile_receipts[-16:]
         if packet.status is ContextStatus.FAILED:
             reason = ",".join(packet.uncertainties) or "context_compile_failed"
             raise self._unavailable(receipt, reason)
         if packet.status is ContextStatus.ABSTAIN:
             if not update:
-                reason = ",".join(packet.uncertainties) or "no_repository_evidence"
-                return self._abstain(f"context_abstained:{reason}")
+                reasons = tuple(packet.uncertainties) or ("no_repository_evidence",)
+                return self._abstain_initial_delivery(*reasons)
             self.context_dirty = False
             return ""
         normalized_packet = packet.as_dict()
+        requirement_ids_by_facet: dict[str, tuple[str, ...]] = {}
+        for requirement in normalized_packet["task_requirements"]:
+            facet_id = str(requirement.get("facet_id") or "")
+            requirement_id = str(requirement.get("requirement_id") or "")
+            if facet_id and requirement_id:
+                requirement_ids_by_facet[facet_id] = tuple(
+                    dict.fromkeys(
+                        (*requirement_ids_by_facet.get(facet_id, ()), requirement_id)
+                    )
+                )
+
+        def scoped_requirements(facet_ids: list[str] | tuple[str, ...]) -> list[str]:
+            mapped = [
+                requirement_id
+                for facet_id in facet_ids
+                for requirement_id in requirement_ids_by_facet.get(facet_id, ())
+            ]
+            return list(dict.fromkeys(mapped or list(facet_ids)))
 
         def feature_paths(values: list[Any]) -> tuple[str, ...]:
             paths: list[str] = []
             for value in values:
                 if isinstance(value, dict) and value.get("path"):
                     paths.append(str(value["path"]))
+                    continue
+                if isinstance(value, dict) and isinstance(value.get("candidates"), list):
+                    paths.extend(
+                        str(candidate["path"])
+                        for candidate in value["candidates"]
+                        if isinstance(candidate, dict) and candidate.get("path")
+                    )
                     continue
                 text = str(value or "")
                 matches = tuple(_PATH_TOKEN.finditer(text))
@@ -972,6 +970,10 @@ class GroundTruthTreatment(BareTreatment):
 
         candidate_features = {
             "exact_edit_targets": normalized_packet["primary_edit_targets"],
+            "implementation_owner_candidates": normalized_packet[
+                "inspection_implementation_owners"
+            ],
+            "ambiguous_identity": normalized_packet["ambiguous_identities"],
             "inspection_candidates": normalized_packet["inspection_candidates"],
             "public_surface": normalized_packet["inspection_public_surface"],
             "integration": normalized_packet["inspection_integration"],
@@ -982,6 +984,7 @@ class GroundTruthTreatment(BareTreatment):
             "affected_tests": normalized_packet["affected_tests"],
             "validation": normalized_packet["validation_plan"],
             "proposed_new_file": normalized_packet["proposed_new_files"],
+            "uncovered_requirement": normalized_packet["uncovered_requirements"],
             "uncovered_facet": normalized_packet["uncovered_facets"],
         }
         for feature, values in candidate_features.items():
@@ -1000,24 +1003,29 @@ class GroundTruthTreatment(BareTreatment):
         # agent inspect the repository itself.  Real edit targets,
         # relationships, impact/test facts, or validation plans remain
         # eligible for delivery even when the graph declares limitations.
-        decision_grade_initial = any(
-            normalized_packet[name]
-            for name in (
-                "primary_edit_targets",
-                "inspection_public_surface",
-                "inspection_integration",
-                "supporting_files",
-                "execution_paths",
-                "change_surface",
-                "affected_tests",
-                "validation_plan",
+        decision_grade_initial = (
+            any(
+                normalized_packet[name]
+                for name in (
+                    "primary_edit_targets",
+                    "inspection_implementation_owners",
+                    "ambiguous_identities",
+                    "inspection_public_surface",
+                    "inspection_integration",
+                    "supporting_files",
+                    "execution_paths",
+                    "change_surface",
+                    "affected_tests",
+                    "validation_plan",
+                )
             )
-        ) or any(
-            item.get("kind") == "relationship"
-            for item in normalized_packet["evidence_items"]
-        ) or any(
-            item.get("decision_reason") == "task_path_phrase_inspection"
-            for item in normalized_packet["inspection_candidates"]
+            or any(
+                item.get("kind") == "relationship" for item in normalized_packet["evidence_items"]
+            )
+            or any(
+                item.get("decision_reason") == "task_path_phrase_inspection"
+                for item in normalized_packet["inspection_candidates"]
+            )
         )
         if (
             not update
@@ -1027,7 +1035,7 @@ class GroundTruthTreatment(BareTreatment):
             and "no_complete_evidence" in normalized_packet["uncertainties"]
         ):
             self.suppressed_inspection_only_updates += 1
-            return self._abstain("context_abstained:no_decision_grade_evidence")
+            return self._abstain_initial_delivery("no_decision_grade_evidence")
 
         def compact_target(item: dict[str, Any]) -> dict[str, Any]:
             return {
@@ -1038,7 +1046,7 @@ class GroundTruthTreatment(BareTreatment):
                 "evidence_id": item["evidence_sha256"][:16],
                 "decision_reason": item["decision_reason"],
                 "role": item["localization_role"],
-                "requirements": list(item["facet_ids"]),
+                "requirements": scoped_requirements(item["facet_ids"]),
             }
 
         # The normalized packet retains every field for local consumers. The
@@ -1049,9 +1057,7 @@ class GroundTruthTreatment(BareTreatment):
         provider_coverage = {
             "documents_considered": raw_coverage.get("documents_considered", 0),
             "ranked_files": raw_coverage.get("ranked_files", 0),
-            "certified_edges_selected": raw_coverage.get(
-                "certified_edges_selected", 0
-            ),
+            "certified_edges_selected": raw_coverage.get("certified_edges_selected", 0),
             "rejected_edges": raw_coverage.get("rejected_edges", 0),
             "retrieval_mode": raw_coverage.get("retrieval_mode", self.retrieval_mode),
             "dense_candidates": raw_coverage.get("dense_candidates", 0),
@@ -1068,6 +1074,7 @@ class GroundTruthTreatment(BareTreatment):
             item["evidence_sha256"][:16]: item["evidence_sha256"]
             for group_name in (
                 "primary_edit_targets",
+                "inspection_implementation_owners",
                 "inspection_candidates",
                 "inspection_public_surface",
                 "inspection_integration",
@@ -1076,31 +1083,35 @@ class GroundTruthTreatment(BareTreatment):
             )
             for item in normalized_packet[group_name]
         }
+        evidence_identity.update(
+            {
+                item["evidence_sha256"][:16]: item["evidence_sha256"]
+                for item in normalized_packet["ambiguous_identities"]
+                if item.get("evidence_sha256")
+            }
+        )
         relationship_evidence = [
             {
                 "evidence_id": item["evidence_sha256"][:16],
                 "source": item["source_path"]
                 + (":" + item["source_symbol"] if item["source_symbol"] else ""),
                 "relation": item["relation"],
-                "target": item["path"]
-                + (":" + item["symbol"] if item["symbol"] else ""),
+                "target": item["path"] + (":" + item["symbol"] if item["symbol"] else ""),
                 "scope": item["completeness"],
                 "role": item["localization_role"],
-                "requirements": list(item["facet_ids"]),
+                "requirements": scoped_requirements(item["facet_ids"]),
             }
             for item in normalized_packet["evidence_items"]
             if item["kind"] == "relationship"
         ]
         semantic_evidence = [
-            item
-            for item in normalized_packet["evidence_items"]
-            if item["kind"] == "semantic_fact"
+            item for item in normalized_packet["evidence_items"] if item["kind"] == "semantic_fact"
         ]
         semantic_facts = [
             {
                 "fact": fact,
                 "evidence_id": semantic_evidence[index]["evidence_sha256"][:16],
-                "requirements": list(semantic_evidence[index]["facet_ids"]),
+                "requirements": scoped_requirements(semantic_evidence[index]["facet_ids"]),
             }
             for index, fact in enumerate(normalized_packet["semantic_facts"])
             if index < len(semantic_evidence)
@@ -1108,21 +1119,32 @@ class GroundTruthTreatment(BareTreatment):
         packet_dict = {
             "status": normalized_packet["status"],
             "task_facets": normalized_packet["task_facets"],
+            "task_requirements": normalized_packet["task_requirements"],
+            "requirement_coverage": normalized_packet["requirement_coverage"],
+            "uncovered_requirements": normalized_packet["uncovered_requirements"],
             "primary_edit_targets": [
+                compact_target(item) for item in normalized_packet["primary_edit_targets"]
+            ],
+            "inspection_implementation_owners": [
                 compact_target(item)
-                for item in normalized_packet["primary_edit_targets"]
+                for item in normalized_packet["inspection_implementation_owners"]
             ],
             "inspection_candidates": [
-                compact_target(item)
-                for item in normalized_packet["inspection_candidates"]
+                compact_target(item) for item in normalized_packet["inspection_candidates"]
             ],
             "inspection_public_surface": [
-                compact_target(item)
-                for item in normalized_packet["inspection_public_surface"]
+                compact_target(item) for item in normalized_packet["inspection_public_surface"]
             ],
             "inspection_integration": [
-                compact_target(item)
-                for item in normalized_packet["inspection_integration"]
+                compact_target(item) for item in normalized_packet["inspection_integration"]
+            ],
+            "ambiguous_identities": [
+                {
+                    **item,
+                    "evidence_id": item["evidence_sha256"][:16],
+                    "requirements": scoped_requirements(item.get("facet_ids") or ()),
+                }
+                for item in normalized_packet["ambiguous_identities"]
             ],
             "supporting_files": [
                 compact_target(item) for item in normalized_packet["supporting_files"]
@@ -1140,10 +1162,32 @@ class GroundTruthTreatment(BareTreatment):
             "truncated": normalized_packet["truncated"],
             "relationships": relationship_evidence,
         }
+        # Provider delivery is an ordered decision surface, not a dump of all
+        # compiled candidates. Keep the full typed ledger in compile_receipts,
+        # but expose one best inspection owner and one role-specific boundary.
+        # A generic candidate is useful only when stronger exact, ambiguous,
+        # owner, or certified-integration localization is absent.
+        packet_dict["inspection_implementation_owners"] = packet_dict[
+            "inspection_implementation_owners"
+        ][:1]
+        packet_dict["inspection_public_surface"] = packet_dict["inspection_public_surface"][:1]
+        packet_dict["inspection_integration"] = packet_dict["inspection_integration"][:1]
+        packet_dict["inspection_candidates"] = sorted(
+            packet_dict["inspection_candidates"],
+            key=lambda item: (
+                item.get("decision_reason") != "task_path_phrase_inspection",
+                not bool(item.get("requirements")),
+                item.get("decision_reason") != "hybrid_rrf_inspection",
+                str(item.get("path") or "").casefold(),
+            ),
+        )[:1]
+        last_resort_inspection_candidate = packet_dict["inspection_candidates"][:1]
         decision_grade_update = any(
             packet_dict[name]
             for name in (
                 "primary_edit_targets",
+                "inspection_implementation_owners",
+                "ambiguous_identities",
                 "inspection_public_surface",
                 "inspection_integration",
                 "supporting_files",
@@ -1178,8 +1222,7 @@ class GroundTruthTreatment(BareTreatment):
         def encode() -> str:
             kind = "repository_update" if update else "repository_start"
             lines = [
-                '<groundtruth-repository-context schema="gt.agent_context.v6" '
-                f'kind="{kind}">',
+                f'<groundtruth-repository-context schema="gt.agent_context.v7" kind="{kind}">',
                 "RECEIPT "
                 f"repository={Path(receipt.repository).name or receipt.repository} "
                 f"commit={receipt.commit_sha[:12]} source={receipt.source_revision[:12]} "
@@ -1194,6 +1237,8 @@ class GroundTruthTreatment(BareTreatment):
                 requirement
                 for group_name in (
                     "primary_edit_targets",
+                    "inspection_implementation_owners",
+                    "ambiguous_identities",
                     "inspection_candidates",
                     "inspection_public_surface",
                     "inspection_integration",
@@ -1204,25 +1249,55 @@ class GroundTruthTreatment(BareTreatment):
                 for item in packet_dict[group_name]
                 for requirement in item.get("requirements", ())
             }
-            referenced_facets = [
-                facet
-                for facet in packet_dict["task_facets"]
-                if facet["facet_id"] in referenced_requirements
-            ]
+            coverage_by_requirement = {
+                item["requirement_id"]: item
+                for item in packet_dict["requirement_coverage"]
+            }
+            if packet_dict["task_requirements"]:
+                referenced_rows = [
+                    requirement
+                    for requirement in packet_dict["task_requirements"]
+                    if requirement["requirement_id"] in referenced_requirements
+                    or requirement["requirement_id"] in packet_dict["uncovered_requirements"]
+                ]
 
-            def facet_details(
-                facet: dict[str, Any], *, value_limit: int
-            ) -> tuple[str, ...]:
-                details: list[str] = []
-                for label, key in (
-                    ("exact", "exact_symbols"),
-                    ("unresolved", "unresolved_symbols"),
-                    ("owners", "owning_symbols"),
-                ):
-                    values = facet.get(key) or []
-                    if values:
-                        details.append(f"{label}=" + ",".join(values[:value_limit]))
-                return tuple(details)
+                def requirement_details(
+                    requirement: dict[str, Any], *, value_limit: int
+                ) -> tuple[str, ...]:
+                    coverage = coverage_by_requirement.get(requirement["requirement_id"], {})
+                    paths = list(coverage.get("paths") or ())[:value_limit]
+                    details = (
+                        f"intent={requirement['intent']}",
+                        f"entity={requirement['entity']}",
+                        f"resolution={requirement['resolution']}",
+                        f"coverage={coverage.get('status', 'UNCOVERED')}",
+                        f"mechanism={coverage.get('mechanism', 'NONE')}",
+                    )
+                    return (
+                        *details,
+                        *((f"paths={','.join(paths)}",) if paths else ()),
+                    )
+
+            else:
+                referenced_rows = [
+                    facet
+                    for facet in packet_dict["task_facets"]
+                    if facet["facet_id"] in referenced_requirements
+                ]
+
+                def requirement_details(
+                    requirement: dict[str, Any], *, value_limit: int
+                ) -> tuple[str, ...]:
+                    details: list[str] = []
+                    for label, key in (
+                        ("exact", "exact_symbols"),
+                        ("unresolved", "unresolved_symbols"),
+                        ("owners", "owning_symbols"),
+                    ):
+                        values = requirement.get(key) or []
+                        if values:
+                            details.append(f"{label}=" + ",".join(values[:value_limit]))
+                    return tuple(details)
 
             requirement_aliases: dict[str, str] = {}
             visible_facets: list[tuple[dict[str, Any], str, tuple[str, ...]]] = []
@@ -1232,38 +1307,40 @@ class GroundTruthTreatment(BareTreatment):
                 # bind every duplicate facet to the same provider alias.  The
                 # full facet ledger remains in the persisted packet receipt.
                 aliases_by_signature: dict[tuple[str, tuple[str, ...]], str] = {}
-                for facet in referenced_facets:
-                    details = facet_details(facet, value_limit=1)
+                for requirement in referenced_rows:
+                    details = requirement_details(requirement, value_limit=1)
                     if not details:
                         continue
-                    signature = (str(facet["role"]), details)
+                    identity = str(
+                        requirement.get("requirement_id") or requirement.get("facet_id")
+                    )
+                    signature = (str(requirement.get("intent") or requirement.get("role")), details)
                     alias = aliases_by_signature.get(signature)
                     if alias is None:
                         if len(visible_facets) >= provider_requirement_limit:
                             continue
                         alias = f"R{len(visible_facets) + 1}"
                         aliases_by_signature[signature] = alias
-                        visible_facets.append((facet, alias, details))
-                    requirement_aliases[facet["facet_id"]] = alias
+                        visible_facets.append((requirement, alias, details))
+                    requirement_aliases[identity] = alias
             else:
                 visible_facets = [
-                    (facet, facet["facet_id"], facet_details(facet, value_limit=4))
-                    for facet in referenced_facets[:12]
+                    (
+                        requirement,
+                        str(requirement.get("requirement_id") or requirement.get("facet_id")),
+                        requirement_details(requirement, value_limit=4),
+                    )
+                    for requirement in referenced_rows[:12]
                 ]
 
-            for facet, alias, details in visible_facets:
+            for _requirement, alias, details in visible_facets:
                 # A facet with no provider-readable identity only contributes
                 # an opaque internal ID. Keep its mapping in the persisted
                 # packet receipt, but spend provider tokens on repository
                 # facts the agent can act on.
                 if not details:
                     continue
-                suffix = " " + " ".join(details)
-                lines.append(
-                    "REQUIREMENT "
-                    f"{alias} "
-                    f"role={facet['role']}{suffix}"
-                )
+                lines.append(f"REQUIREMENT {alias} " + " ".join(details))
 
             def requirement_text(values: list[str] | tuple[str, ...]) -> str:
                 requirements = list(dict.fromkeys(values))
@@ -1279,8 +1356,7 @@ class GroundTruthTreatment(BareTreatment):
                     )
                 )
                 omitted = sum(
-                    requirement not in requirement_aliases
-                    for requirement in requirements
+                    requirement not in requirement_aliases for requirement in requirements
                 )
                 if omitted:
                     visible.append(f"+{omitted}")
@@ -1294,10 +1370,7 @@ class GroundTruthTreatment(BareTreatment):
                 suffix = f" | {excerpt}" if excerpt else ""
                 requirements = requirement_text(item.get("requirements") or ())
                 if compact_output:
-                    return (
-                        f"{prefix} {location} claim={item['evidence_id']} "
-                        f"req={requirements}"
-                    )
+                    return f"{prefix} {location} claim={item['evidence_id']} req={requirements}"
                 return (
                     f"{prefix} {location} claim={item['evidence_id']} "
                     f"req={requirements} "
@@ -1306,10 +1379,29 @@ class GroundTruthTreatment(BareTreatment):
 
             for item in packet_dict["primary_edit_targets"]:
                 lines.append(target_line("EXACT_EDIT_TARGET", item))
-            for item in packet_dict["inspection_candidates"]:
+            for item in packet_dict["inspection_implementation_owners"]:
                 lines.append(
-                    target_line("INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY", item)
+                    target_line(
+                        "INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY",
+                        item,
+                    )
                 )
+            for item in packet_dict["ambiguous_identities"]:
+                candidates = ",".join(
+                    f"{candidate['path']}:{candidate['line']}#{candidate['symbol']}"
+                    for candidate in item["candidates"]
+                )
+                lines.append(
+                    "AMBIGUOUS_IDENTITY "
+                    f"symbol={item['entity']} "
+                    f"claim={item['evidence_id']} "
+                    f"req={requirement_text(item.get('facet_ids') or ())} "
+                    f"total={item['total_candidates']} "
+                    f"truncated={str(bool(item['truncated'])).lower()} "
+                    f"candidates={candidates} action={item['next_action']}"
+                )
+            for item in packet_dict["inspection_candidates"]:
+                lines.append(target_line("INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY", item))
             for item in packet_dict["inspection_public_surface"]:
                 lines.append(target_line("INSPECT_PUBLIC_SURFACE", item))
             for item in packet_dict["inspection_integration"]:
@@ -1332,6 +1424,7 @@ class GroundTruthTreatment(BareTreatment):
                     f"req={requirement_text(item.get('requirements') or ())} "
                     f"{item['fact']}"
                 )
+
             def projection_line(item: str) -> str:
                 value = item
                 for requirement, alias in requirement_aliases.items():
@@ -1350,16 +1443,29 @@ class GroundTruthTreatment(BareTreatment):
                 for item in packet_dict["execution_paths"]
             )
             lines.extend(
-                f"BOUNDED_IMPACT {projection_line(item)}"
-                for item in packet_dict["change_surface"]
+                f"BOUNDED_IMPACT {projection_line(item)}" for item in packet_dict["change_surface"]
             )
             lines.extend(f"AFFECTED_TEST {item}" for item in packet_dict["affected_tests"])
             lines.extend(f"VALIDATE {item}" for item in packet_dict["validation_plan"])
             lines.extend(
-                f"PROPOSED_NEW_FILE {item} fact=false"
-                for item in packet_dict["proposed_new_files"]
+                f"PROPOSED_NEW_FILE {item} fact=false" for item in packet_dict["proposed_new_files"]
             )
-            for item in packet_dict["uncovered_facets"]:
+            uncovered_requirement_rows = {
+                item["requirement_id"]: item for item in packet_dict["task_requirements"]
+            }
+            for requirement_id in packet_dict["uncovered_requirements"]:
+                item = uncovered_requirement_rows.get(requirement_id, {})
+                alias = requirement_aliases.get(requirement_id, requirement_id)
+                lines.append(
+                    "UNCOVERED_REQUIREMENT "
+                    f"{alias} entity={item.get('entity', 'unknown')} "
+                    f"intent={item.get('intent', 'unknown')}"
+                )
+            for item in (
+                packet_dict["uncovered_facets"]
+                if not packet_dict["uncovered_requirements"]
+                else ()
+            ):
                 uncovered = str(item).strip()
                 if compact_output:
                     facet_id, separator, detail = uncovered.partition(" ")
@@ -1390,15 +1496,41 @@ class GroundTruthTreatment(BareTreatment):
             return "\n".join(lines)
 
         rendered = encode()
-        token_ceiling = max(
-            1, self.update_token_budget if update else self.start_token_budget
+        token_ceiling = max(1, self.update_token_budget if update else self.start_token_budget)
+        delivered_tokens = sum(
+            int(item.get("context_token_count") or 0) for item in self.provider_delivery_receipts
         )
+        remaining_total_tokens = max(0, int(self.total_context_token_budget) - delivered_tokens)
+        if remaining_total_tokens == 0:
+            self.errors.append("total_context_delivery_limit_reached")
+            self.context_dirty = False
+            return ""
+        token_ceiling = min(token_ceiling, remaining_total_tokens)
 
         def too_large() -> bool:
             return len(rendered) > budget or _bounded_token_count(rendered) > token_ceiling
 
+        def bound_ambiguities(group_limit: int, candidate_limit: int) -> None:
+            original = list(packet_dict["ambiguous_identities"])
+            bounded = []
+            for group in original[:group_limit]:
+                candidates = list(group.get("candidates") or ())
+                bounded.append(
+                    {
+                        **group,
+                        "candidates": candidates[:candidate_limit],
+                        "truncated": bool(
+                            group.get("truncated") or len(candidates) > candidate_limit
+                        ),
+                    }
+                )
+            if len(original) > len(bounded):
+                packet_dict["truncated"] = True
+            packet_dict["ambiguous_identities"] = bounded
+
         if too_large():
             compact_output = True
+            bound_ambiguities(2, 3)
             packet_dict["coverage"] = {
                 "retrieval_mode": provider_coverage["retrieval_mode"],
                 "dense_status": provider_coverage["dense_status"],
@@ -1406,12 +1538,17 @@ class GroundTruthTreatment(BareTreatment):
             }
             packet_dict["semantic_graph_receipt"] = {}
             packet_dict["supporting_files"] = []
+            packet_dict["inspection_implementation_owners"] = packet_dict[
+                "inspection_implementation_owners"
+            ][:2]
             packet_dict["inspection_candidates"] = sorted(
                 packet_dict["inspection_candidates"],
-                key=lambda item: item.get("decision_reason")
-                != "task_path_phrase_inspection",
+                key=lambda item: item.get("decision_reason") != "task_path_phrase_inspection",
             )[:1]
             packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
+            packet_dict["uncovered_requirements"] = packet_dict[
+                "uncovered_requirements"
+            ][:2]
             packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:2]
             packet_dict["uncertainties"] = packet_dict["uncertainties"][:4]
             for item in packet_dict["primary_edit_targets"]:
@@ -1424,8 +1561,10 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict["truncated"] = True
             rendered = encode()
         if too_large():
+            bound_ambiguities(1, 2)
             for group_name in (
                 "primary_edit_targets",
+                "inspection_implementation_owners",
                 "inspection_candidates",
                 "inspection_public_surface",
                 "inspection_integration",
@@ -1439,6 +1578,9 @@ class GroundTruthTreatment(BareTreatment):
             ][:1]
             packet_dict["uncertainties"] = packet_dict["uncertainties"][:2]
             packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
+            packet_dict["uncovered_requirements"] = packet_dict[
+                "uncovered_requirements"
+            ][:1]
             for group_name in (
                 "primary_edit_targets",
                 "inspection_public_surface",
@@ -1455,22 +1597,23 @@ class GroundTruthTreatment(BareTreatment):
             # one row from every available decision role before retaining
             # rank-only candidates or verbose limitation metadata.
             packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:2]
-            packet_dict["inspection_public_surface"] = packet_dict[
-                "inspection_public_surface"
+            packet_dict["inspection_implementation_owners"] = packet_dict[
+                "inspection_implementation_owners"
             ][:1]
-            packet_dict["inspection_integration"] = packet_dict[
-                "inspection_integration"
-            ][:1]
+            bound_ambiguities(1, 1)
+            packet_dict["inspection_public_surface"] = packet_dict["inspection_public_surface"][:1]
+            packet_dict["inspection_integration"] = packet_dict["inspection_integration"][:1]
             packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:2]
             packet_dict["execution_paths"] = packet_dict["execution_paths"][:1]
             packet_dict["change_surface"] = packet_dict["change_surface"][:2]
             packet_dict["affected_tests"] = packet_dict["affected_tests"][:2]
             packet_dict["validation_plan"] = packet_dict["validation_plan"][:2]
             packet_dict["relationships"] = packet_dict["relationships"][:2]
-            packet_dict["proposed_new_files"] = packet_dict[
-                "proposed_new_files"
-            ][:1]
+            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
             packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
+            packet_dict["uncovered_requirements"] = packet_dict[
+                "uncovered_requirements"
+            ][:1]
             packet_dict["uncertainties"] = []
             rendered = encode()
         if too_large():
@@ -1491,6 +1634,7 @@ class GroundTruthTreatment(BareTreatment):
             # process/impact and affected test carry stronger decision value.
             # Keep those roles and bound their already persisted projections.
             packet_dict["semantic_facts"] = []
+
             def bounded_projection(item: str, limit: int = 240) -> str:
                 value = str(item).strip()
                 if len(value) <= limit:
@@ -1501,12 +1645,10 @@ class GroundTruthTreatment(BareTreatment):
                 return value[:boundary].rstrip() + " truncated=true"
 
             packet_dict["execution_paths"] = [
-                bounded_projection(item)
-                for item in packet_dict["execution_paths"][:1]
+                bounded_projection(item) for item in packet_dict["execution_paths"][:1]
             ]
             packet_dict["change_surface"] = [
-                bounded_projection(item)
-                for item in packet_dict["change_surface"][:1]
+                bounded_projection(item) for item in packet_dict["change_surface"][:1]
             ]
             rendered = encode()
         if too_large() and packet_dict["affected_tests"]:
@@ -1530,6 +1672,36 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict["inspection_candidates"] = []
             rendered = encode()
         if too_large():
+            # Last-resort provider view: one truthful localization fact plus
+            # the revision receipt. The complete role/facet/projection ledger
+            # remains in the compile receipt; a verbose packet must never turn
+            # a healthy treatment into a product failure.
+            provider_requirement_limit = 1
+            packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:1]
+            bound_ambiguities(1, 1)
+            packet_dict["inspection_implementation_owners"] = packet_dict[
+                "inspection_implementation_owners"
+            ][:1]
+            if packet_dict["primary_edit_targets"] or packet_dict["ambiguous_identities"]:
+                packet_dict["inspection_implementation_owners"] = []
+            packet_dict["inspection_candidates"] = (
+                [] if packet_dict["primary_edit_targets"] else last_resort_inspection_candidate
+            )
+            packet_dict["inspection_public_surface"] = []
+            packet_dict["inspection_integration"] = []
+            packet_dict["supporting_files"] = []
+            packet_dict["relationships"] = []
+            packet_dict["semantic_facts"] = []
+            packet_dict["execution_paths"] = []
+            packet_dict["change_surface"] = []
+            packet_dict["affected_tests"] = []
+            packet_dict["validation_plan"] = []
+            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
+            packet_dict["uncovered_facets"] = []
+            packet_dict["uncovered_requirements"] = []
+            packet_dict["uncertainties"] = []
+            rendered = encode()
+        if too_large():
             # A budget too small for the remaining decision-grade floor is not
             # permission to silently pretend a graph treatment was delivered.
             self.errors.append("context_budget_too_small")
@@ -1542,6 +1714,8 @@ class GroundTruthTreatment(BareTreatment):
                 evidence_identity[str(item["evidence_id"])]
                 for group in (
                     packet_dict["primary_edit_targets"],
+                    packet_dict["inspection_implementation_owners"],
+                    packet_dict["ambiguous_identities"],
                     packet_dict["inspection_candidates"],
                     packet_dict["inspection_public_surface"],
                     packet_dict["inspection_integration"],
@@ -1551,6 +1725,18 @@ class GroundTruthTreatment(BareTreatment):
                 )
                 for item in group
                 if item.get("evidence_id") in evidence_identity
+            )
+        )
+        delivered = tuple(
+            dict.fromkeys(
+                (
+                    *delivered,
+                    *(
+                        str(item["evidence_sha256"])
+                        for item in packet_dict["ambiguous_identities"]
+                        if str(item.get("evidence_sha256") or "")
+                    ),
+                )
             )
         )
         visible_projection_claims = tuple(
@@ -1566,6 +1752,8 @@ class GroundTruthTreatment(BareTreatment):
             return ""
         delivered_features = {
             "exact_edit_targets": packet_dict["primary_edit_targets"],
+            "implementation_owner_candidates": packet_dict["inspection_implementation_owners"],
+            "ambiguous_identity": packet_dict["ambiguous_identities"],
             "inspection_candidates": packet_dict["inspection_candidates"],
             "public_surface": packet_dict["inspection_public_surface"],
             "integration": packet_dict["inspection_integration"],
@@ -1576,6 +1764,7 @@ class GroundTruthTreatment(BareTreatment):
             "affected_tests": packet_dict["affected_tests"],
             "validation": packet_dict["validation_plan"],
             "proposed_new_file": packet_dict["proposed_new_files"],
+            "uncovered_requirement": packet_dict["uncovered_requirements"],
             "uncovered_facet": packet_dict["uncovered_facets"],
         }
         for feature, values in delivered_features.items():
@@ -1583,9 +1772,7 @@ class GroundTruthTreatment(BareTreatment):
                 continue
             paths = feature_paths(values)
             self._feature_transition(feature, FeatureState.DELIVERED, paths=paths)
-            self._feature_transition(
-                feature, FeatureState.AVAILABLE_TO_AGENT, paths=paths
-            )
+            self._feature_transition(feature, FeatureState.AVAILABLE_TO_AGENT, paths=paths)
             self._snapshot_feature_content(feature, paths)
         self.delivered_claim_ids.update(delivered)
         self.delivery_count += 1
@@ -1593,23 +1780,36 @@ class GroundTruthTreatment(BareTreatment):
         self.delivery_char_count += len(rendered)
         self.evidence_items_delivered += len(delivered)
         visible_feature_counts = {
-            feature: len(values)
-            for feature, values in delivered_features.items()
-            if values
+            feature: len(values) for feature, values in delivered_features.items() if values
+        }
+        visible_role_paths = {
+            role: list(feature_paths(delivered_features[feature]))
+            for role, feature in (
+                ("EXACT_EDIT_TARGET", "exact_edit_targets"),
+                (
+                    "INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY",
+                    "implementation_owner_candidates",
+                ),
+                ("AMBIGUOUS_IDENTITY", "ambiguous_identity"),
+                ("INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY", "inspection_candidates"),
+                ("INSPECT_PUBLIC_SURFACE", "public_surface"),
+                ("INSPECT_INTEGRATION", "integration"),
+                ("AFFECTED_TEST", "affected_tests"),
+                ("PROPOSED_NEW_FILE", "proposed_new_file"),
+            )
+            if delivered_features[feature]
         }
         self._last_delivery_claim_ids = delivered
         self._last_delivery_feature_counts = visible_feature_counts
         self._last_delivery_before_call = delivered_before_call
         self.provider_delivery_receipts.append(
             {
-                "schema": "gt.provider_delivery.v1",
+                "schema": "gt.provider_delivery.v2",
                 "delivery_index": self.delivery_count,
                 "kind": "repository_update" if update else "repository_start",
                 "delivered_before_call": delivered_before_call,
                 "source_revision": receipt.source_revision,
-                "context_sha256": hashlib.sha256(
-                    rendered.encode("utf-8")
-                ).hexdigest(),
+                "context_sha256": hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
                 "context_token_count": _bounded_token_count(rendered),
                 "context_char_count": len(rendered),
                 "serialized_claim_ids": list(delivered),
@@ -1617,12 +1817,15 @@ class GroundTruthTreatment(BareTreatment):
                     dict.fromkeys(re.findall(r"\bclaim=([A-Za-z0-9_-]+)", rendered))
                 ),
                 "provider_visible_feature_counts": visible_feature_counts,
+                "provider_visible_role_paths": visible_role_paths,
             }
         )
         self.context_dirty = False
         self.treatment_status = TreatmentStatus.ACTIVE
         if not update:
             self.initial_context = rendered
+            self.initial_delivery_disposition = "DELIVERED"
+            self.initial_delivery_reasons = []
         return rendered
 
     def prepare(self, task: str) -> str:
@@ -1637,9 +1840,7 @@ class GroundTruthTreatment(BareTreatment):
             receipt = self.service.build()
         except Exception as exc:  # noqa: BLE001 - treatment must fail closed
             receipt = self.service.status()
-            raise self._unavailable(
-                receipt, f"graph_build_failed:{type(exc).__name__}"
-            ) from exc
+            raise self._unavailable(receipt, f"graph_build_failed:{type(exc).__name__}") from exc
         if not receipt.query_ready:
             if self._not_applicable(receipt):
                 self._prepared_context = self._abstain(
@@ -1647,9 +1848,7 @@ class GroundTruthTreatment(BareTreatment):
                 )
                 self._prepare_complete = True
                 return self._prepared_context
-            raise self._unavailable(
-                receipt, f"graph_not_ready:{receipt.build_status.value}"
-            )
+            raise self._unavailable(receipt, f"graph_not_ready:{receipt.build_status.value}")
         self.treatment_status = TreatmentStatus.ACTIVE
         self._ensure_dense_ready()
         self._prepared_context = self._render(
@@ -1676,9 +1875,7 @@ class GroundTruthTreatment(BareTreatment):
         if observed.build_status is GraphStatus.STALE:
             raise self._unavailable(observed, "unobserved_repository_change")
         if not observed.query_ready:
-            raise self._unavailable(
-                observed, f"graph_not_ready:{observed.build_status.value}"
-            )
+            raise self._unavailable(observed, f"graph_not_ready:{observed.build_status.value}")
         return ""
 
     def _refresh_and_render_update(self) -> str:
@@ -1804,8 +2001,7 @@ class GroundTruthTreatment(BareTreatment):
                 self._feature_transition(feature, FeatureState.FOLLOWED)
             baseline_identities = self.feature_content_identities.get(feature, {})
             content_changed = any(
-                path in feature_path_set
-                and self._feature_content_identity(path) != baseline
+                path in feature_path_set and self._feature_content_identity(path) != baseline
                 for path, baseline in baseline_identities.items()
             )
             if repository_changed and content_changed:
@@ -1822,10 +2018,7 @@ class GroundTruthTreatment(BareTreatment):
                         feature,
                         FeatureState.VALIDATED,
                         paths=tuple(
-                            sorted(
-                                observed_paths
-                                & self.feature_paths.get(feature, set())
-                            )
+                            sorted(observed_paths & self.feature_paths.get(feature, set()))
                         ),
                     )
         if diagnostic_lines or diagnostics_cleared or discovered_new_path or repository_changed:
@@ -1840,6 +2033,10 @@ class GroundTruthTreatment(BareTreatment):
             not self.context_dirty
             or self.treatment_status is not TreatmentStatus.ACTIVE
             or self.delivery_count >= max(1, self.max_delivery_count)
+            or sum(
+                item.get("kind") == "repository_update" for item in self.provider_delivery_receipts
+            )
+            >= max(0, self.max_update_delivery_count)
         ):
             return None
         rendered = self._refresh_and_render_update()
@@ -1848,9 +2045,7 @@ class GroundTruthTreatment(BareTreatment):
         # The augmentation is physically attached to the final observation,
         # so raw_output_sha256 binds that exact immutable value. A separate
         # turn hash binds every action/result used to compile the update.
-        raw_hash = hashlib.sha256(
-            observations[-1].output.encode("utf-8")
-        ).hexdigest()
+        raw_hash = hashlib.sha256(observations[-1].output.encode("utf-8")).hexdigest()
         turn_hash = hashlib.sha256(
             repr(
                 tuple(
@@ -1875,9 +2070,7 @@ class GroundTruthTreatment(BareTreatment):
             context_token_count=_bounded_token_count(rendered),
             delivered_before_call=self._last_delivery_before_call,
             serialized_claim_ids=self._last_delivery_claim_ids,
-            provider_visible_feature_counts=dict(
-                self._last_delivery_feature_counts
-            ),
+            provider_visible_feature_counts=dict(self._last_delivery_feature_counts),
             observation_count=len(observations),
             turn_observations_sha256=turn_hash,
         )
@@ -1892,9 +2085,7 @@ class GroundTruthTreatment(BareTreatment):
             for claim in delivery.get("serialized_claim_ids", ())
         }
         delivery_reconciliation = (
-            "PASS"
-            if serialized_claim_ids == self.delivered_claim_ids
-            else "FAIL"
+            "PASS" if serialized_claim_ids == self.delivered_claim_ids else "FAIL"
         )
         feature_states = dict(self.feature_states)
         if result is not None:
@@ -1907,7 +2098,7 @@ class GroundTruthTreatment(BareTreatment):
                 for feature, state in feature_states.items()
             }
         return {
-            "schema": "gt.treatment_receipt.v3",
+            "schema": "gt.treatment_receipt.v4",
             "treatment": self.treatment_id,
             "treatment_status": self.treatment_status.value,
             "provider_calls": 0,
@@ -1927,9 +2118,9 @@ class GroundTruthTreatment(BareTreatment):
             "delivery_reconciliation": delivery_reconciliation,
             "delivery_char_count": self.delivery_char_count,
             "evidence_items_delivered": self.evidence_items_delivered,
-            "suppressed_inspection_only_updates": (
-                self.suppressed_inspection_only_updates
-            ),
+            "suppressed_inspection_only_updates": (self.suppressed_inspection_only_updates),
+            "initial_delivery_disposition": self.initial_delivery_disposition,
+            "initial_delivery_reasons": list(self.initial_delivery_reasons),
             "context_compile_count": self.context_compile_count,
             "retrieval_channel_count": self.retrieval_channel_count,
             "action_count": self.action_count,
@@ -1939,11 +2130,11 @@ class GroundTruthTreatment(BareTreatment):
             "dense_query_receipts": list(self.dense_query_receipts),
             "dense_error": self.dense_error or None,
             "graph_projection_receipts": list(self.projection_receipts),
-            "feature_lifecycle_schema": "gt.feature_lifecycle.v1",
+            "context_compile_receipts": list(self.compile_receipts),
+            "feature_lifecycle_schema": "gt.feature_lifecycle.v2",
             "feature_states": feature_states,
             "feature_paths": {
-                feature: sorted(paths)
-                for feature, paths in sorted(self.feature_paths.items())
+                feature: sorted(paths) for feature, paths in sorted(self.feature_paths.items())
             },
             "feature_transitions": list(self.feature_transitions),
             "errors": list(dict.fromkeys(self.errors)),

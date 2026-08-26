@@ -115,17 +115,14 @@ def run_campaign(
         raise RuntimeError(f"checkout mismatch: expected {commit}, got {exact_commit}")
 
     state = run_dir.parent / f"{run_dir.name}-gt-state"
-    if not (dense_model_dir / "model.onnx").is_file() or not (
-        dense_model_dir / "tokenizer.json"
-    ).is_file():
+    if (
+        not (dense_model_dir / "model.onnx").is_file()
+        or not (dense_model_dir / "tokenizer.json").is_file()
+    ):
         raise RuntimeError("pinned dense model assets are missing")
     os.environ["GT_DENSE_MODEL_DIR"] = str(dense_model_dir)
-    treatment = GroundTruthTreatment(
-        run_dir, state_dir=state, retrieval_mode="hybrid_required"
-    )
-    initial = treatment.prepare(
-        "Inspect `Signer` behavior and its callers before changing it"
-    )
+    treatment = GroundTruthTreatment(run_dir, state_dir=state, retrieval_mode="hybrid_required")
+    initial = treatment.prepare("Inspect `Signer` behavior and its callers before changing it")
     match = _TARGET.search(initial)
     if match is None:
         raise RuntimeError("GT did not produce an exact source target")
@@ -165,9 +162,7 @@ def run_campaign(
     if treatment.before_model_call(2) != "":
         raise RuntimeError("GT attempted late synthetic-user context injection")
 
-    restarted = GroundTruthTreatment(
-        run_dir, state_dir=state, retrieval_mode="hybrid_required"
-    )
+    restarted = GroundTruthTreatment(run_dir, state_dir=state, retrieval_mode="hybrid_required")
     restart_context = restarted.prepare(
         "Inspect `Signer` behavior and its callers before changing it"
     )
@@ -204,12 +199,9 @@ def run_campaign(
             item.get("query_ready") and int(item.get("candidate_count", 0)) > 0
             for item in dense_queries
         )
-        and before["dense_index_receipt"]["source_revision"]
-        == before["source_revision"]
-        and after["dense_index_receipt"]["source_revision"]
-        == after["source_revision"]
-        and reopened["dense_index_receipt"]["source_revision"]
-        == reopened["source_revision"]
+        and before["dense_index_receipt"]["source_revision"] == before["source_revision"]
+        and after["dense_index_receipt"]["source_revision"] == after["source_revision"]
+        and reopened["dense_index_receipt"]["source_revision"] == reopened["source_revision"]
     )
     if not dense_lifecycle_ready:
         raise RuntimeError("dense index/query lifecycle was not exact and provider-free")
@@ -248,14 +240,11 @@ def run_campaign(
         "initial_source_revision": before["source_revision"],
         "updated_source_revision": after["source_revision"],
         "same_observation": same_observation,
-        "context_schema_v6": bool(
-            'schema="gt.agent_context.v6"' in initial
-            and 'schema="gt.agent_context.v6"' in content
+        "context_schema_v7": bool(
+            'schema="gt.agent_context.v7"' in initial and 'schema="gt.agent_context.v7"' in content
         ),
         "raw_output_preserved": content.startswith(environment.raw_output),
-        "raw_output_sha256": hashlib.sha256(
-            environment.raw_output.encode("utf-8")
-        ).hexdigest(),
+        "raw_output_sha256": hashlib.sha256(environment.raw_output.encode("utf-8")).hexdigest(),
         "delivery_receipt": delivery,
         "trajectory_delivery_receipt_preserved": True,
         "provider_delivery_receipts": provider_deliveries,
@@ -263,6 +252,10 @@ def run_campaign(
         "delivery_reconciliation": "PASS",
         "initial_context_token_count": _bounded_token_count(initial),
         "update_context_token_count": int(delivery["context_token_count"]),
+        "total_context_token_count": sum(
+            int(item.get("context_token_count") or 0)
+            for item in after["provider_delivery_receipts"]
+        ),
         "before_model_call_injected_context": False,
         "restart_reused_current_graph": restart_reused_current_graph,
         "retrieval_mode": "hybrid_required",

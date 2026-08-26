@@ -1,109 +1,94 @@
-# Benchmark-Readiness Handoff — 2026-08-26
+# Benchmark-readiness implementation handoff — 2026-08-26
 
-Status: **NOT YET BENCHMARK-READY** — one deterministic blocker remains
-(recall floor). All repairs are provider-free and committed; no paid
-benchmark was run.
+Status: **IMPLEMENTATION COMPLETE; EXACT-SHA LINUX CERTIFICATION PENDING**.
+No paid benchmark was run. Historical smoke results are diagnostic evidence,
+not certification of this revision.
 
-## What the product is
+## Product identity
 
-GT Harness 0.9.0: a host-owned repository-intelligence layer for
-Mini-SWE-Agent 2.4.6. It converts an exact repo checkout + issue into a
-bounded `gt.agent_context.v6` packet (exact edit targets, inspection
-roles, certified relations, bounded processes/impact, affected tests)
-delivered at the provider boundary with receipts. DeepSWE smoke20 cohort
-is the current frozen benchmark set (`eval/deepswe_smoke20_v1.json`,
-baseline 15/20 from run 32615305543).
+GT Harness 0.9.0 is a model-agnostic repository-intelligence treatment for
+Mini-SWE-Agent 2.4.6. It builds an exact-revision structural graph and dense
+index, compiles task requirements into bounded deterministic repository facts,
+delivers those facts on the provider-visible action loop, preserves the exact
+trajectory, and binds official verifier outcomes for paired analysis.
 
-## Working tree / branch
+The authoritative boundaries are:
 
-- Worktree: `D:\gt-harness-prerelease-3df01d2`
-- Branch: `final/gt-harness-benchmark-update`
-- Run SHA: `f8fc94d` (certified 14/14, smoke 32964236004 = GT 11/20 vs baseline 15/20)
-- HEAD after this batch: uncommitted (see next section)
+- installed command: `gt-harness`;
+- exact source/workflow allowlist: `production-surface.toml`;
+- architecture: `arch_type.md`;
+- experiment contract: `eval/benchmark_product_contract.json`;
+- Linux campaign: `scripts/codespaces_product_certification.sh`.
 
-## What this batch did (latent-regression sweep)
+## Corrections in this candidate
 
-| # | Fix | File | Regression prevented |
-|---|---|---|---|
-| 1 | Exact-key obligation dedup (no substring collapse) | `gt_engine/task_contract.py` | `Create foo.txt.bak` silently dropped behind `Create foo.txt` → lost facet |
-| 2 | `_DIRECTIVE_RE` covers `fix/update/patch/refactor/bug` family | `gt_engine/task_contract.py` | non-bullet prose obligations never became facets |
-| 3 | `_task_cites_path` requires word boundary for bare filename | `gt_engine/repository_context_compiler.py` | extensionless script `config` hijacked edit authority from prose word `config` |
-| 4 | Dense-only file anchors excluded from graph-expansion `file_anchors` | `gt_engine/repository_context_compiler.py` | semantically-similar irrelevant file promoted spurious certified public/integration rows |
-| 5 | Repository branch/expansion truncation propagates to packet `truncated` | `gt_engine/repository_context_compiler.py` | high-fan-out graph claimed `truncated=false` with partial process/impact |
-| 6 | Ambiguity demotion now per-row on unscoped matches (was inverted) | `gt_engine/repository_context_compiler.py` | globally-unscoped cross-file symbol collisions kept as edit targets |
-| 7 | All localization tests non-vacuous (positive controls) | `tests/test_localization_regressions.py` | empty/broken compiler passes suite |
-| 8 | `mean_edit_target_recall` added to truth report + gate (`--min-recall 0.5`) | `scripts/replay_smoke20_localization.py`, `scripts/localization_truth_gate.py` | abstaining localizer no longer scores 1.0 |
+| Boundary | Implemented correction | Fail-closed proof |
+| --- | --- | --- |
+| Repository identity and persistence | Graph receipt v5; immutable generation directories; atomic `CURRENT`; durable build-attempt record; generation, manifest, graph, builder, commit, and source-revision revalidation | tamper, stale-revision, interrupted-publication, cold/warm, and real-CLI lifecycle tests |
+| Graph builder ownership | Canonical indexer invokes the source-certified Go binary directly; no runtime import from legacy `groundtruth` | production-surface reachability and wheel-equality checks |
+| Task understanding | Context v7 converts directives into typed requirements with intent, entity, resolution, coverage, and mechanism | requirement extraction, duplicate-obligation, ambiguity, new-file, and uncovered-requirement tests |
+| Localization authority | Edit, inspection, public surface, integration, and validation remain separate; package echo, unscoped collisions, dense-anchor poisoning, and weak path matches cannot manufacture edit authority | non-vacuous compiler/localization regression tests |
+| Ambiguity | `AMBIGUOUS_IDENTITY` is delivered as an explicit claim with candidates instead of silently disappearing or becoming an edit target | treatment reconciliation and ambiguity-only delivery tests |
+| Delivery | Provider receipt v2 and treatment receipt v4 bind context hash, exact revision, requirement/claim IDs, delivery timing, and token limits | canonical delivery auditor in all three suite attestations |
+| Uptake | Followed evidence requires an exact normalized repository path in a later durable Mini-SWE action; hidden reasoning is never inferred | `gt_harness.analysis.uptake` tests |
+| Outcomes | Official verifier dispositions and efficiency metrics are typed; invalid delivery cannot enter a normal paired result | comparison/outcome tests |
+| Product surface | Wheel contents, runtime imports, console entry point, schemas, budgets, languages, and the exact five workflows are allowlisted | `gt.product_surface_verification.v1` receipt |
+| Workflow surface | One workflow per suite, both treatments through Mini-SWE 2.4.6; obsolete central, Nano, baseline-only, split, and diagnostic dispatch files removed | workflow equality, YAML, adapter, and attestation tests |
+| User-level verification | Project-local verification skill exercises doctor, cold build, definition query, edit-to-STALE, rebuild-to-new-generation, and cleanup on a real temporary Git repository | `gt.cli_verification.v1` receipt |
 
-## Scorecard (current, fingerprint-bound truth report)
+Historical source remains recoverable in Git. `src/groundtruth`, old central
+agents, Nano paths, and MCP experiments are not installed, imported by the
+canonical closure, or dispatchable. This is capability-preserving migration,
+not a clone of GitNexus: GT retains its stronger exact-revision graph truth,
+receipts, multi-language structural graph, deterministic semantic facts, and
+benchmark-neutral delivery while adopting the useful higher-order lesson that
+facts must be composed and delivered at a decision point.
 
-| Gate | Floor | Measured | Status |
-|---|---|---:|---|
-| Mean edit-target precision | ≥ 0.7 | 1.00 | ✅ |
-| **Mean edit-target recall** | **≥ 0.5** | **0.0845** | ❌ **blocker** |
-| Wrong edit targets | 0 | 0 | ✅ |
-| Zero-target tasks | ≤ 10 | 12 | ❌ |
-| Treatment failures (replay) | 0 | 0 | ✅ |
-| Timeout terminalization (boa class) | terminal receipt | boa `RUNNING`/empty patch (smoke 32964236004) | ❌ open |
-| Infra-censor typing (katex class) | censor ≠ missing | mush → task-set mismatch | ❌ open |
-| Uptake/follow gate | floored | unwired | ❌ open |
-| Efficiency vs baseline | Akon caps | unwired | ❌ open |
-| Truth report in `hybrid_required` | prod mode | `sparse_only` only | ❌ open |
+## Current evidence
 
-## Remaining work to reach benchmark-ready (ordered)
+- canonical Python product suite: 495 passed after the final certification
+  receipt additions;
+- Go indexer: `go test -tags sqlite_fts5 ./...` passed locally;
+- built wheel: exact equality with `production-surface.toml`, with no legacy
+  module present;
+- real CLI verification: PASS; stale status returned nonzero and the rebuild
+  published a different immutable generation;
+- provider calls during all of the above: 0.
 
-1. **Recall lift to ≥ 0.5** (the gate blocker). Plan: GitNexus-style
-   decision-point delivery (bounded same-observation process/impact/test
-   answers on file-read observations, replacing inspection-only update
-   suppression); typed `AMBIGUOUS_IDENTITY` rows with candidate file:line
-   lists instead of silent demotion; inspection-candidate structural
-   relevance filter (kills `markupsafe`/`my-invalid-action` diversion).
-2. **Regenerate the truth report under `hybrid_required`** (provision pinned
-   ONNX locally; certification must regenerate, not just check the JSON).
-3. **Runtime integrity**: timeout terminalization (boa) + typed
-   `infrastructure_censored{reason}` attestation (katex).
-4. **Full-distribution proof**: resolve 2 short-SHA tasks (`eicrud`,
-   `langchain` — resolve to 40-char via their remotes), build the 113-task
-   manifest, staged replay 20 → 113.
-5. **Utility measurement** (free, data local): uptake adapter over runs
-   `32928374228` + `32964236004`; wire `scripts/deepswe_release_gate.py`
-   + baseline per-task `agent_result` join for Akon-style efficiency caps.
-6. **Certification**: full provider-free suite + hosted certification 14/14
-   at a new exact SHA; update `arch_type.md`/V6 same-change. **No paid
-   dispatch** — readiness is declared by the gates, per user directive.
+The old localization report (precision 1.0, recall 0.0845) predates context v7
+and remains historical evidence. It must not be relabeled. The Linux campaign
+must regenerate the fingerprint-bound 20-task report under
+`hybrid_required`; the candidate fails if precision, recall, treatment,
+dense-readiness, or task-set gates do not pass.
 
-## How to verify / re-run gates
+## Remaining release actions
+
+1. Run the full local Python, Ruff, Go, wheel-surface, workflow, and CLI gates.
+2. Commit and push the exact candidate SHA to `harneet2512/gt-harness`.
+3. Dispatch `prerelease_product_matrix.yml` at that immutable SHA.
+4. Inspect every uploaded receipt. If a gate fails, reproduce and correct the
+   cause, add regression coverage, create a new SHA, and repeat.
+5. Only after the provider-free product bundle certifies may a controlled paid
+   smoke be considered. Utility still requires identical bare/GT task,
+   revision, model, scaffold, budget, environment, and official verifier.
+
+## Verification commands
 
 ```powershell
-# full provider-free suite
-.venv\Scripts\python.exe -m pytest -q -m "not external_evidence" --ignore=tests/test_gt_finalstand.py
-
-# regenerate the fingerprint-bound truth report (needs Go + smoke20 repos at D:\tmp\opencode\smoke20_repos)
-.venv\Scripts\python.exe scripts/replay_smoke20_localization.py `
-  --manifest eval/deepswe_smoke20_manifest.json `
-  --state-root D:\tmp\opencode\smoke20_state_v2 `
-  --out-json docs/deepswe_smoke20_localization_truth.json
-
-# gate (currently fails on recall — that is the expected blocker)
-.venv\Scripts\python.exe scripts/localization_truth_gate.py `
-  --report docs/deepswe_smoke20_localization_truth.json `
-  --min-precision 0.7 --min-recall 0.5
+python -m pytest
+python scripts/lint_product_surface.py
+go test -tags sqlite_fts5 ./...
+python -m build --wheel
+python scripts/verify_product_surface.py --wheel <wheel> --output <receipt>
+python scripts/verify_gt_harness.py --output artifacts/verification/latest
 ```
 
-## Key file map
+Hosted proof uses only:
 
-- Compiler: `gt_engine/repository_context_compiler.py`
-- Task contract: `gt_engine/task_contract.py`
-- Treatment/delivery: `gt_harness/treatments.py`
-- Replay + gate: `scripts/replay_smoke20_localization.py`, `scripts/localization_truth_gate.py`
-- Flip ledger: `scripts/deepswe_smoke_flip_ledger.py`, `docs/deepswe_smoke20_flip_ledger.{json,md}`
-- Cohort: `eval/deepswe_smoke20_v1.json`, `eval/deepswe_smoke20_manifest.json`, `eval/deepswe_smoke20_tasks/`
-- Architecture: `arch_type.md` (authoritative), `docs/GT_CONTEXT_V6_IMPLEMENTATION_2026-08-25.md`
-- Frozen baselines (do not rerun): local copies per CLAUDE.md (GT-off DeepSWE 4/10 control, TB2 89-task, DeepSWE v1.1 leaderboard pass@1 0.5332)
+```text
+.github/workflows/prerelease_product_matrix.yml
+  -> scripts/codespaces_product_certification.sh <exact-sha>
+```
 
-## Artifacts / data on disk
-
-- GT smoke 32964236004 receipts: `D:\tmp\opencode\run32964236004\`
-- GT-off baseline (frozen, 20 cohort tasks): `D:\tmp\opencode\gtoff32615305543\`
-- Cohort repos at exact SHAs: `D:\tmp\opencode\smoke20_repos\`
-- Replay state (warm graphs): `D:\tmp\opencode\smoke20_state_v2\`
-- Full task source (instructions/solutions): `D:\tmp\opencode\deep-swe\tasks\` (113 tasks)
+The current verdict remains `NOT_CERTIFIED` until that exact-SHA Linux receipt
+bundle passes. That is evidence discipline, not missing implementation.

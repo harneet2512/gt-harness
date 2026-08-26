@@ -21,6 +21,12 @@ on:
         description: "For full mode only, one-based i/n shard (required for >256 tasks)"
         required: false
         type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: choice
+        options: [groundtruth, bare]
+        default: groundtruth
 
 permissions:
   contents: read
@@ -75,6 +81,7 @@ jobs:
           INSTANCE_IDS: ${{ inputs.instance_ids }}
           SHARD: ${{ inputs.shard }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -125,6 +132,9 @@ jobs:
                   for ordinal, task in enumerate(selected, start=1)
               ]
           }
+          treatment = os.environ["TREATMENT"].strip().lower()
+          if treatment not in {"bare", "groundtruth"}:
+              raise SystemExit(f"unsupported treatment: {treatment!r}")
           receipt = {
               "schema": "gt.swe_live_lite_product_plan.v1",
               "source_sha": os.environ["SOURCE_SHA"],
@@ -139,6 +149,7 @@ jobs:
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.4.6",
               "adapter": "eval.swe_live_lite_gt_harness_adapter",
+              "treatment": treatment,
               "matrix": matrix["include"],
           }
           Path("swe-live-lite-plan.json").write_text(
@@ -181,6 +192,8 @@ jobs:
           ATTEMPTS="$attempts" STATUS_CODES="$status_codes" SUCCESS="$success" SOURCE_SHA="$SOURCE_SHA" python - <<'PY'
           import json, os
           from pathlib import Path
+
+          from gt_harness.analysis.delivery import audit_treatment_delivery
           row = {
               "schema": "gt.provider_availability_gate.v1",
               "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
@@ -211,6 +224,7 @@ jobs:
     env:
       TASK: ${{ matrix.task }}
       GT_RETRIEVAL_MODE: hybrid_required
+      GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
       OPENAI_API_KEY: ${{ secrets.OPENROUTER_NEW }}
       OPENAI_BASE_URL: https://openrouter.ai/api/v1
     steps:
@@ -322,6 +336,7 @@ jobs:
             -e GT_INDEX_BINARY=/installed-agent/gt-index \
             -e GT_DENSE_MODEL_DIR=/installed-agent/snowflake-arctic-embed-m \
             -e GT_RETRIEVAL_MODE=hybrid_required \
+            -e GT_TREATMENT \
             -e GT_PRODUCT_SOURCE_SHA="$SOURCE_SHA" \
             -e GT_TASK_ID="$TASK" \
             -e GT_TIME_BUDGET_SECONDS="$TIME_BUDGET_SECONDS" \
@@ -351,7 +366,8 @@ jobs:
                 --max-iterations 300 --temperature 1.0 \
                 --output /logs/agent/gt-run.json \
                 --state-dir /logs/agent/gt-state \
-                --adapter-receipt /logs/agent/benchmark-adapter.json
+                --adapter-receipt /logs/agent/benchmark-adapter.json \
+                --treatment "$GT_TREATMENT"
               product_rc=$?
               git add -A -N >/dev/null 2>&1 || true
               git diff --binary HEAD > /logs/agent/agent_patch.diff
@@ -458,6 +474,8 @@ jobs:
           import json, os
           from pathlib import Path
 
+          from gt_harness.analysis.delivery import audit_treatment_delivery
+
           root = Path("attestation")
           plan = json.loads((root / "swe-live-lite-plan.json").read_text(encoding="utf-8"))
           expected = set(plan["task_ids"])
@@ -472,6 +490,8 @@ jobs:
                   errors.append(f"adapter_contract_mismatch:{task}")
               if row.get("agent_scaffold_version") != "2.4.6" or row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
                   errors.append(f"adapter_identity_mismatch:{task}")
+              if row.get("treatment") != plan.get("treatment"):
+                  errors.append(f"adapter_treatment_mismatch:{task}")
           for path in (root / "tasks").rglob("gt-run.json"):
               row = json.loads(path.read_text(encoding="utf-8")); task = str(row.get("task_id") or "")
               products[task] = row
@@ -480,6 +500,15 @@ jobs:
               if not trajectory.is_file(): errors.append(f"missing_full_trajectory:{task}")
               treatment = row.get("treatment_receipt") or {}
               if treatment.get("treatment_status") == "ACTIVE":
+                  delivery_audit = audit_treatment_delivery(
+                      treatment,
+                      initial_context=str(row.get("initial_context") or ""),
+                      repository_end=row.get("repository_end") or {},
+                  )
+                  errors.extend(
+                      f"delivery_audit:{task}:{reason}"
+                      for reason in delivery_audit["failures"]
+                  )
                   if not treatment.get("graph_available") or treatment.get("graph_status") not in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}:
                       errors.append(f"active_graph_not_ready:{task}")
                   dense = treatment.get("dense_index_receipt") or {}
@@ -503,6 +532,7 @@ jobs:
               "task_order_sha256": plan["task_order_sha256"],
               "agent_scaffold_version": "2.4.6",
               "product_command": "gt-harness run",
+              "treatment": plan["treatment"],
               "solved": solved,
               "errors": errors,
           }

@@ -1,0 +1,93 @@
+name: GT repository-intelligence audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact GT commit to audit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  provider_free_audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Bind audit to the immutable candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
+
+      - name: Install the exact product and verifier dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,retrieval]'
+          python -c 'import importlib.metadata as m; assert m.version("mini-swe-agent") == "2.4.6"'
+
+      - name: Verify graph, localization, delivery, and comparison boundaries
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          python -m pytest -q \
+            tests/test_repository_graph_service.py \
+            tests/test_repository_context_compiler.py \
+            tests/test_localization_regressions.py \
+            tests/test_localization_truth.py \
+            tests/test_product_analysis.py \
+            tests/test_product_treatments.py \
+            tests/test_product_comparison.py \
+            | tee audit/pytest.log
+          (cd vendor/gt-index-src && go test -tags sqlite_fts5 ./...) \
+            | tee audit/go-test.log
+
+      - name: Emit an immutable audit receipt
+        env:
+          AUDIT_SHA: ${{ inputs.ref }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+
+          files = [Path("audit/pytest.log"), Path("audit/go-test.log")]
+          receipt = {
+              "schema": "gt.repository_intelligence_audit.v1",
+              "status": "PASS",
+              "source_sha": os.environ["AUDIT_SHA"],
+              "provider_calls": 0,
+              "provider_credentials_inspected": False,
+              "evidence": {
+                  path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in files
+              },
+          }
+          Path("audit/repository-intelligence-audit.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gt-repository-intelligence-audit-${{ github.run_id }}
+          path: audit/
+          if-no-files-found: error

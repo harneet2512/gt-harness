@@ -13,8 +13,10 @@ from gt_engine.hybrid_retrieval import (
 from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
     ContextStatus,
+    FacetCoverageStatus,
     LocalizationRole,
     RepositoryContextCompiler,
+    RequirementCoverageStatus,
     _matching_facet_ids,
     compile_task_facets,
 )
@@ -92,8 +94,7 @@ def test_compiler_prefers_exact_production_symbol_over_legacy_and_workflow() -> 
     assert packet.primary_edit_targets[0].path == "gt_engine/hybrid_retrieval.py"
     assert packet.primary_edit_targets[0].symbol == "HybridRetriever"
     assert all(
-        target.path != "src/groundtruth/pretask/hybrid.py"
-        for target in packet.primary_edit_targets
+        target.path != "src/groundtruth/pretask/hybrid.py" for target in packet.primary_edit_targets
     )
     assert all(".github/workflows" not in target.path for target in packet.primary_edit_targets)
 
@@ -263,8 +264,7 @@ def test_dense_and_sparse_rankings_are_fused_with_auditable_rrf() -> None:
     assert fusion["ranked_paths"][0]["supporting_channels"] == ["dense", "sparse"]
 
 
-def test_compiler_abstains_instead_of_sending_generic_symbols_for_unmatched_anchor(
-) -> None:
+def test_compiler_abstains_instead_of_sending_generic_symbols_for_unmatched_anchor() -> None:
     repository = HybridRepository(
         documents=(
             _document("modifiers.py", "modify", "def modify(value): return value"),
@@ -440,9 +440,7 @@ def test_compiler_deduplicates_transitive_copy_of_direct_relationship() -> None:
         _request("Wire HybridRetriever into GroundTruthTreatment"),
     )
 
-    relationships = [
-        item for item in packet.evidence_items if item.kind == "relationship"
-    ]
+    relationships = [item for item in packet.evidence_items if item.kind == "relationship"]
     assert len(relationships) == 1
     assert relationships[0].relation == "CALLS"
 
@@ -496,8 +494,18 @@ def test_compiler_separates_public_surface_from_edit_targets() -> None:
 
     assert [item.path for item in packet.inspection_public_surface] == ["src/awilix.ts"]
     assert packet.inspection_public_surface[0].localization_role == "PUBLIC_SURFACE"
+    assert all(item.path != "src/awilix.ts" for item in packet.primary_edit_targets)
+    public_requirements = {
+        item.requirement_id: item
+        for item in packet.task_requirements
+        if item.intent.value == "INSPECT_PUBLIC_SURFACE"
+    }
+    coverage = {item.requirement_id: item for item in packet.requirement_coverage}
+    assert public_requirements
     assert all(
-        item.path != "src/awilix.ts" for item in packet.primary_edit_targets
+        coverage[identifier].status is RequirementCoverageStatus.COVERED
+        and coverage[identifier].mechanism == "PUBLIC_SURFACE"
+        for identifier in public_requirements
     )
 
 
@@ -618,6 +626,112 @@ def test_quoted_configuration_literal_is_not_promoted_to_exact_symbol() -> None:
     assert "strict" not in exact
 
 
+def test_dependency_type_is_not_granted_edit_authority() -> None:
+    documents = (
+        _document(
+            "src/adaptix/_internal/morphing/facade/provider.py",
+            "name_mapping",
+            "def name_mapping(*, alias_style=None): pass",
+        ),
+        _document(
+            "src/adaptix/_internal/name_style.py",
+            "NameStyle",
+            "class NameStyle: pass",
+        ),
+    )
+    task = (
+        "`name_mapping` gains a new optional keyword argument `alias_style` "
+        "(`NameStyle` value or values, default None)."
+    )
+
+    facets = compile_task_facets(task, documents)
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=2,
+            document_chars=160,
+        ),
+        _request(task),
+    )
+
+    authoritative = {symbol for facet in facets for symbol in facet.edit_symbols}
+    assert "name_mapping" in authoritative
+    assert "NameStyle" not in authoritative
+    assert all(
+        item.path != "src/adaptix/_internal/name_style.py" for item in packet.primary_edit_targets
+    )
+
+
+def test_argument_noun_is_not_granted_edit_authority() -> None:
+    documents = (
+        _document(
+            "core/engine/src/context/mod.rs",
+            "Context",
+            "pub struct Context;",
+        ),
+        _document(
+            "core/runtime/src/interval.rs",
+            "handle",
+            "fn handle() {}",
+        ),
+    )
+    task = (
+        "Add `Context::run_jobs_with_evaluation`. APIs that run under a "
+        "handle must take the `handle` by shared reference."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=2,
+            document_chars=120,
+        ),
+        _request(task),
+    )
+
+    assert any(item.symbol == "Context" for item in packet.primary_edit_targets)
+    assert all(item.symbol != "handle" for item in packet.primary_edit_targets)
+
+
+def test_qualified_owner_prefers_its_namesake_module_over_homonym() -> None:
+    documents = (
+        _document(
+            "core/engine/src/script.rs",
+            "Script",
+            "pub struct Script;",
+        ),
+        _document(
+            "core/engine/src/builtins/locale/options.rs",
+            "Script",
+            "enum Script { Latin, Cyrillic }",
+        ),
+    )
+    task = "Add `Script::evaluate_with_evaluation` with cancellation checkpoints."
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=2,
+            document_chars=100,
+        ),
+        _request(task),
+    )
+
+    assert [item.path for item in packet.primary_edit_targets] == ["core/engine/src/script.rs"]
+
+
 def test_new_snake_case_api_does_not_promote_case_mismatched_analog() -> None:
     documents = (
         _document("object/object.go", "Reset", "func (e *Environment) Reset() {}"),
@@ -675,11 +789,7 @@ def test_symbol_bearing_paragraph_does_not_duplicate_extracted_obligation() -> N
         documents,
     )
 
-    matching = [
-        facet
-        for facet in facets
-        if "format_running_task_list" in facet.exact_symbols
-    ]
+    matching = [facet for facet in facets if "format_running_task_list" in facet.exact_symbols]
     assert len(matching) == 1
 
 
@@ -755,10 +865,10 @@ def test_multi_token_task_path_match_remains_inspection_evidence() -> None:
     )
 
     assert not packet.primary_edit_targets
-    candidate = packet.inspection_candidates[0]
+    candidate = packet.inspection_implementation_owners[0]
     assert candidate.path == "backend/handlers/multiAgentChat.ts"
-    assert candidate.decision_reason == "task_path_phrase_inspection"
-    assert candidate.localization_role == "UNCERTAIN"
+    assert candidate.decision_reason == "task_scoped_implementation_owner_candidate"
+    assert candidate.localization_role == "IMPLEMENTATION_OWNER"
     assert candidate.facet_ids
     assert [item.path for item in packet.inspection_integration] == [
         "backend/providers/registry.ts"
@@ -780,7 +890,7 @@ def test_long_distinctive_task_path_token_is_inspection_not_edit_authority() -> 
             "export function expandShorthand(property) { return property; }",
         ),
         _document(
-            "lib/__tests__/lexer-match-property.js",
+            "lib/__tests/lexer-match-property.js",
             "lexerMatchProperty",
             "describe('property matching', () => {});",
         ),
@@ -802,10 +912,64 @@ def test_long_distinctive_task_path_token_is_inspection_not_edit_authority() -> 
     )
 
     assert not packet.primary_edit_targets
-    candidate = packet.inspection_candidates[0]
+    candidate = packet.inspection_implementation_owners[0]
     assert candidate.path == "lib/lexer/shorthand.js"
-    assert candidate.decision_reason == "task_path_phrase_inspection"
+    assert candidate.decision_reason == "task_scoped_implementation_owner_candidate"
     assert candidate.facet_ids
+    assert all("/__tests/" not in item.path for item in packet.inspection_implementation_owners)
+
+
+def test_single_channel_strong_filename_match_is_an_owner_candidate() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "parser/default_args.go",
+                "parseDefaultArguments",
+                "func parseDefaultArguments() {}",
+            ),
+            _document("vm/runtime.go", "run", "func run() {}"),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=2,
+        document_chars=90,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Support default function arguments in the parser."),
+    )
+
+    assert "parser/default_args.go" in {
+        item.path for item in packet.inspection_implementation_owners
+    }
+
+
+def test_single_underscore_tests_directory_is_validation_not_owner() -> None:
+    repository = HybridRepository(
+        documents=(
+            _document(
+                "lib/__tests/lexer-shorthand.js",
+                "testShorthand",
+                "test('shorthand', () => {})",
+            ),
+        ),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=1,
+        document_chars=50,
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Implement shorthand expansion and compression."),
+    )
+
+    assert not packet.inspection_implementation_owners
 
 
 def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:
@@ -943,9 +1107,7 @@ def test_owner_scoped_exact_facts_are_seeded_when_rank_window_omits_them(
     def crowded_retrieve(self, state, **kwargs):
         result = original_retrieve(self, state, **kwargs)
         visible = tuple(
-            row
-            for row in result.ranked_files
-            if row.path == "core/engine/src/module/mod.rs"
+            row for row in result.ranked_files if row.path == "core/engine/src/module/mod.rs"
         )
         return replace(
             result,
@@ -991,9 +1153,7 @@ def test_file_location_cannot_substitute_for_owner_symbol_match() -> None:
         documents,
     )
     script_facet = next(
-        facet
-        for facet in facets
-        if "Script::evaluate_with_evaluation" in facet.unresolved_symbols
+        facet for facet in facets if "Script::evaluate_with_evaluation" in facet.unresolved_symbols
     )
 
     matched = _matching_facet_ids(
@@ -1018,9 +1178,7 @@ def test_qualified_owner_prefers_case_exact_type_over_lowercase_namesakes() -> N
         documents,
     )
     scoped = next(
-        facet
-        for facet in facets
-        if "Context::run_jobs_with_evaluation" in facet.unresolved_symbols
+        facet for facet in facets if "Context::run_jobs_with_evaluation" in facet.unresolved_symbols
     )
 
     assert scoped.owning_symbols == ("Context",)
@@ -1102,8 +1260,7 @@ def test_compiler_rejects_same_named_member_outside_unresolved_owner_scope() -> 
         for item in packet.primary_edit_targets
     )
     assert any(
-        item.path == "core/engine/src/context/mod.rs"
-        for item in packet.primary_edit_targets
+        item.path == "core/engine/src/context/mod.rs" for item in packet.primary_edit_targets
     )
 
 
@@ -1148,10 +1305,7 @@ def test_qualified_api_context_prevents_unqualified_clarification_from_global_bi
 
     assert all("cancel" not in facet.exact_symbols for facet in facets)
     assert all("is_cancelled" not in facet.exact_symbols for facet in facets)
-    assert all(
-        item.path != "core/runtime/src/abort/mod.rs"
-        for item in packet.primary_edit_targets
-    )
+    assert all(item.path != "core/runtime/src/abort/mod.rs" for item in packet.primary_edit_targets)
 
 
 def test_compiler_separates_integration_callers_from_edit_targets() -> None:
@@ -1303,8 +1457,26 @@ def test_compiler_marks_greenfield_rust_file_as_proposal_not_repository_fact() -
     )
 
     assert packet.proposed_new_files == ("core/engine/src/evaluation.rs",)
-    assert all(
-        item.path != "core/engine/src/evaluation.rs"
-        for item in packet.evidence_items
+    assert all(item.path != "core/engine/src/evaluation.rs" for item in packet.evidence_items)
+    assert any(
+        item.status is FacetCoverageStatus.COVERED_NEW_FILE_PRECEDENT
+        and item.paths == ("core/engine/src/evaluation.rs",)
+        for item in packet.facet_coverage
     )
-    assert packet.uncovered_facets
+    coverage_by_requirement = {item.requirement_id: item for item in packet.requirement_coverage}
+    requirements_by_entity = {item.entity: item for item in packet.task_requirements}
+    assert (
+        coverage_by_requirement[
+            requirements_by_entity["EvaluationHandle::cancel_with_reason"].requirement_id
+        ].mechanism
+        == "NEW_FILE_PRECEDENT"
+    )
+    assert (
+        coverage_by_requirement[requirements_by_entity["run_jobs"].requirement_id].mechanism
+        == "EXACT_EDIT"
+    )
+    unresolved = coverage_by_requirement[
+        requirements_by_entity["run_jobs_with_evaluation"].requirement_id
+    ]
+    assert unresolved.status is RequirementCoverageStatus.UNCOVERED
+    assert unresolved.requirement_id in packet.uncovered_requirements

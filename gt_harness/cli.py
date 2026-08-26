@@ -346,7 +346,7 @@ def _run_agent(args: argparse.Namespace) -> int:
             treatment_receipt = treatment.finalize(None)
         except Exception as exc:  # noqa: BLE001 - retain progress even if telemetry fails
             treatment_receipt = {
-                "schema": "gt.treatment_receipt.v1",
+                "schema": "gt.treatment_receipt.v4",
                 "treatment": args.treatment,
                 "treatment_status": "FAILED",
                 "errors": [f"checkpoint_finalize_failed:{type(exc).__name__}"],
@@ -448,7 +448,7 @@ def _run_agent(args: argparse.Namespace) -> int:
             treatment_receipt = treatment.finalize(None)
         except Exception as receipt_exc:  # noqa: BLE001 - preserve the primary error
             treatment_receipt = {
-                "schema": "gt.treatment_receipt.v1",
+                "schema": "gt.treatment_receipt.v4",
                 "treatment": args.treatment,
                 "treatment_status": "FAILED",
                 "errors": [
@@ -502,7 +502,7 @@ def _run_agent(args: argparse.Namespace) -> int:
             treatment_receipt = treatment.finalize(None)
         except Exception as receipt_exc:  # noqa: BLE001 - preserve the primary error
             treatment_receipt = {
-                "schema": "gt.treatment_receipt.v1",
+                "schema": "gt.treatment_receipt.v4",
                 "treatment": args.treatment,
                 "treatment_status": "FAILED",
                 "errors": [

@@ -203,6 +203,8 @@ jobs:
           import os
           from pathlib import Path
 
+          from gt_harness.analysis.delivery import audit_treatment_delivery
+
           receipt = {
               "schema": "gt.provider_availability_gate.v1",
               "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
@@ -437,6 +439,8 @@ jobs:
           import os
           from pathlib import Path
 
+          from gt_harness.analysis.delivery import audit_treatment_delivery
+
           root = Path("attestation")
           plan = json.loads((root / "deepswe20-plan.json").read_text(encoding="utf-8"))
           provider_gate = json.loads((root / "provider-gate.json").read_text(encoding="utf-8"))
@@ -520,9 +524,26 @@ jobs:
               for delivery in treatment.get("delivery_receipts") or []:
                   if not delivery.get("same_observation"):
                       errors.append(f"late_delivery:{task}")
-                  if int(delivery.get("context_token_count") or 0) > 500:
+              deliveries = treatment.get("provider_delivery_receipts") or []
+              for delivery in deliveries:
+                  token_limit = 500 if delivery.get("kind") == "repository_start" else 350
+                  if int(delivery.get("context_token_count") or 0) > token_limit:
                       errors.append(f"delivery_context_budget_exceeded:{task}")
+              if sum(
+                  int(delivery.get("context_token_count") or 0)
+                  for delivery in deliveries
+              ) > 1200:
+                  errors.append(f"total_context_budget_exceeded:{task}")
               if treatment.get("treatment_status") == "ACTIVE":
+                  delivery_audit = audit_treatment_delivery(
+                      treatment,
+                      initial_context=str(row.get("initial_context") or ""),
+                      repository_end=row.get("repository_end") or {},
+                  )
+                  errors.extend(
+                      f"delivery_audit:{task}:{reason}"
+                      for reason in delivery_audit["failures"]
+                  )
                   if not treatment.get("graph_available") or treatment.get("graph_status") not in {
                       "READY",
                       "READY_WITH_DECLARED_LIMITATIONS",

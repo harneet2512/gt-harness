@@ -139,6 +139,8 @@ def _service(root: Path, state: Path) -> RepositoryGraphService:
         graph_input_fingerprints=identity.graph_input_fingerprints,
         git_status_paths=identity.git_status_paths,
         submodule_state=identity.submodule_state,
+        generation_id="a" * 64,
+        manifest_sha256="b" * 64,
     )
     (state / "graph-receipt.json").write_text(
         json.dumps(receipt.as_dict(), sort_keys=True), encoding="utf-8"
@@ -267,6 +269,8 @@ def _impact_service(root: Path, state: Path) -> RepositoryGraphService:
         graph_input_fingerprints=identity.graph_input_fingerprints,
         git_status_paths=identity.git_status_paths,
         submodule_state=identity.submodule_state,
+        generation_id="a" * 64,
+        manifest_sha256="b" * 64,
     )
     (state / "graph-receipt.json").write_text(
         json.dumps(receipt.as_dict(), sort_keys=True), encoding="utf-8"
@@ -331,6 +335,8 @@ def _unproven_service(root: Path, state: Path) -> RepositoryGraphService:
         graph_input_fingerprints=identity.graph_input_fingerprints,
         git_status_paths=identity.git_status_paths,
         submodule_state=identity.submodule_state,
+        generation_id="a" * 64,
+        manifest_sha256="b" * 64,
     )
     (state / "graph-receipt.json").write_text(
         json.dumps(receipt.as_dict(), sort_keys=True), encoding="utf-8"

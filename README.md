@@ -1,98 +1,94 @@
-# GT-Harness
+# GT Harness
 
-GT-Harness is a model-agnostic benchmarking product for measuring whether deterministic GroundTruth repository intelligence helps coding agents. The prerelease product owns graph construction, readiness, delivery, run receipts, and paired comparison; it does not depend on a particular model or provider.
+GT Harness is a model-agnostic benchmarking product for testing whether
+deterministic repository intelligence improves coding-agent outcomes and
+efficiency. The prerelease product owns exact-revision graph construction,
+hybrid retrieval, requirement-scoped context, provider-visible delivery,
+trajectories, official-outcome binding, and paired comparison.
 
-The current provider-free certified implementation is
-`84be516dee2111f8394ed311fd59abe2e0391d27`, with verdict
-`CERTIFIED_WITH_DECLARED_LIMITATIONS`. It includes the canonical decision-context
-compiler, real pinned dense retrieval, persisted process/impact projection,
-same-observation Mini-SWE delivery, operation-aware Harbor deadlines, and external
-terminal-receipt supervision. Certified graph-language scope is Python,
-JavaScript, TypeScript, Go, Rust, and Java. Localization v5 separates edit,
-public-surface, integration, validation, and uncertain roles; retains explicit
-owners outside statistical rank windows; and records content-attributable feature
-lifecycle. The latest completed 20-task GT smoke scored 13/20 and passed final
-attestation. A new official smoke is authorized for the current frozen SHA;
-general competitive release remains `HOLD` until its results are audited.
+Current status: **implementation complete; exact-SHA Linux certification
+pending; paid benchmark not authorized**. Historical green dashboards and
+smoke scores are not evidence for the current revision.
 
-## What is currently being built?
+## Product guarantees
 
-The current system combines:
+- One installed command: `gt-harness`.
+- One agent scaffold: Mini-SWE-Agent 2.4.6 for both `bare` and `groundtruth`.
+- One exact product allowlist: `production-surface.toml`.
+- One immutable graph generation selected through atomic `CURRENT` publication.
+- No graph-derived delivery unless commit, source revision, builder, schema,
+  manifest, checksum, database health, and query readiness all match.
+- A required dense index in official `hybrid_required` treatments, using the
+  checksum-pinned local Snowflake ONNX model and no provider calls.
+- Typed context-v7 requirements and separate edit, inspection, public-surface,
+  integration, and validation roles.
+- Exact delivery receipts and durable trajectories; hidden reasoning is never
+  invented as evidence uptake.
+- Official verifier results, not workflow success or self-reported outcomes,
+  determine solves.
 
-- deterministic repository graph construction;
-- exact symbol search and source-evidenced structural graph queries;
-- persistent revision-bound dense retrieval fused with exact/BM25/lexical/structural
-  retrieval by deterministic reciprocal-rank fusion;
-- bounded v5 decision packets containing owner-scoped edit targets, distinct
-  public/integration/validation roles, certified process paths, change surface,
-  affected tests, validation facts, uncertainty, and revision-bound evidence;
-- preflight and postflight command classification;
-- exact source-revision tracking and fail-closed full graph convergence after edits;
-- replayable receipts containing request hashes, evidence, timing, and token accounting.
-
-The goal is not to force a model's answer. The goal is to give the model less context, but better-grounded context, at the moment it can use it.
-
-The graph does not require an LSP or provider credential. The release benchmark
-uses the pinned local Snowflake ONNX embedder and `hybrid_required`, so a missing,
-stale, or corrupt dense index fails before provider use. Local exploratory runs
-default to `hybrid_if_available` and explicitly receipt degradation when the model
-is absent. Dense similarity only ranks inspection candidates; it never creates a
-verified symbol, relationship, or edit target.
-
-## Historical results (not product certification)
-
-### Retrieval benchmark
-
-On the 427-row Agent Retrieval Bench across 25 repositories:
-
-| Metric | Result |
-|---|---:|
-| Ranked MRR | 0.4372 |
-| Ranked Recall@20 | 0.7072 |
-| Ranked BCY@8K | 0.5198 |
-| Delivered-payload MRR | 0.4207 |
-
-### Matched Mini-SWE smoke
-
-In one ten-task matched smoke, GT-on matched the frozen GT-off baseline at **9/10 official tasks** on the common solved set, while using:
-
-- **31.3% fewer tokens**;
-- **51 fewer API calls**;
-- **53 fewer assistant steps**;
-- **103 fewer model actions**.
-
-This is a single matched-smoke result, not a claim of causal solve-rate improvement. Provider-free tests establish implementation integrity; larger outcome claims require a separately authorized matched evaluation.
-
-## Canonical local product path
+## Canonical product path
 
 ```bash
 pip install -e .
 gt-harness doctor
 gt-harness graph build --root /path/to/repository
+gt-harness graph status --root /path/to/repository
 gt-harness graph query definition Symbol --root /path/to/repository
 gt-harness run "task" --model exact/provider-model --treatment bare
 gt-harness run "task" --model exact/provider-model --treatment groundtruth
 gt-harness record-harbor-outcomes --harbor-run-dir /path/to/job --output-dir /path/to/evaluated
 gt-harness compare --baseline /path/to/bare/evaluated --treatment /path/to/gt/evaluated
-gt-harness certify --receipt-dir /path/to/codespaces-campaign --expected-commit "$(git rev-parse HEAD)"
+gt-harness certify --receipt-dir /path/to/campaign --expected-commit "$(git rev-parse HEAD)"
 ```
 
-The GT arm fails before the first provider call when its exact-revision graph
-or initial evidence packet is unavailable. A nominal GT task with zero
-delivered evidence cannot enter a paired comparison. Evaluator outcomes are
-derived from graded Harbor receipts and hash-bound to the run receipt; they are
-not typed in by an operator.
+The `groundtruth` treatment fails before provider call 1 when the exact graph,
+dense index, or initial decision packet is unavailable. `NOT_APPLICABLE` is
+reserved for genuinely unsupported tasks. A nominal GT task with missing or
+invalid delivery cannot enter a normal paired comparison.
 
-`gt-harness run` is the sole coding-agent product boundary. GT Harness does not
-ship an MCP server: benchmark treatments run through the pinned Mini-SWE-Agent
-2.4.6 loop so graph delivery, trajectories, costs, and solve outcomes share one
-auditable path.
+## Benchmark workflows
 
-The legacy file-keyed incremental indexer and historical benchmark/control paths remain in the repository for parity analysis, but they are not the canonical graph lifecycle. See `CANONICAL_ARCHITECTURE.md` for the authoritative boundary.
+| Suite | Workflow | Adapter |
+| --- | --- | --- |
+| Terminal-Bench 2 | `tb2_miniswe_product.yml` | `eval.harbor_gt_harness_adapter` |
+| DeepSWE | `deepswe_gt_harness_product.yml` | `eval.pier_gt_harness_adapter` |
+| SWE-bench Live Lite | `swe_live_lite_gt_harness_product.yml` | `eval.swe_live_lite_gt_harness_adapter` |
 
-Provider-free product certification runs `pytest -m 'not external_evidence'`. The excluded class is explicit: it requires either the separately pinned official ARB evaluator or a hosted historical Finalstand artifact/API receipt. It is not silently counted as product coverage and runs only in its owning benchmark/evidence workflow.
+Each workflow accepts `bare` or `groundtruth` through the same Mini-SWE 2.4.6
+surface. The other two dispatchable workflows are provider-free certification
+and repository-intelligence audit. Historical central, Nano, MCP, diagnostic,
+split, and baseline-only workflows are not dispatchable or installed.
 
-The certification command verifies receipts produced by the real clean Linux campaign. It does not create evidence, accept a different checkout SHA, tolerate a dirty checkout, or convert an absent competitive benchmark into a product PASS.
+## Verification
+
+```bash
+python -m pytest
+python scripts/lint_product_surface.py
+go test -tags sqlite_fts5 ./...
+python scripts/verify_gt_harness.py --output artifacts/verification/latest
+```
+
+The real-CLI verifier creates a temporary Git repository, runs doctor, builds
+and queries the graph, changes source, proves the old graph becomes `STALE`,
+rebuilds to a different immutable generation, and cleans up. The hosted
+`prerelease_product_matrix.yml` workflow runs the complete Linux campaign and
+retains every receipt even on failure.
+
+## Architecture and evidence
+
+- [Canonical architecture](CANONICAL_ARCHITECTURE.md)
+- [Detailed architecture contract](arch_type.md)
+- [Benchmark integration contract](AGENTS.md)
+- [Current implementation handoff](docs/BENCHMARK_READINESS_HANDOFF_2026-08-26.md)
+- [Historical implementation evidence](docs/GT_CONTEXT_V6_IMPLEMENTATION_2026-08-25.md)
+
+GT is not a GitNexus clone. Both products use graph-backed repository
+intelligence, but GT's release claim is an auditable benchmark treatment:
+exact-revision truth, fail-closed lifecycle, deterministic requirement coverage,
+identical bare/GT scaffold control, and official outcome/efficiency analysis.
+Competitor ideas are useful only when they improve a repository fact and a
+measurable agent decision without weakening those guarantees.
 
 ## License
 

@@ -28,10 +28,11 @@ stop before provider spend and fix the workflow.
 | deepswe | `deepswe_gt_harness_product.yml` | `eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent` |
 | swe-live-lite | `swe_live_lite_gt_harness_product.yml` | `eval.swe_live_lite_gt_harness_adapter` |
 
-DeepSWE uses the registered dispatch wrapper
-`deepswe_miniswe_central.yml`, which may only call the current DeepSWE product
-workflow. The word `central` in that filename is historical GitHub registration,
-not a permitted runtime architecture.
+There are no dispatch wrappers. Each suite has one product workflow, and both
+`bare` and `groundtruth` treatments enter through that workflow's identical
+Mini-SWE-Agent 2.4.6 boundary. `production-surface.toml` is the exact allowlist
+for installed modules and dispatchable workflows; an undeclared workflow or
+runtime import is a certification failure.
 
 ## Runtime integration
 
@@ -110,11 +111,12 @@ contain the exact observations delivered to the model and its provider-call
 accounting must match `gt-run.json`. The official verifier result must bind the
 same task and patch.
 
-For an ACTIVE context-v6 treatment, the union of
+For an ACTIVE context-v7 treatment, the union of
 `provider_delivery_receipts[].serialized_claim_ids` must exactly equal
 `delivered_claim_ids`, every receipt must identify `delivered_before_call`, and
 the trajectory may contain at most one GT augmentation for each assistant
-provider turn. Candidate-only paths do not count as delivered or followed.
+provider turn. Every provider-visible fact must bind a typed requirement ID and
+role; candidate-only paths do not count as delivered or followed.
 
 The suite attestation must fail when any expected task, receipt, trajectory,
 official reward, or source identity is absent. Upload artifacts under `always()`
@@ -154,9 +156,10 @@ GitHub Actions workflow or a current integration example.
 Before any paid smoke, run provider-free checks in the GitHub Codespace:
 
 ```text
-pytest -q tests/test_generalized_benchmark_product.py
-pytest -q tests/test_harbor_gt_harness_product.py tests/test_deepswe_gt_harness_product.py
-pytest -q -m "not external_evidence" --ignore=tests/test_gt_finalstand.py
+python -m pytest
+python scripts/lint_product_surface.py
+go test -tags sqlite_fts5 ./...
+python scripts/verify_gt_harness.py --output artifacts/verification/latest
 ```
 
 If GitHub billing prevents a Codespace from starting, dispatch the registered

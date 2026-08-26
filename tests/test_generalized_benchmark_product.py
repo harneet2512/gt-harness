@@ -19,7 +19,7 @@ CERTIFICATION_WORKFLOW = ROOT / ".github" / "workflows" / "prerelease_product_ma
 def test_one_machine_contract_binds_all_benchmark_suites_to_one_product() -> None:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
 
-    assert contract["schema"] == "gt.benchmark_product_contract.v1"
+    assert contract["schema"] == "gt.benchmark_product_contract.v2"
     assert contract["product_command"] == "gt-harness run"
     assert contract["agent_scaffold"] == "mini-swe-agent"
     assert contract["agent_scaffold_version"] == "2.4.6"

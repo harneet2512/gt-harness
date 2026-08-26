@@ -155,7 +155,7 @@ def replay(
         "graph_identity": receipt.get("graph_identity"),
         "treatment_status": receipt.get("treatment_status"),
         "treatment_errors": receipt.get("errors"),
-        "context_schema_v6": 'schema="gt.agent_context.v6"' in context,
+        "context_schema_v7": 'schema="gt.agent_context.v7"' in context,
         "context": context,
         "packet_status": packet_dict["status"],
         "task_facets": packet_dict["task_facets"],

@@ -69,7 +69,7 @@ The sole installed executable is `gt-harness`, provided by
 | Command | Responsibility | Completion evidence |
 | --- | --- | --- |
 | `gt-harness doctor` | Check Python, Git, Go, the source-built `gt-index`, and product dependencies. | Structured doctor output and zero exit status. |
-| `gt-harness graph build` | Construct and atomically publish the canonical repository graph. | `gt.graph_receipt.v4` with a ready or explicit non-ready state. |
+| `gt-harness graph build` | Construct and atomically publish the canonical repository graph. | `gt.graph_receipt.v5` with a ready or explicit non-ready state. |
 | `gt-harness graph status` | Revalidate graph identity, checksum, and SQLite health against the current checkout. | Fresh public graph receipt. |
 | `gt-harness graph query` | Answer a supported structural query only through a revalidated graph. | Query response bound to the graph receipt. |
 | `gt-harness run --treatment bare` | Run the unaugmented comparison arm. | `gt.run_receipt.v1` plus trajectory. |
@@ -93,13 +93,13 @@ official benchmark task and immutable repository image
   -> adapter invokes gt-harness run with the real issue, task identity,
      repository root, private state directory, model route, and time budget
   -> GroundTruthTreatment computes repository identity
-  -> RepositoryGraphService builds or revalidates .groundtruth/graph.db
+  -> RepositoryGraphService builds or revalidates an immutable graph generation
   -> PersistentDenseSemanticIndex builds or revalidates repository embeddings
   -> hybrid retrieval gathers exact, sparse, structural, and dense candidates
   -> RepositoryContextCompiler separates edit authority from inspection roles
   -> persisted graph projector adds bounded processes, impact, and tests
   -> semantic graph adds supported deterministic source-semantic facts
-  -> compact gt.agent_context.v6 packet is attached to the task
+  -> compact gt.agent_context.v7 requirement packet is attached to the task
   -> Mini-SWE-Agent 2.4.6 chooses and executes shell actions
   -> GT observes each complete assistant turn, refreshes stale state, and may
      append at most one bounded delta to the final triggering observation
@@ -141,9 +141,10 @@ different experiment and cannot be merged into the official comparison.
 | DeepSWE | DataCurve Pier 0.3.1 | `eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent` | `.github/workflows/deepswe_gt_harness_product.yml` |
 | SWE-bench Live Lite | Direct immutable task container | `eval.swe_live_lite_gt_harness_adapter` | `.github/workflows/swe_live_lite_gt_harness_product.yml` |
 
-The DeepSWE dispatch wrapper `deepswe_miniswe_central.yml` exists because the
-workflow filename is registered with GitHub. “Central” is historical naming;
-the wrapper may only dispatch the canonical DeepSWE product workflow.
+No historical dispatch wrapper is part of the product. Each suite workflow
+accepts `bare` or `groundtruth` and calls the same Mini-SWE-Agent 2.4.6 product
+boundary. `production-surface.toml` rejects any additional dispatchable
+workflow.
 
 Adapters own installation, transport, environment scoping, invocation, and
 artifact preservation. The external suite owns task material, repository
@@ -213,12 +214,15 @@ The builder performs:
 
 ### Canonical persisted state
 
-The only production-authoritative graph is:
+The only production-authoritative graph is the immutable generation named by
+the atomically replaced `CURRENT` pointer:
 
 ```text
-<state-dir>/graph.db
-<state-dir>/graph.manifest.json
-<state-dir>/graph-receipt.json
+<state-dir>/CURRENT
+<state-dir>/build-attempt.json
+<state-dir>/generations/<generation-id>/graph.db
+<state-dir>/generations/<generation-id>/graph.manifest.json
+<state-dir>/generations/<generation-id>/graph-receipt.json
 ```
 
 The ordinary repository-local default is `.groundtruth/`. Benchmark adapters
@@ -267,16 +271,20 @@ explicit limitation or non-ready state. It cannot silently serve partial facts.
 
 ### Lifecycle and concurrency
 
-Cold builds write a BUILDING receipt, build a candidate database, validate it,
-and publish database, manifest, and receipt atomically. Warm starts recompute
-repository identity and validate the database seal before reuse. Additions,
+Cold builds persist a durable build attempt, build and seal a new generation,
+then publish only its `CURRENT` pointer atomically. Database, manifest, and
+receipt never mix across generations. Warm starts recompute repository identity
+and validate the current generation, manifest checksum, database seal, and
+generation identity before reuse. Additions,
 modifications, deletions, renames, commit changes, and dirty-tree changes make
 the old receipt stale and currently trigger an atomic full publication. The
 file-keyed incremental implementation remains non-canonical until whole-graph
 relationship parity is proven.
 
 Cross-process publication is serialized. An interrupted build cannot expose
-its partial candidate as ready; restart repairs or rebuilds it.
+its partial generation as ready; restart records the abandoned attempt and
+continues to serve only the previously complete exact-revision generation, or
+rebuilds when that generation is no longer current.
 
 ### Query surface
 
@@ -373,8 +381,13 @@ they must not be represented as having Python-style semantic flow.
 
 ## Layer 6: provider-visible delivery
 
-The initial packet uses schema `gt.agent_context.v6`. It is appended to the
-real task before provider call 1. Its hard budget is measured with the same
+The initial packet uses schema `gt.agent_context.v7`. It is appended to the
+real task before provider call 1. It contains typed requirements with intent,
+entity, resolution (`RESOLVED`, `AMBIGUOUS_IDENTITY`, `UNRESOLVED`, or
+`NEW_FILE_REQUIRED`), coverage, and deterministic mechanism. Edit, inspection,
+public-surface, integration, and validation roles remain separate. An uncovered
+requirement is stated explicitly and cannot be converted into edit authority.
+Its hard budget is measured with the same
 deterministic conservative token counter used by the treatment; current
 benchmark packets are bounded to the configured context ceiling.
 
@@ -520,7 +533,8 @@ benchmark regression can block release even when every receipt is valid.
 | `gt_engine/semantic_graph.py` | PRODUCTION | Deterministic supported source-semantic facts. |
 | `eval/*_gt_harness_adapter.py` | PRODUCTION ADAPTERS | Suite protocol translation into the same product command. |
 | Canonical product workflows | PRODUCTION WORKFLOWS | Immutable planning, provider gate, task execution, artifacts, and attestation. |
-| `src/groundtruth/` | PRODUCTION SUPPORT / MIGRATION SOURCE | First-party capability library; only modules reachable from the canonical path are production-active. |
+| `production-surface.toml` | PRODUCTION CONTRACT | Exact installed-module, workflow, schema, budget, and language-candidate allowlist. |
+| `src/groundtruth/` | LEGACY / GIT HISTORY | Excluded from the wheel and forbidden from the canonical runtime dependency closure. |
 | `eval/gt_central_agent.py`, older central control layers, historical workflows | RESEARCH / LEGACY | Experimental evidence; not a dispatchable or certifying product path. |
 | `eval/pier_gt_adapter.py`, Nano paths, MCP treatment, old headless/mini-patch scripts | FORBIDDEN | Must not be used for official GT Harness evaluation. |
 
@@ -627,12 +641,13 @@ paid run would otherwise have surfaced:
   so high-fan-out graphs could claim `truncated=false`; repository
   truncation reasons now propagate to the packet.
 
-Remaining open work before the recall gate passes (recall measured at
-0.08 vs the 0.5 floor): decision-point delivery of bounded
-process/impact/test answers on file-read observations (GitNexus
-`native_augment` lesson, adopted), typed `AMBIGUOUS_IDENTITY` rows with
-candidates, inspection-candidate structural-relevance filtering, and
-regeneration of the truth report under `hybrid_required` production mode.
+The implementation now uses typed requirement-resolution rows, exposes
+`AMBIGUOUS_IDENTITY` without granting false edit authority, separates all
+candidate roles, and attaches bounded post-action evidence on the triggering
+observation. The old 0.0845 recall receipt remains historical evidence, not a
+claim about this revision. A fresh `hybrid_required` smoke20 replay must meet
+the fail-closed precision, recall, treatment, and dense-readiness gates before
+the candidate SHA can be called benchmark-ready.
 
 GT Harness is complete only when the substrate is exact, the delivered facts
 are decision-useful, the integration is faithful, and controlled results show

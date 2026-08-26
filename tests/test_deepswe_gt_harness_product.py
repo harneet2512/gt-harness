@@ -9,7 +9,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "deepswe_gt_harness_product.yml"
-ENTRY_WORKFLOW = ROOT / ".github" / "workflows" / "deepswe_miniswe_central.yml"
 MANIFEST = ROOT / "eval" / "deepswe_smoke20_v1.json"
 
 
@@ -136,19 +135,18 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "nano" not in source.lower()
 
 
-def test_deepswe_attestation_uses_the_canonical_500_token_delivery_budget() -> None:
+def test_deepswe_attestation_uses_role_phase_delivery_budgets() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'context_token_count") or 0) > 500' in source
+    assert 'token_limit = 500 if delivery.get("kind") == "repository_start" else 350' in source
+    assert 'context_token_count") or 0) > token_limit' in source
+    assert "total_context_budget_exceeded" in source
     assert 'context_token_count") or 0) > 350' not in source
 
 
-def test_registered_deepswe_entrypoint_dispatches_only_the_product_workflow() -> None:
-    source = ENTRY_WORKFLOW.read_text(encoding="utf-8")
+def test_deepswe_product_is_the_only_dispatchable_deepswe_entrypoint() -> None:
+    workflows = ROOT / ".github" / "workflows"
 
-    assert "workflow_dispatch:" in source
-    assert "uses: ./.github/workflows/deepswe_gt_harness_product.yml" in source
-    assert "secrets: inherit" in source
-    assert "eval.pier_gt_adapter" not in source
-    assert "eval.gt_central_agent" not in source
-    assert "DeepSWE Mini-SWE central evaluation" not in source
+    assert WORKFLOW.is_file()
+    assert not (workflows / "deepswe_miniswe_central.yml").exists()
+    assert [path.name for path in workflows.glob("*deepswe*.yml")] == [WORKFLOW.name]

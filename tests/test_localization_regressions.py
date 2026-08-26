@@ -25,9 +25,7 @@ def _git_repository(root: Path, files: dict[str, str]) -> None:
         cwd=root,
         check=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "GT Fixture"], cwd=root, check=True
-    )
+    subprocess.run(["git", "config", "user.name", "GT Fixture"], cwd=root, check=True)
     for relative, content in files.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,7 +65,7 @@ def test_awilix_shape_keeps_implementation_public_surface_and_test_roles(
     assert "src/awilix.ts" not in "\n".join(
         line for line in context.splitlines() if line.startswith("EXACT_EDIT_TARGET")
     )
-    assert 'schema="gt.agent_context.v6"' in context
+    assert 'schema="gt.agent_context.v7"' in context
 
 
 @pytest.mark.real_graph
@@ -101,7 +99,7 @@ def test_boa_shape_keeps_existing_integration_surfaces_and_labels_new_file(
     assert "EXACT_EDIT_TARGET core/engine/src/job.rs" in context
     assert "INSPECT_PUBLIC_SURFACE core/engine/src/lib.rs" in context
     assert "PROPOSED_NEW_FILE core/engine/src/evaluation.rs fact=false" in context
-    assert "UNCOVERED_FACET" in context
+    assert "UNCOVERED_REQUIREMENT" in context
     assert not any(
         "source.rs" in line and "transition" in line
         for line in context.splitlines()
@@ -110,11 +108,7 @@ def test_boa_shape_keeps_existing_integration_surfaces_and_labels_new_file(
 
 
 def _edit_target_lines(context: str) -> list[str]:
-    return [
-        line
-        for line in context.splitlines()
-        if line.startswith("EXACT_EDIT_TARGET")
-    ]
+    return [line for line in context.splitlines() if line.startswith("EXACT_EDIT_TARGET")]
 
 
 def _role_paths(context: str, prefix: str) -> set[str]:
@@ -140,12 +134,8 @@ def test_generic_prose_nouns_cannot_bind_edit_authority(tmp_path: Path) -> None:
                 "export function type(expected: unknown) { return expected }\n"
                 "export function actual(value: unknown) { return value }\n"
             ),
-            "ark/attest/index.ts": (
-                "export { type } from './assert/chainableAssertions'\n"
-            ),
-            "ark/type/scope.ts": (
-                "export class Scope { resolve(name: string) { return name } }\n"
-            ),
+            "ark/attest/index.ts": ("export { type } from './assert/chainableAssertions'\n"),
+            "ark/type/scope.ts": ("export class Scope { resolve(name: string) { return name } }\n"),
             "ark/json-schema/object.ts": (
                 "import { SchemaScope } from '../schema/shared/jsonSchema'\n"
                 "export function parseJsonSchema(schema: unknown) {\n"
@@ -191,9 +181,7 @@ def test_acronym_qualified_owner_never_edits_case_matched_field(tmp_path: Path) 
         root,
         {
             "setup.cfg": "[metadata]\nname=banditfixture\n",
-            "bandit/__init__.py": (
-                "from bandit.core import issue\n"
-            ),
+            "bandit/__init__.py": ("from bandit.core import issue\n"),
             "bandit/core/issue.py": (
                 "class Cwe:\n"
                 "    SQL_INJECTION = 89\n"
@@ -205,9 +193,7 @@ def test_acronym_qualified_owner_never_edits_case_matched_field(tmp_path: Path) 
                 "        self.test_id = ''\n"
             ),
             "bandit/core/taint.py": (
-                "class TaintManager:\n"
-                "    def __init__(self):\n"
-                "        self.nodes = []\n"
+                "class TaintManager:\n    def __init__(self):\n        self.nodes = []\n"
             ),
             "bandit/plugins/taint_sql_injection.py": (
                 "from bandit.core import issue\n"
@@ -246,13 +232,11 @@ def test_package_root_name_symbol_not_edit_identity(tmp_path: Path) -> None:
         {
             "package.json": '{"name":"pkgfixture","main":"pkgfixture.js"}',
             "pkgfixture.js": (
-                "export const pkgfixture = { version: '1.0.0' };\n"
-                "export default pkgfixture;\n"
+                "export const pkgfixture = { version: '1.0.0' };\nexport default pkgfixture;\n"
             ),
             "src/functions.js": "export const registry = {};\n",
             "src/functions/multicolumn.js": (
-                "import { registry } from '../functions'\n"
-                "registry.multicolumn = () => 1\n"
+                "import { registry } from '../functions'\nregistry.multicolumn = () => 1\n"
             ),
             "src/environments/array.js": "export const arrayEnv = {}\n",
         },
@@ -268,6 +252,7 @@ def test_package_root_name_symbol_not_edit_identity(tmp_path: Path) -> None:
     assert "RETRIEVAL" in context or "REQUIREMENT" in context
     edit_paths = _role_paths(context, "EXACT_EDIT_TARGET")
     assert not any(path.endswith("pkgfixture.js") for path in edit_paths)
+    assert "AMBIGUOUS_IDENTITY symbol=pkgfixture" not in context
 
 
 @pytest.mark.real_graph
@@ -287,8 +272,7 @@ def test_same_name_symbols_in_unrelated_files_are_inspection_only(tmp_path: Path
             "index.js": "export { helper } from './domain/core'\n",
             "domain/core.js": "export function helper(input) { return input }\n",
             "ui/widget.js": (
-                "export function helper(markup) { return markup }\n"
-                "export const widget = helper\n"
+                "export function helper(markup) { return markup }\nexport const widget = helper\n"
             ),
             "tools/cli.js": "console.log('cli')\n",
         },
@@ -305,7 +289,15 @@ def test_same_name_symbols_in_unrelated_files_are_inspection_only(tmp_path: Path
     # subsystems must not grant either file edit authority.  Until the
     # typed-ambiguous delivery (P2c) is added, both vanish — the guard is
     # that not-both survive as EXACT_EDIT_TARGET.
-    assert not ("domain/core" in edit_lines and "ui/widget" in edit_lines)
+    assert "domain/core" not in edit_lines
+    assert "ui/widget" not in edit_lines
+    assert "AMBIGUOUS_IDENTITY symbol=helper" in context
+    assert "domain/core.js" in context
+    assert "ui/widget.js" in context
+    receipt = treatment.finalize(None)
+    assert receipt["delivery_reconciliation"] == "PASS"
+    assert receipt["evidence_items_delivered"] >= 1
+    assert receipt["provider_delivery_receipts"][0]["serialized_claim_ids"]
 
 
 @pytest.mark.real_graph
@@ -320,14 +312,8 @@ def test_exact_path_match_without_facet_support_is_inspection_only(
         root,
         {
             "go.mod": "module example.com/cacheconfig\n",
-            "cache/config.go": (
-                "package cache\n"
-                "func Configure() error { return nil }\n"
-            ),
-            "cmd/rebuilder/main.go": (
-                "package main\n"
-                "func main() {}\n"
-            ),
+            "cache/config.go": ("package cache\nfunc Configure() error { return nil }\n"),
+            "cmd/rebuilder/main.go": ("package main\nfunc main() {}\n"),
         },
     )
     treatment = GroundTruthTreatment(root, state_dir=tmp_path / "state")

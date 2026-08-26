@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import platform
 import subprocess
+import tomllib
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 CERTIFIED_WITH_LIMITATIONS = "CERTIFIED_WITH_DECLARED_LIMITATIONS"
+PRODUCT_SURFACE_SCHEMA = "gt.product_surface.v1"
 
 REQUIRED_STEPS = {
     "install",
@@ -23,8 +27,13 @@ REQUIRED_STEPS = {
     "graph_lifecycle",
     "language_lifecycle",
     "dense_model",
+    "localization_source",
+    "localization_truth",
+    "localization_gate",
     "harness_e2e",
     "failure_campaign",
+    "product_surface",
+    "cli_verification",
 }
 
 REQUIRED_RECEIPTS = {
@@ -34,6 +43,9 @@ REQUIRED_RECEIPTS = {
     "language-lifecycle.json": "gt.language_support_audit_receipt.v1",
     "harness-e2e.json": "gt.harness_e2e_audit_receipt.v1",
     "failure-campaign.json": "gt.failure_campaign_receipt.v1",
+    "localization-truth.json": "gt.localization_truth_report.v2",
+    "product-surface.json": "gt.product_surface_verification.v1",
+    "verification-summary.json": "gt.cli_verification.v1",
 }
 
 
@@ -44,6 +56,178 @@ class CertificationError:
 
     def as_dict(self) -> dict[str, str]:
         return {"code": self.code, "message": self.message}
+
+
+@dataclass(frozen=True)
+class ProductSurface:
+    python_modules: tuple[str, ...]
+    console_entry_points: tuple[str, ...]
+    benchmark_adapters: tuple[str, ...]
+    dispatchable_workflows: tuple[str, ...]
+    forbidden_modules: tuple[str, ...]
+    schemas: dict[str, str]
+    budgets: dict[str, int]
+    languages: dict[str, tuple[str, ...]]
+
+
+def load_product_surface(repository: str | Path = ".") -> ProductSurface:
+    """Load the one release allowlist shared by packaging and certification."""
+
+    root = Path(repository).resolve()
+    path = root / "production-surface.toml"
+    try:
+        value = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"cannot read production surface: {exc}") from exc
+    if value.get("schema") != PRODUCT_SURFACE_SCHEMA:
+        raise ValueError("unsupported product surface schema")
+
+    def strings(name: str) -> tuple[str, ...]:
+        rows = value.get(name)
+        if not isinstance(rows, list) or not all(isinstance(row, str) and row for row in rows):
+            raise ValueError(f"production surface {name} must be a non-empty string list")
+        if len(rows) != len(set(rows)):
+            raise ValueError(f"production surface {name} contains duplicates")
+        return tuple(rows)
+
+    language_rows = value.get("languages")
+    if not isinstance(language_rows, dict):
+        raise ValueError("production surface languages table is missing")
+    return ProductSurface(
+        python_modules=strings("python_modules"),
+        console_entry_points=strings("console_entry_points"),
+        benchmark_adapters=strings("benchmark_adapters"),
+        dispatchable_workflows=strings("dispatchable_workflows"),
+        forbidden_modules=strings("forbidden_modules"),
+        schemas={str(key): str(item) for key, item in dict(value.get("schemas", {})).items()},
+        budgets={str(key): int(item) for key, item in dict(value.get("budgets", {})).items()},
+        languages={
+            str(key): tuple(str(item) for item in items)
+            for key, items in language_rows.items()
+            if isinstance(items, list)
+        },
+    )
+
+
+def _module_path(module: str) -> str:
+    return module.replace(".", "/") + ".py"
+
+
+def validate_product_surface(
+    repository: str | Path = ".",
+    *,
+    wheel: str | Path | None = None,
+) -> tuple[CertificationError, ...]:
+    """Validate source/workflow and optional built-wheel equality fail closed."""
+
+    root = Path(repository).resolve()
+    try:
+        surface = load_product_surface(root)
+    except ValueError as exc:
+        return (CertificationError("product_surface_invalid", str(exc)),)
+    errors: list[CertificationError] = []
+    expected_modules = set(surface.python_modules)
+    for module in sorted(expected_modules):
+        if not (root / _module_path(module)).is_file():
+            errors.append(
+                CertificationError("surface_module_missing", f"missing module: {module}")
+            )
+    # Historical sources may remain recoverable in the checkout while the
+    # prerelease is stabilized. They are forbidden from the installed/runtime
+    # dependency closure, not from Git history. Follow imports from every
+    # canonical module and fail if one reaches a forbidden implementation.
+    module_paths = {
+        module: root / _module_path(module)
+        for module in expected_modules
+        if (root / _module_path(module)).is_file()
+    }
+    pending = list(module_paths)
+    reached = set(pending)
+    while pending:
+        module = pending.pop()
+        try:
+            tree = ast.parse(module_paths[module].read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, SyntaxError):
+            continue
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+                imported.update(f"{node.module}.{alias.name}" for alias in node.names)
+        for candidate in imported:
+            candidate_path = root / _module_path(candidate)
+            if (
+                candidate.startswith(("eval.", "gt_engine.", "gt_harness."))
+                and candidate_path.is_file()
+                and candidate not in expected_modules
+            ):
+                errors.append(
+                    CertificationError(
+                        "undeclared_runtime_module",
+                        f"{module} imports undeclared production path {candidate}",
+                    )
+                )
+            if any(
+                candidate == forbidden or candidate.startswith(forbidden + ".")
+                for forbidden in surface.forbidden_modules
+            ):
+                errors.append(
+                    CertificationError(
+                        "forbidden_module_reachable",
+                        f"{module} imports forbidden production path {candidate}",
+                    )
+                )
+            if candidate in module_paths and candidate not in reached:
+                reached.add(candidate)
+                pending.append(candidate)
+    workflow_root = root / ".github" / "workflows"
+    actual_workflows = {
+        path.name for path in workflow_root.glob("*.yml") if path.is_file()
+    } | {path.name for path in workflow_root.glob("*.yaml") if path.is_file()}
+    expected_workflows = set(surface.dispatchable_workflows)
+    for name in sorted(expected_workflows - actual_workflows):
+        errors.append(CertificationError("surface_workflow_missing", name))
+    for name in sorted(actual_workflows - expected_workflows):
+        errors.append(CertificationError("surface_workflow_unexpected", name))
+    if wheel is not None:
+        wheel_path = Path(wheel).resolve()
+        try:
+            with zipfile.ZipFile(wheel_path) as archive:
+                actual_modules = {
+                    name[:-3].replace("/", ".")
+                    for name in archive.namelist()
+                    if name.endswith(".py")
+                    and ".dist-info/" not in name
+                    and not name.endswith("/__init__.py")
+                }
+        except (OSError, zipfile.BadZipFile) as exc:
+            errors.append(CertificationError("surface_wheel_invalid", str(exc)))
+        else:
+            missing = sorted(expected_modules - actual_modules)
+            unexpected = sorted(actual_modules - expected_modules)
+            forbidden = sorted(
+                module
+                for module in actual_modules
+                if any(
+                    module == prefix or module.startswith(prefix + ".")
+                    for prefix in surface.forbidden_modules
+                )
+            )
+            if missing:
+                errors.append(
+                    CertificationError("surface_wheel_missing", ", ".join(missing))
+                )
+            if unexpected:
+                errors.append(
+                    CertificationError("surface_wheel_unexpected", ", ".join(unexpected))
+                )
+            if forbidden:
+                errors.append(
+                    CertificationError("surface_wheel_forbidden", ", ".join(forbidden))
+                )
+    return tuple(errors)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -154,8 +338,8 @@ def _check_specialized_receipt(
             fail("harness_scaffold_mismatch", "Mini-SWE 2.4.6 was not exercised")
         if value.get("same_observation") is not True:
             fail("harness_delivery_timing", "GT update was not on the action observation")
-        if value.get("context_schema_v6") is not True:
-            fail("harness_context_schema", "context-v6 was not exercised end to end")
+        if value.get("context_schema_v7") is not True:
+            fail("harness_context_schema", "context-v7 was not exercised end to end")
         if value.get("raw_output_preserved") is not True:
             fail("harness_observation_mutated", "raw action output was not preserved")
         if value.get("trajectory_delivery_receipt_preserved") is not True:
@@ -171,24 +355,23 @@ def _check_specialized_receipt(
             fail("harness_dense_lifecycle", "dense build/query/update/restart did not pass")
         dense_queries = _rows(value, "dense_queries")
         if not dense_queries or any(
-            row.get("query_ready") is not True
-            or int(row.get("candidate_count", 0)) < 1
+            row.get("query_ready") is not True or int(row.get("candidate_count", 0)) < 1
             for row in dense_queries
         ):
             fail("harness_dense_query", "no non-empty exact-revision dense query receipt")
         if int(value.get("initial_context_token_count", 501)) > 500:
             fail("harness_initial_context_budget", "initial GT context exceeded 500 tokens")
-        if int(value.get("update_context_token_count", 501)) > 500:
-            fail("harness_update_context_budget", "GT update exceeded 500 tokens")
+        if int(value.get("update_context_token_count", 351)) > 350:
+            fail("harness_update_context_budget", "GT update exceeded 350 tokens")
+        if int(value.get("total_context_token_count", 1_201)) > 1_200:
+            fail("harness_total_context_budget", "GT context exceeded 1,200 tokens")
         provider_deliveries = _rows(value, "provider_delivery_receipts")
         serialized_claims = {
             str(claim)
             for delivery in provider_deliveries
             for claim in delivery.get("serialized_claim_ids", ())
         }
-        delivered_claims = {
-            str(claim) for claim in value.get("delivered_claim_ids", ())
-        }
+        delivered_claims = {str(claim) for claim in value.get("delivered_claim_ids", ())}
         if (
             value.get("delivery_reconciliation") != "PASS"
             or not provider_deliveries
@@ -199,14 +382,11 @@ def _check_specialized_receipt(
                 "serialized provider claims do not equal the delivered claim ledger",
             )
         delivery_calls = [
-            int(delivery.get("delivered_before_call", 0))
-            for delivery in provider_deliveries
+            int(delivery.get("delivered_before_call", 0)) for delivery in provider_deliveries
         ]
         if delivery_calls[:1] != [1] or any(
             current <= previous
-            for previous, current in zip(
-                delivery_calls, delivery_calls[1:], strict=False
-            )
+            for previous, current in zip(delivery_calls, delivery_calls[1:], strict=False)
         ):
             fail(
                 "harness_provider_call_timing",
@@ -216,6 +396,56 @@ def _check_specialized_receipt(
         cases = _rows(value, "cases", "checks", "results")
         if len(cases) < 18 or any(row.get("status") != "PASS" for row in cases):
             fail("failure_campaign_incomplete", f"observed {len(cases)} cases")
+    elif filename == "localization-truth.json":
+        summary = value.get("summary")
+        if not isinstance(summary, dict):
+            fail("localization_summary_missing", "summary object missing")
+            return
+        if summary.get("retrieval_mode") != "hybrid_required":
+            fail("localization_not_hybrid", str(summary.get("retrieval_mode")))
+        if int(summary.get("cases_run", -1)) != int(summary.get("cases_expected", -2)):
+            fail(
+                "localization_task_set_incomplete",
+                f"expected {summary.get('cases_expected')}, ran {summary.get('cases_run')}",
+            )
+        for key in (
+            "case_failures",
+            "missing_oracle_tasks",
+            "extra_oracle_tasks",
+            "tasks_with_false_edit_authority",
+            "tasks_below_half_required_coverage",
+            "treatment_failures",
+            "dense_not_ready_tasks",
+        ):
+            if summary.get(key):
+                fail("localization_gate_failure", f"{key}: {summary[key]}")
+        try:
+            exact_precision = float(summary.get("mean_exact_edit_precision"))
+        except (TypeError, ValueError):
+            exact_precision = -1.0
+        try:
+            facet_coverage = float(summary.get("mean_required_facet_coverage"))
+        except (TypeError, ValueError):
+            facet_coverage = -1.0
+        try:
+            implementation_precision = float(summary.get("implementation_role_precision"))
+        except (TypeError, ValueError):
+            implementation_precision = -1.0
+        if exact_precision < 0.95:
+            fail(
+                "localization_precision_below_gate",
+                str(summary.get("mean_exact_edit_precision")),
+            )
+        if facet_coverage < 0.85:
+            fail(
+                "localization_coverage_below_gate",
+                str(summary.get("mean_required_facet_coverage")),
+            )
+        if implementation_precision < 0.50:
+            fail(
+                "localization_implementation_precision_below_gate",
+                str(summary.get("implementation_role_precision")),
+            )
 
 
 def certify_receipt_bundle(

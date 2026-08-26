@@ -8,6 +8,10 @@ RECEIPTS="$OUTPUT_ROOT/receipts"
 LOGS="$OUTPUT_ROOT/logs"
 STEPS="$OUTPUT_ROOT/steps.tsv"
 MODEL_DIR="$OUTPUT_ROOT/models/snowflake-arctic-embed-m"
+DEEPSWE_DIR="$WORKSPACE/deep-swe"
+LOCALIZATION_REPOSITORIES="$WORKSPACE/localization-repositories"
+LOCALIZATION_STATE="$WORKSPACE/localization-state"
+DEEPSWE_SHA="435ee89ec2f2e2289f33b0da4f992f0b7b7266b9"
 SNOWFLAKE_MODEL_SHA256="564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971"
 SNOWFLAKE_TOKENIZER_SHA256="91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854"
 
@@ -95,24 +99,21 @@ cd "$ROOT"
 run_step install python -m pip install -e '.[dev,eval,gt,retrieval]'
 run_step doctor gt-harness doctor
 run_step python_tests python -m pytest -q -m 'not external_evidence'
-run_step localization_truth python scripts/localization_truth_gate.py \
-  --report docs/deepswe_smoke20_localization_truth.json \
-  --min-precision 0.7
-run_step go_tests bash -c 'cd vendor/gt-index-src && go test ./...'
-run_step canonical_lint python -m ruff check \
-  gt_engine/repository_graph_service.py \
-  gt_harness \
-  scripts/product_repository_matrix.py \
-  scripts/graph_truth_audit.py \
-  scripts/graph_lifecycle_campaign.py \
-  scripts/language_lifecycle_matrix.py \
-  scripts/harness_real_repository_campaign.py \
-  scripts/failure_campaign.py \
-  gt_harness/product_certification.py \
-  tests/test_repository_graph_service.py \
-  tests/test_product_repository_matrix.py \
-  tests/test_product_certification.py \
-  tests/test_miniswe_product_runner.py
+run_step go_tests bash -c 'cd vendor/gt-index-src && go test -tags sqlite_fts5 ./...'
+run_step canonical_lint python scripts/lint_product_surface.py
+
+run_step product_surface bash -c '
+  set -euo pipefail
+  mkdir -p "$1"
+  python -m pip wheel . --no-deps --wheel-dir "$1"
+  wheel="$(find "$1" -maxdepth 1 -name "gt_harness-*.whl" -print -quit)"
+  test -n "$wheel"
+  python scripts/verify_product_surface.py \
+    --root . --wheel "$wheel" --output "$2"
+' _ "$WORKSPACE/wheel" "$RECEIPTS/product-surface.json"
+
+run_step cli_verification python scripts/verify_gt_harness.py \
+  --output "$OUTPUT_ROOT/verification"
 
 run_step repository_matrix python scripts/product_repository_matrix.py \
   --workspace "$WORKSPACE" \
@@ -150,6 +151,29 @@ run_step dense_model bash -c '
   echo "$2  $1/model.onnx" | sha256sum -c -
   echo "$3  $1/tokenizer.json" | sha256sum -c -
 ' _ "$MODEL_DIR" "$SNOWFLAKE_MODEL_SHA256" "$SNOWFLAKE_TOKENIZER_SHA256"
+
+run_step localization_source bash -c '
+  set -euo pipefail
+  git clone --no-checkout --filter=blob:none \
+    https://github.com/datacurve-ai/deep-swe.git "$1"
+  git -C "$1" checkout --detach "$2"
+  test "$(git -C "$1" rev-parse HEAD)" = "$2"
+' _ "$DEEPSWE_DIR" "$DEEPSWE_SHA"
+
+run_step localization_truth python scripts/replay_smoke20_localization.py \
+  --manifest eval/deepswe_smoke20_manifest.json \
+  --oracle eval/deepswe_smoke20_oracle_v2.json \
+  --benchmark-source "$DEEPSWE_DIR" \
+  --repository-root "$LOCALIZATION_REPOSITORIES" \
+  --state-root "$LOCALIZATION_STATE" \
+  --retrieval-mode hybrid_required \
+  --dense-model-dir "$MODEL_DIR" \
+  --out-json "$RECEIPTS/localization-truth.json"
+
+run_step localization_gate python scripts/localization_truth_gate.py \
+  --report "$RECEIPTS/localization-truth.json" \
+  --manifest eval/deepswe_smoke20_manifest.json \
+  --oracle eval/deepswe_smoke20_oracle_v2.json
 
 run_step harness_e2e python scripts/harness_real_repository_campaign.py \
   --source-repository "$WORKSPACE/repositories/python-small-itsdangerous" \

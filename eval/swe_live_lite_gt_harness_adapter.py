@@ -33,6 +33,7 @@ def build_product_argv(
     output: str,
     state_dir: str,
     temperature: float = 1.0,
+    treatment: str = "groundtruth",
 ) -> list[str]:
     """Build the exact, shell-free production CLI invocation."""
 
@@ -44,6 +45,9 @@ def build_product_argv(
         raise ValueError("product source SHA must be exactly 40 lowercase hex characters")
     if time_budget_seconds <= 0 or max_iterations <= 0:
         raise ValueError("time and iteration budgets must be positive")
+    treatment = treatment.strip().lower()
+    if treatment not in {"bare", "groundtruth"}:
+        raise ValueError(f"unsupported treatment: {treatment!r}")
     return [
         "gt-harness",
         "run",
@@ -59,7 +63,7 @@ def build_product_argv(
         "--time-budget-seconds",
         str(time_budget_seconds),
         "--treatment",
-        "groundtruth",
+        treatment,
         "--root",
         root,
         "--state-dir",
@@ -89,6 +93,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True)
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--adapter-receipt", required=True)
+    parser.add_argument("--treatment", choices=("bare", "groundtruth"), default="groundtruth")
     return parser
 
 
@@ -107,6 +112,7 @@ def _write_adapter_receipt(path: Path, *, args: argparse.Namespace) -> None:
         "product_command": "gt-harness run",
         "product_source_sha": args.product_source_sha,
         "time_budget_seconds": str(args.time_budget_seconds),
+        "treatment": args.treatment,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(f"{path.suffix}.tmp.{os.getpid()}")
@@ -137,6 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output=args.output,
         state_dir=args.state_dir,
         temperature=args.temperature,
+        treatment=args.treatment,
     )
     _write_adapter_receipt(Path(args.adapter_receipt), args=args)
     completed = subprocess.run(product_argv, check=False, env=os.environ.copy())

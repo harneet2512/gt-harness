@@ -72,8 +72,7 @@ def test_successful_repository_read_requests_same_observation_context(
         GroundTruthTreatment,
         "_refresh_and_render_update",
         lambda self: (
-            "<groundtruth-repository-context>real app fact"
-            "</groundtruth-repository-context>"
+            "<groundtruth-repository-context>real app fact</groundtruth-repository-context>"
         ),
     )
 
@@ -148,7 +147,7 @@ def test_update_suppresses_inspection_only_packet_instead_of_spending_delivery(
     assert treatment.suppressed_inspection_only_updates == 1
 
 
-def test_initial_context_abstains_without_decision_grade_evidence(
+def test_initial_context_abstention_keeps_ready_treatment_active(
     tmp_path: Path, monkeypatch
 ) -> None:
     class FakeReceipt:
@@ -204,11 +203,109 @@ def test_initial_context_abstains_without_decision_grade_evidence(
 
     assert treatment._render(update=False, budget=4_000, delivered_before_call=1) == ""
     assert treatment.delivery_count == 0
-    assert treatment.treatment_status.value == "NOT_APPLICABLE"
+    assert treatment.treatment_status.value == "ACTIVE"
     assert treatment.suppressed_inspection_only_updates == 1
-    assert treatment.errors == [
-        "NOT_APPLICABLE:context_abstained:no_decision_grade_evidence"
-    ]
+    assert treatment.errors == []
+    assert treatment.initial_delivery_disposition == "ABSTAINED"
+    assert treatment.initial_delivery_reasons == ["no_decision_grade_evidence"]
+
+
+def test_initial_abstention_can_deliver_on_later_inspection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "src" / "core.py"
+    source.parent.mkdir()
+    source.write_text("def target():\n    return 1\n", encoding="utf-8")
+
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    weak = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="README.md",
+        start_line=1,
+        end_line=1,
+        symbol="",
+        relation="",
+        confidence=None,
+        verification_status="ranked",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="hybrid_retrieval_inspection",
+        completeness="ranked_candidate_not_edit_target",
+    )
+    strong = ContextEvidenceItem(
+        kind="symbol_identity",
+        path="src/core.py",
+        start_line=1,
+        end_line=2,
+        symbol="target",
+        relation="",
+        confidence=1.0,
+        verification_status="verified",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="e" * 64,
+        decision_reason="exact_task_symbol",
+        completeness="exact_identity",
+        source_excerpt="def target(): return 1",
+        facet_ids=("facet-target",),
+    )
+    packets = iter(
+        (
+            GTContextPacket(
+                status=ContextStatus.READY,
+                repository_identity={"source_revision": "b" * 64},
+                inspection_candidates=(weak,),
+                uncertainties=(
+                    "insufficient_independent_support",
+                    "no_decision_relevant_evidence",
+                    "no_complete_evidence",
+                ),
+                evidence_items=(weak,),
+                coverage={"dense_index": {"status": "READY", "query_ready": True}},
+            ),
+            GTContextPacket(
+                status=ContextStatus.READY,
+                repository_identity={"source_revision": "b" * 64},
+                primary_edit_targets=(strong,),
+                task_anchors=(strong,),
+                evidence_items=(strong,),
+                coverage={"dense_index": {"status": "READY", "query_ready": True}},
+            ),
+        )
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: next(packets))
+
+    assert treatment._render(update=False, budget=4_000, delivered_before_call=1) == ""
+    augmentation = treatment.after_action(
+        "bash",
+        {"command": "cat src/core.py"},
+        source.read_text(encoding="utf-8"),
+        False,
+    )
+
+    assert augmentation is not None
+    assert "EXACT_EDIT_TARGET src/core.py:1#target" in augmentation.content
+    assert augmentation.delivered_before_call == 2
+    assert treatment.delivery_count == 1
+    assert treatment.treatment_status is TreatmentStatus.ACTIVE
 
 
 def test_strong_task_path_inspection_is_delivered_without_edit_authority(
@@ -587,11 +684,11 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
 
     assert len(rendered) <= 4_000
     assert rendered.endswith("</groundtruth-repository-context>")
-    assert 'schema="gt.agent_context.v6"' in rendered
-    assert "REQUIREMENT facet-" in rendered
+    assert 'schema="gt.agent_context.v7"' in rendered
+    assert "REQUIREMENT requirement-" in rendered
     assert "EXACT_EDIT_TARGET app.py:1#answer" in rendered
     assert any(
-        "req=facet-" in line
+        "req=requirement-" in line
         for line in rendered.splitlines()
         if line.startswith("EXACT_EDIT_TARGET")
     )
@@ -670,7 +767,7 @@ def test_provider_context_v6_keeps_edit_public_integration_and_new_file_roles_se
 
     rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
 
-    assert 'schema="gt.agent_context.v6"' in rendered
+    assert 'schema="gt.agent_context.v7"' in rendered
     assert "EXACT_EDIT_TARGET src/container.ts:1#AwilixContainer" in rendered
     assert "INSPECT_PUBLIC_SURFACE src/awilix.ts:1#AwilixContainer" in rendered
     assert "INSPECT_INTEGRATION src/load-modules.ts:1#loadModules" in rendered
@@ -830,8 +927,7 @@ def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
         execution_paths=(process,),
         change_surface=(impact,),
         uncovered_facets=tuple(
-            f"facet-unresolved-{index} role=EDIT "
-            f"unresolved=VeryLongUnresolvedSymbol{index}"
+            f"facet-unresolved-{index} role=EDIT unresolved=VeryLongUnresolvedSymbol{index}"
             for index in range(12)
         ),
         evidence_items=(target,),
@@ -1037,8 +1133,7 @@ def test_compaction_deduplicates_requirements_and_drops_rank_only_noise(
         ),
         affected_tests=("src/__tests__/awilix.test.ts",),
         uncovered_facets=(
-            "facet-rollback role=EDIT "
-            "unresolved=container.register,DatabasePool,instance.connect",
+            "facet-rollback role=EDIT unresolved=container.register,DatabasePool,instance.connect",
         ),
         evidence_items=(edit, candidate, public, integration, relationship),
         projection_claim_ids=(
@@ -1057,14 +1152,9 @@ def test_compaction_deduplicates_requirements_and_drops_rank_only_noise(
     assert _bounded_token_count(rendered) <= 500
     assert rendered.count("exact=register unresolved=container.register owners=container") == 1
     declared = {
-        line.split()[1]
-        for line in rendered.splitlines()
-        if line.startswith("REQUIREMENT ")
+        line.split()[1] for line in rendered.splitlines() if line.startswith("REQUIREMENT ")
     }
-    referenced = {
-        alias
-        for alias in __import__("re").findall(r"\bR\d+\b", rendered)
-    }
+    referenced = {alias for alias in __import__("re").findall(r"\bR\d+\b", rendered)}
     assert referenced <= declared
     assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY" not in rendered
     assert "EXACT_EDIT_TARGET src/resolvers.ts:1#asClass" in rendered
@@ -1079,9 +1169,7 @@ def test_compaction_deduplicates_requirements_and_drops_rank_only_noise(
         "gt-process-0123456789abcdef01234567",
         "gt-impact-fedcba9876543210fedcba98",
     } <= treatment.delivered_claim_ids
-    impact_line = next(
-        line for line in rendered.splitlines() if line.startswith("BOUNDED_IMPACT ")
-    )
+    impact_line = next(line for line in rendered.splitlines() if line.startswith("BOUNDED_IMPACT "))
     assert not impact_line.endswith(" dire")
 
 
@@ -1211,9 +1299,7 @@ def test_provider_context_drops_weak_semantic_noise_before_failing_budget(
             graph_revision="c" * 64,
             evidence_sha256=digest * 64,
             decision_reason=f"verified_{kind}",
-            completeness=(
-                "certified_direct_edge" if kind == "relationship" else "exact_identity"
-            ),
+            completeness=("certified_direct_edge" if kind == "relationship" else "exact_identity"),
             source_path=(
                 "src/repository/integration/caller_with_a_distinctive_name.ts"
                 if kind == "relationship"
@@ -1249,9 +1335,7 @@ def test_provider_context_drops_weak_semantic_noise_before_failing_budget(
         primary_edit_targets=(edit,),
         inspection_public_surface=(public,),
         inspection_integration=(integration,),
-        semantic_facts=(
-            f"{edit.path}:1 weak value-flow detail " + "dependency " * 160,
-        ),
+        semantic_facts=(f"{edit.path}:1 weak value-flow detail " + "dependency " * 160,),
         execution_paths=(
             "gt-process-long lower_bound=true "
             f"{integration.path}#{integration.symbol} -> {edit.path}#{edit.symbol}",
@@ -1261,9 +1345,7 @@ def test_provider_context_drops_weak_semantic_noise_before_failing_budget(
             f"{integration.path}#{integration.symbol} direction=incoming",
         ),
         affected_tests=("tests/feature_with_a_distinctive_name.test.ts",),
-        validation_plan=(
-            "npm test -- tests/feature_with_a_distinctive_name.test.ts",
-        ),
+        validation_plan=("npm test -- tests/feature_with_a_distinctive_name.test.ts",),
         evidence_items=(edit, public, integration, relation, semantic),
         projection_claim_ids=("gt-process-long", "gt-impact-long"),
         coverage={
@@ -1547,9 +1629,7 @@ def test_treatment_adds_manifest_public_surface_as_inspection_only(
     (tmp_path / "src" / "index.ts").write_text(
         "export { Container } from './container'\n", encoding="utf-8"
     )
-    (tmp_path / "package.json").write_text(
-        '{"exports":"./src/index.ts"}', encoding="utf-8"
-    )
+    (tmp_path / "package.json").write_text('{"exports":"./src/index.ts"}', encoding="utf-8")
     edit = ContextEvidenceItem(
         kind="symbol_identity",
         path="src/container.ts",
@@ -1576,9 +1656,7 @@ def test_treatment_adds_manifest_public_surface_as_inspection_only(
 
     updated = treatment._resolve_public_surfaces(packet)
 
-    assert [item.path for item in updated.inspection_public_surface] == [
-        "src/index.ts"
-    ]
+    assert [item.path for item in updated.inspection_public_surface] == ["src/index.ts"]
     assert updated.inspection_public_surface[0].localization_role == "PUBLIC_SURFACE"
     assert updated.inspection_public_surface[0].facet_ids == edit.facet_ids
     assert updated.primary_edit_targets == (edit,)
@@ -1597,9 +1675,7 @@ def test_treatment_prioritizes_manifest_surface_over_incidental_reexport(
     (tmp_path / "src" / "incidental.ts").write_text(
         "export const unrelated = 1\n", encoding="utf-8"
     )
-    (tmp_path / "package.json").write_text(
-        '{"exports":"./src/awilix.ts"}', encoding="utf-8"
-    )
+    (tmp_path / "package.json").write_text('{"exports":"./src/awilix.ts"}', encoding="utf-8")
     edit = ContextEvidenceItem(
         kind="symbol_identity",
         path="src/container.ts",
@@ -1790,9 +1866,7 @@ def test_provider_delivery_receipts_reconcile_visible_facts_and_call_timing(
     )
     assert augmentation is not None
     assert augmentation.observation_count == 2
-    assert augmentation.raw_output_sha256 == hashlib.sha256(
-        b"final observation"
-    ).hexdigest()
+    assert augmentation.raw_output_sha256 == hashlib.sha256(b"final observation").hexdigest()
     assert augmentation.turn_observations_sha256
     receipt = treatment.finalize(None)
 
@@ -1805,6 +1879,7 @@ def test_provider_delivery_receipts_reconcile_visible_facts_and_call_timing(
     }
     assert serialized == set(receipt["delivered_claim_ids"])
     assert receipt["delivery_reconciliation"] == "PASS"
+
 
 def test_candidate_only_feature_cannot_be_reported_as_followed(
     tmp_path: Path,
@@ -1827,6 +1902,7 @@ def test_candidate_only_feature_cannot_be_reported_as_followed(
     )
 
     assert treatment.feature_states["semantic_facts"] == "CANDIDATE"
+
 
 def test_feature_receipt_does_not_attribute_unrelated_edit_to_observed_path(
     tmp_path: Path, monkeypatch
@@ -2065,9 +2141,7 @@ def test_official_bare_and_groundtruth_arms_use_the_identical_agent_prompt(
     assert len({receipt["repository_start"]["source_revision"] for receipt in receipts}) == 1
 
 
-def test_run_cli_checkpoints_receipt_before_agent_finishes(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_cli_checkpoints_receipt_before_agent_finishes(tmp_path: Path, monkeypatch) -> None:
     import gt_harness.miniswe_runner as runner
     from gt_harness.cli import _run_agent
 

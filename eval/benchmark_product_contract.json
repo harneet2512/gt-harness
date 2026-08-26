@@ -1,5 +1,5 @@
 {
-  "schema": "gt.benchmark_product_contract.v1",
+  "schema": "gt.benchmark_product_contract.v2",
   "product": "GT Harness",
   "product_version": "0.9.0",
   "product_command": "gt-harness run",

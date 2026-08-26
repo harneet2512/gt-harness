@@ -70,9 +70,7 @@ def _harbor_outcome(row: dict[str, Any]) -> bool | None:
     return all(value >= 1 for value in values)
 
 
-def _derive_outcome(
-    evaluator: dict[str, Any], *, task_id: str
-) -> tuple[bool, str, dict[str, Any]]:
+def _derive_outcome(evaluator: dict[str, Any], *, task_id: str) -> tuple[bool, str, dict[str, Any]]:
     candidates = evaluator.get("trial_results")
     rows = (
         tuple(row for row in candidates if isinstance(row, dict))
@@ -133,18 +131,27 @@ def bind_evaluator_outcome(
     if run.get("schema") != "gt.run_receipt.v1":
         raise OutcomeBindingError("unsupported run receipt schema")
     run_status = str(run.get("status") or "")
-    if run_status not in {"COMPLETED", "ERROR", "RUNNING"}:
+    if run_status not in {"COMPLETED", "ERROR"}:
         raise OutcomeBindingError(f"unsupported run receipt status: {run_status or 'missing'}")
     if isinstance(run.get("resolved"), bool) or run.get("evaluation") is not None:
         raise OutcomeBindingError("run receipt already has an evaluator outcome")
     task_id = str(run.get("task_id") or "").strip()
     if not task_id:
         raise OutcomeBindingError("run receipt has no task_id")
-    resolved, evaluator_format, evaluator_row = _derive_outcome(
-        evaluator, task_id=task_id
-    )
+    resolved, evaluator_format, evaluator_row = _derive_outcome(evaluator, task_id=task_id)
     result = dict(run)
     result["resolved"] = resolved
+    termination = run.get("termination")
+    termination_kind = str(termination.get("kind") or "") if isinstance(termination, dict) else ""
+    infrastructure_disposition = (
+        "NONE"
+        if run_status == "COMPLETED"
+        else "PROVIDER_TRANSPORT"
+        if termination_kind == "PROVIDER_TRANSPORT"
+        else "ORCHESTRATOR_TIMEOUT"
+        if termination_kind in {"TIMEOUT", "CANCELLED"}
+        else "PRODUCT_ERROR"
+    )
     result["evaluation"] = {
         "schema": "gt.evaluation_binding.v1",
         "task_id": task_id,
@@ -156,6 +163,9 @@ def bind_evaluator_outcome(
         "run_receipt_sha256": hashlib.sha256(run_bytes).hexdigest(),
         "evaluator_receipt_sha256": hashlib.sha256(evaluator_bytes).hexdigest(),
         "evaluator_row_sha256": hashlib.sha256(_canonical(evaluator_row)).hexdigest(),
+        "infrastructure_disposition": infrastructure_disposition,
+        "termination_kind": termination_kind or None,
+        "official_verifier_authoritative": True,
     }
     _write_atomic(destination, result)
     return result
@@ -177,9 +187,7 @@ def bind_harbor_run_directory(
         trial_dir = run_path.parent.parent
         evaluator_path = trial_dir / "result.json"
         if not evaluator_path.is_file():
-            raise OutcomeBindingError(
-                f"Harbor trial has no evaluator result: {trial_dir.name}"
-            )
+            raise OutcomeBindingError(f"Harbor trial has no evaluator result: {trial_dir.name}")
         run, _ = _read_object(run_path, label="run receipt")
         task_id = str(run.get("task_id") or "").strip()
         trial_id = str(run.get("trial_id") or "").strip()
@@ -191,15 +199,10 @@ def bind_harbor_run_directory(
     incomplete = sum(1 for row in bound if row.get("status") != "COMPLETED")
     return {
         "schema": "gt.evaluated_run_collection.v1",
-        "status": (
-            "COMPLETE_WITH_INCOMPLETE_RUNS" if incomplete else "COMPLETE"
-        ),
+        "status": ("COMPLETE_WITH_INCOMPLETE_RUNS" if incomplete else "COMPLETE"),
         "bound_receipts": len(bound),
         "incomplete_run_receipts": incomplete,
-        "pairs": [
-            {"task_id": row["task_id"], "trial_id": row["trial_id"]}
-            for row in bound
-        ],
+        "pairs": [{"task_id": row["task_id"], "trial_id": row["trial_id"]} for row in bound],
         "output_dir": str(destination),
     }
 

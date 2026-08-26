@@ -1,0 +1,681 @@
+{
+  "schema": "gt.localization_truth_oracle.v2",
+  "benchmark_sha": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+  "reviewed_by": "codex-source-role-audit-2026-08-26",
+  "tasks": [
+    {
+      "task_id": "abs-module-cache-flags",
+      "base_sha": "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "evaluator/functions.go",
+            "repl/repl.go",
+            "util/util.go"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/abs-module-cache-flags/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "evaluator/module_loader.go"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/abs-module-cache-flags/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "adaptix-name-mapping-aliases",
+      "base_sha": "a691069fcadf9131e5f7a5a130a022dc678f3e1d",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "src/adaptix/_internal/morphing/facade/provider.py",
+            "src/adaptix/_internal/morphing/facade/retort.py",
+            "src/adaptix/_internal/morphing/model/crown_definitions.py",
+            "src/adaptix/_internal/morphing/model/loader_gen.py",
+            "src/adaptix/_internal/morphing/model/loader_provider.py",
+            "src/adaptix/_internal/morphing/name_layout/base.py",
+            "src/adaptix/_internal/morphing/name_layout/component.py",
+            "src/adaptix/_internal/morphing/name_layout/provider.py"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/adaptix-name-mapping-aliases/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "arktype-json-schema-refs-dependencies",
+      "base_sha": "04355e8b26d1ad5264ef62314a2bc46c4de58ed8",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "ark/json-schema/array.ts",
+            "ark/json-schema/common.ts",
+            "ark/json-schema/composition.ts",
+            "ark/json-schema/json.ts",
+            "ark/json-schema/object.ts",
+            "ark/json-schema/scope.ts"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/arktype-json-schema-refs-dependencies/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "ark/json-schema/utils.ts"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/arktype-json-schema-refs-dependencies/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "csstree-shorthand-expansion-compression",
+      "base_sha": "88e3d965c0b1628642a30a841745b410d6835052",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "lib/lexer/Lexer.js"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/csstree-shorthand-expansion-compression/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "lib/lexer/shorthand-config.js",
+            "lib/lexer/shorthand.js"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/csstree-shorthand-expansion-compression/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "boa-hierarchical-evaluation-cancellation",
+      "base_sha": "70409a5052984325dccfdc5f6520818568a81f39",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "core/engine/src/context/mod.rs",
+            "core/engine/src/job.rs",
+            "core/engine/src/module/mod.rs",
+            "core/engine/src/script.rs",
+            "core/engine/src/vm/mod.rs"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/boa-hierarchical-evaluation-cancellation/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "integration-or-registration",
+          "role": "INTEGRATION_OR_REGISTRATION",
+          "acceptable_paths": [
+            "core/engine/src/lib.rs"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/boa-hierarchical-evaluation-cancellation/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "core/engine/src/context/evaluation.rs"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/boa-hierarchical-evaluation-cancellation/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "abs-stepped-slices",
+      "base_sha": "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "ast/ast.go",
+            "evaluator/evaluator.go",
+            "parser/parser.go"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/abs-stepped-slices/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "aiomonitor-task-snapshots-diff",
+      "base_sha": "b73fea2e0682803bda7531c93cd1dfb360839175",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "aiomonitor/monitor.py",
+            "aiomonitor/termui/commands.py",
+            "aiomonitor/types.py",
+            "aiomonitor/webui/app.py"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/aiomonitor-task-snapshots-diff/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "aiomonitor/webui/templates/snapshots.html"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/aiomonitor-task-snapshots-diff/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "awilix-async-container-initialization",
+      "base_sha": "82ac179c1de4c216c4e333093044fac643303f0c",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "src/awilix.ts",
+            "src/container.ts",
+            "src/errors.ts",
+            "src/resolvers.ts"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/awilix-async-container-initialization/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "katex-multicolumn-array-spans",
+      "base_sha": "89bede495dc2c85e1c57ba627a18526f71d57396",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "src/environments/array.ts",
+            "src/functions.ts",
+            "src/parseNode.ts"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/katex-multicolumn-array-spans/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "src/functions/multicolumn.ts"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/katex-multicolumn-array-spans/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "fd-deterministic-multi-key-sorting",
+      "base_sha": "227883606023d62275fb48701aeac90f2b604143",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "src/cli.rs",
+            "src/config.rs",
+            "src/main.rs",
+            "src/walk.rs"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/fd-deterministic-multi-key-sorting/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "src/sort.rs"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/fd-deterministic-multi-key-sorting/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "actionlint-action-pinning-lint",
+      "base_sha": "0bdc95715fa58f64e3fd6e63b0f89be8733cbbab",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "command.go",
+            "config.go",
+            "linter.go",
+            "reusable_workflow.go",
+            "rule_action.go"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/actionlint-action-pinning-lint/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:rule_action.go parses action uses references",
+            "source-review:reusable_workflow.go owns reusable-workflow resolution"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "rule_action_pinning.go"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/actionlint-action-pinning-lint/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:rule_action.go parses action uses references",
+            "source-review:reusable_workflow.go owns reusable-workflow resolution"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "bandit-incremental-cache-control",
+      "base_sha": "765f00d3f202f83f61d03f882f80a2d5142d81f8",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "bandit/core/issue.py",
+            "bandit/core/manager.py",
+            "bandit/core/metrics.py",
+            "bandit/formatters/json.py"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/bandit-incremental-cache-control/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "integration-or-registration",
+          "role": "INTEGRATION_OR_REGISTRATION",
+          "acceptable_paths": [
+            "bandit/cli/main.py"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/bandit-incremental-cache-control/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "bandit/core/cache_manager.py"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/bandit-incremental-cache-control/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "clack-async-autocomplete-options",
+      "base_sha": "8a96e2dcd7f821d1250b58cf71c327679f94de25",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "packages/core/src/prompts/autocomplete.ts",
+            "packages/core/src/prompts/prompt.ts",
+            "packages/prompts/src/autocomplete.ts"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/clack-async-autocomplete-options/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "packages/core/src/prompts/autocomplete-async.ts"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/clack-async-autocomplete-options/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "testem-bail-on-test-failure",
+      "base_sha": "06a1adb7a70e85e7322d8cfae3181508785de95d",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "lib/app.js",
+            "lib/config.js",
+            "lib/reporters/dot_reporter.js",
+            "lib/reporters/tap_reporter.js",
+            "lib/reporters/teamcity_reporter.js",
+            "lib/reporters/xunit_reporter.js",
+            "lib/runners/browser_test_runner.js",
+            "lib/runners/process_test_runner.js",
+            "lib/runners/tap_process_test_runner.js",
+            "lib/utils/displayutils.js",
+            "lib/utils/reporter.js",
+            "public/testem/jasmine2_adapter.js",
+            "public/testem/mocha_adapter.js",
+            "public/testem/qunit_adapter.js",
+            "public/testem/testem_client.js",
+            "public/testem/testem_connection.js",
+            "testem.js"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/testem-bail-on-test-failure/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "integration-or-registration",
+          "role": "INTEGRATION_OR_REGISTRATION",
+          "acceptable_paths": [
+            "lib/server/index.js"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/testem-bail-on-test-failure/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "oxvg-structural-selector-preservation",
+      "base_sha": "1fd7fab851ecc975e008be0e3e279568ce4e2b51",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "crates/oxvg_ast/src/style.rs",
+            "crates/oxvg_optimiser/src/jobs/collapse_groups.rs",
+            "crates/oxvg_optimiser/src/jobs/remove_empty_containers.rs",
+            "crates/oxvg_ast/src/selectors.rs"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/oxvg-structural-selector-preservation/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:selectors.rs owns CSS selector parsing and matching types"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "anko-default-function-arguments",
+      "base_sha": "9d2d84bb1564e9513287998c56ccf16c01c19008",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "core/core.go",
+            "parser/lexer.go",
+            "vm/vmExprFunction.go"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/anko-default-function-arguments/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:vmExprFunction.go binds function parameters and invokes calls"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "parser/default_args.go"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/anko-default-function-arguments/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:vmExprFunction.go binds function parameters and invokes calls"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "bandit-interprocedural-taint-checks",
+      "base_sha": "b46fa3a2723635aa29cc012538df4867ac2ac006",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "bandit/core/issue.py",
+            "bandit/core/node_visitor.py",
+            "setup.cfg",
+            "bandit/plugins/injection_shell.py",
+            "bandit/plugins/injection_sql.py"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/bandit-interprocedural-taint-checks/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:existing injection plugins define sink behavior and issue construction"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "bandit/core/taint.py",
+            "bandit/plugins/taint_path_traversal.py",
+            "bandit/plugins/taint_shell_injection.py",
+            "bandit/plugins/taint_sql_injection.py",
+            "bandit/plugins/taint_ssrf.py",
+            "bandit/plugins/taint_xss.py"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/bandit-interprocedural-taint-checks/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26",
+            "source-review:existing injection plugins define sink behavior and issue construction"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "claude-code-by-agents-recursive-delegation",
+      "base_sha": "5e0a2247d446c49a9951a06bb83b6e956dc7eb41",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "backend/handlers/multiAgentChat.ts",
+            "backend/providers/anthropic.ts",
+            "backend/providers/registry.ts",
+            "backend/providers/types.ts"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/claude-code-by-agents-recursive-delegation/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "testem-per-launcher-reports",
+      "base_sha": "158f61ea91c9613d2011c41ee9be40ada1d7a307",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "lib/config.js",
+            "lib/launcher.js",
+            "lib/reporters/tap_reporter.js",
+            "lib/reporters/xunit_reporter.js",
+            "lib/utils/report-file.js",
+            "lib/utils/reporter.js"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/testem-per-launcher-reports/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "pest-character-class-coalescing",
+      "base_sha": "79dd30d11aab6f0fba3cd79bd48f456209b966b3",
+      "review_status": "REVIEWED",
+      "facts": [
+        {
+          "fact_id": "implementation-owner",
+          "role": "IMPLEMENTATION_OWNER",
+          "acceptable_paths": [
+            "generator/src/generator.rs",
+            "meta/src/optimizer/mod.rs"
+          ],
+          "required": true,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/pest-character-class-coalescing/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "integration-or-registration",
+          "role": "INTEGRATION_OR_REGISTRATION",
+          "acceptable_paths": [
+            "grammars/src/lib.rs",
+            "vm/src/lib.rs"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/pest-character-class-coalescing/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        },
+        {
+          "fact_id": "new-file-precedent",
+          "role": "NEW_FILE_PRECEDENT",
+          "acceptable_paths": [
+            "meta/src/optimizer/coalescer.rs"
+          ],
+          "required": false,
+          "evidence": [
+            "deep-swe@435ee89ec2f2e2289f33b0da4f992f0b7b7266b9:tasks/pest-character-class-coalescing/solution/solution.patch",
+            "manual-role-review:codex-source-role-audit-2026-08-26"
+          ]
+        }
+      ]
+    }
+  ]
+}

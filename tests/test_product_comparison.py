@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -28,8 +29,10 @@ def _receipt(
     }
     treatment_receipt: dict[str, object]
     if treatment == "groundtruth":
+        context = "verified deterministic context"
+        claim = "d" * 64
         treatment_receipt = {
-            "schema": "gt.treatment_receipt.v1",
+            "schema": "gt.treatment_receipt.v4",
             "treatment": "groundtruth",
             "treatment_status": "ACTIVE",
             "provider_calls": 0,
@@ -38,11 +41,26 @@ def _receipt(
             "graph_commit_sha": repository["commit_sha"],
             "source_revision": revision,
             "delivery_count": 1,
-            "evidence_items_delivered": 3,
+            "evidence_items_delivered": 1,
+            "delivery_reconciliation": "PASS",
+            "delivered_claim_ids": [claim],
+            "provider_delivery_receipts": [
+                {
+                    "schema": "gt.provider_delivery.v2",
+                    "delivery_index": 1,
+                    "kind": "repository_start",
+                    "delivered_before_call": 1,
+                    "context_sha256": hashlib.sha256(context.encode()).hexdigest(),
+                    "context_token_count": 3,
+                    "context_char_count": len(context),
+                    "serialized_claim_ids": [claim],
+                    "provider_visible_role_paths": {},
+                }
+            ],
         }
     else:
         treatment_receipt = {
-            "schema": "gt.treatment_receipt.v1",
+            "schema": "gt.treatment_receipt.v4",
             "treatment": "bare",
             "treatment_status": "NOT_APPLICABLE",
             "provider_calls": 0,
@@ -51,7 +69,7 @@ def _receipt(
             "delivery_count": 0,
             "evidence_items_delivered": 0,
         }
-    return {
+    receipt = {
         "schema": "gt.run_receipt.v1",
         "run_id": f"{treatment}-{task}-{trial}",
         "task_id": task,
@@ -90,6 +108,9 @@ def _receipt(
         "treatment_receipt_present": True,
         "treatment_receipt": treatment_receipt,
     }
+    if treatment == "groundtruth":
+        receipt["initial_context"] = context
+    return receipt
 
 
 def test_comparison_reports_paired_outcomes_statistics_and_efficiency() -> None:
@@ -167,8 +188,8 @@ def test_comparison_invalidates_different_scaffolds_or_repository_revisions() ->
         ("treatment_status", "FAILED", "treatment_not_active"),
         ("graph_available", False, "graph_unavailable"),
         ("source_revision", "stale", "graph_source_revision_mismatch"),
-        ("delivery_count", 0, "evidence_not_delivered"),
-        ("evidence_items_delivered", 0, "evidence_items_not_delivered"),
+        ("delivery_count", 0, "delivery_count_mismatch"),
+        ("evidence_items_delivered", 0, "evidence_item_count_mismatch"),
     ],
 )
 def test_comparison_invalidates_nominal_gt_runs_without_valid_delivery(

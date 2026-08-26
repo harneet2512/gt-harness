@@ -7,6 +7,12 @@ on:
         description: "Commit or branch to evaluate (defaults to the dispatched SHA)"
         required: false
         type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: choice
+        options: [groundtruth, bare]
+        default: groundtruth
 
 permissions:
   contents: read
@@ -47,6 +53,7 @@ jobs:
         id: repair20
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
         run: |
           set -euo pipefail
           harbor dataset download terminal-bench@2.0 -o "$RUNNER_TEMP/tb2-plan" --export
@@ -55,6 +62,8 @@ jobs:
           import json
           import os
           from pathlib import Path
+
+          from gt_harness.analysis.delivery import audit_treatment_delivery
 
           from scripts.resolve_harbor_budget import (
               SUPERVISOR_GRACE_SECONDS,
@@ -116,6 +125,9 @@ jobs:
                       "task_config_sha256": budget["task_config_sha256"],
                   }
               )
+          treatment = os.environ["TREATMENT"].strip().lower()
+          if treatment not in {"bare", "groundtruth"}:
+              raise SystemExit(f"unsupported treatment: {treatment!r}")
           receipt = {
               "schema": "gt.harbor_repair20_plan.v1",
               "profile": "repair20-v1",
@@ -135,6 +147,7 @@ jobs:
               "agent_scaffold_version": "2.4.6",
               "requested_model": "stealth/ox-alpha",
               "effective_model": "openai/stealth/ox-alpha",
+              "treatment": treatment,
               "matrix": matrix_rows,
           }
           Path("repair20-plan.json").write_text(
@@ -244,6 +257,7 @@ jobs:
       MODEL: stealth/ox-alpha
       MINISWE_AGENT_VERSION: "2.4.6"
       GT_RETRIEVAL_MODE: hybrid_required
+      GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -379,6 +393,8 @@ jobs:
           import os
           from pathlib import Path
 
+          from gt_harness.analysis.delivery import audit_treatment_delivery
+
           root = Path("attestation")
           plan = json.loads((root / "repair20-plan.json").read_text(encoding="utf-8"))
           provider_gate = json.loads(
@@ -426,6 +442,8 @@ jobs:
                   errors.append(f"scaffold_version_mismatch:{task}")
               if row.get("attempt") != 1 or row.get("product_command") != "gt-harness run":
                   errors.append(f"adapter_contract_mismatch:{task}")
+              if row.get("treatment") != plan.get("treatment"):
+                  errors.append(f"adapter_treatment_mismatch:{task}")
               if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
                   errors.append(f"adapter_source_sha_mismatch:{task}")
               if str(row.get("time_budget_seconds")) != expected_budgets.get(task):
@@ -484,9 +502,26 @@ jobs:
               for delivery in treatment.get("delivery_receipts") or []:
                   if not delivery.get("same_observation"):
                       errors.append(f"late_delivery:{task}")
-                  if int(delivery.get("context_token_count") or 0) > 500:
+              deliveries = treatment.get("provider_delivery_receipts") or []
+              for delivery in deliveries:
+                  token_limit = 500 if delivery.get("kind") == "repository_start" else 350
+                  if int(delivery.get("context_token_count") or 0) > token_limit:
                       errors.append(f"delivery_context_budget_exceeded:{task}")
+              if sum(
+                  int(delivery.get("context_token_count") or 0)
+                  for delivery in deliveries
+              ) > 1200:
+                  errors.append(f"total_context_budget_exceeded:{task}")
               if treatment.get("treatment_status") == "ACTIVE":
+                  delivery_audit = audit_treatment_delivery(
+                      treatment,
+                      initial_context=str(row.get("initial_context") or ""),
+                      repository_end=row.get("repository_end") or {},
+                  )
+                  errors.extend(
+                      f"delivery_audit:{task}:{reason}"
+                      for reason in delivery_audit["failures"]
+                  )
                   if not treatment.get("graph_available") or treatment.get(
                       "graph_status"
                   ) not in {"READY", "READY_WITH_DECLARED_LIMITATIONS"}:
@@ -527,6 +562,7 @@ jobs:
               "effective_model": plan["effective_model"],
               "agent": plan["agent"],
               "agent_scaffold_version": plan["agent_scaffold_version"],
+              "treatment": plan["treatment"],
               "provider_gate": provider_gate,
               "observed_trial_tasks": sorted(observed_trials),
               "adapter_receipt_tasks": sorted(adapters),

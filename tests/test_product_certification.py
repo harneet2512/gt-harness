@@ -8,6 +8,8 @@ from gt_harness.product_certification import (
     REQUIRED_RECEIPTS,
     REQUIRED_STEPS,
     certify_receipt_bundle,
+    load_product_surface,
+    validate_product_surface,
 )
 
 
@@ -18,6 +20,43 @@ def _write(path: Path, value: dict[str, object]) -> None:
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+
+
+def test_product_surface_is_typed_and_rejects_unexpected_workflow(tmp_path: Path) -> None:
+    (tmp_path / "production-surface.toml").write_text(
+        """
+schema = "gt.product_surface.v1"
+python_modules = ["app.cli"]
+console_entry_points = ["app=app.cli:main"]
+benchmark_adapters = ["app.cli"]
+dispatchable_workflows = ["product.yml"]
+forbidden_modules = ["app.legacy"]
+[schemas]
+graph_receipt = "gt.graph_receipt.v5"
+[budgets]
+initial_tokens = 500
+[languages]
+structural_certification_candidates = ["python"]
+semantic_certification_candidates = ["python"]
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "cli.py").write_text("def main(): pass\n", encoding="utf-8")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "product.yml").write_text("name: product\n", encoding="utf-8")
+
+    surface = load_product_surface(tmp_path)
+    assert surface.python_modules == ("app.cli",)
+    assert validate_product_surface(tmp_path) == ()
+
+    (workflows / "legacy.yml").write_text("name: legacy\n", encoding="utf-8")
+    errors = validate_product_surface(tmp_path)
+    assert [(error.code, error.message) for error in errors] == [
+        ("surface_workflow_unexpected", "legacy.yml")
+    ]
 
 
 def _bundle(tmp_path: Path, repository: Path) -> Path:
@@ -57,7 +96,7 @@ def _bundle(tmp_path: Path, repository: Path) -> Path:
             **common,
             "agent_scaffold_version": "2.4.6",
             "same_observation": True,
-            "context_schema_v6": True,
+            "context_schema_v7": True,
             "raw_output_preserved": True,
             "trajectory_delivery_receipt_preserved": True,
             "restart_reused_current_graph": True,
@@ -65,7 +104,8 @@ def _bundle(tmp_path: Path, repository: Path) -> Path:
             "dense_lifecycle_ready": True,
             "dense_queries": [{"query_ready": True, "candidate_count": 3}],
             "initial_context_token_count": 500,
-            "update_context_token_count": 500,
+            "update_context_token_count": 350,
+            "total_context_token_count": 850,
             "provider_delivery_receipts": [
                 {
                     "delivered_before_call": 1,
@@ -82,6 +122,42 @@ def _bundle(tmp_path: Path, repository: Path) -> Path:
         "failure-campaign.json": {
             **common,
             "cases": [{"status": "PASS"} for _ in range(18)],
+        },
+        "localization-truth.json": {
+            **common,
+            "summary": {
+                "schema": "gt.localization_truth_report.v2",
+                "retrieval_mode": "hybrid_required",
+                "cases_expected": 20,
+                "cases_run": 20,
+                "case_failures": [],
+                "missing_oracle_tasks": [],
+                "extra_oracle_tasks": [],
+                "tasks_with_false_edit_authority": [],
+                "tasks_below_half_required_coverage": [],
+                "treatment_failures": [],
+                "dense_not_ready_tasks": [],
+                "mean_exact_edit_precision": 1.0,
+                "mean_required_facet_coverage": 0.9,
+                "implementation_role_precision": 0.9,
+            },
+        },
+        "product-surface.json": {
+            **common,
+            "python_modules": ["gt_harness.cli"],
+            "dispatchable_workflows": ["prerelease_product_matrix.yml"],
+            "forbidden_modules": ["groundtruth"],
+            "errors": [],
+        },
+        "verification-summary.json": {
+            **common,
+            "doctor_exit_code": 0,
+            "build_exit_code": 0,
+            "query_exit_code": 0,
+            "stale_status_exit_code": 1,
+            "rebuild_exit_code": 0,
+            "immutable_generation_changed": True,
+            "temporary_state_cleaned": True,
         },
     }
     for filename, schema in REQUIRED_RECEIPTS.items():
@@ -166,9 +242,7 @@ def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
         cwd=repository,
         check=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "Audit"], cwd=repository, check=True
-    )
+    subprocess.run(["git", "config", "user.name", "Audit"], cwd=repository, check=True)
     (repository / "README.md").write_text("receipt subject\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repository, check=True)
     subprocess.run(["git", "commit", "-qm", "subject"], cwd=repository, check=True)
@@ -178,7 +252,7 @@ def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
     e2e["retrieval_mode"] = "sparse_only"
     e2e["dense_lifecycle_ready"] = False
     e2e["dense_queries"] = [{"query_ready": True, "candidate_count": 0}]
-    e2e["context_schema_v6"] = False
+    e2e["context_schema_v7"] = False
     e2e["delivered_claim_ids"] = ["claim-not-serialized"]
     e2e["provider_delivery_receipts"][1]["delivered_before_call"] = 1
     _write(e2e_path, e2e)
@@ -198,15 +272,12 @@ def test_certification_rejects_sparse_only_or_empty_dense_product_e2e(
 
 def test_codespaces_campaign_provisions_public_pinned_dense_asset() -> None:
     script = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "codespaces_product_certification.sh"
+        Path(__file__).resolve().parents[1] / "scripts" / "codespaces_product_certification.sh"
     ).read_text(encoding="utf-8")
 
     assert "gh release download" not in script
     assert (
-        "https://github.com/harneet2512/gt-harness/releases/download/"
-        "gt-retrieval-runtime-v1"
+        "https://github.com/harneet2512/gt-harness/releases/download/gt-retrieval-runtime-v1"
     ) in script
     assert "curl --fail --location --silent --show-error" in script
     assert "564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971" in script

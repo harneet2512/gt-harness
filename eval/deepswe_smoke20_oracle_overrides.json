@@ -1,0 +1,56 @@
+{
+  "schema": "gt.localization_truth_oracle_overrides.v1",
+  "tasks": [
+    {
+      "task_id": "actionlint-action-pinning-lint",
+      "base_sha": "0bdc95715fa58f64e3fd6e63b0f89be8733cbbab",
+      "add_paths": {
+        "IMPLEMENTATION_OWNER": [
+          "reusable_workflow.go",
+          "rule_action.go"
+        ]
+      },
+      "evidence": [
+        "source-review:rule_action.go parses action uses references",
+        "source-review:reusable_workflow.go owns reusable-workflow resolution"
+      ]
+    },
+    {
+      "task_id": "oxvg-structural-selector-preservation",
+      "base_sha": "1fd7fab851ecc975e008be0e3e279568ce4e2b51",
+      "add_paths": {
+        "IMPLEMENTATION_OWNER": [
+          "crates/oxvg_ast/src/selectors.rs"
+        ]
+      },
+      "evidence": [
+        "source-review:selectors.rs owns CSS selector parsing and matching types"
+      ]
+    },
+    {
+      "task_id": "anko-default-function-arguments",
+      "base_sha": "9d2d84bb1564e9513287998c56ccf16c01c19008",
+      "add_paths": {
+        "IMPLEMENTATION_OWNER": [
+          "vm/vmExprFunction.go"
+        ]
+      },
+      "evidence": [
+        "source-review:vmExprFunction.go binds function parameters and invokes calls"
+      ]
+    },
+    {
+      "task_id": "bandit-interprocedural-taint-checks",
+      "base_sha": "b46fa3a2723635aa29cc012538df4867ac2ac006",
+      "add_paths": {
+        "IMPLEMENTATION_OWNER": [
+          "bandit/plugins/injection_shell.py",
+          "bandit/plugins/injection_sql.py"
+        ]
+      },
+      "evidence": [
+        "source-review:existing injection plugins define sink behavior and issue construction"
+      ]
+    }
+  ]
+}

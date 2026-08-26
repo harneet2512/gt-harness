@@ -14,7 +14,7 @@ from harbor.models.agent.context import AgentContext
 
 from eval.harbor_gt_harness_adapter import (
     CANONICAL_MINISWE_VERSION,
-    GtHarnessMiniSwe228Agent,
+    GtHarnessMiniSwe246Agent,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +60,7 @@ async def test_harbor_adapter_runs_the_production_product_with_a_model_identity_
             commands.append((command, dict(env or {})))
             return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    agent = GtHarnessMiniSwe228Agent(
+    agent = GtHarnessMiniSwe246Agent(
         logs_dir=tmp_path / "logs",
         model_name="stealth/ox-alpha",
         task_id="fix-code-vulnerability",
@@ -113,7 +113,7 @@ async def test_harbor_adapter_can_run_the_matched_bare_control_arm(
             commands.append(command)
             return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    agent = GtHarnessMiniSwe228Agent(
+    agent = GtHarnessMiniSwe246Agent(
         logs_dir=tmp_path / "logs",
         model_name="stealth/ox-alpha",
         task_id="matched-control",
@@ -140,7 +140,7 @@ async def test_harbor_adapter_finalizes_a_sigkill_checkpoint_before_raising(
                 return SimpleNamespace(return_code=137, stdout="", stderr="")
             return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+    agent = GtHarnessMiniSwe246Agent(logs_dir=tmp_path / "logs")
 
     with pytest.raises(NonZeroAgentExitCodeError, match="exit 137"):
         await agent._exec_product_secret_safe(Environment(), "product", {})
@@ -150,6 +150,7 @@ async def test_harbor_adapter_finalizes_a_sigkill_checkpoint_before_raising(
     assert "--return-code 137" in commands[1]
     assert "/logs/agent/gt-run.json" in commands[1]
     assert "/logs/agent/gt-run.trajectory.json" in commands[1]
+    assert "--termination-kind PROCESS_EXIT" in commands[1]
 
 
 @pytest.mark.asyncio
@@ -165,7 +166,7 @@ async def test_harbor_adapter_finalizes_checkpoint_when_harbor_cancels_it(
                 raise asyncio.CancelledError
             return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+    agent = GtHarnessMiniSwe246Agent(logs_dir=tmp_path / "logs")
 
     with pytest.raises(asyncio.CancelledError):
         await agent._exec_product_secret_safe(Environment(), "product", {})
@@ -173,6 +174,7 @@ async def test_harbor_adapter_finalizes_checkpoint_when_harbor_cancels_it(
     assert len(commands) == 2
     assert "--return-code 124" in commands[1]
     assert "--supervisor harbor_adapter_timeout" in commands[1]
+    assert "--termination-kind TIMEOUT" in commands[1]
 
 
 @pytest.mark.asyncio
@@ -187,7 +189,7 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
         (dense / name).write_bytes(name.encode())
     monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(dense))
     monkeypatch.setattr(
-        GtHarnessMiniSwe228Agent,
+        GtHarnessMiniSwe246Agent,
         "_indexer_host_path",
         staticmethod(lambda: indexer),
     )
@@ -204,7 +206,7 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
     async def capture_exec(environment, command, **kwargs):
         commands.append(command)
 
-    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+    agent = GtHarnessMiniSwe246Agent(logs_dir=tmp_path / "logs")
     monkeypatch.setattr(agent, "exec_as_root", capture_exec)
     monkeypatch.setattr(agent, "exec_as_agent", capture_exec)
 
@@ -239,7 +241,7 @@ async def test_harbor_adapter_creates_remote_source_parent_before_upload(
         (dense / name).write_bytes(name.encode())
     monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(dense))
     monkeypatch.setattr(
-        GtHarnessMiniSwe228Agent,
+        GtHarnessMiniSwe246Agent,
         "_indexer_host_path",
         staticmethod(lambda: indexer),
     )
@@ -272,7 +274,7 @@ async def test_harbor_adapter_creates_remote_source_parent_before_upload(
     async def capture_agent_exec(environment, command, **kwargs):
         return None
 
-    agent = GtHarnessMiniSwe228Agent(logs_dir=tmp_path / "logs")
+    agent = GtHarnessMiniSwe246Agent(logs_dir=tmp_path / "logs")
     monkeypatch.setattr(agent, "exec_as_root", capture_root_exec)
     monkeypatch.setattr(agent, "exec_as_agent", capture_agent_exec)
 
@@ -352,35 +354,36 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
         assert forbidden not in lowered
 
 
-def test_tb2_attestation_uses_the_canonical_500_token_delivery_budget() -> None:
+def test_tb2_attestation_uses_role_phase_delivery_budgets() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'context_token_count") or 0) > 500' in workflow
+    assert 'token_limit = 500 if delivery.get("kind") == "repository_start" else 350' in workflow
+    assert 'context_token_count") or 0) > token_limit' in workflow
+    assert "total_context_budget_exceeded" in workflow
     assert 'context_token_count") or 0) > 350' not in workflow
 
 
 def test_cleanup_ledger_preserves_evidence_and_classifies_legacy_paths() -> None:
     ledger = CLEANUP_LEDGER.read_text(encoding="utf-8")
 
-    assert "IMPLEMENTED_NOT_DISPATCHED" in ledger
     assert ".github/workflows/tb2_miniswe_product.yml" in ledger
-    assert ".github/workflows/tb2_miniswe_ox_alpha_diagnostic.yml" in ledger
-    assert ".github/workflows/tb2_miniswe_central.yml" in ledger
-    assert ".github/workflows/tb2_miniswe_engine.yml" in ledger
-    assert ".github/workflows/deepswe_miniswe_central.yml" in ledger
+    assert "RETIRED_FROM_DISPATCH" in ledger
     assert "eval/gt_central_agent.py" in ledger
     assert "eval/miniswe_agent.py" in ledger
     assert "eval/pier_gt_adapter.py" in ledger
     assert "scripts/miniswe_gt_run.py" in ledger
     assert "artifacts/" in ledger
-    assert "do not delete" in ledger.lower()
+    assert "excluded from the wheel" in ledger.lower()
 
-    # This change classifies old paths; it does not erase shared implementation.
-    for retained in (
+    for retired in (
         ".github/workflows/tb2_miniswe_ox_alpha_diagnostic.yml",
         ".github/workflows/tb2_miniswe_central.yml",
         ".github/workflows/tb2_miniswe_engine.yml",
         ".github/workflows/deepswe_miniswe_central.yml",
+    ):
+        assert not (ROOT / retired).exists(), retired
+
+    for retained in (
         "eval/gt_central_agent.py",
         "eval/miniswe_agent.py",
         "eval/pier_gt_adapter.py",

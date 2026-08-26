@@ -71,11 +71,14 @@ def test_gt_index_source_provenance_is_content_addressed() -> None:
     assert digest.hexdigest() == provenance["source_tree_sha256"]
 
 
-def test_official_package_and_cli_have_groundtruth_identity() -> None:
+def test_official_package_and_cli_exclude_historical_groundtruth_runtime() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert config["project"]["name"] == "gt-harness"
     assert config["project"]["scripts"]["gt-harness"] == "gt_harness.cli:main"
-    assert "src/groundtruth" in config["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+    included = config["tool"]["hatch"]["build"]["targets"]["wheel"]["only-include"]
+    assert "gt_harness/cli.py" in included
+    assert "gt_engine/repository_graph_service.py" in included
+    assert not any(path.startswith("src/groundtruth") for path in included)
 
 
 def test_indexer_source_identity_is_stable_across_git_line_endings(
@@ -148,5 +151,5 @@ def test_prerelease_matrix_runs_full_provider_free_regression() -> None:
     assert 'test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"' in workflow
     assert "if: always()" in workflow
     assert "python -m pytest -q -m 'not external_evidence'" in campaign
-    assert "go test ./..." in campaign
+    assert "go test -tags sqlite_fts5 ./..." in campaign
     assert "scripts/product_repository_matrix.py" in campaign

@@ -48,6 +48,8 @@ def test_outcome_binding_derives_harbor_result_and_hash_binds_receipts(
     assert result["resolved"] is True
     assert result["evaluation"]["schema"] == "gt.evaluation_binding.v1"
     assert result["evaluation"]["evaluator_format"] == "harbor"
+    assert result["evaluation"]["infrastructure_disposition"] == "NONE"
+    assert result["evaluation"]["official_verifier_authoritative"] is True
     assert len(result["evaluation"]["run_receipt_sha256"]) == 64
     assert len(result["evaluation"]["evaluator_receipt_sha256"]) == 64
     assert json.loads(output_path.read_text(encoding="utf-8")) == result
@@ -99,7 +101,7 @@ def test_outcome_binding_refuses_to_overwrite_an_existing_outcome(tmp_path: Path
         bind_evaluator_outcome(run_path, evaluator_path, output_path)
 
 
-def test_outcome_binding_preserves_incomplete_run_status(tmp_path: Path) -> None:
+def test_outcome_binding_rejects_nonterminal_run_status(tmp_path: Path) -> None:
     run_path = tmp_path / "run.json"
     evaluator_path = tmp_path / "result.json"
     output_path = tmp_path / "evaluated.json"
@@ -116,11 +118,36 @@ def test_outcome_binding_preserves_incomplete_run_status(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
+    with pytest.raises(OutcomeBindingError, match="unsupported run receipt status"):
+        bind_evaluator_outcome(run_path, evaluator_path, output_path)
+
+
+def test_official_verifier_preserves_typed_timeout_disposition(tmp_path: Path) -> None:
+    run_path = tmp_path / "run.json"
+    evaluator_path = tmp_path / "result.json"
+    output_path = tmp_path / "evaluated.json"
+    receipt = _run_receipt(status="ERROR")
+    receipt["termination"] = {
+        "schema": "gt.termination.v1",
+        "kind": "TIMEOUT",
+        "authority": "pier_adapter_timeout",
+    }
+    run_path.write_text(json.dumps(receipt), encoding="utf-8")
+    evaluator_path.write_text(
+        json.dumps(
+            {
+                "task_name": "task-one",
+                "verifier_result": {"rewards": {"tests": 0.0}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
     result = bind_evaluator_outcome(run_path, evaluator_path, output_path)
 
-    assert result["status"] == "RUNNING"
     assert result["resolved"] is False
-    assert result["evaluation"]["run_status_at_binding"] == "RUNNING"
+    assert result["evaluation"]["infrastructure_disposition"] == "ORCHESTRATOR_TIMEOUT"
+    assert result["evaluation"]["termination_kind"] == "TIMEOUT"
 
 
 def test_record_outcome_cli_exercises_the_public_product_boundary(
@@ -219,7 +246,7 @@ def test_harbor_directory_binding_accepts_harbor_020_structured_task_id(
     assert summary["bound_receipts"] == 1
 
 
-def test_harbor_directory_binding_reports_incomplete_runs_without_losing_results(
+def test_harbor_directory_binding_rejects_incomplete_runs(
     tmp_path: Path,
 ) -> None:
     trial = tmp_path / "harbor" / "task-one__abc1234"
@@ -238,10 +265,5 @@ def test_harbor_directory_binding_reports_incomplete_runs_without_losing_results
         encoding="utf-8",
     )
 
-    summary = bind_harbor_run_directory(
-        tmp_path / "harbor", tmp_path / "evaluated"
-    )
-
-    assert summary["status"] == "COMPLETE_WITH_INCOMPLETE_RUNS"
-    assert summary["bound_receipts"] == 1
-    assert summary["incomplete_run_receipts"] == 1
+    with pytest.raises(OutcomeBindingError, match="unsupported run receipt status"):
+        bind_harbor_run_directory(tmp_path / "harbor", tmp_path / "evaluated")
