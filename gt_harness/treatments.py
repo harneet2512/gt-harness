@@ -1404,9 +1404,29 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict["relationships"] = packet_dict["relationships"][:1]
             rendered = encode()
         if too_large():
-            # A budget too small for one row of each available decision role
-            # is not permission to silently turn a graph treatment into a list
-            # of filenames. Fail closed and make the missing treatment visible.
+            # Semantic facts are useful only after localization.  They must
+            # never make an otherwise actionable graph treatment unavailable:
+            # the exact target, scoped boundaries, certified relationship,
+            # process/impact and affected test carry stronger decision value.
+            # Keep those roles and bound their already persisted projections.
+            packet_dict["semantic_facts"] = []
+            packet_dict["execution_paths"] = [
+                str(item)[:240].rstrip()
+                for item in packet_dict["execution_paths"][:1]
+            ]
+            packet_dict["change_surface"] = [
+                str(item)[:240].rstrip()
+                for item in packet_dict["change_surface"][:1]
+            ]
+            rendered = encode()
+        if too_large() and packet_dict["affected_tests"]:
+            # The affected-test fact is a more compact and independently
+            # actionable verification instruction than a repeated command.
+            packet_dict["validation_plan"] = []
+            rendered = encode()
+        if too_large():
+            # A budget too small for the remaining decision-grade floor is not
+            # permission to silently pretend a graph treatment was delivered.
             self.errors.append("context_budget_too_small")
             if not update:
                 raise self._unavailable(receipt, "context_budget_too_small")

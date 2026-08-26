@@ -982,6 +982,10 @@ class ExactRetrievalChannel:
                 # tokens, so common directory vocabulary cannot manufacture
                 # identity authority.
                 reasons.append(f"exact_path_token_count:{len(task_path_overlap)}")
+                reasons.extend(
+                    f"exact_path_token_value:{token}"
+                    for token in sorted(path_overlap)
+                )
             if symbol_overlap:
                 score += 6.0 * len(symbol_overlap)
                 reasons.append("exact_symbol_token")

@@ -880,7 +880,18 @@ def _strong_task_path_candidate(ranked: RankedFile) -> bool:
     such as chat without falsely authorizing either as an edit target.
     """
 
-    return _task_path_match_count(ranked) >= 2
+    if _task_path_match_count(ranked) >= 2:
+        return True
+    candidate = _exact_candidate(ranked)
+    return bool(
+        candidate
+        and any(
+            len(token) >= 8 and token not in _ISSUE_LANGUAGE_WORDS
+            for item in candidate.provenance
+            if item.startswith("exact_path_token_value:")
+            for token in (item.split(":", 1)[1].casefold(),)
+        )
+    )
 
 
 def _rank_key(ranked: RankedFile, identifiers: dict[str, int]) -> tuple[Any, ...]:
@@ -967,7 +978,13 @@ def _matching_path_facet_ids(
     return tuple(
         facet.facet_id
         for facet in facets
-        if len(terms & frozenset(facet.query_terms)) >= 2
+        if (
+            len(terms & frozenset(facet.query_terms)) >= 2
+            or any(
+                len(token) >= 8
+                for token in terms & frozenset(facet.query_terms)
+            )
+        )
     )
 
 

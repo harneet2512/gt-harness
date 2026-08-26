@@ -945,6 +945,119 @@ def test_provider_context_preserves_decision_facts_before_candidate_noise(
     assert rendered.count("VERIFIED_RELATION ") == 2
 
 
+def test_provider_context_drops_weak_semantic_noise_before_failing_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A usable graph treatment must survive verbose lower-priority facts."""
+
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    def item(kind: str, path: str, symbol: str, digest: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind=kind,
+            path=path,
+            start_line=1,
+            end_line=1,
+            symbol=symbol,
+            relation="CALLS" if kind == "relationship" else "",
+            confidence=1.0,
+            verification_status="verified",
+            source_revision="b" * 64,
+            graph_revision="c" * 64,
+            evidence_sha256=digest * 64,
+            decision_reason=f"verified_{kind}",
+            completeness=(
+                "certified_direct_edge" if kind == "relationship" else "exact_identity"
+            ),
+            source_path=(
+                "src/repository/integration/caller_with_a_distinctive_name.ts"
+                if kind == "relationship"
+                else ""
+            ),
+            source_symbol="callFeature" if kind == "relationship" else "",
+            facet_ids=("requirement-1",),
+        )
+
+    edit = item(
+        "symbol_identity",
+        "src/repository/implementation/feature_with_a_distinctive_name.ts",
+        "featureWithADistinctiveName",
+        "a",
+    )
+    public = item(
+        "public_surface",
+        "src/repository/public/index_with_a_distinctive_name.ts",
+        "featureWithADistinctiveName",
+        "b",
+    )
+    integration = item(
+        "integration_surface",
+        "src/repository/integration/caller_with_a_distinctive_name.ts",
+        "callFeatureWithADistinctiveName",
+        "c",
+    )
+    relation = item("relationship", edit.path, edit.symbol, "d")
+    semantic = item("semantic_fact", edit.path, edit.symbol, "e")
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        primary_edit_targets=(edit,),
+        inspection_public_surface=(public,),
+        inspection_integration=(integration,),
+        semantic_facts=(
+            f"{edit.path}:1 weak value-flow detail " + "dependency " * 160,
+        ),
+        execution_paths=(
+            "gt-process-long lower_bound=true "
+            f"{integration.path}#{integration.symbol} -> {edit.path}#{edit.symbol}",
+        ),
+        change_surface=(
+            "gt-impact-long depth=1 CALLS "
+            f"{integration.path}#{integration.symbol} direction=incoming",
+        ),
+        affected_tests=("tests/feature_with_a_distinctive_name.test.ts",),
+        validation_plan=(
+            "npm test -- tests/feature_with_a_distinctive_name.test.ts",
+        ),
+        evidence_items=(edit, public, integration, relation, semantic),
+        projection_claim_ids=("gt-process-long", "gt-impact-long"),
+        coverage={
+            "retrieval_mode": "hybrid_required",
+            "dense_index": {"status": "READY", "query_ready": True},
+        },
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    treatment.start_token_budget = 500
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= treatment.start_token_budget
+    assert "EXACT_EDIT_TARGET " in rendered
+    assert "INSPECT_PUBLIC_SURFACE " in rendered
+    assert "INSPECT_INTEGRATION " in rendered
+    assert "VERIFIED_RELATION " in rendered
+    assert "BOUNDED_PROCESS " in rendered
+    assert "BOUNDED_IMPACT " in rendered
+    assert "AFFECTED_TEST " in rendered
+    assert "SEMANTIC_FACT " not in rendered
+
+
 def test_delivered_claim_ids_equal_provider_visible_claims_after_compaction(
     tmp_path: Path, monkeypatch
 ) -> None:

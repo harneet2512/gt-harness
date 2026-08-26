@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from gt_harness.miniswe_runner import TreatmentMiniSweAgent
 from gt_harness.treatments import GroundTruthTreatment, _bounded_token_count
 
 _TARGET = re.compile(r"^EXACT_EDIT_TARGET ([^:]+):\d+#", re.MULTILINE)
+_EXPECTED_MINISWE_VERSION = "2.4.6"
 
 
 def _run(*args: str, cwd: Path | None = None) -> str:
@@ -97,6 +99,12 @@ def run_campaign(
     output: Path,
     dense_model_dir: Path,
 ) -> dict[str, Any]:
+    installed_miniswe_version = version("mini-swe-agent")
+    if installed_miniswe_version != _EXPECTED_MINISWE_VERSION:
+        raise RuntimeError(
+            "Mini-SWE version mismatch: expected "
+            f"{_EXPECTED_MINISWE_VERSION}, got {installed_miniswe_version}"
+        )
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -231,7 +239,7 @@ def run_campaign(
         "status": "PASS",
         "product_boundary": "gt-harness run / TreatmentMiniSweAgent",
         "agent_scaffold": "mini-swe-agent",
-        "agent_scaffold_version": "2.4.6",
+        "agent_scaffold_version": installed_miniswe_version,
         "repository": str(run_dir),
         "commit_sha": exact_commit,
         "target": target,

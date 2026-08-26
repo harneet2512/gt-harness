@@ -183,6 +183,11 @@ public, integration, and relationship facts remain hidden. Compaction retains
 that causal starting file and up to two certified relationships before
 secondary impact rows.
 
+A single long distinctive artifact token is also sufficient inspection
+evidence (for example `shorthand.js` or `multicolumn.ts`), while generic task
+language remains excluded. This closes the same measured omission on the
+CSSTree and KaTeX trajectories without promoting those files to edit authority.
+
 The exact-revision production witness at repository SHA
 `5e0a2247d446c49a9951a06bb83b6e956dc7eb41` now emits an `ACTIVE` 419-token
 packet containing:
@@ -200,3 +205,49 @@ Independent reference-patch inspection confirms that the actual change touches
 `providers/types.ts`. GT therefore now provides the correct starting subsystem
 and one of its true changed dependencies without injecting or reading the
 reference patch at runtime. The reference patch is audit evidence only.
+
+## Completed invalid smoke and final budget-floor correction
+
+Run `32913521485` eventually completed all 20 task jobs. Its canonical Pier
+aggregates establish eight real graded agent executions: four solves and four
+failures. Twelve other tasks never called the provider because GT rejected its
+own initial context as `FAILED:context_budget_too_small`. The run's attestation
+reported only eight graded tasks because the old reward binder also ignored
+Pier's aggregate reward representation. It is therefore diagnostic evidence,
+not an official GT-on solve-rate result.
+
+On the eight provider-executed tasks, the same local Mini-SWE-Agent 2.4.6 Ox
+Alpha baseline solved five. GT solved four: four were solved by both, three were
+failed by both, and `anko-default-function-arguments` was baseline-only. GT used
+804 provider calls versus 912, and 71,398,391 input-plus-output tokens versus
+77,879,158. Those efficiency numbers apply only to the eight executed tasks;
+they cannot redeem the twelve treatment failures or certify causal uplift.
+
+The final task, `oxvg-structural-selector-preservation`, earned reward `0` in
+both arms. GT's old context contained a real reference-patch file,
+`crates/oxvg_ast/src/style.rs`, but omitted the two optimizer jobs that defined
+the complete change surface. The model independently found and edited
+`collapse_groups.rs` but missed `remove_empty_containers.rs`; two of six
+fail-to-pass tests remained failing. This is consistent with the measured old
+delivery weakness: real graph facts were present, but higher-order localization
+was incomplete.
+
+Exact-SHA provider-free certification `32918140989` at `790aaec` passed install,
+doctor, Python, Go, lint, the ten-repository matrix, graph truth, graph
+lifecycle, six-language lifecycle, the pinned dense model, and the failure
+campaign. It correctly failed `harness_e2e`. Reproduction on the exact
+itsdangerous revision proved that the renderer's minimum retained role set
+could require 501 or more bounded tokens; it then failed the whole treatment
+instead of discarding a weaker semantic row.
+
+The renderer now drops weak semantic noise before any decision-grade floor,
+bounds persisted process/impact text, and removes a redundant validation
+command when an affected-test fact is already present. It continues to retain
+the exact target, scoped public/integration boundaries, a certified relation,
+process/impact, and affected test. The real Mini-SWE-Agent 2.4.6 E2E now passes
+with a 468-token initial packet and 435-token post-edit packet, exact-revision
+dense rebuild/reopen, same-observation delivery, raw-output preservation, and
+claim reconciliation. The E2E campaign now derives the installed Mini-SWE
+version and refuses to run unless it is exactly 2.4.6; it can no longer
+hardcode a false scaffold receipt. Hosted exact-SHA certification remains the
+next release gate before a replacement paid smoke.

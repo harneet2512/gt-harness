@@ -6,7 +6,11 @@ import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 
+import pytest
+
+import scripts.harness_real_repository_campaign as harness_campaign
 from gt_harness.miniswe_runner import (
     MODEL_REQUEST_TIMEOUT_SECONDS,
     CredentialIsolatedEnvironment,
@@ -15,6 +19,21 @@ from gt_harness.miniswe_runner import (
 )
 from gt_harness.treatments import BareTreatment
 from scripts.harness_real_repository_campaign import _ObservationModel
+
+
+def test_harness_campaign_rejects_an_unpinned_miniswe_scaffold(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(harness_campaign, "version", lambda _name: "2.2.8")
+
+    with pytest.raises(RuntimeError, match="expected 2.4.6, got 2.2.8"):
+        harness_campaign.run_campaign(
+            source_repository=tmp_path / "repository",
+            commit="a" * 40,
+            run_dir=tmp_path / "run",
+            output=tmp_path / "receipt.json",
+            dense_model_dir=tmp_path / "model",
+        )
 
 
 class _Treatment(BareTreatment):

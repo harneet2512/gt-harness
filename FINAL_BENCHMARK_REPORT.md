@@ -1,8 +1,64 @@
 # Final Benchmark Report
 
-Status: `OFFICIAL_REPAIR20_SMOKE_ATTESTED_BASELINE_COMPARISON_COMPLETE`
+Status: `DEEPSWE20_DIAGNOSTIC_REJECTED_REPLACEMENT_PENDING_CERTIFICATION`
 
-Current implementation under audit: `c0b296f9f95f1e7b162b36d81063dafb8860e693`.
+Current implementation under audit: branch `final/gt-harness-benchmark-update`;
+the exact replacement SHA must be bound by the next hosted certification.
+
+## 2026-08-26 DeepSWE diagnostic — rejected
+
+Run [32913521485](https://github.com/harneet2512/gt-harness/actions/runs/32913521485)
+at `ca068e11a8ea000df38c5e776ef1c472a0372636` completed all 20 task jobs but is
+not an official GT-on benchmark result. Twelve tasks failed GT treatment setup
+before the first provider call with `FAILED:context_budget_too_small`. The old
+reward binder also represented valid Pier aggregate rewards as verifier
+`ERROR`. These are GT Harness defects, not model losses, and invalidate the run.
+
+The canonical aggregate rewards for the eight tasks that actually crossed the
+provider boundary are four solves and four failures. Against the local Ox Alpha
+Mini-SWE-Agent 2.4.6 baseline for those identical task IDs, the paired result is
+four both-solve, three both-fail, one baseline-only (`anko-default-function-arguments`),
+and zero GT-only.
+
+| Metric, eight executed tasks | Local GT-off baseline | Rejected GT-on run | Difference |
+| --- | ---: | ---: | ---: |
+| Solved | 5/8 | 4/8 | -1 |
+| Provider calls | 912 | 804 | -108 (-11.8%) |
+| Input tokens | 77,378,708 | 70,869,624 | -6,509,084 (-8.4%) |
+| Cached input tokens | 74,527,040 | 69,764,992 | -4,762,048 (-6.4%) |
+| Output tokens | 500,450 | 528,767 | +28,317 (+5.7%) |
+| Input + output tokens | 77,879,158 | 71,398,391 | -6,480,767 (-8.3%) |
+
+These subset metrics show lower calls and total tokens but no solve uplift. They
+do not compensate for twelve treatment failures and are not a release result.
+The GT wrapper also reserves 90 seconds of the task-owned 5,400-second Harbor
+ceiling for durable finalization, so this historical subset is not a strict
+causal experiment even though task IDs, Mini-SWE 2.4.6, and Ox Alpha match.
+
+The final task, `oxvg-structural-selector-preservation`, was a both-fail. GT's
+initial packet supplied real repository evidence in
+`crates/oxvg_ast/src/style.rs`, one of three reference-patch production files.
+It omitted `collapse_groups.rs` and `remove_empty_containers.rs`. The agent later
+found and edited `collapse_groups.rs` but not `remove_empty_containers.rs`; the
+official verifier passed 62/62 pass-to-pass tests and only 4/6 fail-to-pass
+tests. This is incomplete localization, not dummy context.
+
+The replacement candidate fixes both invalidators and adds regression evidence:
+
+- the reward standardizer reads Pier's canonical
+  `stats.evals.*.metrics[].reward` representation and rejects conflicts;
+- provider context drops weak semantic noise before decision-grade facts,
+  rather than aborting when every available role cannot fit simultaneously;
+- long process/impact rows are bounded while exact target, scoped public and
+  integration boundaries, one certified relation, and affected tests remain;
+- the real itsdangerous Mini-SWE-Agent 2.4.6 lifecycle passes at 468 initial
+  tokens and 435 update tokens; and
+- the campaign derives the installed Mini-SWE version and rejects anything
+  other than 2.4.6 instead of hardcoding the claimed version.
+
+No replacement paid run is launched until this exact candidate passes hosted
+provider-free certification. The replacement run is acceptable only with all
+20 treatment receipts present and no pre-provider context-budget failures.
 
 ## Canonical final official run
 

@@ -772,6 +772,42 @@ def test_multi_token_task_path_match_remains_inspection_evidence() -> None:
     )
 
 
+def test_long_distinctive_task_path_token_is_inspection_not_edit_authority() -> None:
+    documents = (
+        _document(
+            "lib/lexer/shorthand.js",
+            "shorthand",
+            "export function expandShorthand(property) { return property; }",
+        ),
+        _document(
+            "lib/__tests__/lexer-match-property.js",
+            "lexerMatchProperty",
+            "describe('property matching', () => {});",
+        ),
+        _document("lib/lexer/Lexer.js", "Lexer", "export class Lexer {}"),
+    )
+    repository = HybridRepository(
+        documents=documents,
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=3,
+        document_chars=sum(len(document.text) for document in documents),
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Implement shorthand expansion and compression."),
+    )
+
+    assert not packet.primary_edit_targets
+    candidate = packet.inspection_candidates[0]
+    assert candidate.path == "lib/lexer/shorthand.js"
+    assert candidate.decision_reason == "task_path_phrase_inspection"
+    assert candidate.facet_ids
+
+
 def test_task_facets_keep_code_bearing_public_capability_paragraphs() -> None:
     documents = (
         _document("core/engine/src/context/mod.rs", "Context", "pub struct Context;"),
