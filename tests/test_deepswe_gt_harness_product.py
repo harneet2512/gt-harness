@@ -136,6 +136,13 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "nano" not in source.lower()
 
 
+def test_deepswe_attestation_uses_the_canonical_500_token_delivery_budget() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'context_token_count") or 0) > 500' in source
+    assert 'context_token_count") or 0) > 350' not in source
+
+
 def test_registered_deepswe_entrypoint_dispatches_only_the_product_workflow() -> None:
     source = ENTRY_WORKFLOW.read_text(encoding="utf-8")
 

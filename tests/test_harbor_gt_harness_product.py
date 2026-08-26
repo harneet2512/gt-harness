@@ -14,7 +14,6 @@ from harbor.models.agent.context import AgentContext
 
 from eval.harbor_gt_harness_adapter import (
     CANONICAL_MINISWE_VERSION,
-    GtHarnessMiniSwe246Agent,
     GtHarnessMiniSwe228Agent,
 )
 
@@ -351,6 +350,13 @@ def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> 
         "benchmark-only bridge",
     ):
         assert forbidden not in lowered
+
+
+def test_tb2_attestation_uses_the_canonical_500_token_delivery_budget() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'context_token_count") or 0) > 500' in workflow
+    assert 'context_token_count") or 0) > 350' not in workflow
 
 
 def test_cleanup_ledger_preserves_evidence_and_classifies_legacy_paths() -> None:

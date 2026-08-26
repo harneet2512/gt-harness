@@ -251,3 +251,14 @@ claim reconciliation. The E2E campaign now derives the installed Mini-SWE
 version and refuses to run unless it is exactly 2.4.6; it can no longer
 hardcode a false scaffold receipt. Hosted exact-SHA certification remains the
 next release gate before a replacement paid smoke.
+
+Certification run `32920899809` passed every provider-free gate at exact SHA
+`72f9d8c472465ddccab3cc690729b1a9e7144073`. Receipt inspection then found a
+separate benchmark-verifier drift before paid dispatch: the DeepSWE and TB2
+attestations still rejected provider deliveries above 350 tokens even though
+the canonical treatment, product certifier, and this implementation record all
+set the proven delivery ceiling to 500. Harbor and Pier do not impose the stale
+350-token value. Both workflow attestations now enforce 500 and report the
+accurate `delivery_context_budget_exceeded` error. Regression tests bind both
+workflows to that product contract. Because this changes the benchmark source
+SHA, another exact-SHA hosted certification is required before dispatch.

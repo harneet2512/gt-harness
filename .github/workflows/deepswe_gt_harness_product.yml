@@ -520,8 +520,8 @@ jobs:
               for delivery in treatment.get("delivery_receipts") or []:
                   if not delivery.get("same_observation"):
                       errors.append(f"late_delivery:{task}")
-                  if int(delivery.get("context_token_count") or 0) > 350:
-                      errors.append(f"update_context_budget_exceeded:{task}")
+                  if int(delivery.get("context_token_count") or 0) > 500:
+                      errors.append(f"delivery_context_budget_exceeded:{task}")
               if treatment.get("treatment_status") == "ACTIVE":
                   if not treatment.get("graph_available") or treatment.get("graph_status") not in {
                       "READY",
