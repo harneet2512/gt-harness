@@ -785,7 +785,13 @@ def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
         evidence_sha256="d" * 64,
         decision_reason="exact_task_symbol",
         completeness="exact_identity",
-        facet_ids=("facet-repl",),
+        # Real multi-obligation tasks can bind one exact repository fact to
+        # many task facets.  The persisted packet keeps every binding, but the
+        # provider header must remain bounded.
+        facet_ids=(
+            "facet-repl",
+            *(f"facet-unresolved-{index}" for index in range(12)),
+        ),
     )
     facets = (
         TaskFacet(
@@ -849,8 +855,14 @@ def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
     assert "EXACT_EDIT_TARGET repl/repl.go:90#BeginRepl" in rendered
     assert "BOUNDED_PROCESS gt-process-strong" in rendered
     assert "BOUNDED_IMPACT gt-impact-strong" in rendered
-    assert "REQUIREMENT facet-repl" in rendered
-    assert "REQUIREMENT facet-unresolved-0" not in rendered
+    assert "REQUIREMENT R1" in rendered
+    assert rendered.count("REQUIREMENT ") <= 4
+    assert ",+" in rendered
+    process_line = next(
+        line for line in rendered.splitlines() if line.startswith("BOUNDED_PROCESS ")
+    )
+    assert process_line.endswith("truncated=true")
+    assert not process_line.endswith("evaluator/eva truncated=true")
 
 
 def test_provider_context_preserves_decision_facts_before_candidate_noise(

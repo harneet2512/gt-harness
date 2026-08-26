@@ -1164,6 +1164,7 @@ class GroundTruthTreatment(BareTreatment):
             return ""
 
         compact_output = False
+        provider_requirement_limit: int | None = None
 
         def encode() -> str:
             kind = "repository_update" if update else "repository_start"
@@ -1194,13 +1195,23 @@ class GroundTruthTreatment(BareTreatment):
                 for item in packet_dict[group_name]
                 for requirement in item.get("requirements", ())
             }
-            visible_facets = [
+            referenced_facets = [
                 facet
                 for facet in packet_dict["task_facets"]
                 if facet["facet_id"] in referenced_requirements
-            ][:12]
+            ]
+            requirement_aliases = (
+                {
+                    facet["facet_id"]: f"R{index}"
+                    for index, facet in enumerate(referenced_facets, start=1)
+                }
+                if provider_requirement_limit is not None
+                else {}
+            )
+            visible_facets = referenced_facets[: provider_requirement_limit or 12]
             for facet in visible_facets:
                 details: list[str] = []
+                value_limit = 1 if provider_requirement_limit is not None else 4
                 for label, key in (
                     ("exact", "exact_symbols"),
                     ("unresolved", "unresolved_symbols"),
@@ -1208,7 +1219,7 @@ class GroundTruthTreatment(BareTreatment):
                 ):
                     values = facet.get(key) or []
                     if values:
-                        details.append(f"{label}=" + ",".join(values[:4]))
+                        details.append(f"{label}=" + ",".join(values[:value_limit]))
                 # A facet with no provider-readable identity only contributes
                 # an opaque internal ID. Keep its mapping in the persisted
                 # packet receipt, but spend provider tokens on repository
@@ -1217,7 +1228,27 @@ class GroundTruthTreatment(BareTreatment):
                     continue
                 suffix = " " + " ".join(details)
                 lines.append(
-                    f"REQUIREMENT {facet['facet_id']} role={facet['role']}{suffix}"
+                    "REQUIREMENT "
+                    f"{requirement_aliases.get(facet['facet_id'], facet['facet_id'])} "
+                    f"role={facet['role']}{suffix}"
+                )
+
+            def requirement_text(values: list[str] | tuple[str, ...]) -> str:
+                requirements = list(values)
+                if not requirements:
+                    return "unscoped"
+                requirements = [
+                    requirement_aliases.get(requirement, requirement)
+                    for requirement in requirements
+                ]
+                if (
+                    provider_requirement_limit is None
+                    or len(requirements) <= provider_requirement_limit
+                ):
+                    return ",".join(requirements)
+                visible = requirements[:provider_requirement_limit]
+                return ",".join(
+                    (*visible, f"+{len(requirements) - provider_requirement_limit}")
                 )
 
             def target_line(prefix: str, item: dict[str, Any]) -> str:
@@ -1226,7 +1257,7 @@ class GroundTruthTreatment(BareTreatment):
                     location += "#" + item["symbol"]
                 excerpt = " ".join(str(item.get("source_excerpt") or "").split())
                 suffix = f" | {excerpt}" if excerpt else ""
-                requirements = ",".join(item.get("requirements") or ()) or "unscoped"
+                requirements = requirement_text(item.get("requirements") or ())
                 if compact_output:
                     return (
                         f"{prefix} {location} claim={item['evidence_id']} "
@@ -1255,7 +1286,7 @@ class GroundTruthTreatment(BareTreatment):
                     "VERIFIED_RELATION "
                     f"{item['source']} {item['relation']} {item['target']} "
                     f"claim={item['evidence_id']} "
-                    f"req={','.join(item.get('requirements') or ()) or 'unscoped'}"
+                    f"req={requirement_text(item.get('requirements') or ())}"
                 )
                 if not compact_output:
                     relationship += f" scope={item['scope']}"
@@ -1263,23 +1294,29 @@ class GroundTruthTreatment(BareTreatment):
             for item in packet_dict["semantic_facts"]:
                 lines.append(
                     f"SEMANTIC_FACT claim={item['evidence_id']} "
-                    f"req={','.join(item.get('requirements') or ()) or 'unscoped'} "
+                    f"req={requirement_text(item.get('requirements') or ())} "
                     f"{item['fact']}"
                 )
             def projection_line(item: str) -> str:
+                value = item
+                for requirement, alias in requirement_aliases.items():
+                    value = value.replace(requirement, alias)
                 if not compact_output:
-                    return item
+                    return value
                 # Edge IDs remain in the persisted projection receipt. The
                 # provider needs the bounded path and claim, not a repeated
                 # per-hop proof ledger that can consume the entire context
                 # budget on a deep call chain.
-                return re.sub(r"\s+\[[^\]]+\]\s*$", "", item)
+                return re.sub(r"\s+\[[^\]]+\]\s*$", "", value)
 
             lines.extend(
                 f"BOUNDED_PROCESS {projection_line(item)}"
                 for item in packet_dict["execution_paths"]
             )
-            lines.extend(f"BOUNDED_IMPACT {item}" for item in packet_dict["change_surface"])
+            lines.extend(
+                f"BOUNDED_IMPACT {projection_line(item)}"
+                for item in packet_dict["change_surface"]
+            )
             lines.extend(f"AFFECTED_TEST {item}" for item in packet_dict["affected_tests"])
             lines.extend(f"VALIDATE {item}" for item in packet_dict["validation_plan"])
             lines.extend(
@@ -1410,8 +1447,17 @@ class GroundTruthTreatment(BareTreatment):
             # process/impact and affected test carry stronger decision value.
             # Keep those roles and bound their already persisted projections.
             packet_dict["semantic_facts"] = []
+            def bounded_projection(item: str, limit: int = 240) -> str:
+                value = str(item).strip()
+                if len(value) <= limit:
+                    return value
+                boundary = value.rfind(" -> ", 0, limit)
+                if boundary < limit // 2:
+                    boundary = value.rfind(" ", 0, limit)
+                return value[:boundary].rstrip() + " truncated=true"
+
             packet_dict["execution_paths"] = [
-                str(item)[:240].rstrip()
+                bounded_projection(item)
                 for item in packet_dict["execution_paths"][:1]
             ]
             packet_dict["change_surface"] = [
@@ -1423,6 +1469,13 @@ class GroundTruthTreatment(BareTreatment):
             # The affected-test fact is a more compact and independently
             # actionable verification instruction than a repeated command.
             packet_dict["validation_plan"] = []
+            rendered = encode()
+        if too_large():
+            # One repository fact can satisfy many task obligations.  The
+            # complete fact-to-facet ledger remains in the packet receipt; the
+            # provider view carries a deterministic prefix plus an explicit
+            # +N count so requirement metadata cannot suppress the treatment.
+            provider_requirement_limit = 4
             rendered = encode()
         if too_large():
             # A budget too small for the remaining decision-grade floor is not

@@ -262,3 +262,24 @@ set the proven delivery ceiling to 500. Harbor and Pier do not impose the stale
 accurate `delivery_context_budget_exceeded` error. Regression tests bind both
 workflows to that product contract. Because this changes the benchmark source
 SHA, another exact-SHA hosted certification is required before dispatch.
+
+The next dispatch, run `32922757431`, was cancelled as soon as its first task
+proved one remaining pre-provider overflow on the multi-obligation Go task
+`abs-module-cache-flags`. The graph was real and query-ready (164 discovered
+repository files, 83 graph inputs, 41/41 dense documents, no failed dense
+files), but no provider call occurred because the minimum serialized packet
+was 531 tokens. Direct stage instrumentation showed repeated opaque task-facet
+hashes consumed the final 31-token excess; the graph facts themselves were not
+the problem.
+
+The provider view now assigns deterministic packet-local requirement aliases
+(`R1`, `R2`, and so on), retains an explicit `+N` count when a fact binds more
+requirements than fit, and preserves the complete original facet ledger in the
+packet receipt. Process truncation now stops on a complete graph hop and marks
+`truncated=true` instead of cutting a symbol or path mid-token. A provider-free
+reproduction on the exact ABS commit `cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a`
+and original task text produces an `ACTIVE` 457-token packet with the exact
+`BeginRepl` edit target, `Environment` inspection boundary, `main` integration
+boundary, verified import edge, bounded process, impact, and uncovered cache
+API facet. The dense index is `READY`, the graph is
+`READY_WITH_DECLARED_LIMITATIONS`, and provider calls remain zero.
