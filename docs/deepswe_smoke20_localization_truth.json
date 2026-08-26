@@ -1,7 +1,7 @@
 {
   "summary": {
     "schema": "gt.localization_truth_report.v1",
-    "compiler_fingerprint": "1c1c5de687b292c90c08f6723427443cf628763238c3602dfdc9b1180cadb22d",
+    "compiler_fingerprint": "7ded0f252c79ffc12a4dd24079d5e2a96be6375477d2f2b7b76c7a9b751cad77",
     "cases_run": 20,
     "case_failures": [],
     "mean_edit_target_precision": 1.0,
@@ -10,6 +10,7 @@
       "arktype-json-schema-refs-dependencies",
       "csstree-shorthand-expansion-compression",
       "abs-stepped-slices",
+      "aiomonitor-task-snapshots-diff",
       "katex-multicolumn-array-spans",
       "fd-deterministic-multi-key-sorting",
       "actionlint-action-pinning-lint",
@@ -237,7 +238,6 @@
       "edit_target_recall": 0.14285714285714285,
       "roles": {
         "EXACT_EDIT_TARGET": 1,
-        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
         "INSPECT_PUBLIC_SURFACE": 1,
         "BOUNDED_PROCESS": 1,
         "UNCOVERED_FACET": 1
@@ -246,14 +246,11 @@
         "EXACT_EDIT_TARGET": [
           "core/engine/src/context/mod.rs"
         ],
-        "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
-          "core/engine/src/job.rs"
-        ],
         "INSPECT_PUBLIC_SURFACE": [
           "core/engine/src/builtins/mod.rs"
         ],
         "BOUNDED_PROCESS": [
-          "gt-process-99a6073b56c8"
+          "gt-process-5fb0c4704252"
         ],
         "UNCOVERED_FACET": [
           "role=EDIT"
@@ -268,7 +265,7 @@
         "core/engine/src/script.rs",
         "core/engine/src/vm/mod.rs"
       ],
-      "token_count": 418
+      "token_count": 366
     },
     {
       "task_id": "abs-stepped-slices",
@@ -307,21 +304,14 @@
       "treatment_status": "ACTIVE",
       "graph_available": true,
       "context_schema_v6": true,
-      "edit_target_count": 1,
-      "edit_targets": [
-        {
-          "path": "aiomonitor/monitor.py",
-          "symbol": "format_running_task_list"
-        }
-      ],
+      "edit_target_count": 0,
+      "edit_targets": [],
       "wrong_edit_targets": [],
       "oracle_path_count": 5,
-      "edit_target_precision": 1.0,
-      "edit_target_recall": 0.2,
+      "edit_target_precision": null,
+      "edit_target_recall": 0.0,
       "roles": {
-        "EXACT_EDIT_TARGET": 1,
         "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": 1,
-        "INSPECT_PUBLIC_SURFACE": 1,
         "INSPECT_INTEGRATION": 1,
         "BOUNDED_PROCESS": 1,
         "BOUNDED_IMPACT": 1,
@@ -329,23 +319,17 @@
         "UNCOVERED_FACET": 1
       },
       "role_paths": {
-        "EXACT_EDIT_TARGET": [
-          "aiomonitor/monitor.py"
-        ],
         "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY": [
           "aiomonitor/termui/completion.py"
         ],
-        "INSPECT_PUBLIC_SURFACE": [
-          "aiomonitor/__init__.py"
-        ],
         "INSPECT_INTEGRATION": [
-          "aiomonitor/types.py"
+          "aiomonitor/monitor.py"
         ],
         "BOUNDED_PROCESS": [
           "gt-process-e637ff59a876"
         ],
         "BOUNDED_IMPACT": [
-          "gt-impact-5ca7205bdd56"
+          "gt-impact-b5095d923d87"
         ],
         "AFFECTED_TEST": [
           "examples/extension.py"
@@ -361,7 +345,7 @@
         "aiomonitor/webui/app.py",
         "aiomonitor/webui/templates/snapshots.html"
       ],
-      "token_count": 455
+      "token_count": 435
     },
     {
       "task_id": "awilix-async-container-initialization",

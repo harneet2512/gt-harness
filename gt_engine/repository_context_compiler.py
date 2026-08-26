@@ -380,6 +380,26 @@ def _task_cites_path(task: str, path: str) -> bool:
     return bool(normalized and normalized in text) or bool(name and name in text)
 
 
+def _package_echo_symbol(task: str, path: str, symbol: str) -> bool:
+    """Return whether an all-lowercase symbol merely echoes its own module
+    filename token as unbackticked task prose (``remarkable-katex.js`` and a
+    task that mentions katex).  Such package/plugin echoes are inspection
+    evidence.  Backticked or qualified references express real identity and
+    keep full authority."""
+
+    raw_symbol = str(symbol or "").strip()
+    if not raw_symbol or raw_symbol != raw_symbol.lower():
+        return False
+    stem = Path(str(path)).stem.strip().casefold()
+    parts = frozenset(
+        part for part in re.split(r"[_.-]+", stem) if len(part) >= 4
+    )
+    if not parts:
+        return False
+    plain_words = re.sub(r"`[^`]*`", " ", str(task or "")).casefold().split()
+    return any(part in plain_words for part in parts)
+
+
 def _segment_identity_eligible(segment: str) -> bool:
     """Return whether a task-text segment may bind repository symbols."""
 
@@ -1540,25 +1560,7 @@ class RepositoryContextCompiler:
         )
 
         def _entry_file_symbol(path: str, symbol: str) -> bool:
-            """An all-lowercase symbol naming its own file or filename token
-            (katex.js#katex, remarkable-katex.js#katex) is package entry,
-            plugin, or barrel evidence: inspection only, not edit identity.
-
-            CamelCase symbols sharing their module filename (Rust's
-            ``script.rs`` defining ``Script``) stay fully eligible."""
-
-            raw_symbol = str(symbol or "").strip()
-            if not raw_symbol or raw_symbol != raw_symbol.lower():
-                return False
-            symbol_key = raw_symbol.casefold()
-            stem = Path(str(path)).stem.strip().casefold()
-            if stem == symbol_key:
-                return True
-            parts = frozenset(
-                part for part in re.split(r"[_.-]+", Path(str(path)).name.casefold())
-                if part
-            )
-            return symbol_key in parts
+            return _package_echo_symbol(request.task, path, symbol)
 
         exact_symbol_rows = tuple(
             row
