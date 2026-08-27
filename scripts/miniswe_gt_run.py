@@ -165,7 +165,11 @@ def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
     model_kwargs: dict = {"temperature": temperature}
     base_url = os.environ.get("OPENAI_BASE_URL")
     if base_url:
-        if "/" not in model:
+        # An OpenAI-compatible gateway owns the full catalog identifier.  A
+        # provider-prefixed id such as minimax/minimax-m3:free must still be
+        # forced through LiteLLM's OpenAI adapter, otherwise LiteLLM selects
+        # its native MiniMax adapter and ignores OPENAI_API_KEY.
+        if not model.startswith("openai/"):
             model = f"openai/{model}"
         model_kwargs["api_base"] = base_url
     return model, model_kwargs
@@ -256,6 +260,17 @@ def build_agent(
     from gt_engine.verification_contract import compile_obligation_predicates
 
     apply_profile_env()
+    # Set the gateway producer flags INTERNALLY (never rely on container env:
+    # round-11 the model read GT_* from `env` and audited the harness source).
+    # _ensure_gateway_flags covers the 6 producer flags; submit suppression is
+    # the enforcement arm the submit gate reads.
+    try:
+        from gt_engine.engine.runner import _ensure_gateway_flags
+
+        _ensure_gateway_flags()
+        os.environ.setdefault("GT_SUBMIT_SUPPRESSION_ENFORCE", "1")
+    except Exception:  # noqa: BLE001 - flags default off; engine sets them lazily
+        pass
     contract = extract_task_contract(task)
     compiled = compile_obligation_predicates(contract)
     predicates = tuple(
@@ -435,7 +450,7 @@ def main() -> int:
     parser.add_argument("--gt-off", action="store_true")
     parser.add_argument(
         "--gt-mode",
-        choices=("off", "shadow", "advisory", "assistive", "enforced"),
+        choices=("off", "shadow", "advisory", "assistive", "enforced", "engine"),
         default="advisory",
     )
     parser.add_argument(
