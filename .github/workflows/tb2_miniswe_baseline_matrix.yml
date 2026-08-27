@@ -17,6 +17,15 @@ on:
         description: "Model id for harbor -m, passed through verbatim when base_url is set (api.deepseek.com wants bare 'deepseek-v4-flash')"
         type: string
         default: "deepseek-v4-flash"
+      provider_secret:
+        description: "Repository Actions secret name containing the provider key"
+        type: string
+        default: "OPENROUTER_NEW"
+      api_key:
+        description: "Provider API key supplied at dispatch time; falls back to the repository secret when omitted."
+        type: string
+        required: false
+        default: ""
       base_url:
         description: "OpenAI-compatible gateway URL; exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -25,6 +34,10 @@ on:
         description: "Max concurrent task jobs (GHA concurrency cap)"
         type: string
         default: "20"
+      agent_timeout_multiplier:
+        description: "Harbor agent wall-clock multiplier; official TB2 comparator is 1.0"
+        type: string
+        default: "1.0"
       include:
         description: "Optional comma-separated task names/globs to restrict the pool (default: all tasks)"
         type: string
@@ -38,10 +51,6 @@ on:
         type: string
         default: "terminal-bench@2.0"
 
-permissions:
-  contents: read
-  actions: read
-
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -50,7 +59,7 @@ jobs:
       tasks: ${{ steps.enum.outputs.tasks }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets[inputs.provider_secret] || inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
@@ -62,7 +71,7 @@ jobs:
       - name: Install nano-harness + harbor
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[miniswe]" "harbor==0.20.0"
+          python -m pip install -e ".[miniswe]" "harbor==0.20.0"
 
       - name: Sanitize API keys (strip BOM / stray whitespace)
         run: |
@@ -175,7 +184,6 @@ jobs:
   run:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 350
     strategy:
       # One task failing must not cancel the rest - a partial baseline with
       # known-failed tasks is still useful.
@@ -185,7 +193,7 @@ jobs:
         task: ${{ fromJson(needs.plan.outputs.tasks) }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets[inputs.provider_secret] || inputs.api_key || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
@@ -203,7 +211,7 @@ jobs:
       - name: Install nano-harness + harbor
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[miniswe]" "harbor==0.20.0"
+          python -m pip install -e ".[miniswe]" "harbor==0.20.0"
 
       - name: Sanitize API keys (strip BOM / stray whitespace)
         run: |
@@ -243,7 +251,7 @@ jobs:
             -m "$MODEL" \
             -o results/terminal-bench \
             --job-name "$JOB_NAME" \
-            --agent-timeout-multiplier 1.0 \
+            --agent-timeout-multiplier ${{ inputs.agent_timeout_multiplier }} \
             -n 1 \
             -y \
             -i "$TASK"
@@ -252,6 +260,20 @@ jobs:
         if: always()
         run: df -h /
 
+      - name: Normalize task artifact permissions
+        if: always()
+        run: |
+          # Harbor's container can leave gt-state files owned by root.  The
+          # runner must be able to read every receipt before upload; this does
+          # not alter the task workspace, model, evaluator, or score.
+          if [ -d results/terminal-bench ]; then
+            # Harbor task containers may write receipts as root.  chmod alone
+            # cannot repair ownership for the GitHub runner, so take ownership
+            # first and then normalize read/execute bits for artifact upload.
+            sudo chown -R "$(id -u):$(id -g)" results/terminal-bench || true
+            chmod -R a+rX results/terminal-bench || true
+          fi
+
       - name: Upload task result
         if: always()
         uses: actions/upload-artifact@v4
@@ -259,16 +281,6 @@ jobs:
           name: tb2-miniswe-${{ github.run_id }}-task-${{ matrix.task }}
           path: results/terminal-bench/
           if-no-files-found: warn
-
-  task_progress:
-    name: Task progress
-    needs: [plan]
-    if: always()
-    uses: ./.github/workflows/task_progress.yml
-    with:
-      expected_tasks_json: ${{ needs.plan.outputs.tasks }}
-      task_job_regex: '^run \(.+\)$'
-    secrets: inherit
 
   merge:
     needs: [plan, run]
@@ -302,14 +314,23 @@ jobs:
 
           for task_dir in sorted(Path("tasks").glob("*")):
               results = list(task_dir.rglob("result.json"))
-              if not results:
-                  missing.append(task_dir.name)
-                  continue
+              task_trials = []
               for rp in results:
                   r = json.loads(rp.read_text(encoding="utf-8"))
+                  # Harbor writes an outer run summary and one nested trial
+                  # result.  The outer file has stats but no trial_results;
+                  # only nested records carry verifier rewards/exceptions.
                   got = r.get("trial_results", []) or []
-                  trials.extend(got)
-                  per_task.append((task_dir.name, len(got)))
+                  if not got and r.get("task_name") and (
+                      "verifier_result" in r or "exception_info" in r
+                  ):
+                      got = [r]
+                  task_trials.extend(got)
+              if not task_trials:
+                  missing.append(task_dir.name)
+                  continue
+              trials.extend(task_trials)
+              per_task.append((task_dir.name, len(task_trials)))
 
           def solved(t):
               rewards = (t.get("verifier_result") or {}).get("rewards") or {}
