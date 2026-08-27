@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
 from gt_engine.hybrid_repository import HybridRepository
@@ -32,6 +33,30 @@ def _document(path: str, symbol: str, text: str) -> RepositoryDocument:
         provenance=("graph_node",),
         origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
         origin_revision="source-1",
+    )
+
+
+def _safe_self_link(document: RepositoryDocument) -> StructuralLink:
+    digest = hashlib.sha256(document.text.encode("utf-8")).hexdigest()
+    return StructuralLink(
+        source_path=document.path,
+        target_path=document.path,
+        relation="REFERENCES",
+        confidence=1.0,
+        certified=True,
+        verification_status="verified",
+        source_symbol=document.symbol,
+        target_symbol=document.symbol,
+        source_start_line=document.start_line,
+        target_start_line=document.start_line,
+        source_content_sha256=digest,
+        target_content_sha256=digest,
+        source_evidence_origin="preexisting_repository",
+        target_evidence_origin="preexisting_repository",
+        origin="program",
+        resolution_outcome="exact",
+        resolution_method="exact_symbol",
+        candidate_count=1,
     )
 
 
@@ -761,8 +786,14 @@ def test_unresolved_qualified_member_keeps_owner_as_inspection_not_edit_authorit
 
 def test_declared_domain_artifact_localizes_generic_named_owner_module() -> None:
     documents = (
+        _document("katex.ts", "katex", "export const katex = {}"),
+        _document(
+            "src/functions/environment.ts",
+            "environment",
+            "export const environment = {}",
+        ),
+        _document("src/mathMLTree.ts", "mathMLTree", "export const mathMLTree = {}"),
         _document("src/environments/array.ts", "parseArray", "function parseArray() {}"),
-        _document("src/mathMLTree.ts", "MathNode", "class MathNode {}"),
         _document("src/buildMathML.ts", "buildMathML", "function buildMathML() {}"),
     )
     task = (
@@ -774,19 +805,90 @@ def test_declared_domain_artifact_localizes_generic_named_owner_module() -> None
     packet = RepositoryContextCompiler().compile(
         HybridRepository(
             documents=documents,
-            structural_links=(),
+            structural_links=tuple(_safe_self_link(document) for document in documents[:3]),
             source_revision="source-1",
             complete=True,
             reason_codes=(),
-            source_file_count=3,
-            document_chars=120,
+            source_file_count=len(documents),
+            document_chars=240,
         ),
         _request(task),
     )
 
-    assert any(
-        item.path == "src/environments/array.ts"
-        for item in packet.inspection_implementation_owners
+    assert packet.inspection_implementation_owners[0].path == "src/environments/array.ts"
+
+
+def test_direct_owner_identity_outranks_partial_compound_path_match() -> None:
+    documents = (
+        _document(
+            "lib/definition-syntax/SyntaxError.js",
+            "SyntaxError",
+            "export class SyntaxError {}",
+        ),
+        _document("lib/lexer/Lexer.js", "Lexer", "export class Lexer {}"),
+        _document("lib/lexer/match.js", "internalMatch", "export function internalMatch() {}"),
+    )
+    task = (
+        "Add two methods to the lexer: `expandShorthand(propertyName, value)` and "
+        "`compressShorthand(propertyName, longhands)`. Each shorthand uses CSS syntax."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(_safe_self_link(documents[0]),),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=180,
+        ),
+        _request(task),
+    )
+
+    assert packet.inspection_implementation_owners[0].path == "lib/lexer/Lexer.js"
+
+
+def test_direct_owner_identity_outranks_broad_facet_cover() -> None:
+    documents = (
+        _document(
+            "frontend/src/components/native/AgentHubPage.tsx",
+            "AgentHubPage",
+            "export function AgentHubPage() {}",
+        ),
+        _document(
+            "backend/handlers/multiAgentChat.ts",
+            "multiAgentChat",
+            "export async function multiAgentChat() {}",
+        ),
+        _document(
+            "ClaudeAgentHub/ClaudeAgentHub/Models/ChatMessage.swift",
+            "ChatMessageType",
+            "enum ChatMessageType {}",
+        ),
+    )
+    task = (
+        "Implement recursive agent delegation in the multi-agent chat flow. "
+        "Handle unknown agents, sub-agent failures, and circular delegation; "
+        "follow existing handler and registry patterns."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=180,
+        ),
+        _request(task),
+    )
+
+    assert (
+        packet.inspection_implementation_owners[0].path
+        == "backend/handlers/multiAgentChat.ts"
     )
 
 
@@ -804,6 +906,8 @@ def test_argument_noun_is_not_granted_edit_authority() -> None:
         ),
     )
     task = (
+        "Implement evaluation cancellation with parent/child handles and checkpoints. "
+        "Handle clones must share the same cancellation state and reason lineage. "
         "Add `Context::run_jobs_with_evaluation`. APIs that run under a "
         "handle must take the `handle` by shared reference."
     )

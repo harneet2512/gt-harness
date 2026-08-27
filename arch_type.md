@@ -682,3 +682,18 @@ edit. A referenced future call such as `via Server.resetAbort()` keeps `Server`
 as an inspection owner unless a sentence-scoped edit directive names it. Thus
 the recall repair preserves the architecture's separation between where the
 agent may edit and what it should inspect, verify, or understand.
+
+Run `33024039628` refined that invariant. A PascalCase behavioral subject is
+now eligible only when the repository contains the exact spelling; `Handle`
+cannot case-fold onto a lowercase function `handle`. Edit-scope matching is
+also identifier-bounded, so `handle` cannot match inside `handles` or another
+identifier.
+
+Owner delivery is ordered by direct identity affinity before graph centrality
+or broad facet coverage. The compiler compares the task to the candidate's own
+symbol and path components, demotes package-echo modules, retains a bounded
+24-row internal pool, and selects three owners with deterministic tie-breaks.
+At the emergency 500-token floor the serializer chooses one scoped
+implementation owner ahead of unrelated ambiguity or rank-only evidence.
+This is not oracle-fed ranking: every input is task text plus exact repository
+identity and typed evidence provenance.

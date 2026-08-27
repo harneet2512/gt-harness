@@ -763,8 +763,14 @@ def _entity_is_edit_directed(text: str, entity: str) -> bool:
     if not value:
         return False
     leaf = re.split(r"(?:::|[.#])", value)[-1]
-    quoted = rf"(?:`|'|\")?{re.escape(value)}(?:`|'|\")?"
-    leaf_quoted = rf"(?:`|'|\")?{re.escape(leaf)}(?:`|'|\")?"
+    quoted = (
+        rf"(?<![A-Za-z0-9_])(?:`|'|\")?{re.escape(value)}"
+        rf"(?:`|'|\")?(?![A-Za-z0-9_])"
+    )
+    leaf_quoted = (
+        rf"(?<![A-Za-z0-9_])(?:`|'|\")?{re.escape(leaf)}"
+        rf"(?:`|'|\")?(?![A-Za-z0-9_])"
+    )
     explicit_leaf = rf"(?:`{re.escape(leaf)}`|'{re.escape(leaf)}'|\"{re.escape(leaf)}\")"
 
     # ``alias_style (NameStyle value or values)`` describes the accepted
@@ -1016,11 +1022,15 @@ def compile_task_facets(
             re.split(r"(?:::|[.#])", entity)[-1].casefold() for entity in associated
         }
         entities = list(associated)
-        entities.extend(
+        behavior_subjects = tuple(
             match.group(1)
             for match in _BEHAVIOR_SUBJECT.finditer(text)
-            if match.group(1).casefold() in available
+            if any(
+                symbol == match.group(1)
+                for symbol, _path in available.get(match.group(1).casefold(), ())
+            )
         )
+        entities.extend(behavior_subjects)
         entities.extend(
             match.group(1)
             for match in _CODE_ENTITY.finditer(text)
@@ -1051,9 +1061,7 @@ def compile_task_facets(
             if entity not in exception_tokens
             and (
                 _entity_is_edit_directed(text, entity)
-                or any(
-                    match.group(1) == entity for match in _BEHAVIOR_SUBJECT.finditer(text)
-                )
+                or entity in behavior_subjects
             )
         )
         directed_exact, _directed_unresolved, directed_owners, _directed_modules = resolve_entities(
@@ -1468,6 +1476,33 @@ def _related_path_term(first: str, second: str) -> bool:
         return True
     shorter, longer = sorted((left, right), key=len)
     return len(shorter) >= 4 and longer.startswith(shorter)
+
+
+def _owner_identity_affinity(
+    item: ContextEvidenceItem,
+    task: str,
+) -> tuple[int, int]:
+    """Measure how completely an owner's own identity is named by the task.
+
+    A direct owner such as ``Lexer`` or ``selectors.rs`` must outrank a broad
+    path that shares one incidental token such as ``SyntaxError`` or
+    ``remove_attributes_by_selector``.  The score uses only repository path,
+    symbol, and task text; graph centrality and facet count remain tie-breakers.
+    """
+
+    identity_terms = frozenset(
+        term
+        for term in (*_path_terms(item.path), *_path_terms(item.symbol))
+        if not any(_related_path_term(term, stopword) for stopword in _PATH_OWNER_STOPWORDS)
+    )
+    if not identity_terms:
+        return (0, 0)
+    task_terms = _path_terms(task)
+    matched = sum(
+        any(_related_path_term(term, task_term) for task_term in task_terms)
+        for term in identity_terms
+    )
+    return (matched, len(identity_terms))
 
 
 def _matching_path_facet_ids(*, path: str, facets: tuple[TaskFacet, ...]) -> tuple[str, ...]:
@@ -2697,7 +2732,7 @@ class RepositoryContextCompiler:
             item
             for _rank, item in sorted(path_affinity_rows, key=lambda row: row[0])
             if item.path not in role_paths
-        )[:3]
+        )[:24]
         owner_candidates_by_path: dict[str, ContextEvidenceItem] = {}
         for item in (
             *exact_owner_inspection,
@@ -2718,15 +2753,27 @@ class RepositoryContextCompiler:
             facet_id for item in owner_candidates for facet_id in item.facet_ids
         }
         while remaining_owner_items and len(selected_owner_items) < 3:
-            selected = min(
-                remaining_owner_items,
-                key=lambda item: (
-                    -len(set(item.facet_ids) & uncovered_owner_facets),
+            def owner_priority(item: ContextEvidenceItem) -> tuple[Any, ...]:
+                matched, identity_terms = _owner_identity_affinity(item, request.task)
+                identity_ratio = matched / identity_terms if identity_terms else 0.0
+                package_echo = (
+                    item.decision_reason == "task_path_module_owner_candidate"
+                    and _package_echo_symbol(request.task, item.path, item.symbol)
+                )
+                return (
+                    -identity_ratio,
+                    package_echo,
+                    -matched,
                     owner_reason_priority.get(item.decision_reason, 4),
+                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     _path_penalty(item.path),
                     item.path.casefold(),
                     item.path,
-                ),
+                )
+
+            selected = min(
+                remaining_owner_items,
+                key=owner_priority,
             )
             remaining_owner_items.remove(selected)
             selected_owner_items.append(selected)

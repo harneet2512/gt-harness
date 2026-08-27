@@ -48,7 +48,7 @@ facts must be composed and delivered at a decision point.
 
 ## Current evidence
 
-- canonical Python product suite: 500 collected and passed after the hosted
+- canonical Python product suite: 503 collected and passed after the hosted
   failure corrections;
 - Go indexer: `go test -tags sqlite_fts5 ./...` passed locally;
 - built wheel: exact equality with `production-surface.toml`, with no legacy
@@ -83,6 +83,36 @@ and remains historical evidence. It must not be relabeled. The Linux campaign
 must regenerate the fingerprint-bound 20-task report under
 `hybrid_required`; the candidate fails if precision, recall, treatment,
 dense-readiness, or task-set gates do not pass.
+
+### Exact-SHA run 33024039628
+
+Run `33024039628` audited commit `bde7fe1537393c5f01c6e731ccc192cff9e797e3`.
+It proved the crash and E2E repairs on hosted Linux: graph lifecycle, language
+lifecycle, real Mini-SWE-Agent 2.4.6 E2E, and the failure campaign all passed.
+The run remained `NOT_CERTIFIED` because localization delivery failed with
+mean exact-edit precision 0.9, mean required-fact coverage 0.75, and mean
+ambiguity recall 0.5. One task had false edit authority and five tasks had zero
+required-fact coverage.
+
+Receipt inspection found two causes:
+
+- capitalized grammatical subject `Handle` was allowed to case-fold onto a
+  lowercase repository function `handle`, granting a false Boa edit target;
+- owner selection and emergency compaction allowed broad facet count, graph
+  degree, package echo, or an unrelated ambiguity to displace a more directly
+  named implementation owner.
+
+The next candidate requires exact-case behavioral subjects and word-bounded
+edit matching. It ranks owner identities by how completely their own path and
+symbol are named by the task, demotes package echo, retains a bounded internal
+pool of 24 candidates before selecting three, and preserves a scoped owner at
+the 500-token emergency floor ahead of unrelated ambiguity/rank noise.
+
+A provider-free replay against the six affected real graph databases now
+shows required-fact coverage 1.0 and zero false edit authority in every case.
+The first owners are `Lexer.js`, `script.rs`, `array.ts`, `linter.go`,
+`selectors.rs`, and `multiAgentChat.ts`, respectively. This is focused local
+evidence; a fresh exact-SHA Linux twenty-case receipt is still required.
 
 ## Remaining release actions
 

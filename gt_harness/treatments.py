@@ -1682,10 +1682,20 @@ class GroundTruthTreatment(BareTreatment):
             packet_dict["inspection_implementation_owners"] = packet_dict[
                 "inspection_implementation_owners"
             ][:1]
-            if packet_dict["primary_edit_targets"] or packet_dict["ambiguous_identities"]:
+            if packet_dict["primary_edit_targets"]:
                 packet_dict["inspection_implementation_owners"] = []
+            elif packet_dict["inspection_implementation_owners"]:
+                # A scoped implementation owner is more actionable than an
+                # unrelated ambiguous identity or rank-only candidate. Keep
+                # ambiguity when it is the only repository identity, but do
+                # not let it evict a stronger owner at the emergency floor.
+                packet_dict["ambiguous_identities"] = []
             packet_dict["inspection_candidates"] = (
-                [] if packet_dict["primary_edit_targets"] else last_resort_inspection_candidate
+                last_resort_inspection_candidate
+                if not packet_dict["primary_edit_targets"]
+                and not packet_dict["inspection_implementation_owners"]
+                and not packet_dict["ambiguous_identities"]
+                else []
             )
             packet_dict["inspection_public_surface"] = []
             packet_dict["inspection_integration"] = []

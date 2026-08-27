@@ -23,6 +23,8 @@ from gt_engine.hybrid_retrieval import (
     StructuralLink,
 )
 from gt_engine.repository_context_compiler import (
+    AmbiguousIdentityCandidate,
+    AmbiguousIdentityGroup,
     ContextEvidenceItem,
     ContextStatus,
     GTContextPacket,
@@ -959,6 +961,120 @@ def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
     )
     assert process_line.endswith("truncated=true")
     assert not process_line.endswith("evaluator/eva truncated=true")
+
+
+def test_last_resort_compaction_keeps_owner_ahead_of_unrelated_ambiguity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    owner_path = "implementation/" + "owner_segment/" * 20 + "reusable_workflow.go"
+    owner = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path=owner_path,
+        start_line=1,
+        end_line=1,
+        symbol="newNullLocalReusableWorkflowCache",
+        relation="",
+        confidence=None,
+        verification_status="verified_path_identity",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="task_path_implementation_owner_candidate",
+        completeness="inspection_only_path_affinity",
+        source_excerpt="implementation owner " + "detail " * 120,
+        localization_role="IMPLEMENTATION_OWNER",
+        facet_ids=tuple(f"facet-{index}" for index in range(12)),
+    )
+    candidate = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="candidate/" + "rank_only_segment/" * 20 + "rule_workflow_call.go",
+        start_line=1,
+        end_line=1,
+        symbol="isWorkflowCallUsesLocalFormat",
+        relation="",
+        confidence=None,
+        verification_status="verified_path_identity",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="e" * 64,
+        decision_reason="task_path_phrase_inspection",
+        completeness="inspection_only_path_affinity",
+        source_excerpt="rank-only candidate " + "detail " * 120,
+        localization_role="UNCERTAIN",
+        facet_ids=(),
+    )
+    ambiguity = AmbiguousIdentityGroup(
+        entity="Error",
+        facet_ids=tuple(f"facet-{index}" for index in range(12)),
+        candidates=tuple(
+            AmbiguousIdentityCandidate(
+                path=("ambiguity/" + "unrelated_error_segment/" * 20 + f"{index}/error.go"),
+                line=1,
+                symbol="Error",
+                kind="type",
+                evidence_sha256=str(index) * 64,
+            )
+            for index in range(4)
+        ),
+        total_candidates=4,
+        truncated=False,
+        reason="multiple_disconnected_exact_repository_identities",
+        next_action="inspect_candidates_before_editing",
+        evidence_sha256="f" * 64,
+    )
+    facets = tuple(
+        TaskFacet(
+            facet_id=f"facet-{index}",
+            obligation_ids=(f"obligation-{index}",),
+            role=LocalizationRole.EDIT,
+            exact_symbols=("Error",),
+            query_terms=("action", "pinning", "workflow", f"requirement{index}"),
+        )
+        for index in range(12)
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        task_facets=facets,
+        inspection_implementation_owners=(owner,),
+        inspection_candidates=(candidate,),
+        ambiguous_identities=(ambiguity,),
+        semantic_facts=tuple("semantic fact " + "detail " * 80 for _ in range(6)),
+        execution_paths=tuple("process " + "hop -> " * 100 for _ in range(4)),
+        change_surface=tuple("impact " + "edge " * 100 for _ in range(4)),
+        evidence_items=(owner, candidate),
+        coverage={
+            "retrieval_mode": "hybrid_required",
+            "dense_index": {"status": "READY", "query_ready": True},
+        },
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    treatment.start_token_budget = 500
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= 500
+    assert f"INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY {owner_path}" in rendered
+    assert "AMBIGUOUS_IDENTITY symbol=Error" not in rendered
+    assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY" not in rendered
 
 
 def test_compaction_deduplicates_requirements_and_drops_rank_only_noise(

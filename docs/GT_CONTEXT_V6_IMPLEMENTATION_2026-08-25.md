@@ -478,3 +478,28 @@ The three previously failing localization cases each score 1.0 exact-edit
 precision and 1.0 required-path coverage at the actual 500-token provider
 boundary. Full twenty-case and Linux failure evidence remains pending until the
 new immutable SHA completes `prerelease_product_matrix.yml`.
+
+## Exact-SHA run 33024039628 localization closure
+
+The next hosted run passed every repaired runtime boundary but failed the
+localization gate. Exact metrics were precision 0.9, required-fact coverage
+0.75, and ambiguity recall 0.5. The failure was not attributed to Mini-SWE or
+the model: replay was provider-free and all twenty treatments were ACTIVE with
+dense retrieval ready.
+
+The remaining false edit was `core/runtime/src/interval.rs#handle` on the Boa
+task. The grammatical subject `Handle` had case-folded onto lowercase
+`handle`; an edit-scope regex also lacked identifier boundaries. Both paths
+now require exact spelling/bounds.
+
+Four zero-coverage cases already contained an acceptable path in the compiled
+packet, but the 500-token provider view exposed a weaker first row. KaTeX was
+the only compiler miss: `src/environments/array.ts` existed in the query graph
+but fell outside a prematurely truncated three-row module-owner pool. Owner
+selection now uses direct identity coverage before graph degree/facet breadth,
+demotes package echo, considers a bounded 24-row pool, and keeps a scoped owner
+ahead of unrelated ambiguity at last-resort compaction.
+
+The bounded real-graph replay of all six affected tasks now returns coverage
+1.0 and false-edit count zero per task. Full hosted replay remains the release
+authority.
