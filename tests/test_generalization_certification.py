@@ -5,7 +5,10 @@ import subprocess
 from pathlib import Path
 
 from scripts import runtime_leak_scan
-from scripts.replay_smoke20_localization import _tracked_source_fingerprint
+from scripts.replay_smoke20_localization import (
+    _exception_receipt,
+    _tracked_source_fingerprint,
+)
 from tests.generalization_helpers import (
     assert_distractor_monotonic,
     assert_homonym_is_scoped,
@@ -113,6 +116,20 @@ def test_runtime_scan_rejects_forbidden_value_without_task_specific_rules(tmp_pa
         (source,), forbidden_values=("synthetic-repository-name",)
     )
     assert any("forbidden value" in finding.reason for finding in findings)
+
+
+def test_localization_failure_receipt_preserves_chained_root_cause() -> None:
+    try:
+        try:
+            raise TypeError("invalid provider claim payload")
+        except TypeError as cause:
+            raise RuntimeError("context compilation failed") from cause
+    except RuntimeError as exc:
+        receipt = _exception_receipt(exc)
+
+    assert "TypeError: invalid provider claim payload" in receipt
+    assert "The above exception was the direct cause" in receipt
+    assert "RuntimeError: context compilation failed" in receipt
 
 
 def test_compiler_fingerprint_uses_committed_git_objects_not_checkout_line_endings(

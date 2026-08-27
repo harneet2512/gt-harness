@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -288,6 +289,14 @@ def _mean(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
 
 
+def _exception_receipt(exc: BaseException) -> str:
+    """Preserve the causal chain needed to reproduce a failed product path."""
+
+    return "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__, chain=True)
+    ).rstrip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
@@ -349,8 +358,9 @@ def main() -> int:
             )
             print(f"{task_id}: OK", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - report every task failure
-            failures.append(f"{task_id}: {exc}")
-            print(f"{task_id}: FAIL {exc}", file=sys.stderr)
+            failure = _exception_receipt(exc)
+            failures.append(f"{task_id}: {failure}")
+            print(f"{task_id}: FAIL\n{failure}", file=sys.stderr, flush=True)
 
     exact_precisions = [
         float(result["score"]["exact_edit_precision"])
