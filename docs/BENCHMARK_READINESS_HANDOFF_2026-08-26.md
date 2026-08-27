@@ -386,3 +386,31 @@ Status remains `NOT_CERTIFIED`: the implementation is ready for the immutable-
 SHA `prerelease_product_matrix.yml` Linux campaign, including all 20 provider-
 free localization tasks. No paid agent benchmark is authorized until that
 bundle passes.
+
+## Exact-SHA run 33102042740: native isolation blocker
+
+Provider-free Linux run `33102042740` tested
+`2a4df946ce814d568bdf3d47b43ced9cd3f3a96e`. Clean install, doctor, the full
+Python and Go suites, canonical lint, built product surface, CLI, the real-
+repository matrix, graph truth, graph lifecycle, language lifecycle, pinned
+dense model, localization source, harness E2E, and the failure campaign all
+passed. Provider calls were zero and the checkout was clean at the exact SHA.
+
+The run is not a certification. The first localization case reported
+`FAILED:context_compile_failed:TypeError`; the shared Python process then
+terminated with signal 11 before it could write the aggregate localization
+receipt. The original verifier retained native ONNX/parser-backed task state
+across unrelated repositories and suppressed the chained Python traceback.
+That design both diverged from real per-task harness isolation and converted
+an actionable task failure into an opaque whole-sweep crash.
+
+The verifier now preserves complete chained exceptions and launches every
+repository case in an independent spawned process. A Python failure is stored
+with its causal traceback. A native crash is stored as a typed task failure
+with exit code and signal. Remaining tasks continue, and the parent always
+produces an aggregate report. The worker boundary is general: it contains no
+task IDs, repository-specific rules, expected paths, or reference-patch data.
+Unit receipts cover both chained Python failure and signal-11 termination; an
+isolated fresh-state ABS replay retains precision, coverage, and implementation
+recall of 1.0. A fresh exact-SHA Linux run remains required, so product status
+remains `NOT_CERTIFIED`.

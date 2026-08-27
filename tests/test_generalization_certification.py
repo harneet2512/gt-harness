@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from scripts import runtime_leak_scan
+from scripts import replay_smoke20_localization, runtime_leak_scan
 from scripts.replay_smoke20_localization import (
     _exception_receipt,
     _tracked_source_fingerprint,
@@ -130,6 +130,89 @@ def test_localization_failure_receipt_preserves_chained_root_cause() -> None:
     assert "TypeError: invalid provider claim payload" in receipt
     assert "The above exception was the direct cause" in receipt
     assert "RuntimeError: context compilation failed" in receipt
+
+
+def test_localization_worker_preserves_python_failure(monkeypatch, tmp_path: Path) -> None:
+    class ImmediateProcess:
+        exitcode = None
+
+        def __init__(self, *, target, args, name) -> None:
+            self.target = target
+            self.args = args
+            self.name = name
+
+        def start(self) -> None:
+            self.target(*self.args)
+            self.exitcode = 0
+
+        def join(self) -> None:
+            return None
+
+    class ImmediateContext:
+        Process = ImmediateProcess
+
+    def fail_case(*args, **kwargs):
+        del args, kwargs
+        raise TypeError("invalid Linux graph claim")
+
+    monkeypatch.setattr(replay_smoke20_localization, "run_case", fail_case)
+    monkeypatch.setattr(
+        replay_smoke20_localization.multiprocessing,
+        "get_context",
+        lambda method: ImmediateContext(),
+    )
+
+    result, failure = replay_smoke20_localization._run_case_isolated(
+        "task-a",
+        {},
+        object(),
+        tmp_path,
+        benchmark_source=None,
+        repository_root=None,
+        retrieval_mode="sparse_only",
+        dense_model_dir=None,
+    )
+
+    assert result is None
+    assert failure is not None
+    assert "TypeError: invalid Linux graph claim" in failure
+
+
+def test_localization_worker_types_native_crash(monkeypatch, tmp_path: Path) -> None:
+    class CrashedProcess:
+        exitcode = None
+
+        def __init__(self, *, target, args, name) -> None:
+            del target, args, name
+
+        def start(self) -> None:
+            self.exitcode = -11
+
+        def join(self) -> None:
+            return None
+
+    class CrashedContext:
+        Process = CrashedProcess
+
+    monkeypatch.setattr(
+        replay_smoke20_localization.multiprocessing,
+        "get_context",
+        lambda method: CrashedContext(),
+    )
+
+    result, failure = replay_smoke20_localization._run_case_isolated(
+        "task-a",
+        {},
+        object(),
+        tmp_path,
+        benchmark_source=None,
+        repository_root=None,
+        retrieval_mode="sparse_only",
+        dense_model_dir=None,
+    )
+
+    assert result is None
+    assert failure == "isolated_worker_exit:exit_code=-11:signal=11"
 
 
 def test_compiler_fingerprint_uses_committed_git_objects_not_checkout_line_endings(

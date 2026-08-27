@@ -870,3 +870,20 @@ implementation precision 1.0, implementation path recall 1.0, required fact
 coverage 1.0, and zero treatment failures. This one case proves the regression
 mechanism is repaired; it does not certify the twenty-task cohort. The exact-
 SHA Linux product matrix remains mandatory.
+
+### Per-task native process boundary
+
+The provider-free localization certification executes each repository task in
+its own spawned process, matching the isolation of real benchmark jobs. The
+parent process owns cohort aggregation only; the child owns graph construction,
+dense-model lifetime, compilation, provider planning, and its atomic task
+receipt. Python exceptions retain their chained traceback. A child that exits
+without a receipt is not retried or silently omitted: its task receives a typed
+worker failure containing the exit code and POSIX signal when available.
+
+This boundary was required by exact-SHA Linux run `33102042740`. All preceding
+product gates passed, but a task-level compile TypeError was followed by a
+signal-11 termination in the shared native process. Process isolation prevents
+one repository's native lifetime from corrupting the cohort while preserving
+the original task failure as release-blocking evidence. It does not alter
+retrieval, ranking, edit authority, token budgets, or task outputs.

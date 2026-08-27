@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -297,6 +298,96 @@ def _exception_receipt(exc: BaseException) -> str:
     ).rstrip()
 
 
+def _isolated_case_worker(
+    output: Path,
+    task_id: str,
+    row: dict[str, Any],
+    oracle: LocalizationOracleTask,
+    state_root: Path,
+    benchmark_source: Path | None,
+    repository_root: Path | None,
+    retrieval_mode: str,
+    dense_model_dir: Path | None,
+) -> None:
+    """Run one repository treatment behind a native-process boundary."""
+
+    if dense_model_dir is not None:
+        os.environ["GT_DENSE_MODEL_DIR"] = str(dense_model_dir.resolve())
+    try:
+        payload: dict[str, Any] = {
+            "status": "OK",
+            "result": run_case(
+                task_id,
+                row,
+                oracle,
+                state_root,
+                benchmark_source=benchmark_source,
+                repository_root=repository_root,
+                retrieval_mode=retrieval_mode,
+            ),
+        }
+    except BaseException as exc:  # noqa: BLE001 - preserve worker failure evidence
+        payload = {"status": "FAIL", "failure": _exception_receipt(exc)}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(output)
+
+
+def _run_case_isolated(
+    task_id: str,
+    row: dict[str, Any],
+    oracle: LocalizationOracleTask,
+    state_root: Path,
+    *,
+    benchmark_source: Path | None,
+    repository_root: Path | None,
+    retrieval_mode: str,
+    dense_model_dir: Path | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Return a task result or an explicit Python/native worker failure."""
+
+    worker_key = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]
+    output = state_root / ".worker-results" / f"{worker_key}.json"
+    output.unlink(missing_ok=True)
+    context = multiprocessing.get_context("spawn")
+    process = context.Process(
+        target=_isolated_case_worker,
+        args=(
+            output,
+            task_id,
+            row,
+            oracle,
+            state_root,
+            benchmark_source,
+            repository_root,
+            retrieval_mode,
+            dense_model_dir,
+        ),
+        name=f"gt-localization-{worker_key}",
+    )
+    process.start()
+    process.join()
+    if process.exitcode != 0:
+        signal = -process.exitcode if process.exitcode and process.exitcode < 0 else None
+        return None, (
+            f"isolated_worker_exit:exit_code={process.exitcode}"
+            + (f":signal={signal}" if signal is not None else "")
+        )
+    if not output.is_file():
+        return None, "isolated_worker_receipt_missing"
+    try:
+        payload = json.loads(output.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, f"isolated_worker_receipt_invalid:{type(exc).__name__}:{exc}"
+    if payload.get("status") != "OK":
+        return None, str(payload.get("failure") or "isolated_worker_failed_without_reason")
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None, "isolated_worker_result_invalid"
+    return result, None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
@@ -344,23 +435,23 @@ def main() -> int:
     failures: list[str] = []
     for row in selected:
         task_id = str(row["task_id"])
-        try:
-            results.append(
-                run_case(
-                    task_id,
-                    row,
-                    oracle[task_id],
-                    args.state_root,
-                    benchmark_source=args.benchmark_source,
-                    repository_root=args.repository_root,
-                    retrieval_mode=args.retrieval_mode,
-                )
-            )
+        result, failure = _run_case_isolated(
+            task_id,
+            row,
+            oracle[task_id],
+            args.state_root,
+            benchmark_source=args.benchmark_source,
+            repository_root=args.repository_root,
+            retrieval_mode=args.retrieval_mode,
+            dense_model_dir=args.dense_model_dir,
+        )
+        if result is not None:
+            results.append(result)
             print(f"{task_id}: OK", file=sys.stderr)
-        except Exception as exc:  # noqa: BLE001 - report every task failure
-            failure = _exception_receipt(exc)
-            failures.append(f"{task_id}: {failure}")
-            print(f"{task_id}: FAIL\n{failure}", file=sys.stderr, flush=True)
+        else:
+            reason = failure or "isolated_worker_failed_without_reason"
+            failures.append(f"{task_id}: {reason}")
+            print(f"{task_id}: FAIL\n{reason}", file=sys.stderr, flush=True)
 
     exact_precisions = [
         float(result["score"]["exact_edit_precision"])
