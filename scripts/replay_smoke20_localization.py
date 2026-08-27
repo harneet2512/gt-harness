@@ -219,6 +219,8 @@ def run_case(
         "compiled_score": compiled_score.as_dict(),
         "delivered_roles": {role: list(paths) for role, paths in delivered.items()},
         "provider_plan": delivery_receipt.get("provider_plan"),
+        "provider_claim_ledger": delivery_receipt.get("provider_claim_ledger", []),
+        "provider_omitted_metadata": delivery_receipt.get("omitted_metadata", []),
         "provider_visible_feature_counts": delivery_receipt.get(
             "provider_visible_feature_counts"
         ),

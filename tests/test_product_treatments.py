@@ -997,7 +997,7 @@ def test_complex_task_compaction_keeps_strong_facts_under_release_budget(
     assert not process_line.endswith("evaluator/eva truncated=true")
 
 
-def test_last_resort_compaction_keeps_owner_ahead_of_unrelated_ambiguity(
+def test_last_resort_compaction_keeps_exact_ambiguity_ahead_of_rank_owner(
     tmp_path: Path, monkeypatch
 ) -> None:
     class FakeReceipt:
@@ -1057,7 +1057,7 @@ def test_last_resort_compaction_keeps_owner_ahead_of_unrelated_ambiguity(
         facet_ids=tuple(f"facet-{index}" for index in range(12)),
         candidates=tuple(
             AmbiguousIdentityCandidate(
-                path=("ambiguity/" + "unrelated_error_segment/" * 20 + f"{index}/error.go"),
+                path=f"packages/errors/{index}/error.go",
                 line=1,
                 symbol="Error",
                 kind="type",
@@ -1106,8 +1106,8 @@ def test_last_resort_compaction_keeps_owner_ahead_of_unrelated_ambiguity(
     rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
 
     assert _bounded_token_count(rendered) <= 500
-    assert f"INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY {owner_path}" in rendered
-    assert "AMBIGUOUS_IDENTITY symbol=Error" not in rendered
+    assert f"INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY {owner_path}" not in rendered
+    assert "AMBIGUOUS_IDENTITY symbol=Error" in rendered
     assert "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY" not in rendered
 
 
@@ -1504,6 +1504,18 @@ def test_provider_compaction_never_replaces_ready_evidence_with_metadata_only(
     assert treatment.provider_delivery_receipts[0]["provider_plan"]["selected_claim_ids"] == [
         owner.evidence_sha256
     ]
+    claim_ledger = treatment.provider_delivery_receipts[0]["provider_claim_ledger"]
+    owner_claim = next(item for item in claim_ledger if item["claim_id"] == owner.evidence_sha256)
+    assert owner_claim == {
+        "claim_id": owner.evidence_sha256,
+        "role": "IMPLEMENTATION_OWNER",
+        "authority": "RANK_SUPPORT",
+        "requirement_ids": [f"facet-{index}" for index in range(4)],
+        "estimated_tokens": owner_claim["estimated_tokens"],
+        "selection_rank": 0,
+        "selected": True,
+        "omission_reason": None,
+    }
 
 
 def test_provider_context_preserves_decision_facts_before_candidate_noise(

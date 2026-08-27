@@ -1842,6 +1842,26 @@ class GroundTruthTreatment(BareTreatment):
             compact_output = True
             provider_requirement_limit = 4
             rendered = encode()
+        if too_large():
+            # Optional limitation bookkeeping must not force the planner to
+            # replace a stronger repository fact with a cheaper heuristic.
+            # The complete values remain in the compile receipt; record their
+            # provider omission and retry the same plan before reducing the
+            # evidence budget.
+            for name in ("uncertainties", "uncovered_requirements", "uncovered_facets"):
+                keep = 1 if name == "uncovered_facets" else 0
+                omitted = max(0, len(packet_dict[name]) - keep)
+                if omitted:
+                    provider_metadata_omissions.append(
+                        {
+                            "field": name,
+                            "omitted_count": omitted,
+                            "reason": "EVIDENCE_PRIORITY",
+                        }
+                    )
+                    packet_dict[name] = packet_dict[name][:keep]
+            provider_requirement_limit = 2
+            rendered = encode()
         last_failing_budget: int | None = None
         while too_large() and planner_budget > 0:
             last_failing_budget = planner_budget
@@ -2040,6 +2060,23 @@ class GroundTruthTreatment(BareTreatment):
                 "context_char_count": len(rendered),
                 "serialized_claim_ids": list(delivered),
                 "provider_plan": provider_plan.as_dict(),
+                "provider_claim_ledger": [
+                    {
+                        "claim_id": claim.claim_id,
+                        "role": claim.role.value,
+                        "authority": claim.authority.name,
+                        "requirement_ids": list(claim.requirement_ids),
+                        "estimated_tokens": claim.estimated_tokens,
+                        "selection_rank": claim.selection_rank,
+                        "selected": claim.claim_id in provider_plan.selected_claim_ids,
+                        "omission_reason": (
+                            provider_plan.omission_by_claim[claim.claim_id].value
+                            if claim.claim_id in provider_plan.omission_by_claim
+                            else None
+                        ),
+                    }
+                    for claim in planner_claims
+                ],
                 "omitted_metadata": provider_metadata_omissions,
                 "provider_claim_tokens": list(
                     dict.fromkeys(re.findall(r"\bclaim=([A-Za-z0-9_-]+)", rendered))

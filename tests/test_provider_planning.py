@@ -168,7 +168,7 @@ def test_planner_preserves_compiler_rank_before_serialized_cost() -> None:
     assert plans == {("compiler-first",)}
 
 
-def test_planner_prefers_truthfully_typed_ambiguity_over_rank_only_inspection() -> None:
+def test_exact_ambiguity_beats_rank_only_owner_for_same_requirement() -> None:
     claims = (
         _claim(
             "weak-owner",
@@ -193,6 +193,57 @@ def test_planner_prefers_truthfully_typed_ambiguity_over_rank_only_inspection() 
     )
 
     assert plan.selected_claim_ids == ("exact-ambiguity",)
+
+
+def test_unique_exact_owner_beats_ambiguity_for_same_requirement() -> None:
+    claims = (
+        _claim(
+            "exact-owner",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.EXACT_IDENTITY,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+        _claim(
+            "exact-ambiguity",
+            role=ClaimRole.AMBIGUITY,
+            authority=ClaimAuthority.EXACT_IDENTITY,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("requirement",),
+        token_budget=10,
+    )
+
+    assert plan.selected_claim_ids == ("exact-owner",)
+
+
+def test_rank_only_owner_delivery_is_a_bounded_two_candidate_set() -> None:
+    claims = tuple(
+        _claim(
+            f"owner-{index}",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("requirement",),
+            tokens=10,
+            selection_rank=index,
+        )
+        for index in range(3)
+    )
+
+    for ordering in permutations(claims):
+        plan = ProviderContextPlanner().plan(
+            ordering,
+            requirement_ids=("requirement",),
+            token_budget=30,
+        )
+
+        assert plan.selected_claim_ids == ("owner-0", "owner-1")
+        assert plan.omission_by_claim["owner-2"] is OmissionReason.REDUNDANT_COVERAGE
 
 
 def test_planner_delivers_localization_before_downstream_relation_detail() -> None:

@@ -188,6 +188,11 @@ class ProviderContextPlanner:
                 candidates.append(claim)
 
         while candidates:
+            selected_rank_owners = sum(
+                item.role is ClaimRole.IMPLEMENTATION_OWNER
+                and item.authority is ClaimAuthority.RANK_SUPPORT
+                for item in selected
+            )
             decision_selected = any(
                 item.authority is not ClaimAuthority.RANK_SUPPORT
                 or bool(item.requirement_ids)
@@ -197,6 +202,11 @@ class ProviderContextPlanner:
                 item
                 for item in candidates
                 if item.estimated_tokens <= remaining
+                and not (
+                    item.role is ClaimRole.IMPLEMENTATION_OWNER
+                    and item.authority is ClaimAuthority.RANK_SUPPORT
+                    and selected_rank_owners >= 2
+                )
                 and not (
                     decision_selected
                     and item.authority is ClaimAuthority.RANK_SUPPORT
@@ -220,6 +230,11 @@ class ProviderContextPlanner:
                         & roles
                     )
                     and required_set.intersection(item.requirement_ids) <= covered
+                    and not (
+                        item.role is ClaimRole.IMPLEMENTATION_OWNER
+                        and item.authority is ClaimAuthority.RANK_SUPPORT
+                        and 0 < selected_rank_owners < 2
+                    )
                 )
             ]
             if not fitting:
@@ -227,15 +242,30 @@ class ProviderContextPlanner:
 
             def order(item: ProviderClaim) -> tuple[object, ...]:
                 new_requirements = required_set.intersection(item.requirement_ids) - covered
-                localization_family = {
-                    ClaimRole.EDIT,
-                    ClaimRole.IMPLEMENTATION_OWNER,
-                    ClaimRole.AMBIGUITY,
-                    ClaimRole.INSPECTION,
-                }
+                # Repository identity resolution is upstream truth, not a
+                # retrieval preference.  When the compiler says a named
+                # entity has several exact definitions, that bounded set must
+                # reach the agent before a heuristic single-file owner for
+                # the same unresolved decision.  A unique exact edit/owner
+                # remains stronger than an ambiguity set; ranking evidence
+                # can never erase declared identity ambiguity.
+                localization_resolution = 0
+                if item.authority is ClaimAuthority.EXACT_IDENTITY:
+                    if item.role is ClaimRole.EDIT:
+                        localization_resolution = 4
+                    elif item.role is ClaimRole.IMPLEMENTATION_OWNER:
+                        localization_resolution = 3
+                    elif item.role is ClaimRole.AMBIGUITY:
+                        localization_resolution = 2
                 return (
+                    -localization_resolution,
+                    (
+                        item.selection_rank
+                        if item.role is ClaimRole.IMPLEMENTATION_OWNER
+                        and item.authority is ClaimAuthority.RANK_SUPPORT
+                        else 1_000_000
+                    ),
                     -int(bool(new_requirements)),
-                    -(int(item.authority) if item.role in localization_family else 0),
                     -int(_ROLE_PRIORITY[item.role] >= 60),
                     -int(item.role not in roles),
                     -_ROLE_PRIORITY[item.role],

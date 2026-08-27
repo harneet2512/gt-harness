@@ -299,29 +299,44 @@ eliminated false edit authority, but remained release-blocking: 19/20 cases
 ran, implementation fact recall was 15/19 (0.7895), implementation precision
 was 15/28 (0.5357), and required coverage was 0.7895.
 
-The receipts isolated two deterministic causes. First, owner selection ranked
-lexical identity ahead of independent obligation coverage, choosing narrow
-one-facet rows over files supported by several task obligations. Second, a
-pathless semantic Rust task produced a healthy exact-revision graph and
-correct dense hits, but provider metadata consumed the 500-token allowance.
+The receipts isolated a provider-boundary failure. A pathless semantic Rust
+task produced a healthy exact-revision graph and correct dense hits, but
+provider metadata consumed the 500-token allowance.
 The planner reached a zero-claim packet that fit and then raised
 `FAILED:context_evidence_empty`. A clean pinned oxvg reproduction confirmed
 that `selectors.rs`, `style.rs`, and `remove_empty_containers.rs` existed in
 the compiler evidence before provider compaction.
 
-The corrective implementation is general. Owner ranking now prioritizes
-cross-obligation coverage before lexical affinity. Planner authority reflects
-the evidence source instead of the optimistic output label: exact identities,
-hybrid semantic support, and rank-only lexical/dense candidates remain
-distinct. Redundant localization-family rows are omitted once the same
-requirements are already covered, while new-file precedent remains a separate
-role. If optional metadata would leave a READY packet with zero claims, the
-serializer removes that metadata and searches the bounded budget for an
-evidence-bearing plan that the real renderer proves fits.
+The first corrective candidate, commit
+`95d4a2bb322ad1c55a6348be763a0c9f4764b074`, correctly made compaction
+evidence-first, but also placed broad facet count ahead of lexical and scoped
+identity. Exact-SHA run `33072270921` falsified that ranking change: all 20
+cases executed and oxvg stopped failing treatment delivery, but fact recall
+fell to 12/20 (0.60), implementation precision fell to 15/29 (0.5172), and
+required coverage fell to 0.60. The broad-coverage ranking is therefore
+rejected and reverted; it is not part of the candidate architecture.
 
-The clean oxvg replay now completes with one provider-visible accepted owner,
-required coverage 1.0, implementation precision 1.0, fact recall 1.0, zero
-false edit authority, and no treatment failure. The complete provider-free
-Python suite, Go SQLite-FTS5 suite, and changed-file Ruff pass locally. Product
-status remains `NOT_CERTIFIED` until the next exact-SHA hosted twenty-task
-receipt passes; no paid benchmark is authorized.
+The surviving correction is general. Planner authority reflects the evidence
+source instead of the optimistic output label: exact identities, hybrid
+semantic support, and rank-only lexical/dense candidates remain distinct. A
+READY compiler packet cannot compact to metadata-only output. Unique exact
+owners remain single. An exact disconnected identity set outranks a heuristic
+owner for the same decision, and uncertain rank-only ownership is represented
+as a bounded two-candidate set rather than a false singleton. Public surface,
+integration, validation, process, impact, and new-file precedent remain
+separate roles. Provider receipts include a complete candidate ledger with
+role, authority, requirement bindings, serialized cost, rank, selection, and
+omission reason.
+
+Product status remains `NOT_CERTIFIED` until a fresh exact-SHA hosted
+twenty-task receipt passes every product gate; no paid benchmark is
+authorized.
+
+Focused production-path replays on the current candidate pass at both failure
+boundaries. Boa uses exact ambiguity and scores coverage/ambiguity recall/
+implementation recall of 1.0 at 330 tokens with precision 0.6667. Oxvg uses
+bounded rank-only ownership, exposes `selectors.rs`, and scores coverage and
+implementation recall of 1.0. Neither replay grants edit authority, degrades
+the graph, or fails treatment delivery. The full Python suite, SQLite-FTS5 Go
+suite, changed-file Ruff, product lint, 25-document consistency audit, built
+wheel surface, and real CLI lifecycle pass locally.

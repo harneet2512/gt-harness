@@ -816,14 +816,19 @@ serialized form fits the configured token and character ceilings. If no real
 claim can fit even after that reduction, the treatment fails explicitly as a
 budget error; it never misreports the non-empty compiler packet as empty.
 
-Owner ranking uses independent task-obligation coverage before lexical name
-affinity. This is the deterministic semantic-consensus rule: a file returned
-for several independently extracted requirements is a stronger decision-point
-candidate than a higher-similarity file returned for one clause. Similarity
-and path wording remain rank evidence, never edit authority. The provider
-planner also treats edit, owner, ambiguity, and inspection rows as one
-localization family for redundancy: once a requirement is covered by a
-stronger localization claim, a weaker row for the same requirement is omitted
-instead of consuming context and diluting precision. Public surface,
-integration, validation, process, impact, and new-file precedent remain
-separate roles and are not erased by this localization deduplication.
+Broad obligation count is not an ownership proof. Exact-SHA run `33072270921`
+showed that placing facet count ahead of scoped identity promotes generic
+semantic matches and reduces recall; that experiment was reverted. Owner
+ranking retains exact identity, explicit owner reason, and path scope before
+bounded coverage and retrieval score.
+
+The provider must preserve localization uncertainty without flooding the
+agent. A unique exact edit or owner is a singleton. If an exact repository
+name resolves to disconnected definitions, its bounded ambiguity set outranks
+a heuristic single-file guess for the same decision. If no exact resolution
+exists, rank-only ownership may expose the compiler's first two candidates,
+each explicitly labeled `NOT_EDIT_AUTHORITY`; it may not silently collapse
+uncertainty into a false authoritative owner or serialize an unbounded search
+result. Higher-order roles remain independently budgeted. The delivery receipt
+records every candidate's authority, requirements, rank, estimated cost,
+selection, and omission reason.

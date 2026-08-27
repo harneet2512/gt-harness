@@ -557,3 +557,46 @@ or dense failures. The full local Python and Go suites, changed-file Ruff,
 product-surface lint, built-wheel verification, and CLI lifecycle also pass.
 Full exact-SHA Linux product certification is still required before benchmark
 authorization.
+
+## Exact-SHA run 33072270921: rejected breadth heuristic and provider fix
+
+Commit `95d4a2bb322ad1c55a6348be763a0c9f4764b074` fixed the evidence-free
+compaction failure: all twenty localization cases executed through the real
+production treatment, including oxvg. It did not pass certification. Moving
+raw facet count ahead of scoped identity reduced required-fact coverage and
+fact recall to 0.60 and implementation precision to 0.5172. This was a
+falsifying result, so breadth-first owner ranking was reverted.
+
+The remaining provider defect was loss of typed uncertainty. The compiler can
+know either that an exact name has several disconnected definitions or that
+retrieval produced several plausible non-authoritative owners. The provider
+previously collapsed both states to one heuristic file because role priority
+and facet-to-requirement deduplication treated the first owner as conclusive.
+That was false precision: correct paths for Boa, fd, actionlint, Bandit, and
+oxvg were present in the compiled ledger but could be removed before the agent
+saw them.
+
+The generalized policy is now:
+
+1. unique exact edit/owner identity is delivered as a singleton;
+2. exact disconnected identity is delivered as a bounded ambiguity set before
+   any heuristic owner for the same decision;
+3. rank-only owner uncertainty may deliver the compiler's first two candidates
+   and is always labeled `NOT_EDIT_AUTHORITY`;
+4. the candidate set is never expanded by repository, task, benchmark, or
+   language exceptions;
+5. every provider candidate is recorded with authority, requirement binding,
+   selection rank, estimated cost, selected state, and omission reason.
+
+This policy preserves dynamic current-revision evidence and makes the
+compiler-to-provider loss boundary independently auditable. A fresh hosted
+exact-SHA product matrix remains the certification authority.
+
+Production-path replays at the exact pinned revisions validate both branches
+of the policy. Boa delivers a bounded exact ambiguity set with required
+coverage 1.0, ambiguity recall 1.0, implementation recall 1.0, precision
+0.6667, and 330 tokens. Oxvg delivers the compiler's first two rank-only
+owners, including `crates/oxvg_ast/src/selectors.rs`, with required coverage
+1.0 and implementation recall 1.0. Both runs have zero false edit authority,
+zero treatment failures, and a READY dense substrate. These are focused
+diagnostics, not product certification.
