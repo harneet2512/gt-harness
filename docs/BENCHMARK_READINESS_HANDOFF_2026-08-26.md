@@ -414,3 +414,11 @@ Unit receipts cover both chained Python failure and signal-11 termination; an
 isolated fresh-state ABS replay retains precision, coverage, and implementation
 recall of 1.0. A fresh exact-SHA Linux run remains required, so product status
 remains `NOT_CERTIFIED`.
+
+The hosted evidence artifact is intentionally bounded to the root log, step
+ledger, certification JSON, receipts, per-gate logs, and built wheel. Cloned
+repositories, graph workspaces, caches, and the pinned ONNX model are
+reproducible inputs and are not uploaded. Run `33102042740` demonstrated the
+cost of the former scope: 1.02 GB for a failed receipt bundle, including a
+435 MB model. The bounded artifact preserves all verdict evidence while making
+download and failure triage practical.

@@ -54,7 +54,11 @@ jobs:
         with:
           name: gt-product-certification-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/gt-codespaces-certification/
             ${{ runner.temp }}/gt-codespaces-certification.log
+            ${{ runner.temp }}/gt-codespaces-certification/codespaces-product-certification.json
+            ${{ runner.temp }}/gt-codespaces-certification/steps.tsv
+            ${{ runner.temp }}/gt-codespaces-certification/logs/
+            ${{ runner.temp }}/gt-codespaces-certification/receipts/
+            ${{ runner.temp }}/gt-codespaces-certification/workspace/wheel/*.whl
           if-no-files-found: error
           retention-days: 30

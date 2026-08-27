@@ -887,3 +887,8 @@ signal-11 termination in the shared native process. Process isolation prevents
 one repository's native lifetime from corrupting the cohort while preserving
 the original task failure as release-blocking evidence. It does not alter
 retrieval, ranking, edit authority, token budgets, or task outputs.
+
+Certification artifacts contain evidence, not reproducible working data. The
+workflow uploads receipts, logs, the step ledger, the root certification
+record, and the built wheel. It excludes cloned repositories, graph databases,
+caches, and model weights; their identities and checksums remain in receipts.
