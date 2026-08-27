@@ -697,3 +697,22 @@ At the emergency 500-token floor the serializer chooses one scoped
 implementation owner ahead of unrelated ambiguity or rank-only evidence.
 This is not oracle-fed ranking: every input is task text plus exact repository
 identity and typed evidence provenance.
+
+Run `33031285044` exposed the final known localization boundary in this
+sequence. Exact graph membership did not guarantee that a literal module path
+entered the task-conditioned repository projection, and a compiled acceptable
+owner did not guarantee survival at the emergency provider-token floor. The
+architecture therefore has two explicit, independently bounded recall paths:
+
+1. fused exact/sparse/structural/dense retrieval for ranked relevance; and
+2. per-term graph-FTS path identity for task-named repository artifacts that a
+   combined rank window could crowd out.
+
+The second path is inspection-only input to the same context compiler. It can
+neither create an edit target nor bypass source revision, graph readiness, or
+facet checks. Final owner ordering measures the candidate's own symbol/file
+identity, leaf-plus-parent scope, and uncovered obligation contribution;
+shared package directories and graph degree cannot dominate those signals.
+Fresh exact-revision KaTeX and Bandit replays prove that the resulting owners
+survive final delivery with coverage 1.0 and no false edit authority. A new
+exact-SHA hosted campaign must still certify the complete twenty-task cohort.

@@ -48,7 +48,7 @@ facts must be composed and delivered at a decision point.
 
 ## Current evidence
 
-- canonical Python product suite: 503 collected and passed after the hosted
+- canonical Python product suite: 505 collected and passed after the hosted
   failure corrections;
 - Go indexer: `go test -tags sqlite_fts5 ./...` passed locally;
 - built wheel: exact equality with `production-surface.toml`, with no legacy
@@ -113,6 +113,38 @@ shows required-fact coverage 1.0 and zero false edit authority in every case.
 The first owners are `Lexer.js`, `script.rs`, `array.ts`, `linter.go`,
 `selectors.rs`, and `multiAgentChat.ts`, respectively. This is focused local
 evidence; a fresh exact-SHA Linux twenty-case receipt is still required.
+
+### Exact-SHA run 33031285044
+
+Run `33031285044` audited commit
+`0430310dfc5ff7d1a652651bb1588b67bb46f15a`. Every product gate except the
+localization threshold and its downstream certifier passed, including the
+real repository matrix, graph truth, graph lifecycle, language lifecycle,
+dense model, real Mini-SWE-Agent E2E, and failure campaign. Localization
+improved to exact-edit precision 1.0, required-fact coverage 0.9, ambiguity
+recall 1.0, and implementation-role precision 0.6562. No treatment failed,
+no dense index was unavailable, and no false edit authority remained.
+
+Two tasks remained below the per-task half-coverage floor. Receipt inspection
+showed two general product defects:
+
+- KaTeX's exact graph contained `src/environments/array.ts`, but a single
+  fused retrieval window could omit that literal task/path owner before the
+  compiler saw it.
+- Bandit's acceptable injection owners reached the compiled packet, but
+  package/directory words and broad facet count caused the 500-token delivery
+  to retain a less decision-relevant plugin.
+
+The next candidate adds a bounded per-term path-identity augmentation over
+the existing graph FTS index. It cannot grant edit authority: it only ensures
+that task-named repository paths reach the typed compiler. Owner ranking now
+uses symbol/file identity rather than shared repository directories, recognizes
+leaf-plus-parent scope for common-noun modules, and uses uncovered obligation
+coverage to break equal-identity ties. A fresh exact-revision replay of both
+failed repositories now delivers `src/environments/array.ts` and
+`bandit/plugins/injection_sql.py` at the provider boundary, with coverage 1.0,
+zero false edit authority, and 474/223 tokens respectively. The next hosted
+exact-SHA run remains the certification authority.
 
 ## Remaining release actions
 

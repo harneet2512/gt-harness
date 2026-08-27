@@ -750,3 +750,77 @@ def test_query_builder_materializes_qualified_owner_and_existing_api_analogs(
     )
 
     assert {document.path for document in repository.documents} == set(paths)
+
+
+def test_query_builder_materializes_literal_task_path_owner_outside_rank_window(
+    tmp_path,
+    monkeypatch,
+):
+    paths = {
+        "src/environments/array.ts": "export function parseArray() {}\n",
+        "src/functions/environment.ts": "export const environment = {};\n",
+        "src/mathMLTree.ts": "export const mathMLTree = {};\n",
+    }
+    for relative, body in paths.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    connection = sqlite3.connect(graph)
+    try:
+        connection.execute(
+            "CREATE TABLE nodes (id INTEGER PRIMARY KEY,name TEXT,file_path TEXT,"
+            "start_line INTEGER,end_line INTEGER,signature TEXT,language TEXT,is_test BOOLEAN)"
+        )
+        rows = (
+            (1, "parseArray", "src/environments/array.ts", 1, 1, "parseArray", "typescript", 0),
+            (
+                2,
+                "environment",
+                "src/functions/environment.ts",
+                1,
+                1,
+                "environment",
+                "typescript",
+                0,
+            ),
+            (3, "mathMLTree", "src/mathMLTree.ts", 1, 1, "mathMLTree", "typescript", 0),
+        )
+        connection.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?)", rows)
+        connection.execute("CREATE VIRTUAL TABLE nodes_fts USING fts5(name,file_path)")
+        connection.executemany(
+            "INSERT INTO nodes_fts(rowid,name,file_path) VALUES (?,?,?)",
+            ((row[0], row[1], row[2]) for row in rows),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    monkeypatch.setattr(
+        hybrid_repository,
+        "build_graph_projection",
+        lambda *_args, **_kwargs: GraphProjection(
+            files=frozenset(),
+            symbols=frozenset(),
+            node_ids=frozenset(),
+            surface_hits=(),
+        ),
+    )
+
+    repository = build_query_hybrid_repository(
+        tmp_path,
+        graph,
+        RetrievalState(
+            task_text=(
+                "Add multicolumn support. Supported environments include array, "
+                "matrix, and cases."
+            ),
+            intent=RetrievalIntent.IMPLEMENTATION_CONTEXT,
+            source_revision="source-1",
+        ),
+        candidate_limit=8,
+    )
+
+    assert "src/environments/array.ts" in {
+        document.path for document in repository.documents
+    }

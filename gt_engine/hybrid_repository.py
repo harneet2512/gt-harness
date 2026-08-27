@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -160,6 +161,95 @@ def _exact_task_node_ids(
             (*identifiers, max(1, int(limit))),
         )
         return tuple(int(row[0]) for row in rows)
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return ()
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _path_identity_terms(value: str) -> frozenset[str]:
+    """Return exact lexical components from a repository path or filename."""
+
+    expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", str(value or ""))
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", expanded)
+    return frozenset(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", expanded)
+        if len(token) >= 3 and not token.isdigit()
+    )
+
+
+def _task_path_candidate_paths(
+    graph: Path,
+    state: RetrievalState,
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    """Materialize task-named repository paths outside the fused rank window.
+
+    Long issue text can crowd a literal module owner out of a single combined
+    FTS result set. Querying each bounded task term independently prevents that
+    rank-window loss. Results remain path identity only: the context compiler
+    must still prove task-facet relevance and can expose them only as
+    inspection evidence, never as edit authority.
+    """
+
+    maximum = max(1, int(limit))
+    terms = retrieval_query_terms(state, limit=32)
+    if not terms:
+        return ()
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{graph.as_posix()}?mode=ro", uri=True)
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if not {"nodes", "nodes_fts"} <= tables:
+            return ()
+        columns = _columns(connection, "nodes")
+        if not {"id", "file_path"} <= columns:
+            return ()
+        include_tests = state.intent is RetrievalIntent.VALIDATION_CONTEXT
+        task_terms = frozenset(terms)
+        best_by_path: dict[str, tuple[int, int, int, str, str]] = {}
+        per_term_limit = max(8, maximum * 2)
+        for term_rank, term in enumerate(terms):
+            if re.fullmatch(r"[a-z0-9_]+", term) is None:
+                continue
+            rows = connection.execute(
+                "SELECT n.file_path FROM nodes_fts f "
+                "JOIN nodes n ON n.id=f.rowid WHERE nodes_fts MATCH ? "
+                + ("" if include_tests else "AND COALESCE(n.is_test,0)=0 ")
+                + "ORDER BY bm25(nodes_fts),LOWER(n.file_path),n.id LIMIT ?",
+                (f'"{term}"', per_term_limit),
+            ).fetchall()
+            for (raw_path,) in rows:
+                path = str(raw_path or "").replace("\\", "/")
+                path_terms = _path_identity_terms(path)
+                if term not in path_terms:
+                    continue
+                basename_terms = _path_identity_terms(Path(path).stem)
+                matched_terms = len(path_terms & task_terms)
+                rank = (
+                    0 if term in basename_terms else 1,
+                    -matched_terms,
+                    term_rank,
+                    path.casefold(),
+                    path,
+                )
+                previous = best_by_path.get(path)
+                if previous is None or rank < previous:
+                    best_by_path[path] = rank
+        return tuple(
+            path
+            for path, _rank in sorted(best_by_path.items(), key=lambda item: item[1])[
+                :maximum
+            ]
+        )
     except (OSError, sqlite3.Error, TypeError, ValueError):
         return ()
     finally:
@@ -1001,12 +1091,19 @@ def build_query_hybrid_repository(
             is not None
         )
     )[: max(8, int(candidate_limit))]
+    path_identity_paths = _task_path_candidate_paths(
+        graph,
+        state,
+        limit=max(8, int(candidate_limit)),
+    )
     return build_hybrid_repository(
         repo_root,
         graph,
         source_revision=state.source_revision,
         limits=limits,
-        include_paths=tuple(sorted((*projection.files, *dense_paths))),
+        include_paths=tuple(
+            sorted((*projection.files, *dense_paths, *path_identity_paths))
+        ),
         include_node_ids=ordered_node_ids,
         model_authored_paths=model_authored_paths,
         task_deliverables=task_deliverables,

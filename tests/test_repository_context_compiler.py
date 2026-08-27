@@ -892,6 +892,47 @@ def test_direct_owner_identity_outranks_broad_facet_cover() -> None:
     )
 
 
+def test_owner_obligation_coverage_breaks_equal_identity_affinity() -> None:
+    documents = (
+        _document(
+            "bandit/plugins/markupsafe_markup_xss.py",
+            "markupsafe_markup_xss",
+            "def markupsafe_markup_xss(context): pass",
+        ),
+        _document(
+            "bandit/plugins/injection_sql.py",
+            "injection_sql",
+            "def injection_sql(context): pass",
+        ),
+    )
+    task = (
+        "Bandit's injection checks only work on string literals; user input "
+        "flowing through variables to sinks goes undetected.\n\n"
+        "Taint propagates through assignments and calls. Parameterized SQL "
+        "queries and escaping are safe.\n\n"
+        "Add Bandit plugins: B620 for SQL injection sinks execute and "
+        "executemany, and B624 for exact markupsafe.Markup XSS sinks."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=120,
+        ),
+        _request(task),
+    )
+
+    assert (
+        packet.inspection_implementation_owners[0].path
+        == "bandit/plugins/injection_sql.py"
+    )
+
+
 def test_argument_noun_is_not_granted_edit_authority() -> None:
     documents = (
         _document(

@@ -503,3 +503,25 @@ ahead of unrelated ambiguity at last-resort compaction.
 The bounded real-graph replay of all six affected tasks now returns coverage
 1.0 and false-edit count zero per task. Full hosted replay remains the release
 authority.
+
+## Exact-SHA run 33031285044 path-identity closure
+
+The following hosted candidate removed all false edit authority and reached
+precision 1.0, mean required-fact coverage 0.9, ambiguity recall 1.0, and
+implementation-role precision 0.6562. All non-localization product gates
+passed. The remaining KaTeX and Bandit failures demonstrated that a healthy
+graph and a correct compiled alternative are still insufficient when the
+bounded query projection or emergency delivery drops the best owner.
+
+The query builder now performs bounded literal path-identity augmentation
+against `nodes_fts`, one task term at a time, and materializes only paths whose
+actual components contain the term. This is an independent recall channel,
+not semantic or edit authority. The compiler still assigns role, facet, and
+authority. Its owner ordering now excludes shared repository directories from
+identity affinity, recognizes task-named leaf/parent scope, and breaks direct
+identity ties with uncovered obligation coverage.
+
+Fresh exact-revision replays now deliver `src/environments/array.ts` for KaTeX
+and `bandit/plugins/injection_sql.py` for Bandit after the real 500-token
+compaction boundary. Both required facts score 1.0 coverage with zero false
+edit authority. Full hosted smoke20 certification remains pending.

@@ -1490,11 +1490,29 @@ def _owner_identity_affinity(
     symbol, and task text; graph centrality and facet count remain tie-breakers.
     """
 
-    identity_terms = frozenset(
+    symbol_terms = frozenset(
         term
-        for term in (*_path_terms(item.path), *_path_terms(item.symbol))
+        for term in _path_terms(item.symbol)
         if not any(_related_path_term(term, stopword) for stopword in _PATH_OWNER_STOPWORDS)
     )
+    stem_terms = frozenset(
+        term
+        for term in _path_terms(Path(item.path).stem)
+        if not any(_related_path_term(term, stopword) for stopword in _PATH_OWNER_STOPWORDS)
+    )
+    # Directory names such as ``plugins`` or a repository/package name are
+    # shared by many candidates and must not make an incidental file look
+    # like a direct owner. Prefer the representative symbol and file stem;
+    # fall back to the full path only when neither exposes a usable identity.
+    identity_terms = symbol_terms | stem_terms
+    if not identity_terms:
+        identity_terms = frozenset(
+            term
+            for term in _path_terms(item.path)
+            if not any(
+                _related_path_term(term, stopword) for stopword in _PATH_OWNER_STOPWORDS
+            )
+        )
     if not identity_terms:
         return (0, 0)
     task_terms = _path_terms(task)
@@ -1503,6 +1521,34 @@ def _owner_identity_affinity(
         for term in identity_terms
     )
     return (matched, len(identity_terms))
+
+
+def _owner_path_scope_affinity(
+    item: ContextEvidenceItem,
+    task: str,
+) -> tuple[int, int, int]:
+    """Score a task-named leaf and its repository scope.
+
+    Common nouns cannot identify symbols, but a task phrase such as
+    ``array-like environments`` can still identify the inspection-only path
+    ``environments/array.ts``. Requiring both leaf and parent agreement makes
+    that stronger than an unscoped package facade such as ``environments.ts``.
+    """
+
+    task_terms = _path_terms(task)
+    leaf_terms = _path_terms(Path(item.path).stem)
+    parent_terms = _path_terms(Path(item.path).parent.name)
+    if not leaf_terms:
+        return (0, 0, 0)
+    leaf_matches = sum(
+        any(_related_path_term(term, task_term) for task_term in task_terms)
+        for term in leaf_terms
+    )
+    parent_matches = sum(
+        any(_related_path_term(term, task_term) for task_term in task_terms)
+        for term in parent_terms
+    )
+    return (leaf_matches, len(leaf_terms), parent_matches)
 
 
 def _matching_path_facet_ids(*, path: str, facets: tuple[TaskFacet, ...]) -> tuple[str, ...]:
@@ -2623,6 +2669,12 @@ class RepositoryContextCompiler:
             if len(token) >= 4
             and not any(_related_path_term(token, stopword) for stopword in _PATH_OWNER_STOPWORDS)
         )
+        raw_task_terms = frozenset(
+            token.casefold()
+            for facet in task_facets
+            for token in facet.query_terms
+            if len(token) >= 4
+        )
         graph_degree: Counter[str] = Counter()
         for link in repository.structural_links:
             if _safe_link(link):
@@ -2665,7 +2717,24 @@ class RepositoryContextCompiler:
                 and _related_path_term(basename, parent)
                 and any(_related_path_term(parent, task_term) for task_term in task_terms)
             )
-            if len(matched_terms) < 2 and not direct_module_match and not eponymous_module:
+            scoped_leaf_match = bool(
+                basename
+                and parent
+                and any(
+                    _related_path_term(basename, task_term)
+                    for task_term in raw_task_terms
+                )
+                and any(
+                    _related_path_term(parent, task_term)
+                    for task_term in raw_task_terms
+                )
+            )
+            if (
+                len(matched_terms) < 2
+                and not direct_module_match
+                and not eponymous_module
+                and not scoped_leaf_match
+            ):
                 continue
             facet_scores: list[tuple[int, str]] = []
             for facet in task_facets:
@@ -2756,16 +2825,23 @@ class RepositoryContextCompiler:
             def owner_priority(item: ContextEvidenceItem) -> tuple[Any, ...]:
                 matched, identity_terms = _owner_identity_affinity(item, request.task)
                 identity_ratio = matched / identity_terms if identity_terms else 0.0
+                leaf_matches, leaf_terms, parent_matches = _owner_path_scope_affinity(
+                    item,
+                    request.task,
+                )
+                leaf_ratio = leaf_matches / leaf_terms if leaf_terms else 0.0
                 package_echo = (
                     item.decision_reason == "task_path_module_owner_candidate"
                     and _package_echo_symbol(request.task, item.path, item.symbol)
                 )
                 return (
                     -identity_ratio,
+                    -leaf_ratio,
+                    -parent_matches,
                     package_echo,
+                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     -matched,
                     owner_reason_priority.get(item.decision_reason, 4),
-                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     _path_penalty(item.path),
                     item.path.casefold(),
                     item.path,
