@@ -231,6 +231,22 @@ class ProviderContextPlanner:
                     )
                     and required_set.intersection(item.requirement_ids) <= covered
                 )
+                # A rank-only claim that cannot be bound to a typed task
+                # requirement is one heuristic answer to one unresolved
+                # decision, not proof of an additional decision.  Deliver at
+                # most the strongest representative for a role.  Distinct
+                # multi-file work remains expressible through separate typed
+                # requirement IDs or stronger structural/exact authority.
+                and not (
+                    item.authority is ClaimAuthority.RANK_SUPPORT
+                    and not required_set.intersection(item.requirement_ids)
+                    and any(
+                        chosen.role is item.role
+                        and chosen.authority is ClaimAuthority.RANK_SUPPORT
+                        and not required_set.intersection(chosen.requirement_ids)
+                        for chosen in selected
+                    )
+                )
             ]
             if not fitting:
                 break
@@ -292,6 +308,17 @@ class ProviderContextPlanner:
                 and claim.authority is ClaimAuthority.RANK_SUPPORT
             ):
                 omitted[claim.claim_id] = OmissionReason.WEAKER_AUTHORITY
+            elif (
+                claim.authority is ClaimAuthority.RANK_SUPPORT
+                and not required_set.intersection(claim.requirement_ids)
+                and any(
+                    chosen.role is claim.role
+                    and chosen.authority is ClaimAuthority.RANK_SUPPORT
+                    and not required_set.intersection(chosen.requirement_ids)
+                    for chosen in selected
+                )
+            ):
+                omitted[claim.claim_id] = OmissionReason.REDUNDANT_COVERAGE
             elif claim.estimated_tokens > remaining:
                 omitted[claim.claim_id] = OmissionReason.TOKEN_BUDGET
             elif required_set.intersection(claim.requirement_ids) <= covered:

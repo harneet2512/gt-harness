@@ -892,3 +892,43 @@ Certification artifacts contain evidence, not reproducible working data. The
 workflow uploads receipts, logs, the step ledger, the root certification
 record, and the built wheel. It excludes cloned repositories, graph databases,
 caches, and model weights; their identities and checksums remain in receipts.
+
+### Native parser ABI is graph identity, not an ambient dependency
+
+The semantic graph's parser runtime is part of the deterministic builder. GT
+pins py-tree-sitter `0.25.2`, includes that version in the builder receipt and
+localization compiler fingerprint, and refuses to parse under any other
+runtime. This is a correctness boundary: py-tree-sitter `0.26.0` can corrupt
+`Point.row` and `Point.column` references, producing invalid source ranges or a
+native crash. A graph built under an uncertified parser ABI is `FAILED`; it is
+never silently served as READY or treated as an optional semantic miss.
+
+Each benchmark repository still runs behind its own spawned native-process
+boundary. Isolation contains a native defect and preserves the rest of the
+cohort, while the runtime guard prevents the known defect before native parser
+entry. The two controls solve different problems and both remain canonical.
+
+### One heuristic cannot claim several implementation decisions
+
+Typed delivery roles remain disjoint. Public surfaces constrain public API;
+integration rows show wiring; affected tests guide validation; none counts as
+an implementation owner unless separately proved in that role. An unbound
+rank-only owner is one heuristic answer to one unresolved decision. Once its
+strongest representative is selected, same-role unbound alternatives are
+receipted as redundant. Multi-file implementation context is retained only
+when distinct typed requirement IDs, exact identity, or certified structural
+evidence establishes the separate decisions.
+
+Owner ranking follows evidence specificity, not prompt word frequency. Generic
+code nouns such as `output`, `context`, and `error` cannot identify a file or
+symbol from unscoped repetition. A generic leaf requires a locally named
+non-generic parent; a complete compound artifact phrase may identify the
+matching repository path. This preserves `array-like environments` ->
+`environments/array.ts` and `reusable workflow` -> `reusable_workflow.go`, while
+rejecting bare `output` -> `output.rs` and sentence grammar such as `Error
+messages should` -> every method named `Error`.
+
+This is deliberately narrower than the rejected broad-facet experiment from
+run `33072270921`. Exact/explicit owner reason, compound path identity, symbol
+identity, scoped path identity, and only then bounded facet agreement determine
+selection. Raw facet count never outranks proof-bearing identity.

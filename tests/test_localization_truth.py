@@ -153,6 +153,47 @@ def test_inspection_candidate_covers_availability_without_edit_authority() -> No
     assert score.ambiguity_candidate_recall is None
 
 
+def test_public_and_integration_roles_do_not_impersonate_implementation_owner() -> None:
+    oracle = LocalizationOracleTask(
+        task_id="task",
+        base_sha="e" * 40,
+        facts=(
+            LocalizationFact(
+                fact_id="owner",
+                role=LocalizationRole.IMPLEMENTATION_OWNER,
+                acceptable_paths=("src/owner.py",),
+                required=True,
+            ),
+            LocalizationFact(
+                fact_id="public",
+                role=LocalizationRole.PUBLIC_SURFACE,
+                acceptable_paths=("src/public.py",),
+                required=False,
+            ),
+            LocalizationFact(
+                fact_id="integration",
+                role=LocalizationRole.INTEGRATION_OR_REGISTRATION,
+                acceptable_paths=("src/integration.py",),
+                required=False,
+            ),
+        ),
+    )
+
+    score = score_localization(
+        oracle,
+        {
+            "INSPECT_PUBLIC_SURFACE": ("src/public.py", "src/owner.py"),
+            "INSPECT_INTEGRATION": ("src/integration.py", "src/owner.py"),
+        },
+    )
+
+    assert score.required_facts_covered == 0
+    assert score.role_metrics["IMPLEMENTATION_OWNER"]["delivered"] == 0
+    assert score.role_metrics["IMPLEMENTATION_OWNER"]["precision"] is None
+    assert score.role_metrics["PUBLIC_SURFACE"]["precision"] == 0.5
+    assert score.role_metrics["INTEGRATION_OR_REGISTRATION"]["precision"] == 0.5
+
+
 def test_role_fact_recall_treats_acceptable_paths_as_alternatives() -> None:
     oracle = LocalizationOracleTask(
         task_id="task",

@@ -13,6 +13,7 @@ from gt_engine.hybrid_retrieval import (
 )
 from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
+    ContextEvidenceItem,
     ContextStatus,
     FacetCoverageStatus,
     LocalizationRole,
@@ -20,6 +21,7 @@ from gt_engine.repository_context_compiler import (
     RequirementCoverageStatus,
     RequirementIntent,
     _matching_facet_ids,
+    _owner_path_scope_affinity,
     compile_task_facets,
 )
 from gt_engine.task_contract import extract_task_contract
@@ -751,6 +753,21 @@ def test_value_kind_phrase_cannot_manufacture_generic_error_identity() -> None:
     assert "Error" not in named
 
 
+def test_capitalized_generic_phrase_head_cannot_manufacture_error_identity() -> None:
+    documents = (
+        _document("error.go", "Error", "type Error struct {}"),
+        _document("expr.go", "Error", "func (e *ExprError) Error() string"),
+        _document("glob.go", "Error", "func (e *GlobError) Error() string"),
+        _document("rule.go", "Error", "func (r *RuleBase) Error()"),
+    )
+    task = "Error messages should distinguish reusable workflows from step actions."
+
+    facets = compile_task_facets(task, documents)
+    named = {symbol for facet in facets for symbol in facet.exact_symbols}
+
+    assert "Error" not in named
+
+
 def test_prose_new_and_schema_words_do_not_mint_edit_authority() -> None:
     documents = (
         _document("lexer/lexer.go", "New", "func New() *Lexer { return &Lexer{} }"),
@@ -1061,6 +1078,66 @@ def test_distant_generic_words_do_not_create_scoped_path_owner() -> None:
         item.path not in {"src/filter/size.rs", "src/filter/time.rs"}
         for item in packet.inspection_implementation_owners
     )
+
+
+def test_repeated_generic_output_noun_does_not_poison_owner_ranking() -> None:
+    item = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="src/output.rs",
+        start_line=1,
+        end_line=1,
+        symbol="output",
+        relation="",
+        confidence=None,
+        verification_status="rank_only",
+        source_revision="source-1",
+        graph_revision="graph-1",
+        evidence_sha256="a" * 64,
+        decision_reason="hybrid_rrf_implementation_owner_candidate",
+        completeness="inspection_only",
+    )
+    task = (
+        "Add deterministic multi-key sorting to standard search output. "
+        "The CLI accepts repeatable --sort and output remains deterministic. "
+        "Sorting controls require --sort and invalid options use existing CLI errors."
+    )
+
+    assert _owner_path_scope_affinity(item, task) == (0, 0, 0)
+
+
+def test_complete_compound_artifact_phrase_outranks_incidental_helper_symbol() -> None:
+    documents = (
+        _document(
+            "reusable_workflow.go",
+            "newNullLocalReusableWorkflowCache",
+            "func newNullLocalReusableWorkflowCache() {}",
+        ),
+        _document(
+            "rule_workflow_call.go",
+            "isWorkflowCallUsesLocalFormat",
+            "func isWorkflowCallUsesLocalFormat() {}",
+        ),
+        _document("rule_action.go", "RuleAction", "type RuleAction struct {}"),
+    )
+    task = (
+        "Add action pinning checks for step actions and job-level reusable workflow "
+        "uses references. Skip local refs and distinguish reusable workflows in errors."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=180,
+        ),
+        _request(task),
+    )
+
+    assert packet.inspection_implementation_owners[0].path == "reusable_workflow.go"
 
 
 def test_api_words_do_not_manufacture_unscoped_module_owners() -> None:

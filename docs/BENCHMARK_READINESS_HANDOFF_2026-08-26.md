@@ -422,3 +422,68 @@ reproducible inputs and are not uploaded. Run `33102042740` demonstrated the
 cost of the former scope: 1.02 GB for a failed receipt bundle, including a
 435 MB model. The bounded artifact preserves all verdict evidence while making
 download and failure triage practical.
+
+## Exact-SHA run 33105512694: parser ABI and provider-role blockers
+
+Provider-free Linux run
+[`33105512694`](https://github.com/harneet2512/gt-harness/actions/runs/33105512694)
+tested exact clean commit `73217b6f42d0ec5678fe140077d06b9ef5bd0227`.
+Install, doctor, Python, Go, canonical lint, built product surface, CLI,
+repository matrix, graph truth, graph lifecycle, language lifecycle, pinned
+dense model, localization source, harness E2E, and the failure campaign all
+passed. Provider calls were zero and provider credentials were not inspected.
+Localization truth and the product certifier failed, so the run is not a
+certification.
+
+The isolated workers converted the former opaque whole-process crash into two
+reproducible defects. A clean install resolved `tree-sitter==0.26.0` through
+the language-pack's open lower bound. That release has an upstream borrowed-
+reference defect in `Point.row`/`Point.column`; rows above CPython's immortal
+small-integer range can surface as unrelated Python objects and corrupt the
+allocator. The exact GT failures were `_hashlib.HASH` objects in source line
+comparisons and seven worker exits by signal 11. This matches upstream
+[py-tree-sitter issue 472](https://github.com/tree-sitter/py-tree-sitter/issues/472),
+not model behavior. The product now pins `tree-sitter==0.25.2`, includes the
+runtime version in the semantic builder identity/compiler fingerprint, parses
+a real source location above line 256 in regression coverage, and returns an
+explicit semantic-graph `FAILED` receipt before parser invocation if the
+installed runtime drifts.
+
+The eight workers that completed also exposed provider noise:
+implementation-owner precision was `0.4783` despite exact-edit precision,
+required coverage, and ambiguity recall of `1.0`. Two causes were removed.
+First, public-surface and integration rows no longer impersonate implementation
+owners in the truth scorer. Second, an unbound rank-only claim cannot prove a
+second implementation decision; the provider emits one strongest
+representative unless distinct typed requirements or stronger evidence prove
+multi-file work. Omission receipts identify this as redundant coverage rather
+than inventing a token-budget explanation.
+
+Two generalized localization defects were then repaired on real repositories.
+A bare generic filename such as `output.rs` receives no owner affinity merely
+because a long task repeats “output”; generic paths require a locally named
+non-generic scope. A sentence-initial generic phrase such as “Error messages
+should...” cannot manufacture an exact `Error` ambiguity. Conversely, a
+complete adjacent artifact phrase such as “reusable workflow” is deterministic
+path evidence for `reusable_workflow.go` and outranks an incidental helper
+symbol. None of these rules contains task IDs, repositories, oracle paths, or
+reference-patch data.
+
+Local final-fingerprint production-path receipts are:
+
+| Task | Implementation precision | Fact recall | Required coverage | Treatment failure |
+| --- | ---: | ---: | ---: | --- |
+| `abs-module-cache-flags` | 1.000 | 1.000 | 1.000 | none |
+| `actionlint-action-pinning-lint` | 1.000 | 1.000 | 1.000 | none |
+| `fd-deterministic-multi-key-sorting` | 1.000 | 1.000 | 1.000 | none |
+| `adaptix-name-mapping-aliases` | 0.500 | 1.000 | 1.000 | none |
+
+Adaptix's lower precision is an honest exact disconnected identity set, not
+rank flooding: both source identities reach the agent and neither is granted
+edit authority. The hosted evidence artifact is `1,095,026` bytes, down from
+`1,024,558,435` bytes in run `33102042740` (about 935x smaller) while retaining
+the logs and receipts needed for root-cause analysis.
+
+Status remains `NOT_CERTIFIED` until the complete exact-SHA Linux matrix passes
+the twenty-task localization truth gate and product certifier. No paid agent
+benchmark is authorized by these fixes.

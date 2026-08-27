@@ -38,15 +38,6 @@ _DELIVERY_ROLES: dict[LocalizationRole, tuple[str, ...]] = {
         # availability; the separate role-precision and false-authority gates
         # prevent broad candidate flooding from scoring as success.
         "INSPECT_CANDIDATE_NOT_EDIT_AUTHORITY",
-        # A relationship-derived integration row can simultaneously be the
-        # implementation file the agent must inspect. The compiler keeps the
-        # integration label; availability scoring does not erase that path.
-        "INSPECT_INTEGRATION",
-        # A task-named public entrypoint may constrain a signature while its
-        # implementation body remains part of the change surface. Count the
-        # path as available implementation context without relabeling it or
-        # granting edit authority.
-        "INSPECT_PUBLIC_SURFACE",
     ),
     LocalizationRole.PUBLIC_SURFACE: ("INSPECT_PUBLIC_SURFACE",),
     LocalizationRole.INTEGRATION_OR_REGISTRATION: ("INSPECT_INTEGRATION",),

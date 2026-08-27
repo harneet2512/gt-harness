@@ -31,6 +31,7 @@ def _sha256_file(path: Path) -> str:
 
 
 _COMPILER_INPUTS = (
+    "pyproject.toml",
     "eval/benchmark_product_contract.json",
     "gt_engine/task_contract.py",
     "gt_engine/hybrid_repository.py",

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from importlib.metadata import version
+
 import pytest
 
+import gt_engine.semantic_graph as semantic_graph_module
 from gt_engine.hybrid_retrieval import EvidenceOrigin, RepositoryDocument
 from gt_engine.semantic_graph import (
     SemanticFactKind,
@@ -195,6 +198,68 @@ def test_cross_language_semantic_slice_emits_exact_assignment_and_return(
     assert any(
         fact.kind is SemanticFactKind.RETURN_FLOW and returned in fact.object
         for fact in projection.facts
+    )
+
+
+def test_tree_sitter_runtime_and_large_source_points_are_stable() -> None:
+    # py-tree-sitter 0.26.0 returned borrowed Point.row/column references. Rows
+    # above CPython's immortal-small-int range were freed and later surfaced as
+    # unrelated objects or SIGSEGV. Keep the runtime contract explicit and
+    # exercise a real point above that boundary.
+    assert version("tree-sitter") == "0.25.2"
+    padding = "\n".join(f"// line {line}" for line in range(1, 300))
+    document = RepositoryDocument(
+        path="pkg/large.go",
+        symbol="run",
+        text=(
+            f"package p\n{padding}\n"
+            "func run(value int) int { result := value + 1; return result }\n"
+        ),
+        start_line=1,
+        origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+        origin_revision="source-large",
+    )
+
+    projection = compile_semantic_graph(
+        (document,),
+        source_revision="source-large",
+        task="Change run result flow",
+        anchor_paths=("pkg/large.go",),
+        anchor_symbols=("run",),
+    )
+
+    assert projection.status is SemanticGraphStatus.READY
+    assert projection.facts
+    assert all(isinstance(fact.start_line, int) for fact in projection.facts)
+    assert all(isinstance(fact.end_line, int) for fact in projection.facts)
+    assert max(fact.start_line for fact in projection.facts) > 256
+    assert projection.receipt.builder_version.endswith("tree-sitter-0.25.2")
+
+
+def test_unsupported_tree_sitter_runtime_fails_before_parsing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        semantic_graph_module,
+        "_TREE_SITTER_RUNTIME_VERSION",
+        "0.26.0",
+    )
+
+    projection = compile_semantic_graph(
+        (
+            RepositoryDocument(
+                path="pkg/main.go",
+                symbol="main",
+                text="package main\nfunc main() {}\n",
+                origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+                origin_revision="source-runtime-mismatch",
+            ),
+        ),
+        source_revision="source-runtime-mismatch",
+    )
+
+    assert projection.status is SemanticGraphStatus.FAILED
+    assert projection.receipt.documents_attempted == 0
+    assert projection.receipt.limitations == (
+        "unsupported_tree_sitter_runtime:expected=0.25.2:actual=0.26.0",
     )
 
 

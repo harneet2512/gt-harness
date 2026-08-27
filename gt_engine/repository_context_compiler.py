@@ -658,7 +658,46 @@ def _behavior_subject_is_prose_phrase(text: str, match: re.Match[str]) -> bool:
     if candidate not in _GENERIC_IDENTITY_NOUNS:
         return False
     prefix = text[max(0, match.start() - 40) : match.start()]
-    return re.search(r"(?:[A-Z][A-Za-z0-9]*|[A-Z]{2,})\s+$", prefix) is not None
+    if re.search(r"(?:[A-Z][A-Za-z0-9]*|[A-Z]{2,})\s+$", prefix) is not None:
+        return True
+    # In ``Error messages should distinguish ...`` the generic head noun is
+    # capitalized only because it begins a sentence.  The behavior belongs to
+    # the phrase, not to every repository symbol named Error.  A generic type
+    # is identity-bearing only when the behavior verb immediately follows it
+    # (``Config adds``, ``Schema exposes``); quoted and qualified identifiers
+    # are handled by stronger extractors.
+    following = text[match.end() : match.end() + 64]
+    next_word = re.match(r"\s+([A-Za-z][A-Za-z0-9_-]*)", following)
+    behavior_verbs = {
+        "add",
+        "adds",
+        "accept",
+        "accepts",
+        "bail",
+        "bails",
+        "constructor",
+        "detect",
+        "detects",
+        "emit",
+        "emits",
+        "expose",
+        "exposes",
+        "gate",
+        "gates",
+        "implement",
+        "implements",
+        "must",
+        "record",
+        "records",
+        "return",
+        "returns",
+        "should",
+        "support",
+        "supports",
+        "validate",
+        "validates",
+    }
+    return next_word is None or next_word.group(1).casefold() not in behavior_verbs
 
 
 # Entities introduced by a throw/raise verb name an exception the obligation
@@ -1681,8 +1720,25 @@ def _owner_path_scope_affinity(
     """
 
     task_terms = _path_terms(task)
-    leaf_terms = _path_terms(Path(item.path).stem)
+    raw_leaf_terms = _path_terms(Path(item.path).stem)
     parent_terms = _path_terms(Path(item.path).parent.name)
+    leaf_terms = frozenset(
+        term
+        for term in raw_leaf_terms
+        if not any(_related_path_term(term, stopword) for stopword in _PATH_OWNER_STOPWORDS)
+    )
+    # A generic leaf such as output.rs or context.py is not scoped merely
+    # because the noun occurs repeatedly in a long issue.  It becomes useful
+    # path evidence only when the task locally names its non-generic parent,
+    # e.g. "array-like environments" -> environments/array.ts.
+    if not leaf_terms and raw_leaf_terms:
+        if not _task_names_scoped_path(
+            task,
+            leaf=Path(item.path).stem,
+            parent=Path(item.path).parent.name,
+        ):
+            return (0, 0, 0)
+        leaf_terms = raw_leaf_terms
     if not leaf_terms:
         return (0, 0, 0)
     leaf_matches = sum(
@@ -3175,13 +3231,18 @@ class RepositoryContextCompiler:
                     request.task,
                 )
                 leaf_ratio = leaf_matches / leaf_terms if leaf_terms else 0.0
+                compound_leaf_match = _task_names_compound_leaf(
+                    request.task,
+                    leaf=Path(item.path).stem,
+                )
                 package_echo = (
                     item.decision_reason == "task_path_module_owner_candidate"
                     and _package_echo_symbol(request.task, item.path, item.symbol)
                 )
                 return (
-                    -identity_ratio,
                     owner_reason_priority.get(item.decision_reason, 4),
+                    not compound_leaf_match,
+                    -identity_ratio,
                     -leaf_ratio,
                     -parent_matches,
                     package_echo,

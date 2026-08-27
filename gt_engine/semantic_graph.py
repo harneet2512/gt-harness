@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
+from importlib.metadata import version
 from typing import Any
 
 from tree_sitter_language_pack import get_parser
@@ -36,6 +37,7 @@ class SemanticGraphStatus(StrEnum):
     READY = "READY"
     READY_WITH_DECLARED_LIMITATIONS = "READY_WITH_DECLARED_LIMITATIONS"
     ABSTAIN = "ABSTAIN"
+    FAILED = "FAILED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +119,11 @@ class SemanticGraphProjection:
         }
 
 
-_BUILDER_VERSION = "cross-language-semantic-slice-v2"
+_REQUIRED_TREE_SITTER_VERSION = "0.25.2"
+_TREE_SITTER_RUNTIME_VERSION = version("tree-sitter")
+_BUILDER_VERSION = (
+    f"cross-language-semantic-slice-v3:tree-sitter-{_TREE_SITTER_RUNTIME_VERSION}"
+)
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TRACEBACK_FRAME = re.compile(
     r"File\s+[\"'](?P<path>[^\"']+)[\"'],\s+line\s+(?P<line>\d+)"
@@ -668,6 +674,24 @@ def compile_semantic_graph(
     max_facts: int = 12,
 ) -> SemanticGraphProjection:
     """Compile bounded semantic facts from exact, preexisting source spans."""
+
+    if _TREE_SITTER_RUNTIME_VERSION != _REQUIRED_TREE_SITTER_VERSION:
+        return SemanticGraphProjection(
+            status=SemanticGraphStatus.FAILED,
+            facts=(),
+            receipt=SemanticGraphReceipt(
+                source_revision=source_revision,
+                builder_version=_BUILDER_VERSION,
+                documents_attempted=0,
+                documents_indexed=0,
+                documents_failed=0,
+                limitations=(
+                    "unsupported_tree_sitter_runtime:"
+                    f"expected={_REQUIRED_TREE_SITTER_VERSION}:"
+                    f"actual={_TREE_SITTER_RUNTIME_VERSION}",
+                ),
+            ),
+        )
 
     normalized_anchors = {_normalize_path(path) for path in anchor_paths if path}
     symbol_anchors = {str(symbol or "").strip() for symbol in anchor_symbols if symbol}

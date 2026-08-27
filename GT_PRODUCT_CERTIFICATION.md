@@ -1,45 +1,45 @@
 # GroundTruth Product Certification
 
-Verdict: `CERTIFIED_WITH_DECLARED_LIMITATIONS`
+Verdict: `NOT_CERTIFIED`
 
-Implementation subject: `84be516dee2111f8394ed311fd59abe2e0391d27`
+Last exact hosted subject: `73217b6f42d0ec5678fe140077d06b9ef5bd0227`.
 
-Observed on clean Linux: `2026-08-24`.
+Hosted provider-free run
+[`33105512694`](https://github.com/harneet2512/gt-harness/actions/runs/33105512694)
+passed clean install, doctor, Python, Go, canonical lint, built product surface,
+CLI lifecycle, real-repository matrix, graph truth, graph lifecycle, language
+lifecycle, pinned dense provisioning, harness E2E, and the failure campaign.
+It failed localization truth and the fail-closed product certifier. Provider
+calls were zero and provider credentials were not inspected.
 
-The exact subject passes install, doctor, the complete provider-free Python suite,
-all Go packages, canonical lint, the ten-repository matrix, independent graph truth,
-graph lifecycle, six-language lifecycle, pinned dense provisioning, real Mini-SWE
-Harness E2E, the 18-case failure campaign, and the fail-closed product certifier.
+The failure was real. A clean install selected py-tree-sitter `0.26.0`, whose
+`Point` borrowed-reference defect produced corrupted line objects and seven
+signal-11 worker exits. Eight completed tasks also had implementation-owner
+precision `0.4783` because cross-role paths and repeated unbound rank-only
+owners inflated provider context. Therefore the previous
+`CERTIFIED_WITH_DECLARED_LIMITATIONS` verdict is superseded.
 
-Certified scope:
+The current unhosted candidate repairs the demonstrated causes:
 
-- exact revision/dirty-tree graph identity, readiness, persistence, and atomic rebuild;
-- structural graph support for Python, JavaScript, TypeScript, Go, Rust, and Java;
-- revision-bound Snowflake ONNX dense retrieval and deterministic dense+sparse fusion;
-- bounded persisted process/impact and Python semantic projections;
-- same-observation Mini-SWE 2.2.8 delivery through the actual Harbor adapter;
-- operation-aware provider and shell deadlines beneath Harbor's task-owned ceiling;
-- external atomic terminalization of a durable `RUNNING` checkpoint after process
-  exit or Harbor cancellation;
-- trajectory-backed call accounting, including provider format-error attempts; and
-- path-only edit authority for task-named files unless a symbol is independently exact.
-- localization-v5 owner/facet coverage with role-separated provider delivery and
-  content-attributable feature lifecycle.
+- pins and receipts py-tree-sitter `0.25.2`;
+- fails semantic graph construction before parsing under a drifted runtime;
+- tests a real parser point above source line 256;
+- keeps implementation, public, integration, test, and new-file roles disjoint;
+- emits one representative for unbound same-role rank evidence while retaining
+  distinct typed multi-file requirements;
+- prevents generic prose/path nouns from manufacturing owner identity; and
+- gives complete adjacent artifact phrases precedence over incidental helper
+  symbol overlap.
 
-Declared limitations:
+Local production-path witnesses for ABS, Actionlint, and fd have implementation
+precision, implementation fact recall, and required coverage of `1.0`, with no
+treatment or dense-readiness failures. Adaptix retains an honest two-path exact
+ambiguity set: recall and coverage are `1.0`, precision is `0.5`, and neither
+candidate receives edit authority. The complete Python suite, Go SQLite-FTS5
+suite, wheel/product surface, CLI lifecycle, canonical lint, changed-file Ruff,
+and diff integrity pass locally.
 
-- 62/62 graph truth is a bounded corpus, not universal recall;
-- graph updates use an atomic full rebuild until incremental parity is proven;
-- parser recovery/exclusions are explicit `READY_WITH_DECLARED_LIMITATIONS`;
-- semantic AST facts are currently Python-specific;
-- large Django/pnpm cold builds remain material;
-- the current localization-v5 repair has not yet been verified by the newly
-  authorized 20-task live smoke;
-- broad competitive superiority and causal solve-rate uplift are not certified.
-
-The exact-SHA delta verification has zero provider calls and does not inspect
-provider credentials. It selected 1,956 tests: 1,954 passed and two skipped; five
-external-evidence tests were deselected and the historical frozen-artifact suite
-was excluded by path. Current receipt: `audit/receipts/localization-v5-2bab259.json`.
-The predecessor complete campaign is retained at
-`audit/receipts/codespaces-8931876/codespaces-product-certification.json`.
+Certification remains blocked until an immutable candidate SHA passes the
+complete `prerelease_product_matrix.yml` Linux campaign, including all twenty
+provider-free localization cases and the product certifier. No paid agent
+benchmark is authorized.

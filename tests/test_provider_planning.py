@@ -247,6 +247,96 @@ def test_rank_only_owner_delivery_is_one_candidate_per_requirement() -> None:
         assert plan.omission_by_claim["owner-2"] is OmissionReason.REDUNDANT_COVERAGE
 
 
+def test_rank_only_owner_without_typed_requirement_has_one_representative() -> None:
+    claims = tuple(
+        _claim(
+            f"owner-{index}",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=(),
+            tokens=10,
+            selection_rank=index,
+        )
+        for index in range(3)
+    )
+
+    for ordering in permutations(claims):
+        plan = ProviderContextPlanner().plan(
+            ordering,
+            requirement_ids=("typed-requirement",),
+            token_budget=30,
+        )
+
+        assert plan.selected_claim_ids == ("owner-0",)
+        assert plan.omission_by_claim["owner-1"] is OmissionReason.REDUNDANT_COVERAGE
+        assert plan.omission_by_claim["owner-2"] is OmissionReason.REDUNDANT_COVERAGE
+
+
+def test_unbound_rank_owner_omission_reason_is_not_relabelled_as_budget() -> None:
+    claims = (
+        _claim(
+            "owner-one",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=(),
+            tokens=10,
+            selection_rank=0,
+        ),
+        _claim(
+            "owner-two",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=(),
+            tokens=20,
+            selection_rank=1,
+        ),
+        _claim(
+            "relation",
+            role=ClaimRole.RELATION,
+            authority=ClaimAuthority.CERTIFIED_RELATION,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("requirement",),
+        token_budget=20,
+    )
+
+    assert plan.selected_claim_ids == ("owner-one", "relation")
+    assert plan.omission_by_claim["owner-two"] is OmissionReason.REDUNDANT_COVERAGE
+
+
+def test_rank_only_owners_for_distinct_typed_requirements_are_preserved() -> None:
+    claims = (
+        _claim(
+            "owner-one",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("requirement-one",),
+            tokens=10,
+        ),
+        _claim(
+            "owner-two",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("requirement-two",),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("requirement-one", "requirement-two"),
+        token_budget=20,
+    )
+
+    assert set(plan.selected_claim_ids) == {"owner-one", "owner-two"}
+    assert plan.uncovered_requirement_ids == ()
+
+
 def test_planner_delivers_localization_before_downstream_relation_detail() -> None:
     claims = (
         _claim(
