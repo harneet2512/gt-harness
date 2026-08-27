@@ -235,8 +235,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: gt-index/go.mod
-          cache-dependency-path: gt-index/go.sum
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
 
       - uses: actions/setup-python@v5
         with:
@@ -258,7 +258,7 @@ jobs:
           python -m pip install "$RUNNER_TEMP/swe-live-evaluator"
 
       - name: Build the portable graph indexer
-        working-directory: gt-index
+        working-directory: vendor/gt-index-src
         run: |
           set -euo pipefail
           sudo apt-get update -qq

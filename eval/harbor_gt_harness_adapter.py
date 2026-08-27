@@ -109,9 +109,9 @@ class GtHarnessMiniSwe246Agent(BaseInstalledAgent):
         # directories so installation is consistent across task images.
         await self.exec_as_root(
             environment,
-            f"mkdir -p -- {_REMOTE_SOURCE} {_REMOTE_SOURCE}/src",
+            f"mkdir -p -- {_REMOTE_SOURCE}",
         )
-        for relative in ("eval", "gt_engine", "gt_harness", "src/groundtruth"):
+        for relative in ("eval", "gt_engine", "gt_harness"):
             await environment.upload_dir(
                 _REPO_ROOT / relative,
                 f"{_REMOTE_SOURCE}/{relative}",

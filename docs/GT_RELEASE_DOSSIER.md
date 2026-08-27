@@ -3,19 +3,18 @@ Wall time: 0.2 seconds
 Output:
 # GroundTruth final benchmark release dossier
 
-Current status (2026-08-24): GT Harness implementation
-`8931876541ec82ec96799f6c4462b5c0726e4518` is provider-free certified with
-declared limitations. Live run `32680131105` failed treatment attestation on two
-nonterminal receipts; the causes are repaired but not paid-replayed. Release is
-`HOLD` and paid benchmarking is `NOT_AUTHORIZED`.
+Current status (2026-08-27): the GT Harness implementation candidate is
+`NOT_CERTIFIED` until its new exact SHA passes the hosted provider-free Linux
+campaign. The older certified and live-run identities below are historical
+evidence, not authority for this candidate. Release is `HOLD` and paid
+benchmarking is `NOT_AUTHORIZED`.
 
 ## Release status authority
 
 Paid-benchmark eligibility is a machine-verifiable state plus explicit user
 authorization, not a sentence in this document. The historical central product
-required the
-[`central_provider_free.yml`](../.github/workflows/central_provider_free.yml)
-run for that exact SHA succeeds and its uploaded
+required the now-retired `central_provider_free.yml` run for that exact SHA to
+succeed, and its uploaded
 `central_provider_free_receipt.json` records the same commit, zero provider
 calls, no provider credentials, and `mechanical_completeness: PASS`. Local tests
 establish implementation behavior; the hosted proof establishes the
@@ -45,7 +44,7 @@ workflow or merge script owns a second dated “active” prediction path.
 
 ## Product bound by the current Harness subject
 
-- Agent: `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe228Agent`
+- Agent: `eval.harbor_gt_harness_adapter:GtHarnessMiniSwe246Agent`
 - Scaffold: Mini-SWE-Agent 2.4.6 only
 - Treatment: `gt-harness run --treatment groundtruth`, `hybrid_required`
 - Denominator: `repair20-v1`, exactly 20 tasks

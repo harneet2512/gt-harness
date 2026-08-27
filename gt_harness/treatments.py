@@ -8,6 +8,7 @@ calls.  This keeps model, prompt, tool policy, and step budget arm-neutral.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from dataclasses import asdict, dataclass, field, replace
@@ -20,6 +21,11 @@ from gt_engine.graph_db_projection import PersistedGraphProjector, ProjectionSta
 from gt_engine.hybrid_repository import build_query_hybrid_repository
 from gt_engine.hybrid_retrieval import RetrievalIntent
 from gt_engine.public_surface import PublicSurfaceResolver
+from gt_engine.repository_architecture import (
+    RepositoryArchitectureProjection,
+    project_repository_architecture,
+    select_architecture_facts,
+)
 from gt_engine.repository_context_compiler import (
     ContextCompileRequest,
     ContextEvidenceItem,
@@ -30,6 +36,13 @@ from gt_engine.repository_context_compiler import (
 from gt_engine.repository_graph_service import GraphStatus, RepositoryGraphService
 from gt_engine.snowflake_onnx import SnowflakeOnnxDenseBackend
 from gt_engine.task_contract import extract_task_contract
+from gt_harness.provider_planning import (
+    ClaimAuthority,
+    ClaimRole,
+    ProviderClaim,
+    ProviderContextPlanner,
+    ProviderPlan,
+)
 
 
 class TreatmentStatus(StrEnum):
@@ -59,6 +72,7 @@ _FEATURE_NAMES = (
     "integration",
     "supporting_files",
     "semantic_facts",
+    "architecture",
     "process",
     "impact",
     "affected_tests",
@@ -270,6 +284,9 @@ class GroundTruthTreatment(BareTreatment):
     dense_query_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     projection_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     compile_receipts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    _architecture_projection: RepositoryArchitectureProjection | None = field(
+        default=None, init=False, repr=False
+    )
     feature_states: dict[str, str] = field(default_factory=dict, init=False)
     feature_paths: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False)
     feature_content_identities: dict[str, dict[str, str]] = field(
@@ -572,11 +589,74 @@ class GroundTruthTreatment(BareTreatment):
             additional_candidate_paths=tuple(path for path, _score in dense_candidates),
         )
         packet = self.compiler.compile(repository, state)
+        packet = self._project_repository_architecture(packet)
         packet = self._resolve_public_surfaces(packet)
         packet = self._project_persisted_graph(packet)
         self.context_compile_count += 1
         self.retrieval_channel_count += packet.retrieval_channel_count
         return packet
+
+    def _project_repository_architecture(self, packet: GTContextPacket) -> GTContextPacket:
+        """Attach source-bound, task-scoped manifest facts to the provider packet."""
+
+        if packet.status is not ContextStatus.READY:
+            return packet
+        source_revision = str(packet.repository_identity.get("source_revision") or "")
+        projection = self._architecture_projection
+        if projection is None or projection.source_revision != source_revision:
+            try:
+                projection = project_repository_architecture(
+                    self.service.root,
+                    source_revision=source_revision,
+                )
+            except (OSError, ValueError) as exc:
+                coverage = dict(packet.coverage)
+                coverage["repository_architecture"] = {
+                    "status": "DEGRADED",
+                    "source_revision": source_revision,
+                    "reason": type(exc).__name__,
+                }
+                return replace(packet, coverage=coverage)
+            self._architecture_projection = projection
+        anchor_paths = tuple(
+            dict.fromkeys(
+                item.path
+                for group in (
+                    packet.primary_edit_targets,
+                    packet.inspection_implementation_owners,
+                    packet.inspection_public_surface,
+                    packet.inspection_integration,
+                )
+                for item in group
+                if item.path
+            )
+        )
+        facts = select_architecture_facts(
+            projection,
+            task=self.task,
+            anchor_paths=anchor_paths,
+        )
+        receipt = {
+            "schema": projection.schema,
+            "status": "READY_WITH_DECLARED_LIMITATIONS"
+            if projection.limitations
+            else "READY",
+            "source_revision": projection.source_revision,
+            "manifest_revision": projection.manifest_revision,
+            "manifest_count": len(projection.manifests),
+            "node_count": len(projection.nodes),
+            "link_count": len(projection.links),
+            "selected_fact_count": len(facts),
+            "limitations": list(projection.limitations),
+        }
+        coverage = dict(packet.coverage)
+        coverage["repository_architecture"] = receipt
+        return replace(
+            packet,
+            architecture_facts=tuple(fact.rendered for fact in facts),
+            repository_architecture_receipt=receipt,
+            coverage=coverage,
+        )
 
     def _resolve_public_surfaces(self, packet: GTContextPacket) -> GTContextPacket:
         """Add existing manifest/language surfaces as inspection-only evidence."""
@@ -979,6 +1059,7 @@ class GroundTruthTreatment(BareTreatment):
             "integration": normalized_packet["inspection_integration"],
             "supporting_files": normalized_packet["supporting_files"],
             "semantic_facts": normalized_packet["semantic_facts"],
+            "architecture": normalized_packet["architecture_facts"],
             "process": normalized_packet["execution_paths"],
             "impact": normalized_packet["change_surface"],
             "affected_tests": normalized_packet["affected_tests"],
@@ -1013,6 +1094,7 @@ class GroundTruthTreatment(BareTreatment):
                     "inspection_public_surface",
                     "inspection_integration",
                     "supporting_files",
+                    "architecture_facts",
                     "execution_paths",
                     "change_surface",
                     "affected_tests",
@@ -1063,6 +1145,9 @@ class GroundTruthTreatment(BareTreatment):
             "dense_candidates": raw_coverage.get("dense_candidates", 0),
             "dense_status": raw_dense.get("status", "UNAVAILABLE"),
             "dense_query_ready": bool(raw_dense.get("query_ready", False)),
+            "repository_architecture": normalized_packet[
+                "repository_architecture_receipt"
+            ],
         }
         raw_semantic_receipt = normalized_packet["semantic_graph_receipt"]
         semantic_receipt = {
@@ -1152,6 +1237,7 @@ class GroundTruthTreatment(BareTreatment):
             "proposed_new_files": normalized_packet["proposed_new_files"],
             "uncovered_facets": normalized_packet["uncovered_facets"],
             "semantic_facts": semantic_facts,
+            "architecture_facts": normalized_packet["architecture_facts"],
             "semantic_graph_receipt": semantic_receipt,
             "execution_paths": normalized_packet["execution_paths"],
             "change_surface": normalized_packet["change_surface"],
@@ -1162,16 +1248,9 @@ class GroundTruthTreatment(BareTreatment):
             "truncated": normalized_packet["truncated"],
             "relationships": relationship_evidence,
         }
-        # Provider delivery is an ordered decision surface, not a dump of all
-        # compiled candidates. Keep the full typed ledger in compile_receipts,
-        # but expose one best inspection owner and one role-specific boundary.
-        # A generic candidate is useful only when stronger exact, ambiguous,
-        # owner, or certified-integration localization is absent.
-        packet_dict["inspection_implementation_owners"] = packet_dict[
-            "inspection_implementation_owners"
-        ][:1]
-        packet_dict["inspection_public_surface"] = packet_dict["inspection_public_surface"][:1]
-        packet_dict["inspection_integration"] = packet_dict["inspection_integration"][:1]
+        # Preserve the complete compiled ledger until the single provider
+        # planner applies the real token budget.  Pre-slicing any role here can
+        # silently discard the only owner of a separate task requirement.
         packet_dict["inspection_candidates"] = sorted(
             packet_dict["inspection_candidates"],
             key=lambda item: (
@@ -1180,8 +1259,7 @@ class GroundTruthTreatment(BareTreatment):
                 item.get("decision_reason") != "hybrid_rrf_inspection",
                 str(item.get("path") or "").casefold(),
             ),
-        )[:1]
-        last_resort_inspection_candidate = packet_dict["inspection_candidates"][:1]
+        )
         decision_grade_update = any(
             packet_dict[name]
             for name in (
@@ -1193,6 +1271,7 @@ class GroundTruthTreatment(BareTreatment):
                 "supporting_files",
                 "relationships",
                 "semantic_facts",
+                "architecture_facts",
                 "execution_paths",
                 "change_surface",
                 "affected_tests",
@@ -1424,6 +1503,9 @@ class GroundTruthTreatment(BareTreatment):
                     f"req={requirement_text(item.get('requirements') or ())} "
                     f"{item['fact']}"
                 )
+            lines.extend(
+                f"ARCHITECTURE_FACT {item}" for item in packet_dict["architecture_facts"]
+            )
 
             def projection_line(item: str) -> str:
                 value = item
@@ -1435,8 +1517,15 @@ class GroundTruthTreatment(BareTreatment):
                 # provider needs the bounded path and claim, not a repeated
                 # per-hop proof ledger that can consume the entire context
                 # budget on a deep call chain.
-                value = provider_projection_claim(value)
-                return re.sub(r"\s+\[[^\]]+\]\s*$", "", value)
+                value = re.sub(
+                    r"\s+\[[^\]]+\]\s*$", "", provider_projection_claim(value)
+                )
+                if len(value) <= 200:
+                    return value
+                boundary = value.rfind(" -> ", 0, 200)
+                if boundary < 100:
+                    boundary = value.rfind(" ", 0, 200)
+                return value[:boundary].rstrip() + " truncated=true"
 
             lines.extend(
                 f"BOUNDED_PROCESS {projection_line(item)}"
@@ -1495,7 +1584,6 @@ class GroundTruthTreatment(BareTreatment):
             lines.append("</groundtruth-repository-context>")
             return "\n".join(lines)
 
-        rendered = encode()
         token_ceiling = max(1, self.update_token_budget if update else self.start_token_budget)
         delivered_tokens = sum(
             int(item.get("context_token_count") or 0) for item in self.provider_delivery_receipts
@@ -1507,218 +1595,283 @@ class GroundTruthTreatment(BareTreatment):
             return ""
         token_ceiling = min(token_ceiling, remaining_total_tokens)
 
+        provider_metadata_omissions: list[dict[str, object]] = []
+
+        def bound_provider_metadata(name: str, limit: int) -> None:
+            values = list(packet_dict[name])
+            packet_dict[name] = values[:limit]
+            omitted = max(0, len(values) - limit)
+            if omitted:
+                packet_dict["truncated"] = True
+                provider_metadata_omissions.append(
+                    {
+                        "field": name,
+                        "omitted_count": omitted,
+                        "reason": "TOKEN_BUDGET",
+                    }
+                )
+
+        # These rows describe limitations; they do not compete with repository
+        # decision facts. Keep a compact truthful sample while the persisted
+        # compile receipt retains the complete ledger.
+        bound_provider_metadata("uncertainties", 4)
+        bound_provider_metadata("uncovered_requirements", 4)
+        bound_provider_metadata("uncovered_facets", 2)
+
+        planned_group_roles = {
+            "primary_edit_targets": (ClaimRole.EDIT, ClaimAuthority.EXACT_IDENTITY),
+            "inspection_implementation_owners": (
+                ClaimRole.IMPLEMENTATION_OWNER,
+                ClaimAuthority.CERTIFIED_RELATION,
+            ),
+            "ambiguous_identities": (ClaimRole.AMBIGUITY, ClaimAuthority.EXACT_IDENTITY),
+            "inspection_candidates": (ClaimRole.INSPECTION, ClaimAuthority.RANK_SUPPORT),
+            "inspection_public_surface": (
+                ClaimRole.PUBLIC_SURFACE,
+                ClaimAuthority.STRUCTURAL_PROJECTION,
+            ),
+            "inspection_integration": (
+                ClaimRole.INTEGRATION,
+                ClaimAuthority.CERTIFIED_RELATION,
+            ),
+            "supporting_files": (
+                ClaimRole.INSPECTION,
+                ClaimAuthority.STRUCTURAL_PROJECTION,
+            ),
+            "relationships": (ClaimRole.RELATION, ClaimAuthority.CERTIFIED_RELATION),
+            "semantic_facts": (ClaimRole.SEMANTIC, ClaimAuthority.SOURCE_SEMANTIC),
+            "architecture_facts": (
+                ClaimRole.ARCHITECTURE,
+                ClaimAuthority.STRUCTURAL_PROJECTION,
+            ),
+            "execution_paths": (ClaimRole.PROCESS, ClaimAuthority.CERTIFIED_RELATION),
+            "change_surface": (ClaimRole.IMPACT, ClaimAuthority.CERTIFIED_RELATION),
+            "affected_tests": (ClaimRole.AFFECTED_TEST, ClaimAuthority.CERTIFIED_RELATION),
+            "validation_plan": (ClaimRole.VALIDATION, ClaimAuthority.CERTIFIED_RELATION),
+            "proposed_new_files": (
+                ClaimRole.IMPLEMENTATION_OWNER,
+                ClaimAuthority.STRUCTURAL_PROJECTION,
+            ),
+        }
+        original_planned_groups = {
+            name: tuple(packet_dict[name]) for name in planned_group_roles
+        }
+        requirement_ids = tuple(
+            dict.fromkeys(
+                str(item.get("requirement_id") or "")
+                for item in packet_dict["task_requirements"]
+                if str(item.get("requirement_id") or "")
+            )
+        ) or tuple(
+            dict.fromkeys(
+                str(item.get("facet_id") or "")
+                for item in packet_dict["task_facets"]
+                if str(item.get("facet_id") or "")
+            )
+        )
+        requirement_signatures = [
+            (
+                str(item.get("intent") or item.get("role") or ""),
+                str(item.get("entity") or ""),
+                tuple(item.get("exact_symbols") or ()),
+                tuple(item.get("unresolved_symbols") or ()),
+                tuple(item.get("owning_symbols") or ()),
+            )
+            for item in (packet_dict["task_requirements"] or packet_dict["task_facets"])
+        ]
+        if len(requirement_signatures) != len(set(requirement_signatures)):
+            # Alias duplicate natural-language obligations even when the whole
+            # packet happens to fit; spending provider tokens twice on the
+            # same repository question cannot improve a decision.
+            provider_requirement_limit = 12
+        planner_claims: list[ProviderClaim] = []
+        claim_bindings: list[tuple[str, int, str]] = []
+        used_planner_ids: set[str] = set()
+
+        def requirements_for_provider_item(value: object) -> tuple[str, ...]:
+            if isinstance(value, dict):
+                values = value.get("requirements") or value.get("facet_ids") or ()
+                return tuple(dict.fromkeys(str(item) for item in values if str(item)))
+            match = re.search(r"\breq=([^\s\]]+)", str(value))
+            if not match:
+                return ()
+            return tuple(
+                dict.fromkeys(
+                    item
+                    for item in re.split(r"[,;]", match.group(1))
+                    if item and not item.startswith("+")
+                )
+            )
+
+        def provider_claim_id(group_name: str, index: int, value: object) -> str:
+            if isinstance(value, dict):
+                short = str(value.get("evidence_id") or "")
+                candidate = evidence_identity.get(short, short)
+                if candidate:
+                    claim_id = candidate
+                else:
+                    claim_id = "gt-provider-" + hashlib.sha256(
+                        json.dumps(value, sort_keys=True, default=str).encode("utf-8")
+                    ).hexdigest()[:24]
+            else:
+                claim_id = "gt-provider-" + hashlib.sha256(
+                    f"{group_name}\0{value}".encode()
+                ).hexdigest()[:24]
+            if claim_id in used_planner_ids:
+                claim_id = f"{claim_id}:{group_name}:{index}"
+            used_planner_ids.add(claim_id)
+            return claim_id
+
+        for group_name, (role, default_authority) in planned_group_roles.items():
+            for index, value in enumerate(original_planned_groups[group_name]):
+                authority = default_authority
+                if isinstance(value, dict):
+                    reason = str(value.get("decision_reason") or "")
+                    if group_name == "inspection_implementation_owners" and reason.startswith(
+                        "exact_"
+                    ):
+                        authority = ClaimAuthority.EXACT_IDENTITY
+                    elif group_name in {"inspection_public_surface", "inspection_integration"} and (
+                        reason.startswith("certified_")
+                    ):
+                        authority = ClaimAuthority.CERTIFIED_RELATION
+                claim_id = provider_claim_id(group_name, index, value)
+                if isinstance(value, dict):
+                    cost_material = " ".join(
+                        (
+                            str(value.get("path") or value.get("source") or ""),
+                            str(value.get("symbol") or value.get("target") or ""),
+                            str(value.get("relation") or ""),
+                            str(value.get("decision_reason") or ""),
+                            ",".join(requirements_for_provider_item(value)),
+                            " ".join(str(value.get("source_excerpt") or "").split())[:160],
+                            json.dumps(
+                                value.get("candidates") or (),
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        )
+                    )
+                else:
+                    cost_material = str(value)
+                # The serialized row also carries a role prefix, a normally
+                # 64-character proof ID, requirement binding, and separators.
+                # Pricing only the payload makes the planner overcommit and
+                # can incorrectly collapse a useful treatment to no evidence.
+                if group_name in {"execution_paths", "change_surface"}:
+                    cost_material = re.sub(
+                        r"\s+\[[^\]]+\]\s*$",
+                        "",
+                        provider_projection_claim(cost_material),
+                    )[:200]
+                fixed_row_tokens = 16 if isinstance(value, dict) else 6
+                cost = max(4, _bounded_token_count(cost_material) + fixed_row_tokens)
+                planner_claims.append(
+                    ProviderClaim(
+                        claim_id=claim_id,
+                        role=role,
+                        authority=authority,
+                        requirement_ids=requirements_for_provider_item(value),
+                        estimated_tokens=cost,
+                        source_revision=receipt.source_revision,
+                        graph_revision=receipt.graph_checksum_or_identity,
+                    )
+                )
+                claim_bindings.append((group_name, index, claim_id))
+
+        planner = ProviderContextPlanner()
+
+        def apply_provider_plan(plan: ProviderPlan) -> None:
+            selected = set(plan.selected_claim_ids)
+            for group_name, values in original_planned_groups.items():
+                indexes = {
+                    index
+                    for bound_group, index, claim_id in claim_bindings
+                    if bound_group == group_name and claim_id in selected
+                }
+                packet_dict[group_name] = [
+                    value for index, value in enumerate(values) if index in indexes
+                ]
+
+        # Reserve the revision receipt, requirement aliases, retrieval line and
+        # closing tag.  The loop below uses the actual serializer as the final
+        # authority and tightens this allowance deterministically if needed.
+        planner_budget = max(0, token_ceiling - 72)
+        provider_plan = planner.plan(
+            planner_claims,
+            requirement_ids=requirement_ids,
+            token_budget=planner_budget,
+        )
+        if provider_plan.omitted_claims:
+            compact_output = True
+            provider_requirement_limit = 4
+        apply_provider_plan(provider_plan)
+        rendered = encode()
+
         def too_large() -> bool:
             return len(rendered) > budget or _bounded_token_count(rendered) > token_ceiling
 
-        def bound_ambiguities(group_limit: int, candidate_limit: int) -> None:
-            original = list(packet_dict["ambiguous_identities"])
-            bounded = []
-            for group in original[:group_limit]:
-                candidates = list(group.get("candidates") or ())
-                bounded.append(
-                    {
-                        **group,
-                        "candidates": candidates[:candidate_limit],
-                        "truncated": bool(
-                            group.get("truncated") or len(candidates) > candidate_limit
-                        ),
-                    }
-                )
-            if len(original) > len(bounded):
-                packet_dict["truncated"] = True
-            packet_dict["ambiguous_identities"] = bounded
-
         if too_large():
             compact_output = True
-            bound_ambiguities(2, 3)
-            packet_dict["coverage"] = {
-                "retrieval_mode": provider_coverage["retrieval_mode"],
-                "dense_status": provider_coverage["dense_status"],
-                "dense_query_ready": provider_coverage["dense_query_ready"],
-            }
-            packet_dict["semantic_graph_receipt"] = {}
-            packet_dict["supporting_files"] = []
-            packet_dict["inspection_implementation_owners"] = packet_dict[
-                "inspection_implementation_owners"
-            ][:2]
-            packet_dict["inspection_candidates"] = sorted(
-                packet_dict["inspection_candidates"],
-                key=lambda item: item.get("decision_reason") != "task_path_phrase_inspection",
-            )[:1]
-            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
-            packet_dict["uncovered_requirements"] = packet_dict[
-                "uncovered_requirements"
-            ][:2]
-            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:2]
-            packet_dict["uncertainties"] = packet_dict["uncertainties"][:4]
-            for item in packet_dict["primary_edit_targets"]:
-                item["source_excerpt"] = str(item.get("source_excerpt") or "")[:160]
-            for item in packet_dict["inspection_candidates"]:
-                item["source_excerpt"] = str(item.get("source_excerpt") or "")[:80]
-            for group_name in ("inspection_public_surface", "inspection_integration"):
-                for item in packet_dict[group_name]:
-                    item["source_excerpt"] = str(item.get("source_excerpt") or "")[:80]
-            packet_dict["truncated"] = True
-            rendered = encode()
-        if too_large():
-            bound_ambiguities(1, 2)
-            for group_name in (
-                "primary_edit_targets",
-                "inspection_implementation_owners",
-                "inspection_candidates",
-                "inspection_public_surface",
-                "inspection_integration",
-            ):
-                for item in packet_dict[group_name]:
-                    item["source_excerpt"] = ""
-            packet_dict["inspection_candidates"] = [
-                item
-                for item in packet_dict["inspection_candidates"]
-                if item.get("decision_reason") == "task_path_phrase_inspection"
-            ][:1]
-            packet_dict["uncertainties"] = packet_dict["uncertainties"][:2]
-            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
-            packet_dict["uncovered_requirements"] = packet_dict[
-                "uncovered_requirements"
-            ][:1]
-            for group_name in (
-                "primary_edit_targets",
-                "inspection_public_surface",
-                "inspection_integration",
-            ):
-                for item in packet_dict[group_name]:
-                    reason = str(item.get("decision_reason") or "")
-                    item["decision_reason"] = (
-                        "verified" if reason.startswith("verified_") else reason[:32]
-                    )
-            rendered = encode()
-        if too_large():
-            # Decision facts replace repository exploration. Preserve at least
-            # one row from every available decision role before retaining
-            # rank-only candidates or verbose limitation metadata.
-            packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:2]
-            packet_dict["inspection_implementation_owners"] = packet_dict[
-                "inspection_implementation_owners"
-            ][:1]
-            bound_ambiguities(1, 1)
-            packet_dict["inspection_public_surface"] = packet_dict["inspection_public_surface"][:1]
-            packet_dict["inspection_integration"] = packet_dict["inspection_integration"][:1]
-            packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:2]
-            packet_dict["execution_paths"] = packet_dict["execution_paths"][:1]
-            packet_dict["change_surface"] = packet_dict["change_surface"][:2]
-            packet_dict["affected_tests"] = packet_dict["affected_tests"][:2]
-            packet_dict["validation_plan"] = packet_dict["validation_plan"][:2]
-            packet_dict["relationships"] = packet_dict["relationships"][:2]
-            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
-            packet_dict["uncovered_facets"] = packet_dict["uncovered_facets"][:1]
-            packet_dict["uncovered_requirements"] = packet_dict[
-                "uncovered_requirements"
-            ][:1]
-            packet_dict["uncertainties"] = []
-            rendered = encode()
-        if too_large():
-            packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:1]
-            packet_dict["semantic_facts"] = packet_dict["semantic_facts"][:1]
-            packet_dict["change_surface"] = packet_dict["change_surface"][:1]
-            packet_dict["affected_tests"] = packet_dict["affected_tests"][:1]
-            packet_dict["validation_plan"] = packet_dict["validation_plan"][:1]
-            packet_dict["relationships"] = packet_dict["relationships"][:2]
-            rendered = encode()
-        if too_large():
-            packet_dict["relationships"] = packet_dict["relationships"][:1]
-            rendered = encode()
-        if too_large():
-            # Semantic facts are useful only after localization.  They must
-            # never make an otherwise actionable graph treatment unavailable:
-            # the exact target, scoped boundaries, certified relationship,
-            # process/impact and affected test carry stronger decision value.
-            # Keep those roles and bound their already persisted projections.
-            packet_dict["semantic_facts"] = []
-
-            def bounded_projection(item: str, limit: int = 240) -> str:
-                value = str(item).strip()
-                if len(value) <= limit:
-                    return value
-                boundary = value.rfind(" -> ", 0, limit)
-                if boundary < limit // 2:
-                    boundary = value.rfind(" ", 0, limit)
-                return value[:boundary].rstrip() + " truncated=true"
-
-            packet_dict["execution_paths"] = [
-                bounded_projection(item) for item in packet_dict["execution_paths"][:1]
-            ]
-            packet_dict["change_surface"] = [
-                bounded_projection(item) for item in packet_dict["change_surface"][:1]
-            ]
-            rendered = encode()
-        if too_large() and packet_dict["affected_tests"]:
-            # The affected-test fact is a more compact and independently
-            # actionable verification instruction than a repeated command.
-            packet_dict["validation_plan"] = []
-            rendered = encode()
-        if too_large():
-            # One repository fact can satisfy many task obligations.  The
-            # complete fact-to-facet ledger remains in the packet receipt; the
-            # provider view carries a deterministic prefix plus an explicit
-            # +N count so requirement metadata cannot suppress the treatment.
             provider_requirement_limit = 4
             rendered = encode()
-        if too_large() and packet_dict["inspection_candidates"]:
-            # Under the hard provider ceiling, rank/phrase-only inspection is
-            # lower-value than verified edit, public-surface, integration,
-            # relationship, process, impact, and affected-test facts.  Keep
-            # the candidate in the persisted packet, but do not let it make
-            # the entire deterministic treatment unavailable.
-            packet_dict["inspection_candidates"] = []
-            rendered = encode()
-        if too_large():
-            # Last-resort provider view: one truthful localization fact plus
-            # the revision receipt. The complete role/facet/projection ledger
-            # remains in the compile receipt; a verbose packet must never turn
-            # a healthy treatment into a product failure.
-            provider_requirement_limit = 1
-            packet_dict["primary_edit_targets"] = packet_dict["primary_edit_targets"][:1]
-            bound_ambiguities(1, 1)
-            packet_dict["inspection_implementation_owners"] = packet_dict[
-                "inspection_implementation_owners"
-            ][:1]
-            if packet_dict["primary_edit_targets"]:
-                packet_dict["inspection_implementation_owners"] = []
-            elif packet_dict["inspection_implementation_owners"]:
-                # A scoped implementation owner is more actionable than an
-                # unrelated ambiguous identity or rank-only candidate. Keep
-                # ambiguity when it is the only repository identity, but do
-                # not let it evict a stronger owner at the emergency floor.
-                packet_dict["ambiguous_identities"] = []
-            packet_dict["inspection_candidates"] = (
-                last_resort_inspection_candidate
-                if not packet_dict["primary_edit_targets"]
-                and not packet_dict["inspection_implementation_owners"]
-                and not packet_dict["ambiguous_identities"]
-                else []
+        last_failing_budget: int | None = None
+        while too_large() and planner_budget > 0:
+            last_failing_budget = planner_budget
+            overflow = max(
+                1,
+                _bounded_token_count(rendered) - token_ceiling,
+                (len(rendered) - budget + 3) // 4,
             )
-            packet_dict["inspection_public_surface"] = []
-            packet_dict["inspection_integration"] = []
-            packet_dict["supporting_files"] = []
-            packet_dict["relationships"] = []
-            packet_dict["semantic_facts"] = []
-            packet_dict["execution_paths"] = []
-            packet_dict["change_surface"] = []
-            packet_dict["affected_tests"] = []
-            packet_dict["validation_plan"] = []
-            packet_dict["proposed_new_files"] = packet_dict["proposed_new_files"][:1]
-            packet_dict["uncovered_facets"] = []
-            packet_dict["uncovered_requirements"] = []
-            packet_dict["uncertainties"] = []
+            planner_budget = max(0, planner_budget - max(1, overflow // 2) - 2)
+            provider_plan = planner.plan(
+                planner_claims,
+                requirement_ids=requirement_ids,
+                token_budget=planner_budget,
+            )
+            apply_provider_plan(provider_plan)
             rendered = encode()
+        if not too_large() and last_failing_budget is not None:
+            # Selection changes at discrete claim-cost boundaries.  A linear
+            # overflow subtraction can jump from an oversized plan to a much
+            # smaller one. Recover the largest fitting deterministic plan by
+            # searching the last known fitting/failing budget interval.
+            fitting_budget = planner_budget
+            fitting_plan = provider_plan
+            fitting_rendered = rendered
+            lower = planner_budget + 1
+            upper = last_failing_budget - 1
+            while lower <= upper:
+                candidate_budget = (lower + upper) // 2
+                candidate_plan = planner.plan(
+                    planner_claims,
+                    requirement_ids=requirement_ids,
+                    token_budget=candidate_budget,
+                )
+                apply_provider_plan(candidate_plan)
+                candidate_rendered = encode()
+                candidate_too_large = (
+                    len(candidate_rendered) > budget
+                    or _bounded_token_count(candidate_rendered) > token_ceiling
+                )
+                if candidate_too_large:
+                    upper = candidate_budget - 1
+                else:
+                    fitting_budget = candidate_budget
+                    fitting_plan = candidate_plan
+                    fitting_rendered = candidate_rendered
+                    lower = candidate_budget + 1
+            planner_budget = fitting_budget
+            provider_plan = fitting_plan
+            apply_provider_plan(provider_plan)
+            rendered = fitting_rendered
         if too_large():
-            # A budget too small for the remaining decision-grade floor is not
-            # permission to silently pretend a graph treatment was delivered.
             self.errors.append("context_budget_too_small")
             if not update:
                 raise self._unavailable(receipt, "context_budget_too_small")
             self.context_dirty = False
             return ""
+
         delivered = tuple(
             dict.fromkeys(
                 evidence_identity[str(item["evidence_id"])]
@@ -1754,7 +1907,11 @@ class GroundTruthTreatment(BareTreatment):
             for claim in normalized_packet["projection_claim_ids"]
             if claim and provider_projection_claim(claim) in rendered
         )
-        delivered = tuple(dict.fromkeys((*delivered, *visible_projection_claims)))
+        delivered = tuple(
+            dict.fromkeys(
+                (*delivered, *visible_projection_claims, *provider_plan.selected_claim_ids)
+            )
+        )
         if not delivered:
             if not update:
                 raise self._unavailable(receipt, "context_evidence_empty")
@@ -1769,6 +1926,7 @@ class GroundTruthTreatment(BareTreatment):
             "integration": packet_dict["inspection_integration"],
             "supporting_files": packet_dict["supporting_files"],
             "semantic_facts": packet_dict["semantic_facts"],
+            "architecture": packet_dict["architecture_facts"],
             "process": packet_dict["execution_paths"],
             "impact": packet_dict["change_surface"],
             "affected_tests": packet_dict["affected_tests"],
@@ -1823,6 +1981,8 @@ class GroundTruthTreatment(BareTreatment):
                 "context_token_count": _bounded_token_count(rendered),
                 "context_char_count": len(rendered),
                 "serialized_claim_ids": list(delivered),
+                "provider_plan": provider_plan.as_dict(),
+                "omitted_metadata": provider_metadata_omissions,
                 "provider_claim_tokens": list(
                     dict.fromkeys(re.findall(r"\bclaim=([A-Za-z0-9_-]+)", rendered))
                 ),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import glob
 import json
 import platform
 import subprocess
@@ -12,6 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 CERTIFIED_WITH_LIMITATIONS = "CERTIFIED_WITH_DECLARED_LIMITATIONS"
 PRODUCT_SURFACE_SCHEMA = "gt.product_surface.v1"
@@ -113,6 +116,137 @@ def _module_path(module: str) -> str:
     return module.replace(".", "/") + ".py"
 
 
+def _workflow_path_entries(value: object) -> tuple[str, ...]:
+    if not isinstance(value, str):
+        return ()
+    entries: list[str] = []
+    for row in value.splitlines() or [value]:
+        text = row.strip()
+        if text and not text.startswith("#"):
+            entries.append(text)
+    return tuple(entries)
+
+
+def _is_static_local_workflow_path(value: str) -> bool:
+    path = value.strip()
+    if not path:
+        return False
+    if any(marker in path for marker in ("${{", "$", "`", "://")):
+        return False
+    if path.startswith(("~", "/", "\\")):
+        return False
+    if len(path) > 1 and path[1] == ":":
+        return False
+    return True
+
+
+def _local_workflow_path_exists(root: Path, relative: str) -> bool:
+    normalized = relative[2:] if relative.startswith("./") else relative
+    if glob.has_magic(normalized):
+        return any((root / match).exists() for match in glob.glob(normalized, root_dir=root))
+    return (root / normalized).exists()
+
+
+def _validate_workflow_local_path(
+    root: Path,
+    workflow_name: str,
+    label: str,
+    value: object,
+    errors: list[CertificationError],
+) -> None:
+    for relative in _workflow_path_entries(value):
+        if not _is_static_local_workflow_path(relative):
+            continue
+        if not _local_workflow_path_exists(root, relative):
+            errors.append(
+                CertificationError(
+                    "surface_workflow_local_path_missing",
+                    f"{workflow_name}: {label} {relative}",
+                )
+            )
+
+
+def _validate_dispatchable_workflow_paths(
+    root: Path,
+    workflow_name: str,
+    errors: list[CertificationError],
+) -> None:
+    path = root / ".github" / "workflows" / workflow_name
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        errors.append(CertificationError("surface_workflow_invalid", f"{workflow_name}: {exc}"))
+        return
+    if not isinstance(document, dict):
+        errors.append(
+            CertificationError("surface_workflow_invalid", f"{workflow_name}: expected mapping")
+        )
+        return
+    defaults = document.get("defaults")
+    if isinstance(defaults, dict) and isinstance(defaults.get("run"), dict):
+        _validate_workflow_local_path(
+            root,
+            workflow_name,
+            "working-directory",
+            defaults["run"].get("working-directory"),
+            errors,
+        )
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        defaults = job.get("defaults")
+        if isinstance(defaults, dict) and isinstance(defaults.get("run"), dict):
+            _validate_workflow_local_path(
+                root,
+                workflow_name,
+                "working-directory",
+                defaults["run"].get("working-directory"),
+                errors,
+            )
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if isinstance(uses, str) and uses.startswith("./"):
+                _validate_workflow_local_path(
+                    root,
+                    workflow_name,
+                    "local action",
+                    uses[2:],
+                    errors,
+                )
+            _validate_workflow_local_path(
+                root,
+                workflow_name,
+                "working-directory",
+                step.get("working-directory"),
+                errors,
+            )
+            with_values = step.get("with")
+            if not isinstance(with_values, dict):
+                continue
+            _validate_workflow_local_path(
+                root,
+                workflow_name,
+                "go-version-file",
+                with_values.get("go-version-file"),
+                errors,
+            )
+            _validate_workflow_local_path(
+                root,
+                workflow_name,
+                "cache-dependency-path",
+                with_values.get("cache-dependency-path"),
+                errors,
+            )
+
+
 def validate_product_surface(
     repository: str | Path = ".",
     *,
@@ -191,6 +325,8 @@ def validate_product_surface(
         errors.append(CertificationError("surface_workflow_missing", name))
     for name in sorted(actual_workflows - expected_workflows):
         errors.append(CertificationError("surface_workflow_unexpected", name))
+    for name in sorted(expected_workflows & actual_workflows):
+        _validate_dispatchable_workflow_paths(root, name, errors)
     if wheel is not None:
         wheel_path = Path(wheel).resolve()
         try:

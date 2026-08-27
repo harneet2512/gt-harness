@@ -276,6 +276,8 @@ class GTContextPacket:
     symbol_contracts: tuple[ContextEvidenceItem, ...] = ()
     semantic_facts: tuple[str, ...] = ()
     semantic_graph_receipt: dict[str, Any] = field(default_factory=dict)
+    architecture_facts: tuple[str, ...] = ()
+    repository_architecture_receipt: dict[str, Any] = field(default_factory=dict)
     execution_paths: tuple[str, ...] = ()
     change_surface: tuple[str, ...] = ()
     affected_tests: tuple[str, ...] = ()
@@ -318,6 +320,10 @@ class GTContextPacket:
             "symbol_contracts": [item.as_dict() for item in self.symbol_contracts],
             "semantic_facts": list(self.semantic_facts),
             "semantic_graph_receipt": dict(self.semantic_graph_receipt),
+            "architecture_facts": list(self.architecture_facts),
+            "repository_architecture_receipt": dict(
+                self.repository_architecture_receipt
+            ),
             "execution_paths": list(self.execution_paths),
             "change_surface": list(self.change_surface),
             "affected_tests": list(self.affected_tests),

@@ -308,6 +308,9 @@ def main() -> int:
     ]
     implementation_delivered = sum(int(row.get("delivered") or 0) for row in implementation_rows)
     implementation_hits = sum(int(row.get("hits") or 0) for row in implementation_rows)
+    implementation_acceptable = sum(
+        int(row.get("acceptable") or 0) for row in implementation_rows
+    )
     summary = {
         "schema": REPORT_SCHEMA,
         "compiler_fingerprint": _compiler_fingerprint(),
@@ -325,6 +328,11 @@ def main() -> int:
         "implementation_role_precision": (
             round(implementation_hits / implementation_delivered, 4)
             if implementation_delivered
+            else None
+        ),
+        "implementation_role_recall": (
+            round(implementation_hits / implementation_acceptable, 4)
+            if implementation_acceptable
             else None
         ),
         "implementation_role_hits": implementation_hits,

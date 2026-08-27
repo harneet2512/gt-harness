@@ -209,3 +209,38 @@ Hosted proof uses only:
 
 The current verdict remains `NOT_CERTIFIED` until that exact-SHA Linux receipt
 bundle passes. That is evidence discipline, not missing implementation.
+
+## 2026-08-27 implementation closure
+
+This candidate closes four defects found by the P-stack architecture,
+capability, blast-radius, root-cause, and verification passes:
+
+1. A single deterministic provider planner now preserves distinct obligation
+   owners and high-value decision roles, validates edit authority, prices the
+   serialized output, and receipts every omission. The second hidden compactor
+   and initial role slices are gone.
+2. Repository architecture is production-reachable. One bounded manifest scan
+   projects package, workspace, public, entry, build, test, and dependency
+   facts; task-scoped delivery is bound to the exact source revision and
+   manifest hashes.
+3. Harbor no longer uploads `src/groundtruth`, the package root no longer
+   exports legacy fail-open `create_bridge`, SWE-Live addresses
+   `vendor/gt-index-src`, and certification rejects nonexistent workflow-local
+   paths before dispatch.
+4. Certification no longer rewards abstention. Defaults require exact-edit
+   precision 1.0, mean coverage 0.90, per-task coverage 0.50, ambiguity recall
+   1.0, implementation precision 0.80, and implementation recall 0.85 when the
+   corresponding roles are present. The AST anti-leak scan and generic
+   metamorphic tests guard against benchmark-specific learning.
+
+Local evidence before the final commit: 56 architecture/treatment tests and 86
+combined planner, product-surface, workflow, and generalization tests pass.
+Product lint, Ruff, runtime leak scan, wheel build, and wheel-content checks
+pass. A full-suite run exposed one test-order pollution defect; its focused
+30-test ordering reproduction is green after correction and the full suite is
+being rerun.
+
+The historical localization report is not relabeled. Benchmark readiness
+remains `NOT_CERTIFIED` until a fresh exact-SHA hosted Linux
+`hybrid_required` smoke20 receipt passes the strengthened gates. No paid agent
+benchmark is authorized by these implementation changes alone.

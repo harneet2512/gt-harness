@@ -51,6 +51,35 @@ def test_bare_treatment_is_a_strict_no_op() -> None:
     assert treatment.finalize(None)["provider_calls"] == 0
 
 
+def test_treatment_projects_and_caches_source_bound_architecture(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "index.ts").write_text("export const value = 1\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        '{"name":"sample","exports":{".":"./src/index.ts"},'
+        '"scripts":{"test":"vitest run"}}',
+        encoding="utf-8",
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.task = "update src/index.ts public export"
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "source-architecture-1"},
+    )
+
+    first = treatment._project_repository_architecture(packet)
+    cached = treatment._architecture_projection
+    second = treatment._project_repository_architecture(packet)
+
+    assert first.repository_architecture_receipt["status"] == "READY"
+    assert first.repository_architecture_receipt["source_revision"] == (
+        "source-architecture-1"
+    )
+    assert first.architecture_facts
+    assert any("path=src/index.ts" in fact for fact in first.architecture_facts)
+    assert second.architecture_facts == first.architecture_facts
+    assert treatment._architecture_projection is cached
+
+
 def test_successful_repository_read_requests_same_observation_context(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1287,6 +1316,115 @@ def test_compaction_deduplicates_requirements_and_drops_rank_only_noise(
     } <= treatment.delivered_claim_ids
     impact_line = next(line for line in rendered.splitlines() if line.startswith("BOUNDED_IMPACT "))
     assert not impact_line.endswith(" dire")
+
+
+def test_provider_budget_preserves_owners_for_distinct_requirements(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Provider packing must optimize requirement coverage, not take owner[:1]."""
+
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    def owner(path: str, symbol: str, digest: str, facet: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind="inspection_candidate",
+            path=path,
+            start_line=1,
+            end_line=2,
+            symbol=symbol,
+            relation="",
+            confidence=1.0,
+            verification_status="verified_exact_identity",
+            source_revision="b" * 64,
+            graph_revision="c" * 64,
+            evidence_sha256=digest * 64,
+            decision_reason="exact_task_owner_inspection_only",
+            completeness="exact_identity",
+            localization_role="IMPLEMENTATION_OWNER",
+            facet_ids=(facet,),
+        )
+
+    first = owner("src/object.ts", "ObjectSchema", "d", "facet-object")
+    second = owner("src/json.ts", "JsonSchema", "e", "facet-json")
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        task_facets=(
+            TaskFacet(
+                facet_id="facet-object",
+                obligation_ids=("obligation-object",),
+                role=LocalizationRole.EDIT,
+                exact_symbols=("ObjectSchema",),
+            ),
+            TaskFacet(
+                facet_id="facet-json",
+                obligation_ids=("obligation-json",),
+                role=LocalizationRole.EDIT,
+                exact_symbols=("JsonSchema",),
+            ),
+        ),
+        inspection_implementation_owners=(first, second),
+        inspection_candidates=tuple(
+            ContextEvidenceItem(
+                kind="inspection_candidate",
+                path=f"noise/unrelated_{index}.ts",
+                start_line=1,
+                end_line=1,
+                symbol=f"Unrelated{index}",
+                relation="",
+                confidence=0.1,
+                verification_status="rank_only",
+                source_revision="b" * 64,
+                graph_revision="c" * 64,
+                evidence_sha256=f"{index:064x}",
+                decision_reason="dense_semantic_inspection",
+                completeness="inspection_only",
+                localization_role="UNCERTAIN",
+            )
+            for index in range(20)
+        ),
+        evidence_items=(first, second),
+        coverage={
+            "retrieval_mode": "hybrid_required",
+            "dense_index": {"status": "READY", "query_ready": True},
+        },
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    treatment.start_token_budget = 500
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= 500
+    assert (
+        "INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY src/object.ts:1#ObjectSchema"
+        in rendered
+    )
+    assert "INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY src/json.ts:1#JsonSchema" in rendered
+    delivery = treatment.provider_delivery_receipts[0]
+    assert set(delivery["provider_plan"]["covered_requirement_ids"]) == {
+        "facet-object",
+        "facet-json",
+    }
+    assert set(delivery["provider_plan"]["selected_claim_ids"]) >= {
+        first.evidence_sha256,
+        second.evidence_sha256,
+    }
 
 
 def test_provider_context_preserves_decision_facts_before_candidate_noise(

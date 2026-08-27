@@ -172,3 +172,21 @@ Parse every current workflow with PyYAML, build the Go indexer with
 local CLI witness that produces a ready graph, `gt-run.json`, and
 `gt-run.trajectory.json`. Only then dispatch the selected suite workflow at an
 immutable source SHA.
+
+## Arktype: repository architecture facts
+
+Arktype is GT Harness's source-bound architectural projection, implemented in
+`gt_engine.repository_architecture`. It is not a second graph builder and it
+must never infer edit authority. It parses bounded static manifests without
+executing repository code and emits immutable package, workspace, public
+surface, entrypoint, build target, test target, and dependency facts. Each
+projection is bound to the graph receipt's exact `source_revision`, a manifest
+set digest, and per-manifest hashes. Unsupported dynamic configuration is a
+declared limitation.
+
+The treatment caches Arktype only for the matching source revision, selects
+task/path-scoped facts, and submits them to the common provider planner. Its
+authority is `STRUCTURAL_PROJECTION`: below exact identity and certified
+relation/process/impact, above loose semantic and rank-only support.
+`ARCHITECTURE_FACT` is inspection context, never an edit instruction. A source
+revision change invalidates the cache.

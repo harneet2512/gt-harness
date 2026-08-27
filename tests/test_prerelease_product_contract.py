@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import tomllib
 from pathlib import Path
 
@@ -79,6 +80,24 @@ def test_official_package_and_cli_exclude_historical_groundtruth_runtime() -> No
     assert "gt_harness/cli.py" in included
     assert "gt_engine/repository_graph_service.py" in included
     assert not any(path.startswith("src/groundtruth") for path in included)
+
+
+def test_gt_engine_package_surface_does_not_export_legacy_bridge() -> None:
+    previous_package = sys.modules.pop("gt_engine", None)
+    previous_bridge = sys.modules.pop("gt_engine.bridge", None)
+    try:
+        import gt_engine
+
+        assert getattr(gt_engine, "__all__", ()) == ()
+        assert not hasattr(gt_engine, "create_bridge")
+        assert "gt_engine.bridge" not in sys.modules
+    finally:
+        if previous_package is None:
+            sys.modules.pop("gt_engine", None)
+        else:
+            sys.modules["gt_engine"] = previous_package
+        if previous_bridge is not None:
+            sys.modules["gt_engine.bridge"] = previous_bridge
 
 
 def test_indexer_source_identity_is_stable_across_git_line_endings(

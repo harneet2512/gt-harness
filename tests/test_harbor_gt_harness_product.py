@@ -225,10 +225,14 @@ async def test_harbor_adapter_installs_exact_scaffold_and_smoke_checks_graph_ind
         destination == "/installed-agent/snowflake-arctic-embed-m"
         for _, destination in uploads
     )
+    assert not any(
+        destination == "/installed-agent/gt-harness/src/groundtruth"
+        for _, destination in uploads
+    )
 
 
 @pytest.mark.asyncio
-async def test_harbor_adapter_creates_remote_source_parent_before_upload(
+async def test_harbor_adapter_creates_remote_source_parent_before_uploading_canonical_modules(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Pier's Docker uploader does not create a missing destination parent."""
@@ -246,30 +250,26 @@ async def test_harbor_adapter_creates_remote_source_parent_before_upload(
         staticmethod(lambda: indexer),
     )
     remote_source_exists = False
-    remote_src_exists = False
+    uploaded_destinations: list[str] = []
 
     class Environment:
         async def upload_dir(self, source, destination):
+            uploaded_destinations.append(destination)
             if destination.startswith("/installed-agent/gt-harness/"):
                 assert remote_source_exists, (
                     "adapter uploaded into /installed-agent/gt-harness before "
                     "creating that parent directory"
                 )
-            if destination == "/installed-agent/gt-harness/src/groundtruth":
-                assert remote_src_exists, (
-                    "adapter uploaded groundtruth into a missing src parent"
-                )
 
         async def upload_file(self, source, destination):
+            uploaded_destinations.append(destination)
             if destination.startswith("/installed-agent/gt-harness/"):
                 assert remote_source_exists
 
     async def capture_root_exec(environment, command, **kwargs):
-        nonlocal remote_source_exists, remote_src_exists
+        nonlocal remote_source_exists
         if "mkdir" in command and "/installed-agent/gt-harness" in command:
             remote_source_exists = True
-        if "mkdir" in command and "/installed-agent/gt-harness/src" in command:
-            remote_src_exists = True
 
     async def capture_agent_exec(environment, command, **kwargs):
         return None
@@ -280,7 +280,7 @@ async def test_harbor_adapter_creates_remote_source_parent_before_upload(
 
     await agent.install(Environment())
     assert remote_source_exists
-    assert remote_src_exists
+    assert "/installed-agent/gt-harness/src/groundtruth" not in uploaded_destinations
 
 
 def test_canonical_workflow_is_the_exact_one_attempt_repair20_product_path() -> None:

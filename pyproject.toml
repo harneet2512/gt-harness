@@ -61,6 +61,7 @@ only-include = [
   "gt_engine/indexer.py",
   "gt_engine/language_registry.py",
   "gt_engine/public_surface.py",
+  "gt_engine/repository_architecture.py",
   "gt_engine/repository_context.py",
   "gt_engine/repository_context_compiler.py",
   "gt_engine/repository_graph_service.py",
@@ -82,6 +83,7 @@ only-include = [
   "gt_harness/miniswe_runner.py",
   "gt_harness/outcomes.py",
   "gt_harness/product_certification.py",
+  "gt_harness/provider_planning.py",
   "gt_harness/supervision.py",
   "gt_harness/treatments.py",
 ]
@@ -113,6 +115,7 @@ python_files = [
   "test_prerelease_product_contract.py",
   "test_product_*.py",
   "test_public_surface_resolver.py",
+  "test_repository_architecture.py",
   "test_repository_context.py",
   "test_repository_context_compiler.py",
   "test_repository_graph_real.py",

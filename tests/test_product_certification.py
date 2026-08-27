@@ -12,6 +12,8 @@ from gt_harness.product_certification import (
     validate_product_surface,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _write(path: Path, value: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,6 +59,76 @@ semantic_certification_candidates = ["python"]
     assert [(error.code, error.message) for error in errors] == [
         ("surface_workflow_unexpected", "legacy.yml")
     ]
+
+
+def test_product_surface_rejects_missing_local_workflow_paths(tmp_path: Path) -> None:
+    (tmp_path / "production-surface.toml").write_text(
+        """
+schema = "gt.product_surface.v1"
+python_modules = ["app.cli"]
+console_entry_points = ["app=app.cli:main"]
+benchmark_adapters = ["app.cli"]
+dispatchable_workflows = ["product.yml"]
+forbidden_modules = ["app.legacy"]
+[schemas]
+graph_receipt = "gt.graph_receipt.v5"
+[budgets]
+initial_tokens = 500
+[languages]
+structural_certification_candidates = ["python"]
+semantic_certification_candidates = ["python"]
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "cli.py").write_text("def main(): pass\n", encoding="utf-8")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "product.yml").write_text(
+        """
+name: product
+jobs:
+  task:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: missing/go.mod
+          cache-dependency-path: missing/go.sum
+      - uses: ./missing-local-action
+      - run: go test ./...
+        working-directory: missing/indexer
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    errors = validate_product_surface(tmp_path)
+
+    assert [(error.code, error.message) for error in errors] == [
+        ("surface_workflow_local_path_missing", "product.yml: go-version-file missing/go.mod"),
+        (
+            "surface_workflow_local_path_missing",
+            "product.yml: cache-dependency-path missing/go.sum",
+        ),
+        ("surface_workflow_local_path_missing", "product.yml: local action missing-local-action"),
+        (
+            "surface_workflow_local_path_missing",
+            "product.yml: working-directory missing/indexer",
+        ),
+    ]
+
+
+def test_swe_live_lite_workflow_uses_source_indexer_checkout() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "swe_live_lite_gt_harness_product.yml")
+    text = workflow.read_text(encoding="utf-8")
+
+    assert "go-version-file: vendor/gt-index-src/go.mod" in text
+    assert "cache-dependency-path: vendor/gt-index-src/go.sum" in text
+    assert "working-directory: vendor/gt-index-src" in text
+    assert "go-version-file: gt-index/go.mod" not in text
+    assert "cache-dependency-path: gt-index/go.sum" not in text
+    assert "working-directory: gt-index" not in text
 
 
 def _bundle(tmp_path: Path, repository: Path) -> Path:

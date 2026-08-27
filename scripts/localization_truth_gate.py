@@ -26,10 +26,12 @@ def main() -> int:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, default=None)
     parser.add_argument("--oracle", type=Path, default=None)
-    parser.add_argument("--min-exact-precision", type=float, default=0.95)
-    parser.add_argument("--min-required-coverage", type=float, default=0.85)
-    parser.add_argument("--min-ambiguity-recall", type=float, default=0.90)
-    parser.add_argument("--min-implementation-precision", type=float, default=0.50)
+    parser.add_argument("--min-exact-precision", type=float, default=1.0)
+    parser.add_argument("--min-required-coverage", type=float, default=0.90)
+    parser.add_argument("--min-task-required-coverage", type=float, default=0.50)
+    parser.add_argument("--min-ambiguity-recall", type=float, default=1.0)
+    parser.add_argument("--min-implementation-precision", type=float, default=0.80)
+    parser.add_argument("--min-implementation-recall", type=float, default=0.85)
     args = parser.parse_args()
 
     if not args.report.exists():
@@ -88,6 +90,37 @@ def main() -> int:
             "implementation role precision "
             f"{implementation_precision} below floor {args.min_implementation_precision}"
         )
+    implementation_recall = summary.get("implementation_role_recall")
+    if (
+        implementation_recall is not None
+        and float(implementation_recall) < args.min_implementation_recall
+    ):
+        failures.append(
+            "implementation role recall "
+            f"{implementation_recall} below floor {args.min_implementation_recall}"
+        )
+
+    # Mean coverage can hide a completely uncovered task. Enforce the floor
+    # over the per-task score rows as well, while leaving source-less tasks
+    # (zero required facts) outside this denominator.
+    task_rows = data.get("results")
+    if not isinstance(task_rows, list):
+        failures.append("per-task coverage rows missing")
+    else:
+        below_floor: list[str] = []
+        for row in task_rows:
+            if not isinstance(row, dict):
+                below_floor.append("<malformed>")
+                continue
+            score = row.get("score") or {}
+            coverage = score.get("required_facet_coverage")
+            if coverage is not None and float(coverage) < args.min_task_required_coverage:
+                below_floor.append(str(row.get("task_id") or "<unknown>"))
+        if below_floor:
+            failures.append(
+                "tasks below required coverage floor "
+                f"{args.min_task_required_coverage}: {below_floor}"
+            )
 
     if failures:
         for failure in failures:
@@ -103,6 +136,7 @@ def main() -> int:
                 "mean_required_facet_coverage": coverage,
                 "mean_ambiguity_candidate_recall": ambiguity,
                 "implementation_role_precision": implementation_precision,
+                "implementation_role_recall": implementation_recall,
                 "compiler_fingerprint": _compiler_fingerprint(),
             },
             sort_keys=True,

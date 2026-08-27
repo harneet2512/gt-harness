@@ -744,3 +744,48 @@ changed-file Ruff, product-surface lint, wheel verification, and CLI lifecycle
 also pass locally. These constraints recover decision-point delivery without
 expanding edit authority or packet size. A new exact-SHA hosted certification
 is still required.
+
+## Provider planning and repository architecture closure (2026-08-27)
+
+The provider boundary now has one selection policy. The compiler retains the
+complete typed evidence ledger; `gt_harness.provider_planning` selects a
+source/graph-generation-bound subset by requirement coverage, proof authority,
+decision role, serialized cost, and stable claim identity. It rejects edit
+claims without exact identity, records every omitted claim and reason, and
+searches for the largest plan that fits the actual 500/350-token serializer.
+The previous role slices and emergency compaction sequence was deleted because
+it could discard a second requirement owner, silently change policy after
+selection, or collapse a fitting packet to zero evidence.
+
+Provider roles are not an undifferentiated file list: `EDIT`,
+`IMPLEMENTATION_OWNER`, `PUBLIC_SURFACE`, `INTEGRATION`, `RELATION`, `PROCESS`,
+`IMPACT`, `AFFECTED_TEST`, `VALIDATION`, `ARCHITECTURE`, `SEMANTIC`,
+`AMBIGUITY`, and `INSPECTION`. Exact identities and certified relations outrank
+manifest architecture; architecture outranks loose semantic or rank-only
+support. Package/build metadata cannot grant edit authority.
+
+`gt_engine.repository_architecture` supplies deterministic structure between
+file/symbol graphs and higher-order decisions. One bounded manifest scan
+projects packages, workspaces, public surfaces, entry points, build targets,
+test targets, and dependencies for Python, JavaScript/TypeScript, Go, Rust,
+Maven, and literal Gradle projects. Every projection binds the exact source
+revision plus hashes of its manifests. Dynamic declarations are explicit
+limitations. The treatment caches only the matching source revision and
+selects at most eight task/path-scoped architecture facts.
+
+```text
+exact repository snapshot
+  -> atomic graph generation and receipt
+  -> sparse/structural/dense query repository
+  -> typed requirements and evidence authorities
+  -> symbol/relation/process/impact/semantic projections
+  -> source-bound manifest architecture projection
+  -> single coverage-aware provider plan and omission receipt
+  -> Mini-SWE-Agent 2.4.6 observation
+  -> uptake/edit/validation attribution
+```
+
+No GitNexus code or data is imported. GT retains the useful deterministic
+higher-order-views lesson while differentiating through proof-carrying revision
+receipts, authority separation, correct-or-quiet degradation, and an auditable
+provider-budget planner.
