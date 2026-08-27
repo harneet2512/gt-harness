@@ -235,6 +235,13 @@ jobs:
                   f.write(f"{name}={clean}\n")
           EOF
 
+      - name: Ensure Docker daemon is available
+        run: |
+          if ! docker info >/dev/null 2>&1; then
+            sudo systemctl start docker || sudo service docker start
+          fi
+          docker info
+
       - name: Run harbor - task ${{ matrix.task }}
         id: harbor
         env:
