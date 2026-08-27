@@ -1432,6 +1432,80 @@ def test_provider_budget_preserves_owners_for_distinct_requirements(
     }
 
 
+def test_provider_compaction_never_replaces_ready_evidence_with_metadata_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class FakeReceipt:
+        query_ready = True
+        build_status = GraphStatus.READY
+        repository = str(tmp_path)
+        commit_sha = "a" * 40
+        source_revision = "b" * 64
+        graph_checksum_or_identity = "c" * 64
+        degraded_reasons = ()
+
+    class FakeService:
+        root = tmp_path
+
+        def status(self):
+            return FakeReceipt()
+
+    facets = tuple(
+        TaskFacet(
+            facet_id=f"facet-{index}",
+            obligation_ids=(f"obligation-{index}",),
+            role=LocalizationRole.EDIT,
+            query_terms=("selector", "relationship", f"condition{index}"),
+        )
+        for index in range(6)
+    )
+    owner = ContextEvidenceItem(
+        kind="inspection_candidate",
+        path="src/selectors/structural_match.rs",
+        start_line=1,
+        end_line=4,
+        symbol="structural_match",
+        relation="",
+        confidence=0.9,
+        verification_status="verified_source_identity",
+        source_revision="b" * 64,
+        graph_revision="c" * 64,
+        evidence_sha256="d" * 64,
+        decision_reason="dense_semantic_implementation_owner_candidate",
+        completeness="dense_file_candidate_not_edit_target",
+        localization_role="IMPLEMENTATION_OWNER",
+        facet_ids=tuple(f"facet-{index}" for index in range(4)),
+    )
+    packet = GTContextPacket(
+        status=ContextStatus.READY,
+        repository_identity={"source_revision": "b" * 64},
+        task_facets=facets,
+        inspection_implementation_owners=(owner,),
+        evidence_items=(owner,),
+        uncovered_facets=tuple(
+            f"facet-{index} role=EDIT unresolved=condition{index}" for index in range(6)
+        ),
+        uncertainties=tuple(f"uncertainty-{index}" for index in range(8)),
+        coverage={
+            "retrieval_mode": "hybrid_required",
+            "dense_index": {"status": "READY", "query_ready": True},
+        },
+    )
+    treatment = GroundTruthTreatment(tmp_path)
+    treatment.service = FakeService()
+    treatment.treatment_status = TreatmentStatus.ACTIVE
+    treatment.start_token_budget = 160
+    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+
+    rendered = treatment._render(update=False, budget=6_000, delivered_before_call=1)
+
+    assert _bounded_token_count(rendered) <= treatment.start_token_budget
+    assert "INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY" in rendered
+    assert treatment.provider_delivery_receipts[0]["provider_plan"]["selected_claim_ids"] == [
+        owner.evidence_sha256
+    ]
+
+
 def test_provider_context_preserves_decision_facts_before_candidate_noise(
     tmp_path: Path, monkeypatch
 ) -> None:

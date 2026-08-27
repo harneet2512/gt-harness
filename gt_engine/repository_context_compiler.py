@@ -2985,12 +2985,12 @@ class RepositoryContextCompiler:
                     and _package_echo_symbol(request.task, item.path, item.symbol)
                 )
                 return (
+                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     -identity_ratio,
                     owner_reason_priority.get(item.decision_reason, 4),
                     -leaf_ratio,
                     -parent_matches,
                     package_echo,
-                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     -matched,
                     -float(item.confidence or 0.0),
                     _path_penalty(item.path),

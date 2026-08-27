@@ -29,6 +29,7 @@ class ClaimAuthority(IntEnum):
 class ClaimRole(StrEnum):
     EDIT = "EDIT"
     IMPLEMENTATION_OWNER = "IMPLEMENTATION_OWNER"
+    NEW_FILE = "NEW_FILE"
     PUBLIC_SURFACE = "PUBLIC_SURFACE"
     INTEGRATION = "INTEGRATION"
     AFFECTED_TEST = "AFFECTED_TEST"
@@ -54,6 +55,7 @@ _ROLE_PRIORITY: Mapping[ClaimRole, int] = MappingProxyType(
     {
         ClaimRole.EDIT: 110,
         ClaimRole.IMPLEMENTATION_OWNER: 100,
+        ClaimRole.NEW_FILE: 95,
         ClaimRole.PUBLIC_SURFACE: 90,
         ClaimRole.INTEGRATION: 85,
         ClaimRole.AFFECTED_TEST: 80,
@@ -200,14 +202,40 @@ class ProviderContextPlanner:
                     and item.authority is ClaimAuthority.RANK_SUPPORT
                     and not item.requirement_ids
                 )
+                and not (
+                    decision_selected
+                    and item.role
+                    in {
+                        ClaimRole.IMPLEMENTATION_OWNER,
+                        ClaimRole.AMBIGUITY,
+                        ClaimRole.INSPECTION,
+                    }
+                    and bool(
+                        {
+                            ClaimRole.EDIT,
+                            ClaimRole.IMPLEMENTATION_OWNER,
+                            ClaimRole.AMBIGUITY,
+                            ClaimRole.INSPECTION,
+                        }
+                        & roles
+                    )
+                    and required_set.intersection(item.requirement_ids) <= covered
+                )
             ]
             if not fitting:
                 break
 
             def order(item: ProviderClaim) -> tuple[object, ...]:
                 new_requirements = required_set.intersection(item.requirement_ids) - covered
+                localization_family = {
+                    ClaimRole.EDIT,
+                    ClaimRole.IMPLEMENTATION_OWNER,
+                    ClaimRole.AMBIGUITY,
+                    ClaimRole.INSPECTION,
+                }
                 return (
                     -int(bool(new_requirements)),
+                    -(int(item.authority) if item.role in localization_family else 0),
                     -int(_ROLE_PRIORITY[item.role] >= 60),
                     -int(item.role not in roles),
                     -_ROLE_PRIORITY[item.role],

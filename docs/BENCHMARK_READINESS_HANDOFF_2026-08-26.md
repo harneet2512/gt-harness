@@ -286,3 +286,42 @@ wheel build, and built-wheel product-surface verification pass. Full-repository
 Ruff is not a release gate and currently reports pre-existing errors in the
 separate experimental `gt_engine.engine` tree. A fresh exact-SHA hosted Linux
 run remains required before certification.
+
+## Exact-SHA run 33062346788 and evidence-first delivery correction
+
+Run `33062346788` tested commit
+`4d3f914fc61637b4f3841f637f419643e90c1068`. Every product gate except
+localization passed, including clean install, Python and Go suites, product
+surface, CLI, real-repository matrix, graph truth, graph and language
+lifecycle, pinned dense model, harness E2E, and the failure campaign. The
+localization result improved exact-edit precision from 0.50 to 1.00 and
+eliminated false edit authority, but remained release-blocking: 19/20 cases
+ran, implementation fact recall was 15/19 (0.7895), implementation precision
+was 15/28 (0.5357), and required coverage was 0.7895.
+
+The receipts isolated two deterministic causes. First, owner selection ranked
+lexical identity ahead of independent obligation coverage, choosing narrow
+one-facet rows over files supported by several task obligations. Second, a
+pathless semantic Rust task produced a healthy exact-revision graph and
+correct dense hits, but provider metadata consumed the 500-token allowance.
+The planner reached a zero-claim packet that fit and then raised
+`FAILED:context_evidence_empty`. A clean pinned oxvg reproduction confirmed
+that `selectors.rs`, `style.rs`, and `remove_empty_containers.rs` existed in
+the compiler evidence before provider compaction.
+
+The corrective implementation is general. Owner ranking now prioritizes
+cross-obligation coverage before lexical affinity. Planner authority reflects
+the evidence source instead of the optimistic output label: exact identities,
+hybrid semantic support, and rank-only lexical/dense candidates remain
+distinct. Redundant localization-family rows are omitted once the same
+requirements are already covered, while new-file precedent remains a separate
+role. If optional metadata would leave a READY packet with zero claims, the
+serializer removes that metadata and searches the bounded budget for an
+evidence-bearing plan that the real renderer proves fits.
+
+The clean oxvg replay now completes with one provider-visible accepted owner,
+required coverage 1.0, implementation precision 1.0, fact recall 1.0, zero
+false edit authority, and no treatment failure. The complete provider-free
+Python suite, Go SQLite-FTS5 suite, and changed-file Ruff pass locally. Product
+status remains `NOT_CERTIFIED` until the next exact-SHA hosted twenty-task
+receipt passes; no paid benchmark is authorized.

@@ -764,6 +764,50 @@ def test_obligation_bound_dense_hit_is_typed_inspection_owner_not_edit() -> None
     assert packet.primary_edit_targets == ()
 
 
+def test_owner_ranking_prefers_cross_obligation_semantic_consensus() -> None:
+    task = (
+        "The system must preserve selector relationships before rewriting containers. "
+        "Unrelated document branches must remain independently optimizable."
+    )
+    obligations = extract_task_contract(task).obligations
+    assert len(obligations) >= 2
+    narrow = "src/jobs/generic_rewrite.rs"
+    consensus = "src/selectors/structural_match.rs"
+    documents = (
+        _document(narrow, "generic_rewrite", "fn generic_rewrite() {}"),
+        _document(consensus, "structural_match", "fn structural_match() {}"),
+    )
+    request = replace(
+        _request(task),
+        dense_candidates=((narrow, 0.95), (consensus, 0.90)),
+        dense_candidate_requirements=(
+            (narrow, (obligations[0].obligation_id,)),
+            (
+                consensus,
+                (obligations[0].obligation_id, obligations[1].obligation_id),
+            ),
+        ),
+        dense_index_receipt={"status": "READY", "query_ready": True},
+        retrieval_mode="hybrid_required",
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=120,
+        ),
+        request,
+    )
+
+    assert packet.inspection_implementation_owners[0].path == consensus
+    assert len(packet.inspection_implementation_owners[0].facet_ids) >= 2
+
+
 def test_unquoted_pascal_case_behavior_subjects_bind_existing_repository_types() -> None:
     documents = (
         _document("lib/config.js", "Config", "class Config {}"),

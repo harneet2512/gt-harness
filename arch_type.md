@@ -805,3 +805,25 @@ inspection owner when no exact identity exists, while the authority lattice
 prevents semantic similarity from becoming an edit command. This closes the
 old end-to-end gap where the graph and semantic index were healthy but their
 best facts vanished before Mini-SWE-Agent received them.
+
+### Evidence-first compaction invariant added after run 33062346788
+
+A `READY` compiler packet with decision evidence cannot become an
+evidence-free provider packet merely because receipt, requirement, limitation,
+or uncertainty metadata is verbose. Provider compaction must first remove
+optional metadata, then select at least one evidence-bearing plan whose actual
+serialized form fits the configured token and character ceilings. If no real
+claim can fit even after that reduction, the treatment fails explicitly as a
+budget error; it never misreports the non-empty compiler packet as empty.
+
+Owner ranking uses independent task-obligation coverage before lexical name
+affinity. This is the deterministic semantic-consensus rule: a file returned
+for several independently extracted requirements is a stronger decision-point
+candidate than a higher-similarity file returned for one clause. Similarity
+and path wording remain rank evidence, never edit authority. The provider
+planner also treats edit, owner, ambiguity, and inspection rows as one
+localization family for redundancy: once a requirement is covered by a
+stronger localization claim, a weaker row for the same requirement is omitted
+instead of consuming context and diluting precision. Public surface,
+integration, validation, process, impact, and new-file precedent remain
+separate roles and are not erased by this localization deduplication.

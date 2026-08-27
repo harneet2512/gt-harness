@@ -166,3 +166,85 @@ def test_planner_preserves_compiler_rank_before_serialized_cost() -> None:
     }
 
     assert plans == {("compiler-first",)}
+
+
+def test_planner_prefers_truthfully_typed_ambiguity_over_rank_only_inspection() -> None:
+    claims = (
+        _claim(
+            "weak-owner",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+        _claim(
+            "exact-ambiguity",
+            role=ClaimRole.AMBIGUITY,
+            authority=ClaimAuthority.EXACT_IDENTITY,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("requirement",),
+        token_budget=10,
+    )
+
+    assert plan.selected_claim_ids == ("exact-ambiguity",)
+
+
+def test_planner_delivers_localization_before_downstream_relation_detail() -> None:
+    claims = (
+        _claim(
+            "semantic-owner",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+        _claim(
+            "relation",
+            role=ClaimRole.RELATION,
+            authority=ClaimAuthority.CERTIFIED_RELATION,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("requirement",),
+        token_budget=10,
+    )
+
+    assert plan.selected_claim_ids == ("semantic-owner",)
+
+
+def test_planner_drops_redundant_localization_family_noise() -> None:
+    claims = (
+        _claim(
+            "exact-edit",
+            role=ClaimRole.EDIT,
+            authority=ClaimAuthority.EXACT_IDENTITY,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+        _claim(
+            "semantic-owner",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("requirement",),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("requirement",),
+        token_budget=20,
+    )
+
+    assert plan.selected_claim_ids == ("exact-edit",)
+    assert plan.omission_by_claim["semantic-owner"] is OmissionReason.REDUNDANT_COVERAGE

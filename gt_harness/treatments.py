@@ -1669,7 +1669,7 @@ class GroundTruthTreatment(BareTreatment):
             "affected_tests": (ClaimRole.AFFECTED_TEST, ClaimAuthority.CERTIFIED_RELATION),
             "validation_plan": (ClaimRole.VALIDATION, ClaimAuthority.CERTIFIED_RELATION),
             "proposed_new_files": (
-                ClaimRole.IMPLEMENTATION_OWNER,
+                ClaimRole.NEW_FILE,
                 ClaimAuthority.STRUCTURAL_PROJECTION,
             ),
         }
@@ -1744,6 +1744,7 @@ class GroundTruthTreatment(BareTreatment):
 
         for group_name, (role, default_authority) in planned_group_roles.items():
             for index, value in enumerate(original_planned_groups[group_name]):
+                claim_role = role
                 authority = default_authority
                 if isinstance(value, dict):
                     reason = str(value.get("decision_reason") or "")
@@ -1751,6 +1752,12 @@ class GroundTruthTreatment(BareTreatment):
                         "exact_"
                     ):
                         authority = ClaimAuthority.EXACT_IDENTITY
+                    elif group_name == "inspection_implementation_owners" and reason.startswith(
+                        "hybrid_rrf_"
+                    ):
+                        authority = ClaimAuthority.SOURCE_SEMANTIC
+                    elif group_name == "inspection_implementation_owners":
+                        authority = ClaimAuthority.RANK_SUPPORT
                     elif group_name in {"inspection_public_surface", "inspection_integration"} and (
                         reason.startswith("certified_")
                     ):
@@ -1764,7 +1771,6 @@ class GroundTruthTreatment(BareTreatment):
                             str(value.get("relation") or ""),
                             str(value.get("decision_reason") or ""),
                             ",".join(requirements_for_provider_item(value)),
-                            " ".join(str(value.get("source_excerpt") or "").split())[:160],
                             json.dumps(
                                 value.get("candidates") or (),
                                 sort_keys=True,
@@ -1789,7 +1795,7 @@ class GroundTruthTreatment(BareTreatment):
                 planner_claims.append(
                     ProviderClaim(
                         claim_id=claim_id,
-                        role=role,
+                        role=claim_role,
                         authority=authority,
                         requirement_ids=requirements_for_provider_item(value),
                         estimated_tokens=cost,
@@ -1886,6 +1892,37 @@ class GroundTruthTreatment(BareTreatment):
             provider_plan = fitting_plan
             apply_provider_plan(provider_plan)
             rendered = fitting_rendered
+        if not provider_plan.selected_claim_ids and planner_claims:
+            # A READY packet must never spend its entire provider allowance on
+            # requirement/uncertainty bookkeeping and then claim that no
+            # repository evidence exists.  Shed optional metadata and search
+            # the bounded planner space for the strongest evidence-bearing
+            # plan that the real serializer proves fits.
+            packet_dict["uncertainties"] = []
+            packet_dict["uncovered_requirements"] = []
+            packet_dict["uncovered_facets"] = []
+            compact_output = True
+            provider_requirement_limit = 2
+            fitting: tuple[int, ProviderPlan, str] | None = None
+            for candidate_budget in range(max(0, token_ceiling - 32), 0, -1):
+                candidate_plan = planner.plan(
+                    planner_claims,
+                    requirement_ids=requirement_ids,
+                    token_budget=candidate_budget,
+                )
+                if not candidate_plan.selected_claim_ids:
+                    continue
+                apply_provider_plan(candidate_plan)
+                candidate_rendered = encode()
+                if (
+                    len(candidate_rendered) <= budget
+                    and _bounded_token_count(candidate_rendered) <= token_ceiling
+                ):
+                    fitting = (candidate_budget, candidate_plan, candidate_rendered)
+                    break
+            if fitting is not None:
+                planner_budget, provider_plan, rendered = fitting
+                apply_provider_plan(provider_plan)
         if too_large():
             self.errors.append("context_budget_too_small")
             if not update:
