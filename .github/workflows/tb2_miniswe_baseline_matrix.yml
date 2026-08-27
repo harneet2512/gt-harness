@@ -290,6 +290,17 @@ jobs:
           path: results/terminal-bench/
           if-no-files-found: warn
 
+  task_progress:
+    name: Task progress
+    needs: [plan]
+    if: always()
+    uses: ./.github/workflows/task_progress.yml
+    with:
+      expected_tasks_json: ${{ needs.plan.outputs.tasks }}
+      task_job_regex: '^run \\('
+      gate_job_regex: '^plan$'
+      checkpoint_every: '5'
+
   merge:
     needs: [plan, run]
     if: always()
@@ -388,7 +399,7 @@ jobs:
 
           body = "\n".join(out) + "\n"
           Path("SUMMARY.md").write_text(body, encoding="utf-8")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
               f.write(body)
           print(body[:4000])
           EOF
