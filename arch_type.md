@@ -716,3 +716,31 @@ shared package directories and graph degree cannot dominate those signals.
 Fresh exact-revision KaTeX and Bandit replays prove that the resulting owners
 survive final delivery with coverage 1.0 and no false edit authority. A new
 exact-SHA hosted campaign must still certify the complete twenty-task cohort.
+
+Run `33037863387` tested that augmentation at commit
+`1b68176fd43b7d749f1f502c519636208888e8a6`. Every graph, lifecycle,
+language, dense-readiness, Mini-SWE-Agent E2E, and failure-campaign gate
+passed. Localization retained exact-edit precision 1.0 and ambiguity recall
+1.0, but required-fact coverage fell to 0.85 because three fallback owners
+displaced stronger evidence at the 500-token boundary. This was a compiler
+ordering defect, not a graph or model failure.
+
+The correction distinguishes three claims. First, explicit node identities
+and graph-projection facts are stronger than path-only augmentation and must
+be materialized before the document bound is applied. Second, a common-noun
+path is only a fallback: the task must locally name a leaf/parent scope or all
+components of a compound filename. Thus `array-like environments` can identify
+`environments/array.ts`, while distant `size`/`filtering` clauses cannot create
+`filter/size.rs`, and isolated API words cannot create `eval.rs`, `convert.rs`,
+or `shared.rs`. Third, an exact non-edit symbol becomes an implementation owner
+only when a task facet identifies it as an owner; an argument named `handle`
+remains ordinary inspection evidence. Within equal identity affinity, direct
+evidence precedes fallback evidence.
+
+Warm production-path replays of the five affected exact revisions now have
+required-fact coverage 1.0, no false edit authority, no treatment failures,
+and no dense-readiness failures. The full Python suite, Go SQLite-FTS5 suite,
+changed-file Ruff, product-surface lint, wheel verification, and CLI lifecycle
+also pass locally. These constraints recover decision-point delivery without
+expanding edit authority or packet size. A new exact-SHA hosted certification
+is still required.

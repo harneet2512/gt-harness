@@ -525,3 +525,35 @@ Fresh exact-revision replays now deliver `src/environments/array.ts` for KaTeX
 and `bandit/plugins/injection_sql.py` for Bandit after the real 500-token
 compaction boundary. Both required facts score 1.0 coverage with zero false
 edit authority. Full hosted smoke20 certification remains pending.
+
+## Exact-SHA run 33037863387 fallback-owner correction
+
+Commit `1b68176fd43b7d749f1f502c519636208888e8a6` passed every hosted product
+gate except localization. The provider-free twenty-case receipt reported
+exact-edit precision 1.0, required-fact coverage 0.85, ambiguity recall 1.0,
+and implementation-role precision 0.6333, with no treatment failures, dense
+failures, or false edit authority. Boa, fd, and Claude were the three
+zero-coverage tasks.
+
+The complete root cause was over-broad and incorrectly ordered fallback
+ownership. Path-only rows could precede explicit node IDs at the materialized
+document limit. Global issue words could manufacture a module owner. Finally,
+an exact argument symbol that was correctly denied edit authority could still
+be mislabeled as an implementation owner and displace a useful file at
+emergency compaction.
+
+The correction materializes node-ID evidence first, requires locally named
+leaf/parent or compound-file identity for path fallback, ranks direct evidence
+ahead of fallback, and requires a non-edit exact symbol to be identified as an
+owner by a task facet before it receives the implementation-owner role.
+Regression coverage proves that distant `size`/`filtering` clauses cannot
+create `filter/size.rs`, API words cannot create `eval.rs`/`convert.rs`/
+`shared.rs`, `handle` cannot bind an unrelated function, direct
+`multiAgentChat` evidence wins, and the KaTeX/Bandit recall paths remain.
+
+Warm production-path replays of all five affected exact revisions now report
+required-fact coverage 1.0 with zero false edit authority, treatment failures,
+or dense failures. The full local Python and Go suites, changed-file Ruff,
+product-surface lint, built-wheel verification, and CLI lifecycle also pass.
+Full exact-SHA Linux product certification is still required before benchmark
+authorization.

@@ -862,6 +862,11 @@ def test_direct_owner_identity_outranks_broad_facet_cover() -> None:
             "export async function multiAgentChat() {}",
         ),
         _document(
+            "backend/handlers/agentConversations.ts",
+            "agentConversations",
+            "export async function agentConversations() {}",
+        ),
+        _document(
             "ClaudeAgentHub/ClaudeAgentHub/Models/ChatMessage.swift",
             "ChatMessageType",
             "enum ChatMessageType {}",
@@ -870,7 +875,10 @@ def test_direct_owner_identity_outranks_broad_facet_cover() -> None:
     task = (
         "Implement recursive agent delegation in the multi-agent chat flow. "
         "Handle unknown agents, sub-agent failures, and circular delegation; "
-        "follow existing handler and registry patterns."
+        "follow existing handler and registry patterns.\n\n"
+        "Contract: delegation is triggered by delegate_task with agent_id and "
+        "instructions. Feed one tool_result back so the conversation continues. "
+        "Unknown agents emit an error; circular delegation must be rejected."
     )
 
     packet = RepositoryContextCompiler().compile(
@@ -890,6 +898,78 @@ def test_direct_owner_identity_outranks_broad_facet_cover() -> None:
         packet.inspection_implementation_owners[0].path
         == "backend/handlers/multiAgentChat.ts"
     )
+
+
+def test_distant_generic_words_do_not_create_scoped_path_owner() -> None:
+    documents = (
+        _document("src/cli.rs", "Opts", "pub struct Opts;"),
+        _document("src/filter/size.rs", "size", "pub fn size() {}"),
+        _document("src/filter/time.rs", "time", "pub fn time() {}"),
+    )
+    task = (
+        "Add deterministic multi-key sorting. Support size and modified-time "
+        "sort keys.\n\nKeep existing filtering semantics, ignore handling, "
+        "and pattern matching unchanged."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=120,
+        ),
+        _request(task),
+    )
+
+    assert all(
+        item.path not in {"src/filter/size.rs", "src/filter/time.rs"}
+        for item in packet.inspection_implementation_owners
+    )
+
+
+def test_api_words_do_not_manufacture_unscoped_module_owners() -> None:
+    documents = (
+        _document("core/engine/src/builtins/error/eval.rs", "eval", "pub fn eval() {}"),
+        _document(
+            "core/engine/src/value/conversions/convert.rs",
+            "convert",
+            "pub fn convert() {}",
+        ),
+        _document(
+            "core/engine/src/builtins/array_buffer/shared.rs",
+            "shared",
+            "pub fn shared() {}",
+        ),
+        _document("core/engine/src/job.rs", "job", "pub fn run_jobs() {}"),
+    )
+    task = (
+        "Add `Context::eval_with_evaluation`. Return an Error-like value. "
+        "The cancellation reason accepts any value convertible into the engine "
+        "value type, and handle-aware APIs take handles by shared reference."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=180,
+        ),
+        _request(task),
+    )
+
+    assert not {
+        "core/engine/src/builtins/error/eval.rs",
+        "core/engine/src/value/conversions/convert.rs",
+        "core/engine/src/builtins/array_buffer/shared.rs",
+    } & {item.path for item in packet.inspection_implementation_owners}
 
 
 def test_owner_obligation_coverage_breaks_equal_identity_affinity() -> None:
@@ -968,6 +1048,9 @@ def test_argument_noun_is_not_granted_edit_authority() -> None:
 
     assert any(item.symbol == "Context" for item in packet.primary_edit_targets)
     assert all(item.symbol != "handle" for item in packet.primary_edit_targets)
+    assert all(
+        item.symbol != "handle" for item in packet.inspection_implementation_owners
+    )
 
 
 def test_qualified_owner_prefers_its_namesake_module_over_homonym() -> None:

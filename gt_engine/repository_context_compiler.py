@@ -1551,6 +1551,91 @@ def _owner_path_scope_affinity(
     return (leaf_matches, len(leaf_terms), parent_matches)
 
 
+def _task_lexical_tokens(task: str) -> tuple[str, ...]:
+    """Normalize task prose once for exact local artifact-name matching."""
+
+    return tuple(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", str(task or ""))
+    )
+
+
+def _task_names_scoped_path(
+    task: str,
+    *,
+    leaf: str,
+    parent: str,
+    max_gap: int = 3,
+) -> bool:
+    """Require local phrase evidence before promoting a common-noun path.
+
+    Global bag-of-words overlap is insufficient for path ownership: a long
+    issue can mention ``size`` as a sort key and ``filtering`` in a distant
+    compatibility clause without naming ``filter/size.rs``. Exact lexical
+    components within a short window do identify phrases such as
+    ``array-like environments`` -> ``environments/array.ts``.
+    """
+
+    leaf_terms = _path_terms(leaf)
+    parent_terms = _path_terms(parent)
+    if not leaf_terms or not parent_terms:
+        return False
+    distinct_leaf_terms = frozenset(
+        term
+        for term in leaf_terms
+        if not any(_related_path_term(term, parent_term) for parent_term in parent_terms)
+    )
+    if not distinct_leaf_terms:
+        return False
+    if all(
+        any(_related_path_term(term, stopword) for stopword in _PATH_OWNER_STOPWORDS)
+        for term in (*distinct_leaf_terms, *parent_terms)
+    ):
+        return False
+    task_tokens = _task_lexical_tokens(task)
+    leaf_positions = tuple(
+        index for index, token in enumerate(task_tokens) if token in distinct_leaf_terms
+    )
+    parent_positions = tuple(
+        index for index, token in enumerate(task_tokens) if token in parent_terms
+    )
+    return any(
+        abs(leaf_position - parent_position) <= max(1, int(max_gap))
+        for leaf_position in leaf_positions
+        for parent_position in parent_positions
+    )
+
+
+def _task_names_compound_leaf(
+    task: str,
+    *,
+    leaf: str,
+    max_gap: int = 3,
+) -> bool:
+    """Return whether a task locally names every component of a compound leaf.
+
+    This recognizes deterministic artifact phrases such as ``SQL injection``
+    for ``injection_sql.py`` without treating a single API word such as
+    ``eval`` or an adjective such as ``shared`` as a module identity.
+    """
+
+    expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", str(leaf or ""))
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", expanded)
+    leaf_terms = frozenset(
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", expanded)
+        if len(token) >= 3 and not token.isdigit()
+    )
+    if len(leaf_terms) < 2:
+        return False
+    task_tokens = _task_lexical_tokens(task)
+    window_size = max(2, int(max_gap) + 1)
+    return any(
+        leaf_terms <= frozenset(task_tokens[start : start + window_size])
+        for start in range(len(task_tokens))
+    )
+
+
 def _matching_path_facet_ids(*, path: str, facets: tuple[TaskFacet, ...]) -> tuple[str, ...]:
     """Scope strong natural artifact names to obligations, never edit identity."""
 
@@ -2654,26 +2739,27 @@ class RepositoryContextCompiler:
             and row not in primary_rows
             and not _is_test(row.path)
             and row_facet_ids(row)
+            and any(
+                _symbol_keys(str(_exact_candidate(row).symbol or ""))
+                & _symbol_keys(owner)
+                for facet in task_facets
+                for owner in facet.owning_symbols
+            )
         )
 
         # Repository maps and graph systems are useful because they keep a
         # small module-level fallback when no exact symbol exists. Build that
         # fallback from source paths plus graph centrality, never from model
-        # judgment. A direct module name (lexer/Lexer.js, config.go) or two
-        # independent task/path terms is required, tests/generated files are
-        # excluded, and every row remains inspection-only authority.
+        # judgment. The task must locally name a leaf/parent scope or every
+        # component of a compound filename; unrelated words anywhere in a long
+        # issue cannot be combined into module ownership. Tests/generated
+        # files are excluded, and every row remains inspection-only authority.
         task_terms = frozenset(
             token.casefold()
             for facet in task_facets
             for token in facet.query_terms
             if len(token) >= 4
             and not any(_related_path_term(token, stopword) for stopword in _PATH_OWNER_STOPWORDS)
-        )
-        raw_task_terms = frozenset(
-            token.casefold()
-            for facet in task_facets
-            for token in facet.query_terms
-            if len(token) >= 4
         )
         graph_degree: Counter[str] = Counter()
         for link in repository.structural_links:
@@ -2708,10 +2794,6 @@ class RepositoryContextCompiler:
             normalized = _normalized_path(path)
             basename = Path(normalized).stem.casefold()
             parent = Path(normalized).parent.name.casefold()
-            direct_module_match = (
-                any(_related_path_term(basename, task_term) for task_term in task_terms)
-                and basename not in _PATH_OWNER_STOPWORDS
-            )
             eponymous_module = bool(
                 parent
                 and _related_path_term(basename, parent)
@@ -2720,21 +2802,17 @@ class RepositoryContextCompiler:
             scoped_leaf_match = bool(
                 basename
                 and parent
-                and any(
-                    _related_path_term(basename, task_term)
-                    for task_term in raw_task_terms
-                )
-                and any(
-                    _related_path_term(parent, task_term)
-                    for task_term in raw_task_terms
+                and _task_names_scoped_path(
+                    request.task,
+                    leaf=basename,
+                    parent=parent,
                 )
             )
-            if (
-                len(matched_terms) < 2
-                and not direct_module_match
-                and not eponymous_module
-                and not scoped_leaf_match
-            ):
+            compound_leaf_match = _task_names_compound_leaf(
+                request.task,
+                leaf=basename,
+            )
+            if not eponymous_module and not scoped_leaf_match and not compound_leaf_match:
                 continue
             facet_scores: list[tuple[int, str]] = []
             for facet in task_facets:
@@ -2787,8 +2865,9 @@ class RepositoryContextCompiler:
             path_affinity_rows.append(
                 (
                     (
-                        not direct_module_match,
                         not eponymous_module,
+                        not compound_leaf_match,
+                        not scoped_leaf_match,
                         -graph_degree[path],
                         -len(matched_terms),
                         path.casefold(),
@@ -2836,12 +2915,12 @@ class RepositoryContextCompiler:
                 )
                 return (
                     -identity_ratio,
+                    owner_reason_priority.get(item.decision_reason, 4),
                     -leaf_ratio,
                     -parent_matches,
                     package_echo,
                     -len(set(item.facet_ids) & uncovered_owner_facets),
                     -matched,
-                    owner_reason_priority.get(item.decision_reason, 4),
                     _path_penalty(item.path),
                     item.path.casefold(),
                     item.path,

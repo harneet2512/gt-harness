@@ -433,6 +433,8 @@ def build_hybrid_repository(
     limits: RepositoryBuildLimits = _DEFAULT_BUILD_LIMITS,
     include_paths: tuple[str, ...] | None = None,
     include_node_ids: tuple[int, ...] | None = None,
+    priority_paths: tuple[str, ...] | None = None,
+    priority_node_ids: tuple[int, ...] | None = None,
     document_origins: Mapping[str, EvidenceOrigin] | None = None,
     origin_revisions: Mapping[str, str] | None = None,
     model_authored_paths: Iterable[str] = (),
@@ -605,19 +607,52 @@ def build_hybrid_repository(
         return_type = (
             "COALESCE(return_type,'')" if "return_type" in node_columns else "''"
         )
-        canonical_include_paths = tuple(
+        canonical_priority_paths = tuple(
             dict.fromkeys(
                 path
-                for raw_path in (include_paths or ())
+                for raw_path in (priority_paths or ())
                 if (path := _canonical_repo_path(root, raw_path)) is not None
+            )
+        )
+        canonical_include_paths = tuple(
+            dict.fromkeys(
+                (
+                    *canonical_priority_paths,
+                    *(
+                        path
+                        for raw_path in (include_paths or ())
+                        if (path := _canonical_repo_path(root, raw_path)) is not None
+                    ),
+                )
             )
         )
         path_clause = ""
         path_parameters: tuple[object, ...] = ()
-        canonical_node_ids = tuple(
-            dict.fromkeys(int(node_id) for node_id in (include_node_ids or ()) if int(node_id) > 0)
+        canonical_priority_node_ids = tuple(
+            dict.fromkeys(
+                int(node_id)
+                for node_id in (priority_node_ids or ())
+                if int(node_id) > 0
+            )
         )
-        if include_node_ids is not None or include_paths is not None:
+        canonical_node_ids = tuple(
+            dict.fromkeys(
+                (
+                    *canonical_priority_node_ids,
+                    *(
+                        int(node_id)
+                        for node_id in (include_node_ids or ())
+                        if int(node_id) > 0
+                    ),
+                )
+            )
+        )
+        if (
+            include_node_ids is not None
+            or include_paths is not None
+            or priority_node_ids is not None
+            or priority_paths is not None
+        ):
             if not canonical_node_ids and not canonical_include_paths:
                 return HybridRepository(
                     documents=(),
@@ -644,16 +679,61 @@ def build_hybrid_repository(
                 parameters.extend(canonical_include_paths)
             path_clause = "WHERE (" + " OR ".join(clauses) + ") "
             path_parameters = tuple(parameters)
+        # Explicit node identities and graph-projection facts are stronger
+        # than path-only augmentation.  The combined candidate query used to
+        # sort every row by path before applying ``max_documents``; on a large
+        # graph, lexically early fallback paths could therefore evict an
+        # explicitly named owner.  Keep the query bounded, but spend the bound
+        # on node-ID evidence first.
+        node_priority = ""
+        node_priority_parameters: tuple[object, ...] = ()
+        priority_cases: list[str] = []
+        priority_parameters: list[object] = []
+        if canonical_priority_node_ids:
+            priority_cases.append(
+                "WHEN id IN ("
+                + ",".join("?" for _ in canonical_priority_node_ids)
+                + ") THEN 0"
+            )
+            priority_parameters.extend(canonical_priority_node_ids)
+        projection_node_ids = tuple(
+            node_id
+            for node_id in canonical_node_ids
+            if node_id not in frozenset(canonical_priority_node_ids)
+        )
+        if projection_node_ids:
+            priority_cases.append(
+                "WHEN id IN ("
+                + ",".join("?" for _ in projection_node_ids)
+                + ") THEN 1"
+            )
+            priority_parameters.extend(projection_node_ids)
+        if canonical_priority_paths:
+            priority_cases.append(
+                "WHEN file_path IN ("
+                + ",".join("?" for _ in canonical_priority_paths)
+                + ") THEN 2"
+            )
+            priority_parameters.extend(canonical_priority_paths)
+        if priority_cases:
+            node_priority = "CASE " + " ".join(priority_cases) + " ELSE 3 END,"
+            node_priority_parameters = tuple(priority_parameters)
         node_query = (
             "SELECT id,name,file_path,start_line,end_line,"
             + f"{signature},{label},{return_type} FROM nodes "
             + path_clause
-            + "ORDER BY lower(file_path),start_line,id LIMIT ?"
+            + "ORDER BY "
+            + node_priority
+            + "lower(file_path),start_line,id LIMIT ?"
         )
         node_rows = tuple(
             connection.execute(
                 node_query,
-                (*path_parameters, limits.max_documents + 1),
+                (
+                    *path_parameters,
+                    *node_priority_parameters,
+                    limits.max_documents + 1,
+                ),
             )
         )
         if len(node_rows) > limits.max_documents:
@@ -1080,6 +1160,11 @@ def build_query_hybrid_repository(
                     for fact in projection.semantic_facts
                     if int(fact.node_id) > 0
                 ),
+                *sorted(
+                    int(node_id)
+                    for node_id in projection.node_ids
+                    if int(node_id) > 0
+                ),
             )
         )
     )[:node_limit]
@@ -1105,6 +1190,8 @@ def build_query_hybrid_repository(
             sorted((*projection.files, *dense_paths, *path_identity_paths))
         ),
         include_node_ids=ordered_node_ids,
+        priority_paths=tuple(sorted(projection.files)),
+        priority_node_ids=exact_node_ids,
         model_authored_paths=model_authored_paths,
         task_deliverables=task_deliverables,
     )

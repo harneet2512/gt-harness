@@ -824,3 +824,131 @@ def test_query_builder_materializes_literal_task_path_owner_outside_rank_window(
     assert "src/environments/array.ts" in {
         document.path for document in repository.documents
     }
+
+
+def test_query_builder_prioritizes_exact_identity_over_path_fallback_at_limit(
+    tmp_path,
+    monkeypatch,
+):
+    paths = {
+        "aaa/noise.rs": "pub fn noise() {}\n",
+        "zzz/script.rs": "pub struct Script;\npub fn evaluate() {}\n",
+    }
+    for relative, body in paths.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    rows = (
+        (1, "noise", "aaa/noise.rs", 1, 1, "pub fn noise", "rust", 0),
+        (2, "Script", "zzz/script.rs", 1, 1, "pub struct Script", "rust", 0),
+        (3, "evaluate", "zzz/script.rs", 2, 2, "pub fn evaluate", "rust", 0),
+    )
+    connection = sqlite3.connect(graph)
+    try:
+        connection.execute(
+            "CREATE TABLE nodes (id INTEGER PRIMARY KEY,name TEXT,file_path TEXT,"
+            "start_line INTEGER,end_line INTEGER,signature TEXT,language TEXT,is_test BOOLEAN)"
+        )
+        connection.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?)", rows)
+        connection.execute("CREATE VIRTUAL TABLE nodes_fts USING fts5(name,file_path)")
+        connection.executemany(
+            "INSERT INTO nodes_fts(rowid,name,file_path) VALUES (?,?,?)",
+            ((row[0], row[1], row[2]) for row in rows),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    monkeypatch.setattr(
+        hybrid_repository,
+        "build_graph_projection",
+        lambda *_args, **_kwargs: GraphProjection(
+            files=frozenset(),
+            symbols=frozenset(),
+            node_ids=frozenset(),
+            surface_hits=(),
+        ),
+    )
+
+    repository = build_query_hybrid_repository(
+        tmp_path,
+        graph,
+        RetrievalState(
+            task_text=(
+                "Preserve noise behavior while adding cancellation through "
+                "`Script::evaluate_with_evaluation`."
+            ),
+            intent=RetrievalIntent.IMPLEMENTATION_CONTEXT,
+            source_revision="source-1",
+        ),
+        candidate_limit=8,
+        limits=RepositoryBuildLimits(max_documents=1),
+    )
+
+    assert [document.path for document in repository.documents] == [
+        "zzz/script.rs"
+    ]
+
+
+@pytest.mark.parametrize("projection_uses_node_id", (False, True))
+def test_query_builder_prioritizes_projection_evidence_over_path_fallback_at_limit(
+    tmp_path,
+    monkeypatch,
+    projection_uses_node_id,
+):
+    paths = {
+        "aaa/noise.rs": "pub fn noise() {}\n",
+        "zzz/owner.rs": "pub fn owner() {}\n",
+    }
+    for relative, body in paths.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    rows = (
+        (1, "noise", "aaa/noise.rs", 1, 1, "pub fn noise", "rust", 0),
+        (2, "owner", "zzz/owner.rs", 1, 1, "pub fn owner", "rust", 0),
+    )
+    connection = sqlite3.connect(graph)
+    try:
+        connection.execute(
+            "CREATE TABLE nodes (id INTEGER PRIMARY KEY,name TEXT,file_path TEXT,"
+            "start_line INTEGER,end_line INTEGER,signature TEXT,language TEXT,is_test BOOLEAN)"
+        )
+        connection.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?)", rows)
+        connection.execute("CREATE VIRTUAL TABLE nodes_fts USING fts5(name,file_path)")
+        connection.executemany(
+            "INSERT INTO nodes_fts(rowid,name,file_path) VALUES (?,?,?)",
+            ((row[0], row[1], row[2]) for row in rows),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    monkeypatch.setattr(
+        hybrid_repository,
+        "build_graph_projection",
+        lambda *_args, **_kwargs: GraphProjection(
+            files=(frozenset() if projection_uses_node_id else frozenset({"zzz/owner.rs"})),
+            symbols=frozenset({"owner"}),
+            node_ids=(frozenset({2}) if projection_uses_node_id else frozenset()),
+            surface_hits=(("nodes", 1),),
+        ),
+    )
+
+    repository = build_query_hybrid_repository(
+        tmp_path,
+        graph,
+        RetrievalState(
+            task_text="Preserve noise behavior while fixing cancellation.",
+            intent=RetrievalIntent.IMPLEMENTATION_CONTEXT,
+            source_revision="source-1",
+        ),
+        candidate_limit=8,
+        limits=RepositoryBuildLimits(max_documents=1),
+    )
+
+    assert [document.path for document in repository.documents] == [
+        "zzz/owner.rs"
+    ]

@@ -146,6 +146,38 @@ failed repositories now delivers `src/environments/array.ts` and
 zero false edit authority, and 474/223 tokens respectively. The next hosted
 exact-SHA run remains the certification authority.
 
+### Exact-SHA run 33037863387
+
+Run `33037863387` audited commit
+`1b68176fd43b7d749f1f502c519636208888e8a6`. All non-localization product
+gates passed. Localization produced exact-edit precision 1.0, mean
+required-fact coverage 0.85, ambiguity recall 1.0, and implementation-role
+precision 0.6333. No treatment failed, dense retrieval was ready for every
+task, and no task received false edit authority.
+
+Three tasks fell below half required coverage. Boa received
+`core/engine/src/builtins/error/eval.rs` instead of an accepted engine owner;
+fd received `src/filter/size.rs` instead of a CLI/configuration owner; Claude
+received `backend/handlers/agentConversations.ts` ahead of
+`backend/handlers/multiAgentChat.ts`. The path fallback had treated distant
+task words as though they named one scoped path, and fallback rows could tie
+or outrank exact/retrieved implementation evidence.
+
+The corrective candidate closes the complete boundary. Explicit node IDs are
+materialized before path-only rows at the document limit. Module fallback now
+requires a locally named leaf/parent scope or all components of a compound
+filename; unrelated issue words cannot be assembled into ownership. Exact
+non-edit symbols become implementation owners only when a task facet names
+them as owners, so the argument `handle` cannot bind an unrelated function.
+Direct evidence also precedes fallback evidence at equal identity affinity.
+
+Warm production-path replays preserve KaTeX and Bandit at mean required
+coverage 1.0 and recover Boa, fd, and Claude at mean required coverage 1.0;
+both cohorts have zero false edit authority, treatment failures, or dense
+failures. The full Python suite, Go SQLite-FTS5 suite, changed-file Ruff,
+product lint, built-wheel verification, and CLI lifecycle pass locally. Full
+exact-SHA Linux certification remains the authority.
+
 ## Remaining release actions
 
 1. Commit and push the locally verified candidate SHA to
