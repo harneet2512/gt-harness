@@ -164,6 +164,11 @@ class ContextCompileRequest:
     token_budget: int = 1_000
     character_budget: int = 4_000
     dense_candidates: tuple[tuple[str, float], ...] = ()
+    # Query-obligation provenance for dense file candidates.  Dense ranking
+    # remains inspection-only, but this binding tells the compiler which task
+    # facet caused a path to be retrieved instead of treating every vector hit
+    # as unscoped noise.
+    dense_candidate_requirements: tuple[tuple[str, tuple[str, ...]], ...] = ()
     dense_index_receipt: dict[str, Any] = field(default_factory=dict)
     retrieval_mode: str = "sparse_only"
 
@@ -387,6 +392,7 @@ _ISSUE_LANGUAGE_WORDS = frozenset(
         "make",
         "modify",
         "move",
+        "new",
         "open",
         "optimize",
         "parse",
@@ -477,6 +483,7 @@ _GENERIC_IDENTITY_NOUNS = frozenset(
         "path",
         "paths",
         "property",
+        "schema",
         "setting",
         "settings",
         "size",
@@ -582,7 +589,27 @@ def _segment_identity_eligible(segment: str) -> bool:
     """Return whether a task-text segment may bind repository symbols."""
 
     token = str(segment or "").strip()
-    return bool(token) and not _is_generic_identity_noun(token)
+    return bool(
+        token
+        and token.casefold() not in _ISSUE_LANGUAGE_WORDS
+        and not _is_generic_identity_noun(token)
+    )
+
+
+def _behavior_subject_is_prose_phrase(text: str, match: re.Match[str]) -> bool:
+    """Reject the tail noun of a capitalized prose phrase.
+
+    ``Input JSON Schema exposes`` does not name a repository type called
+    ``Schema``.  A standalone ``Schema exposes`` still may.  Explicit quoted,
+    qualified, or symbol-cue identities are collected by separate paths and
+    are unaffected by this guard.
+    """
+
+    candidate = match.group(1).casefold()
+    if candidate not in _GENERIC_IDENTITY_NOUNS:
+        return False
+    prefix = text[max(0, match.start() - 40) : match.start()]
+    return re.search(r"(?:[A-Z][A-Za-z0-9]*|[A-Z]{2,})\s+$", prefix) is not None
 
 
 # Entities introduced by a throw/raise verb name an exception the obligation
@@ -1031,6 +1058,8 @@ def compile_task_facets(
         behavior_subjects = tuple(
             match.group(1)
             for match in _BEHAVIOR_SUBJECT.finditer(text)
+            if match.group(1).casefold() not in _ISSUE_LANGUAGE_WORDS
+            and not _behavior_subject_is_prose_phrase(text, match)
             if any(
                 symbol == match.group(1)
                 for symbol, _path in available.get(match.group(1).casefold(), ())
@@ -1051,6 +1080,7 @@ def compile_task_facets(
             if (
                 token
                 and token.casefold() not in associated_members
+                and token.casefold() not in _ISSUE_LANGUAGE_WORDS
                 and "/" not in token
                 and "\\" not in token
                 and _code_shaped(token)
@@ -2395,6 +2425,31 @@ class RepositoryContextCompiler:
             if row.path not in exact_row_paths
         }
         dense_by_path: dict[str, tuple[int, float]] = {}
+        dense_requirements_by_path = {
+            _normalized_path(path): tuple(dict.fromkeys(requirements))
+            for path, requirements in request.dense_candidate_requirements
+            if path and requirements
+        }
+        facets_by_obligation: dict[str, tuple[str, ...]] = {}
+        for facet in task_facets:
+            for obligation_id in facet.obligation_ids:
+                facets_by_obligation[obligation_id] = tuple(
+                    dict.fromkeys(
+                        (*facets_by_obligation.get(obligation_id, ()), facet.facet_id)
+                    )
+                )
+
+        def dense_facet_ids(path: str) -> tuple[str, ...]:
+            return tuple(
+                dict.fromkeys(
+                    facet_id
+                    for obligation_id in dense_requirements_by_path.get(
+                        _normalized_path(path), ()
+                    )
+                    for facet_id in facets_by_obligation.get(obligation_id, ())
+                )
+            )
+
         for rank, (path, score) in enumerate(request.dense_candidates, start=1):
             if path in documents_by_path_for_dense and path not in dense_by_path:
                 dense_by_path[path] = (rank, float(score))
@@ -2429,8 +2484,9 @@ class RepositoryContextCompiler:
         fusion_rows.sort(
             key=lambda item: (
                 _is_test(str(item["path"])),
-                -int(item["task_path_token_count"]),
+                -len(item["supporting_channels"]),
                 -float(item["rrf_score"]),
+                -int(item["task_path_token_count"]),
                 _path_penalty(str(item["path"])),
                 str(item["path"]).lower(),
                 str(item["path"]),
@@ -2515,12 +2571,13 @@ class RepositoryContextCompiler:
                             and _strong_task_path_candidate(sparse_entry[1])
                             else ()
                         )
+                        or dense_facet_ids(item.path)
                     ),
                 )
             )
-            if len(inspection_items) >= 3:
+            if len(inspection_items) >= 12:
                 break
-        inspection = tuple(inspection_items[:3])
+        inspection = tuple(inspection_items[:12])
         anchors = (*primary, *inspection)
         task_scope_inspection = tuple(
             item
@@ -2721,6 +2778,8 @@ class RepositoryContextCompiler:
                 decision_reason=(
                     "task_path_implementation_owner_candidate"
                     if item.decision_reason == "task_path_phrase_inspection"
+                    else "dense_semantic_implementation_owner_candidate"
+                    if item.decision_reason == "dense_semantic_inspection"
                     else "hybrid_rrf_implementation_owner_candidate"
                 ),
             )
@@ -2728,7 +2787,12 @@ class RepositoryContextCompiler:
             if item.path not in role_paths
             and not _is_test(item.path)
             and item.facet_ids
-            and item.decision_reason in {"task_path_phrase_inspection", "hybrid_rrf_inspection"}
+            and item.decision_reason
+            in {
+                "task_path_phrase_inspection",
+                "hybrid_rrf_inspection",
+                "dense_semantic_inspection",
+            }
         )
         exact_owner_inspection = tuple(
             replace(
@@ -2900,6 +2964,7 @@ class RepositoryContextCompiler:
             "task_path_implementation_owner_candidate": 1,
             "task_path_module_owner_candidate": 2,
             "hybrid_rrf_implementation_owner_candidate": 3,
+            "dense_semantic_implementation_owner_candidate": 4,
         }
         selected_owner_items: list[ContextEvidenceItem] = []
         remaining_owner_items = list(owner_candidates)
@@ -2927,6 +2992,7 @@ class RepositoryContextCompiler:
                     package_echo,
                     -len(set(item.facet_ids) & uncovered_owner_facets),
                     -matched,
+                    -float(item.confidence or 0.0),
                     _path_penalty(item.path),
                     item.path.casefold(),
                     item.path,
@@ -3466,6 +3532,9 @@ class RepositoryContextCompiler:
                 "retrieval_mode": request.retrieval_mode,
                 "dense_index": dict(request.dense_index_receipt),
                 "dense_candidates": len(request.dense_candidates),
+                "dense_candidates_with_obligation_provenance": len(
+                    request.dense_candidate_requirements
+                ),
                 "dense_sparse_fusion": {
                     "method": "reciprocal_rank_fusion",
                     "k": rrf_k,

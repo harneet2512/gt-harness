@@ -544,6 +544,9 @@ def test_dense_retrieval_queries_each_requirement_and_rrf_fuses_results(
     class FakeCompiler:
         def compile(self, _repository, request):
             captured["dense_candidates"] = request.dense_candidates
+            captured["dense_candidate_requirements"] = (
+                request.dense_candidate_requirements
+            )
             return GTContextPacket(
                 status=ContextStatus.ABSTAIN,
                 repository_identity={"source_revision": "s" * 64},
@@ -566,6 +569,8 @@ def test_dense_retrieval_queries_each_requirement_and_rrf_fuses_results(
     assert dense_index.queries[0] != dense_index.queries[1]
     candidates = captured["dense_candidates"]
     assert candidates[0][0] == "src/shared.py"
+    requirement_bindings = dict(captured["dense_candidate_requirements"])
+    assert requirement_bindings["src/shared.py"]
     assert len(treatment.dense_query_receipts) == len(dense_index.queries)
     assert all(row["query_sha256"] for row in treatment.dense_query_receipts)
 

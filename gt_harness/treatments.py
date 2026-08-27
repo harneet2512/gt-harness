@@ -465,6 +465,7 @@ class GroundTruthTreatment(BareTreatment):
     def _context(self, *, update: bool, budget: int) -> GTContextPacket:
         receipt = self.service.status()
         dense_candidates: tuple[tuple[str, float], ...] = ()
+        dense_candidate_requirements: tuple[tuple[str, tuple[str, ...]], ...] = ()
         if self.dense_index is not None:
             contract = extract_task_contract(self.task)
             query_rows: list[tuple[str, str]] = [
@@ -514,7 +515,12 @@ class GroundTruthTreatment(BareTreatment):
             if ready_queries:
                 rrf_scores: dict[str, float] = {}
                 similarity_scores: dict[str, float] = {}
-                for query in ready_queries:
+                requirements_by_path: dict[str, list[str]] = {}
+                for (query_id, _query_text), query in zip(
+                    unique_queries, dense_queries, strict=True
+                ):
+                    if not query.query_ready:
+                        continue
                     for rank, candidate in enumerate(query.candidates, start=1):
                         rrf_scores[candidate.path] = rrf_scores.get(candidate.path, 0.0) + 1.0 / (
                             60 + rank
@@ -523,6 +529,11 @@ class GroundTruthTreatment(BareTreatment):
                             similarity_scores.get(candidate.path, 0.0),
                             float(candidate.score),
                         )
+                        # A top semantic hit is scoped to the obligation that
+                        # produced it.  The compiler may use this only as
+                        # inspection-owner evidence, never edit authority.
+                        if rank <= 5 and query_id not in {"observed-state"}:
+                            requirements_by_path.setdefault(candidate.path, []).append(query_id)
                 dense_candidates = tuple(
                     (path, similarity_scores[path])
                     for path in sorted(
@@ -534,6 +545,14 @@ class GroundTruthTreatment(BareTreatment):
                             candidate_path,
                         ),
                     )[:16]
+                )
+                dense_candidate_requirements = tuple(
+                    (
+                        path,
+                        tuple(dict.fromkeys(requirements_by_path.get(path, ()))),
+                    )
+                    for path, _score in dense_candidates
+                    if requirements_by_path.get(path)
                 )
             failed_queries = [query for query in dense_queries if not query.query_ready]
             if failed_queries and self.retrieval_mode == "hybrid_required":
@@ -578,6 +597,7 @@ class GroundTruthTreatment(BareTreatment):
             token_budget=400 if update else 1_000,
             character_budget=max(1, budget),
             dense_candidates=dense_candidates,
+            dense_candidate_requirements=dense_candidate_requirements,
             dense_index_receipt=dict(self.dense_receipt),
             retrieval_mode=str(self.retrieval_mode),
         )
@@ -1775,6 +1795,7 @@ class GroundTruthTreatment(BareTreatment):
                         estimated_tokens=cost,
                         source_revision=receipt.source_revision,
                         graph_revision=receipt.graph_checksum_or_identity,
+                        selection_rank=index,
                     )
                 )
                 claim_bindings.append((group_name, index, claim_id))

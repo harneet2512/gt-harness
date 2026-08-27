@@ -21,6 +21,7 @@ from gt_engine.repository_context_compiler import (
     _matching_facet_ids,
     compile_task_facets,
 )
+from gt_engine.task_contract import extract_task_contract
 
 
 def _document(path: str, symbol: str, text: str) -> RepositoryDocument:
@@ -689,6 +690,78 @@ def test_dependency_type_is_not_granted_edit_authority() -> None:
     assert all(
         item.path != "src/adaptix/_internal/name_style.py" for item in packet.primary_edit_targets
     )
+
+
+def test_prose_new_and_schema_words_do_not_mint_edit_authority() -> None:
+    documents = (
+        _document("lexer/lexer.go", "New", "func New() *Lexer { return &Lexer{} }"),
+        _document("provider/overlay_schema.py", "Schema", "class Schema: pass"),
+        _document("parser/parser.go", "Parser", "type Parser struct {}"),
+    )
+    task = (
+        "New stepped range behavior must preserve existing indexing. "
+        "Input JSON Schema exposes aliases as additional typed properties."
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=160,
+        ),
+        _request(task),
+    )
+
+    assert not packet.primary_edit_targets
+
+
+def test_obligation_bound_dense_hit_is_typed_inspection_owner_not_edit() -> None:
+    documents = (
+        _document(
+            "bandit/core/manager.py",
+            "BanditManager",
+            "class BanditManager:\n    def discover_files(self): pass",
+        ),
+        _document("bandit/plugins/noise.py", "noise", "def noise(): pass"),
+    )
+    task = "Unchanged files must return cached results during incremental analysis."
+    base_request = _request(task)
+    obligation_id = extract_task_contract(task).obligations[0].obligation_id
+    request = replace(
+        base_request,
+        dense_candidates=(("bandit/core/manager.py", 0.92),),
+        dense_candidate_requirements=(
+            ("bandit/core/manager.py", (obligation_id,)),
+        ),
+        dense_index_receipt={"status": "READY", "query_ready": True},
+        retrieval_mode="hybrid_required",
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=len(documents),
+            document_chars=120,
+        ),
+        request,
+    )
+
+    owner = next(
+        item
+        for item in packet.inspection_implementation_owners
+        if item.path == "bandit/core/manager.py"
+    )
+    assert owner.decision_reason == "dense_semantic_implementation_owner_candidate"
+    assert owner.facet_ids
+    assert packet.primary_edit_targets == ()
 
 
 def test_unquoted_pascal_case_behavior_subjects_bind_existing_repository_types() -> None:

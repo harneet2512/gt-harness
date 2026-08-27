@@ -148,7 +148,33 @@ def test_inspection_candidate_covers_availability_without_edit_authority() -> No
     assert score.required_facts_covered == 1
     assert score.false_edit_authority == ()
     assert score.role_metrics["IMPLEMENTATION_OWNER"]["precision"] == 0.5
+    assert score.role_metrics["IMPLEMENTATION_OWNER"]["fact_recall"] == 1.0
+    assert score.role_metrics["IMPLEMENTATION_OWNER"]["recall"] == 1.0
     assert score.ambiguity_candidate_recall is None
+
+
+def test_role_fact_recall_treats_acceptable_paths_as_alternatives() -> None:
+    oracle = LocalizationOracleTask(
+        task_id="task",
+        base_sha="d" * 40,
+        facts=(
+            LocalizationFact(
+                fact_id="owner",
+                role=LocalizationRole.IMPLEMENTATION_OWNER,
+                acceptable_paths=("src/one.py", "src/two.py", "src/three.py"),
+                required=True,
+            ),
+        ),
+    )
+
+    score = score_localization(
+        oracle,
+        {"INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY": ("src/two.py",)},
+    )
+
+    metrics = score.role_metrics["IMPLEMENTATION_OWNER"]
+    assert metrics["fact_recall"] == 1.0
+    assert metrics["recall"] == pytest.approx(1 / 3)
 
 
 def test_oracle_rejects_abbreviated_revision() -> None:

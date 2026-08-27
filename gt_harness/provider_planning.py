@@ -79,6 +79,10 @@ class ProviderClaim:
     estimated_tokens: int
     source_revision: str
     graph_revision: str
+    # Stable rank assigned by the compiler/serializer before budget planning.
+    # Lower is stronger.  This is explicit input data, so the planner remains
+    # input-order invariant without throwing away upstream relevance.
+    selection_rank: int = 0
 
     def __post_init__(self) -> None:
         if not self.claim_id.strip():
@@ -87,6 +91,8 @@ class ProviderClaim:
             raise ValueError("provider claim token cost must be positive")
         if not self.source_revision or not self.graph_revision:
             raise ValueError("provider claim must be bound to source and graph revisions")
+        if self.selection_rank < 0:
+            raise ValueError("provider claim selection rank must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,11 +208,12 @@ class ProviderContextPlanner:
                 new_requirements = required_set.intersection(item.requirement_ids) - covered
                 return (
                     -int(bool(new_requirements)),
-                    -len(new_requirements),
                     -int(_ROLE_PRIORITY[item.role] >= 60),
                     -int(item.role not in roles),
                     -_ROLE_PRIORITY[item.role],
                     -int(item.authority),
+                    item.selection_rank,
+                    -len(new_requirements),
                     item.estimated_tokens,
                     item.claim_id,
                 )

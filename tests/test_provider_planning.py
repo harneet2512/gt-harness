@@ -18,6 +18,7 @@ def _claim(
     authority: ClaimAuthority,
     requirements: tuple[str, ...],
     tokens: int,
+    selection_rank: int = 0,
 ) -> ProviderClaim:
     return ProviderClaim(
         claim_id=claim_id,
@@ -27,6 +28,7 @@ def _claim(
         estimated_tokens=tokens,
         source_revision="source-revision",
         graph_revision="graph-revision",
+        selection_rank=selection_rank,
     )
 
 
@@ -130,3 +132,37 @@ def test_planner_is_input_order_invariant_and_receipts_every_omission() -> None:
     assert set(plan.selected_claim_ids) | set(plan.omission_by_claim) == {
         claim.claim_id for claim in claims
     }
+
+
+def test_planner_preserves_compiler_rank_before_serialized_cost() -> None:
+    """A cheap lower-ranked row must not replace the compiler's best fact."""
+
+    claims = (
+        _claim(
+            "compiler-first",
+            role=ClaimRole.EDIT,
+            authority=ClaimAuthority.EXACT_IDENTITY,
+            requirements=("requirement",),
+            tokens=20,
+            selection_rank=0,
+        ),
+        _claim(
+            "cheap-but-second",
+            role=ClaimRole.EDIT,
+            authority=ClaimAuthority.EXACT_IDENTITY,
+            requirements=("requirement",),
+            tokens=5,
+            selection_rank=1,
+        ),
+    )
+
+    plans = {
+        ProviderContextPlanner().plan(
+            order,
+            requirement_ids=("requirement",),
+            token_budget=20,
+        ).selected_claim_ids
+        for order in permutations(claims)
+    }
+
+    assert plans == {("compiler-first",)}

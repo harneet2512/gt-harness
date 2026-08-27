@@ -244,3 +244,45 @@ The historical localization report is not relabeled. Benchmark readiness
 remains `NOT_CERTIFIED` until a fresh exact-SHA hosted Linux
 `hybrid_required` smoke20 receipt passes the strengthened gates. No paid agent
 benchmark is authorized by these implementation changes alone.
+
+## Exact-SHA run 33054007515 and provider-boundary correction
+
+Run `33054007515` tested commit
+`808172e4813fa173e0a9b825db808a5edf259d13`. Install, doctor, Python, Go,
+product surface, CLI, real-repository matrix, graph truth, graph lifecycle,
+language lifecycle, dense model, localization execution, harness E2E, and the
+failure campaign all passed. The release gate correctly failed on the
+provider-visible localization result: compiled required-fact coverage was
+0.90, but delivery coverage was 0.40. Exact-edit precision fell from 0.8704 in
+the complete compiler packet to 0.50 at the provider boundary.
+
+The failure was not graph absence and not model behavior. The provider planner
+discarded the compiler's stable relevance order and used serialized row cost
+as its last tie-break. A cheaper lower-ranked claim could replace the first
+ranked exact identity for the same obligation. Requirement-count priority also
+collapsed distinct edit, owner, public, and integration responsibilities.
+
+The corrective candidate now carries the compiler rank into the input-order-
+invariant plan, preserves role diversity, and records the selected plan in the
+20-task audit receipt. Dense retrieval also carries the exact task-obligation
+IDs that produced each top hit. Those hits may become typed implementation
+inspection candidates, but never edit authority. Hybrid consensus now ranks
+before bare path overlap, and the compiler retains a bounded candidate pool so
+the provider planner, rather than an early three-row slice, makes the final
+budget decision.
+
+The verifier now distinguishes two different quantities. Implementation fact
+recall asks whether at least one independently accepted path for each required
+owner fact reached the agent. Implementation path recall reports how much of
+the complete alternative/change-surface set was delivered. The latter remains
+diagnostic because forcing every acceptable alternative into a 500-token
+packet would reward context flooding and contradict the oracle's any-path fact
+semantics. Precision, mean coverage, and the per-task floor are unchanged.
+
+Local proof for this candidate: the complete Python suite passes with one
+declared missing-Pier skip; the focused compiler, treatment, planner,
+localization, and generalization suite passes; changed-file Ruff, product lint,
+wheel build, and built-wheel product-surface verification pass. Full-repository
+Ruff is not a release gate and currently reports pre-existing errors in the
+separate experimental `gt_engine.engine` tree. A fresh exact-SHA hosted Linux
+run remains required before certification.

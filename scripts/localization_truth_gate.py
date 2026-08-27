@@ -96,7 +96,7 @@ def main() -> int:
         and float(implementation_recall) < args.min_implementation_recall
     ):
         failures.append(
-            "implementation role recall "
+            "implementation fact recall "
             f"{implementation_recall} below floor {args.min_implementation_recall}"
         )
 
@@ -137,6 +137,7 @@ def main() -> int:
                 "mean_ambiguity_candidate_recall": ambiguity,
                 "implementation_role_precision": implementation_precision,
                 "implementation_role_recall": implementation_recall,
+                "implementation_path_recall": summary.get("implementation_path_recall"),
                 "compiler_fingerprint": _compiler_fingerprint(),
             },
             sort_keys=True,

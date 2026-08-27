@@ -203,7 +203,13 @@ def score_localization(
         acceptable = frozenset(path for fact in facts for path in fact.acceptable_paths)
         hits = role_paths & acceptable
         false_paths = role_paths - acceptable
+        facts_covered = sum(
+            bool(role_paths & frozenset(fact.acceptable_paths)) for fact in facts
+        )
         role_metrics[role.value] = {
+            "facts": len(facts),
+            "facts_covered": facts_covered,
+            "fact_recall": facts_covered / len(facts) if facts else None,
             "delivered": len(role_paths),
             "acceptable": len(acceptable),
             "hits": len(hits),

@@ -789,3 +789,19 @@ No GitNexus code or data is imported. GT retains the useful deterministic
 higher-order-views lesson while differentiating through proof-carrying revision
 receipts, authority separation, correct-or-quiet degradation, and an auditable
 provider-budget planner.
+
+### Provider-boundary invariant added after run 33054007515
+
+The complete compiler packet and the provider packet are separate correctness
+surfaces. A fact does not help an agent merely because the compiler found it.
+The provider planner therefore consumes an explicit compiler rank, obligation
+binding, role, authority, revision identity, and serialized cost for every
+claim. It must preserve the strongest claim and role diversity within budget;
+cost may break only otherwise equal choices.
+
+Dense retrieval is likewise typed. Each top semantic hit retains the task
+obligation that generated its query. The compiler can expose that path as an
+inspection owner when no exact identity exists, while the authority lattice
+prevents semantic similarity from becoming an edit command. This closes the
+old end-to-end gap where the graph and semantic index were healthy but their
+best facts vanished before Mini-SWE-Agent received them.

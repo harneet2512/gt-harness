@@ -39,10 +39,12 @@ def _compiler_fingerprint() -> str:
         "gt_engine/hybrid_repository.py",
         "gt_engine/hybrid_retrieval.py",
         "gt_engine/repository_context_compiler.py",
+        "gt_engine/repository_architecture.py",
         "gt_engine/graph_db_projection.py",
         "gt_engine/semantic_graph.py",
         "gt_engine/dense_semantic_index.py",
         "gt_harness/treatments.py",
+        "gt_harness/provider_planning.py",
         "gt_harness/localization_truth.py",
         "scripts/replay_smoke20_localization.py",
     ):
@@ -177,8 +179,9 @@ def run_case(
     compiled = delivered_roles_from_packet(packet)
     compiled_score = score_localization(oracle, compiled)
     delivery_receipts = receipt.get("provider_delivery_receipts") or []
+    delivery_receipt = delivery_receipts[0] if delivery_receipts else {}
     delivered = (
-        delivered_roles_from_provider_receipt(delivery_receipts[0]) if delivery_receipts else {}
+        delivered_roles_from_provider_receipt(delivery_receipt) if delivery_receipt else {}
     )
     score = score_localization(oracle, delivered)
     compiled_evidence = {
@@ -215,6 +218,10 @@ def run_case(
         "compiled_evidence": compiled_evidence,
         "compiled_score": compiled_score.as_dict(),
         "delivered_roles": {role: list(paths) for role, paths in delivered.items()},
+        "provider_plan": delivery_receipt.get("provider_plan"),
+        "provider_visible_feature_counts": delivery_receipt.get(
+            "provider_visible_feature_counts"
+        ),
         "score": score.as_dict(),
         "token_count": receipt.get("initial_context_token_count"),
     }
@@ -311,6 +318,10 @@ def main() -> int:
     implementation_acceptable = sum(
         int(row.get("acceptable") or 0) for row in implementation_rows
     )
+    implementation_facts = sum(int(row.get("facts") or 0) for row in implementation_rows)
+    implementation_facts_covered = sum(
+        int(row.get("facts_covered") or 0) for row in implementation_rows
+    )
     summary = {
         "schema": REPORT_SCHEMA,
         "compiler_fingerprint": _compiler_fingerprint(),
@@ -331,10 +342,17 @@ def main() -> int:
             else None
         ),
         "implementation_role_recall": (
+            round(implementation_facts_covered / implementation_facts, 4)
+            if implementation_facts
+            else None
+        ),
+        "implementation_path_recall": (
             round(implementation_hits / implementation_acceptable, 4)
             if implementation_acceptable
             else None
         ),
+        "implementation_facts": implementation_facts,
+        "implementation_facts_covered": implementation_facts_covered,
         "implementation_role_hits": implementation_hits,
         "implementation_role_delivered": implementation_delivered,
         "tasks_with_false_edit_authority": [
