@@ -19,6 +19,8 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from tree_sitter_language_pack import get_parser
+
 from gt_engine.hybrid_retrieval import EvidenceOrigin, RepositoryDocument
 
 
@@ -115,7 +117,7 @@ class SemanticGraphProjection:
         }
 
 
-_BUILDER_VERSION = "python-semantic-graph-v1"
+_BUILDER_VERSION = "cross-language-semantic-slice-v2"
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TRACEBACK_FRAME = re.compile(
     r"File\s+[\"'](?P<path>[^\"']+)[\"'],\s+line\s+(?P<line>\d+)"
@@ -450,6 +452,211 @@ def _facts_for_document(
     return tuple(unique.values())
 
 
+_TREE_SITTER_LANGUAGE_BY_SUFFIX = {
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".rs": "rust",
+}
+_FUNCTION_NODE_TYPES = frozenset(
+    {
+        "function_declaration",
+        "function_expression",
+        "method_definition",
+        "method_declaration",
+        "arrow_function",
+        "function_item",
+        "closure_expression",
+    }
+)
+_ASSIGNMENT_FIELDS = {
+    "variable_declarator": (("name",), ("value",)),
+    "assignment_expression": (("left",), ("right",)),
+    "augmented_assignment_expression": (("left",), ("right",)),
+    "assignment_statement": (("left",), ("right",)),
+    "short_var_declaration": (("left",), ("right",)),
+    "var_spec": (("name",), ("value",)),
+    "let_declaration": (("pattern",), ("value",)),
+}
+_RETURN_NODE_TYPES = frozenset({"return_statement", "return_expression"})
+_CONTROL_NODE_TYPES = frozenset(
+    {"if_statement", "if_expression", "while_statement", "while_expression"}
+)
+
+
+def _node_text(node: Any | None, source: bytes) -> str:
+    if node is None:
+        return ""
+    return source[int(node.start_byte) : int(node.end_byte)].decode("utf-8", errors="replace")
+
+
+def _field(node: Any, names: tuple[str, ...]) -> Any | None:
+    for name in names:
+        value = node.child_by_field_name(name)
+        if value is not None:
+            return value
+    return None
+
+
+def _syntax_scope(node: Any, source: bytes) -> str:
+    parent = node.parent
+    while parent is not None:
+        if parent.type in _FUNCTION_NODE_TYPES:
+            name = parent.child_by_field_name("name")
+            if name is not None:
+                return _node_text(name, source)
+            # Arrow functions are normally owned by a variable declarator.
+            owner = parent.parent
+            if owner is not None:
+                owner_name = owner.child_by_field_name("name")
+                if owner_name is not None:
+                    return _node_text(owner_name, source)
+        parent = parent.parent
+    return ""
+
+
+def _syntax_identifiers(node: Any | None, source: bytes) -> tuple[str, ...]:
+    if node is None:
+        return ()
+    values: set[str] = set()
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.type in {"identifier", "field_identifier", "type_identifier"}:
+            values.add(_node_text(current, source))
+        stack.extend(current.named_children)
+    return tuple(sorted(value for value in values if value))
+
+
+def _syntax_fact(
+    *,
+    kind: SemanticFactKind,
+    document: RepositoryDocument,
+    node: Any,
+    source: bytes,
+    scope: str,
+    subject: str,
+    relation: str,
+    object_: str,
+    source_revision: str,
+    language: str,
+) -> SemanticGraphFact:
+    start = int(document.start_line or 1) + int(node.start_point.row)
+    end = int(document.start_line or 1) + int(node.end_point.row)
+    path = _normalize_path(document.path)
+    return SemanticGraphFact(
+        claim_id=_stable_id(
+            kind.value, path, start, scope, subject, relation, object_, source_revision
+        ),
+        kind=kind,
+        path=path,
+        start_line=start,
+        end_line=max(start, end),
+        scope=scope,
+        subject=subject,
+        relation=relation,
+        object=object_,
+        evidence=_node_text(node, source)[:600],
+        provenance=("tree_sitter", language, "exact_source_span"),
+        source_revision=source_revision,
+    )
+
+
+def _tree_sitter_facts(
+    document: RepositoryDocument,
+    *,
+    language: str,
+    source_revision: str,
+) -> tuple[SemanticGraphFact, ...] | None:
+    source = str(document.text or "").encode("utf-8")
+    tree = get_parser(language).parse(source)
+    if tree.root_node.has_error:
+        return None
+    facts: list[SemanticGraphFact] = []
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        stack.extend(reversed(node.named_children))
+        scope = _syntax_scope(node, source)
+        assignment = _ASSIGNMENT_FIELDS.get(node.type)
+        if assignment is not None:
+            target = _field(node, assignment[0])
+            value = _field(node, assignment[1])
+            if target is not None and value is not None:
+                target_text = _node_text(target, source)
+                value_text = _node_text(value, source)
+                dependencies = tuple(
+                    value
+                    for value in _syntax_identifiers(value, source)
+                    if value not in set(_syntax_identifiers(target, source))
+                )
+                facts.append(
+                    _syntax_fact(
+                        kind=SemanticFactKind.VALUE_FLOW,
+                        document=document,
+                        node=node,
+                        source=source,
+                        scope=scope,
+                        subject=target_text,
+                        relation="<-",
+                        object_=(
+                            f"{value_text} (depends on: {', '.join(dependencies)})"
+                            if dependencies
+                            else value_text
+                        ),
+                        source_revision=source_revision,
+                        language=language,
+                    )
+                )
+        elif node.type in _RETURN_NODE_TYPES:
+            value = node.child_by_field_name("value")
+            if value is None and node.named_children:
+                value = node.named_children[-1]
+            value_text = _node_text(value, source)
+            if value_text:
+                dependencies = _syntax_identifiers(value, source)
+                facts.append(
+                    _syntax_fact(
+                        kind=SemanticFactKind.RETURN_FLOW,
+                        document=document,
+                        node=node,
+                        source=source,
+                        scope=scope,
+                        subject=f"{scope or '<module>'}.return",
+                        relation="<-",
+                        object_=(
+                            f"{value_text} (depends on: {', '.join(dependencies)})"
+                            if dependencies
+                            else value_text
+                        ),
+                        source_revision=source_revision,
+                        language=language,
+                    )
+                )
+        elif node.type in _CONTROL_NODE_TYPES:
+            condition = node.child_by_field_name("condition")
+            if condition is not None:
+                facts.append(
+                    _syntax_fact(
+                        kind=SemanticFactKind.CONTROL_DEPENDENCY,
+                        document=document,
+                        node=node,
+                        source=source,
+                        scope=scope,
+                        subject="body",
+                        relation="executes when",
+                        object_=_node_text(condition, source),
+                        source_revision=source_revision,
+                        language=language,
+                    )
+                )
+    return tuple({fact.claim_id: fact for fact in facts}.values())
+
+
 def compile_semantic_graph(
     documents: Iterable[RepositoryDocument],
     *,
@@ -479,24 +686,40 @@ def compile_semantic_graph(
         if document.origin is not EvidenceOrigin.PREEXISTING_REPOSITORY:
             limitations.append(f"{document.origin.value}_source_rejected")
             continue
-        if not document.path.lower().endswith((".py", ".pyi")):
+        attempted += 1
+        suffix = "." + document.path.lower().rsplit(".", 1)[-1] if "." in document.path else ""
+        if suffix in {".py", ".pyi"}:
+            tree = _parse_document(document)
+            if tree is None:
+                failed += 1
+                limitations.append("python_source_parse_failed")
+                continue
+            indexed += 1
+            facts.extend(
+                _facts_for_document(
+                    document,
+                    tree,
+                    source_revision=source_revision,
+                    frames=frames,
+                )
+            )
+            continue
+        language = _TREE_SITTER_LANGUAGE_BY_SUFFIX.get(suffix)
+        if language is None:
+            attempted -= 1
             limitations.append("semantic_language_unsupported")
             continue
-        attempted += 1
-        tree = _parse_document(document)
-        if tree is None:
+        syntax_facts = _tree_sitter_facts(
+            document,
+            language=language,
+            source_revision=source_revision,
+        )
+        if syntax_facts is None:
             failed += 1
-            limitations.append("python_source_parse_failed")
+            limitations.append(f"{language}_source_parse_failed")
             continue
         indexed += 1
-        facts.extend(
-            _facts_for_document(
-                document,
-                tree,
-                source_revision=source_revision,
-                frames=frames,
-            )
-        )
+        facts.extend(syntax_facts)
 
     unique_facts = {fact.claim_id: fact for fact in facts}
     duplicate_facts_removed = len(facts) - len(unique_facts)

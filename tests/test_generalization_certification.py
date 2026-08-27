@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from scripts import runtime_leak_scan
+from scripts.replay_smoke20_localization import _tracked_source_fingerprint
 from tests.generalization_helpers import (
     assert_distractor_monotonic,
     assert_homonym_is_scoped,
@@ -111,6 +113,65 @@ def test_runtime_scan_rejects_forbidden_value_without_task_specific_rules(tmp_pa
         (source,), forbidden_values=("synthetic-repository-name",)
     )
     assert any("forbidden value" in finding.reason for finding in findings)
+
+
+def test_compiler_fingerprint_uses_committed_git_objects_not_checkout_line_endings(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "GT Test"], check=True
+    )
+    source = repository / "compiler.py"
+    source.write_bytes(b"first\nsecond\n")
+    subprocess.run(["git", "-C", str(repository), "add", "compiler.py"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-qm", "fixture"], check=True
+    )
+
+    expected = _tracked_source_fingerprint(repository, ("compiler.py",))
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "core.autocrlf", "true"], check=True
+    )
+    source.write_bytes(b"first\r\nsecond\r\n")
+
+    assert (
+        subprocess.run(
+            ["git", "-C", str(repository), "diff", "--quiet", "--", "compiler.py"]
+        ).returncode
+        == 0
+    )
+    assert _tracked_source_fingerprint(repository, ("compiler.py",)) == expected
+
+
+def test_compiler_fingerprint_marks_real_worktree_changes(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "GT Test"], check=True
+    )
+    source = repository / "compiler.py"
+    source.write_text("first\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "compiler.py"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-qm", "fixture"], check=True
+    )
+    clean = _tracked_source_fingerprint(repository, ("compiler.py",))
+
+    source.write_text("changed\n", encoding="utf-8")
+
+    assert _tracked_source_fingerprint(repository, ("compiler.py",)) != clean
 
 
 def test_metamorphic_task_and_retrieval_invariants() -> None:

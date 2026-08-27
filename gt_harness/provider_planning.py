@@ -188,9 +188,9 @@ class ProviderContextPlanner:
                 candidates.append(claim)
 
         while candidates:
-            selected_rank_owners = sum(
-                item.role is ClaimRole.IMPLEMENTATION_OWNER
-                and item.authority is ClaimAuthority.RANK_SUPPORT
+            exact_edit_selected = any(
+                item.role is ClaimRole.EDIT
+                and item.authority is ClaimAuthority.EXACT_IDENTITY
                 for item in selected
             )
             decision_selected = any(
@@ -203,9 +203,9 @@ class ProviderContextPlanner:
                 for item in candidates
                 if item.estimated_tokens <= remaining
                 and not (
-                    item.role is ClaimRole.IMPLEMENTATION_OWNER
+                    exact_edit_selected
+                    and item.role is ClaimRole.IMPLEMENTATION_OWNER
                     and item.authority is ClaimAuthority.RANK_SUPPORT
-                    and selected_rank_owners >= 2
                 )
                 and not (
                     decision_selected
@@ -230,11 +230,6 @@ class ProviderContextPlanner:
                         & roles
                     )
                     and required_set.intersection(item.requirement_ids) <= covered
-                    and not (
-                        item.role is ClaimRole.IMPLEMENTATION_OWNER
-                        and item.authority is ClaimAuthority.RANK_SUPPORT
-                        and 0 < selected_rank_owners < 2
-                    )
                 )
             ]
             if not fitting:
@@ -265,11 +260,11 @@ class ProviderContextPlanner:
                         and item.authority is ClaimAuthority.RANK_SUPPORT
                         else 1_000_000
                     ),
-                    -int(bool(new_requirements)),
                     -int(_ROLE_PRIORITY[item.role] >= 60),
                     -int(item.role not in roles),
                     -_ROLE_PRIORITY[item.role],
                     -int(item.authority),
+                    -int(bool(new_requirements)),
                     item.selection_rank,
                     -len(new_requirements),
                     item.estimated_tokens,
@@ -287,7 +282,17 @@ class ProviderContextPlanner:
         for claim in candidates:
             if claim.claim_id in omitted:
                 continue
-            if claim.estimated_tokens > remaining:
+            if (
+                any(
+                    item.role is ClaimRole.EDIT
+                    and item.authority is ClaimAuthority.EXACT_IDENTITY
+                    for item in selected
+                )
+                and claim.role is ClaimRole.IMPLEMENTATION_OWNER
+                and claim.authority is ClaimAuthority.RANK_SUPPORT
+            ):
+                omitted[claim.claim_id] = OmissionReason.WEAKER_AUTHORITY
+            elif claim.estimated_tokens > remaining:
                 omitted[claim.claim_id] = OmissionReason.TOKEN_BUDGET
             elif required_set.intersection(claim.requirement_ids) <= covered:
                 omitted[claim.claim_id] = OmissionReason.REDUNDANT_COVERAGE

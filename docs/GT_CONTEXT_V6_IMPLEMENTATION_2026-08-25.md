@@ -581,8 +581,8 @@ The generalized policy is now:
 1. unique exact edit/owner identity is delivered as a singleton;
 2. exact disconnected identity is delivered as a bounded ambiguity set before
    any heuristic owner for the same decision;
-3. rank-only owner uncertainty may deliver the compiler's first two candidates
-   and is always labeled `NOT_EDIT_AUTHORITY`;
+3. rank-only owner uncertainty may deliver one candidate per uncovered
+   localization requirement and is always labeled `NOT_EDIT_AUTHORITY`;
 4. the candidate set is never expanded by repository, task, benchmark, or
    language exceptions;
 5. every provider candidate is recorded with authority, requirement binding,
@@ -600,3 +600,28 @@ owners, including `crates/oxvg_ast/src/selectors.rs`, with required coverage
 1.0 and implementation recall 1.0. Both runs have zero false edit authority,
 zero treatment failures, and a READY dense substrate. These are focused
 diagnostics, not product certification.
+
+## Proof-safe graph augmentation and complete-task queries (2026-08-27)
+
+Exact AST calls were previously persisted as certified confidence-1.0 edges
+but stamped unverified, so this compiler correctly discarded them. The pinned
+Go builder now marks only same-file/import proofs and concrete typed-receiver
+proofs as verified; receiver-blind and name-only resolutions remain quiet.
+Integration delivery must touch the exact identity, not merely another symbol
+in the same file. When no exact identity exists, a strong task-path seed may
+still expose a certified neighbor as inspection-only evidence.
+
+Dense queries now sample the full typed task contract rather than its first six
+obligations. Non-localizable behavior stays in the verification checklist but
+cannot become an owner claim. Exact edit, add/remove, preserve/forbid,
+public/integration, inspection, and validation intents remain distinct through
+the provider ledger. An exact edit suppresses rank-only owner guesses, and a
+verified identity-adjacent integration fact is selected before generic
+coverage noise.
+
+The exact-revision ABS diagnostic now emits three provider-visible paths at
+499 tokens: exact edit `evaluator/functions.go`, exact public constraint
+`repl/repl.go`, and verified integration `util/util.go`. Reviewed-oracle edit
+precision, implementation precision, path recall, and required coverage are
+all 1.0, with zero treatment failures. The result is a focused regression
+witness; twenty-task Linux certification is still pending.

@@ -358,7 +358,7 @@ func indexOneRepo(db *store.DB, root string, repoID int64, maxFiles, workers int
 			TrustTier:          rc.TrustTier,
 			CandidateCount:     rc.CandidateCount,
 			EvidenceType:       rc.EvidenceType,
-			VerificationStatus: "unverified",
+			VerificationStatus: resolvedCallVerificationStatus(rc),
 		}
 	}
 	if err := db.BatchInsertEdges(edgePtrs); err != nil {

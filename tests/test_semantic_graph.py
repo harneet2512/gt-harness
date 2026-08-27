@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from gt_engine.hybrid_retrieval import EvidenceOrigin, RepositoryDocument
 from gt_engine.semantic_graph import (
     SemanticFactKind,
@@ -122,7 +124,7 @@ def run(worker, data):
     assert argument_facts == []
 
 
-def test_semantic_graph_declares_mixed_language_limitations() -> None:
+def test_semantic_graph_indexes_mixed_python_and_typescript_without_fake_limitations() -> None:
     javascript = RepositoryDocument(
         path="src/index.ts",
         symbol="run",
@@ -137,8 +139,63 @@ def test_semantic_graph_declares_mixed_language_limitations() -> None:
         anchor_paths=("src/tensor_parallel.py", "src/index.ts"),
     )
 
-    assert projection.status is SemanticGraphStatus.READY_WITH_DECLARED_LIMITATIONS
-    assert "semantic_language_unsupported" in projection.receipt.limitations
+    assert projection.status is SemanticGraphStatus.READY
+    assert projection.receipt.documents_indexed == 2
+    assert "semantic_language_unsupported" not in projection.receipt.limitations
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "target", "returned"),
+    (
+        (
+            "src/index.ts",
+            "function run(value: number) { const result = value + 1; return result; }",
+            "result",
+            "result",
+        ),
+        (
+            "pkg/run.go",
+            "package p\nfunc run(value int) int { result := value + 1; return result }",
+            "result",
+            "result",
+        ),
+        (
+            "src/lib.rs",
+            "fn run(value: i32) -> i32 { let result = value + 1; return result; }",
+            "result",
+            "result",
+        ),
+    ),
+)
+def test_cross_language_semantic_slice_emits_exact_assignment_and_return(
+    path: str, source: str, target: str, returned: str
+) -> None:
+    document = RepositoryDocument(
+        path=path,
+        symbol="run",
+        text=source,
+        start_line=1,
+        origin=EvidenceOrigin.PREEXISTING_REPOSITORY,
+        origin_revision="source-1",
+    )
+
+    projection = compile_semantic_graph(
+        (document,),
+        source_revision="source-1",
+        task="Change run result flow",
+        anchor_paths=(path,),
+        anchor_symbols=("run",),
+    )
+
+    assert projection.status is SemanticGraphStatus.READY
+    assert any(
+        fact.kind is SemanticFactKind.VALUE_FLOW and fact.subject == target
+        for fact in projection.facts
+    )
+    assert any(
+        fact.kind is SemanticFactKind.RETURN_FLOW and returned in fact.object
+        for fact in projection.facts
+    )
 
 
 def test_semantic_graph_deduplicates_same_fact_from_overlapping_symbol_documents() -> None:

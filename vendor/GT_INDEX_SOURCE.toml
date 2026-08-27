@@ -1,6 +1,6 @@
 source_repository = "https://github.com/harneet2512/groundtruth"
 upstream_source_commit = "61cfdbce2c42751c11028e46e863b3231f0bb70e"
 upstream_tree_git_object = "e8a1b6cf6243ec12715626879884388ddd26845c"
-source_tree_sha256 = "b8c66604d39fe1bda0a40c03ff4d12730560c26f81136f8a7e1fb42f30bcd859"
-source_files = 83
-overlay = "GT-Harness v0.9 discovery accounting, fail-closed component and parser-limitation receipts, explicit file nodes, import-provenance relationship resolution including Python relative imports and duplicate candidate elimination, callback-parameter shadow abstention, typed callable-field constructor candidates, symbol-aware re-exports, TypeScript declaration recovery, external Rust import abstention, unresolved dynamic self-member abstention, non-following symlink discovery, cross-platform source identity, extensionless non-source classification, and removal of an unreferenced duplicate internal/types package."
+source_tree_sha256 = "f66932b655486667bf8434fcb2d21e0c2448ea46a06c7e2236f30a8e74ae9d11"
+source_files = 84
+overlay = "GT-Harness v0.9 discovery accounting, fail-closed component and parser-limitation receipts, explicit file nodes, import-provenance relationship resolution including Python relative imports and duplicate candidate elimination, callback-parameter shadow abstention, typed callable-field constructor candidates, symbol-aware re-exports, TypeScript declaration recovery, external Rust import abstention, unresolved dynamic self-member abstention, non-following symlink discovery, cross-platform source identity, extensionless non-source classification, proof-safe verification of exact call edges, and removal of an unreferenced duplicate internal/types package."

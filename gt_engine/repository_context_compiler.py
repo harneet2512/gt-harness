@@ -37,13 +37,41 @@ from gt_engine.repository_context import (
     RetrievalRankHint,
 )
 from gt_engine.repository_intelligence import RepositoryEvidence
-from gt_engine.task_contract import extract_task_contract, significant_tokens
+from gt_engine.task_contract import (
+    DirectiveKind,
+    classify_directive_kind,
+    extract_task_contract,
+    significant_tokens,
+)
 
 
 class ContextStatus(StrEnum):
     READY = "READY"
     ABSTAIN = "ABSTAIN"
     FAILED = "FAILED"
+
+
+class EvidenceQuality(StrEnum):
+    EXACT = "EXACT"
+    CERTIFIED = "CERTIFIED"
+    CORROBORATED = "CORROBORATED"
+    CONTESTED = "CONTESTED"
+    UNKNOWN = "UNKNOWN"
+
+
+class FactCompleteness(StrEnum):
+    EXACT = "EXACT"
+    LOWER_BOUND = "LOWER_BOUND"
+    TRUNCATED = "TRUNCATED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class ProviderAuthority(StrEnum):
+    EXACT_IDENTITY = "EXACT_IDENTITY"
+    CERTIFIED_RELATION = "CERTIFIED_RELATION"
+    SOURCE_SEMANTIC = "SOURCE_SEMANTIC"
+    STRUCTURAL_PROJECTION = "STRUCTURAL_PROJECTION"
+    RANK_SUPPORT = "RANK_SUPPORT"
 
 
 class LocalizationRole(StrEnum):
@@ -80,10 +108,17 @@ class FacetCoverageStatus(StrEnum):
 class RequirementIntent(StrEnum):
     EDIT_EXISTING = "EDIT_EXISTING"
     ADD_SYMBOL = "ADD_SYMBOL"
+    REMOVE_EXISTING = "REMOVE_EXISTING"
+    PRESERVE = "PRESERVE"
+    FORBID_EDIT = "FORBID_EDIT"
     INSPECT_OWNER = "INSPECT_OWNER"
     INSPECT_PUBLIC_SURFACE = "INSPECT_PUBLIC_SURFACE"
     INSPECT_INTEGRATION = "INSPECT_INTEGRATION"
     VALIDATE = "VALIDATE"
+    # A repository behavior the patch must satisfy but which does not name a
+    # repository identity. It belongs in the completion checklist, not in
+    # graph-owner coverage or edit localization.
+    BEHAVIOR = "BEHAVIOR"
 
 
 class RequirementCoverageStatus(StrEnum):
@@ -98,11 +133,15 @@ class TaskFacet:
     facet_id: str
     obligation_ids: tuple[str, ...]
     role: LocalizationRole
+    directive_kind: DirectiveKind = DirectiveKind.MODIFY
     exact_symbols: tuple[str, ...] = ()
     # Existing identities that the task text actually authorizes changing.
     # ``exact_symbols`` is deliberately broader: dependency types and values
     # remain useful retrieval facts without becoming edit instructions.
     edit_symbols: tuple[str, ...] = ()
+    # Requested identities that do not yet exist but are directly governed by
+    # this clause. Contextual literals and dependency names stay out.
+    edit_unresolved_symbols: tuple[str, ...] = ()
     unresolved_symbols: tuple[str, ...] = ()
     query_terms: tuple[str, ...] = ()
     owning_symbols: tuple[str, ...] = ()
@@ -206,6 +245,12 @@ class ContextEvidenceItem:
     source_excerpt: str = ""
     localization_role: str = LocalizationRole.EDIT.value
     facet_ids: tuple[str, ...] = ()
+    evidence_quality: EvidenceQuality = EvidenceQuality.UNKNOWN
+    fact_completeness: FactCompleteness = FactCompleteness.UNAVAILABLE
+    # ``None`` means the provider group must apply its declared safe default.
+    # Production compiler constructors set this explicitly for every claim;
+    # the nullable default preserves compatibility for local packet consumers.
+    provider_authority: ProviderAuthority | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -351,6 +396,10 @@ _SYMBOL_CUE = re.compile(
 )
 _CODE_ENTITY = re.compile(
     r"(?:`|'|\")([A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)(?:`|'|\")"
+)
+_CALLABLE_CUE = re.compile(
+    r"(?:`|'|\")?([A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)"
+    r"\s*\(\s*\)(?:`|'|\")?"
 )
 _BEHAVIOR_SUBJECT = re.compile(
     r"\b([A-Z][A-Za-z0-9]*)\b(?=[^\n.]{0,56}\b(?:adds?|accepts?|bails?|constructor|"
@@ -681,7 +730,9 @@ def _normalized_path(path: str) -> str:
 def _facet_role(text: str) -> LocalizationRole:
     lowered = str(text or "").lower()
     if re.search(
-        r"\b(?:public api|public capabilities|public entry points|public surface|"
+        r"\b(?:public api|public capabilities|public (?:entry\s*-?\s*points?|entrypoints?)|"
+        r"public surface|public .{0,32}\bentry\s*-?\s*points?|"
+        r"public .{0,32}\bentrypoints?|public .{0,64}\bsignature|"
         r"crate surface|export|re-export|reexport)\b",
         lowered,
     ):
@@ -769,11 +820,11 @@ def _quoted_entity_is_literal(text: str, match: re.Match[str]) -> bool:
 
 
 _EDIT_ACTION = (
-    r"(?:add|change|extend|fix|implement|modify|patch|refactor|remove|replace|"
-    r"support|update|wire)"
+    r"(?:add|change|expose|extend|fix|harden|implement|improve|modify|normalize|patch|"
+    r"refactor|remove|replace|support|update|wire)"
 )
 _EDIT_PREDICATE = (
-    r"(?:accepts?|adds?|changes?|gains?|implements?|must|needs?|removes?|"
+    r"(?:accepts?|adds?|changes?|exposes?|gains?|implements?|must|needs?|removes?|"
     r"returns?|should|supports?|updates?)"
 )
 _DEPENDENCY_NOUN = (
@@ -782,7 +833,11 @@ _DEPENDENCY_NOUN = (
 )
 
 
-def _entity_is_edit_directed(text: str, entity: str) -> bool:
+def _entity_is_edit_directed(
+    text: str,
+    entity: str,
+    directive_kind: DirectiveKind | None = None,
+) -> bool:
     """Return whether prose grants an entity edit authority.
 
     Backticks prove that text is code-shaped, not that its definition should
@@ -795,6 +850,13 @@ def _entity_is_edit_directed(text: str, entity: str) -> bool:
     value = str(entity or "").strip()
     if not value:
         return False
+    if directive_kind in {
+        DirectiveKind.PRESERVE,
+        DirectiveKind.FORBID_EDIT,
+        DirectiveKind.INSPECT,
+        DirectiveKind.VALIDATE,
+    }:
+        return False
     leaf = re.split(r"(?:::|[.#])", value)[-1]
     quoted = (
         rf"(?<![A-Za-z0-9_])(?:`|'|\")?{re.escape(value)}"
@@ -805,6 +867,20 @@ def _entity_is_edit_directed(text: str, entity: str) -> bool:
         rf"(?:`|'|\")?(?![A-Za-z0-9_])"
     )
     explicit_leaf = rf"(?:`{re.escape(leaf)}`|'{re.escape(leaf)}'|\"{re.escape(leaf)}\")"
+
+    # A positive clause may also contain a local preservation constraint
+    # (``change Foo without modifying Bar``). The constraint nearest the named
+    # entity wins; an earlier edit verb must not leak authority across it.
+    entity_match = re.search(quoted, text, flags=re.IGNORECASE)
+    if entity_match is not None:
+        local_prefix = text[max(0, entity_match.start() - 120) : entity_match.start()]
+        if re.search(
+            r"(?i)(?:unaffected\s+by|without\s+(?:changing|modifying|editing|breaking)|"
+            r"(?:preserve|keep)\b[^.\n]{0,80}|do\s+not\s+(?:change|modify|edit|touch)\b)"
+            r"[^.\n]{0,80}$",
+            local_prefix,
+        ):
+            return False
 
     # ``alias_style (NameStyle value or values)`` describes the accepted
     # dependency type; changing NameStyle is not part of that obligation.
@@ -819,8 +895,6 @@ def _entity_is_edit_directed(text: str, entity: str) -> bool:
     # qualification, this does not promote a merely mentioned future call
     # such as ``via Server.resetAbort()`` to owner edit authority.
     if re.search(rf"(?i)\b{_EDIT_ACTION}\b[^.\n]{{0,240}}{quoted}", text):
-        return True
-    if _code_shaped(value) and "::" not in value and "." not in value:
         return True
     if any(match.group(1).casefold() == leaf.casefold() for match in _SYMBOL_CUE.finditer(text)):
         return True
@@ -861,6 +935,10 @@ def compile_task_facets(
     """
 
     contract = extract_task_contract(task)
+    directive_by_obligation = {
+        obligation.obligation_id: obligation.directive_kind
+        for obligation in contract.obligations
+    }
     obligation_rows = tuple(
         (obligation.obligation_id, obligation.text) for obligation in contract.obligations
     )
@@ -888,6 +966,9 @@ def compile_task_facets(
     )
     qualified_task_leaves = frozenset(
         re.split(r"(?:::|[.#])", entity)[-1].casefold() for entity in task_qualified_entities
+    )
+    callable_task_names = frozenset(
+        match.group(1).casefold() for match in _CALLABLE_CUE.finditer(task)
     )
     available: dict[str, list[tuple[str, str]]] = {}
     for document in documents:
@@ -999,6 +1080,21 @@ def compile_task_facets(
                 exact.extend(symbol for symbol, _path in leaf_rows)
                 modules.extend(path for _symbol, path in leaf_rows if path)
                 continue
+            # Language/runtime adapters often register a public callable under
+            # a unique host implementation such as ``load`` -> ``loadFn``.
+            # An explicit ``load()`` citation plus one repository-wide adapter
+            # spelling is deterministic identity evidence; ordinary prose and
+            # collisions remain unresolved.
+            adapter_rows: set[tuple[str, str]] = set()
+            if len(segments) == 1 and leaf.casefold() in callable_task_names:
+                for suffix in ("fn", "func", "function", "handler", "command"):
+                    adapter_rows.update(available.get(leaf.casefold() + suffix, ()))
+            if len(adapter_rows) == 1:
+                adapter_symbol, adapter_path = next(iter(adapter_rows))
+                exact.append(adapter_symbol)
+                if adapter_path:
+                    modules.append(adapter_path)
+                continue
             unresolved.append(entity)
             owner_paths = {path for _symbol, path in owner_rows if path}
             if owner_rows:
@@ -1050,6 +1146,9 @@ def compile_task_facets(
 
     facets: list[TaskFacet] = []
     for obligation_id, text in rows:
+        directive_kind = directive_by_obligation.get(
+            obligation_id, classify_directive_kind(text)
+        )
         associated = _associated_entities(text)
         associated_members = {
             re.split(r"(?:::|[.#])", entity)[-1].casefold() for entity in associated
@@ -1071,6 +1170,7 @@ def compile_task_facets(
             for match in _CODE_ENTITY.finditer(text)
             if not _quoted_entity_is_literal(text, match)
         )
+        entities.extend(match.group(1) for match in _CALLABLE_CUE.finditer(text))
         for match in _SYMBOL_CUE.finditer(text):
             candidate = match.group(1)
             if candidate.casefold() in available or _code_shaped(candidate):
@@ -1096,11 +1196,11 @@ def compile_task_facets(
             for entity in entity_values
             if entity not in exception_tokens
             and (
-                _entity_is_edit_directed(text, entity)
+                _entity_is_edit_directed(text, entity, directive_kind)
                 or entity in behavior_subjects
             )
         )
-        directed_exact, _directed_unresolved, directed_owners, _directed_modules = resolve_entities(
+        directed_exact, directed_unresolved, directed_owners, _directed_modules = resolve_entities(
             directed_entities
         )
         digest = hashlib.sha256(f"{obligation_id}\0{text}".encode()).hexdigest()[:16]
@@ -1109,8 +1209,10 @@ def compile_task_facets(
             facet_id=f"facet-{digest}",
             obligation_ids=(obligation_id,),
             role=role,
+            directive_kind=directive_kind,
             exact_symbols=exact,
             edit_symbols=tuple(dict.fromkeys((*directed_exact, *directed_owners))),
+            edit_unresolved_symbols=directed_unresolved,
             unresolved_symbols=unresolved,
             query_terms=significant_tokens(text)[:12],
             owning_symbols=owners,
@@ -1148,9 +1250,14 @@ def compile_task_facets(
                 child_directed = tuple(
                     entity
                     for entity in dict.fromkeys(owner_entities)
-                    if _entity_is_edit_directed(text, entity)
+                    if _entity_is_edit_directed(text, entity, directive_kind)
                 )
-                child_directed_exact, _, child_directed_owners, _ = resolve_entities(child_directed)
+                (
+                    child_directed_exact,
+                    child_directed_unresolved,
+                    child_directed_owners,
+                    _,
+                ) = resolve_entities(child_directed)
                 child_digest = hashlib.sha256(
                     f"{obligation_id}\0{text}\0{owner}".encode()
                 ).hexdigest()[:16]
@@ -1159,10 +1266,12 @@ def compile_task_facets(
                         facet_id=f"facet-{child_digest}",
                         obligation_ids=(obligation_id,),
                         role=role,
+                        directive_kind=directive_kind,
                         exact_symbols=child_exact,
                         edit_symbols=tuple(
                             dict.fromkeys((*child_directed_exact, *child_directed_owners))
                         ),
+                        edit_unresolved_symbols=child_directed_unresolved,
                         unresolved_symbols=child_unresolved,
                         query_terms=significant_tokens(" ".join(owner_entities))[:12],
                         owning_symbols=child_owners,
@@ -1901,6 +2010,9 @@ def _identity_item(
         decision_reason=decision_reason,
         completeness="exact_identity",
         source_excerpt="" if file_only else str(candidate.text or "").strip()[:600],
+        evidence_quality=EvidenceQuality.EXACT,
+        fact_completeness=FactCompleteness.EXACT,
+        provider_authority=ProviderAuthority.EXACT_IDENTITY,
     )
 
 
@@ -1931,6 +2043,9 @@ def _inspection_item(
         decision_reason=decision_reason,
         completeness="ranked_candidate_not_edit_target",
         source_excerpt=str(candidate.text or "").strip()[:600],
+        evidence_quality=EvidenceQuality.UNKNOWN,
+        fact_completeness=FactCompleteness.LOWER_BOUND,
+        provider_authority=ProviderAuthority.RANK_SUPPORT,
     )
 
 
@@ -1959,6 +2074,9 @@ def _dense_inspection_item(
         decision_reason="dense_semantic_inspection",
         completeness="dense_file_candidate_not_edit_target",
         source_excerpt=str(document.text or "").strip()[:600],
+        evidence_quality=EvidenceQuality.UNKNOWN,
+        fact_completeness=FactCompleteness.LOWER_BOUND,
+        provider_authority=ProviderAuthority.RANK_SUPPORT,
     )
 
 
@@ -2018,6 +2136,9 @@ def _link_item(link: StructuralLink, request: ContextCompileRequest) -> ContextE
         completeness="certified_direct_edge",
         source_path=link.source_path,
         source_symbol=str(link.source_symbol or ""),
+        evidence_quality=EvidenceQuality.CERTIFIED,
+        fact_completeness=FactCompleteness.EXACT,
+        provider_authority=ProviderAuthority.CERTIFIED_RELATION,
     )
 
 
@@ -2600,10 +2721,13 @@ class RepositoryContextCompiler:
                 or (link.target_path, str(link.target_symbol or "")) in anchor_identities
                 or link.source_path in file_anchors
                 or link.target_path in file_anchors
-                # A task/path phrase match scopes the file, not the arbitrary
-                # representative symbol selected for its retrieval span.
-                or link.source_path in task_scope_inspection_paths
-                or link.target_path in task_scope_inspection_paths
+                or (
+                    not primary
+                    and (
+                        link.source_path in task_scope_inspection_paths
+                        or link.target_path in task_scope_inspection_paths
+                    )
+                )
             )
 
         relevant_links = tuple(
@@ -2702,6 +2826,9 @@ class RepositoryContextCompiler:
                             path=path,
                             facets=task_facets,
                         ),
+                        evidence_quality=EvidenceQuality.CERTIFIED,
+                        fact_completeness=FactCompleteness.EXACT,
+                        provider_authority=ProviderAuthority.CERTIFIED_RELATION,
                     )
                 )
                 if len(supporting) >= 5:
@@ -2719,7 +2846,19 @@ class RepositoryContextCompiler:
                 for facet_id in item.facet_ids
             )
         )
-        public_surface = tuple(
+        reexport_target_paths = frozenset(
+            link.target_path
+            for link in safe_links
+            if str(link.relation or "").upper() == "RE_EXPORTS"
+            and link.source_path != link.target_path
+        )
+        exact_public_surface = tuple(
+            item
+            for item in inspection
+            if item.localization_role == LocalizationRole.PUBLIC_SURFACE.value
+            and item.path not in reexport_target_paths
+        )
+        linked_public_surface = tuple(
             surfaced
             for link in safe_links
             if str(link.relation or "").upper() == "RE_EXPORTS"
@@ -2738,6 +2877,16 @@ class RepositoryContextCompiler:
                 )
             ).facet_ids
         )
+        public_surface = tuple(
+            {
+                item.evidence_sha256: item
+                for item in (*exact_public_surface, *linked_public_surface)
+            }.values()
+        )
+        primary_identities = frozenset(
+            (item.path, item.symbol) for item in primary if item.symbol
+        )
+        primary_file_scopes = frozenset(item.path for item in primary if not item.symbol)
         integration_paths: list[str] = []
         for link in safe_links:
             if str(link.relation or "").upper() not in {"CALLS", "IMPORTS"}:
@@ -2748,15 +2897,30 @@ class RepositoryContextCompiler:
             # primary facet merely because both were in the bounded retrieval
             # set. Integration authority requires a certified edge touching a
             # primary task identity.
-            if (
-                link.source_path not in task_scope_paths
-                and link.target_path not in task_scope_paths
-            ):
+            touches_primary_identity = bool(
+                (link.source_path, str(link.source_symbol or "")) in primary_identities
+                or (link.target_path, str(link.target_symbol or "")) in primary_identities
+                or link.source_path in primary_file_scopes
+                or link.target_path in primary_file_scopes
+                or (
+                    not primary
+                    and (
+                        link.source_path in task_scope_inspection_paths
+                        or link.target_path in task_scope_inspection_paths
+                    )
+                )
+            )
+            if not touches_primary_identity:
                 continue
             for path in (link.source_path, link.target_path):
                 if path not in task_scope_paths and path in role_candidates_by_path:
                     integration_paths.append(path)
-        integration = tuple(
+        exact_integration = tuple(
+            item
+            for item in inspection
+            if item.localization_role == LocalizationRole.INTEGRATION.value
+        )
+        linked_integration_unsorted = tuple(
             integrated
             for path in dict.fromkeys(integration_paths)
             if (
@@ -2769,6 +2933,34 @@ class RepositoryContextCompiler:
                     facet_ids=(role_candidates_by_path[path].facet_ids or anchor_facet_ids),
                 )
             ).facet_ids
+        )
+
+        def integration_relevance(item: ContextEvidenceItem) -> tuple[Any, ...]:
+            expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", request.task)
+            expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", expanded)
+            task_counts = Counter(
+                token.casefold()
+                for token in re.findall(r"[A-Za-z0-9]+", expanded)
+                if len(token) >= 4
+            )
+            identity_terms = _path_terms(item.symbol) | _path_terms(Path(item.path).stem)
+            frequency = sum(task_counts.get(term, 0) for term in identity_terms)
+            return (
+                -frequency,
+                -len(item.facet_ids),
+                _path_penalty(item.path),
+                item.path.casefold(),
+                item.path,
+            )
+
+        linked_integration = tuple(
+            sorted(linked_integration_unsorted, key=integration_relevance)
+        )
+        integration = tuple(
+            {
+                item.evidence_sha256: item
+                for item in (*exact_integration, *linked_integration)
+            }.values()
         )
         role_paths = frozenset(item.path for item in (*public_surface, *integration))
         retrieved_owner_inspection = tuple(
@@ -2931,6 +3123,9 @@ class RepositoryContextCompiler:
                 source_excerpt=str(representative.text or "").strip()[:400],
                 localization_role="IMPLEMENTATION_OWNER",
                 facet_ids=facet_ids,
+                evidence_quality=EvidenceQuality.CORROBORATED,
+                fact_completeness=FactCompleteness.LOWER_BOUND,
+                provider_authority=ProviderAuthority.RANK_SUPPORT,
             )
             path_affinity_rows.append(
                 (
@@ -3161,6 +3356,9 @@ class RepositoryContextCompiler:
                     or facet_ids_by_path.get(fact.path, ())
                     or anchor_facet_ids
                 ),
+                evidence_quality=EvidenceQuality.EXACT,
+                fact_completeness=FactCompleteness.LOWER_BOUND,
+                provider_authority=ProviderAuthority.SOURCE_SEMANTIC,
             )
             for fact in (semantic_projection.facts if semantic_projection else ())
         )
@@ -3322,16 +3520,37 @@ class RepositoryContextCompiler:
         task_requirements: list[TaskRequirement] = []
         requirement_coverage: list[RequirementCoverage] = []
 
-        def requirement_intent(facet: TaskFacet, *, unresolved: bool) -> RequirementIntent:
+        def requirement_intent(
+            facet: TaskFacet,
+            *,
+            entity: str,
+            unresolved: bool,
+        ) -> RequirementIntent:
+            if facet.directive_kind is DirectiveKind.PRESERVE:
+                return RequirementIntent.PRESERVE
+            if facet.directive_kind is DirectiveKind.FORBID_EDIT:
+                return RequirementIntent.FORBID_EDIT
+            if facet.directive_kind is DirectiveKind.REMOVE:
+                return RequirementIntent.REMOVE_EXISTING
+            if facet.directive_kind is DirectiveKind.INSPECT:
+                return RequirementIntent.INSPECT_OWNER
+            if facet.directive_kind is DirectiveKind.VALIDATE:
+                return RequirementIntent.VALIDATE
             if facet.role is LocalizationRole.PUBLIC_SURFACE:
                 return RequirementIntent.INSPECT_PUBLIC_SURFACE
             if facet.role is LocalizationRole.INTEGRATION:
                 return RequirementIntent.INSPECT_INTEGRATION
             if facet.role is LocalizationRole.VALIDATION:
                 return RequirementIntent.VALIDATE
-            if unresolved:
+            if entity == "repository-responsibility":
+                return RequirementIntent.BEHAVIOR
+            if unresolved and entity in facet.edit_unresolved_symbols:
                 return RequirementIntent.ADD_SYMBOL
-            return RequirementIntent.EDIT_EXISTING
+            if unresolved:
+                return RequirementIntent.BEHAVIOR
+            if entity in facet.edit_symbols:
+                return RequirementIntent.EDIT_EXISTING
+            return RequirementIntent.INSPECT_OWNER
 
         for facet in task_facets:
             entities = tuple(dict.fromkeys((*facet.exact_symbols, *facet.unresolved_symbols)))
@@ -3388,7 +3607,11 @@ class RepositoryContextCompiler:
                     requirement_id=requirement_id,
                     facet_id=facet.facet_id,
                     obligation_ids=facet.obligation_ids,
-                    intent=requirement_intent(facet, unresolved=unresolved),
+                    intent=requirement_intent(
+                        facet,
+                        entity=entity,
+                        unresolved=unresolved,
+                    ),
                     entity=entity,
                     query_terms=facet.query_terms,
                     resolution=resolution,

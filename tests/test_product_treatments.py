@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,6 +41,7 @@ from gt_harness.treatments import (
     TreatmentStatus,
     TreatmentUnavailableError,
     _bounded_token_count,
+    _decision_query_rows,
 )
 
 
@@ -49,6 +51,34 @@ def test_bare_treatment_is_a_strict_no_op() -> None:
     assert treatment.before_model_call(1) == ""
     assert treatment.after_action("bash", {"command": "x"}, "ok", False) is None
     assert treatment.finalize(None)["provider_calls"] == 0
+
+
+def test_dense_decision_queries_cover_late_typed_responsibilities() -> None:
+    task = """Harden the loader and command behavior.
+
+- Normalize cache paths.
+- Reuse existing entries.
+- Keep lookup deterministic.
+- Handle aliases.
+- Report cache statistics.
+- Detect cycles.
+- Emit runtime tracing.
+- Support script flags.
+- Preserve the public `BeginRepl(args []string)` signature.
+- Add `reset_loader_cache()` for explicit reset.
+"""
+
+    rows = _decision_query_rows(task, limit=6)
+    selected = "\n".join(text for _identifier, text in rows)
+
+    assert len(rows) == 6
+    assert "Harden the loader" in selected
+    assert "BeginRepl" in selected
+    assert "reset_loader_cache" in selected
+    assert any(
+        phrase in selected
+        for phrase in ("Report cache statistics", "Detect cycles", "runtime tracing")
+    )
 
 
 def test_treatment_projects_and_caches_source_bound_architecture(tmp_path: Path) -> None:
@@ -721,10 +751,10 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
     assert len(rendered) <= 4_000
     assert rendered.endswith("</groundtruth-repository-context>")
     assert 'schema="gt.agent_context.v7"' in rendered
-    assert "REQUIREMENT requirement-" in rendered
+    assert "REQUIREMENT R1" in rendered
     assert "EXACT_EDIT_TARGET app.py:1#answer" in rendered
     assert any(
-        "req=requirement-" in line
+        "req=R1" in line
         for line in rendered.splitlines()
         if line.startswith("EXACT_EDIT_TARGET")
     )
@@ -735,7 +765,11 @@ def test_groundtruth_delivers_valid_composed_relationship_context(
         for line in rendered.splitlines()
         if line.startswith(("VERIFIED_RELATION", "SEMANTIC_FACT"))
     )
-    assert "UNCERTAINTY graph_projection_failed" in rendered
+    assert "UNCERTAINTY graph_projection_failed" not in rendered
+    assert any(
+        str(reason).startswith("graph_projection_failed")
+        for reason in treatment.compile_receipts[0]["packet"]["uncertainties"]
+    )
     assert _bounded_token_count(rendered) <= 500
     treatment.max_delivery_count = 1
     treatment.context_dirty = True
@@ -808,7 +842,7 @@ def test_provider_context_v6_keeps_edit_public_integration_and_new_file_roles_se
     assert "INSPECT_PUBLIC_SURFACE src/awilix.ts:1#AwilixContainer" in rendered
     assert "INSPECT_INTEGRATION src/load-modules.ts:1#loadModules" in rendered
     assert "PROPOSED_NEW_FILE src/evaluation.rs fact=false" in rendered
-    assert "UNCOVERED_FACET facet-new role=EDIT unresolved=EvaluationHandle" in rendered
+    assert "UNCOVERED_FACET role=EDIT unresolved=EvaluationHandle" in rendered
 
 
 def test_provider_context_v6_prunes_within_budget_without_losing_roles(
@@ -1501,9 +1535,15 @@ def test_provider_compaction_never_replaces_ready_evidence_with_metadata_only(
 
     assert _bounded_token_count(rendered) <= treatment.start_token_budget
     assert "INSPECT_IMPLEMENTATION_OWNER_NOT_EDIT_AUTHORITY" in rendered
-    assert treatment.provider_delivery_receipts[0]["provider_plan"]["selected_claim_ids"] == [
-        owner.evidence_sha256
+    selected_claims = treatment.provider_delivery_receipts[0]["provider_plan"][
+        "selected_claim_ids"
     ]
+    assert selected_claims[0] == owner.evidence_sha256
+    assert treatment.provider_delivery_receipts[0]["planning_passes"] == 1
+    assert (
+        treatment.provider_delivery_receipts[0]["claim_cost_basis"]
+        == "exact_compact_encoder_delta"
+    )
     claim_ledger = treatment.provider_delivery_receipts[0]["provider_claim_ledger"]
     owner_claim = next(item for item in claim_ledger if item["claim_id"] == owner.evidence_sha256)
     assert owner_claim == {
@@ -2178,17 +2218,32 @@ def test_provider_delivery_receipts_reconcile_visible_facts_and_call_timing(
         completeness="exact_identity",
         facet_ids=("facet-execute",),
     )
-    packet = GTContextPacket(
+    updated_identity = replace(identity, evidence_sha256="e" * 64)
+    unrelated = replace(
+        identity,
+        path="src/unrelated.py",
+        symbol="unrelated",
+        evidence_sha256="f" * 64,
+    )
+    initial_packet = GTContextPacket(
         status=ContextStatus.READY,
         repository_identity={"source_revision": "b" * 64},
         primary_edit_targets=(identity,),
         evidence_items=(identity,),
         coverage={"dense_index": {"status": "DISABLED", "query_ready": False}},
     )
+    update_packet = replace(
+        initial_packet,
+        primary_edit_targets=(updated_identity, unrelated),
+        evidence_items=(updated_identity, unrelated),
+    )
+    packets = iter((initial_packet, update_packet))
     treatment = GroundTruthTreatment(tmp_path)
     treatment.service = FakeService()
     treatment.treatment_status = TreatmentStatus.ACTIVE
-    monkeypatch.setattr(GroundTruthTreatment, "_context", lambda self, **_kwargs: packet)
+    monkeypatch.setattr(
+        GroundTruthTreatment, "_context", lambda self, **_kwargs: next(packets)
+    )
 
     treatment._render(update=False, budget=4_000, delivered_before_call=1)
     treatment.before_model_call(1)
@@ -2210,6 +2265,8 @@ def test_provider_delivery_receipts_reconcile_visible_facts_and_call_timing(
         )
     )
     assert augmentation is not None
+    assert "src/engine.py" in augmentation.content
+    assert "src/unrelated.py" not in augmentation.content
     assert augmentation.observation_count == 2
     assert augmentation.raw_output_sha256 == hashlib.sha256(b"final observation").hexdigest()
     assert augmentation.turn_observations_sha256

@@ -18,6 +18,7 @@ from gt_engine.repository_context_compiler import (
     LocalizationRole,
     RepositoryContextCompiler,
     RequirementCoverageStatus,
+    RequirementIntent,
     _matching_facet_ids,
     compile_task_facets,
 )
@@ -690,6 +691,64 @@ def test_dependency_type_is_not_granted_edit_authority() -> None:
     assert all(
         item.path != "src/adaptix/_internal/name_style.py" for item in packet.primary_edit_targets
     )
+
+
+def test_explicit_callable_resolves_unique_host_adapter_function() -> None:
+    documents = (
+        _document("runtime/builtins.go", "loadFn", "func loadFn() {}"),
+        _document("runtime/module.go", "module", "func module() {}"),
+    )
+    task = "Improve `load()` so module resolution is deterministic."
+
+    packet = RepositoryContextCompiler().compile(
+        HybridRepository(
+            documents=documents,
+            structural_links=(),
+            source_revision="source-1",
+            complete=True,
+            reason_codes=(),
+            source_file_count=2,
+            document_chars=80,
+        ),
+        _request(task),
+    )
+
+    assert any(
+        item.path == "runtime/builtins.go" and item.symbol == "loadFn"
+        for item in packet.primary_edit_targets
+    )
+
+
+def test_preservation_clause_cannot_grant_edit_authority_to_named_symbol() -> None:
+    documents = (
+        _document("src/mapping.py", "name_mapping", "def name_mapping(): pass"),
+        _document("src/name_style.py", "NameStyle", "class NameStyle: pass"),
+    )
+    task = (
+        "Fix `name_mapping` so aliases are deterministic. "
+        "The behavior must remain unaffected by `NameStyle`."
+    )
+
+    facets = compile_task_facets(task, documents)
+    edit_symbols = {symbol for facet in facets for symbol in facet.edit_symbols}
+
+    assert "name_mapping" in edit_symbols
+    assert "NameStyle" not in edit_symbols
+
+
+def test_value_kind_phrase_cannot_manufacture_generic_error_identity() -> None:
+    documents = (
+        _document("src/actions.py", "pin_action", "def pin_action(): pass"),
+        _document("src/errors.py", "Error", "class Error: pass"),
+    )
+    task = "Fix `pin_action` and preserve the error kind used for action-pinning."
+
+    facets = compile_task_facets(task, documents)
+    named = {symbol for facet in facets for symbol in facet.exact_symbols}
+    edit_symbols = {symbol for facet in facets for symbol in facet.edit_symbols}
+
+    assert "pin_action" in edit_symbols
+    assert "Error" not in named
 
 
 def test_prose_new_and_schema_words_do_not_mint_edit_authority() -> None:
@@ -1905,3 +1964,42 @@ def test_compiler_marks_greenfield_rust_file_as_proposal_not_repository_fact() -
     ]
     assert unresolved.status is RequirementCoverageStatus.UNCOVERED
     assert unresolved.requirement_id in packet.uncovered_requirements
+
+
+def test_public_entrypoint_constraint_is_delivered_without_edit_authority() -> None:
+    document = _document(
+        "repl/repl.go",
+        "BeginRepl",
+        "func BeginRepl(args []string, version string) {}",
+    )
+    repository = HybridRepository(
+        documents=(document,),
+        structural_links=(),
+        source_revision="source-1",
+        complete=True,
+        reason_codes=(),
+        source_file_count=1,
+        document_chars=len(document.text),
+    )
+
+    packet = RepositoryContextCompiler().compile(
+        repository,
+        _request("Preserve the public `BeginRepl(args []string, version string)` signature."),
+    )
+
+    assert packet.primary_edit_targets == ()
+    assert [item.path for item in packet.inspection_public_surface] == ["repl/repl.go"]
+    requirement = next(item for item in packet.task_requirements if item.entity == "BeginRepl")
+    assert requirement.intent is RequirementIntent.PRESERVE
+
+
+def test_behavior_clause_is_not_fabricated_as_an_edit_identity() -> None:
+    packet = RepositoryContextCompiler().compile(
+        _repository(),
+        _request("Ensure equivalent paths reuse one cache entry."),
+    )
+
+    responsibility = next(
+        item for item in packet.task_requirements if item.entity == "repository-responsibility"
+    )
+    assert responsibility.intent is RequirementIntent.BEHAVIOR

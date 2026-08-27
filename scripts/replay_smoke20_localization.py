@@ -28,30 +28,85 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+_COMPILER_INPUTS = (
+    "eval/benchmark_product_contract.json",
+    "gt_engine/task_contract.py",
+    "gt_engine/hybrid_repository.py",
+    "gt_engine/hybrid_retrieval.py",
+    "gt_engine/repository_context_compiler.py",
+    "gt_engine/repository_architecture.py",
+    "gt_engine/graph_db_projection.py",
+    "gt_engine/semantic_graph.py",
+    "gt_engine/dense_semantic_index.py",
+    "gt_harness/treatments.py",
+    "gt_harness/provider_planning.py",
+    "gt_harness/localization_truth.py",
+    "scripts/replay_smoke20_localization.py",
+)
+
+
+def _tracked_source_fingerprint(root: Path, relative_paths: tuple[str, ...]) -> str:
+    """Hash canonical Git objects while still detecting substantive local edits.
+
+    A clean checkout of one commit must have one compiler identity on every OS.
+    Reading worktree bytes violated that invariant because Git may materialize
+    LF blobs as CRLF. For clean paths we therefore bind to their committed blob
+    IDs. A real staged, unstaged, deleted, or untracked compiler input is bound
+    to normalized worktree content with an explicit ``DIRTY`` marker so a local
+    modification can never masquerade as the frozen compiler.
+    """
+
+    hasher = hashlib.sha256()
+    hasher.update(b"gt.compiler_fingerprint.v2\0")
+    for relative in relative_paths:
+        path = root / relative
+        hasher.update(relative.encode("utf-8"))
+        tracked = (
+            subprocess.run(
+                ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", relative],
+                text=True,
+                encoding="utf-8",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        unstaged_clean = (
+            subprocess.run(
+                ["git", "-C", str(root), "diff", "--quiet", "--", relative],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        staged_clean = (
+            subprocess.run(
+                ["git", "-C", str(root), "diff", "--cached", "--quiet", "--", relative],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        if tracked and unstaged_clean and staged_clean:
+            blob_oid = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", f"HEAD:{relative}"],
+                text=True,
+                encoding="utf-8",
+                stderr=subprocess.STDOUT,
+            ).strip()
+            hasher.update(b"\0CLEAN\0" + blob_oid.encode("ascii") + b"\0")
+            continue
+        content = path.read_bytes() if path.is_file() else b"<missing>"
+        content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        hasher.update(b"\0DIRTY\0" + hashlib.sha256(content).digest() + b"\0")
+    return hasher.hexdigest()
+
+
 def _compiler_fingerprint() -> str:
     """Bind reports to every implementation that can change delivered facts."""
 
     root = Path(__file__).resolve().parents[1]
-    hasher = hashlib.sha256()
-    for relative in (
-        "eval/benchmark_product_contract.json",
-        "gt_engine/task_contract.py",
-        "gt_engine/hybrid_repository.py",
-        "gt_engine/hybrid_retrieval.py",
-        "gt_engine/repository_context_compiler.py",
-        "gt_engine/repository_architecture.py",
-        "gt_engine/graph_db_projection.py",
-        "gt_engine/semantic_graph.py",
-        "gt_engine/dense_semantic_index.py",
-        "gt_harness/treatments.py",
-        "gt_harness/provider_planning.py",
-        "gt_harness/localization_truth.py",
-        "scripts/replay_smoke20_localization.py",
-    ):
-        path = root / relative
-        hasher.update(relative.encode("utf-8"))
-        hasher.update(b"\0" + path.read_bytes() + b"\0")
-    return hasher.hexdigest()
+    return _tracked_source_fingerprint(root, _COMPILER_INPUTS)
 
 
 def _git(root: Path, *args: str) -> str:

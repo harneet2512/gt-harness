@@ -321,8 +321,9 @@ source instead of the optimistic output label: exact identities, hybrid
 semantic support, and rank-only lexical/dense candidates remain distinct. A
 READY compiler packet cannot compact to metadata-only output. Unique exact
 owners remain single. An exact disconnected identity set outranks a heuristic
-owner for the same decision, and uncertain rank-only ownership is represented
-as a bounded two-candidate set rather than a false singleton. Public surface,
+owner for the same decision. Uncertain rank-only ownership is limited to one
+candidate per still-uncovered localization requirement and is suppressed once
+an exact edit seed exists. Public surface,
 integration, validation, process, impact, and new-file precedent remain
 separate roles. Provider receipts include a complete candidate ledger with
 role, authority, requirement bindings, serialized cost, rank, selection, and
@@ -340,3 +341,48 @@ implementation recall of 1.0. Neither replay grants edit authority, degrades
 the graph, or fails treatment delivery. The full Python suite, SQLite-FTS5 Go
 suite, changed-file Ruff, product lint, 25-document consistency audit, built
 wheel surface, and real CLI lifecycle pass locally.
+
+## 2026-08-27 proof-safe graph-to-provider closure
+
+The next root-cause pass found that GT was not merely ranking weak context. It
+was building exact call edges and then making them unusable: exact AST calls
+were stored as certified confidence-1.0 facts with
+`verification_status=unverified`, so the production context compiler rejected
+them. The pinned Go indexer now verifies only structurally proved same-file,
+import, and concrete typed-receiver calls; name-only and ambiguous resolutions
+remain unverified. The new source identity is
+`f66932b655486667bf8434fcb2d21e0c2448ea46a06c7e2236f30a8e74ae9d11`
+over 84 files.
+
+The rest of the correction is provider-boundary work, not benchmark hints:
+
+1. Dense decision queries cover the complete task contract instead of the
+   first six clauses.
+2. Task requirements distinguish edit, add, remove, preserve, forbid-edit,
+   inspect, validate, public/integration, and non-localizable behavior.
+3. Exact public constraints are routed to public-surface delivery without edit
+   authority.
+4. Exact edits suppress rank-only owner guesses. Verified graph integration
+   adjacent to the exact identity is delivered before lower-order coverage
+   noise.
+5. Provider selection is one immutable pass using exact compact-encoder costs;
+   update packets are observation-bound and cannot repeat delivered claims.
+6. TypeScript/JavaScript, Go, and Rust semantic facts now use pinned
+   Tree-sitter parses for assignment, return, and control dependencies;
+   malformed parses fail explicitly and never fall back to regex facts.
+7. Compiler fingerprints use committed Git blob identities for clean files and
+   normalized dirty-content markers for real changes, eliminating CRLF/OS
+   drift without hiding local modifications.
+
+The fresh local ABS production-path witness delivered exactly the reviewed
+implementation/public/integration paths at 499 tokens and scored precision,
+path recall, required coverage, and exact-edit precision of 1.0 with zero
+treatment failures. Focused Python and full Go suites pass, as do changed-file
+Ruff and real graph lifecycle tests. Full-repository Ruff still reports the
+pre-existing experimental-engine lint backlog and is not the canonical product
+lint gate.
+
+Status remains `NOT_CERTIFIED`: the implementation is ready for the immutable-
+SHA `prerelease_product_matrix.yml` Linux campaign, including all 20 provider-
+free localization tasks. No paid agent benchmark is authorized until that
+bundle passes.

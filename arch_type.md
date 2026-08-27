@@ -751,8 +751,9 @@ The provider boundary now has one selection policy. The compiler retains the
 complete typed evidence ledger; `gt_harness.provider_planning` selects a
 source/graph-generation-bound subset by requirement coverage, proof authority,
 decision role, serialized cost, and stable claim identity. It rejects edit
-claims without exact identity, records every omitted claim and reason, and
-searches for the largest plan that fits the actual 500/350-token serializer.
+claims without exact identity, records every omitted claim and reason, prices
+each claim through the final compact encoder, and selects exactly once against
+the actual 500/350-token ceiling.
 The previous role slices and emergency compaction sequence was deleted because
 it could discard a second requirement owner, silently change policy after
 selection, or collapse a fitting packet to zero evidence.
@@ -826,9 +827,46 @@ The provider must preserve localization uncertainty without flooding the
 agent. A unique exact edit or owner is a singleton. If an exact repository
 name resolves to disconnected definitions, its bounded ambiguity set outranks
 a heuristic single-file guess for the same decision. If no exact resolution
-exists, rank-only ownership may expose the compiler's first two candidates,
-each explicitly labeled `NOT_EDIT_AUTHORITY`; it may not silently collapse
+exists, rank-only ownership may expose at most one candidate for each still-
+uncovered localization requirement, explicitly labeled `NOT_EDIT_AUTHORITY`.
+Once an exact edit seed exists, rank-only owners are suppressed in favor of
+verified graph augmentation; the planner may not silently collapse
 uncertainty into a false authoritative owner or serialize an unbounded search
 result. Higher-order roles remain independently budgeted. The delivery receipt
 records every candidate's authority, requirements, rank, estimated cost,
 selection, and omission reason.
+
+### Proof-safe native augmentation closure (2026-08-27)
+
+The indexer previously emitted exact, single-candidate AST call resolutions
+with `confidence=1.0` and `trust_tier=CERTIFIED` but persisted
+`verification_status=unverified`. Production correctly rejected those edges,
+which meant graph construction succeeded while its strongest call facts never
+reached the provider. The source-built Go indexer now marks only proof-safe
+same-file/import calls and concrete typed-receiver calls as verified. Global
+name matches, receiver-blind uniqueness, ambiguous candidates, and sub-0.95
+facts remain unverified. Full, incremental, and multi-repository builds use
+the same proof function.
+
+Long issues are no longer localized from their first six clauses. A bounded
+decision-query compiler keeps the overview and deterministically samples the
+complete typed contract by directive strength, explicit target participation,
+lexical novelty, and positional separation. Behavioral clauses remain in the
+completion checklist but cannot fabricate graph owners. Exact edit, requested
+new symbol, preservation, public surface, integration, validation, and
+repository behavior are distinct typed intents.
+
+Provider delivery now follows the exact seed with verified, identity-adjacent
+graph integration before generic coverage noise. A rank-only file cannot gain
+authority merely because it covers a later clause. Public entrypoint
+constraints are delivered as public surfaces without becoming edit commands,
+and later updates remain observation-bound and claim-deduplicated.
+
+The local exact-revision ABS witness produced a READY hybrid graph and a
+499-token packet containing only `evaluator/functions.go` as exact edit,
+`repl/repl.go` as exact public surface, and `util/util.go` as verified
+integration. Against the reviewed oracle: exact-edit precision 1.0,
+implementation precision 1.0, implementation path recall 1.0, required fact
+coverage 1.0, and zero treatment failures. This one case proves the regression
+mechanism is repaired; it does not certify the twenty-task cohort. The exact-
+SHA Linux product matrix remains mandatory.

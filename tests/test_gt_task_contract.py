@@ -4,7 +4,14 @@ import os
 
 import pytest
 
-from gt_engine.task_contract import TaskResourceRole, extract_task_resources
+from gt_engine.task_contract import (
+    DirectiveKind,
+    MentionParticipation,
+    TaskResourceRole,
+    TextAuthority,
+    extract_task_contract,
+    extract_task_resources,
+)
 
 try:
     import groundtruth  # noqa: F401
@@ -15,6 +22,45 @@ except ImportError:
 
 
 requires_gt = pytest.mark.skipif(not HAVE_GT, reason="groundtruth not installed")
+
+
+def test_task_contract_types_edit_target_and_preservation_constraint() -> None:
+    contract = extract_task_contract(
+        "Fix `compile_graph` so updates are atomic. "
+        "The public API must remain unaffected by `LegacyGraph`."
+    )
+
+    modify = next(row for row in contract.obligations if "compile_graph" in row.text)
+    preserve = next(row for row in contract.obligations if "LegacyGraph" in row.text)
+    assert modify.directive_kind is DirectiveKind.MODIFY
+    assert preserve.directive_kind is DirectiveKind.PRESERVE
+    compile_graph = next(row for row in modify.mentions if row.text == "compile_graph")
+    legacy = next(row for row in preserve.mentions if row.text == "LegacyGraph")
+    assert compile_graph.participation is MentionParticipation.TARGET
+    assert compile_graph.authority is TextAuthority.CODE_CITATION
+    assert legacy.participation is MentionParticipation.CONSTRAINT
+
+
+def test_callable_signature_is_typed_and_host_git_instruction_is_excluded() -> None:
+    contract = extract_task_contract(
+        """Improve script handling.
+
+- Preserve the public `BeginRepl(args []string, version string)` signature.
+- Add `reset_loader_cache()` for explicit reset.
+
+IMPORTANT: Please work on this in a new branch from main and commit everything.
+"""
+    )
+
+    texts = tuple(item.text for item in contract.obligations)
+    assert all("new branch" not in text for text in texts)
+    mentions = {
+        mention.text: mention.participation
+        for obligation in contract.obligations
+        for mention in obligation.mentions
+    }
+    assert mentions["BeginRepl"] is MentionParticipation.CONSTRAINT
+    assert mentions["reset_loader_cache"] is MentionParticipation.TARGET
 
 
 def test_task_resources_use_clause_local_roles_for_artifact_task():

@@ -222,7 +222,7 @@ def test_unique_exact_owner_beats_ambiguity_for_same_requirement() -> None:
     assert plan.selected_claim_ids == ("exact-owner",)
 
 
-def test_rank_only_owner_delivery_is_a_bounded_two_candidate_set() -> None:
+def test_rank_only_owner_delivery_is_one_candidate_per_requirement() -> None:
     claims = tuple(
         _claim(
             f"owner-{index}",
@@ -242,7 +242,8 @@ def test_rank_only_owner_delivery_is_a_bounded_two_candidate_set() -> None:
             token_budget=30,
         )
 
-        assert plan.selected_claim_ids == ("owner-0", "owner-1")
+        assert plan.selected_claim_ids == ("owner-0",)
+        assert plan.omission_by_claim["owner-1"] is OmissionReason.REDUNDANT_COVERAGE
         assert plan.omission_by_claim["owner-2"] is OmissionReason.REDUNDANT_COVERAGE
 
 
@@ -298,4 +299,30 @@ def test_planner_drops_redundant_localization_family_noise() -> None:
     )
 
     assert plan.selected_claim_ids == ("exact-edit",)
-    assert plan.omission_by_claim["semantic-owner"] is OmissionReason.REDUNDANT_COVERAGE
+    assert plan.omission_by_claim["semantic-owner"] is OmissionReason.WEAKER_AUTHORITY
+
+
+def test_exact_edit_suppresses_rank_owner_for_a_different_requirement() -> None:
+    plan = ProviderContextPlanner().plan(
+        (
+            _claim(
+                "exact-edit",
+                role=ClaimRole.EDIT,
+                authority=ClaimAuthority.EXACT_IDENTITY,
+                requirements=("exact-requirement",),
+                tokens=10,
+            ),
+            _claim(
+                "rank-owner",
+                role=ClaimRole.IMPLEMENTATION_OWNER,
+                authority=ClaimAuthority.RANK_SUPPORT,
+                requirements=("unresolved-requirement",),
+                tokens=10,
+            ),
+        ),
+        requirement_ids=("exact-requirement", "unresolved-requirement"),
+        token_budget=20,
+    )
+
+    assert plan.selected_claim_ids == ("exact-edit",)
+    assert plan.omission_by_claim["rank-owner"] is OmissionReason.WEAKER_AUTHORITY

@@ -633,7 +633,7 @@ func main() {
 			TrustTier:          rc.TrustTier,
 			CandidateCount:     rc.CandidateCount,
 			EvidenceType:       rc.EvidenceType,
-			VerificationStatus: "unverified",
+			VerificationStatus: resolvedCallVerificationStatus(rc),
 		}
 	}
 	if err := db.BatchInsertEdges(edgePtrs); err != nil {
@@ -1489,7 +1489,7 @@ func runIncremental(root, relpath, dbPath string) error {
 			TrustTier:          rc.TrustTier,
 			CandidateCount:     rc.CandidateCount,
 			EvidenceType:       rc.EvidenceType,
-			VerificationStatus: "unverified",
+			VerificationStatus: resolvedCallVerificationStatus(rc),
 		}
 	}
 	if err := store.BatchInsertEdgesTx(tx, edgePtrs); err != nil {
@@ -1787,6 +1787,29 @@ func receiverEdgeMetadata(rc resolver.ResolvedCall) string {
 		return ""
 	}
 	return "receiver_type=" + rc.ReceiverType
+}
+
+// resolvedCallVerificationStatus is the proof boundary between resolver rank
+// and provider-visible graph truth. A high confidence score alone is not a
+// proof: global name matches and receiver-blind unique-name fallbacks remain
+// unverified even when their numeric score reaches the certified tier.
+//
+// Same-file and import resolutions are exact AST identities. Receiver-based
+// resolutions are verified only when the resolver retained the concrete
+// receiver type that justifies the edge. Every other method stays quiet.
+func resolvedCallVerificationStatus(rc resolver.ResolvedCall) string {
+	if rc.CandidateCount != 1 || rc.Confidence < 0.95 || rc.TrustTier != "CERTIFIED" {
+		return "unverified"
+	}
+	switch rc.Method {
+	case "same_file", "import":
+		return "verified"
+	case "import_type", "type_flow", "return_type", "field_based":
+		if rc.ReceiverType != "" {
+			return "verified"
+		}
+	}
+	return "unverified"
 }
 
 // computeMedianConfidence returns the P50 of confidences across all resolved

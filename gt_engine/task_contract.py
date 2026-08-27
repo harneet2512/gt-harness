@@ -24,7 +24,9 @@ _DIRECTIVE_RE = re.compile(
     r"supports|has support|keep|do not|don't|never|be careful|has to|need to|"
     r"make sure|call your|put it in|produce|generate|replace|remove|reconstruct|"
     r"source the|mimics?|fix|fixes|fixed|fixing|update|updates|updated|updating|"
-    r"patch|patches|patched|patching|refactor|bug|bugs|bugged)\b"
+    r"patch|patches|patched|patching|refactor|expose|exposes|normalize|normalizes|"
+    r"improve|improves|improved|improving|"
+    r"harden|hardens|hardened|hardening|bug|bugs|bugged)\b"
 )
 
 _HARNESS_SCAFFOLD_HEADINGS = frozenset(
@@ -36,6 +38,9 @@ _HARNESS_SCAFFOLD_HEADINGS = frozenset(
 )
 _HARNESS_SCAFFOLD_START_RE = re.compile(
     r"(?i)^you can execute bash commands and edit files to implement the necessary changes\.?$"
+)
+_VERSION_CONTROL_SCAFFOLD_RE = re.compile(
+    r"(?i)^important:\s*please\s+work\s+on\s+this\s+in\s+a\s+new\s+branch\b"
 )
 
 
@@ -51,6 +56,8 @@ def _task_issue_core(issue_text: str) -> str:
     kept: list[str] = []
     for raw in (issue_text or "").splitlines():
         stripped = raw.strip()
+        if _VERSION_CONTROL_SCAFFOLD_RE.match(stripped):
+            break
         if _HARNESS_SCAFFOLD_START_RE.fullmatch(stripped):
             break
         if stripped.startswith("#"):
@@ -68,6 +75,13 @@ _DATA_TRANSFORM_RE = re.compile(
     r"input_data|output_data|plan_b\d|transform)\b"
 )
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{2,}")
+_CODE_MENTION_RE = re.compile(
+    r"(?:`|'|\")(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)(?:`|'|\")"
+)
+_BACKTICK_CALLABLE_RE = re.compile(
+    r"`\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[.#])[A-Za-z_][A-Za-z0-9_]*)*)"
+    r"\s*\([^`\r\n]*\)\s*`"
+)
 _STOPWORDS = frozenset(
     {
         "about",
@@ -110,12 +124,50 @@ _STOPWORDS = frozenset(
 )
 
 
+class DirectiveKind(StrEnum):
+    """Normative operation requested by one task clause."""
+
+    MODIFY = "MODIFY"
+    ADD = "ADD"
+    REMOVE = "REMOVE"
+    PRESERVE = "PRESERVE"
+    FORBID_EDIT = "FORBID_EDIT"
+    INSPECT = "INSPECT"
+    VALIDATE = "VALIDATE"
+
+
+class MentionParticipation(StrEnum):
+    """Whether a named artifact is an edit target, constraint, or context."""
+
+    TARGET = "TARGET"
+    CONSTRAINT = "CONSTRAINT"
+    CONTEXT = "CONTEXT"
+
+
+class TextAuthority(StrEnum):
+    """Syntactic strength of an artifact mention in the task text."""
+
+    PLAIN_PROSE = "PLAIN_PROSE"
+    CODE_CITATION = "CODE_CITATION"
+    QUALIFIED_CITATION = "QUALIFIED_CITATION"
+    LITERAL_PATH = "LITERAL_PATH"
+
+
+@dataclass(frozen=True)
+class TaskMention:
+    text: str
+    participation: MentionParticipation
+    authority: TextAuthority
+
+
 @dataclass(frozen=True)
 class Obligation:
     obligation_id: str
     text: str
     source: str
     subjects: tuple[str, ...] = ()
+    directive_kind: DirectiveKind = DirectiveKind.MODIFY
+    mentions: tuple[TaskMention, ...] = ()
 
 
 class TaskResourceRole(StrEnum):
@@ -734,6 +786,74 @@ def _role(issue_text: str) -> str:
     return "code_behavior"
 
 
+def classify_directive_kind(text: str) -> DirectiveKind:
+    value = str(text or "")
+    positive_change = re.search(
+        r"(?i)\b(?:add|change|create|expose|extend|fix|harden|implement|improve|modify|"
+        r"normalize|patch|refactor|remove|replace|support|update|wire)\b",
+        value,
+    )
+    # Negative and preservation clauses take precedence over a nearby positive
+    # modal such as ``must``. They constrain a change; they never authorize one.
+    if re.search(r"(?i)\b(?:do not|don't|never)\s+(?:edit|modify|change|remove|touch)\b", value):
+        return DirectiveKind.FORBID_EDIT
+    if not positive_change and re.search(
+        r"(?i)\b(?:remain(?:s|ed)?\s+(?:unchanged|unaffected|compatible)|"
+        r"unaffected by|preserve|keep\s+(?:the\s+)?(?:existing|current|unchanged)|"
+        r"without\s+(?:changing|modifying|editing|breaking))\b",
+        value,
+    ):
+        return DirectiveKind.PRESERVE
+    if re.search(r"(?i)\b(?:remove|delete|drop|eliminate)\b", value):
+        return DirectiveKind.REMOVE
+    if re.search(r"(?i)\b(?:add|create|introduce|new|generate|write)\b", value):
+        return DirectiveKind.ADD
+    if re.search(
+        r"(?i)\b(?:verify|validate|confirm|run|execute)\s+(?:the\s+)?(?:tests?|checks?)?\b",
+        value,
+    ):
+        return DirectiveKind.VALIDATE
+    if re.search(r"(?i)\b(?:inspect|find|locate|identify|determine|explain|read)\b", value):
+        return DirectiveKind.INSPECT
+    return DirectiveKind.MODIFY
+
+
+def _typed_mentions(text: str, kind: DirectiveKind) -> tuple[TaskMention, ...]:
+    participation = (
+        MentionParticipation.CONSTRAINT
+        if kind in {DirectiveKind.PRESERVE, DirectiveKind.FORBID_EDIT}
+        else MentionParticipation.CONTEXT
+        if kind in {DirectiveKind.INSPECT, DirectiveKind.VALIDATE}
+        else MentionParticipation.TARGET
+    )
+    mentions: list[TaskMention] = []
+    seen: set[str] = set()
+    code_matches = (
+        *(match.group("name") for match in _CODE_MENTION_RE.finditer(text or "")),
+        *(match.group("name") for match in _BACKTICK_CALLABLE_RE.finditer(text or "")),
+    )
+    for value in code_matches:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        authority = (
+            TextAuthority.QUALIFIED_CITATION
+            if "::" in value or "." in value
+            else TextAuthority.CODE_CITATION
+        )
+        mentions.append(TaskMention(value, participation, authority))
+    # Literal source/configuration paths have explicit identity even when they
+    # are not wrapped in Markdown code formatting.
+    for _start, _end, path in _resource_occurrences(text or ""):
+        key = path.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        mentions.append(TaskMention(path, participation, TextAuthority.LITERAL_PATH))
+    return tuple(mentions)
+
+
 def _task_mode(issue_text: str) -> TaskMode:
     text = (issue_text or "").lower()
     if re.search(r"\b(server|service|daemon|listen|endpoint|http)\b", text):
@@ -796,6 +916,8 @@ def extract_task_contract(issue_text: str) -> TaskContract:
                 text=text[:500],
                 source=source,
                 subjects=_subjects(text),
+                directive_kind=(kind := classify_directive_kind(text)),
+                mentions=_typed_mentions(text, kind),
             )
         )
     frozen = tuple(obligations)
