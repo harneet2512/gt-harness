@@ -472,7 +472,10 @@ jobs:
                   continue
               if row.get("task_name") and row.get("trial_name"):
                   trial_rows.append(row)
-          observed_trials = [str(row["task_name"]).split("__", 1)[0] for row in trial_rows]
+          def normalized_task_name(value):
+              return str(value).split("__", 1)[0].rsplit("/", 1)[-1]
+
+          observed_trials = [normalized_task_name(row["task_name"]) for row in trial_rows]
           if len(observed_trials) != 20 or set(observed_trials) != expected_set:
               errors.append("trial_task_set_mismatch")
           if len(observed_trials) != len(set(observed_trials)):
@@ -590,7 +593,7 @@ jobs:
 
           outcomes = {}
           for row in trial_rows:
-              task = str(row["task_name"]).split("__", 1)[0]
+              task = normalized_task_name(row["task_name"])
               verifier = row.get("verifier_result") or {}
               rewards = verifier.get("rewards") or {}
               reward = rewards.get("reward")
