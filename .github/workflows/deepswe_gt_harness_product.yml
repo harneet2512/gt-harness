@@ -1,0 +1,657 @@
+name: "GT Harness: DeepSWE product smoke20"
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_ref:
+        description: "Immutable GT Harness commit or branch to evaluate"
+        required: false
+        type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: string
+        default: groundtruth
+  workflow_call:
+    inputs:
+      code_ref:
+        description: "Immutable GT Harness commit or branch to evaluate"
+        required: false
+        type: string
+      treatment:
+        description: "Treatment arm: bare control or groundtruth"
+        required: false
+        type: string
+        default: groundtruth
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: gt-harness-deepswe20-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.cohort.outputs.matrix }}
+      source_sha: ${{ steps.source.outputs.sha }}
+      task_count: ${{ steps.cohort.outputs.task_count }}
+      task_order_sha256: ${{ steps.cohort.outputs.task_order_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.code_ref || github.sha }}
+
+      - name: Resolve the immutable GT Harness source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout the immutable DeepSWE snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: datacurve-ai/deep-swe
+          ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
+          path: deepswe-bench
+
+      - name: Resolve and attest the balanced DeepSWE smoke20 cohort
+        id: cohort
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tomllib
+          from pathlib import Path
+
+          from scripts.resolve_harbor_budget import (
+              SUPERVISOR_GRACE_SECONDS,
+              resolve_budget,
+          )
+
+          manifest_path = Path("eval/deepswe_smoke20_v1.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          bench = Path("deepswe-bench")
+          if manifest.get("schema") != "gt.deepswe_smoke20.v1":
+              raise SystemExit("invalid DeepSWE smoke20 manifest schema")
+          if manifest.get("benchmark_sha") != "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9":
+              raise SystemExit("DeepSWE manifest revision mismatch")
+          if os.popen("git -C deepswe-bench rev-parse HEAD").read().strip() != manifest["benchmark_sha"]:
+              raise SystemExit("checked-out DeepSWE revision mismatch")
+
+          tasks = list(manifest.get("task_ids") or [])
+          if len(tasks) != 20 or len(set(tasks)) != 20:
+              raise SystemExit("DeepSWE smoke20 must contain 20 unique tasks")
+          order_hash = hashlib.sha256(("\n".join(tasks) + "\n").encode()).hexdigest()
+          if order_hash != manifest.get("task_order_sha256"):
+              raise SystemExit("DeepSWE smoke20 order hash mismatch")
+
+          language_counts = {}
+          matrix = []
+          for ordinal, task in enumerate(tasks, start=1):
+              config = bench / "tasks" / task / "task.toml"
+              if not config.is_file():
+                  raise SystemExit(f"missing DeepSWE task: {task}")
+              with config.open("rb") as handle:
+                  task_config = tomllib.load(handle)
+              language = str((task_config.get("metadata") or {}).get("language") or "unknown")
+              language_counts[language] = language_counts.get(language, 0) + 1
+              budget = resolve_budget(config, multiplier=1.0)
+              matrix.append(
+                  {
+                      "ordinal": ordinal,
+                      "task": task,
+                      "language": language,
+                      "outer_agent_timeout_seconds": int(budget["execution_budget_sec"]),
+                      "time_budget_seconds": max(
+                          30,
+                          int(float(budget["execution_budget_sec"]) - SUPERVISOR_GRACE_SECONDS),
+                      ),
+                      "task_config_sha256": budget["task_config_sha256"],
+                  }
+              )
+          if language_counts != manifest.get("language_counts"):
+              raise SystemExit(
+                  f"DeepSWE language balance mismatch: {language_counts!r}"
+              )
+          treatment = os.environ["TREATMENT"].strip().lower()
+          if treatment not in {"bare", "groundtruth"}:
+              raise SystemExit(f"unsupported treatment: {treatment!r}")
+
+          receipt = {
+              "schema": "gt.deepswe_gt_harness_plan.v1",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "benchmark_sha": manifest["benchmark_sha"],
+              "task_ids": tasks,
+              "task_count": len(tasks),
+              "task_order_sha256": order_hash,
+              "language_counts": language_counts,
+              "attempts_per_task": 1,
+              "max_parallel": 20,
+              "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent",
+              "agent_scaffold": "mini-swe-agent",
+              "agent_scaffold_version": "2.4.6",
+              "treatment": treatment,
+              "requested_model": "deepseek-v4-flash",
+              "effective_model": "openai/deepseek-v4-flash",
+              "provider": "deepseek:native:api.deepseek.com",
+              "baseline": manifest["baseline"],
+              "matrix": matrix,
+          }
+          Path("deepswe20-plan.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("matrix=" + json.dumps({"include": matrix}, separators=(",", ":")) + "\n")
+              output.write(f"task_count={len(tasks)}\n")
+              output.write(f"task_order_sha256={order_hash}\n")
+          PY
+
+      - name: Upload the immutable DeepSWE plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-deepswe20-plan-${{ github.run_id }}
+          path: deepswe20-plan.json
+          if-no-files-found: error
+
+  provider_gate:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Verify the pinned native DeepSeek Flash route
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+        run: |
+          set -uo pipefail
+          attempts=0
+          success=false
+          status_codes=""
+          while [ "$attempts" -lt 20 ]; do
+            attempts=$((attempts + 1))
+            status="$({
+              curl --silent --show-error --max-time 30 \
+                --output "$RUNNER_TEMP/provider-gate-response.json" \
+                --write-out '%{http_code}' \
+                https://api.deepseek.com/models \
+                --header "Authorization: Bearer $DEEPSEEK_API_KEY" \
+                --header 'Accept: application/json'
+            } 2>/dev/null || true)"
+            status_codes="${status_codes}${status_codes:+,}${status:-000}"
+            case "$status" in
+              2??)
+                if python -c 'import json,os,pathlib; payload=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-gate-response.json").read_text(encoding="utf-8")); models={str(row.get("id")) for row in payload.get("data",[]) if isinstance(row,dict) and row.get("id")}; assert "deepseek-v4-flash" in models, "native DeepSeek catalog lacks deepseek-v4-flash"'; then
+                  success=true
+                fi
+                break ;;
+              429|500|502|503|504|000) sleep 60 ;;
+              *) break ;;
+            esac
+          done
+          export ATTEMPTS="$attempts" STATUS_CODES="$status_codes" SUCCESS="$success"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          receipt = {
+              "schema": "gt.provider_availability_gate.v1",
+              "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "model": "deepseek-v4-flash",
+              "provider": "deepseek:native:api.deepseek.com",
+              "attempts": int(os.environ["ATTEMPTS"]),
+              "http_statuses": [
+                  int(value) for value in os.environ["STATUS_CODES"].split(",") if value
+              ],
+              "catalog_requests_outside_task_metrics": int(os.environ["ATTEMPTS"]),
+              "provider_calls_outside_task_metrics": 0,
+          }
+          Path("provider-gate.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(receipt, indent=2, sort_keys=True))
+          PY
+          test "$success" = true
+
+      - name: Upload provider availability receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-deepswe20-provider-gate-${{ github.run_id }}
+          path: provider-gate.json
+          if-no-files-found: error
+
+  task:
+    needs: [plan, provider_gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      # The frozen DeepSWE smoke has 20 independent tasks. Run the complete
+      # cohort concurrently; provider throttling is recorded as infrastructure
+      # evidence and never reclassified as a task solve/loss.
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      TASK: ${{ matrix.task }}
+      ORDINAL: ${{ matrix.ordinal }}
+      MODEL: deepseek-v4-flash
+      GT_RETRIEVAL_MODE: hybrid_required
+      GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+
+      - name: Checkout the immutable DeepSWE snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: datacurve-ai/deep-swe
+          ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
+          path: deepswe-bench
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/gt-index-src/go.mod
+          cache-dependency-path: vendor/gt-index-src/go.sum
+
+      - name: Build the checked-in static graph indexer
+        working-directory: vendor/gt-index-src
+        env:
+          CGO_ENABLED: "1"
+          CC: musl-gcc
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+          go test -tags sqlite_fts5 ./...
+          go build -tags sqlite_fts5 \
+            -ldflags '-linkmode external -extldflags "-static"' \
+            -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
+          file "$RUNNER_TEMP/gt-index" | grep -F "statically linked"
+          if readelf -d "$RUNNER_TEMP/gt-index" 2>&1 | grep -q '(NEEDED)'; then
+            echo "gt-index contains a dynamic-library dependency" >&2
+            exit 1
+          fi
+          chmod 755 "$RUNNER_TEMP/gt-index"
+          echo "GT_INDEX_BINARY_HOST=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+
+      - name: Authenticate Docker Hub account for task image pulls
+        env:
+          DOCKERHUB_USERNAME_PRIMARY: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN_PRIMARY: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME_ROTATION: ${{ secrets.DOCKERHUB_USERNAME_ROTATION }}
+          DOCKERHUB_TOKEN_ROTATION: ${{ secrets.DOCKERHUB_TOKEN_ROTATION }}
+        run: |
+          set -euo pipefail
+          if [ "$(( ORDINAL % 2 ))" -eq 0 ]; then
+            user="$DOCKERHUB_USERNAME_PRIMARY"
+            token="$DOCKERHUB_TOKEN_PRIMARY"
+          else
+            user="$DOCKERHUB_USERNAME_ROTATION"
+            token="$DOCKERHUB_TOKEN_ROTATION"
+          fi
+          test -n "$user" -a -n "$token"
+          printf '%s' "$token" | docker login docker.io --username "$user" --password-stdin
+
+      - name: Authenticate public ECR for DeepSWE task image pulls
+        run: |
+          set -uo pipefail
+          # DeepSWE task images are public.ecr.aws images. Docker Hub login
+          # does not authorize this registry. The public registry token keeps
+          # the 20-task matrix from falling back to anonymous ECR pulls.
+          # The registry's bearer token endpoint is not a Docker Basic-auth
+          # endpoint; piping its bearer token to `docker login` returns HTTP
+          # 400 on GitHub-hosted runners.  Anonymous pulls are supported, so
+          # do not turn an optional optimization into a task failure.  The
+          # stagger below prevents the 20-job matrix from creating a burst.
+          token="$(curl --fail --silent --show-error \
+            'https://public.ecr.aws/token/?scope=repository:d3j8x8q7/swe-bench-202605:pull&service=public.ecr.aws' \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)"
+          if [ -n "$token" ] && printf '%s' "$token" | docker login public.ecr.aws --username AWS --password-stdin; then
+            echo "Public ECR authentication configured"
+          else
+            echo "Public ECR authenticated pull unavailable; using staggered anonymous pull"
+          fi
+
+      - name: Stagger Docker task-image pulls
+        run: |
+          set -euo pipefail
+          # GitHub-hosted runners have isolated Docker daemons. Keep all 20
+          # jobs parallel, but avoid a synchronized Docker Hub pull burst.
+          delay=$(( (ORDINAL - 1) * 30 ))
+          echo "Waiting ${delay}s before the task image pull"
+          sleep "$delay"
+
+      - name: Install Pier and the canonical product source
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[retrieval,eval]' \
+            "mini-swe-agent==2.4.6" "harbor==0.20.0" "datacurve-pier==0.3.1"
+          test "$(python -c 'import importlib.metadata as m; print(m.version("mini-swe-agent"))')" = "2.4.6"
+          test "$(python -c 'import importlib.metadata as m; print(m.version("datacurve-pier"))')" = "0.3.1"
+
+      - name: Provision the pinned local retrieval model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"
+          mkdir -p "$model_dir"
+          gh release download gt-retrieval-runtime-v1 \
+            --repo harneet2512/gt-harness \
+            --pattern model.onnx --pattern tokenizer.json --pattern manifest.json \
+            --dir "$model_dir"
+          echo "564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971  $model_dir/model.onnx" | sha256sum -c -
+          echo "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854  $model_dir/tokenizer.json" | sha256sum -c -
+          echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
+
+      - name: Run DeepSWE through the released gt-harness run boundary
+        env:
+          OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_BASE_URL: https://api.deepseek.com
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
+        run: |
+          set -euo pipefail
+          pier run \
+            -p deepswe-bench/tasks \
+            --include-task-name "$TASK" \
+            --agent-import-path eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent \
+            -m "$MODEL" \
+            -o results/deepswe \
+            --job-name "deepswe-gt-harness-${GITHUB_RUN_ID}-${TASK}" \
+            --agent-timeout-multiplier 1.0 \
+            -n 1 \
+            -y \
+            --ak task_id="$TASK" \
+            --ak product_source_sha="${{ needs.plan.outputs.source_sha }}" \
+            --ak temperature=1.0 \
+            --ak max_iterations=300 \
+            --ak time_budget_seconds="${{ matrix.time_budget_seconds }}"
+
+      - name: Bind the Pier reward to the canonical product receipt
+        if: always()
+        run: |
+          python -m scripts.standardize_benchmark_result \
+            --root results/deepswe \
+            --suite deepswe \
+            --task-id "$TASK" \
+            --source-sha "${{ needs.plan.outputs.source_sha }}"
+
+      - name: Upload DeepSWE verifier and GT Harness product evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-deepswe20-task-${{ matrix.ordinal }}-${{ github.run_id }}
+          path: results/deepswe/
+          if-no-files-found: error
+
+  attest:
+    if: always()
+    needs: [plan, provider_gate, task]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+
+      - name: Download immutable plan
+        uses: actions/download-artifact@v4
+        with:
+          name: gt-harness-deepswe20-plan-${{ github.run_id }}
+          path: attestation
+
+      - name: Download provider gate
+        uses: actions/download-artifact@v4
+        with:
+          name: gt-harness-deepswe20-provider-gate-${{ github.run_id }}
+          path: attestation
+
+      - name: Download all task artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gt-harness-deepswe20-task-*-${{ github.run_id }}
+          path: attestation/tasks
+          merge-multiple: true
+
+      - name: Verify all DeepSWE outcomes and product receipts
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          TASK_JOB_RESULT: ${{ needs.task.result }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from gt_harness.analysis.delivery import audit_treatment_delivery
+
+          root = Path("attestation")
+          plan = json.loads((root / "deepswe20-plan.json").read_text(encoding="utf-8"))
+          provider_gate = json.loads((root / "provider-gate.json").read_text(encoding="utf-8"))
+          expected = list(plan["task_ids"])
+          expected_set = set(expected)
+          expected_budgets = {
+              row["task"]: str(row["time_budget_seconds"]) for row in plan["matrix"]
+          }
+          errors = []
+          if provider_gate.get("status") != "PASS":
+              errors.append("provider_gate_failed")
+          if provider_gate.get("source_sha") != os.environ["SOURCE_SHA"]:
+              errors.append("provider_gate_source_sha_mismatch")
+
+          trial_rows = []
+          for path in (root / "tasks").rglob("result.json"):
+              try:
+                  row = json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError) as exc:
+                  errors.append(f"invalid_result:{path}:{type(exc).__name__}")
+                  continue
+              if row.get("task_name") and row.get("trial_name"):
+                  trial_rows.append(row)
+          observed_trials = [str(row["task_name"]).split("__", 1)[0] for row in trial_rows]
+          if len(observed_trials) != 20 or set(observed_trials) != expected_set:
+              errors.append("trial_task_set_mismatch")
+          if len(observed_trials) != len(set(observed_trials)):
+              errors.append("duplicate_trial_task")
+
+          adapters = {}
+          for path in (root / "tasks").rglob("agent/benchmark-adapter.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              task = str(row.get("task_id") or "")
+              adapters[task] = row
+              if row.get("product_command") != "gt-harness run" or row.get("attempt") != 1:
+                  errors.append(f"adapter_contract_mismatch:{task}")
+              if row.get("treatment") != plan.get("treatment"):
+                  errors.append(f"adapter_treatment_mismatch:{task}")
+              if row.get("requested_model") != "deepseek-v4-flash":
+                  errors.append(f"requested_model_mismatch:{task}")
+              if row.get("effective_model") != "openai/deepseek-v4-flash":
+                  errors.append(f"effective_model_mismatch:{task}")
+              if row.get("agent_scaffold_version") != "2.4.6":
+                  errors.append(f"scaffold_version_mismatch:{task}")
+              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"adapter_source_sha_mismatch:{task}")
+              if str(row.get("time_budget_seconds")) != expected_budgets.get(task):
+                  errors.append(f"adapter_time_budget_mismatch:{task}")
+          if set(adapters) != expected_set:
+              errors.append("adapter_receipt_task_set_mismatch")
+
+          product_runs = {}
+          product_rows = []
+          for path in (root / "tasks").rglob("agent/gt-run.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              task = str(row.get("task_id") or "")
+              product_runs[task] = row
+              if row.get("status") != "COMPLETED":
+                  errors.append(f"product_error:{task}:{row.get('error_type') or row.get('status') or 'unknown'}")
+              trajectory_path = path.with_name("gt-run.trajectory.json")
+              if not trajectory_path.is_file():
+                  errors.append(f"missing_full_trajectory:{task}")
+              else:
+                  trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+                  if not isinstance(trajectory.get("messages"), list):
+                      errors.append(f"invalid_full_trajectory:{task}")
+                  calls = ((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls")
+                  if calls is None:
+                      errors.append(f"missing_trajectory_provider_calls:{task}")
+                  elif int(row.get("provider_calls") or 0) != int(calls):
+                      errors.append(f"provider_call_receipt_mismatch:{task}")
+
+              treatment = row.get("treatment_receipt")
+              if not isinstance(treatment, dict):
+                  errors.append(f"missing_treatment_receipt:{task}")
+                  continue
+              if treatment.get("treatment_status") == "FAILED":
+                  errors.append(f"treatment_failed:{task}")
+              if int(treatment.get("delivery_count") or 0) > 4:
+                  errors.append(f"delivery_limit_exceeded:{task}")
+              for delivery in treatment.get("delivery_receipts") or []:
+                  if not delivery.get("same_observation"):
+                      errors.append(f"late_delivery:{task}")
+              deliveries = treatment.get("provider_delivery_receipts") or []
+              for delivery in deliveries:
+                  token_limit = 500 if delivery.get("kind") == "repository_start" else 350
+                  if int(delivery.get("context_token_count") or 0) > token_limit:
+                      errors.append(f"delivery_context_budget_exceeded:{task}")
+              if sum(
+                  int(delivery.get("context_token_count") or 0)
+                  for delivery in deliveries
+              ) > 1200:
+                  errors.append(f"total_context_budget_exceeded:{task}")
+              if treatment.get("treatment_status") == "ACTIVE":
+                  delivery_audit = audit_treatment_delivery(
+                      treatment,
+                      initial_context=str(row.get("initial_context") or ""),
+                      repository_end=row.get("repository_end") or {},
+                  )
+                  errors.extend(
+                      f"delivery_audit:{task}:{reason}"
+                      for reason in delivery_audit["failures"]
+                  )
+                  if not treatment.get("graph_available") or treatment.get("graph_status") not in {
+                      "READY",
+                      "READY_WITH_DECLARED_LIMITATIONS",
+                  }:
+                      errors.append(f"active_graph_not_ready:{task}")
+                  dense = treatment.get("dense_index_receipt") or {}
+                  if treatment.get("retrieval_mode") != "hybrid_required" or not dense.get("query_ready"):
+                      errors.append(f"active_dense_not_ready:{task}")
+              product_rows.append(
+                  {
+                      "task": task,
+                      "status": row.get("status"),
+                      "provider_calls": int(row.get("provider_calls") or 0),
+                      "input_tokens": int(row.get("input_tokens") or 0),
+                      "cached_tokens": int(row.get("cached_tokens") or 0),
+                      "output_tokens": int(row.get("output_tokens") or 0),
+                      "treatment_status": treatment.get("treatment_status"),
+                      "graph_status": treatment.get("graph_status"),
+                      "delivery_count": int(treatment.get("delivery_count") or 0),
+                  }
+              )
+          if set(product_runs) != expected_set:
+              errors.append("product_receipt_task_set_mismatch")
+
+          official_results = {}
+          for path in (root / "tasks").rglob("agent/official-verifier-result.json"):
+              row = json.loads(path.read_text(encoding="utf-8"))
+              task = str(row.get("task_id") or "")
+              official_results[task] = row
+              if row.get("status") != "GRADED":
+                  errors.append(f"official_verifier_ungraded:{task}")
+              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"official_verifier_source_mismatch:{task}")
+          if set(official_results) != expected_set:
+              errors.append("official_verifier_task_set_mismatch")
+
+          outcomes = {}
+          for row in trial_rows:
+              task = str(row["task_name"]).split("__", 1)[0]
+              verifier = row.get("verifier_result") or {}
+              rewards = verifier.get("rewards") or {}
+              reward = rewards.get("reward")
+              outcomes[task] = {
+                  "graded": reward is not None,
+                  "reward": reward,
+                  "solved": reward == 1 or reward == 1.0,
+                  "exception": (row.get("exception_info") or {}).get("exception_type"),
+              }
+
+          solved = sum(1 for row in outcomes.values() if row["solved"])
+          graded = sum(1 for row in outcomes.values() if row["graded"])
+          receipt = {
+              "schema": "gt.deepswe_gt_harness_attestation.v1",
+              "status": "PASS" if not errors else "FAIL",
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "benchmark_sha": plan["benchmark_sha"],
+              "task_job_result": os.environ["TASK_JOB_RESULT"],
+              "task_count": plan["task_count"],
+              "task_ids": expected,
+              "task_order_sha256": plan["task_order_sha256"],
+              "language_counts": plan["language_counts"],
+              "requested_model": plan["requested_model"],
+              "effective_model": plan["effective_model"],
+              "agent": plan["agent"],
+              "agent_scaffold_version": plan["agent_scaffold_version"],
+              "treatment": plan["treatment"],
+              "provider_gate": provider_gate,
+              "baseline": plan["baseline"],
+              "graded": graded,
+              "solved": solved,
+              "outcomes": outcomes,
+              "official_verifier_tasks": sorted(official_results),
+              "product_totals": {
+                  "provider_calls": sum(row["provider_calls"] for row in product_rows),
+                  "input_tokens": sum(row["input_tokens"] for row in product_rows),
+                  "cached_tokens": sum(row["cached_tokens"] for row in product_rows),
+                  "output_tokens": sum(row["output_tokens"] for row in product_rows),
+                  "deliveries": sum(row["delivery_count"] for row in product_rows),
+              },
+              "product_rows": sorted(product_rows, key=lambda row: row["task"]),
+              "observed_trial_tasks": sorted(observed_trials),
+              "adapter_receipt_tasks": sorted(adapters),
+              "product_receipt_tasks": sorted(product_runs),
+              "errors": errors,
+          }
+          if receipt["source_sha"] != plan.get("source_sha"):
+              errors.append("source_sha_mismatch")
+              receipt["status"] = "FAIL"
+          output = root / "deepswe20-attestation.json"
+          output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          print(json.dumps(receipt, indent=2, sort_keys=True))
+          if errors:
+              raise SystemExit("DeepSWE GT Harness attestation failed")
+          PY
+
+      - name: Upload final DeepSWE GT Harness attestation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-harness-deepswe20-attestation-${{ github.run_id }}
+          path: attestation/deepswe20-attestation.json
+          if-no-files-found: error
