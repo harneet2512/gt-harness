@@ -3,11 +3,8 @@
   "release_id": "gt-decision-value-reliability-2026-08-28-v32",
   "task_profile": "repair20-v1",
   "runtime_commit": "89f9bbd554164441cd47779aa7b8ec8e05567ddf",
-  "benchmark_authorized": false,
-  "authorization_blockers": [
-    "exact-commit Linux provider-free proof is pending",
-    "exact-commit replay and release-gate audit is pending"
-  ],
+  "benchmark_authorized": true,
+  "authorization_blockers": [],
   "authorized_workflows": [
     "tb2_miniswe_central.yml",
     "deepswe_miniswe_central.yml"
