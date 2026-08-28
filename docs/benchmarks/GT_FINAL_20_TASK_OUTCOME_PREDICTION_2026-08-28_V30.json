@@ -1,0 +1,19 @@
+{
+  "schema": "gt.final_20_task_outcome_prediction.v2",
+  "prediction_version": "V30",
+  "supersedes": "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-28_V29.json",
+  "frozen_at": "2026-08-28",
+  "prediction_before_outcome": true,
+  "outcome_run_executed": false,
+  "candidate_runtime_commit": "764b4e8b712b8d44d31babdf3d10342d431b5e9c",
+  "candidate_runtime_proof_commit": "764b4e8b712b8d44d31babdf3d10342d431b5e9c",
+  "candidate_treatment": "tb2-central-relational-v2",
+  "task_profile": "repair20-v1",
+  "task_count": 20,
+  "task_order": ["cobol-modernization", "count-dataset-tokens", "extract-elf", "feal-linear-cryptanalysis", "fix-code-vulnerability", "headless-terminal", "largest-eigenval", "llm-inference-batching-scheduler", "mcmc-sampling-stan", "portfolio-optimization", "prove-plus-comm", "qemu-alpine-ssh", "regex-chess", "sanitize-git-repo", "schemelike-metacircular-eval", "torch-pipeline-parallelism", "torch-tensor-parallelism", "video-processing", "winning-avg-corewars", "write-compressor"],
+  "source_artifacts": {"frozen_gt_off": {"path": "eval/frozen_baselines/tb2_miniswe_20260731.json", "sha256": "f75ebc8dd1eb25cb31cfa099b196d54346016b9f2de8e6f026e420cc213dd0bf"}},
+  "aggregate_prediction": {"point_solved": 16, "point_resolve_rate": 0.8, "plausible_solved_range": [15, 18], "plausible_resolve_rate_range": [0.75, 0.9], "baseline_solved": 17, "predicted_positive_flips_vs_baseline": ["count-dataset-tokens", "largest-eigenval"], "predicted_negative_flips_vs_baseline": [], "confidence": "low"},
+  "predictions": [{"task": "cobol-modernization", "predicted_solved": true}, {"task": "count-dataset-tokens", "predicted_solved": true}, {"task": "extract-elf", "predicted_solved": false}, {"task": "feal-linear-cryptanalysis", "predicted_solved": true}, {"task": "fix-code-vulnerability", "predicted_solved": true}, {"task": "headless-terminal", "predicted_solved": true}, {"task": "largest-eigenval", "predicted_solved": true}, {"task": "llm-inference-batching-scheduler", "predicted_solved": true}, {"task": "mcmc-sampling-stan", "predicted_solved": true}, {"task": "portfolio-optimization", "predicted_solved": true}, {"task": "prove-plus-comm", "predicted_solved": true}, {"task": "qemu-alpine-ssh", "predicted_solved": true}, {"task": "regex-chess", "predicted_solved": true}, {"task": "sanitize-git-repo", "predicted_solved": true}, {"task": "schemelike-metacircular-eval", "predicted_solved": true}, {"task": "torch-pipeline-parallelism", "predicted_solved": false}, {"task": "torch-tensor-parallelism", "predicted_solved": true}, {"task": "video-processing", "predicted_solved": false}, {"task": "winning-avg-corewars", "predicted_solved": false}, {"task": "write-compressor", "predicted_solved": true}],
+  "allowed_post_runtime_paths": ["eval/release/active_release.json", "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-28_V30.json"],
+  "freeze_rule": "Do not edit this artifact after any candidate outcome is inspected; if the runner contract changes, create a new version with a new hash."
+}
