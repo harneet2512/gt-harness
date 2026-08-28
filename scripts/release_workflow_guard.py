@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Fail closed unless a workflow and exact commit are release-authorized."""
+"""Fail closed unless a workflow and frozen runtime are release-authorized.
+
+The dispatch commit may follow the frozen runtime only through the two
+content-addressed release files. The frozen prediction verifier owns that
+ancestry and changed-path proof; this guard owns authorization and workflow
+allow-list checks.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
+
+from scripts.verify_frozen_outcome_prediction import verify_release_manifest
 
 
 def audit_release_workflow(
@@ -35,14 +44,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default="eval/release/active_release.json")
     parser.add_argument("--workflow", required=True)
-    parser.add_argument("--runtime-sha", required=True)
+    identity = parser.add_mutually_exclusive_group(required=True)
+    identity.add_argument("--runtime-sha")
+    identity.add_argument("--current-sha")
     args = parser.parse_args()
-    manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    manifest_path = Path(args.manifest)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    identity_failures: list[str] = []
+    runtime_sha = str(args.runtime_sha or manifest.get("runtime_commit") or "")
+    if args.current_sha:
+        try:
+            verify_release_manifest(
+                manifest_path=manifest_path,
+                current_commit=args.current_sha,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            identity_failures.append(f"release_identity_invalid:{exc}")
     failures = audit_release_workflow(
         manifest,
         workflow=args.workflow,
-        runtime_sha=args.runtime_sha,
+        runtime_sha=runtime_sha,
     )
+    failures = identity_failures + failures
     print(json.dumps({"status": "PASS" if not failures else "BLOCKED", "failures": failures}))
     return 0 if not failures else 1
 

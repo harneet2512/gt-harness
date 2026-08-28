@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from scripts.release_workflow_guard import audit_release_workflow
 
 
@@ -31,3 +33,11 @@ def test_historical_workflow_is_not_silently_authorized() -> None:
     assert "workflow_not_authorized" in audit_release_workflow(
         _manifest(), workflow="swebench_live_lite_full.yml", runtime_sha="a" * 40
     )
+
+
+def test_authorized_workflows_verify_dispatch_commit_against_release_freeze() -> None:
+    root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    for workflow_name in ("tb2_miniswe_central.yml", "deepswe_miniswe_central.yml"):
+        source = (root / workflow_name).read_text(encoding="utf-8")
+        assert '--current-sha "$(git rev-parse HEAD)"' in source
+        assert '--runtime-sha "$(git rev-parse HEAD)"' not in source

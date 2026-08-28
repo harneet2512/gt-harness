@@ -74,7 +74,7 @@ jobs:
         run: |
           python -m scripts.release_workflow_guard \
             --workflow tb2_miniswe_central.yml \
-            --runtime-sha "$(git rev-parse HEAD)"
+            --current-sha "$(git rev-parse HEAD)"
       - name: Verify exact provider-free certification identity
         env:
           EXPECTED_COMMIT: ${{ needs.resolve.outputs.sha }}
