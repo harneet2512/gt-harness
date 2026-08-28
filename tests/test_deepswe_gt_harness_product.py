@@ -125,6 +125,7 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "from gt_harness" not in provider_gate
     assert "uses: actions/checkout@v4" in attest
     assert "ref: ${{ needs.plan.outputs.source_sha }}" in attest
+    assert 'rsplit("/", 1)' in attest
     assert "secrets.DOCKERHUB_USERNAME" in source
     assert "secrets.DOCKERHUB_TOKEN" in source
     assert "secrets.DOCKERHUB_USERNAME_ROTATION" in source
