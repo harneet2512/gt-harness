@@ -618,7 +618,7 @@ def audit() -> dict[str, bool]:
             and "MiniSweCentralShadowAgent" not in workflow
         ),
         "custom_agent_uses_import_path": '--agent-import-path "$AGENT"' in workflow,
-        "frozen_miniswe_version": '"mini-swe-agent==2.2.8"' in workflow,
+        "frozen_miniswe_version": '"mini-swe-agent==2.4.6"' in workflow,
         "legacy_agent_not_in_paid_workflow": (
             "eval.miniswe_agent:MiniSweEngineAgent" not in workflow
         ),

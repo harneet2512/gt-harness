@@ -774,6 +774,18 @@ def test_provider_free_workflow_covers_final_hardening_and_exact_commit():
     assert "workflow_call:" in workflow
     assert '"dispatch_sha": "${{ github.sha }}"' in workflow
     assert '"provider_calls": 0' in workflow
+    assert '"mini-swe-agent==2.4.6"' in workflow
+    assert "tests/test_decision_value_runtime.py" in workflow
+    assert "scripts/decision_value_fixture_pilot.py" in workflow
+    assert "python -m scripts.central_readiness_audit" in workflow
+
+
+def test_authorized_central_workflows_pin_miniswe_246():
+    root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    for name in ("tb2_miniswe_central.yml", "deepswe_miniswe_central.yml"):
+        workflow = (root / name).read_text(encoding="utf-8")
+        assert '"mini-swe-agent==2.4.6"' in workflow
+        assert '"mini-swe-agent==2.2.8"' not in workflow
 
 
 def test_pier_adapter_isolated_from_runner_neutral_central_agent():

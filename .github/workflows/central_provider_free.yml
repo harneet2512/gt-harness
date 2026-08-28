@@ -64,7 +64,7 @@ jobs:
       - name: Install exact host runtime
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" \
+          pip install -e '.[retrieval]' "mini-swe-agent==2.4.6" "harbor==0.20.0" \
             "pytest==9.1.1" "pytest-asyncio==1.4.0" "ruff==0.16.0" \
             vendor/groundtruth_mcp-*.whl
 
@@ -162,10 +162,40 @@ jobs:
             tests/test_live_retrieval_profile.py \
             tests/test_gt_contributions.py \
             tests/test_gt_component_registry.py \
-            tests/test_decision_point_eval.py -q
+            tests/test_decision_point_eval.py \
+            tests/test_central_run_receipt_v2.py \
+            tests/test_decision_value_corpus.py \
+            tests/test_decision_value_runtime.py \
+            tests/test_miniswe_integration.py \
+            tests/test_miniswe_runtime.py \
+            tests/test_miniswe_smoke.py -q
+
+      - name: Decision-value acceptance corpus
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/decision-value-v1"
+          python scripts/decision_value_fixture_pilot.py \
+            --corpus benchmarks/decision_value_v1/corpus.json \
+            --output-dir "$proof"
+          python scripts/decision_value_observe.py \
+            --run "python-owner=$proof/python-owner/gt-run-receipt.json" \
+            --run "typescript-owner=$proof/typescript-owner/gt-run-receipt.json" \
+            --run "go-owner=$proof/go-owner/gt-run-receipt.json" \
+            --run "rust-owner=$proof/rust-owner/gt-run-receipt.json" \
+            --output "$proof/observations.json"
+          python scripts/decision_value_gate.py \
+            --expected-runs 4 \
+            --run-receipts \
+              "$proof/python-owner/gt-run-receipt.json" \
+              "$proof/typescript-owner/gt-run-receipt.json" \
+              "$proof/go-owner/gt-run-receipt.json" \
+              "$proof/rust-owner/gt-run-receipt.json" \
+            --corpus benchmarks/decision_value_v1/corpus.json \
+            --observations "$proof/observations.json" \
+            | tee decision-value-gate.json
 
       - name: Structural readiness audit
-        run: python scripts/central_readiness_audit.py
+        run: python -m scripts.central_readiness_audit
 
       - name: Benchmark-integrity audit (legal evidence sources only)
         run: python scripts/central_integrity_audit.py
@@ -196,6 +226,13 @@ jobs:
             gt_engine/decision_point_eval.py \
             gt_engine/snowflake_onnx.py \
             gt_engine/semantic_decisions.py gt_engine/deep_metrics.py \
+            gt_engine/central_run_receipt_v2.py \
+            gt_engine/decision_value.py gt_engine/decision_value_corpus.py \
+            gt_engine/decision_value_gate.py \
+            gt_engine/decision_value_observations.py \
+            gt_engine/graph_lease.py gt_engine/run_receipt_v2.py \
+            gt_engine/uptake_audit.py gt_engine/miniswe_integration.py \
+            gt_engine/miniswe_runtime.py \
             gt_engine/delivery_audit.py \
             gt_engine/intervention_chain.py \
             gt_engine/benchmark_reports.py \
@@ -231,6 +268,10 @@ jobs:
             scripts/verify_tb2_language_contract.py \
             scripts/central_language_depth_audit.py \
             scripts/decision_point_eval.py \
+            scripts/decision_value_fixture_pilot.py \
+            scripts/decision_value_gate.py \
+            scripts/decision_value_observe.py \
+            scripts/miniswe_gt_uptake.py \
             tests/test_gt_central_runtime.py \
             tests/test_gt_central_agent.py \
             tests/test_gt_uplift_policy.py \
@@ -350,4 +391,5 @@ jobs:
             mechanical-completeness.json
             documentation-consistency.json
             tb2_language_contract.json
+            decision-value-gate.json
           if-no-files-found: warn
