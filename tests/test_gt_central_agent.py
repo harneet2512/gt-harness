@@ -790,6 +790,16 @@ def test_authorized_central_workflows_pin_miniswe_246():
         assert '"mini-swe-agent==2.2.8"' not in workflow
 
 
+def test_decision_value_fixture_pilot_uses_required_git_substrate_for_search():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "scripts" / "decision_value_fixture_pilot.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '["git", "grep", "-n", "--fixed-strings", "--", symbol]' in source
+    assert '["rg",' not in source
+
+
 def test_pier_adapter_isolated_from_runner_neutral_central_agent():
     root = Path(__file__).resolve().parents[1]
     source = (root / "eval" / "pier_gt_adapter.py").read_text(encoding="utf-8")

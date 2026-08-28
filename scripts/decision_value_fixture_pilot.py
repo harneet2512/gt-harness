@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -90,7 +91,7 @@ def _run_case(case, output_root: Path) -> dict:
     symbol = str(claim.get("symbol_identity") or "").rsplit(":", 1)[-1]
     if not symbol:
         raise RuntimeError(f"{case.case_id}: owner claim has no symbol identity")
-    command = f"rg -n --fixed-strings {symbol} ."
+    command = f"git grep -n --fixed-strings -- {shlex.quote(symbol)}"
     adapter.bind_provider_response(
         {
             "id": f"provider-free:{case.case_id}",
@@ -102,7 +103,7 @@ def _run_case(case, output_root: Path) -> dict:
         next_actions=({"command": command},),
     )
     result = subprocess.run(
-        ["rg", "-n", "--fixed-strings", symbol, "."],
+        ["git", "grep", "-n", "--fixed-strings", "--", symbol],
         cwd=case.repository,
         check=False,
         capture_output=True,
