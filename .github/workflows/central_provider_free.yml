@@ -25,6 +25,10 @@ jobs:
     env:
       PYTHONUTF8: "1"
       GH_TOKEN: ${{ github.token }}
+      GIT_AUTHOR_NAME: GT Provider-Free Tests
+      GIT_AUTHOR_EMAIL: gt-tests@example.invalid
+      GIT_COMMITTER_NAME: GT Provider-Free Tests
+      GIT_COMMITTER_EMAIL: gt-tests@example.invalid
       GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
       SNOWFLAKE_MODEL_SHA256: 564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971
       SNOWFLAKE_TOKENIZER_SHA256: 91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854

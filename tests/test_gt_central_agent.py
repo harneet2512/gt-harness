@@ -775,6 +775,8 @@ def test_provider_free_workflow_covers_final_hardening_and_exact_commit():
     assert '"dispatch_sha": "${{ github.sha }}"' in workflow
     assert '"provider_calls": 0' in workflow
     assert '"mini-swe-agent==2.4.6"' in workflow
+    assert "GIT_AUTHOR_EMAIL: gt-tests@example.invalid" in workflow
+    assert "GIT_COMMITTER_EMAIL: gt-tests@example.invalid" in workflow
     assert "tests/test_decision_value_runtime.py" in workflow
     assert "scripts/decision_value_fixture_pilot.py" in workflow
     assert "python -m scripts.central_readiness_audit" in workflow
