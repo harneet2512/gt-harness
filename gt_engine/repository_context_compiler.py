@@ -3034,6 +3034,14 @@ class RepositoryContextCompiler:
             for item in inspection
             if item.path not in role_paths
             and not _is_test(item.path)
+            # Examples, generated/legacy trees, and documentation are useful
+            # inspection evidence but are not implementation ownership unless
+            # the task explicitly names that path. Otherwise a high-ranked
+            # tutorial entry can displace the real source owner at delivery.
+            and (
+                _path_penalty(item.path) < 2
+                or _task_cites_path(request.task, item.path)
+            )
             and item.facet_ids
             and item.decision_reason
             in {
@@ -3240,13 +3248,17 @@ class RepositoryContextCompiler:
                     and _package_echo_symbol(request.task, item.path, item.symbol)
                 )
                 return (
-                    owner_reason_priority.get(item.decision_reason, 4),
-                    not compound_leaf_match,
                     -identity_ratio,
                     -leaf_ratio,
+                    # A candidate corroborated by more independent task
+                    # facets is stronger evidence than a single lexical
+                    # path hit. This prevents a narrowly named helper from
+                    # displacing the source module that owns the behavior.
+                    -len(set(item.facet_ids) & uncovered_owner_facets),
+                    owner_reason_priority.get(item.decision_reason, 4),
+                    not compound_leaf_match,
                     -parent_matches,
                     package_echo,
-                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     -matched,
                     -float(item.confidence or 0.0),
                     _path_penalty(item.path),

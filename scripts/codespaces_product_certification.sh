@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 OUTPUT_ROOT="${1:-$(mktemp -d -t gt-codespaces-certification-XXXXXX)}"
@@ -168,6 +168,8 @@ run_step localization_truth python scripts/replay_smoke20_localization.py \
   --state-root "$LOCALIZATION_STATE" \
   --retrieval-mode hybrid_required \
   --dense-model-dir "$MODEL_DIR" \
+  --max-workers "${GT_LOCALIZATION_MAX_WORKERS:-2}" \
+  --worker-timeout-seconds "${GT_LOCALIZATION_WORKER_TIMEOUT_SECONDS:-1200}" \
   --out-json "$RECEIPTS/localization-truth.json"
 
 run_step localization_gate python scripts/localization_truth_gate.py \

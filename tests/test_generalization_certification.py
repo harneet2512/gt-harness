@@ -145,8 +145,12 @@ def test_localization_worker_preserves_python_failure(monkeypatch, tmp_path: Pat
             self.target(*self.args)
             self.exitcode = 0
 
-        def join(self) -> None:
+        def join(self, timeout=None) -> None:
+            del timeout
             return None
+
+        def is_alive(self) -> bool:
+            return False
 
     class ImmediateContext:
         Process = ImmediateProcess
@@ -188,8 +192,12 @@ def test_localization_worker_types_native_crash(monkeypatch, tmp_path: Path) -> 
         def start(self) -> None:
             self.exitcode = -11
 
-        def join(self) -> None:
+        def join(self, timeout=None) -> None:
+            del timeout
             return None
+
+        def is_alive(self) -> bool:
+            return False
 
     class CrashedContext:
         Process = CrashedProcess
@@ -213,6 +221,52 @@ def test_localization_worker_types_native_crash(monkeypatch, tmp_path: Path) -> 
 
     assert result is None
     assert failure == "isolated_worker_exit:exit_code=-11:signal=11"
+
+
+def test_localization_worker_types_timeout_and_terminates(monkeypatch, tmp_path: Path) -> None:
+    class HungProcess:
+        exitcode = None
+
+        def __init__(self, *, target, args, name) -> None:
+            del target, args, name
+            self.terminated = False
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None) -> None:
+            del timeout
+            return None
+
+        def is_alive(self) -> bool:
+            return not self.terminated
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    class HungContext:
+        Process = HungProcess
+
+    monkeypatch.setattr(
+        replay_smoke20_localization.multiprocessing,
+        "get_context",
+        lambda method: HungContext(),
+    )
+
+    result, failure = replay_smoke20_localization._run_case_isolated(
+        "task-a",
+        {},
+        object(),
+        tmp_path,
+        benchmark_source=None,
+        repository_root=None,
+        retrieval_mode="sparse_only",
+        dense_model_dir=None,
+        worker_timeout_seconds=2,
+    )
+
+    assert result is None
+    assert failure == "isolated_worker_timeout:seconds=2"
 
 
 def test_compiler_fingerprint_uses_committed_git_objects_not_checkout_line_endings(

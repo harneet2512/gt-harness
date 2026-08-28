@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -345,6 +346,7 @@ def _run_case_isolated(
     repository_root: Path | None,
     retrieval_mode: str,
     dense_model_dir: Path | None,
+    worker_timeout_seconds: float = 900.0,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Return a task result or an explicit Python/native worker failure."""
 
@@ -368,7 +370,15 @@ def _run_case_isolated(
         name=f"gt-localization-{worker_key}",
     )
     process.start()
-    process.join()
+    timeout = max(1.0, float(worker_timeout_seconds))
+    process.join(timeout)
+    if process.is_alive():
+        process.terminate()
+        process.join(min(10.0, timeout))
+        if process.is_alive() and hasattr(process, "kill"):
+            process.kill()
+            process.join(1.0)
+        return None, f"isolated_worker_timeout:seconds={timeout:g}"
     if process.exitcode != 0:
         signal = -process.exitcode if process.exitcode and process.exitcode < 0 else None
         return None, (
@@ -405,6 +415,18 @@ def main() -> int:
         default="hybrid_required",
     )
     parser.add_argument("--dense-model-dir", type=Path, default=None)
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=2,
+        help="Bounded concurrent isolated workers (default: 2).",
+    )
+    parser.add_argument(
+        "--worker-timeout-seconds",
+        type=float,
+        default=1200.0,
+        help="Hard timeout for each isolated worker (default: 1200 seconds).",
+    )
     args = parser.parse_args()
 
     if args.dense_model_dir is not None:
@@ -432,9 +454,11 @@ def main() -> int:
     missing_oracles = sorted(selected_ids - oracle_ids)
     extra_oracles = sorted(oracle_ids - {str(row.get("task_id")) for row in manifest_rows})
 
-    results: list[dict[str, Any]] = []
+    results_by_task: dict[str, dict[str, Any]] = {}
     failures: list[str] = []
-    for row in selected:
+    max_workers = max(1, min(int(args.max_workers), len(selected) or 1))
+
+    def run_row(row: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
         task_id = str(row["task_id"])
         result, failure = _run_case_isolated(
             task_id,
@@ -445,14 +469,33 @@ def main() -> int:
             repository_root=args.repository_root,
             retrieval_mode=args.retrieval_mode,
             dense_model_dir=args.dense_model_dir,
+            worker_timeout_seconds=args.worker_timeout_seconds,
         )
-        if result is not None:
-            results.append(result)
-            print(f"{task_id}: OK", file=sys.stderr)
-        else:
-            reason = failure or "isolated_worker_failed_without_reason"
-            failures.append(f"{task_id}: {reason}")
-            print(f"{task_id}: FAIL\n{reason}", file=sys.stderr, flush=True)
+        return task_id, result, failure
+
+    # The thread pool only bounds how many isolated native processes are
+    # active. Reassemble results in manifest order so scheduling cannot alter
+    # the receipt or its digest.
+    with ThreadPoolExecutor(
+        max_workers=max_workers, thread_name_prefix="gt-localization"
+    ) as pool:
+        futures = [pool.submit(run_row, row) for row in selected]
+        for future in as_completed(futures):
+            task_id, result, failure = future.result()
+            if result is not None:
+                results_by_task[task_id] = result
+                print(f"{task_id}: OK", file=sys.stderr)
+            else:
+                reason = failure or "isolated_worker_failed_without_reason"
+                failures.append(f"{task_id}: {reason}")
+                print(f"{task_id}: FAIL\n{reason}", file=sys.stderr, flush=True)
+
+    results = [
+        results_by_task[task_id]
+        for task_id in (str(row["task_id"]) for row in selected)
+        if task_id in results_by_task
+    ]
+    failures.sort()
 
     exact_precisions = [
         float(result["score"]["exact_edit_precision"])
