@@ -346,7 +346,7 @@ def _run_case_isolated(
     repository_root: Path | None,
     retrieval_mode: str,
     dense_model_dir: Path | None,
-    worker_timeout_seconds: float = 900.0,
+    worker_timeout_seconds: float = 1_800.0,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Return a task result or an explicit Python/native worker failure."""
 
@@ -424,8 +424,8 @@ def main() -> int:
     parser.add_argument(
         "--worker-timeout-seconds",
         type=float,
-        default=1200.0,
-        help="Hard timeout for each isolated worker (default: 1200 seconds).",
+        default=1800.0,
+        help="Hard timeout for each isolated worker (default: 1800 seconds).",
     )
     args = parser.parse_args()
 

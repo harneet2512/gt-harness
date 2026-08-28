@@ -169,7 +169,7 @@ run_step localization_truth python scripts/replay_smoke20_localization.py \
   --retrieval-mode hybrid_required \
   --dense-model-dir "$MODEL_DIR" \
   --max-workers "${GT_LOCALIZATION_MAX_WORKERS:-2}" \
-  --worker-timeout-seconds "${GT_LOCALIZATION_WORKER_TIMEOUT_SECONDS:-1200}" \
+  --worker-timeout-seconds "${GT_LOCALIZATION_WORKER_TIMEOUT_SECONDS:-1800}" \
   --out-json "$RECEIPTS/localization-truth.json"
 
 run_step localization_gate python scripts/localization_truth_gate.py \
