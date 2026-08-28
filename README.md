@@ -65,7 +65,7 @@ split, and baseline-only workflows are not dispatchable or installed.
 ```bash
 python -m pytest
 python scripts/lint_product_surface.py
-go test -tags sqlite_fts5 ./...
+go -C vendor/gt-index-src test -tags sqlite_fts5 ./...
 python scripts/verify_gt_harness.py --output artifacts/verification/latest
 ```
 

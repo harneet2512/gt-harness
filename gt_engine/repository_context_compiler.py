@@ -1842,6 +1842,68 @@ def _task_names_compound_leaf(
     )
 
 
+_OWNER_REASON_PRIORITY = {
+    "exact_task_owner_inspection_only": 0,
+    "task_path_implementation_owner_candidate": 1,
+    "task_path_module_owner_candidate": 2,
+    "hybrid_rrf_implementation_owner_candidate": 3,
+    "dense_semantic_implementation_owner_candidate": 4,
+}
+
+
+def _owner_priority_key(
+    item: ContextEvidenceItem,
+    task: str,
+    uncovered_owner_facets: set[str] | frozenset[str],
+) -> tuple[Any, ...]:
+    """Rank bounded inspection owners without granting edit authority.
+
+    Exact repository identities remain strongest. For rank-only candidates, a
+    locally named compound basename (``reusable workflow``) or basename plus
+    immediate parent (``array-like environments``) is more discriminating
+    than incidental overlap with a helper symbol. Identity, path, graph, and
+    dense evidence remain separate corroboration lanes; this key only orders
+    already typed inspection candidates.
+    """
+
+    matched, identity_terms = _owner_identity_affinity(item, task)
+    identity_ratio = matched / identity_terms if identity_terms else 0.0
+    leaf_matches, leaf_terms, parent_matches = _owner_path_scope_affinity(item, task)
+    leaf_ratio = leaf_matches / leaf_terms if leaf_terms else 0.0
+    compound_leaf_match = _task_names_compound_leaf(
+        task,
+        leaf=Path(item.path).stem,
+    )
+    scoped_path_match = _task_names_scoped_path(
+        task,
+        leaf=Path(item.path).stem,
+        parent=Path(item.path).parent.name,
+    )
+    strong_local_artifact_match = compound_leaf_match or scoped_path_match
+    exact_identity_owner = item.decision_reason == "exact_task_owner_inspection_only"
+    package_echo = (
+        item.decision_reason == "task_path_module_owner_candidate"
+        and _package_echo_symbol(task, item.path, item.symbol)
+    )
+    return (
+        not exact_identity_owner,
+        not strong_local_artifact_match,
+        not scoped_path_match,
+        not compound_leaf_match,
+        -identity_ratio,
+        -leaf_ratio,
+        _OWNER_REASON_PRIORITY.get(item.decision_reason, 4),
+        -parent_matches,
+        package_echo,
+        -len(set(item.facet_ids) & set(uncovered_owner_facets)),
+        -matched,
+        -float(item.confidence or 0.0),
+        _path_penalty(item.path),
+        item.path.casefold(),
+        item.path,
+    )
+
+
 def _matching_path_facet_ids(*, path: str, facets: tuple[TaskFacet, ...]) -> tuple[str, ...]:
     """Scope strong natural artifact names to obligations, never edit identity."""
 
@@ -3223,53 +3285,19 @@ class RepositoryContextCompiler:
         ):
             owner_candidates_by_path.setdefault(item.path, item)
         owner_candidates = tuple(owner_candidates_by_path.values())
-        owner_reason_priority = {
-            "exact_task_owner_inspection_only": 0,
-            "task_path_implementation_owner_candidate": 1,
-            "task_path_module_owner_candidate": 2,
-            "hybrid_rrf_implementation_owner_candidate": 3,
-            "dense_semantic_implementation_owner_candidate": 4,
-        }
         selected_owner_items: list[ContextEvidenceItem] = []
         remaining_owner_items = list(owner_candidates)
         uncovered_owner_facets = {
             facet_id for item in owner_candidates for facet_id in item.facet_ids
         }
         while remaining_owner_items and len(selected_owner_items) < 3:
-            def owner_priority(item: ContextEvidenceItem) -> tuple[Any, ...]:
-                matched, identity_terms = _owner_identity_affinity(item, request.task)
-                identity_ratio = matched / identity_terms if identity_terms else 0.0
-                leaf_matches, leaf_terms, parent_matches = _owner_path_scope_affinity(
-                    item,
-                    request.task,
-                )
-                leaf_ratio = leaf_matches / leaf_terms if leaf_terms else 0.0
-                compound_leaf_match = _task_names_compound_leaf(
-                    request.task,
-                    leaf=Path(item.path).stem,
-                )
-                package_echo = (
-                    item.decision_reason == "task_path_module_owner_candidate"
-                    and _package_echo_symbol(request.task, item.path, item.symbol)
-                )
-                return (
-                    -identity_ratio,
-                    -leaf_ratio,
-                    owner_reason_priority.get(item.decision_reason, 4),
-                    not compound_leaf_match,
-                    -parent_matches,
-                    package_echo,
-                    -len(set(item.facet_ids) & uncovered_owner_facets),
-                    -matched,
-                    -float(item.confidence or 0.0),
-                    _path_penalty(item.path),
-                    item.path.casefold(),
-                    item.path,
-                )
-
             selected = min(
                 remaining_owner_items,
-                key=owner_priority,
+                key=lambda item: _owner_priority_key(
+                    item,
+                    request.task,
+                    uncovered_owner_facets,
+                ),
             )
             remaining_owner_items.remove(selected)
             selected_owner_items.append(selected)

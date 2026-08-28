@@ -50,7 +50,7 @@ facts must be composed and delivered at a decision point.
 
 - canonical Python product suite: 505 collected and passed after the hosted
   failure corrections;
-- Go indexer: `go test -tags sqlite_fts5 ./...` passed locally;
+- Go indexer: `go -C vendor/gt-index-src test -tags sqlite_fts5 ./...` passed locally;
 - built wheel: exact equality with `production-surface.toml`, with no legacy
   module present;
 - real CLI verification: PASS; stale status returned nonzero and the rebuild
@@ -194,7 +194,7 @@ exact-SHA Linux certification remains the authority.
 ```powershell
 python -m pytest
 python scripts/lint_product_surface.py
-go test -tags sqlite_fts5 ./...
+go -C vendor/gt-index-src test -tags sqlite_fts5 ./...
 python -m build --wheel
 python scripts/verify_product_surface.py --wheel <wheel> --output <receipt>
 python scripts/verify_gt_harness.py --output artifacts/verification/latest

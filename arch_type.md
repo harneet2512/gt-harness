@@ -929,6 +929,11 @@ rejecting bare `output` -> `output.rs` and sentence grammar such as `Error
 messages should` -> every method named `Error`.
 
 This is deliberately narrower than the rejected broad-facet experiment from
-run `33072270921`. Exact/explicit owner reason, compound path identity, symbol
-identity, scoped path identity, and only then bounded facet agreement determine
-selection. Raw facet count never outranks proof-bearing identity.
+run `33072270921`. Exact task identity remains strongest. Among rank-only
+candidates, a complete compound basename or a locally named basename plus
+immediate parent outranks an incidental helper-symbol token ratio; evidence
+reason, bounded facet agreement, and retrieval score remain deterministic
+tie-breakers. Path affinity can reorder inspection evidence but can never grant
+edit authority. The primary-source rationale and rejected alternatives are
+recorded in
+[`docs/research/GT_TASK_CONDITIONED_OWNER_RANKING_2026-08-28.md`](docs/research/GT_TASK_CONDITIONED_OWNER_RANKING_2026-08-28.md).

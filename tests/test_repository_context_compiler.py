@@ -22,6 +22,7 @@ from gt_engine.repository_context_compiler import (
     RequirementIntent,
     _matching_facet_ids,
     _owner_path_scope_affinity,
+    _owner_priority_key,
     compile_task_facets,
 )
 from gt_engine.task_contract import extract_task_contract
@@ -1103,6 +1104,67 @@ def test_repeated_generic_output_noun_does_not_poison_owner_ranking() -> None:
     )
 
     assert _owner_path_scope_affinity(item, task) == (0, 0, 0)
+
+
+def test_owner_priority_prefers_task_local_artifacts_over_incidental_symbol_matches() -> None:
+    def candidate(path: str, symbol: str) -> ContextEvidenceItem:
+        return ContextEvidenceItem(
+            kind="inspection_candidate",
+            path=path,
+            start_line=1,
+            end_line=1,
+            symbol=symbol,
+            relation="",
+            confidence=None,
+            verification_status="rank_only",
+            source_revision="source-1",
+            graph_revision="graph-1",
+            evidence_sha256=hashlib.sha256(path.encode("utf-8")).hexdigest(),
+            decision_reason="task_path_implementation_owner_candidate",
+            completeness="inspection_only",
+        )
+
+    katex_task = (
+        "KaTeX lacks support for spanning columns. Add multicolumn alignment content. "
+        "Throw ParseError for use outside array-like environments. "
+        "For MathML output, add columnspan and columnalign attributes."
+    )
+    katex_candidates = (
+        candidate("src/buildMathML.ts", "buildMathML"),
+        candidate("src/environments/array.ts", "handler"),
+        candidate("src/mathMLTree.ts", "mathMLTree"),
+    )
+    actionlint_task = (
+        "Add action pinning checks for step actions and job-level reusable workflow "
+        "uses references. Skip local refs and distinguish reusable workflows in errors."
+    )
+    actionlint_candidates = (
+        candidate("rule_workflow_call.go", "isWorkflowCallUsesLocalFormat"),
+        candidate("reusable_workflow.go", "newNullLocalReusableWorkflowCache"),
+        candidate("rule_action.go", "RuleAction"),
+    )
+
+    assert min(
+        katex_candidates,
+        key=lambda item: _owner_priority_key(item, katex_task, frozenset()),
+    ).path == "src/environments/array.ts"
+    assert min(
+        actionlint_candidates,
+        key=lambda item: _owner_priority_key(item, actionlint_task, frozenset()),
+    ).path == "reusable_workflow.go"
+    assert min(
+        tuple(reversed(actionlint_candidates)),
+        key=lambda item: _owner_priority_key(item, actionlint_task, frozenset()),
+    ).path == "reusable_workflow.go"
+    renamed_katex_candidates = (
+        candidate("checkout/vendor/src/buildMathML.ts", "buildMathML"),
+        candidate("checkout/vendor/src/environments/array.ts", "handler"),
+        candidate("checkout/vendor/src/mathMLTree.ts", "mathMLTree"),
+    )
+    assert min(
+        renamed_katex_candidates,
+        key=lambda item: _owner_priority_key(item, katex_task, frozenset()),
+    ).path == "checkout/vendor/src/environments/array.ts"
 
 
 def test_complete_compound_artifact_phrase_outranks_incidental_helper_symbol() -> None:
