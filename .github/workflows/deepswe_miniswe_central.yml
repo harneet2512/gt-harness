@@ -276,7 +276,7 @@ jobs:
           BENCH_SHA: ${{ needs.plan.outputs.bench_sha }}
           MODEL: ${{ inputs.model }}
           PROVIDER: ${{ inputs.provider }}
-          PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+          PROVIDER_BASE_URL: ${{ inputs.provider_base_url || 'https://openrouter.ai/api/v1' }}
           STEP_LIMIT: ${{ inputs.step_limit }}
         run: |
           set -euo pipefail
@@ -404,7 +404,7 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       MODEL: ${{ inputs.model }}
       PROVIDER: ${{ inputs.provider }}
-      PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+      PROVIDER_BASE_URL: ${{ inputs.provider_base_url || 'https://openrouter.ai/api/v1' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -570,7 +570,7 @@ jobs:
       TASK: ${{ matrix.task }}
       STEP_LIMIT: ${{ inputs.step_limit }}
       PROVIDER: ${{ inputs.provider }}
-      PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+      PROVIDER_BASE_URL: ${{ inputs.provider_base_url || 'https://openrouter.ai/api/v1' }}
       PROFILE: ${{ inputs.comparison_profile }}
     steps:
       - uses: actions/checkout@v4
@@ -903,7 +903,7 @@ jobs:
           GT_SHA: ${{ needs.plan.outputs.gt_sha }}
           MODEL: ${{ inputs.model }}
           PROVIDER: ${{ inputs.provider }}
-          PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
+          PROVIDER_BASE_URL: ${{ inputs.provider_base_url || 'https://openrouter.ai/api/v1' }}
           STEP_LIMIT: ${{ inputs.step_limit }}
           PROFILE: ${{ inputs.comparison_profile }}
           ARM: ${{ inputs.arm }}
