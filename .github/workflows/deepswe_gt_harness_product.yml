@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: groundtruth
+      allow_baseline_rerun:
+        description: "Explicitly authorize rerunning the already-recorded bare baseline"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       code_ref:
@@ -23,6 +28,11 @@ on:
         required: false
         type: string
         default: groundtruth
+      allow_baseline_rerun:
+        description: "Explicitly authorize rerunning the already-recorded bare baseline"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,8 +76,13 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
+          ALLOW_BASELINE_RERUN: ${{ inputs.allow_baseline_rerun || 'false' }}
         run: |
           set -euo pipefail
+          if [[ "${TREATMENT}" == "bare" && "${ALLOW_BASELINE_RERUN}" != "true" ]]; then
+            echo "Bare baseline already exists; set allow_baseline_rerun=true explicitly to rerun it." >&2
+            exit 1
+          fi
           python - <<'PY'
           import hashlib
           import json
