@@ -88,7 +88,7 @@ class PierGtHarnessMiniSwe246Agent(GtHarnessMiniSwe246Agent):
                 "astral.sh",
                 "files.pythonhosted.org",
                 "github.com",
-                "openrouter.ai",
+                "api.deepseek.com",
                 "pypi.org",
                 "releases.astral.sh",
             ]
@@ -98,7 +98,7 @@ class PierGtHarnessMiniSwe246Agent(GtHarnessMiniSwe246Agent):
         from pier.models.trial.result import AgentInfo, ModelInfo
 
         requested = str(getattr(self, "model_name", "") or "").strip()
-        model_info = ModelInfo(name=requested, provider="openrouter") if requested else None
+        model_info = ModelInfo(name=requested, provider="deepseek") if requested else None
         return AgentInfo(
             name=self.name(),
             version=self.version() or "0.9.0/miniswe-2.4.6",

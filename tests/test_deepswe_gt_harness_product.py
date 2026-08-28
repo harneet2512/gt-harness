@@ -21,10 +21,10 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
     )
     for domain in (
         ".githubusercontent.com",
+        "api.deepseek.com",
         "astral.sh",
         "files.pythonhosted.org",
         "github.com",
-        "openrouter.ai",
         "pypi.org",
         "releases.astral.sh",
     ):
@@ -35,10 +35,10 @@ def test_deepswe_product_adapter_is_the_real_gt_harness_boundary() -> None:
     )
     assert set(allowlist.domains) == {
         ".githubusercontent.com",
+        "api.deepseek.com",
         "astral.sh",
         "files.pythonhosted.org",
         "github.com",
-        "openrouter.ai",
         "pypi.org",
         "releases.astral.sh",
     }
@@ -82,8 +82,10 @@ def test_deepswe_smoke20_manifest_is_balanced_frozen_and_baseline_bound() -> Non
 
     assert payload["schema"] == "gt.deepswe_smoke20.v1"
     assert payload["benchmark_sha"] == "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9"
-    assert payload["baseline"]["run_id"] == "32615305543"
-    assert payload["baseline"]["model"] == "openrouter/stealth/ox-alpha"
+    assert payload["baseline"]["comparison_protocol"] == "paired_same_workflow_v1"
+    assert payload["baseline"]["model"] == "deepseek-v4-flash"
+    assert payload["baseline"]["provider"] == "deepseek:native:api.deepseek.com"
+    assert payload["baseline"]["required_treatment"] == "bare"
     assert payload["baseline"]["mini_swe_agent_version"] == "2.4.6"
     assert len(tasks) == 20
     assert len(set(tasks)) == 20
@@ -111,8 +113,13 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent" in source
     assert "mini-swe-agent==2.4.6" in source
     assert "datacurve-pier==0.3.1" in source
-    assert "stealth/ox-alpha" in source
-    assert "secrets.OPENROUTER_NEW" in source
+    assert "deepseek-v4-flash" in source
+    assert "secrets.DEEPSEEK_API_KEY" in source
+    assert "https://api.deepseek.com" in source
+    assert "if python -c" in source
+    assert 'assert "deepseek-v4-flash" in models' in source
+    assert "stealth/ox-alpha" not in source
+    assert "secrets.OPENROUTER_NEW" not in source
     assert "secrets.DOCKERHUB_USERNAME" in source
     assert "secrets.DOCKERHUB_TOKEN" in source
     assert "secrets.DOCKERHUB_USERNAME_ROTATION" in source

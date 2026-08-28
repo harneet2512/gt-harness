@@ -414,7 +414,7 @@ def test_deepswe_registered_entrypoint_routes_to_the_product_workflow():
     assert "eval.gt_central_agent" not in workflow
 
 
-def test_deepswe_product_workflow_uses_ox_alpha_and_pins_v11_catalog_snapshot():
+def test_deepswe_product_workflow_uses_native_deepseek_flash_and_pins_v11_catalog_snapshot():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -422,7 +422,8 @@ def test_deepswe_product_workflow_uses_ox_alpha_and_pins_v11_catalog_snapshot():
         / "deepswe_gt_harness_product.yml"
     ).read_text(encoding="utf-8")
 
-    assert "stealth/ox-alpha" in workflow
+    assert "deepseek-v4-flash" in workflow
+    assert "stealth/ox-alpha" not in workflow
     assert workflow.count("ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9") == 2
     assert "v1.0.0" not in workflow
     assert "eval/deepswe_smoke20_v1.json" in workflow
@@ -449,7 +450,7 @@ def test_deepswe_product_workflow_uses_pier_v11_verifier_protocol():
     assert "harbor run -p deepswe-bench/tasks" not in workflow
 
 
-def test_deepswe_product_workflow_gates_the_exact_openrouter_route():
+def test_deepswe_product_workflow_gates_the_exact_native_deepseek_route():
     workflow = (
         Path(__file__).resolve().parents[1]
         / ".github"
@@ -458,12 +459,12 @@ def test_deepswe_product_workflow_gates_the_exact_openrouter_route():
     ).read_text(encoding="utf-8")
 
     assert "provider_gate:" in workflow
-    assert "https://openrouter.ai/api/v1/chat/completions" in workflow
-    assert "OPENAI_BASE_URL: https://openrouter.ai/api/v1" in workflow
-    assert workflow.count("secrets.OPENROUTER_NEW") == 2
-    assert '"model":"stealth/ox-alpha"' in workflow
+    assert "https://api.deepseek.com/models" in workflow
+    assert "OPENAI_BASE_URL: https://api.deepseek.com" in workflow
+    assert workflow.count("secrets.DEEPSEEK_API_KEY") == 2
+    assert '"deepseek-v4-flash" in models' in workflow
     assert "TOKENROUTER" not in workflow
-    assert "DEEPSEEK_API_KEY" not in workflow
+    assert "OPENROUTER_NEW" not in workflow
 
 
 def test_openrouter_model_builder_pins_exact_model_and_provider(monkeypatch, tmp_path):

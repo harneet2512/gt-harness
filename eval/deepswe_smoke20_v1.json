@@ -34,40 +34,24 @@
     "typescript": 4
   },
   "baseline": {
-    "repository": "hbali-stack/gt-harness",
-    "run_id": "32615305543",
-    "source_artifact": "D:/Downloads/DeepSWE-GT-off-oxalpha-32615305543",
-    "model": "openrouter/stealth/ox-alpha",
+    "comparison_protocol": "paired_same_workflow_v1",
+    "model": "deepseek-v4-flash",
+    "provider": "deepseek:native:api.deepseek.com",
     "mini_swe_agent_version": "2.4.6",
     "tasks": 20,
-    "graded": 20,
-    "solved": 15,
-    "provider_calls": 2349,
-    "input_tokens": 192250348,
-    "cache_tokens": 186143232,
-    "output_tokens": 1203403,
-    "task_rewards": {
-      "abs-module-cache-flags": 1,
-      "adaptix-name-mapping-aliases": 0,
-      "arktype-json-schema-refs-dependencies": 1,
-      "csstree-shorthand-expansion-compression": 0,
-      "boa-hierarchical-evaluation-cancellation": 1,
-      "abs-stepped-slices": 1,
-      "aiomonitor-task-snapshots-diff": 1,
-      "awilix-async-container-initialization": 1,
-      "katex-multicolumn-array-spans": 1,
-      "fd-deterministic-multi-key-sorting": 1,
-      "actionlint-action-pinning-lint": 1,
-      "bandit-incremental-cache-control": 0,
-      "clack-async-autocomplete-options": 1,
-      "testem-bail-on-test-failure": 1,
-      "oxvg-structural-selector-preservation": 0,
-      "anko-default-function-arguments": 1,
-      "bandit-interprocedural-taint-checks": 1,
-      "claude-code-by-agents-recursive-delegation": 0,
-      "testem-per-launcher-reports": 1,
-      "pest-character-class-coalescing": 1
-    },
-    "comparison_limit": "The GT-on treatment and the GT-off baseline both use Mini-SWE-Agent 2.4.6. This is an apples-to-apples comparison only when task cohort, revision, model route, time budget, and environment receipts also match."
+    "attempts_per_task": 1,
+    "required_treatment": "bare",
+    "required_comparison_fields": [
+      "benchmark_sha",
+      "task_order_sha256",
+      "model",
+      "provider",
+      "mini_swe_agent_version",
+      "temperature",
+      "max_iterations",
+      "time_budget_seconds",
+      "official_verifier"
+    ],
+    "comparison_limit": "A regression claim is valid only against a bare run from this exact workflow and source SHA with the required comparison fields equal. Historical Ox Alpha and public DataCurve aggregates are directional evidence only."
   }
 }

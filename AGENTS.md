@@ -43,8 +43,8 @@ binary and the checksum-pinned Snowflake ONNX model before the model is called.
 The task environment must contain:
 
 ```text
-OPENAI_API_KEY=<runner secret>
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=<native DeepSeek runner secret>
+OPENAI_BASE_URL=https://api.deepseek.com
 GT_INDEX_BINARY=<in-container static gt-index path>
 GT_DENSE_MODEL_DIR=<in-container model directory>
 GT_RETRIEVAL_MODE=hybrid_required
@@ -56,8 +56,8 @@ directory, and receipt output. The effective product call is:
 
 ```text
 gt-harness run <real issue text> \
-  --model openai/stealth/ox-alpha \
-  --base-url https://openrouter.ai/api/v1 \
+  --model openai/deepseek-v4-flash \
+  --base-url https://api.deepseek.com \
   --temperature 1.0 \
   --max-iterations 300 \
   --time-budget-seconds <task-derived budget> \
