@@ -1688,6 +1688,7 @@ def _owner_identity_affinity(
     # shared by many candidates and must not make an incidental file look
     # like a direct owner. Prefer the representative symbol and file stem;
     # fall back to the full path only when neither exposes a usable identity.
+    raw_identity_terms = _path_terms(item.symbol) | _path_terms(Path(item.path).stem)
     identity_terms = symbol_terms | stem_terms
     if not identity_terms:
         identity_terms = frozenset(
@@ -1704,7 +1705,11 @@ def _owner_identity_affinity(
         any(_related_path_term(term, task_term) for task_term in task_terms)
         for term in identity_terms
     )
-    return (matched, len(identity_terms))
+    # Preserve the width of the original identity, including generic terms
+    # that were intentionally excluded from matching. A compound helper such
+    # as ``remove_attributes_by_selector`` must not tie an exact module leaf
+    # such as ``selectors`` merely because both contain ``selector``.
+    return (matched, max(len(identity_terms), len(raw_identity_terms)))
 
 
 def _owner_path_scope_affinity(
@@ -3250,15 +3255,11 @@ class RepositoryContextCompiler:
                 return (
                     -identity_ratio,
                     -leaf_ratio,
-                    # A candidate corroborated by more independent task
-                    # facets is stronger evidence than a single lexical
-                    # path hit. This prevents a narrowly named helper from
-                    # displacing the source module that owns the behavior.
-                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     owner_reason_priority.get(item.decision_reason, 4),
                     not compound_leaf_match,
                     -parent_matches,
                     package_echo,
+                    -len(set(item.facet_ids) & uncovered_owner_facets),
                     -matched,
                     -float(item.confidence or 0.0),
                     _path_penalty(item.path),

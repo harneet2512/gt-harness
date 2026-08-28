@@ -337,6 +337,36 @@ def test_rank_only_owners_for_distinct_typed_requirements_are_preserved() -> Non
     assert plan.uncovered_requirement_ids == ()
 
 
+def test_rank_only_owners_preserve_distinct_nonrequired_bindings() -> None:
+    """Typed facet evidence outside the strict floor must not be collapsed."""
+
+    claims = (
+        _claim(
+            "owner-one",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("required-owner", "behavior-one"),
+            tokens=10,
+        ),
+        _claim(
+            "owner-two",
+            role=ClaimRole.IMPLEMENTATION_OWNER,
+            authority=ClaimAuthority.RANK_SUPPORT,
+            requirements=("required-owner", "behavior-two"),
+            tokens=10,
+        ),
+    )
+
+    plan = ProviderContextPlanner().plan(
+        claims,
+        requirement_ids=("required-owner",),
+        token_budget=20,
+    )
+
+    assert set(plan.selected_claim_ids) == {"owner-one", "owner-two"}
+    assert plan.covered_requirement_ids == ("required-owner",)
+
+
 def test_planner_delivers_localization_before_downstream_relation_detail() -> None:
     claims = (
         _claim(

@@ -179,6 +179,13 @@ class ProviderContextPlanner:
         roles: set[ClaimRole] = set()
         omitted: dict[str, OmissionReason] = {}
         remaining = budget
+        # ``required_set`` contains only obligations that the current
+        # delivery lane can certify directly.  A compiler claim may also carry
+        # typed facet bindings for non-required (for example behavioural or
+        # integration) obligations.  Keep track of those bindings separately
+        # so a second implementation owner is not discarded merely because
+        # its useful evidence is outside the strict coverage floor.
+        bound_owner_requirements: set[str] = set()
 
         candidates: list[ProviderClaim] = []
         for claim in rows:
@@ -188,8 +195,8 @@ class ProviderContextPlanner:
                 candidates.append(claim)
 
         while candidates:
-            exact_edit_selected = any(
-                item.role is ClaimRole.EDIT
+            exact_localization_selected = any(
+                item.role in {ClaimRole.EDIT, ClaimRole.AMBIGUITY}
                 and item.authority is ClaimAuthority.EXACT_IDENTITY
                 for item in selected
             )
@@ -203,7 +210,7 @@ class ProviderContextPlanner:
                 for item in candidates
                 if item.estimated_tokens <= remaining
                 and not (
-                    exact_edit_selected
+                    exact_localization_selected
                     and item.role is ClaimRole.IMPLEMENTATION_OWNER
                     and item.authority is ClaimAuthority.RANK_SUPPORT
                 )
@@ -229,7 +236,14 @@ class ProviderContextPlanner:
                         }
                         & roles
                     )
-                    and required_set.intersection(item.requirement_ids) <= covered
+                    and (
+                        required_set.intersection(item.requirement_ids) <= covered
+                        and not (
+                            item.role is ClaimRole.IMPLEMENTATION_OWNER
+                            and bool(item.requirement_ids)
+                            and not set(item.requirement_ids) <= bound_owner_requirements
+                        )
+                    )
                 )
                 # A rank-only claim that cannot be bound to a typed task
                 # requirement is one heuristic answer to one unresolved
@@ -239,11 +253,11 @@ class ProviderContextPlanner:
                 # requirement IDs or stronger structural/exact authority.
                 and not (
                     item.authority is ClaimAuthority.RANK_SUPPORT
-                    and not required_set.intersection(item.requirement_ids)
+                    and not item.requirement_ids
                     and any(
                         chosen.role is item.role
                         and chosen.authority is ClaimAuthority.RANK_SUPPORT
-                        and not required_set.intersection(chosen.requirement_ids)
+                        and not chosen.requirement_ids
                         for chosen in selected
                     )
                 )
@@ -293,6 +307,8 @@ class ProviderContextPlanner:
             selected_ids.add(chosen.claim_id)
             remaining -= chosen.estimated_tokens
             covered.update(required_set.intersection(chosen.requirement_ids))
+            if chosen.role is ClaimRole.IMPLEMENTATION_OWNER:
+                bound_owner_requirements.update(chosen.requirement_ids)
             roles.add(chosen.role)
 
         for claim in candidates:
@@ -300,7 +316,7 @@ class ProviderContextPlanner:
                 continue
             if (
                 any(
-                    item.role is ClaimRole.EDIT
+                    item.role in {ClaimRole.EDIT, ClaimRole.AMBIGUITY}
                     and item.authority is ClaimAuthority.EXACT_IDENTITY
                     for item in selected
                 )
@@ -310,11 +326,11 @@ class ProviderContextPlanner:
                 omitted[claim.claim_id] = OmissionReason.WEAKER_AUTHORITY
             elif (
                 claim.authority is ClaimAuthority.RANK_SUPPORT
-                and not required_set.intersection(claim.requirement_ids)
+                and not claim.requirement_ids
                 and any(
                     chosen.role is claim.role
                     and chosen.authority is ClaimAuthority.RANK_SUPPORT
-                    and not required_set.intersection(chosen.requirement_ids)
+                    and not chosen.requirement_ids
                     for chosen in selected
                 )
             ):
@@ -322,7 +338,14 @@ class ProviderContextPlanner:
             elif claim.estimated_tokens > remaining:
                 omitted[claim.claim_id] = OmissionReason.TOKEN_BUDGET
             elif required_set.intersection(claim.requirement_ids) <= covered:
-                omitted[claim.claim_id] = OmissionReason.REDUNDANT_COVERAGE
+                if (
+                    claim.role is ClaimRole.IMPLEMENTATION_OWNER
+                    and bool(claim.requirement_ids)
+                    and not set(claim.requirement_ids) <= bound_owner_requirements
+                ):
+                    omitted[claim.claim_id] = OmissionReason.TOKEN_BUDGET
+                else:
+                    omitted[claim.claim_id] = OmissionReason.REDUNDANT_COVERAGE
             else:
                 omitted[claim.claim_id] = OmissionReason.WEAKER_AUTHORITY
         for claim in rows:
