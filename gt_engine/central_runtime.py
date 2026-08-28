@@ -4835,24 +4835,37 @@ class CentralFeatureRuntime:
         for feature_id in CENTRAL_FEATURE_IDS:
             rows = [row for row in opportunity_rows if row["feature_id"] == feature_id]
             eligible = [row for row in rows if row["evidence_status"] == "eligible"]
-            status = (
-                "fired_when_eligible"
-                if eligible and by_feature[feature_id] >= len(eligible)
-                else "missed_trigger"
-                if eligible
-                else rows[-1]["evidence_status"]
-                if rows
-                else "trigger_absent"
+            feature_receipts = [
+                receipt for receipt in self.receipts if receipt.feature_id == feature_id
+            ]
+            dispositions = [
+                self._delivery_disposition(receipt) for receipt in feature_receipts
+            ]
+            delivered = any(
+                disposition is FeatureDeliveryDisposition.CANDIDATE_DELIVERED
+                for disposition in dispositions
             )
+            certified = bool(feature_receipts)
+            if delivered:
+                lifecycle_state = "DELIVERED"
+            elif certified:
+                lifecycle_state = "CERTIFIED"
+            elif eligible:
+                lifecycle_state = "ABSTAINED"
+            elif rows and rows[-1]["evidence_status"] == "ambiguous_evidence":
+                lifecycle_state = "ABSTAINED"
+            else:
+                lifecycle_state = "NOT_APPLICABLE"
             feature_applicability[feature_id] = {
                 "evaluations": len(rows),
                 "eligible": len(eligible),
                 "fired": by_feature[feature_id],
-                "status": status,
+                "status": lifecycle_state,
+                "lifecycle_state": lifecycle_state,
                 "reason_codes": (
                     list(dict.fromkeys(row["reason_code"] for row in rows))
                     if rows
-                    else ["no_lifecycle_evidence_observed"]
+                    else ["deterministic_trigger_not_applicable"]
                 ),
             }
         required_claims_without_declared_id = sum(
@@ -4933,11 +4946,14 @@ class CentralFeatureRuntime:
                 and all(
                     row["status"]
                     in {
-                        "fired_when_eligible",
-                        "correct_abstention",
-                        "trigger_absent",
-                        "ambiguous_evidence",
-                        "substrate_unavailable",
+                        "NOT_APPLICABLE",
+                        "CANDIDATE",
+                        "CERTIFIED",
+                        "DELIVERED",
+                        "CONSUMED",
+                        "VALIDATED",
+                        "CONTRADICTED",
+                        "ABSTAINED",
                     }
                     for row in feature_applicability.values()
                 )
@@ -5345,6 +5361,18 @@ class CentralFeatureRuntime:
             "revision": selected.revision,
             "source_revision": frame.source_revision,
             "materialized_for_call": frame.materialized_for_call,
+            "decision_boundary": (
+                "FAILURE_OBSERVATION"
+                if frame.need_kind
+                in {DecisionNeedKind.REPAIR_FAILURE, DecisionNeedKind.RECOVER_FAILURE}
+                else "POST_EDIT_GRAPH_DELTA"
+                if frame.need_kind is DecisionNeedKind.REPAIR_IMPACT
+                else "VERIFICATION_SELECTION"
+                if frame.need_kind is DecisionNeedKind.VALIDATE_CHANGE
+                else "REPOSITORY_START"
+                if frame.need_kind is DecisionNeedKind.LOCALIZE_TASK
+                else "PRE_SUBMIT"
+            ),
             "feedback": feedback,
             # Provider-value certification is deliberately derived from the
             # selected typed feature receipt, not from the rendered sentence.

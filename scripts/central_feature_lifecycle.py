@@ -142,13 +142,25 @@ def build_feature_lifecycle_report(
             bucket["produced"] += fired
             if eligible:
                 bucket["live_tasks"].add(task)
-            status = str(app.get("status") or "trigger_absent")
-            if status in {"correct_abstention", "trigger_absent"}:
+            status = str(app.get("lifecycle_state") or app.get("status") or "NOT_APPLICABLE")
+            if status in {"correct_abstention", "trigger_absent", "NOT_APPLICABLE"}:
                 bucket["correct_abstentions"] += 1
-            if status == "missed_trigger" or eligible > fired:
+            # ABSTAINED is an explicit, valid terminal for an eligible
+            # candidate that could not be independently certified.  Legacy
+            # receipts did not carry this distinction and retain the old
+            # eligible-vs-fired reconciliation.
+            legacy_status = status in {
+                "correct_abstention", "trigger_absent", "missed_trigger",
+                "ambiguous_evidence", "substrate_unavailable",
+            }
+            if status in {"missed_trigger", "CANDIDATE"} or (
+                legacy_status and eligible > fired
+            ):
                 bucket["missed_triggers"] += max(1, eligible - fired)
                 failures.append(f"{task}:{feature_id}:missed_trigger")
-            if fired and eligible == 0 and status in {"correct_abstention", "trigger_absent"}:
+            if fired and eligible == 0 and status in {
+                "correct_abstention", "trigger_absent", "NOT_APPLICABLE",
+            }:
                 bucket["false_fires"] += fired
                 failures.append(f"{task}:{feature_id}:false_fire")
 

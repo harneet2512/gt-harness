@@ -100,7 +100,10 @@ def _first_position_after(source: str, needles: tuple[str, ...], *, start: int =
 
 def audit() -> dict[str, bool]:
     source = inspect.getsource(MiniSweCentralAgent)
-    run_source = inspect.getsource(MiniSweCentralAgent.run)
+    # ``run`` is the failure-safe receipt wrapper.  Readiness invariants about
+    # provider ordering and action postflight belong to the actual central
+    # orchestration loop.
+    run_source = inspect.getsource(MiniSweCentralAgent._run_central)
     setup_source = inspect.getsource(MiniSweCentralAgent.setup)
     validation_source = inspect.getsource(ValidationClassification)
     observation_source = inspect.getsource(CentralFeatureRuntime.observe_action)

@@ -40,6 +40,11 @@ def build_benchmark_reports(
     )
     if not complete_task_set:
         failures.append("matched_task_set_incomplete_or_duplicated")
+    efficiency_valid = bool(
+        complete_task_set
+        and not any("receipt" in failure.lower() for failure in failures)
+        and all(row.get("receipt_complete", True) is True for row in metric_rows)
+    )
 
     categories = {
         "both_solve": [],
@@ -105,8 +110,16 @@ def build_benchmark_reports(
         },
         "efficiency": {
             "schema": "gt.benchmark_efficiency_report.v1",
-            **dict(efficiency),
-            "exact_operations": exact_operations,
+            "valid": efficiency_valid,
+            "invalid_reason": (
+                "missing_or_invalid_run_receipt" if not efficiency_valid else ""
+            ),
+            "aggregate": dict(efficiency) if efficiency_valid else None,
+            # Compatibility projection for complete historical inputs.  When
+            # invalid, no aggregate values are exposed as if missing usage
+            # were zero.
+            **(dict(efficiency) if efficiency_valid else {}),
+            "exact_operations": exact_operations if efficiency_valid else [],
         },
         "intervention": {
             "schema": "gt.benchmark_intervention_report.v1",

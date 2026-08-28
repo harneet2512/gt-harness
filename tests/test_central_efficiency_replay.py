@@ -53,6 +53,10 @@ def _write_trial(root, task, *, instruction, command, declared, partial, headroo
         ),
         encoding="utf-8",
     )
+    (agent / "gt-run-receipt.json").write_text(
+        json.dumps({"schema": "gt.run_receipt.v2", "task_id": task}),
+        encoding="utf-8",
+    )
 
 
 def test_archived_replay_projects_custom_failures_private_and_partial_probes_zero(tmp_path):
@@ -122,6 +126,10 @@ def test_archived_replay_preserves_unique_observations_below_budget_epoch(tmp_pa
     )
     (agent / "central_receipt.json").write_text(
         json.dumps({"features": {}, "metrics": {}, "model_call_contexts": []}),
+        encoding="utf-8",
+    )
+    (agent / "gt-run-receipt.json").write_text(
+        json.dumps({"schema": "gt.run_receipt.v2", "task_id": "large-read"}),
         encoding="utf-8",
     )
 

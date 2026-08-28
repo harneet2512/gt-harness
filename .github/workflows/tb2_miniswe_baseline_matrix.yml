@@ -17,11 +17,10 @@ on:
         description: "Model id for harbor -m, passed through verbatim when base_url is set (api.deepseek.com wants bare 'deepseek-v4-flash')"
         type: string
         default: "deepseek-v4-flash"
-      api_key:
-        description: "Provider API key supplied at dispatch time; falls back to the repository secret when omitted."
+      provider_secret:
+        description: "Repository Actions secret name containing the provider key"
         type: string
-        required: false
-        default: ""
+        default: "OPENROUTER_NEW"
       base_url:
         description: "OpenAI-compatible gateway URL; exported as OPENAI_BASE_URL (overrides the repo secret)"
         type: string
@@ -55,7 +54,7 @@ jobs:
       tasks: ${{ steps.enum.outputs.tasks }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets[inputs.provider_secret] || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
@@ -112,8 +111,9 @@ jobs:
           model = os.environ["MODEL"]
           base = os.environ.get("OPENAI_BASE_URL") or ""
           mname, kwargs = model, {"temperature": 1.0}
-          if base and "/" not in model:
+          if base and not model.startswith("openai/"):
               mname = f"openai/{model}"
+          if base:
               kwargs["api_base"] = base
           print(f"model={model!r} -> litellm model={mname!r} "
                 f"OPENAI_BASE_URL={base or '(unset)'}")
@@ -189,7 +189,7 @@ jobs:
         task: ${{ fromJson(needs.plan.outputs.tasks) }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ inputs.api_key || secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets[inputs.provider_secret] || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
     steps:
@@ -229,6 +229,13 @@ jobs:
                   print(f"::add-mask::{clean}")
                   f.write(f"{name}={clean}\n")
           EOF
+
+      - name: Ensure Docker daemon is available
+        run: |
+          if ! docker info >/dev/null 2>&1; then
+            sudo systemctl start docker || sudo service docker start
+          fi
+          docker info
 
       - name: Run harbor - task ${{ matrix.task }}
         id: harbor
@@ -277,6 +284,17 @@ jobs:
           name: tb2-miniswe-${{ github.run_id }}-task-${{ matrix.task }}
           path: results/terminal-bench/
           if-no-files-found: warn
+
+  task_progress:
+    name: Task progress
+    needs: [plan]
+    if: always()
+    uses: ./.github/workflows/task_progress.yml
+    with:
+      expected_tasks_json: ${{ needs.plan.outputs.tasks }}
+      task_job_regex: '^run \\('
+      gate_job_regex: '^plan$'
+      checkpoint_every: '5'
 
   merge:
     needs: [plan, run]

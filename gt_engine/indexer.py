@@ -1059,6 +1059,45 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
     return ensure_index_with_receipt(root, state_dir=state_dir).graph_db
 
 
+def graph_reverse_dependents(
+    graph_db: str | os.PathLike[str],
+    changed_paths: tuple[str, ...],
+    *,
+    limit: int = 10_000,
+) -> tuple[str, ...]:
+    """Return graph-recorded reverse dependents of changed files.
+
+    This is a conservative dependency closure seed for incremental refresh.
+    It does not claim textual completeness: when the graph cannot answer, the
+    caller must select a full rebuild rather than treating an empty result as
+    proof that no dependents exist.
+    """
+
+    database = Path(graph_db)
+    paths = tuple(dict.fromkeys(path.replace("\\", "/") for path in changed_paths if path))
+    if not paths:
+        return ()
+    if not database.is_file():
+        raise FileNotFoundError(database)
+    placeholders = ",".join("?" for _ in paths)
+    connection = sqlite3.connect(
+        f"file:{database.resolve().as_posix()}?mode=ro", uri=True
+    )
+    try:
+        rows = connection.execute(
+            "SELECT DISTINCT e.source_file FROM edges e "
+            "JOIN nodes target ON target.id=e.target_id "
+            f"WHERE target.file_path IN ({placeholders}) "
+            "AND e.source_file IS NOT NULL AND e.source_file != '' "
+            "ORDER BY e.source_file LIMIT ?",
+            (*paths, max(1, int(limit))),
+        ).fetchall()
+    finally:
+        connection.close()
+    changed = set(paths)
+    return tuple(str(row[0]).replace("\\", "/") for row in rows if str(row[0]) not in changed)
+
+
 def refresh_index_files(
     root: str | os.PathLike[str],
     graph_db: str | os.PathLike[str],

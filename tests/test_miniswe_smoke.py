@@ -35,6 +35,7 @@ from gt_engine.indexer import ensure_index  # noqa: E402
 from gt_engine.miniswe_controller import Predicate  # noqa: E402
 from gt_engine.miniswe_integration import MiniSweAdapter  # noqa: E402
 from gt_engine.miniswe_runtime import install_runtime_hooks  # noqa: E402
+from gt_engine.runtime_observation import capture_workspace  # noqa: E402
 from gt_engine.task_contract import extract_task_contract  # noqa: E402
 from gt_engine.verification_contract import compile_obligation_predicates  # noqa: E402
 
@@ -132,6 +133,10 @@ def _build_agent(tmp_path):
     adapter = MiniSweAdapter(
         task_id="smoke-1", state_dir=root / ".gt-state", predicates=predicates,
         contract=contract, repo_root=str(root), graph_db=graph_db, issue_text=TASK,
+    )
+    adapter.record_repository_snapshot(
+        capture_workspace(root, excluded_roots=(root / ".gt-state",)),
+        boundary="repository_start",
     )
     session = GTSession(
         GTSessionConfig(
@@ -268,6 +273,10 @@ def test_task_start_localization_delivered_with_graph(tmp_path):
     loc_rows = [r for r in rows if r.get("event") == "evidence_delivery"
                 and r.get("evidence_type") == "localization"]
     assert len(loc_rows) <= 1
+    lifecycle_rows = adapter.feature_lifecycle_receipts()
+    assert lifecycle_rows
+    assert lifecycle_rows[0]["repository_revision"] == adapter.initial_repository_revision
+    assert all(row["repository_revision"] for row in lifecycle_rows)
 
 
 def test_miniswe_gt_smoke_localization_requires_graph(tmp_path):

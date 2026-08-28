@@ -277,7 +277,8 @@ def test_healthy_empty_repository_retrieval_is_not_recorded_as_substrate_failure
         "def_partition",
         "caller_contract",
     ):
-        assert applicability[feature_id]["status"] == "correct_abstention"
+        assert applicability[feature_id]["status"] == "NOT_APPLICABLE"
+        assert applicability[feature_id]["lifecycle_state"] == "NOT_APPLICABLE"
         assert applicability[feature_id]["reason_codes"] == ["empty"]
 
 

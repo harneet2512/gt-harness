@@ -13,6 +13,7 @@ trajectory; cost is derived at freeze time).
 from __future__ import annotations
 
 import argparse
+import atexit
 import hashlib
 import json
 import os
@@ -165,7 +166,11 @@ def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
     model_kwargs: dict = {"temperature": temperature}
     base_url = os.environ.get("OPENAI_BASE_URL")
     if base_url:
-        if "/" not in model:
+        # An OpenAI-compatible gateway owns the full catalog identifier.  A
+        # provider-prefixed id such as minimax/minimax-m3:free must still be
+        # forced through LiteLLM's OpenAI adapter, otherwise LiteLLM selects
+        # its native MiniMax adapter and ignores OPENAI_API_KEY.
+        if not model.startswith("openai/"):
             model = f"openai/{model}"
         model_kwargs["api_base"] = base_url
     return model, model_kwargs
@@ -248,7 +253,7 @@ def build_agent(
 
     from gt_engine.bridge import apply_profile_env
     from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
-    from gt_engine.indexer import ensure_index
+    from gt_engine.indexer import ensure_index_with_receipt
     from gt_engine.miniswe_controller import Predicate
     from gt_engine.miniswe_integration import MiniSweAdapter
     from gt_engine.miniswe_runtime import install_runtime_hooks
@@ -275,9 +280,11 @@ def build_agent(
         for item in (compiled[contract_obligation.obligation_id],)
     )
     graph_db = None
+    index_receipt = None
     index_error: Exception | None = None
     try:
-        graph_db = ensure_index(cwd, state_dir=state_dir)
+        index_receipt = ensure_index_with_receipt(cwd, state_dir=state_dir)
+        graph_db = index_receipt.graph_db if index_receipt.available else None
     except Exception as exc:  # noqa: BLE001 - indexing is an optional observer
         index_error = exc
     adapter = MiniSweAdapter(
@@ -291,6 +298,23 @@ def build_agent(
         requested_model=model,
         resolved_model=model_name,
     )
+    adapter.initial_index_receipt = index_receipt
+    try:
+        from gt_engine.runtime_observation import capture_workspace
+
+        private_state = Path(state_dir)
+        if not private_state.is_absolute():
+            private_state = Path(cwd) / private_state
+        adapter.record_repository_snapshot(
+            capture_workspace(cwd, excluded_roots=(private_state,)),
+            boundary="repository_start",
+        )
+    except Exception as exc:  # noqa: BLE001 - snapshot authority abstains explicitly
+        adapter.store.append(
+            "repository_snapshot_unavailable",
+            boundary="repository_start",
+            error_type=type(exc).__name__,
+        )
     delivery_path = (
         "legacy" if os.environ.get("GT_LEGACY_MODEL_VISIBLE", "").strip() == "1"
         else "compiled"
@@ -430,6 +454,136 @@ def _classify_terminal(exception: BaseException | None, result: dict) -> str:
     return "internal_error"
 
 
+def _infrastructure_classification(terminal: str) -> str:
+    if terminal == "setup_error":
+        return "SETUP_ERROR"
+    if terminal in {"provider_failed", "provider_model_mismatch"}:
+        return "PROVIDER_ERROR"
+    if terminal == "timeout":
+        return "INTERRUPTED"
+    if terminal == "internal_error":
+        return "HARNESS_ERROR"
+    return "COMPLETED"
+
+
+def _provider_usage(observer) -> dict[str, int | float]:
+    usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "duration_ms": 0.0}
+    if observer is None:
+        return usage
+    usage["calls"] = int(getattr(observer, "request_count", 0) or 0)
+    path = Path(getattr(observer, "events_path", ""))
+    if not path.is_file():
+        return usage
+    try:
+        rows = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return usage
+    for row in rows:
+        if row.get("event") not in {"provider_response", "provider_failure"}:
+            continue
+        provider = row.get("usage") or {}
+        usage["input_tokens"] += int(
+            provider.get("prompt_tokens") or provider.get("input_tokens") or 0
+        )
+        usage["output_tokens"] += int(
+            provider.get("completion_tokens") or provider.get("output_tokens") or 0
+        )
+        usage["duration_ms"] += float(row.get("latency_ms") or 0.0)
+    return usage
+
+
+def _trajectory_payload(agent, output: str | None) -> dict:
+    path = Path(output) if output else None
+    if path is not None and path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            pass
+    messages = getattr(agent, "messages", None)
+    return {"messages": list(messages or ())}
+
+
+def _decision_boundary_for_delivery(delivery, *, initial_revision: str) -> str:
+    recorded = tuple(getattr(delivery, "decision_boundaries", ()) or ())
+    if recorded:
+        return str(recorded[0])
+    phase = str(delivery.phase or "").upper()
+    suffix = str(delivery.suffix or "").lower()
+    if "fail" in suffix or "error" in suffix or "traceback" in suffix:
+        return "FAILURE_OBSERVATION"
+    if "SUBMIT" in phase:
+        return "PRE_SUBMIT"
+    if "VERIFY" in phase:
+        return "VERIFICATION_SELECTION"
+    if "IMPLEMENT" in phase:
+        return (
+            "PRE_EDIT"
+            if delivery.repository_revision == initial_revision
+            else "POST_EDIT_GRAPH_DELTA"
+        )
+    return "REPOSITORY_START"
+
+
+def _record_adapter_run_receipts(run_finalizer, adapter) -> None:
+    """Transfer production adapter receipts into the final v2 artifact."""
+
+    run_finalizer.record_repository_identity(
+        initial_repository_revision=adapter.initial_repository_revision,
+        final_repository_revision=adapter.repository_revision,
+    )
+    initial_index = adapter.initial_index_receipt
+    if initial_index is not None:
+        run_finalizer.record_graph_build(
+            kind="initial",
+            repository_revision=adapter.initial_repository_revision,
+            graph_revision=str(initial_index.graph_revision or ""),
+            duration_ms=float(initial_index.elapsed_ms or 0.0),
+            success=bool(initial_index.available and initial_index.schema_valid),
+            workspace_revision=adapter.initial_repository_revision,
+            mode="full",
+        )
+    for graph_receipt in adapter.graph_lease.receipts:
+        run_finalizer.record_graph_build(
+            kind="refresh",
+            repository_revision=graph_receipt.result.graph_repository_revision,
+            graph_revision=graph_receipt.result.graph_revision,
+            duration_ms=graph_receipt.result.duration_ms,
+            success=(graph_receipt.result.success and graph_receipt.result.health_valid),
+            workspace_revision=graph_receipt.request.workspace_revision,
+            mode=graph_receipt.result.mode.value,
+        )
+    for delivery in adapter.deliveries:
+        visible_bytes = delivery.suffix.encode("utf-8", "surrogatepass")
+        run_finalizer.record_delivery(
+            {
+                "delivery_id": delivery.request_id,
+                "iteration": delivery.iteration,
+                "payload_sha256": delivery.payload_sha256,
+                "model_visible_bytes_sha256": delivery.model_visible_sha256,
+                "model_visible_bytes_hex": visible_bytes.hex(),
+                "decision_boundary": _decision_boundary_for_delivery(
+                    delivery,
+                    initial_revision=adapter.initial_repository_revision,
+                ),
+                "repository_revision": delivery.repository_revision,
+                "graph_revision": delivery.graph_revision,
+                "delivery_bytes": len(visible_bytes),
+                "delivery_tokens": 0,
+                "delivery_token_count_status": "provider_tokenizer_unavailable",
+                "lifecycle_feature_ids": list(delivery.lifecycle_feature_ids),
+                "decision_boundaries": list(delivery.decision_boundaries),
+            }
+        )
+    for lifecycle in adapter.feature_lifecycle_receipts():
+        run_finalizer.record_feature_lifecycle(lifecycle)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
@@ -464,6 +618,32 @@ def main() -> int:
         help="set one capability mode: off/shadow/advisory/assistive/enforced",
     )
     args = parser.parse_args()
+    task_id = hashlib.sha256(args.task.encode("utf-8")).hexdigest()[:16]
+    from gt_engine.run_receipt_v2 import RunReceiptFinalizer
+
+    run_receipt_path = Path(args.state_dir) / task_id / "gt-run-receipt.json"
+    run_finalizer = RunReceiptFinalizer(
+        run_receipt_path,
+        task_id=task_id,
+        requested_model=args.model,
+    )
+
+    def finalize_if_unwound() -> None:
+        if run_finalizer.finalized:
+            return
+        try:
+            run_finalizer.finalize(
+                terminal="internal_error",
+                infrastructure_classification="HARNESS_ERROR",
+                trajectory={"messages": []},
+            )
+        except Exception:
+            # The finalizer already uses atomic writes.  At interpreter exit
+            # there is no further safe recovery if the artifact store itself
+            # is unavailable.
+            pass
+
+    atexit.register(finalize_if_unwound)
     capability_modes: dict[str, str] = {}
     for item in args.gt_capability_mode:
         name, separator, mode = item.partition("=")
@@ -517,7 +697,6 @@ def main() -> int:
             request_receipt=request_receipt,
             binary_paths=[sys.executable],
         )
-        task_id = hashlib.sha256(args.task.encode("utf-8")).hexdigest()[:16]
         manifest_path = Path(args.manifest) if args.manifest else (
             Path(args.state_dir) / task_id / "reproducibility_manifest.json"
         )
@@ -525,6 +704,13 @@ def main() -> int:
         report["model_identity"] = manifest["model"]
         report["research_valid"] = False
         report["reproducibility_manifest"] = str(manifest_path)
+        run_finalizer.finalize(
+            terminal=terminal,
+            infrastructure_classification=_infrastructure_classification(terminal),
+            exception=exc,
+            trajectory={"messages": []},
+        )
+        report["run_receipt_v2"] = str(run_receipt_path)
         if args.metrics:
             Path(args.metrics).parent.mkdir(parents=True, exist_ok=True)
             Path(args.metrics).write_text(
@@ -634,7 +820,6 @@ def main() -> int:
         manifest["research_valid"]
         and TERMINAL_EXIT_CODES.get(terminal, 5) == 0
     )
-    task_id = hashlib.sha256(args.task.encode("utf-8")).hexdigest()[:16]
     manifest_path = Path(args.manifest) if args.manifest else (
         Path(args.state_dir) / task_id / "reproducibility_manifest.json"
     )
@@ -642,6 +827,22 @@ def main() -> int:
     report["model_identity"] = manifest["model"]
     report["research_valid"] = manifest["research_valid"]
     report["reproducibility_manifest"] = str(manifest_path)
+    provider_usage = _provider_usage(observer)
+    run_finalizer.record_provider_usage(
+        calls=int(provider_usage["calls"]),
+        input_tokens=int(provider_usage["input_tokens"]),
+        output_tokens=int(provider_usage["output_tokens"]),
+        duration_ms=float(provider_usage["duration_ms"]),
+    )
+    if adapter is not None:
+        _record_adapter_run_receipts(run_finalizer, adapter)
+    run_finalizer.finalize(
+        terminal=terminal,
+        infrastructure_classification=_infrastructure_classification(terminal),
+        exception=exception,
+        trajectory=_trajectory_payload(agent, args.output),
+    )
+    report["run_receipt_v2"] = str(run_receipt_path)
     if args.metrics:
         Path(args.metrics).parent.mkdir(parents=True, exist_ok=True)
         Path(args.metrics).write_text(json.dumps(report, sort_keys=True), encoding="utf-8")

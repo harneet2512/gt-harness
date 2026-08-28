@@ -5,15 +5,32 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import threading
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .decision_value import (
+    ClaimRole,
+    DecisionBoundary,
+    DecisionClaim,
+    DecisionDeliveryCompiler,
+    FeatureLifecycle,
+    FeatureStage,
+    SourceEvidence,
+)
 from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash
+from .graph_lease import (
+    GraphBuildResult,
+    GraphFreshness,
+    GraphLease,
+    GraphRefreshMode,
+)
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
 from .task_contract import (
     TaskContract,
@@ -36,6 +53,10 @@ class ProviderDelivery:
     phase: str
     suffix: str
     model_visible_sha256: str = ""
+    repository_revision: str = ""
+    graph_revision: str = ""
+    lifecycle_feature_ids: tuple[str, ...] = ()
+    decision_boundaries: tuple[str, ...] = ()
 
 
 class ProviderModelMismatch(RuntimeError):
@@ -168,6 +189,15 @@ class MiniSweAdapter(GroundtruthController):
         self._dedup_chain: set[str] = set()
         self._chain_head = ""
         self._latest_delivery: ProviderDelivery | None = None
+        self._decision_compiler = DecisionDeliveryCompiler()
+        self._feature_lifecycles: list[FeatureLifecycle] = []
+        self._pending_model_visible_fragments: list[
+            tuple[str, FeatureLifecycle | None]
+        ] = []
+        self._delivery_lifecycles: dict[str, tuple[FeatureLifecycle, ...]] = {}
+        self._pending_lifecycle_validation: list[
+            tuple[FeatureLifecycle, str]
+        ] = []
         self._terminal_request_ids: set[str] = set()
         self._contract_shipped = False
         self._last_delta_signature: tuple[tuple[str, str], ...] = ()
@@ -195,8 +225,12 @@ class MiniSweAdapter(GroundtruthController):
         # is fresh at task start only when an index actually exists; any edit
         # makes it stale until a successful deterministic rebuild.
         self.repository_revision = ""
+        self.initial_repository_revision = ""
+        self.initial_index_receipt: Any | None = None
         self.graph_fresh = bool(self.graph_db)
         self.graph_stale_since_revision = ""
+        self.graph_lease = GraphLease.absent()
+        self._supported_source_files = 0
         self._latest_transaction_sha256 = ""
         self.terminal_evidence_session: Any | None = None
         self.provider_boundary: Any | None = None
@@ -407,6 +441,14 @@ class MiniSweAdapter(GroundtruthController):
                 epoch=self.workspace_epoch,
             )
         self._edited_files.update(normalized_paths)
+        if normalized_paths and self.repository_revision:
+            self.graph_lease.mark_edit(
+                workspace_revision=self.repository_revision,
+                dirty_paths=normalized_paths,
+                operations=tuple("modify" for _ in normalized_paths),
+                supported_file_count=self._supported_source_files,
+                adapter_can_incremental=bool(self.graph_db),
+            )
         if normalized_paths and self.graph_db:
             self.graph_fresh = False
             self.graph_stale_since_revision = self.repository_revision
@@ -426,6 +468,28 @@ class MiniSweAdapter(GroundtruthController):
         digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("repository_snapshots", digest, encoded)
         self.repository_revision = str(snapshot.revision)
+        if not self.initial_repository_revision:
+            self.initial_repository_revision = self.repository_revision
+        from .language_registry import is_indexable_source
+
+        self._supported_source_files = sum(
+            item.kind == "file" and is_indexable_source(item.path, item.captured)
+            for item in getattr(snapshot, "files", ())
+        )
+        if self.graph_db and self.graph_lease.freshness is GraphFreshness.ABSENT:
+            try:
+                from .graph_context import graph_revision
+
+                revision = graph_revision(self.graph_db)
+                if revision:
+                    self.graph_lease = GraphLease.current(
+                        graph_repository_revision=self.repository_revision,
+                        workspace_revision=self.repository_revision,
+                        graph_revision=revision,
+                        graph_path=str(self.graph_db),
+                    )
+            except Exception:  # noqa: BLE001 - unavailable graph stays uncertified
+                self.graph_fresh = False
         self.store.append(
             "repository_snapshot",
             boundary=boundary,
@@ -442,6 +506,29 @@ class MiniSweAdapter(GroundtruthController):
         self.store.put_blob("edit_transactions", digest, encoded)
         self.repository_revision = str(transaction.post_revision)
         self._latest_transaction_sha256 = str(transaction.transaction_sha256)
+        direct_paths = tuple(transaction.changed_paths)
+        reverse_dependents: tuple[str, ...] = ()
+        dependency_scan_safe = not bool(self.graph_db)
+        if self.graph_db and self.graph_fresh:
+            try:
+                from .indexer import graph_reverse_dependents
+
+                reverse_dependents = graph_reverse_dependents(
+                    self.graph_db, direct_paths
+                )
+                dependency_scan_safe = True
+            except Exception:  # noqa: BLE001 - forces conservative full refresh
+                reverse_dependents = ()
+                dependency_scan_safe = False
+        operations = tuple(str(change.operation) for change in transaction.changes)
+        self.graph_lease.mark_edit(
+            workspace_revision=self.repository_revision,
+            dirty_paths=tuple(dict.fromkeys((*direct_paths, *reverse_dependents))),
+            operations=operations,
+            supported_file_count=self._supported_source_files,
+            dependency_closure_size=len(direct_paths) + len(reverse_dependents),
+            adapter_can_incremental=bool(self.graph_db and dependency_scan_safe),
+        )
         self.store.append(
             "edit_transaction",
             action_index=int(transaction.action_id),
@@ -491,31 +578,111 @@ class MiniSweAdapter(GroundtruthController):
             payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
 
-    def refresh_graph(self) -> bool:
-        """Try one full rebuild; failure leaves graph queries unavailable."""
+    def refresh_graph(
+        self,
+        boundary: DecisionBoundary = DecisionBoundary.POST_EDIT_GRAPH_DELTA,
+    ) -> bool:
+        """Refresh once for this revision at a graph-dependent boundary."""
         if not self.repo_root:
             return False
-        try:
-            from .indexer import ensure_index
 
-            rebuilt = ensure_index(
-                self.repo_root, state_dir=str(self.store.root.parent)
+        def build(request):
+            from .indexer import (
+                ensure_index,
+                refresh_index_files,
             )
-        except Exception as exc:  # noqa: BLE001 - freshness is fail-open
-            self.store.append(
-                "graph_refresh_failed", error_type=type(exc).__name__
+
+            receipt = None
+            used_full = request.mode is GraphRefreshMode.FULL
+            if request.mode is GraphRefreshMode.INCREMENTAL and self.graph_db:
+                receipt = refresh_index_files(
+                    self.repo_root,
+                    self.graph_db,
+                    request.dirty_paths,
+                    source_revision=self.repository_revision,
+                )
+            # One conservative full fallback is part of the same revision
+            # refresh transaction.  The lease still prevents another refresh
+            # request for this workspace revision.
+            if receipt is None or not receipt.available:
+                used_full = True
+                started = time.perf_counter()
+                rebuilt = ensure_index(
+                    self.repo_root,
+                    state_dir=str(self.store.root.parent),
+                )
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                graph_revision_value = ""
+                if rebuilt:
+                    try:
+                        from .graph_context import graph_revision
+
+                        graph_revision_value = graph_revision(rebuilt)
+                    except Exception:  # noqa: BLE001 - hash remains exact fallback identity
+                        graph_revision_value = ""
+                    if not graph_revision_value:
+                        try:
+                            graph_revision_value = hashlib.sha256(
+                                Path(rebuilt).read_bytes()
+                            ).hexdigest()
+                        except OSError:
+                            rebuilt = None
+                return GraphBuildResult(
+                    success=bool(rebuilt),
+                    graph_repository_revision=self.repository_revision,
+                    graph_revision=graph_revision_value,
+                    graph_path=str(rebuilt or ""),
+                    duration_ms=elapsed_ms,
+                    health_valid=bool(rebuilt),
+                    mode=GraphRefreshMode.FULL,
+                    error="" if rebuilt else "index_unavailable",
+                )
+            return GraphBuildResult(
+                success=bool(receipt.available),
+                graph_repository_revision=self.repository_revision,
+                graph_revision=str(receipt.graph_revision or ""),
+                graph_path=str(receipt.graph_db or ""),
+                duration_ms=float(receipt.elapsed_ms or 0.0),
+                health_valid=bool(receipt.schema_valid),
+                mode=(GraphRefreshMode.FULL if used_full else GraphRefreshMode.INCREMENTAL),
+                error=str(receipt.error_type or ""),
             )
+
+        refresh_receipt = self.graph_lease.refresh_for_boundary(
+            boundary,
+            repository_revision=self.repository_revision,
+            refresh=build,
+        )
+        if refresh_receipt is None:
+            return self.graph_lease.claims_current(
+                self.repository_revision, self.graph_lease.graph_revision
+            )
+        result = refresh_receipt.result
+        self.store.append(
+            "graph_refresh_receipt",
+            boundary=boundary.value,
+            build_identity=refresh_receipt.request.build_identity,
+            workspace_revision=refresh_receipt.request.workspace_revision,
+            repository_revision=self.repository_revision,
+            dirty_paths=list(refresh_receipt.request.dirty_paths),
+            refresh_mode=result.mode.value,
+            duration_ms=result.duration_ms,
+            success=result.success and result.health_valid,
+            graph_revision=result.graph_revision,
+            error=result.error,
+        )
+        if not (result.success and result.health_valid):
+            self.graph_fresh = False
+            self.store.append("graph_refresh_failed", error_type=result.error or "invalid_graph")
             return False
-        if not rebuilt:
-            self.store.append("graph_refresh_failed", error_type="index_unavailable")
-            return False
-        self.graph_db = rebuilt
+        self.graph_db = result.graph_path
         self.graph_fresh = True
         self.graph_stale_since_revision = ""
         self.store.append(
             "graph_refreshed",
             repository_revision=self.repository_revision,
-            graph_db_sha256=hashlib.sha256(rebuilt.encode("utf-8")).hexdigest(),
+            graph_revision=result.graph_revision,
+            graph_db_sha256=hashlib.sha256(self.graph_db.encode("utf-8")).hexdigest(),
         )
         return True
 
@@ -547,24 +714,59 @@ class MiniSweAdapter(GroundtruthController):
                     affected.append(predicate_id)
         return tuple(sorted(set(affected)))
 
-    def bind_provider_payload(self, payload: Mapping[str, Any]) -> ProviderDelivery:
+    def bind_provider_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        model_visible_additions: Iterable[str] = (),
+    ) -> ProviderDelivery:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             raise ValueError("provider payload requires messages")
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True,
                              separators=(",", ":")).encode("utf-8")
         digest = hashlib.sha256(encoded).hexdigest()
-        model_visible = json.dumps(
+        provider_messages = json.dumps(
             messages,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        model_visible_digest = hashlib.sha256(model_visible).hexdigest()
+        provider_messages_digest = hashlib.sha256(provider_messages).hexdigest()
         self.store.put_blob("provider_requests", digest, encoded)
         self.iteration += 1
         request_id = f"{self.task_id}-{self.iteration}-{digest[:16]}"
-        suffix = self.provider_suffix()
+        content_rows = [
+            str(message.get("content") or "")
+            for message in messages
+            if isinstance(message, Mapping)
+        ]
+        staged = list(self._pending_model_visible_fragments)
+        staged_text = {text for text, _lifecycle in staged}
+        staged.extend(
+            (str(value), None)
+            for value in model_visible_additions
+            if str(value) and str(value) not in staged_text
+        )
+        visible = [
+            (text, lifecycle)
+            for text, lifecycle in staged
+            if text and any(text in content for content in content_rows)
+        ]
+        suffix = "\n\n".join(dict.fromkeys(text for text, _lifecycle in visible))
+        model_visible_digest = hashlib.sha256(
+            suffix.encode("utf-8", "surrogatepass")
+        ).hexdigest()
+        delivered_lifecycles: list[FeatureLifecycle] = []
+        for text, lifecycle in visible:
+            if lifecycle is None or lifecycle.stage is not FeatureStage.CERTIFIED:
+                continue
+            lifecycle.deliver(
+                boundary=lifecycle.decision_boundary,
+                model_visible_bytes=text.encode("utf-8", "surrogatepass"),
+            )
+            delivered_lifecycles.append(lifecycle)
+        self._pending_model_visible_fragments.clear()
         delivery = ProviderDelivery(
             request_id,
             self.iteration,
@@ -572,10 +774,27 @@ class MiniSweAdapter(GroundtruthController):
             self.phase,
             suffix,
             model_visible_digest,
+            self.repository_revision,
+            (
+                self.graph_lease.graph_revision
+                if self.graph_lease.claims_current(
+                    self.repository_revision, self.graph_lease.graph_revision
+                )
+                else ""
+            ),
+            tuple(item.feature_id for item in delivered_lifecycles),
+            tuple(
+                dict.fromkeys(
+                    item.decision_boundary.value
+                    for item in delivered_lifecycles
+                    if item.decision_boundary is not None
+                )
+            ),
         )
         self.deliveries.append(delivery)
         self._last_payload_hash = digest
         self._latest_delivery = delivery
+        self._delivery_lifecycles[request_id] = tuple(delivered_lifecycles)
         self.store.append(
             "provider_delivery",
             request_id=request_id,
@@ -584,8 +803,16 @@ class MiniSweAdapter(GroundtruthController):
             phase=self.phase,
             suffix=suffix,
             model_visible_sha256=model_visible_digest,
+            provider_messages_sha256=provider_messages_digest,
+            model_visible_bytes_hex=suffix.encode(
+                "utf-8", "surrogatepass"
+            ).hex(),
+            lifecycle_feature_ids=list(delivery.lifecycle_feature_ids),
+            decision_boundaries=list(delivery.decision_boundaries),
             requested_model=self.requested_model,
             resolved_model=self.resolved_model,
+            repository_revision=delivery.repository_revision,
+            graph_revision=delivery.graph_revision,
             request_blob=f"provider_requests/{digest}.json",
         )
         for typed in self._pending_typed_observations:
@@ -598,6 +825,398 @@ class MiniSweAdapter(GroundtruthController):
             )
         self._pending_typed_observations.clear()
         return delivery
+
+    @staticmethod
+    def _envelope_role(envelope: Any) -> ClaimRole:
+        semantics = getattr(envelope, "canonical_semantics", None)
+        roles = {
+            str(getattr(role, "value", role))
+            for role in tuple(getattr(semantics, "roles", ()) or ())
+        }
+        context = str(
+            getattr(
+                getattr(semantics, "decision_context", None),
+                "value",
+                getattr(semantics, "decision_context", ""),
+            )
+        )
+        authority = getattr(semantics, "authority", -1)
+        try:
+            authority_value = int(authority)
+        except (TypeError, ValueError):
+            authority_value = -1
+        if (
+            "TARGET_IDENTITY" in roles
+            and context == "SOURCE_TARGET_SELECTION"
+            and authority_value >= 5
+        ):
+            return ClaimRole.EDIT_OWNER
+        normalized = str(getattr(envelope, "evidence_type", "") or "").casefold()
+        if "ambigu" in normalized or "identity" in normalized:
+            return ClaimRole.UNRESOLVED_IDENTITY
+        if "test" in normalized:
+            return ClaimRole.AFFECTED_TEST
+        if any(token in normalized for token in ("syntax", "failure", "red", "verify")):
+            return ClaimRole.VALIDATION_COMMAND
+        if any(token in normalized for token in ("signature", "public", "api")):
+            return ClaimRole.PUBLIC_SURFACE
+        return ClaimRole.INSPECTION_DEPENDENCY
+
+    @staticmethod
+    def _envelope_feature_id(evidence_type: str) -> str:
+        normalized = str(evidence_type or "").casefold()
+        if "ambigu" in normalized or "identity" in normalized:
+            return "ambiguous_identity"
+        if "test" in normalized:
+            return "affected_tests"
+        if any(token in normalized for token in ("syntax", "failure", "red", "recover")):
+            return "failure_analysis"
+        if any(token in normalized for token in ("signature", "public", "api")):
+            return "public_surface"
+        return "inspection_files"
+
+    def _feature_graph_revision(self, envelope: Any) -> str:
+        envelope_revision = str(getattr(envelope, "graph_revision", "") or "")
+        if envelope_revision:
+            return envelope_revision
+        if self.graph_lease.freshness is GraphFreshness.CURRENT:
+            return self.graph_lease.graph_revision
+        repository_revision = self.repository_revision or "repository-unavailable"
+        return f"repository-only:{repository_revision}"
+
+    def _abstained_envelope_lifecycle(
+        self,
+        envelope: Any,
+        *,
+        boundary: DecisionBoundary,
+        reason: str,
+    ) -> str:
+        lifecycle = FeatureLifecycle.candidate(
+            self._envelope_feature_id(str(getattr(envelope, "evidence_type", ""))),
+            triggering_event=str(getattr(envelope, "event_id", "") or "evidence_envelope"),
+            repository_revision=self.repository_revision or "repository-unavailable",
+            graph_revision=self._feature_graph_revision(envelope),
+        )
+        lifecycle.decision_boundary = boundary
+        lifecycle.abstain(reason)
+        self._feature_lifecycles.append(lifecycle)
+        return ""
+
+    def _exact_graph_symbol_identities(
+        self,
+        envelope: Any,
+    ) -> tuple[tuple[str, str, str, int], ...]:
+        """Return independently exact current declaration identities.
+
+        Ranked retrieval is relevance evidence, not edit authority.  It may be
+        upgraded only where the leased graph independently contains exactly
+        one non-file declaration at a candidate source path and line.  Each
+        row is certified separately, so an ambiguous row is omitted without
+        suppressing other exact rows.  This rule is language-neutral and does
+        not trust the producer's confidence, fact id, or rendered payload.
+        """
+
+        graph_revision = str(getattr(envelope, "graph_revision", "") or "")
+        if (
+            not self.graph_db
+            or not graph_revision
+            or not self.repository_revision
+            or not self.graph_lease.claims_current(
+                self.repository_revision, graph_revision
+            )
+        ):
+            return ()
+        provenance = tuple(getattr(envelope, "provenance", ()) or ())
+        if not provenance:
+            return ()
+        identities: list[tuple[str, str, str, int]] = []
+        try:
+            connection = sqlite3.connect(
+                f"file:{Path(self.graph_db).resolve().as_posix()}?mode=ro",
+                uri=True,
+            )
+            try:
+                for raw_path, raw_line in provenance:
+                    relative = Path(str(raw_path).replace("\\", "/"))
+                    if relative.is_absolute() or ".." in relative.parts:
+                        continue
+                    path = relative.as_posix()
+                    try:
+                        line = int(raw_line)
+                    except (TypeError, ValueError):
+                        continue
+                    if line < 1:
+                        continue
+                    rows = connection.execute(
+                        "SELECT COALESCE(language,''),file_path,name,"
+                        "COALESCE(start_line,0) FROM nodes "
+                        "WHERE file_path=? AND start_line=? "
+                        "AND LOWER(COALESCE(label,''))<>'file' LIMIT 2",
+                        (path, line),
+                    ).fetchall()
+                    if len(rows) != 1:
+                        continue
+                    language, graph_path, graph_symbol, graph_line = rows[0]
+                    normalized_language = str(language or "").strip().casefold()
+                    if not normalized_language or not str(graph_symbol or "").strip():
+                        continue
+                    identity = (
+                        normalized_language,
+                        str(graph_path).replace("\\", "/"),
+                        str(graph_symbol),
+                        int(graph_line),
+                    )
+                    if identity not in identities:
+                        identities.append(identity)
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error, TypeError, ValueError):
+            return ()
+        return tuple(identities)
+
+    def compile_certified_envelope(
+        self,
+        envelope: Any,
+        *,
+        boundary: DecisionBoundary,
+    ) -> str:
+        """Compile one independently source-certified envelope for delivery."""
+
+        if not self.repository_revision:
+            return self._abstained_envelope_lifecycle(
+                envelope, boundary=boundary, reason="repository revision unavailable"
+            )
+        envelope_graph = str(getattr(envelope, "graph_revision", "") or "")
+        if envelope_graph and not self.graph_lease.claims_current(
+            self.repository_revision, envelope_graph
+        ):
+            return self._abstained_envelope_lifecycle(
+                envelope, boundary=boundary, reason="graph revision is stale or unleased"
+            )
+        envelope_tier = str(getattr(envelope, "tier", "")).upper()
+        graph_identities = (
+            self._exact_graph_symbol_identities(envelope)
+            if envelope_tier != "VERIFIED"
+            else ()
+        )
+        if envelope_tier != "VERIFIED" and not graph_identities:
+            return self._abstained_envelope_lifecycle(
+                envelope,
+                boundary=boundary,
+                reason="candidate lacks an exact current graph symbol identity",
+            )
+        root = Path(self.repo_root).resolve() if self.repo_root else None
+        evidence_by_location: dict[tuple[str, int], SourceEvidence] = {}
+        for raw_path, raw_line in tuple(getattr(envelope, "provenance", ()) or ()):
+            if root is None:
+                continue
+            relative = Path(str(raw_path).replace("\\", "/"))
+            candidate = (root / relative).resolve()
+            try:
+                normalized = candidate.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if not candidate.is_file():
+                continue
+            content = candidate.read_bytes()
+            line = int(raw_line)
+            if line < 1 or line > len(content.decode("utf-8", "replace").splitlines()):
+                continue
+            evidence_by_location[(normalized, line)] = SourceEvidence(
+                path=normalized,
+                start_line=line,
+                end_line=line,
+                content_sha256=hashlib.sha256(content).hexdigest(),
+            )
+        provenance = tuple(getattr(envelope, "provenance", ()) or ())
+        if graph_identities:
+            graph_identities = tuple(
+                identity
+                for identity in graph_identities
+                if (identity[1], identity[3]) in evidence_by_location
+            )
+            evidence = [
+                evidence_by_location[(path, line)]
+                for _language, path, _symbol, line in graph_identities
+            ]
+        else:
+            evidence = [
+                evidence_by_location[
+                    (Path(str(path).replace("\\", "/")).as_posix(), int(line))
+                ]
+                for path, line in provenance
+                if (
+                    Path(str(path).replace("\\", "/")).as_posix(), int(line)
+                )
+                in evidence_by_location
+            ]
+        if (
+            not provenance
+            or not evidence
+            or (not graph_identities and len(evidence) != len(provenance))
+        ):
+            return self._abstained_envelope_lifecycle(
+                envelope, boundary=boundary, reason="source provenance is incomplete"
+            )
+        graph_revision = self._feature_graph_revision(envelope)
+        feature_id = (
+            "implementation_owner"
+            if graph_identities
+            else self._envelope_feature_id(
+                str(getattr(envelope, "evidence_type", ""))
+            )
+        )
+        lifecycle = FeatureLifecycle.candidate(
+            feature_id,
+            triggering_event=str(getattr(envelope, "event_id", "") or "evidence_envelope"),
+            repository_revision=self.repository_revision,
+            graph_revision=graph_revision,
+        )
+        role = ClaimRole.EDIT_OWNER if graph_identities else self._envelope_role(envelope)
+        target = str(getattr(envelope, "target", "") or evidence[0].path)
+        semantics = getattr(envelope, "canonical_semantics", None)
+        semantic_claim = str(getattr(semantics, "claim", "") or "")
+        semantic_action = str(
+            getattr(semantics, "actionable_consequence", "") or ""
+        )
+        payload = " ".join(
+            str(value).strip()
+            for value in tuple(getattr(envelope, "payload", ()) or ())
+            if str(value).strip()
+        )
+        claims: list[DecisionClaim] = []
+        if graph_identities:
+            for language, identity_path, symbol, line in graph_identities:
+                symbol_identity = f"{language}:{identity_path}:{symbol}"
+                exact_task_identifier = bool(
+                    re.search(
+                        rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])",
+                        self.issue_text,
+                        flags=re.IGNORECASE,
+                    )
+                )
+                claims.append(
+                    DecisionClaim(
+                        claim_id=f"symbol:{symbol_identity}",
+                        text=f"{symbol} is defined at {identity_path}:{line}",
+                        role=ClaimRole.EDIT_OWNER,
+                        requirement_id="task",
+                        repository_revision=self.repository_revision,
+                        graph_revision=graph_revision,
+                        source_evidence=(evidence_by_location[(identity_path, line)],),
+                        action=(
+                            f"inspect {identity_path}:{line} and edit {symbol} "
+                            "only if the task requires it"
+                        ),
+                        symbol_identity=symbol_identity,
+                        relationship="graph_node_identity",
+                        semantic_similarity=(
+                            1.0
+                            if exact_task_identifier
+                            else float(getattr(envelope, "confidence", 0.0) or 0.0)
+                        ),
+                        exact_identifier_match=exact_task_identifier,
+                        graph_distance=0,
+                        authoritative_edge=True,
+                        evidence_quality=1.0,
+                    )
+                )
+        else:
+            symbol_identity = str(getattr(envelope, "fact_id", "") or "")
+            fact = semantic_claim or payload or f"Repository evidence identifies {target}."
+            action = semantic_action or (
+                f"inspect {target} and the cited source lines"
+                if role is not ClaimRole.VALIDATION_COMMAND
+                else "use the cited evidence to select and run the relevant validation"
+            )
+            claims.append(
+                DecisionClaim(
+                    claim_id=str(
+                        getattr(envelope, "dedup_key", "")
+                        or hashlib.sha256(fact.encode("utf-8")).hexdigest()
+                    ),
+                    text=fact,
+                    role=role,
+                    requirement_id="task",
+                    repository_revision=self.repository_revision,
+                    graph_revision=graph_revision,
+                    source_evidence=tuple(evidence),
+                    action=action,
+                    symbol_identity=symbol_identity,
+                    relationship="source_provenance",
+                    semantic_similarity=float(
+                        getattr(envelope, "confidence", 0.0) or 0.0
+                    ),
+                    exact_identifier_match=bool(symbol_identity),
+                    graph_distance=0 if envelope_graph else None,
+                    authoritative_edge=bool(envelope_graph),
+                    evidence_quality=1.0,
+                )
+            )
+        compiled = self._decision_compiler.compile(
+            boundary=boundary,
+            repository_revision=self.repository_revision,
+            graph_revision=graph_revision,
+            unmet_requirement_ids=("task",),
+            claims=tuple(claims),
+        )
+        if compiled is None:
+            lifecycle.abstain("certified claim is unchanged since its prior delivery")
+            self._feature_lifecycles.append(lifecycle)
+            return ""
+        lifecycle.certify(claims=compiled.claims, decision_boundary=boundary)
+        self._feature_lifecycles.append(lifecycle)
+        rendered = compiled.model_visible_bytes.decode("utf-8")
+        self.stage_model_visible_fragment(rendered, lifecycle=lifecycle)
+        return rendered
+
+    def stage_model_visible_fragment(
+        self,
+        text: str,
+        *,
+        lifecycle: FeatureLifecycle | None = None,
+    ) -> None:
+        value = str(text or "")
+        if not value:
+            return
+        for existing, existing_lifecycle in self._pending_model_visible_fragments:
+            if existing == value:
+                if existing_lifecycle is None and lifecycle is not None:
+                    self._pending_model_visible_fragments.remove(
+                        (existing, existing_lifecycle)
+                    )
+                    self._pending_model_visible_fragments.append((value, lifecycle))
+                return
+        self._pending_model_visible_fragments.append((value, lifecycle))
+
+    def feature_lifecycle_receipts(self) -> tuple[dict[str, Any], ...]:
+        return tuple(lifecycle.receipt() for lifecycle in self._feature_lifecycles)
+
+    def validate_consumed_lifecycles(
+        self,
+        command: str,
+        *,
+        output: str,
+        returncode: int | None,
+    ) -> None:
+        remaining: list[tuple[FeatureLifecycle, str]] = []
+        for lifecycle, expected_action in self._pending_lifecycle_validation:
+            if expected_action != command:
+                remaining.append((lifecycle, expected_action))
+                continue
+            if returncode is None:
+                remaining.append((lifecycle, expected_action))
+                continue
+            contradicted = returncode != 0
+            outcome = f"returncode={returncode}"
+            output_sha256 = hashlib.sha256(
+                output.encode("utf-8", "replace")
+            ).hexdigest()
+            lifecycle.validate(
+                validation=f"{outcome}; output_sha256={output_sha256}",
+                contradicted=contradicted,
+            )
+        self._pending_lifecycle_validation = remaining
 
     def record_typed_observation(
         self,
@@ -747,8 +1366,9 @@ class MiniSweAdapter(GroundtruthController):
             reported_model = str(response.get("model") or "")
         self.provider_reported_model = reported_model
         mismatch = self._provider_model_mismatch(reported_model)
+        next_action_values = tuple(next_actions)
         action_rows = []
-        for index, action in enumerate(next_actions, start=1):
+        for index, action in enumerate(next_action_values, start=1):
             canonical = json.dumps(
                 dict(action), ensure_ascii=False, sort_keys=True,
                 separators=(",", ":"), default=str,
@@ -780,6 +1400,55 @@ class MiniSweAdapter(GroundtruthController):
         )
         if self._latest_delivery is not None:
             self._terminal_request_ids.add(self._latest_delivery.request_id)
+            lifecycles = self._delivery_lifecycles.get(
+                self._latest_delivery.request_id, ()
+            )
+            for lifecycle in lifecycles:
+                if lifecycle.stage is not FeatureStage.DELIVERED:
+                    continue
+                anchors = tuple(
+                    dict.fromkeys(
+                        value
+                        for claim in lifecycle.claims
+                        for value in (
+                            claim.symbol_identity,
+                            (
+                                claim.symbol_identity.rsplit(":", 1)[-1]
+                                if ":" in claim.symbol_identity
+                                else ""
+                            ),
+                            *(item.path for item in claim.source_evidence),
+                        )
+                        if value
+                    )
+                )
+                selected_action = ""
+                for action in next_action_values:
+                    action_text = str(
+                        action.get("command")
+                        or action.get("cmd")
+                        or json.dumps(
+                            dict(action),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    )
+                    if any(anchor.casefold() in action_text.casefold() for anchor in anchors):
+                        selected_action = action_text
+                        break
+                if not selected_action:
+                    continue
+                lifecycle.consume(resulting_agent_action=selected_action)
+                self._pending_lifecycle_validation.append(
+                    (lifecycle, selected_action)
+                )
+                self.store.append(
+                    "feature_lifecycle_consumed",
+                    request_id=self._latest_delivery.request_id,
+                    feature_id=lifecycle.feature_id,
+                    resulting_agent_action=selected_action,
+                )
         if mismatch:
             raise ProviderModelMismatch(
                 "provider model mismatch: requested="
@@ -983,11 +1652,18 @@ class MiniSweAdapter(GroundtruthController):
                         action_index=0,
                         iteration=0,
                     )
-                    from .miniswe_evidence import cap_evidence
-
-                    # neutral marker (a `GT_EVIDENCE:` label is harness framing)
-                    tagged = f"[Verified: {result.envelope.evidence_type}]\n"
-                    return tagged + cap_evidence(result.rendered, 600)
+                    compiled = self.compile_certified_envelope(
+                        result.envelope,
+                        boundary=DecisionBoundary.REPOSITORY_START,
+                    )
+                    if compiled:
+                        return compiled
+                    if str(getattr(result.envelope, "tier", "")).upper() == "VERIFIED":
+                        return self._lexical_task_localization()
+                    # An uncertified graph candidate remains private.  Calling
+                    # it "Verified" made ranking output look authoritative and
+                    # bypassed the lifecycle receipt entirely.
+                    return ""
             except Exception:  # noqa: BLE001 - deterministic lexical fallback follows
                 pass
         return self._lexical_task_localization()
@@ -1052,7 +1728,27 @@ class MiniSweAdapter(GroundtruthController):
                 break
         ranked = sorted(rows, key=lambda row: (-int(row["score"]), str(row["anchor"])))[:4]
         if not ranked:
+            lifecycle = FeatureLifecycle.not_applicable(
+                "inspection_files",
+                triggering_event="repository_start:lexical_localization",
+                repository_revision=self.repository_revision or "repository-unavailable",
+                graph_revision=self._feature_graph_revision(object()),
+                reason="no lexical source candidate matched the task",
+            )
+            lifecycle.decision_boundary = DecisionBoundary.REPOSITORY_START
+            self._feature_lifecycles.append(lifecycle)
             return ""
+        lifecycle = FeatureLifecycle.candidate(
+            "inspection_files",
+            triggering_event="repository_start:lexical_localization",
+            repository_revision=self.repository_revision or "repository-unavailable",
+            graph_revision=self._feature_graph_revision(object()),
+        )
+        lifecycle.decision_boundary = DecisionBoundary.REPOSITORY_START
+        lifecycle.abstain(
+            "lexical ranking lacks independently certified graph authority"
+        )
+        self._feature_lifecycles.append(lifecycle)
         artifact = {
             "schema": "gt.localization_advisory.v1",
             "issue_sha256": hashlib.sha256(

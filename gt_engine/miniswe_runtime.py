@@ -32,6 +32,7 @@ from typing import Any
 
 from minisweagent.exceptions import Submitted
 
+from .decision_value import DecisionBoundary
 from .gt_session import GTMode, GTSession, GTSessionConfig
 from .miniswe_evidence import (
     cap_evidence,
@@ -47,6 +48,7 @@ from .runtime_observation import (
     compile_transaction_artifacts,
     diff_workspace,
 )
+from .verification_contract import is_executable_check
 
 _SUBMIT_REFUSED_OUTPUT = "submission withheld by the Groundtruth contract gate"
 
@@ -455,6 +457,22 @@ def _run_evidence(
             action_index=action_index,
             iteration=adapter.iteration,
         )
+        if returncode not in (0, None):
+            boundary = DecisionBoundary.FAILURE_OBSERVATION
+        elif changed_files or created_files:
+            boundary = DecisionBoundary.POST_EDIT_GRAPH_DELTA
+        elif is_executable_check(command):
+            boundary = DecisionBoundary.VERIFICATION_SELECTION
+        else:
+            boundary = DecisionBoundary.PRE_EDIT
+        compiled = adapter.compile_certified_envelope(
+            result.envelope,
+            boundary=boundary,
+        )
+        if compiled:
+            return compiled
+        if str(getattr(result.envelope, "tier", "")).upper() == "VERIFIED":
+            return ""
         # Self-diagnosing splice: the trajectory tool messages carry the exact
         # evidence type so a post-run census is exact, not heuristic.
         return f"[Verified: {result.envelope.evidence_type}]\n{cap_evidence(result.rendered)}"
@@ -522,12 +540,15 @@ def install_runtime_hooks(
                 if isinstance(content, str):
                     last["content"] = f"{content}\n\n" + "\n\n".join(parts)
                     prepared = [*prepared[:-1], last]
-            adapter.bind_provider_payload({
-                "messages": prepared,
-                "model": str(getattr(_model, "model_name", "") or ""),
-                "model_kwargs": dict(getattr(_model, "model_kwargs", {}) or {}),
-                "tools": getattr(_model, "tools", None),
-            })
+            adapter.bind_provider_payload(
+                {
+                    "messages": prepared,
+                    "model": str(getattr(_model, "model_name", "") or ""),
+                    "model_kwargs": dict(getattr(_model, "model_kwargs", {}) or {}),
+                    "tools": getattr(_model, "tools", None),
+                },
+                model_visible_additions=parts,
+            )
         except Exception as exc:  # noqa: BLE001 - prompt augmentation is fail-open
             session.degrade("prepare_messages", exc)
         return prepared
@@ -652,6 +673,11 @@ def install_runtime_hooks(
                         },
                     })
                     continue
+                if (
+                    not adapter.graph_fresh
+                    and session.capability_active("graph_refresh")
+                ):
+                    adapter.refresh_graph(DecisionBoundary.PRE_EDIT)
                 request, result = execute_typed_action_fail_open(
                     action,
                     repo_root=adapter.repo_root or os.getcwd(),
@@ -792,14 +818,12 @@ def install_runtime_hooks(
                         adapter.begin_implement()
                     adapter.note_edit(changed_files)
                     if (
-                        adapter.graph_db
-                        and not adapter.graph_fresh
+                        not adapter.graph_fresh
                         and session.capability_active("graph_refresh")
-                        and os.environ.get(
-                            "GT_REFRESH_INDEX_AFTER_EDIT", ""
-                        ).strip().lower() in {"1", "true", "yes", "on"}
                     ):
-                        adapter.refresh_graph()
+                        adapter.refresh_graph(
+                            DecisionBoundary.POST_EDIT_GRAPH_DELTA
+                        )
                 if returncode not in (None, 0):
                     adapter.record_episode_failure(
                         command=command,
@@ -820,6 +844,11 @@ def install_runtime_hooks(
                     output=output,
                     returncode=returncode,
                     action_index=action_index,
+                )
+                adapter.validate_consumed_lifecycles(
+                    command,
+                    output=output,
+                    returncode=returncode,
                 )
                 rendered = ""
                 if session.capability_active("evidence_delivery"):
@@ -876,6 +905,9 @@ def install_runtime_hooks(
                                 f"<gt-facts>\n{rendered_by_index[index + 1]}"
                                 f"\n</gt-facts>\n{content}"
                             )
+                            adapter.stage_model_visible_fragment(
+                                rendered_by_index[index + 1]
+                            )
                             formatted[index] = obs
                     for index, obs in enumerate(formatted):
                         typed = typed_by_index.get(index + 1)
@@ -886,6 +918,10 @@ def install_runtime_hooks(
                             final_observation_sha256=hashlib.sha256(
                                 str(obs.get("content") or "").encode("utf-8")
                             ).hexdigest(),
+                        )
+                    for directive in directives:
+                        adapter.stage_model_visible_fragment(
+                            str(directive.get("content") or "")
                         )
                 except Exception as exc:  # noqa: BLE001 - splice is fail-open
                     session.degrade("observation_splice", exc)

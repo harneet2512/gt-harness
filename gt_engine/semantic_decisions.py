@@ -353,8 +353,10 @@ class SemanticDecisionEngine:
             selected_need = selected_need or need
             selected_claims.append(selected)
             facts.append(selected.fact)
-            if len(selected_claims) >= 3:
-                break
+            # There is deliberately no claim-count target.  The evidence frame
+            # is bounded by exact rendered size and relevance; unchanged facts
+            # are excluded by ``_exposures``.  A fixed cap produced the old,
+            # suspiciously static three-delivery pattern.
         if not selected_claims or selected_need is None:
             return None
         text = " ".join(facts)

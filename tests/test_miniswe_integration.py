@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from types import SimpleNamespace
 
+import pytest
+from groundtruth.runtime.evidence_envelope import HYPOTHESIS, VERIFIED, EvidenceEnvelope
+
+from gt_engine.decision_value import DecisionBoundary, FeatureStage
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter, ProviderModelMismatch
+from gt_engine.runtime_observation import capture_workspace
 from gt_engine.task_contract import Obligation, TaskContract, extract_task_contract
 from gt_engine.verification_contract import compile_obligation_predicates
 
@@ -130,6 +137,278 @@ def test_adapter_rejects_provider_payload_without_messages(tmp_path):
         assert "messages" in str(exc)
     else:
         raise AssertionError("missing provider messages was accepted")
+
+
+def test_verified_envelope_reaches_validated_lifecycle_through_provider_boundary(
+    tmp_path,
+):
+    repo = tmp_path / "repo"
+    source = repo / "src" / "owner.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def resolve_identity():\n    return 1\n", encoding="utf-8")
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+    )
+    adapter.repository_revision = "repo-r1"
+    envelope = EvidenceEnvelope.build(
+        producer="fixture",
+        fact_id="resolve_identity",
+        target="src/owner.py",
+        evidence_type="localization",
+        payload=("resolve_identity is defined in src/owner.py",),
+        provenance=(("src/owner.py", 1),),
+        confidence=1.0,
+        tier=VERIFIED,
+    )
+
+    rendered = adapter.compile_certified_envelope(
+        envelope,
+        boundary=DecisionBoundary.REPOSITORY_START,
+    )
+    assert rendered.startswith("[inspection dependencies]")
+    delivery = adapter.bind_provider_payload(
+        {"messages": [{"role": "user", "content": f"task\n\n{rendered}"}]},
+        model_visible_additions=(rendered,),
+    )
+    adapter.bind_provider_response(
+        {"id": "response-1", "model": ""},
+        next_actions=({"command": "rg resolve_identity"},),
+    )
+    adapter.validate_consumed_lifecycles(
+        "rg resolve_identity",
+        output="execution outcome unavailable",
+        returncode=None,
+    )
+    assert adapter.feature_lifecycle_receipts()[0]["stage"] == FeatureStage.CONSUMED
+    adapter.validate_consumed_lifecycles(
+        "rg resolve_identity",
+        output="def resolve_identity():",
+        returncode=0,
+    )
+
+    receipts = adapter.feature_lifecycle_receipts()
+    assert delivery.suffix == rendered
+    assert len(receipts) == 1
+    assert receipts[0]["stage"] == FeatureStage.VALIDATED
+    assert receipts[0]["model_visible_bytes_hex"] == rendered.encode().hex()
+    assert receipts[0]["resulting_agent_action"] == "rg resolve_identity"
+
+    from gt_engine.run_receipt_v2 import RunReceiptFinalizer
+    from scripts.miniswe_gt_run import _record_adapter_run_receipts
+
+    finalizer = RunReceiptFinalizer(
+        tmp_path / "gt-run-receipt.json",
+        task_id="task",
+        requested_model="fixture-model",
+    )
+    _record_adapter_run_receipts(finalizer, adapter)
+    run_receipt = finalizer.finalize(
+        terminal="fixture_complete",
+        infrastructure_classification="NONE",
+        trajectory={"messages": []},
+    )
+    assert run_receipt["deliveries"][0]["model_visible_bytes_hex"] == rendered.encode().hex()
+    assert run_receipt["feature_lifecycle_transitions"][0]["stage"] == "VALIDATED"
+
+
+def test_unverifiable_envelope_abstains_and_is_not_model_visible(tmp_path):
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(tmp_path),
+    )
+    adapter.repository_revision = "repo-r1"
+    envelope = EvidenceEnvelope.build(
+        producer="fixture",
+        fact_id="guess",
+        target="missing.py",
+        evidence_type="localization",
+        payload=("maybe missing.py",),
+        provenance=(("missing.py", 1),),
+        confidence=0.5,
+    )
+
+    rendered = adapter.compile_certified_envelope(
+        envelope,
+        boundary=DecisionBoundary.REPOSITORY_START,
+    )
+
+    assert rendered == ""
+    assert adapter.feature_lifecycle_receipts()[0]["stage"] == FeatureStage.ABSTAINED
+
+
+def test_exact_current_graph_symbol_upgrades_ranked_candidate_to_edit_owner(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "src" / "owner.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def resolve_identity():\n    return 1\n", encoding="utf-8")
+    display = repo / "src" / "display.py"
+    display.write_text("def display_identity():\n    return 1\n", encoding="utf-8")
+    graph_db = tmp_path / "graph.db"
+    graph_revision = "b" * 64
+    with sqlite3.connect(graph_db) as connection:
+        connection.execute("CREATE TABLE project_meta(key TEXT PRIMARY KEY, value TEXT)")
+        connection.execute(
+            "INSERT INTO project_meta(key,value) VALUES('post_revision',?)",
+            (graph_revision,),
+        )
+        connection.execute(
+            "CREATE TABLE nodes(id INTEGER PRIMARY KEY,label TEXT,name TEXT,"
+            "qualified_name TEXT,file_path TEXT,start_line INTEGER,language TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO nodes(label,name,qualified_name,file_path,start_line,language) "
+            "VALUES('Function','resolve_identity','resolve_identity','src/owner.py',1,'python')"
+        )
+        connection.execute(
+            "INSERT INTO nodes(label,name,qualified_name,file_path,start_line,language) "
+            "VALUES('Function','display_identity','display_identity','src/display.py',1,'python')"
+        )
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+        graph_db=str(graph_db),
+        issue_text=(
+            "Update resolve_identity while preserving display formatting behavior."
+        ),
+    )
+    adapter.record_repository_snapshot(
+        capture_workspace(repo),
+        boundary="repository_start",
+    )
+    envelope = EvidenceEnvelope.build(
+        producer="ranked_localization",
+        fact_id="display_identity",
+        target="src/display.py",
+        evidence_type="localization",
+        payload=(
+            "src/display.py:1:display_identity",
+            "src/owner.py:1:resolve_identity",
+        ),
+        provenance=(("src/display.py", 1), ("src/owner.py", 1)),
+        confidence=0.5,
+        tier=HYPOTHESIS,
+        graph_revision=graph_revision,
+    )
+
+    rendered = adapter.compile_certified_envelope(
+        envelope,
+        boundary=DecisionBoundary.REPOSITORY_START,
+    )
+    adapter.bind_provider_payload(
+        {"messages": [{"role": "user", "content": rendered}]},
+        model_visible_additions=(rendered,),
+    )
+    adapter.bind_provider_response(
+        {"id": "response-1", "model": ""},
+        next_actions=({"command": "rg resolve_identity"},),
+    )
+    adapter.validate_consumed_lifecycles(
+        "rg resolve_identity",
+        output="src/owner.py:1:def resolve_identity():",
+        returncode=0,
+    )
+
+    receipt = adapter.feature_lifecycle_receipts()[0]
+    claims = receipt["claims"]
+    claim = claims[0]
+    assert rendered.startswith("[edit owners]")
+    assert receipt["feature_id"] == "implementation_owner"
+    assert receipt["stage"] == FeatureStage.VALIDATED
+    assert len(claims) == 2
+    assert claim["claim_id"] == "symbol:python:src/owner.py:resolve_identity"
+    assert claim["text"] == "resolve_identity is defined at src/owner.py:1"
+    assert claim["symbol_identity"] == "python:src/owner.py:resolve_identity"
+    assert claim["relationship"] == "graph_node_identity"
+
+
+def test_envelope_without_repository_snapshot_abstains_instead_of_crashing(tmp_path):
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(tmp_path),
+    )
+    envelope = EvidenceEnvelope.build(
+        producer="fixture",
+        fact_id="guess",
+        target="owner.py",
+        evidence_type="localization",
+        payload=("owner.py may be relevant",),
+        provenance=(("owner.py", 1),),
+        confidence=0.5,
+        tier=VERIFIED,
+    )
+
+    assert (
+        adapter.compile_certified_envelope(
+            envelope,
+            boundary=DecisionBoundary.REPOSITORY_START,
+        )
+        == ""
+    )
+    receipt = adapter.feature_lifecycle_receipts()[0]
+    assert receipt["stage"] == FeatureStage.ABSTAINED
+    assert receipt["repository_revision"] == "repository-unavailable"
+
+
+@pytest.mark.parametrize(
+    ("language", "relative", "content", "symbol"),
+    (
+        ("python", "src/owner.py", "def resolve_identity():\n    return 1\n", "resolve_identity"),
+        ("typescript", "src/owner.ts", "export function resolveIdentity() {}\n", "resolveIdentity"),
+        ("go", "src/owner.go", "package src\nfunc ResolveIdentity() {}\n", "ResolveIdentity"),
+        ("rust", "src/owner.rs", "fn resolve_identity() {}\n", "resolve_identity"),
+    ),
+)
+def test_structured_target_selection_is_the_only_edit_owner_authority(
+    tmp_path, language, relative, content, symbol
+):
+    repo = tmp_path / "repo"
+    source = repo / relative
+    source.parent.mkdir(parents=True)
+    source.write_text(content, encoding="utf-8")
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+    )
+    adapter.repository_revision = "repo-r1"
+    semantics = SimpleNamespace(
+        roles=(SimpleNamespace(value="TARGET_IDENTITY"),),
+        decision_context=SimpleNamespace(value="SOURCE_TARGET_SELECTION"),
+        authority=5,
+        claim=f"{symbol} is the implementation owner",
+        actionable_consequence=f"edit {relative}:{symbol}",
+    )
+    envelope = EvidenceEnvelope.build(
+        producer="fixture",
+        fact_id=f"{language}:{relative}:{symbol}",
+        target=relative,
+        evidence_type="localization",
+        payload=("legacy payload is not the authority",),
+        provenance=((relative, 1),),
+        confidence=1.0,
+        tier=VERIFIED,
+        canonical_semantics=semantics,
+    )
+
+    rendered = adapter.compile_certified_envelope(
+        envelope,
+        boundary=DecisionBoundary.REPOSITORY_START,
+    )
+
+    receipt = adapter.feature_lifecycle_receipts()[0]
+    assert rendered.startswith("[edit owners]")
+    assert receipt["claims"][0]["role"] == "edit_owner"
+    assert receipt["claims"][0]["text"] == semantics.claim
 
 
 def test_adapter_evaluates_semantic_predicates_from_real_observation(tmp_path):

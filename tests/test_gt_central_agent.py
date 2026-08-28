@@ -83,6 +83,7 @@ from gt_engine.preflight import (
 from gt_engine.replay_bundle import load_replay_bundle
 from gt_engine.repository_intelligence import RepositoryEvidence, RepositorySession
 from gt_engine.repository_mirror import SourceMirrorPlan
+from gt_engine.run_receipt_v2 import is_complete_run_receipt
 from gt_engine.snowflake_onnx import (
     SNOWFLAKE_MAX_LENGTH,
     SNOWFLAKE_MODEL_NAME,
@@ -473,14 +474,13 @@ def test_deepswe_workflow_provider_preflight_matches_gateway_model_routing():
     assert "TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}" in workflow
     assert "DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" in workflow
     assert 'tokenrouter_base = os.environ["PROVIDER_BASE_URL"].strip()' in workflow
-    assert 'PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}' in workflow
+    assert "PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}" in workflow
     assert 'echo "GT_LITELLM_MODEL=${executor_model}"' in workflow
-    assert workflow.count('--ak treatment_profile=central_relational_v2') >= 2
+    assert workflow.count("--ak treatment_profile=central_relational_v2") >= 2
     assert "python -m scripts.central_bootstrap_canary" in workflow
     assert "--provider-proof provider-route-proof.json" in workflow
     fingerprint_gate = (
-        'if provider not in {"tokenrouter", "deepseek"} and not '
-        'proof["system_fingerprint"]:'
+        'if provider not in {"tokenrouter", "deepseek"} and not proof["system_fingerprint"]:'
     )
     assert fingerprint_gate in workflow
     assert 'echo "OPENAI_BASE_URL=${PROVIDER_BASE_URL}"' in workflow
@@ -567,9 +567,7 @@ def test_openai_compatible_route_preserves_exact_deepseek_checkpoint(monkeypatch
 def test_native_deepseek_route_uses_explicit_litellm_model(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("GT_LITELLM_MODEL", "openai/deepseek-v4-flash")
-    monkeypatch.setenv(
-        "GT_PROVIDER_ROUTE_ID", "deepseek:native:api.deepseek.com"
-    )
+    monkeypatch.setenv("GT_PROVIDER_ROUTE_ID", "deepseek:native:api.deepseek.com")
     monkeypatch.delenv("GT_OPENROUTER_PROVIDER_ONLY", raising=False)
 
     model = MiniSweCentralAgent(
@@ -680,11 +678,11 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
     assert "GT_OPENROUTER_DATA_COLLECTION: allow" in workflow
     assert 'echo "GT_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"' in workflow
     assert "GT_COMMIT: ${{ github.sha }}" not in workflow
-    assert 'MODEL: ${{ inputs.model }}' in workflow
+    assert "MODEL: ${{ inputs.model }}" in workflow
     assert 'model = f"openai/{model}"' in workflow
     assert 'model = "deepseek/deepseek-v4-flash-0731"' not in workflow
-    assert 'deepseek-v4-flash-0731' not in workflow
-    assert 'deepseek/deepseek-v4-flash-0731' not in workflow
+    assert "deepseek-v4-flash-0731" not in workflow
+    assert "deepseek/deepseek-v4-flash-0731" not in workflow
     assert "GT_OPENROUTER_PROVIDER_ONLY" in workflow
     assert "allow_fallbacks" in workflow
     assert "GT_OPENROUTER_DATA_COLLECTION" in workflow
@@ -700,7 +698,7 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
     assert '"effective_actions_schema": metrics.get("effective_actions_schema")' in workflow
     assert "Download the single exact bootstrap canary proof" in workflow
     assert "exact provider route gate failed" in workflow
-    assert "not proof[\"system_fingerprint\"]" in workflow
+    assert 'not proof["system_fingerprint"]' in workflow
     assert "actual provider response identity gate failed" in workflow
     assert 'executor_identity.get("models") == [expected_response_model]' in workflow
     assert 'executor_identity.get("stable_provider_identity") is True' in workflow
@@ -710,14 +708,11 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
     assert '"executor_retry_policy": "provider_once_no_retry"' in workflow
     assert "DeepSWE parity is 300" not in workflow
     assert "--ak gt_request_token_budget=1200" in workflow
-    assert 'default: persistent_state_only' not in workflow
-    assert 'default: certified_full' in workflow
+    assert "default: persistent_state_only" not in workflow
+    assert "default: certified_full" in workflow
     assert "--ak preflight_mode=assistive_safe" not in workflow
     assert workflow.count("--ak preflight_mode=shadow") >= 2
-    assert (
-        'timeout --signal=TERM --kill-after=30s "${AGENT_TIMEOUT_SEC}s" pier run'
-        in workflow
-    )
+    assert 'timeout --signal=TERM --kill-after=30s "${AGENT_TIMEOUT_SEC}s" pier run' in workflow
     assert '"execution_budget_sec"' in workflow
     assert "provider_query_started.json" in workflow
     assert "central_receipt.json -print -quit" in workflow
@@ -758,8 +753,8 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
         '"${{ inputs.comparison_profile }}" != "certified_full"'
     ) in workflow
     assert '"${{ inputs.arm }}" == "gt_off"' in workflow
-    assert '--ak integration_mode=off --ak policy_mode=off' in workflow
-    assert '--ak enable_decision_sufficiency=false' in workflow
+    assert "--ak integration_mode=off --ak policy_mode=off" in workflow
+    assert "--ak enable_decision_sufficiency=false" in workflow
     assert '"arm": arm' in workflow
     assert '"control"' in workflow
     assert '"claim_scope": claim_scope' in workflow
@@ -1235,9 +1230,7 @@ async def test_oversized_changed_source_is_hydrated_and_digest_verified(tmp_path
 def test_graph_transition_keeps_source_that_becomes_non_source():
     before = "#!/usr/bin/env python3\nprint('old')\n"
     after = "not source anymore\n"
-    classified_after = (
-        classify_change("runner", kind="f", content=after),
-    )
+    classified_after = (classify_change("runner", kind="f", content=after),)
     assert classified_after[0].graph_indexable is False
     transition = WorkspaceTransition(
         action_id=1,
@@ -1263,9 +1256,7 @@ def test_graph_transition_uses_session_mirror_when_prior_sensor_text_is_uncaptur
             "#!/usr/bin/env python3\nprint('prior large source')\n",
             encoding="utf-8",
         )
-        classified_after = (
-            classify_change("runner", kind="f", content="not source anymore\n"),
-        )
+        classified_after = (classify_change("runner", kind="f", content="not source anymore\n"),)
         transition = WorkspaceTransition(
             action_id=1,
             command="rewrite runner",
@@ -1398,9 +1389,7 @@ async def test_observed_fact_survives_later_empty_action_until_next_provider_req
             if command == "printf-shebang":
                 return ExecResult(stdout="#!/usr/bin/env python3\n", return_code=0)
             if command == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
-                return ExecResult(
-                    stdout="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", return_code=0
-                )
+                return ExecResult(stdout="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", return_code=0)
             return ExecResult(stdout="", return_code=0)
 
     model = _BatchModel(
@@ -1427,8 +1416,7 @@ async def test_observed_fact_survives_later_empty_action_until_next_provider_req
         for content in model.observed_history[1]
     )
     assert any(
-        row["surface"] == "observed_execution"
-        and row["disposition"] == "value_rejected"
+        row["surface"] == "observed_execution" and row["disposition"] == "value_rejected"
         for call in receipt["contribution_compiler"]["calls"]
         for row in call["accounting"]
     )
@@ -1447,12 +1435,8 @@ async def test_observed_fact_survives_later_empty_action_until_next_provider_req
             "kind": "shebang",
             "call": 2,
             "disposition": "value_rejected",
-            "reason_codes": receipt["observed_facts"]["fact_decisions"][0][
-                "reason_codes"
-            ],
-            "contribution_id": receipt["observed_facts"]["fact_decisions"][0][
-                "contribution_id"
-            ],
+            "reason_codes": receipt["observed_facts"]["fact_decisions"][0]["reason_codes"],
+            "contribution_id": receipt["observed_facts"]["fact_decisions"][0]["contribution_id"],
         }
     ]
 
@@ -1467,9 +1451,7 @@ async def test_observed_facts_from_later_batch_actions_are_terminally_accounted(
             if command == "python-version":
                 return ExecResult(stdout="Python 3.12.0\n", return_code=0)
             if command == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
-                return ExecResult(
-                    stdout="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", return_code=0
-                )
+                return ExecResult(stdout="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", return_code=0)
             return ExecResult(stdout="", return_code=0)
 
     model = _BatchModel(
@@ -1494,9 +1476,10 @@ async def test_observed_facts_from_later_batch_actions_are_terminally_accounted(
     decisions = receipt["observed_facts"]["fact_decisions"]
     assert {row["kind"] for row in extracted} == {"shebang", "tool_version"}
     assert {row["kind"] for row in decisions} == {"shebang", "tool_version"}
-    assert next(row for row in decisions if row["kind"] == "tool_version")[
-        "disposition"
-    ] == "value_rejected"
+    assert (
+        next(row for row in decisions if row["kind"] == "tool_version")["disposition"]
+        == "value_rejected"
+    )
 
 
 @pytest.mark.asyncio
@@ -1729,9 +1712,7 @@ async def test_persistent_state_bootstraps_once_then_runs_at_every_live_boundary
         "path": "/app",
         "applied": True,
     }
-    assert receipt["provider_prompt_identity"]["schema"] == (
-        "gt.provider_prompt_identity.v1"
-    )
+    assert receipt["provider_prompt_identity"]["schema"] == ("gt.provider_prompt_identity.v1")
     assert all(
         len(receipt["provider_prompt_identity"][key]) == 64
         for key in (
@@ -1758,9 +1739,7 @@ async def test_persistent_state_bootstraps_once_then_runs_at_every_live_boundary
     assert product_census["product_mechanism_count"] == 18
     assert product_census["configured_mechanism_count"] == 18
     assert product_census["persistent_execution_state"]["exercised"] is True
-    assert product_census["persistent_execution_state"][
-        "repeated_deterministic_use"
-    ] is True
+    assert product_census["persistent_execution_state"]["repeated_deterministic_use"] is True
     assert product_census["persistent_execution_state"]["lifecycle_use_count"] > 1
     assert product_census["mechanism_ids"][-1] == "persistent_execution_state"
     assert not any("bootstrap-selection" in item for item in model.observed_history[1])
@@ -1774,9 +1753,7 @@ async def test_persistent_state_bootstraps_once_then_runs_at_every_live_boundary
 
 
 @pytest.mark.asyncio
-async def test_initial_retrieval_failure_prevents_bootstrap_provider_spend(
-    tmp_path, monkeypatch
-):
+async def test_initial_retrieval_failure_prevents_bootstrap_provider_spend(tmp_path, monkeypatch):
     model = _ScriptedModel(["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"])
     agent = MiniSweCentralAgent(
         logs_dir=tmp_path,
@@ -1904,8 +1881,7 @@ async def test_bootstrap_raw_transport_marks_call_and_uses_provider_timeout_with
 
         def _prepare_messages_for_api(self, messages):
             return [
-                {key: value for key, value in row.items() if key != "extra"}
-                for row in messages
+                {key: value for key, value in row.items() if key != "extra"} for row in messages
             ]
 
         def _query(self, messages, **kwargs):
@@ -1991,8 +1967,7 @@ async def test_executor_uses_one_direct_provider_transport_and_preserves_hidden_
 
         def _prepare_messages_for_api(self, messages):
             return [
-                {key: value for key, value in row.items() if key != "extra"}
-                for row in messages
+                {key: value for key, value in row.items() if key != "extra"} for row in messages
             ]
 
         def _query(self, messages, **kwargs):
@@ -2154,9 +2129,7 @@ async def test_bootstrap_persists_raw_args_and_attempted_ids_on_invalid_json(tmp
                 model_dump=lambda: {
                     "role": "assistant",
                     "content": "",
-                    "tool_calls": [
-                        {"function": {"name": "select_catalog", "arguments": raw_args}}
-                    ],
+                    "tool_calls": [{"function": {"name": "select_catalog", "arguments": raw_args}}],
                 },
                 tool_calls=[tool_call],
             )
@@ -2183,9 +2156,7 @@ async def test_bootstrap_persists_raw_args_and_attempted_ids_on_invalid_json(tmp
 
     assert selection.valid is False
     assert "invalid_json" in selection.reason_codes[0]
-    assert receipt["raw_tool_arguments_sha256"] == hashlib.sha256(
-        raw_args.encode()
-    ).hexdigest()
+    assert receipt["raw_tool_arguments_sha256"] == hashlib.sha256(raw_args.encode()).hexdigest()
     assert receipt["attempted_item_ids"] == ["pes-0123456789abcdef0123"]
     assert "pes-0123456789abcdef0123" in receipt["raw_tool_arguments_preview"]
 
@@ -2271,9 +2242,7 @@ class _ObservedMutationEnvironment(_Environment):
 
 
 @pytest.mark.asyncio
-async def test_supported_source_creation_activates_persistent_state_once(
-    tmp_path, monkeypatch
-):
+async def test_supported_source_creation_activates_persistent_state_once(tmp_path, monkeypatch):
     class TransferMutationEnvironment(_ObservedMutationEnvironment):
         async def download_dir_with_exclusions(self, *, source_dir, target_dir, exclude):
             Path(target_dir).mkdir(parents=True, exist_ok=True)
@@ -2401,9 +2370,7 @@ async def test_supported_source_creation_activates_persistent_state_once(
         for row in persistent["deliveries"]
         for meta in row.get("claim_metadata", ())
     )
-    assert all(
-        "GroundTruth" not in text for text in model.observed_history[-1]
-    )
+    assert all("GroundTruth" not in text for text in model.observed_history[-1])
     assert all(
         "not_applicable_no_supported_source" not in row.get("reason_codes", ())
         for row in receipt["preemptive_retrieval"]["decisions"]
@@ -2412,8 +2379,7 @@ async def test_supported_source_creation_activates_persistent_state_once(
     assert receipt["repository_intelligence"]["denominator_excluded"] is False
     assert receipt["product_mechanism_census"]["persistent_execution_state"]["exercised"] is True
     release_checks = {
-        check.name: check
-        for check in audit_treatment_runtime(receipt, label="dynamic-source")
+        check.name: check for check in audit_treatment_runtime(receipt, label="dynamic-source")
     }
     assert set(release_checks["persistent_execution_state"].failures) == {
         "dynamic-source:persistent_bootstrap_transport_not_single_call",
@@ -2455,13 +2421,10 @@ async def test_source_backed_localization_stays_off_first_provider_call(tmp_path
     evidence = receipt["repository_evidence"]
     assert evidence["available"] is True
     assert not any(
-        row.get("feature_id") == "GT_LOC_RESLOT"
-        for row in receipt.get("guidance_deliveries") or ()
+        row.get("feature_id") == "GT_LOC_RESLOT" for row in receipt.get("guidance_deliveries") or ()
     )
     loc_receipts = [
-        row
-        for row in receipt["features"]["receipts"]
-        if row["feature_id"] == "GT_LOC_RESLOT"
+        row for row in receipt["features"]["receipts"] if row["feature_id"] == "GT_LOC_RESLOT"
     ]
     assert loc_receipts
     assert all(row["model_visible"] is False for row in loc_receipts)
@@ -2655,8 +2618,7 @@ async def test_relational_v2_delivers_certified_process_after_existing_read_acti
     )
     descriptor = json.loads(
         (
-            Path(__file__).resolve().parents[1]
-            / "eval/treatments/tb2_central_relational_v2.json"
+            Path(__file__).resolve().parents[1] / "eval/treatments/tb2_central_relational_v2.json"
         ).read_text(encoding="utf-8")
     )
     runtime_contract = build_runtime_arguments(
@@ -2685,16 +2647,16 @@ async def test_relational_v2_delivers_certified_process_after_existing_read_acti
             return tuple((1.0, 0.0) for _ in texts)
 
         def receipt(self):
-                return {
-                    "backend": "snowflake_onnx",
-                    "model_name": SNOWFLAKE_MODEL_NAME,
-                    "model_revision": SNOWFLAKE_MODEL_REVISION,
-                    "model_sha256": SNOWFLAKE_MODEL_SHA256,
-                    "tokenizer_sha256": SNOWFLAKE_TOKENIZER_SHA256,
-                    "pooling": "cls",
-                    "normalization": "l2",
-                    "max_length": SNOWFLAKE_MAX_LENGTH,
-                    "available": True,
+            return {
+                "backend": "snowflake_onnx",
+                "model_name": SNOWFLAKE_MODEL_NAME,
+                "model_revision": SNOWFLAKE_MODEL_REVISION,
+                "model_sha256": SNOWFLAKE_MODEL_SHA256,
+                "tokenizer_sha256": SNOWFLAKE_TOKENIZER_SHA256,
+                "pooling": "cls",
+                "normalization": "l2",
+                "max_length": SNOWFLAKE_MAX_LENGTH,
+                "available": True,
                 "failed": False,
                 "network_calls": 0,
                 "provider_calls": 0,
@@ -2799,12 +2761,8 @@ async def test_relational_v2_delivers_certified_process_after_existing_read_acti
     assert "Definition src/core.py" not in second_request
     assert "src/entry.py" in second_request
     assert "tests/test_core.py" in second_request
-    assert "repository_context" in receipt["model_call_contexts"][1][
-        "selected_surfaces"
-    ]
-    _rows, failures, totals = audit_provider_deliveries(
-        receipt, task="relational-v2-integration"
-    )
+    assert "repository_context" in receipt["model_call_contexts"][1]["selected_surfaces"]
+    _rows, failures, totals = audit_provider_deliveries(receipt, task="relational-v2-integration")
     assert failures == []
     assert totals["surfaces"]["repository_context"]["delivery_count"] == 1
 
@@ -2825,9 +2783,7 @@ async def test_final_profile_invalidates_treatment_but_dispatches_baseline_solve
 
     receipt = json.loads((tmp_path / "central_receipt.json").read_text())
     assert len(model.observed_history) == 1
-    assert receipt["metrics"]["solver_exhausted_reason"] != (
-        "mechanical_completeness_barrier"
-    )
+    assert receipt["metrics"]["solver_exhausted_reason"] != ("mechanical_completeness_barrier")
     barrier = receipt["mechanical_completeness"]["provider_barriers"][0]
     assert barrier["status"] == "BLOCKED"
     assert "runtime_contract_missing" in barrier["failures"]
@@ -3275,10 +3231,7 @@ async def test_assistive_convergence_returns_forbidden_artifact_read_before_exec
 
 def test_tb2_workflow_gates_matrix_with_exact_runtime_bootstrap_canary():
     workflow = (
-        Path(__file__).resolve().parents[1]
-        / ".github"
-        / "workflows"
-        / "tb2_miniswe_central.yml"
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "tb2_miniswe_central.yml"
     ).read_text(encoding="utf-8")
 
     assert "python -m scripts.central_bootstrap_canary" in workflow
@@ -3289,10 +3242,7 @@ def test_tb2_workflow_gates_matrix_with_exact_runtime_bootstrap_canary():
     assert workflow.count("ref: ${{ needs.resolve.outputs.sha }}") == 5
     assert "name: bootstrap-canary-${{ github.run_id }}" in workflow
     provider_free = (
-        Path(__file__).resolve().parents[1]
-        / ".github"
-        / "workflows"
-        / "central_provider_free.yml"
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "central_provider_free.yml"
     ).read_text(encoding="utf-8")
     assert "scripts/central_bootstrap_canary.py" in provider_free
 
@@ -3779,9 +3729,10 @@ async def test_context_soft_character_limit_starts_repeated_bounded_compaction_e
         if row["call"] >= 4
     ]
     assert view_chars and max(view_chars) < 40_000
-    assert int(
-        receipt["metrics"]["context_compaction_epochs"][-1]["epoch"]
-    ) == receipt["metrics"]["context_compactions"]
+    assert (
+        int(receipt["metrics"]["context_compaction_epochs"][-1]["epoch"])
+        == receipt["metrics"]["context_compactions"]
+    )
 
 
 @pytest.mark.asyncio
@@ -3886,12 +3837,8 @@ async def test_reasoning_dominated_pressure_is_reported_without_deleting_reasoni
         def query(self, messages):
             response = super().query(messages)
             self.response_index += 1
-            response["content"] = (
-                f"distinct hypothesis {self.response_index}: " + "R" * 4_000
-            )
-            response["reasoning_content"] = (
-                f"private chain {self.response_index}: " + "Q" * 4_000
-            )
+            response["content"] = f"distinct hypothesis {self.response_index}: " + "R" * 4_000
+            response["reasoning_content"] = f"private chain {self.response_index}: " + "Q" * 4_000
             return response
 
     model = ReasoningHeavyModel()
@@ -3910,8 +3857,7 @@ async def test_reasoning_dominated_pressure_is_reported_without_deleting_reasoni
     deferrals = receipt["metrics"]["context_compaction_deferrals"]
     assert deferrals
     assert any(
-        row["reason"] == "distinct_assistant_reasoning_preservation_boundary"
-        for row in deferrals
+        row["reason"] == "distinct_assistant_reasoning_preservation_boundary" for row in deferrals
     )
     assert receipt["metrics"]["context_unique_reasoning_chars_removed"] == 0
 
@@ -4057,9 +4003,7 @@ async def test_marker_failure_does_not_consume_or_receipt_pending_visible_eviden
                 return ExecResult(stdout="tests/test_app.py::test_app FAILED\n", return_code=1)
             raise AssertionError(command)
 
-    model = _ScriptedModel(
-        ["pytest -q", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]
-    )
+    model = _ScriptedModel(["pytest -q", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"])
     agent = MiniSweCentralAgent(logs_dir=tmp_path, model_name="test")
     agent._model_factory = lambda: model
     feedback_calls = 0
@@ -4857,12 +4801,12 @@ def test_paid_central_matrix_uses_the_same_outcome_preserving_contract():
     assert "python -m scripts.build_benchmark_manifest" in workflow
     assert '--benchmark-manifest "$GT_BENCHMARK_MANIFEST_PATH"' in workflow
     assert "benchmark-manifest.json" in workflow
-    assert "BenchmarkManifest.from_dict" in (
-        root / "scripts" / "tb2_merge_results.py"
-    ).read_text(encoding="utf-8")
-    assert "audit_runtime_receipt" in (
-        root / "scripts" / "tb2_merge_results.py"
-    ).read_text(encoding="utf-8")
+    assert "BenchmarkManifest.from_dict" in (root / "scripts" / "tb2_merge_results.py").read_text(
+        encoding="utf-8"
+    )
+    assert "audit_runtime_receipt" in (root / "scripts" / "tb2_merge_results.py").read_text(
+        encoding="utf-8"
+    )
     assert descriptor["profile_id"] == "central_relational_v2"
     assert runtime["policy_mode"] == "certified_active"
     assert "inputs.arm" not in workflow
@@ -4893,9 +4837,9 @@ def test_paid_central_matrix_uses_the_same_outcome_preserving_contract():
 
 
 def test_merge_preserves_artifact_failures_when_runtime_checks_are_added():
-    source = (
-        Path(__file__).resolve().parents[1] / "scripts" / "tb2_merge_results.py"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "scripts" / "tb2_merge_results.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "treatment_release_failures.extend(" in source
     assert "treatment_release_failures = [\n                failure" not in source
@@ -4906,8 +4850,7 @@ def test_merge_preserves_artifact_failures_when_runtime_checks_are_added():
 
 def test_paid_merge_retains_exact_provider_free_proof():
     workflow = (
-        Path(__file__).resolve().parents[1]
-        / ".github/workflows/tb2_miniswe_central.yml"
+        Path(__file__).resolve().parents[1] / ".github/workflows/tb2_miniswe_central.yml"
     ).read_text(encoding="utf-8")
 
     assert "needs: [resolve, provider_free, plan, run]" in workflow
@@ -5331,8 +5274,7 @@ async def test_shadow_submit_gate_holds_once_on_unverified_obligations(tmp_path)
     assert executed_submits == [submit]
     assert len(model.observed_history) == 2
     assert any(
-        "required task conditions remain unresolved" in item
-        for item in model.observed_history[1]
+        "required task conditions remain unresolved" in item for item in model.observed_history[1]
     )
     trajectory = (tmp_path / "miniswe_trajectory.json").read_text(encoding="utf-8")
     assert "required task conditions remain unresolved" in trajectory
@@ -5344,9 +5286,7 @@ async def test_shadow_submit_gate_holds_once_on_unverified_obligations(tmp_path)
     assert "submit_refusal" in feature_ids
     assert "GT_SS_SUBMIT_RED" in feature_ids
     red = next(
-        row
-        for row in receipt["features"]["receipts"]
-        if row["feature_id"] == "GT_SS_SUBMIT_RED"
+        row for row in receipt["features"]["receipts"] if row["feature_id"] == "GT_SS_SUBMIT_RED"
     )
     assert red["payload"]["blockers"]
     assert "unverified" in red["payload"]["message"]
@@ -5362,9 +5302,7 @@ async def test_assistive_safe_does_not_hold_on_unverified_prose_obligations(tmp_
             if "-printf" in command:
                 return ExecResult(stdout="", return_code=0)
             if "COMPLETE_TASK" in command:
-                return ExecResult(
-                    stdout="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", return_code=0
-                )
+                return ExecResult(stdout="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", return_code=0)
             raise AssertionError(command)
 
     submit = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
@@ -5559,6 +5497,26 @@ async def test_model_timeout_writes_a_censored_partial_receipt(tmp_path):
     assert receipt["metrics"]["actions"] == 0
     assert model.query_kwargs == {"num_retries": 0, "timeout": pytest.approx(0.001)}
     assert context.metadata["exit_status"] == "ModelTimeout"
+    run_receipt = json.loads((tmp_path / "gt-run-receipt.json").read_text(encoding="utf-8"))
+    assert is_complete_run_receipt(run_receipt)
+    assert run_receipt["terminal"] == "ModelTimeout"
+    assert run_receipt["infrastructure_classification"] == "PROVIDER_ERROR"
+    assert run_receipt["provider_usage"]["calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_exception_still_writes_complete_run_receipt_v2(tmp_path):
+    agent = MiniSweCentralAgent(logs_dir=tmp_path, model_name="test")
+    agent._model_factory = lambda: (_ for _ in ()).throw(RuntimeError("startup probe failed"))
+
+    with pytest.raises(RuntimeError, match="startup probe failed"):
+        await agent.run("do it", _Environment(), AgentContext())
+
+    run_receipt = json.loads((tmp_path / "gt-run-receipt.json").read_text(encoding="utf-8"))
+    assert is_complete_run_receipt(run_receipt)
+    assert run_receipt["terminal"] == "RuntimeError"
+    assert run_receipt["infrastructure_classification"] == "SETUP_ERROR"
+    assert run_receipt["provider_usage"]["calls"] == 0
 
 
 @pytest.mark.asyncio
@@ -6085,4 +6043,12 @@ async def test_syntax_failure_does_not_interrupt_multi_action_batch(tmp_path):
     assert receipt["guidance_deliveries"][0]["delivered_before_call"] == 2
     assert receipt["guidance_deliveries"][0]["first_eligible_call"] == 2
     assert receipt["guidance_deliveries"][0]["delivered_before_model_query"] is True
+    run_receipt = json.loads((tmp_path / "gt-run-receipt.json").read_text(encoding="utf-8"))
+    assert is_complete_run_receipt(run_receipt)
+    assert len(run_receipt["deliveries"]) == 1
+    delivered = run_receipt["deliveries"][0]
+    visible = bytes.fromhex(delivered["model_visible_bytes_hex"])
+    assert visible
+    assert hashlib.sha256(visible).hexdigest() == delivered["model_visible_bytes_sha256"]
+    assert run_receipt["feature_lifecycle_transitions"][0]["stage"] == "ABSTAINED"
     assert context.metadata["exit_status"] == "Submitted"

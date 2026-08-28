@@ -1,0 +1,78 @@
+{
+  "schema": "gt.decision_value_corpus.v1",
+  "oracle_method": "Manually authored symbol ownership labels checked against immutable fixture source bytes; labels are not generated from GT receipts or rankings.",
+  "cases": [
+    {
+      "case_id": "python-owner",
+      "language": "python",
+      "task": "Update resolve_identity so identity normalization remains centralized while preserving display formatting behavior.",
+      "repository": "python",
+      "repository_revision": "1c54f895c968514a66a3e2a2d926e32ccd9c99c27f37904e5b73104b86bd7f73",
+      "expected_owners": ["python:src/identity.py:resolve_identity"],
+      "facts": [
+        {
+          "claim_id": "symbol:python:src/identity.py:resolve_identity",
+          "fact": "resolve_identity is defined at src/identity.py:1",
+          "path": "src/identity.py",
+          "start_line": 1,
+          "end_line": 1,
+          "content_sha256": "5c852c5fa9c0afc5c7f657c4e735fda61dbc20dc73d83470868141bdff8c5347"
+        }
+      ]
+    },
+    {
+      "case_id": "typescript-owner",
+      "language": "typescript",
+      "task": "Update resolveIdentity so identity normalization remains centralized while preserving display formatting behavior.",
+      "repository": "typescript",
+      "repository_revision": "3258ca9bfa6e238d464dfdba0a634ceeba9146c4ea7a647bf255ebdfd4418c51",
+      "expected_owners": ["typescript:src/identity.ts:resolveIdentity"],
+      "facts": [
+        {
+          "claim_id": "symbol:typescript:src/identity.ts:resolveIdentity",
+          "fact": "resolveIdentity is defined at src/identity.ts:1",
+          "path": "src/identity.ts",
+          "start_line": 1,
+          "end_line": 1,
+          "content_sha256": "05abf09b3a194620d478460a8e128013fe90a53c1578a497f7f95f8cd611519c"
+        }
+      ]
+    },
+    {
+      "case_id": "go-owner",
+      "language": "go",
+      "task": "Update ResolveIdentity so identity normalization remains centralized while preserving display formatting behavior.",
+      "repository": "go",
+      "repository_revision": "fdd14f95b899f28947d8c3ca633cd8a79780104a829c0b615111eadb8965cd54",
+      "expected_owners": ["go:src/identity.go:ResolveIdentity"],
+      "facts": [
+        {
+          "claim_id": "symbol:go:src/identity.go:ResolveIdentity",
+          "fact": "ResolveIdentity is defined at src/identity.go:3",
+          "path": "src/identity.go",
+          "start_line": 3,
+          "end_line": 3,
+          "content_sha256": "5f092085820e1870af86c27d05aeaec3767df548dad0c7c20e7929d51ac8c8c2"
+        }
+      ]
+    },
+    {
+      "case_id": "rust-owner",
+      "language": "rust",
+      "task": "Update resolve_identity so identity normalization remains centralized while preserving display formatting behavior.",
+      "repository": "rust",
+      "repository_revision": "8d379cbf9a2730fae08bdd271d9c4ef364961588612fa51aba70bf14c013d26b",
+      "expected_owners": ["rust:src/identity.rs:resolve_identity"],
+      "facts": [
+        {
+          "claim_id": "symbol:rust:src/identity.rs:resolve_identity",
+          "fact": "resolve_identity is defined at src/identity.rs:1",
+          "path": "src/identity.rs",
+          "start_line": 1,
+          "end_line": 1,
+          "content_sha256": "a1aafccb4d5e174f2c949c1c9a2de262f116354c0648d331d4064584f1fca4cd"
+        }
+      ]
+    }
+  ]
+}

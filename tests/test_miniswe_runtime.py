@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import gt_engine.miniswe_runtime as rt
 from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
 from gt_engine.miniswe_controller import Predicate
@@ -107,6 +109,34 @@ def test_runtime_hooks_capture_provider_payload_and_action(tmp_path):
     agent.execute_actions({"extra": {"actions": [{"cmd": "printf ok"}]}})
     assert handle.installed is True
     assert adapter.iteration == 1
+
+
+def test_provider_delivery_records_only_gt_bytes_present_in_prepared_messages(
+    monkeypatch, tmp_path
+):
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t",
+        state_dir=tmp_path,
+        predicates=[],
+        issue_text="locate owner",
+    )
+    localization = "[Localized files]\nsrc/owner.py:7"
+    monkeypatch.setattr(adapter, "task_start_localization", lambda: localization)
+    install_runtime_hooks(agent, _session(adapter))
+
+    prepared = agent.model._prepare_messages_for_api(
+        [{"role": "user", "content": "task"}]
+    )
+    delivery = adapter.deliveries[-1]
+
+    assert localization in prepared[-1]["content"]
+    assert delivery.suffix == localization
+    assert delivery.suffix in prepared[-1]["content"]
+    assert delivery.suffix != adapter.provider_suffix()
+    assert delivery.model_visible_sha256 == hashlib.sha256(
+        delivery.suffix.encode("utf-8")
+    ).hexdigest()
 
 
 def test_native_groundtruth_action_is_routed_without_shell_execution(tmp_path):
@@ -715,7 +745,7 @@ def test_hook_handle_can_restore_stock_miniswe_methods(tmp_path):
     assert handle.installed is False
 
 
-def test_runtime_captures_one_multifile_transaction_and_invalidates_graph(
+def test_runtime_captures_one_multifile_transaction_and_refreshes_graph_once(
     monkeypatch, tmp_path
 ):
     repo = tmp_path / "repo"
@@ -760,7 +790,10 @@ def test_runtime_captures_one_multifile_transaction_and_invalidates_graph(
         index for index, row in enumerate(rows) if row["event"] == "graph_invalidated"
     )
     assert adapter.workspace_epoch == 1
-    assert adapter.graph_fresh is False
+    assert adapter.graph_fresh is True
+    refreshes = [row for row in rows if row["event"] == "graph_refresh_receipt"]
+    assert len(refreshes) == 1
+    assert refreshes[0]["workspace_revision"] == transactions[0]["post_revision"]
     assert any(row["event"] == "graph_invalidated" for row in rows)
 
 

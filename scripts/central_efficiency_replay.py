@@ -215,12 +215,20 @@ def replay_run(
     raw_provider_chars = 0
     projected_provider_chars = 0
     bounded_unique_observations = 0
+    missing_run_receipts: list[str] = []
 
     for trajectory_path in sorted(root.rglob("miniswe_trajectory.json")):
         receipt_path = trajectory_path.with_name("central_receipt.json")
         if not receipt_path.exists():
             continue
         task = _task_name(trajectory_path)
+        run_receipt_path = trajectory_path.with_name("gt-run-receipt.json")
+        if not run_receipt_path.is_file():
+            missing_run_receipts.append(task)
+        else:
+            run_receipt = _load(run_receipt_path)
+            if run_receipt.get("schema") != "gt.run_receipt.v2":
+                missing_run_receipts.append(task)
         trajectory = _load(trajectory_path)
         receipt = _load(receipt_path)
         messages = list(trajectory.get("messages") or ())
@@ -334,6 +342,8 @@ def replay_run(
         }
 
     return {
+        "receipt_complete": not missing_run_receipts,
+        "missing_or_invalid_run_receipts": sorted(set(missing_run_receipts)),
         "task_count": len(tasks),
         "tasks": tasks,
         "invalid_visible_failure_receipts": invalid_receipts,
@@ -394,6 +404,9 @@ def main() -> int:
     print(json.dumps(result, indent=2, sort_keys=True))
     if not result["task_count"]:
         print("ARCHIVED_EFFICIENCY_REPLAY_EMPTY")
+        return 2
+    if not result["receipt_complete"]:
+        print("ARCHIVED_EFFICIENCY_REPLAY_INVALID_RECEIPTS")
         return 2
     print("ARCHIVED_EFFICIENCY_REPLAY_OK")
     return 0

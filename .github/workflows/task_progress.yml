@@ -105,11 +105,15 @@ jobs:
                 ($tasks | map(select(.status == "in_progress")) | length),
                 ($tasks | map(select(.status == "queued")) | length)
               ] | @tsv' <<< "$jobs_json")"
-            read -r observed completed success failed infra_timeout cancelled in_progress queued <<< "$stats"
-            final_stats="$observed $completed $success $failed $infra_timeout $cancelled $in_progress $queued"
-            total="$expected"
-            if (( total == 0 )); then total="$observed"; fi
-            while (( completed >= next_checkpoint )); do
+          read -r observed completed success failed infra_timeout cancelled in_progress queued <<< "$stats"
+          final_stats="$observed $completed $success $failed $infra_timeout $cancelled $in_progress $queued"
+          total="$expected"
+          if (( total == 0 )); then total="$observed"; fi
+          success_gate=$(( (total + 9) / 10 ))
+          if (( total > 0 && success >= success_gate )); then
+            echo "TASK_PROGRESS_SUCCESS_GATE reached=${success_gate} successful=${success} total=${total}"
+          fi
+          while (( completed >= next_checkpoint )); do
               jq -cn --argjson checkpoint "$next_checkpoint" --argjson total "$total" --argjson completed "$completed" --argjson success "$success" --argjson failed "$failed" --argjson infra_timeout "$infra_timeout" --argjson cancelled "$cancelled" --argjson in_progress "$in_progress" --argjson queued "$queued" '{checkpoint, total, completed, success, failed, infra_timeout, cancelled, in_progress, queued}' >> "$checkpoints_file"
               echo "TASK_PROGRESS_CHECKPOINT checkpoint=${next_checkpoint} total=${total} completed=${completed} success=${success} failed=${failed} infra_timeout=${infra_timeout} cancelled=${cancelled} in_progress=${in_progress} queued=${queued}"
               next_checkpoint=$(( next_checkpoint + checkpoint_every ))
@@ -142,6 +146,7 @@ jobs:
             echo "| Total tasks | ${total} |"
             echo "| Completed | ${completed} |"
             echo "| Successful task jobs | ${success} |"
+            echo "| 10% successful-task gate | ${success_gate} |"
             echo "| Failed task jobs | ${failed} |"
             echo "| Infrastructure timeouts | ${infra_timeout} |"
             echo "| Cancelled task jobs | ${cancelled} |"

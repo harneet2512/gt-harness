@@ -694,7 +694,7 @@ jobs:
         env:
           TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_NEW }}
         shell: bash
         run: |
           set -e
@@ -707,7 +707,7 @@ jobs:
           elif echo "$INPUT_MODEL" | grep -qiE "deepseek"; then
             [ "${#DEEPSEEK_API_KEY}" -gt 10 ] || { echo "::error::DEEPSEEK_API_KEY missing (model=$INPUT_MODEL)"; exit 1; }
             echo "  DEEPSEEK_API_KEY present (${#DEEPSEEK_API_KEY} chars)"
-          elif echo "$INPUT_MODEL" | grep -qiE "minimax|tokenrouter"; then
+          elif echo "$INPUT_MODEL" | grep -qiE "tokenrouter"; then
             [ "${#TOKENROUTER_API_KEY}" -gt 10 ] || { echo "::error::TOKENROUTER_API_KEY missing (model=$INPUT_MODEL)"; exit 1; }
             echo "  TOKENROUTER_API_KEY present (${#TOKENROUTER_API_KEY} chars)"
           else
@@ -1076,10 +1076,6 @@ jobs:
               'gt_ref_resolved_source': doc.get('gt_ref_resolved_source') == 'git_rev_parse_head',
               'workflow_dispatch_sha': bool(canonical.fullmatch(str(doc.get('workflow_dispatch_sha') or ''))),
               'workflow_dispatch_matches_prepared': doc.get('workflow_dispatch_sha') == doc.get('gt_ref_prepared_sha'),
-              'seam_sha256': bool(digest.fullmatch(str(doc.get('seam_sha256') or ''))),
-              'seam_matches_checkout': doc.get('seam_sha256') == os.environ.get('GT_ID_SEAM'),
-              'runner_sha256': bool(digest.fullmatch(str(doc.get('runner_sha256') or ''))),
-              'runner_matches_checkout': doc.get('runner_sha256') == os.environ.get('GT_ID_RUNNER'),
               'workflow_run_id': bool(re.fullmatch(r'[0-9]+', str(doc.get('workflow_run_id') or ''))),
               'workflow_run_matches': str(doc.get('workflow_run_id') or '') == os.environ.get('GT_ID_WORKFLOW_RUN_ID'),
               'shadow_rate_requested': doc.get('shadow_rate_requested') == os.environ.get('GT_SS_SHADOW_RATE_REQUESTED'),
@@ -1088,6 +1084,13 @@ jobs:
               'max_parallel_requested': doc.get('max_parallel_requested') == '20',
               'max_parallel_effective': doc.get('max_parallel_effective') == 20,
           }
+          if os.environ.get('GT_ID_BASELINE') != '1':
+              required.update({
+                  'seam_sha256': bool(digest.fullmatch(str(doc.get('seam_sha256') or ''))),
+                  'seam_matches_checkout': doc.get('seam_sha256') == os.environ.get('GT_ID_SEAM'),
+                  'runner_sha256': bool(digest.fullmatch(str(doc.get('runner_sha256') or ''))),
+                  'runner_matches_checkout': doc.get('runner_sha256') == os.environ.get('GT_ID_RUNNER'),
+              })
           expected = os.environ.get('GT_ID_EXPECTED') or ''
           actual = os.environ.get('GT_ID_ACTUAL') or ''
           if os.environ.get('GT_ID_BASELINE') != '1' and expected:
@@ -1144,9 +1147,10 @@ jobs:
           MLANG: ${{ matrix.language }}
           INPUT_MODEL: ${{ inputs.model }}
           INPUT_BASELINE: ${{ inputs.baseline }}
+          GT_ID_BASELINE: ${{ inputs.baseline == true && '1' || '0' }}
           GT_BASELINE_FLAG: ${{ inputs.baseline == true && '1' || '0' }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_NEW }}
           REPO_OWNER: ${{ github.repository_owner }}
           GH_TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
           GT_LIVE_CHECK_TOKEN: ${{ github.token }}
@@ -1176,10 +1180,6 @@ jobs:
               'gt_ref_resolved_source': doc.get('gt_ref_resolved_source') == 'git_rev_parse_head',
               'workflow_dispatch_sha': bool(canonical.fullmatch(str(doc.get('workflow_dispatch_sha') or ''))),
               'workflow_dispatch_matches_prepared': doc.get('workflow_dispatch_sha') == doc.get('gt_ref_prepared_sha'),
-              'seam_sha256': bool(digest.fullmatch(str(doc.get('seam_sha256') or ''))),
-              'seam_matches_checkout': doc.get('seam_sha256') == file_sha('artifact_deepswe/gt_mini_patch.py'),
-              'runner_sha256': bool(digest.fullmatch(str(doc.get('runner_sha256') or ''))),
-              'runner_matches_checkout': doc.get('runner_sha256') == file_sha('artifact_deepswe/gt_headless_runner.py'),
               'workflow_run_id': bool(re.fullmatch(r'[0-9]+', str(doc.get('workflow_run_id') or ''))),
               'workflow_run_matches': str(doc.get('workflow_run_id') or '') == os.environ.get('GITHUB_RUN_ID'),
               'shadow_rate_requested': doc.get('shadow_rate_requested') == os.environ.get('GT_SS_SHADOW_RATE_REQUESTED'),
@@ -1188,8 +1188,15 @@ jobs:
               'max_parallel_requested': doc.get('max_parallel_requested') == '20',
               'max_parallel_effective': doc.get('max_parallel_effective') == 20,
           }
+          if os.environ.get('GT_ID_BASELINE') != '1':
+              required.update({
+                  'seam_sha256': bool(digest.fullmatch(str(doc.get('seam_sha256') or ''))),
+                  'seam_matches_checkout': doc.get('seam_sha256') == file_sha('artifact_deepswe/gt_mini_patch.py'),
+                  'runner_sha256': bool(digest.fullmatch(str(doc.get('runner_sha256') or ''))),
+                  'runner_matches_checkout': doc.get('runner_sha256') == file_sha('artifact_deepswe/gt_headless_runner.py'),
+              })
           expected = os.environ.get('GT_SUBSTRATE_DIGEST') or ''
-          if os.environ.get('INPUT_BASELINE') != 'true' and expected:
+          if os.environ.get('GT_ID_BASELINE') != '1' and expected:
               parity = doc.get('commit_parity_recorded')
               prepared = doc.get('gt_ref_prepared_sha')
               required['substrate_digest_binding'] = (
@@ -1247,12 +1254,22 @@ jobs:
           HOST_GT_INJECT=/tmp/gt_inject/opt/gt
           mkdir -p "${HOST_GT_INJECT}"
           mkdir -p "${HOST_GT_INJECT}/groundtruth"
-          cp artifact_deepswe/gt_mini_patch.py "${HOST_GT_INJECT}/"
+          # The GT-off control arm must not require the GT seam.  In particular,
+          # artifact_deepswe/gt_mini_patch.py is intentionally absent from some
+          # baseline revisions; staging it unconditionally turns a control task
+          # into an infrastructure failure before the model starts.
+          if [ "$INPUT_BASELINE" != "true" ]; then
+            cp artifact_deepswe/gt_mini_patch.py "${HOST_GT_INJECT}/"
+          fi
           # Headless agent runner (B5 fix): the non-interactive core of run/mini.py. The bare
           # `mini-swe-agent` CLI is the INTERACTIVE mini app and never reaches agent.run() in a
           # headless container (0 steps). This runner builds model+local-env+DefaultAgent and runs.
           cp artifact_deepswe/gt_headless_runner.py "${HOST_GT_INJECT}/"
-          cp artifact_deepswe/ledger_attestation.py "${HOST_GT_INJECT}/"
+          if [ "$INPUT_BASELINE" != "true" ]; then
+            cp artifact_deepswe/ledger_attestation.py "${HOST_GT_INJECT}/"
+          fi
+          # Python 3.10 task images need the typing backport before LiteLLM is imported.
+          cp artifact_deepswe/sitecustomize.py "${HOST_GT_INJECT}/"
           cp artifact_deepswe/gt_hook.py        "${HOST_GT_INJECT}/" 2>/dev/null || true
           cp artifact_deepswe/gt_oracle.py      "${HOST_GT_INJECT}/" 2>/dev/null || true
           cp artifact_deepswe/gt_oracle_sense.py "${HOST_GT_INJECT}/" 2>/dev/null || true
@@ -1318,8 +1335,13 @@ jobs:
           echo "CONTAINER mount: ${HOST_ARTIFACTS} -> ${GT_C_ARTIFACTS} (ro); ${HOST_GT_OUT} -> /gt_out (rw); /tmp/gt_inject/opt/gt -> /opt/gt (ro)"
 
           export GT_C_OUT=/gt_out
-          source artifact_deepswe/gt_integration/gt_ae_block.sh
-          echo "GT_AE_ARGS (block): ${GT_AE_ARGS[*]}"
+          if [ "$INPUT_BASELINE" != "true" ]; then
+            source artifact_deepswe/gt_integration/gt_ae_block.sh
+            echo "GT_AE_ARGS (block): ${GT_AE_ARGS[*]}"
+          else
+            GT_AE_ARGS=()
+            echo "GT_AE_ARGS (block): baseline arm; GT substrate injection disabled"
+          fi
 
           # Bounded swap: only create a small swap file when disk can afford it.
           if ! swapon --show 2>/dev/null | grep -q /gt_swap; then
@@ -1433,14 +1455,19 @@ jobs:
           set +e
           set -o pipefail
           INPUT_MODEL="$INPUT_MODEL"
-          if echo "$INPUT_MODEL" | grep -qiE "minimax|tokenrouter"; then
+          if echo "$INPUT_MODEL" | grep -qiE "tokenrouter"; then
             export OPENAI_API_KEY="${TOKENROUTER_API_KEY}"
             export OPENAI_API_BASE="${TOKENROUTER_API_BASE}"
             if ! echo "$INPUT_MODEL" | grep -q "^openai/"; then
               INPUT_MODEL="openai/${INPUT_MODEL}"
             fi
             echo "=== Model routed via TokenRouter: $INPUT_MODEL ==="
-          elif echo "$INPUT_MODEL" | grep -qiE "^openrouter/"; then
+          elif echo "$INPUT_MODEL" | grep -qiE "^openrouter/|minimax"; then
+            export OPENAI_API_KEY="$OPENROUTER_API_KEY"
+            export OPENAI_API_BASE="https://openrouter.ai/api/v1"
+            if ! echo "$INPUT_MODEL" | grep -q "^openai/"; then
+              INPUT_MODEL="openai/${INPUT_MODEL#openrouter/}"
+            fi
             export OPENROUTER_API_KEY="$OPENROUTER_API_KEY"
             GT_AE_ARGS+=(--ae "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}")
             echo "=== Model routed via OpenRouter: $INPUT_MODEL ==="
@@ -1594,8 +1621,8 @@ jobs:
 
           # Model-specific env vars for inside the container
           MODEL_ENV=""
-          if echo "$INPUT_MODEL" | grep -qiE "^openrouter/"; then
-            MODEL_ENV="-e OPENROUTER_API_KEY=$OPENROUTER_API_KEY"
+          if echo "$INPUT_MODEL" | grep -qiE "^openai/minimax/|^openrouter/|minimax"; then
+            MODEL_ENV="-e OPENAI_API_KEY=$OPENROUTER_API_KEY -e OPENAI_API_BASE=https://openrouter.ai/api/v1 -e OPENAI_BASE_URL=https://openrouter.ai/api/v1 -e OPENROUTER_API_KEY=$OPENROUTER_API_KEY"
           elif echo "$INPUT_MODEL" | grep -qiE "deepseek"; then
             MODEL_ENV="-e DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
           fi
@@ -1914,6 +1941,36 @@ jobs:
           set -e
           # NEVER exit 1 from trial — Collect/Upload MUST run to capture partial artifacts.
 
+      - name: Classify task execution (live diagnostic)
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          exit_path = Path('/tmp/gt_out/gt_agent_exit.json')
+          traj_path = Path('/tmp/gt_out/mini-swe-agent.trajectory.json')
+          log = Path('trial_output.log').read_text(encoding='utf-8', errors='replace') if Path('trial_output.log').exists() else ''
+          exit_doc = json.loads(exit_path.read_text(encoding='utf-8')) if exit_path.exists() else {}
+          trajectory = json.loads(traj_path.read_text(encoding='utf-8')) if traj_path.exists() else {}
+          steps = int(((trajectory.get('info') or {}).get('model_stats') or {}).get('api_calls') or 0)
+          rc = int(exit_doc.get('return_code', 1)) if exit_doc else 1
+          if steps > 0:
+              classification = 'TASK_EXECUTION'
+              reason = 'agent produced a trajectory; final reward determines task success'
+          elif re.search(r'Unknown provider|API key|401|402|403|429|rate.?limit|OPENAI_API|OPENROUTER', log, re.I):
+              classification = 'MODEL_FAILURE'
+              reason = 'agent did not produce a trajectory and logs contain provider/API evidence'
+          elif re.search(r'Docker|image not found|No such file|cannot stat|runner|out of memory|timeout', log, re.I) or rc != 0:
+              classification = 'INFRA_FAILURE'
+              reason = 'agent did not produce a trajectory and execution/runner evidence is present'
+          else:
+              classification = 'UNKNOWN_FAILURE'
+              reason = 'agent did not produce a trajectory; no specific marker was found'
+          doc = {'schema': 'gt.task_execution_classification.v1', 'task': '${{ matrix.task }}', 'classification': classification, 'reason': reason, 'agent_steps': steps, 'agent_return_code': rc}
+          Path('task_execution_classification.json').write_text(json.dumps(doc, indent=2), encoding='utf-8')
+          print(f'TASK_EXECUTION_CLASSIFICATION task={doc["task"]} classification={classification} steps={steps} rc={rc} reason={reason}')
+          PY
+
       - name: Upload post-agent diagnostic snapshot
         if: always()
         uses: actions/upload-artifact@v4
@@ -1932,6 +1989,7 @@ jobs:
             /tmp/gt_out/gt_profile_receipt.json
             /tmp/gt_out/gt_batch_activation.json
             /tmp/gt_out/agent_patch.diff
+            task_execution_classification.json
           retention-days: 30
           if-no-files-found: error
 
@@ -2862,7 +2920,9 @@ jobs:
     with:
       expected_total: ${{ needs.prepare.outputs.total }}
       task_job_regex: '^.+ \(.+\)$'
-      monitor_timeout_minutes: "150"
+      # Exit before the GitHub hard timeout; observability must not cancel the
+      # benchmark workflow while task jobs remain queued.
+      monitor_timeout_minutes: "330"
     secrets: inherit
 
   summarize:

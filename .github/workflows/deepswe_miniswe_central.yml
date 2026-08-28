@@ -124,6 +124,7 @@ jobs:
       TASK_IDS: ${{ inputs.task_ids }}
       TASK_COUNT: ${{ inputs.task_count }}
       REQUESTED_PARALLEL: ${{ inputs.parallel }}
+      DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -150,6 +151,7 @@ jobs:
         id: gt
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Enforce active release authorization
+        if: ${{ !inputs.diagnostic_only }}
         run: |
           python -m scripts.release_workflow_guard \
             --workflow deepswe_miniswe_central.yml \
@@ -186,7 +188,7 @@ jobs:
           if not 1 <= target <= 113:
               raise SystemExit(f"TASK_COUNT must be between 1 and 113, got {target}")
           explicit = [x.strip() for x in os.environ.get("TASK_IDS", "").split(",") if x.strip()]
-          if target == 20:
+          if target == 20 and os.environ.get("DIAGNOSTIC_ONLY") != "true":
               frozen_path = Path(
                   "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-20_V20.json"
               )
@@ -396,7 +398,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_NEW || secrets.OPENROUTER_API_KEY }}
       TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -542,6 +544,9 @@ jobs:
       expected_tasks_json: ${{ needs.plan.outputs.tasks }}
       task_job_regex: '^run \(.+\)$'
       checkpoint_every: "20"
+      # Exit before the GitHub hard timeout; this monitor must not cancel the
+      # benchmark workflow while queued task jobs continue.
+      monitor_timeout_minutes: "330"
     secrets: inherit
 
   run:
@@ -561,7 +566,7 @@ jobs:
       matrix:
         task: ${{ fromJson(needs.plan.outputs.tasks) }}
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_NEW || secrets.OPENROUTER_API_KEY }}
       TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -573,6 +578,7 @@ jobs:
       PROVIDER: ${{ inputs.provider }}
       PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
       PROFILE: ${{ inputs.comparison_profile }}
+      GT_DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -617,7 +623,7 @@ jobs:
           # Download public release assets directly.  Calling `gh release
           # download` independently from 20 matrix jobs requires a GitHub API
           # credential and is vulnerable to per-job 401/rate-limit failures.
-          release_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/gt-retrieval-runtime-v1"
+          release_base="https://github.com/harneet2512/gt-harness/releases/download/gt-retrieval-runtime-v1"
           curl --fail --location --retry 3 --retry-all-errors \
             "$release_base/model.onnx" --output "$model_dir/model.onnx"
           curl --fail --location --retry 3 --retry-all-errors \
@@ -705,6 +711,7 @@ jobs:
           AGENT_TIMEOUT_SEC=$(python -c 'import json,sys; print(int(json.load(open(sys.argv[1], encoding="utf-8"))["execution_budget_sec"]))' "deepswe-budget-$TASK.json")
           echo "AGENT_TIMEOUT_SEC=$AGENT_TIMEOUT_SEC" >> "$GITHUB_ENV"
       - name: Download the single exact bootstrap canary proof
+        if: ${{ inputs.arm != 'gt_off' }}
         uses: actions/download-artifact@v4
         with:
           name: deepswe-bootstrap-canary-${{ github.run_id }}
@@ -714,11 +721,15 @@ jobs:
           set -uo pipefail
           mkdir -p results/deepswe
           TREATMENT_CONTRACT="$RUNNER_TEMP/gt-treatment-runtime.json"
-          python -m scripts.render_treatment_agent_args \
-            --release-manifest eval/release/active_release.json \
-            --source-sha "$(git rev-parse HEAD)" \
-            --max-steps "$STEP_LIMIT" \
-            --output "$TREATMENT_CONTRACT"
+          TREATMENT_ARGS=()
+          if [ "$PROFILE" != "baseline" ]; then
+            python -m scripts.render_treatment_agent_args \
+              --release-manifest eval/release/active_release.json \
+              --source-sha "$(git rev-parse HEAD)" \
+              --max-steps "$STEP_LIMIT" \
+              --output "$TREATMENT_CONTRACT"
+            TREATMENT_ARGS=(--ak treatment_runtime_contract_path="$TREATMENT_CONTRACT")
+          fi
           if [ "$PROFILE" = "persistent_state_only" ]; then
             python -c 'import hashlib,json,pathlib,sys; p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d["agent_kwargs"].update({"dense_fallback_only":False,"enable_adaptive_validation_timeout":False,"enable_completion_controller":False,"enable_context_compaction":False,"enable_progress_control":False,"enable_shadow_submit_gate":False,"preflight_mode":"shadow","gt_task_evidence_budget_tokens":1200,"gt_task_critical_reserve_tokens":512,"enable_replay_capture":True}); m=dict(d); m.pop("contract_sha256",None); d["contract_sha256"]=hashlib.sha256(json.dumps(m,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8","surrogatepass")).hexdigest(); p.write_text(json.dumps(d,indent=2,sort_keys=True)+"\n")' "$TREATMENT_CONTRACT"
           fi
@@ -810,7 +821,7 @@ jobs:
               --agent-timeout-multiplier 1.0 -n 1 -y \
               "${PROFILE_ARGS[@]}" \
               --ak enable_replay_capture=true \
-              --ak treatment_runtime_contract_path="$TREATMENT_CONTRACT" \
+              "${TREATMENT_ARGS[@]}" \
               --ak preemptive_retrieval_model_dir="$MODEL_DIR" \
               --ak enable_task_start_advisory=false \
               --ak step_limit="$STEP_LIMIT" \
