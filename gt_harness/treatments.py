@@ -1461,15 +1461,16 @@ class GroundTruthTreatment(BareTreatment):
                 for item in normalized_packet["primary_edit_targets"]
             ],
             "inspection_implementation_owners": [
-                # Preserve every task requirement bound to an implementation
-                # owner.  Restricting this group to localization intents made
-                # the provider planner see otherwise distinct owners as
-                # unbound rank-only hints, so it kept one arbitrary candidate
-                # and silently dropped the facts carried by the others.
+                # Preserve typed actionable owner bindings, but do not turn
+                # every broad behavioral facet into a separate owner
+                # decision.  A rank-only owner attached only to BEHAVIOR is a
+                # single bounded heuristic answer; retaining those bindings
+                # made the planner treat unrelated retrieval hits as distinct
+                # implementation decisions and flooded the provider view.
                 # Ownership is inspection authority (never edit authority),
-                # but its typed facet bindings are decision evidence and must
-                # survive into planning.
-                compact_target(item)
+                # while explicit edit/remove/inspect intents remain typed
+                # evidence and survive into planning.
+                compact_target(item, allowed_intents=evidence_addressable_intents)
                 for item in normalized_packet["inspection_implementation_owners"]
             ],
             "inspection_candidates": [
