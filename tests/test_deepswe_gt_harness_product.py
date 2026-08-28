@@ -104,6 +104,8 @@ def test_deepswe_smoke20_manifest_is_balanced_frozen_and_baseline_bound() -> Non
 
 def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
+    provider_gate = source.split("  provider_gate:", 1)[1].split("  task:", 1)[0]
+    attest = source.split("  attest:", 1)[1]
 
     assert "workflow_dispatch:" in source
     assert "workflow_call:" in source
@@ -120,6 +122,9 @@ def test_deepswe_product_workflow_runs_and_attests_the_current_product() -> None
     assert 'assert "deepseek-v4-flash" in models' in source
     assert "stealth/ox-alpha" not in source
     assert "secrets.OPENROUTER_NEW" not in source
+    assert "from gt_harness" not in provider_gate
+    assert "uses: actions/checkout@v4" in attest
+    assert "ref: ${{ needs.plan.outputs.source_sha }}" in attest
     assert "secrets.DOCKERHUB_USERNAME" in source
     assert "secrets.DOCKERHUB_TOKEN" in source
     assert "secrets.DOCKERHUB_USERNAME_ROTATION" in source
