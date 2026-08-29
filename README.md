@@ -16,13 +16,6 @@ The integration lives in `gt_engine/` (bridge, indexer, evidence-aware context m
 advisory verify gate) plus the lifecycle boundaries in `nano/agent.py`. A GT-enabled request
 therefore follows a deterministic coding SDLC:
 
-The indexer selects an explicitly configured `GT_INDEX_BINARY` as an operator override. When
-none is configured, it builds `gt-index` from the checked-in producer source, keyed by a complete
-source/build-context fingerprint and toolchain identity, and atomically caches the result. Cache
-metadata includes the binary hash; tampering, source/header/toolchain changes, and build failures
-invalidate the cache and keep GT dormant rather than falling back to an unrelated release binary.
-The graph manifest records the bounded selection diagnostic and binary hash used for each run.
-
 1. **Ideate/plan:** task-start obligations and ranked localization are inserted before the
    first model decision.
 2. **Code:** pre-edit, edit, and post-edit observations are normalized through the GT gateway;
