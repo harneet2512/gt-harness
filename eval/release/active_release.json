@@ -1,8 +1,8 @@
 {
   "schema": "gt.release_manifest.v1",
-  "release_id": "gt-decision-value-reliability-2026-08-29-v36",
+  "release_id": "gt-decision-value-reliability-2026-08-29-v37",
   "task_profile": "repair20-v1",
-  "runtime_commit": "249cfc1efc23341e403eaa10cf734271f8b7f47f",
+  "runtime_commit": "2bf3f4954b123c222b7f6c2b98761654ef2ef007",
   "benchmark_authorized": true,
   "authorization_blockers": [],
   "authorized_workflows": [
@@ -10,8 +10,8 @@
     "deepswe_miniswe_central.yml"
   ],
   "prediction": {
-    "path": "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-29_V36.json",
-    "sha256": "c022e13ed14a335546a6e8f9472dd73aec0ff85eb127fc40601408d3c399b0b1"
+    "path": "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-29_V37.json",
+    "sha256": "19fcdcbbaa11475c81f2e948be39d2c1e7d2a1d78d7c5de5c819904fb2a919a7"
   },
   "baseline": {
     "path": "eval/frozen_baselines/tb2_miniswe_20260731.json",
@@ -23,6 +23,6 @@
   },
   "allowed_post_runtime_paths": [
     "eval/release/active_release.json",
-    "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-29_V36.json"
+    "docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-29_V37.json"
   ]
 }
