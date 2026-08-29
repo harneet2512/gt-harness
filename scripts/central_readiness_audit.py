@@ -14,6 +14,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 # Mini-SWE may print a first-run Unicode banner during import.  Windows CI can
 # expose a legacy CP1252 stdout even though the repository itself is UTF-8.
 # Make the provider-free audit deterministic before importing Mini-SWE.

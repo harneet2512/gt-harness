@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 from scripts.central_readiness_audit import (
     _first_position_after,
     _has_explicit_policy_arms,
     audit,
 )
+
+
+def test_readiness_audit_direct_script_entrypoint() -> None:
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "scripts/central_readiness_audit.py"],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.rstrip().endswith("READY")
 
 
 def test_readiness_finds_direct_or_scripted_dispatch_after_compilation():
