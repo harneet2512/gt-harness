@@ -3,8 +3,11 @@
   "release_id": "gt-decision-value-reliability-2026-08-29-v37",
   "task_profile": "repair20-v1",
   "runtime_commit": "2bf3f4954b123c222b7f6c2b98761654ef2ef007",
-  "benchmark_authorized": true,
-  "authorization_blockers": [],
+  "benchmark_authorized": false,
+  "authorization_blockers": [
+    "new_runtime_bound_prediction_required",
+    "deterministic_gates_must_pass_on_candidate_runtime"
+  ],
   "authorized_workflows": [
     "tb2_miniswe_central.yml",
     "deepswe_miniswe_central.yml"
