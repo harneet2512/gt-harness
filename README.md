@@ -1,6 +1,17 @@
 # GT-Harness
 
-GT-Harness is a host-owned repository-intelligence layer for coding agents. It is being built to help Mini-SWE-style agents make better software-engineering decisions by gathering bounded, source-grounded context locally instead of asking the model to rediscover the repository from scratch.
+GT-Harness is a host-owned repository-intelligence layer for coding agents. The active benchmark runtime augments Mini-SWE-Agent with bounded, source-grounded repository context instead of asking the model to rediscover the repository from scratch.
+
+## Active agent and benchmark scaffold
+
+The current GT-on benchmark path uses **Mini-SWE-Agent 2.4.6**, not NanoHarness.
+
+- `eval.gt_central_agent:MiniSweCentralAgent` is the host-owned agent implementation. It uses Mini-SWE-Agent's model configuration, Bash tool contract, interruption flow, and model accounting while GT owns repository intelligence, delivery, controls, and receipts.
+- Terminal-Bench uses the same central agent through Harbor 0.20.0.
+- DeepSWE uses `eval.pier_gt_adapter:PierMiniSweCentralAgent` through DataCurve Pier 0.3.1; Pier supplies the Harbor-compatible task and verifier lifecycle.
+- The active treatment is `central_relational_v3`. Planning is graph-first: repository indexing and hybrid retrieval complete before the generative bootstrap selection and first solver request.
+
+The repository still retains a package distribution named `nano-harness` and legacy NanoHarness adapters for historical compatibility. Those paths are not the active v3 benchmark scaffold, and their results must not be mixed with Mini-SWE central results.
 
 ## What is currently being built?
 
@@ -42,13 +53,13 @@ This is a single matched-smoke result, not a claim of causal solve-rate improvem
 ## Run locally
 
 ```bash
-pip install -e .
+pip install -e '.[dev,miniswe,eval,retrieval]'
 pytest
 python -m scripts.central_feature_census
 python scripts/central_readiness_audit.py
 ```
 
-The repository contains the Mini-SWE integration, GT runtime, retrieval engine, graph/indexer integration, evaluation adapters, and tests. Do not place API keys in source files; provide them through the runtime environment.
+The repository contains the Mini-SWE-Agent integration, GT runtime, retrieval engine, graph/indexer integration, Harbor/Pier evaluation adapters, and tests. Do not place API keys in source files; provide them through the runtime environment.
 
 ## License
 
