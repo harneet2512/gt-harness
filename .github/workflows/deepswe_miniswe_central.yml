@@ -1065,11 +1065,14 @@ jobs:
                       and not (provider_route.get("provider_policy") or {})
                   )
               elif os.environ.get("PROVIDER") == "deepseek":
+                  # The default effective route remains openai/deepseek-v4-flash;
+                  # model-qualified routes (for example a dated 0731 snapshot)
+                  # are validated against the configured model below.
                   route_common = bool(
                       provider_proof.get("requested_model")
-                      == "openai/deepseek-v4-flash"
+                      == effective_model
                       and provider_route.get("model")
-                      == "openai/deepseek-v4-flash"
+                      == effective_model
                       and provider_route.get("credential_in_receipt") is False
                       and provider_route.get("retry_policy")
                       == "provider_once_no_retry"
