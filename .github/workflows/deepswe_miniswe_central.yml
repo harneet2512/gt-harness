@@ -394,7 +394,11 @@ jobs:
 
   bootstrap_canary:
     needs: [plan, baseline, provider_free]
-    if: ${{ always() && inputs.arm != 'gt_off' && needs.provider_free.result == 'success' && (inputs.diagnostic_only || needs.baseline.result == 'success') }}
+    # Diagnostic GT-on runs intentionally skip the paid provider-free
+    # reusable workflow.  They still need the one-call provider canary before
+    # task execution; release runs additionally require provider-free and the
+    # frozen baseline approval.
+    if: ${{ always() && inputs.arm != 'gt_off' && (inputs.diagnostic_only || needs.provider_free.result == 'success') && (inputs.diagnostic_only || needs.baseline.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -551,7 +555,7 @@ jobs:
 
   run:
     needs: [plan, baseline, provider_free, bootstrap_canary]
-    if: ${{ always() && (inputs.arm == 'gt_off' || (needs.provider_free.result == 'success' && needs.bootstrap_canary.result == 'success' && (inputs.diagnostic_only || needs.baseline.result == 'success'))) }}
+    if: ${{ always() && (inputs.arm == 'gt_off' || (needs.bootstrap_canary.result == 'success' && (inputs.diagnostic_only || (needs.provider_free.result == 'success' && needs.baseline.result == 'success')))) }}
     runs-on: ubuntu-latest
     # DeepSWE's published task contract gives the agent 5400 seconds.  Keep
     # the job backstop aligned with the original full-matrix workflow rather
@@ -905,7 +909,7 @@ jobs:
 
   merge:
     needs: [plan, baseline, provider_free, bootstrap_canary, run]
-    if: ${{ always() && needs.plan.result == 'success' && needs.run.result != 'skipped' && (inputs.arm == 'gt_off' || (needs.provider_free.result == 'success' && needs.bootstrap_canary.result == 'success' && (inputs.diagnostic_only || needs.baseline.result == 'success'))) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.run.result != 'skipped' && (inputs.arm == 'gt_off' || (needs.bootstrap_canary.result == 'success' && (inputs.diagnostic_only || (needs.provider_free.result == 'success' && needs.baseline.result == 'success')))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
