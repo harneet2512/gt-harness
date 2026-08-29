@@ -54,6 +54,131 @@ def test_source_less_repository_is_explicitly_not_applicable():
     )
 
 
+def test_binary_selection_preserves_explicit_operator_override(tmp_path, monkeypatch):
+    configured = tmp_path / "operator-gt-index"
+    configured.write_bytes(b"operator")
+    monkeypatch.setenv("GT_INDEX_BINARY", str(configured))
+    monkeypatch.setattr(
+        indexer,
+        "_build_source_compatible_binary",
+        lambda: pytest.fail("explicit override must not invoke source build"),
+    )
+
+    assert indexer._seed_binary_env() == str(configured)
+    assert indexer._resolved_binary_path() == str(configured)
+
+
+def test_binary_selection_preserves_path_override(tmp_path, monkeypatch):
+    discovered = tmp_path / "gt-index"
+    discovered.write_bytes(b"path")
+    monkeypatch.delenv("GT_INDEX_BINARY", raising=False)
+    monkeypatch.setattr(
+        indexer.shutil,
+        "which",
+        lambda name: str(discovered) if name == "gt-index" else None,
+    )
+    monkeypatch.setattr(
+        indexer,
+        "_build_source_compatible_binary",
+        lambda: pytest.fail("PATH override must not invoke source build"),
+    )
+
+    assert indexer._seed_binary_env() == str(discovered)
+
+
+def test_index_source_fingerprint_tracks_only_build_inputs(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "go.mod").write_text("module example\n", encoding="utf-8")
+    implementation = source / "main.go"
+    implementation.write_text("package main\n", encoding="utf-8")
+    first = indexer._index_source_fingerprint(source, "go-toolchain")
+
+    (source / "README.md").write_text("ignored\n", encoding="utf-8")
+    assert indexer._index_source_fingerprint(source, "go-toolchain") == first
+
+    implementation.write_text("package main\n// changed\n", encoding="utf-8")
+    assert indexer._index_source_fingerprint(source, "go-toolchain") != first
+    assert indexer._index_source_fingerprint(source, "other-toolchain") != first
+
+
+def _fake_go_run_factory(*, fail_build: bool = False):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(tuple(str(item) for item in command))
+        if command[1] == "version":
+            return SimpleNamespace(returncode=0, stdout="go version go-test platform\n")
+        if command[1] == "env":
+            return SimpleNamespace(returncode=0, stdout="testos\ntestarch\ncc\n")
+        output = Path(command[command.index("-o") + 1])
+        output.write_bytes(b"partial" if fail_build else b"source-compatible-binary")
+        return SimpleNamespace(returncode=1 if fail_build else 0, stdout="")
+
+    return fake_run, calls
+
+
+def test_source_compatible_binary_is_published_atomically_and_reused(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "source"
+    (source / "cmd" / "gt-index").mkdir(parents=True)
+    (source / "go.mod").write_text("module example\n", encoding="utf-8")
+    (source / "cmd" / "gt-index" / "main.go").write_text(
+        "package main\n", encoding="utf-8"
+    )
+    cache = tmp_path / "cache"
+    fake_run, calls = _fake_go_run_factory()
+    monkeypatch.setattr(indexer, "_INDEX_SOURCE_ROOT", source)
+    monkeypatch.setattr(indexer, "_binary_cache_root", lambda: cache)
+    monkeypatch.setattr(indexer.shutil, "which", lambda name: "go" if name == "go" else None)
+    monkeypatch.setattr(indexer.subprocess, "run", fake_run)
+
+    first = indexer._build_source_compatible_binary()
+    second = indexer._build_source_compatible_binary()
+
+    assert first == second
+    assert Path(first).read_bytes() == b"source-compatible-binary"
+    assert sum(call[1] == "build" for call in calls) == 1
+    assert not tuple(cache.rglob("*.tmp"))
+
+
+def test_source_compatible_binary_fails_closed_without_go(monkeypatch):
+    monkeypatch.setattr(indexer.shutil, "which", lambda _name: None)
+
+    assert indexer._build_source_compatible_binary() == ""
+
+
+def test_index_receipt_fails_closed_without_selected_binary(tmp_path, monkeypatch):
+    (tmp_path / "app.py").write_text("value = 1\n", encoding="utf-8")
+    monkeypatch.delenv("GT_INDEX_BINARY", raising=False)
+    monkeypatch.setattr(indexer.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(indexer, "_build_source_compatible_binary", lambda: "")
+
+    receipt = ensure_index_with_receipt(tmp_path, state_dir=tmp_path / "state")
+
+    assert receipt.status is IndexBuildStatus.MISSING_BINARY
+    assert receipt.graph_db is None
+
+
+def test_failed_source_build_never_publishes_partial_binary(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "go.mod").write_text("module example\n", encoding="utf-8")
+    (source / "main.go").write_text("package main\n", encoding="utf-8")
+    cache = tmp_path / "cache"
+    fake_run, calls = _fake_go_run_factory(fail_build=True)
+    monkeypatch.setattr(indexer, "_INDEX_SOURCE_ROOT", source)
+    monkeypatch.setattr(indexer, "_binary_cache_root", lambda: cache)
+    monkeypatch.setattr(indexer.shutil, "which", lambda name: "go" if name == "go" else None)
+    monkeypatch.setattr(indexer.subprocess, "run", fake_run)
+
+    assert indexer._build_source_compatible_binary() == ""
+    assert sum(call[1] == "build" for call in calls) == 1
+    assert not tuple(cache.rglob("gt-index*"))
+    assert not tuple(cache.rglob("*.tmp"))
+
+
 def test_failed_index_binary_preserves_bounded_diagnostic(tmp_path, monkeypatch):
     (tmp_path / "query.sql").write_text("select 1;\n", encoding="utf-8")
 

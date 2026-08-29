@@ -4,10 +4,11 @@ Uses ``groundtruth._binary.run_index`` (the Go gt-index binary) - NEVER the
 ``groundtruth index`` CLI, which builds the MCP SymbolStore index.db, a
 DIFFERENT database the gateway cannot read.
 
-Binary resolution is find_binary()'s: $GT_INDEX_BINARY -> PATH -> local build
--> release download. Because find_binary's "local build" probe is cwd-relative,
-this module additionally seeds $GT_INDEX_BINARY from a known local build when
-one exists and nothing else resolves.
+Binary resolution is deliberately narrower than ``find_binary()``: an explicit
+``$GT_INDEX_BINARY`` or PATH binary is operator-owned; otherwise the harness
+atomically builds the checked-in producer source into a source/toolchain-keyed
+cache and exports that exact path. It never silently falls back to an unrelated
+package-cache or machine-global binary.
 
 No source files under the root -> return None: GT stays dormant for non-code
 tasks (no harm, no noise).
@@ -21,9 +22,11 @@ import hashlib
 import io
 import json
 import os
+import platform
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Iterator
@@ -70,12 +73,9 @@ _SKIP_DIRS = frozenset(
     }
 )
 
-# Known local gt-index builds probed only when nothing else resolves.
-_LOCAL_BINARY_CANDIDATES = (
-    str(Path(__file__).resolve().parents[1] / "vendor" / "gt-index-src" / "gt-index.exe"),
-    r"D:\Groundtruth\gt-index\gt-index.exe",
-    "/opt/groundtruth/gt-index/gt-index",
-)
+_INDEX_SOURCE_ROOT = Path(__file__).resolve().parents[1] / "vendor" / "gt-index-src"
+_INDEX_BUILD_TAGS = "sqlite_fts5"
+_INDEX_BUILD_CONTRACT = "gt.source_bound_index_binary.v1"
 
 _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 
@@ -268,14 +268,159 @@ def is_code_repo(root: str) -> bool:
     return False
 
 
-def _seed_binary_env() -> None:
-    """Make find_binary() succeed offline when a known local build exists."""
-    if os.environ.get("GT_INDEX_BINARY") or shutil.which("gt-index"):
-        return
-    for cand in _LOCAL_BINARY_CANDIDATES:
-        if Path(cand).exists():
-            os.environ["GT_INDEX_BINARY"] = cand
-            return
+def _binary_cache_root() -> Path:
+    configured = str(os.environ.get("GT_INDEX_BUILD_CACHE") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if os.name == "nt":
+        local = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        if local:
+            return Path(local) / "gt-harness" / "index-binaries"
+    xdg = str(os.environ.get("XDG_CACHE_HOME") or "").strip()
+    if xdg:
+        return Path(xdg).expanduser() / "gt-harness" / "index-binaries"
+    return Path.home() / ".cache" / "gt-harness" / "index-binaries"
+
+
+def _go_toolchain_identity(go_binary: str) -> str:
+    environment = os.environ.copy()
+    environment["CGO_ENABLED"] = "1"
+    try:
+        version = subprocess.run(
+            [go_binary, "version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10.0,
+            check=False,
+            env=environment,
+        )
+        go_env = subprocess.run(
+            [go_binary, "env", "GOOS", "GOARCH", "CC"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10.0,
+            check=False,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if version.returncode or go_env.returncode:
+        return ""
+    return "\n".join(
+        (
+            _INDEX_BUILD_CONTRACT,
+            version.stdout.strip(),
+            go_env.stdout.strip(),
+            os.name,
+            sys.platform,
+            platform.machine(),
+            f"tags={_INDEX_BUILD_TAGS}",
+            "cgo=1",
+            "trimpath=1",
+        )
+    )
+
+
+def _index_source_fingerprint(source_root: Path, toolchain_identity: str) -> str:
+    if not toolchain_identity or not source_root.is_dir():
+        return ""
+    inputs = sorted(
+        path
+        for path in source_root.rglob("*")
+        if path.is_file() and (path.suffix == ".go" or path.name in {"go.mod", "go.sum"})
+    )
+    if not inputs:
+        return ""
+    digest = hashlib.sha256()
+    digest.update(toolchain_identity.encode("utf-8", "surrogatepass"))
+    digest.update(b"\0")
+    try:
+        for path in inputs:
+            relative = path.relative_to(source_root).as_posix()
+            digest.update(relative.encode("utf-8", "surrogatepass"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def _build_source_compatible_binary() -> str:
+    go_binary = shutil.which("go") or ""
+    if not go_binary:
+        return ""
+    toolchain_identity = _go_toolchain_identity(go_binary)
+    fingerprint = _index_source_fingerprint(_INDEX_SOURCE_ROOT, toolchain_identity)
+    if not fingerprint:
+        return ""
+    target_dir = _binary_cache_root() / fingerprint
+    target = target_dir / ("gt-index.exe" if os.name == "nt" else "gt-index")
+    try:
+        if target.is_file() and target.stat().st_size > 0:
+            return str(target.resolve())
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return ""
+    temporary = target.with_name(
+        f".{target.name}.{os.getpid()}.{time.time_ns()}.tmp"
+    )
+    environment = os.environ.copy()
+    environment["CGO_ENABLED"] = "1"
+    try:
+        completed = subprocess.run(
+            [
+                go_binary,
+                "build",
+                "-trimpath",
+                "-tags",
+                _INDEX_BUILD_TAGS,
+                "-o",
+                str(temporary),
+                "./cmd/gt-index/",
+            ],
+            cwd=_INDEX_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300.0,
+            check=False,
+            env=environment,
+        )
+        if completed.returncode or not temporary.is_file() or temporary.stat().st_size <= 0:
+            return ""
+        if os.name != "nt":
+            temporary.chmod(0o755)
+        try:
+            os.replace(temporary, target)
+        except OSError:
+            if not target.is_file() or target.stat().st_size <= 0:
+                return ""
+        return str(target.resolve())
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _seed_binary_env() -> str:
+    """Select an explicit binary or build one from the checked-out source."""
+
+    configured = str(os.environ.get("GT_INDEX_BINARY") or "").strip()
+    if configured:
+        return configured
+    discovered = shutil.which("gt-index") or ""
+    if discovered:
+        return discovered
+    built = _build_source_compatible_binary()
+    if built:
+        os.environ["GT_INDEX_BINARY"] = built
+    return built
 
 
 def _binary_certification() -> dict[str, str]:
@@ -290,17 +435,7 @@ def _binary_certification() -> dict[str, str]:
 
 
 def _resolved_binary_path() -> str:
-    candidate = os.environ.get("GT_INDEX_BINARY") or shutil.which("gt-index") or ""
-    if not candidate:
-        try:
-            from groundtruth._binary import CACHE_DIR, GT_INDEX_VERSION
-
-            name = "gt-index.exe" if os.name == "nt" else "gt-index"
-            cached = Path(CACHE_DIR) / GT_INDEX_VERSION / name
-            candidate = str(cached) if cached.is_file() else ""
-        except (ImportError, AttributeError):
-            candidate = ""
-    return candidate
+    return str(os.environ.get("GT_INDEX_BINARY") or shutil.which("gt-index") or "")
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
