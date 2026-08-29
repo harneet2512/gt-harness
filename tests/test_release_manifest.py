@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.release_manifest import load_release_manifest
+from scripts.release_manifest import ACTIVE_RELEASE_PATH, load_release_manifest
 
 
 def _sha256(path: Path) -> str:
@@ -46,6 +46,26 @@ def test_release_manifest_resolves_and_hashes_every_active_input(tmp_path: Path)
         "active_release.json",
         "prediction.json",
     )
+
+
+def test_repository_active_release_inputs_are_exactly_content_addressed() -> None:
+    root = Path(__file__).resolve().parents[1]
+
+    manifest = load_release_manifest(root / ACTIVE_RELEASE_PATH, root=root)
+
+    protected_paths = {
+        manifest.prediction_relative,
+        manifest.baseline_relative,
+        manifest.treatment_relative,
+    }
+    attribute_lines = {
+        line.strip()
+        for line in (root / ".gitattributes").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert {
+        f"{relative} text eol=lf" for relative in protected_paths
+    }.issubset(attribute_lines)
 
 
 def test_release_manifest_rejects_stale_content_hash(tmp_path: Path) -> None:

@@ -1,0 +1,3 @@
+docs/benchmarks/GT_FINAL_20_TASK_OUTCOME_PREDICTION_2026-08-29_V37.json text eol=lf
+eval/frozen_baselines/tb2_miniswe_20260731.json text eol=lf
+eval/treatments/tb2_central_relational_v3.json text eol=lf
