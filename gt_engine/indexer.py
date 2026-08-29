@@ -26,6 +26,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stderr
 from dataclasses import dataclass
 from enum import StrEnum
@@ -130,6 +131,17 @@ class IndexBuildReceipt:
             and not self.ambiguous_paths
             and self.parser_failures == 0
         )
+
+
+@dataclass(frozen=True, slots=True)
+class GraphReadLease:
+    """An open-time proof that a reader sees the certified graph generation."""
+
+    graph_path: Path
+    graph_revision: str
+    source_revision: str
+    graph_db_sha256: str
+    graph_manifest_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -756,6 +768,50 @@ def _graph_publication_lock(directory: Path, *, timeout: float = 30.0):
 
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
+
+
+@contextmanager
+def certified_graph_read(
+    receipt: IndexBuildReceipt,
+    *,
+    expected_root: Path,
+    expected_source_revision: str,
+    lock_timeout: float = 30.0,
+) -> Iterator[GraphReadLease]:
+    """Hold publication authority while consuming one certified graph pair."""
+
+    if not receipt.available or not receipt.schema_valid or not receipt.graph_db:
+        raise ValueError("graph_read_receipt_not_available")
+    if not expected_source_revision or receipt.source_revision != expected_source_revision:
+        raise ValueError("graph_read_source_revision_mismatch")
+    database = Path(receipt.graph_db).resolve()
+    if not database.is_file():
+        raise FileNotFoundError(database)
+    manifest_path = database.with_suffix(".manifest.json")
+    with _graph_publication_lock(database.parent, timeout=lock_timeout):
+        certified, error = _certify_published_graph(
+            database,
+            manifest_path,
+            expected_root=expected_root.resolve(),
+            expected_source_revision=expected_source_revision,
+            expected_binary_sha256=receipt.binary_sha256,
+            _lock_held=True,
+        )
+        if not certified:
+            raise ValueError("graph_read_certification:" + error)
+        observed_hash = hashlib.sha256(database.read_bytes()).hexdigest()
+        if not receipt.graph_db_sha256 or observed_hash != receipt.graph_db_sha256:
+            raise ValueError("graph_read_database_hash_mismatch")
+        observed_revision = _graph_logical_revision(database)
+        if receipt.graph_revision and observed_revision != receipt.graph_revision:
+            raise ValueError("graph_read_logical_revision_mismatch")
+        yield GraphReadLease(
+            graph_path=database,
+            graph_revision=observed_revision,
+            source_revision=expected_source_revision,
+            graph_db_sha256=observed_hash,
+            graph_manifest_sha256=receipt.graph_manifest_sha256,
+        )
 
 
 def _publish_graph_pair(

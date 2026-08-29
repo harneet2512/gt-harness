@@ -359,6 +359,9 @@ def build_hybrid_repository(
         evidence_type: str = "",
         verification_status: str = "",
         receiver_type: str = "",
+        receiver_origin: str = "unknown",
+        receiver_shape: str = "unknown",
+        receiver_chain: tuple[str, ...] = (),
         route: str = "",
         http_method: str = "",
         source_kind: str = "",
@@ -421,6 +424,9 @@ def build_hybrid_repository(
                 evidence_type=evidence_type,
                 verification_status=verification_status,
                 receiver_type=receiver_type,
+                receiver_origin=receiver_origin,
+                receiver_shape=receiver_shape,
+                receiver_chain=receiver_chain,
                 route=route,
                 http_method=http_method,
                 source_kind=source_kind,
@@ -693,6 +699,19 @@ def build_hybrid_repository(
                     evidence_type=str(edge_evidence_type or ""),
                     verification_status=str(edge_verification_status or ""),
                     receiver_type=normalized_metadata.get("receiver_type", ""),
+                    receiver_origin=normalized_metadata.get(
+                        "receiver_origin", "unknown"
+                    ),
+                    receiver_shape=normalized_metadata.get(
+                        "receiver_shape", "unknown"
+                    ),
+                    receiver_chain=tuple(
+                        item
+                        for item in normalized_metadata.get(
+                            "receiver_chain", ""
+                        ).split("|")
+                        if item
+                    ),
                     route=normalized_metadata.get("route", ""),
                     http_method=normalized_metadata.get("method", ""),
                     source_kind=source_kind,

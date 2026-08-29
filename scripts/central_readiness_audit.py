@@ -73,8 +73,7 @@ def _has_explicit_policy_arms(workflow: str) -> bool:
     return (
         any(line in workflow for line in choices)
         and "default: audit" in workflow
-        and "--ak integration_mode=off --ak policy_mode=off --ak preflight_mode=off"
-        in workflow
+        and "--ak integration_mode=off --ak policy_mode=off --ak preflight_mode=off" in workflow
         and "--ak integration_mode=audit --ak policy_mode=audit --ak preflight_mode=shadow"
         in workflow
         and "--ak policy_mode=certified_active" in workflow
@@ -91,9 +90,7 @@ def _first_position_after(source: str, needles: tuple[str, ...], *, start: int =
     """
 
     positions = tuple(
-        position
-        for needle in needles
-        if (position := source.find(needle, start)) >= 0
+        position for needle in needles if (position := source.find(needle, start)) >= 0
     )
     return min(positions, default=-1)
 
@@ -107,9 +104,7 @@ def audit() -> dict[str, bool]:
     setup_source = inspect.getsource(MiniSweCentralAgent.setup)
     validation_source = inspect.getsource(ValidationClassification)
     observation_source = inspect.getsource(CentralFeatureRuntime.observe_action)
-    persistent_compile_position = run_source.find(
-        "persistent_state_engine.compile_context("
-    )
+    persistent_compile_position = run_source.find("persistent_state_engine.compile_context(")
     provider_dispatch_position = _first_position_after(
         run_source,
         ("_direct_provider_message,", "model.query,"),
@@ -131,14 +126,10 @@ def audit() -> dict[str, bool]:
     workflow = workflows[0]
     verification_workflow = workflows[1]
     release_manifest = load_release_manifest(root=ROOT)
-    treatment_descriptor = json.loads(
-        release_manifest.treatment_path.read_text(encoding="utf-8")
-    )
+    treatment_descriptor = json.loads(release_manifest.treatment_path.read_text(encoding="utf-8"))
     treatment_runtime = treatment_descriptor.get("runtime_agent_kwargs") or {}
     treatment_identity_descriptor = {
-        key: value
-        for key, value in treatment_descriptor.items()
-        if key != "runtime_agent_kwargs"
+        key: value for key, value in treatment_descriptor.items() if key != "runtime_agent_kwargs"
     }
     treatment_identity_descriptor["source_sha"] = "0" * 40
     try:
@@ -157,9 +148,9 @@ def audit() -> dict[str, bool]:
     provider_free_workflow = (ROOT / ".github/workflows/central_provider_free.yml").read_text(
         encoding="utf-8"
     )
-    deepswe_workflow = (
-        ROOT / ".github/workflows/deepswe_miniswe_central.yml"
-    ).read_text(encoding="utf-8")
+    deepswe_workflow = (ROOT / ".github/workflows/deepswe_miniswe_central.yml").read_text(
+        encoding="utf-8"
+    )
     deep_metrics_source = (ROOT / "gt_engine/deep_metrics.py").read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as directory:
         agent = MiniSweCentralAgent(logs_dir=Path(directory), model_name="audit-model")
@@ -335,21 +326,13 @@ def audit() -> dict[str, bool]:
         "provider_free_gate_covers_benchmark_reports": (
             "tests/test_benchmark_reports.py" in provider_free_workflow
             and "gt_engine/benchmark_reports.py" in provider_free_workflow
-            and "tests/test_verify_frozen_outcome_prediction.py"
-            in provider_free_workflow
+            and "tests/test_verify_frozen_outcome_prediction.py" in provider_free_workflow
         ),
-        "final_zero_provider_selection_contract_executes": (
-            deterministic_census_check.passed
-        ),
+        "final_zero_provider_selection_contract_executes": (deterministic_census_check.passed),
         "canonical_intervention_coverage_executes": (
             intervention_probe.get("schema") == "gt.intervention_chain.v2"
             and int((intervention_probe.get("counts") or {}).get("rows") or 0) == 1
-            and int(
-                (intervention_probe.get("counts") or {}).get(
-                    "canonical_delivery_rows"
-                )
-                or 0
-            )
+            and int((intervention_probe.get("counts") or {}).get("canonical_delivery_rows") or 0)
             == 1
         ),
         "provider_free_gate_covers_context_compiler": (
@@ -372,12 +355,9 @@ def audit() -> dict[str, bool]:
             and (ROOT / "gt_engine/uplift_policy.py").is_file()
         ),
         "repeated_control_release_gate_is_available": (
-            "assess_repeated_release" in (ROOT / "gt_engine/experiment.py").read_text(
-                encoding="utf-8"
-            )
-            and "crossover_arm" in (ROOT / "gt_engine/experiment.py").read_text(
-                encoding="utf-8"
-            )
+            "assess_repeated_release"
+            in (ROOT / "gt_engine/experiment.py").read_text(encoding="utf-8")
+            and "crossover_arm" in (ROOT / "gt_engine/experiment.py").read_text(encoding="utf-8")
         ),
         "provider_free_gate_covers_repository_intelligence": (
             "tests/test_gt_intelligence_layer.py" in provider_free_workflow
@@ -404,9 +384,8 @@ def audit() -> dict[str, bool]:
             and "gt_engine/thin_compiler.py" in provider_free_workflow
             and "test_persistent_state_bootstraps_once_then_runs_at_every_live_boundary"
             in (ROOT / "tests/test_gt_central_agent.py").read_text(encoding="utf-8")
-            and "_persistent_execution_state" in (
-                ROOT / "scripts/central_release_gate.py"
-            ).read_text(encoding="utf-8")
+            and "_persistent_execution_state"
+            in (ROOT / "scripts/central_release_gate.py").read_text(encoding="utf-8")
         ),
         "paid_persistent_state_contract_is_explicit": (
             central_uses_typed_treatment
@@ -447,9 +426,8 @@ def audit() -> dict[str, bool]:
             and "persistent_state_engine.rebase_graph(" in run_source
             and "initial_retrieval=initial_retrieval_result" in run_source
             and "preemptive_retrieval_cache[initial_retrieval_cache_key]" in run_source
-            and "persistent_initial_retrieval_not_in_catalog" in (
-                ROOT / "scripts/central_release_gate.py"
-            ).read_text(encoding="utf-8")
+            and "persistent_initial_retrieval_not_in_catalog"
+            in (ROOT / "scripts/central_release_gate.py").read_text(encoding="utf-8")
         ),
         "product_mechanism_contract_is_17_plus_1": (
             "PRODUCT_MECHANISM_IDS" in run_source
@@ -460,8 +438,7 @@ def audit() -> dict[str, bool]:
             # one merge-gate accumulator.  Do not pin this readiness check to
             # an obsolete direct SystemExit spelling: verify the live gate
             # records the 17+1 failure and fails outside diagnostic mode.
-            and 'gate_errors.append("17+1 GT product mechanism census failed")'
-            in deepswe_workflow
+            and 'gate_errors.append("17+1 GT product mechanism census failed")' in deepswe_workflow
             and 'if os.environ.get("DIAGNOSTIC_ONLY") != "1":' in deepswe_workflow
         ),
         "paid_live_retrieval_matches_arb_profile": all(
@@ -498,10 +475,8 @@ def audit() -> dict[str, bool]:
         "provider_free_gate_covers_pinned_benchmark_languages": (
             "tests/test_gt_language_resolution.py" in provider_free_workflow
             and "tests/test_gt_benchmark_language_contract.py" in provider_free_workflow
-            and "scripts/verify_tb2_language_contract.py --dataset-root"
-            in provider_free_workflow
-            and "2fd12b88aafdd04a52c298e3940bcb189f9766d6"
-            in provider_free_workflow
+            and "scripts/verify_tb2_language_contract.py --dataset-root" in provider_free_workflow
+            and "2fd12b88aafdd04a52c298e3940bcb189f9766d6" in provider_free_workflow
         ),
         "paid_context_frontier_is_explicit": (
             treatment_runtime.get("enable_context_frontier") is True
@@ -510,15 +485,13 @@ def audit() -> dict[str, bool]:
         "provider_information_value_contract_executes": provider_value_check.passed,
         "paid_persistent_selection_is_deterministic": (
             central_uses_typed_treatment
-            and treatment_runtime.get("persistent_state_selection_mode")
-            == "deterministic_v1"
+            and treatment_runtime.get("persistent_state_selection_mode") == "deterministic_v1"
             and 'persistent_state_selection_mode: str = "generative"' in source
             and '"deterministic_v1"' in source
         ),
         "paid_retrieval_delivery_is_integrated": (
             central_uses_typed_treatment
-            and treatment_runtime.get("retrieval_delivery_mode")
-            == "integrated_same_observation"
+            and treatment_runtime.get("retrieval_delivery_mode") == "integrated_same_observation"
             and 'retrieval_delivery_mode: str = "standalone_preemptive"' in source
             and '"integrated_same_observation"' in source
         ),
@@ -544,9 +517,7 @@ def audit() -> dict[str, bool]:
             and inspect.isclass(HostExecutionRecorder)
         ),
         "context_compiler_precedes_model_query": (
-            0
-            <= run_source.find("record_context_compiler_call(")
-            < provider_dispatch_position
+            0 <= run_source.find("record_context_compiler_call(") < provider_dispatch_position
         ),
         "provider_prepared_hash_precedes_model_query": (
             persistent_compile_position
@@ -554,23 +525,19 @@ def audit() -> dict[str, bool]:
             < provider_dispatch_position
         ),
         "repository_frontier_precedes_model_query": (
-            0
-            <= run_source.find("compile_incremental_frontier(")
-            < provider_dispatch_position
+            0 <= run_source.find("compile_incremental_frontier(") < provider_dispatch_position
         ),
         "preemptive_hybrid_retrieval_precedes_model_query": (
-            0
-            <= run_source.find("preemptive_retriever.retrieve,")
-            < provider_dispatch_position
+            0 <= run_source.find("preemptive_retriever.retrieve,") < provider_dispatch_position
             and "ProviderEvidenceSurface.PREEMPTIVE_RETRIEVAL" in run_source
             and "preemptive_retrieval_deliveries" in run_source
         ),
         "action_conditioned_graph_query_precedes_postflight": (
             0
-            <= run_source.find("repository_session.query,")
+            <= run_source.find("repository_service.prepare(")
             < run_source.find("self._features.observe_action(")
             and "active_paths=action_graph_paths" in run_source
-            and 'boundary=f"post_{proposed.operation.value}"' in run_source
+            and "boundary=decision_boundary" in run_source
         ),
         "repository_intelligence_failure_is_receipted": (
             "material_frontier_not_delivered" in run_source

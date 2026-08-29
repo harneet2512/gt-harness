@@ -183,7 +183,7 @@ def test_builder_keeps_same_file_calls_and_typed_receiver_provenance(tmp_path):
         )
         connection.execute(
             "INSERT INTO edges VALUES (1,1,2,'CALLS','lsp_verified',1.0,'CERTIFIED',1,"
-            "'receiver_type','lsp_verified','receiver_type=Service')"
+            "'receiver_type','lsp_verified','receiver_type=Service;receiver_origin=explicit_type;receiver_shape=instance')"
         )
         connection.commit()
     finally:
@@ -197,6 +197,8 @@ def test_builder_keeps_same_file_calls_and_typed_receiver_provenance(tmp_path):
     assert link.source_symbol == "run"
     assert link.target_symbol == "helper"
     assert link.receiver_type == "Service"
+    assert link.receiver_origin == "explicit_type"
+    assert link.receiver_shape == "instance"
     assert link.resolution_method == "lsp_verified"
     assert link.source_return_type == link.target_return_type == "int"
     assert link.certified is True

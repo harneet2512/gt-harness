@@ -147,6 +147,7 @@ class RunReceiptFinalizer:
         self.feature_lifecycles: list[dict[str, Any]] = []
         self.initial_repository_revision = ""
         self.final_repository_revision = ""
+        self.runtime_attestation: dict[str, Any] = {}
         self._finalized = False
 
     @property
@@ -206,6 +207,9 @@ class RunReceiptFinalizer:
         self.initial_repository_revision = str(initial_repository_revision or "")
         self.final_repository_revision = str(final_repository_revision or "")
 
+    def record_runtime_attestation(self, attestation: dict[str, Any]) -> None:
+        self.runtime_attestation = dict(attestation)
+
     def finalize(
         self,
         *,
@@ -242,6 +246,7 @@ class RunReceiptFinalizer:
             ),
             "duration_ms": round((time.perf_counter() - self._clock_started) * 1000, 3),
             "provider_usage": dict(self.provider_usage),
+            "runtime_attestation": dict(self.runtime_attestation),
             **metrics,
             "graph_build_count": sum(row["kind"] == "initial" for row in self.graph_builds),
             "graph_refresh_count": sum(row["kind"] != "initial" for row in self.graph_builds),

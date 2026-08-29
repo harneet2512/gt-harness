@@ -792,9 +792,7 @@ def test_authorized_central_workflows_pin_miniswe_246():
 
 def test_decision_value_fixture_pilot_uses_required_git_substrate_for_search():
     root = Path(__file__).resolve().parents[1]
-    source = (root / "scripts" / "decision_value_fixture_pilot.py").read_text(
-        encoding="utf-8"
-    )
+    source = (root / "scripts" / "decision_value_fixture_pilot.py").read_text(encoding="utf-8")
 
     assert '["git", "grep", "-n", "--fixed-strings", "--", symbol]' in source
     assert '["rg",' not in source
@@ -5149,6 +5147,7 @@ async def test_actual_agent_loop_routes_all_17_features_with_nonpredictive_effec
             *,
             snapshot,
             source_revision,
+            graph_revision=None,
             task_deliverables=frozenset(),
         ):
             return (
@@ -5416,6 +5415,7 @@ async def test_assistive_safe_runs_one_discovered_project_check_at_submit(tmp_pa
             *,
             snapshot,
             source_revision,
+            graph_revision=None,
             task_deliverables=frozenset(),
         ):
             return (

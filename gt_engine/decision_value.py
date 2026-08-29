@@ -48,10 +48,38 @@ class FeatureStage(StrEnum):
     CANDIDATE = "CANDIDATE"
     CERTIFIED = "CERTIFIED"
     DELIVERED = "DELIVERED"
-    CONSUMED = "CONSUMED"
     VALIDATED = "VALIDATED"
     CONTRADICTED = "CONTRADICTED"
     ABSTAINED = "ABSTAINED"
+
+
+class FeatureApplicability(StrEnum):
+    APPLICABLE = "APPLICABLE"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class FeatureCertification(StrEnum):
+    NONE = "NONE"
+    CANDIDATE = "CANDIDATE"
+    CERTIFIED = "CERTIFIED"
+    ABSTAINED = "ABSTAINED"
+
+
+class FeatureDelivery(StrEnum):
+    NOT_DELIVERED = "NOT_DELIVERED"
+    DELIVERED = "DELIVERED"
+
+
+class FeatureUptake(StrEnum):
+    UNOBSERVED = "UNOBSERVED"
+    ACTION_CONSISTENT = "ACTION_CONSISTENT"
+    ACTION_CONTRARY = "ACTION_CONTRARY"
+
+
+class FeatureOutcome(StrEnum):
+    UNVALIDATED = "UNVALIDATED"
+    VALIDATED = "VALIDATED"
+    CONTRADICTED = "CONTRADICTED"
 
 
 class DecisionBoundary(StrEnum):
@@ -231,6 +259,11 @@ class FeatureLifecycle:
     resulting_agent_action: str = ""
     validation_result: str = ""
     terminal_reason: str = ""
+    applicability: FeatureApplicability = FeatureApplicability.APPLICABLE
+    certification: FeatureCertification = FeatureCertification.CANDIDATE
+    delivery: FeatureDelivery = FeatureDelivery.NOT_DELIVERED
+    uptake: FeatureUptake = FeatureUptake.UNOBSERVED
+    outcome: FeatureOutcome = FeatureOutcome.UNVALIDATED
 
     @classmethod
     def candidate(
@@ -275,6 +308,8 @@ class FeatureLifecycle:
             terminal_reason=reason,
         )
         instance.transitions.append(FeatureTransition(None, FeatureStage.NOT_APPLICABLE, reason))
+        instance.applicability = FeatureApplicability.NOT_APPLICABLE
+        instance.certification = FeatureCertification.NONE
         instance._validate_identity()
         return instance
 
@@ -308,6 +343,7 @@ class FeatureLifecycle:
             if not claim.owner_authorized() or not claim.ambiguity_actionable():
                 raise ValueError(f"claim {claim.claim_id} lacks decision authority")
         self._move(FeatureStage.CANDIDATE, FeatureStage.CERTIFIED, "source claims certified")
+        self.certification = FeatureCertification.CERTIFIED
         self.claims = claims
         self.decision_boundary = decision_boundary
 
@@ -321,25 +357,47 @@ class FeatureLifecycle:
         if not model_visible_bytes:
             raise ValueError("DELIVERED requires exact non-empty model-visible bytes")
         self._move(FeatureStage.CERTIFIED, FeatureStage.DELIVERED, "exact bytes exposed")
+        self.delivery = FeatureDelivery.DELIVERED
         self.model_visible_bytes = bytes(model_visible_bytes)
 
-    def consume(self, *, resulting_agent_action: str) -> None:
+    def record_action_consistency(
+        self,
+        *,
+        resulting_agent_action: str,
+        contrary: bool = False,
+    ) -> None:
         if not resulting_agent_action:
-            raise ValueError("CONSUMED requires a resulting agent action")
-        self._move(FeatureStage.DELIVERED, FeatureStage.CONSUMED, "later action used delivery")
+            raise ValueError("action consistency requires a resulting agent action")
+        if self.stage is not FeatureStage.DELIVERED:
+            raise ValueError(
+                f"action consistency requires DELIVERED; found {self.stage.value}"
+            )
         self.resulting_agent_action = resulting_agent_action
+        self.uptake = (
+            FeatureUptake.ACTION_CONTRARY
+            if contrary
+            else FeatureUptake.ACTION_CONSISTENT
+        )
 
     def validate(self, *, validation: str, contradicted: bool) -> None:
         if not validation:
             raise ValueError("validation or contradiction evidence is required")
+        if self.stage is not FeatureStage.DELIVERED:
+            raise ValueError(
+                f"validation requires DELIVERED; found {self.stage.value}"
+            )
         target = FeatureStage.CONTRADICTED if contradicted else FeatureStage.VALIDATED
-        self._move(FeatureStage.CONSUMED, target, validation)
+        self._move(FeatureStage.DELIVERED, target, validation)
+        self.outcome = (
+            FeatureOutcome.CONTRADICTED if contradicted else FeatureOutcome.VALIDATED
+        )
         self.validation_result = validation
 
     def abstain(self, reason: str) -> None:
         if not reason:
             raise ValueError("ABSTAINED requires a reason")
         self._move(FeatureStage.CANDIDATE, FeatureStage.ABSTAINED, reason)
+        self.certification = FeatureCertification.ABSTAINED
         self.terminal_reason = reason
 
     def receipt(self) -> dict[str, Any]:
@@ -349,9 +407,14 @@ class FeatureLifecycle:
             else ""
         )
         return {
-            "schema": "gt.feature_lifecycle.v1",
+            "schema": "gt.feature_lifecycle.v2",
             "feature_id": self.feature_id,
             "stage": self.stage.value,
+            "applicability": self.applicability.value,
+            "certification": self.certification.value,
+            "delivery": self.delivery.value,
+            "uptake": self.uptake.value,
+            "outcome": self.outcome.value,
             "triggering_event": self.triggering_event,
             "repository_revision": self.repository_revision,
             "graph_revision": self.graph_revision,
@@ -384,14 +447,29 @@ class DecisionDeliveryCompiler:
         self._delivered_keys: set[str] = set()
 
     @staticmethod
-    def _score(claim: DecisionClaim) -> float:
-        distance = 0.0 if claim.graph_distance is None else 1.0 / (1.0 + claim.graph_distance)
+    def _rank_key(
+        claim: DecisionClaim,
+        boundary: DecisionBoundary,
+    ) -> tuple[Any, ...]:
+        boundary_roles = {
+            DecisionBoundary.IDENTITY_AMBIGUITY: ClaimRole.UNRESOLVED_IDENTITY,
+            DecisionBoundary.PRE_EDIT: ClaimRole.EDIT_OWNER,
+            DecisionBoundary.POST_EDIT_GRAPH_DELTA: ClaimRole.PUBLIC_SURFACE,
+            DecisionBoundary.FAILURE_OBSERVATION: ClaimRole.INSPECTION_DEPENDENCY,
+            DecisionBoundary.VERIFICATION_SELECTION: ClaimRole.VALIDATION_COMMAND,
+            DecisionBoundary.PRE_SUBMIT: ClaimRole.AFFECTED_TEST,
+            DecisionBoundary.REPOSITORY_START: ClaimRole.INSPECTION_DEPENDENCY,
+        }
         return (
-            max(0.0, min(1.0, claim.semantic_similarity)) * 0.30
-            + float(claim.exact_identifier_match) * 0.22
-            + distance * 0.15
-            + float(claim.authoritative_edge) * 0.13
-            + max(0.0, min(1.0, claim.evidence_quality)) * 0.20
+            -int(claim.exact_identifier_match),
+            -int(claim.authoritative_edge),
+            -int(claim.role is boundary_roles[boundary]),
+            int(claim.graph_distance is None),
+            int(claim.graph_distance or 0),
+            -max(0.0, min(1.0, claim.evidence_quality)),
+            -max(0.0, min(1.0, claim.semantic_similarity)),
+            claim.requirement_id,
+            claim.claim_id,
         )
 
     @staticmethod
@@ -444,23 +522,29 @@ class DecisionDeliveryCompiler:
 
         # Rank first, then round-robin roles so one high-volume role cannot
         # crowd all other unmet decision surfaces from the bounded delivery.
-        by_role: dict[ClaimRole, list[DecisionClaim]] = {}
+        buckets: dict[tuple[str, ClaimRole], list[DecisionClaim]] = {}
         for claim in sorted(
             eligible,
-            key=lambda item: (-self._score(item), item.requirement_id, item.claim_id),
+            key=lambda item: self._rank_key(item, boundary),
         ):
-            by_role.setdefault(claim.role, []).append(claim)
+            buckets.setdefault((claim.requirement_id, claim.role), []).append(claim)
         selected: list[DecisionClaim] = []
-        roles = [role for role in ClaimRole if role in by_role]
-        while roles and len(selected) < max_claims:
-            next_roles: list[ClaimRole] = []
-            for role in roles:
-                bucket = by_role[role]
+        requirement_order = tuple(dict.fromkeys(unmet_requirement_ids))
+        bucket_order = [
+            (requirement, role)
+            for requirement in requirement_order
+            for role in ClaimRole
+            if (requirement, role) in buckets
+        ]
+        while bucket_order and len(selected) < max_claims:
+            next_buckets: list[tuple[str, ClaimRole]] = []
+            for bucket_key in bucket_order:
+                bucket = buckets[bucket_key]
                 if bucket and len(selected) < max_claims:
                     selected.append(bucket.pop(0))
                 if bucket:
-                    next_roles.append(role)
-            roles = next_roles
+                    next_buckets.append(bucket_key)
+            bucket_order = next_buckets
 
         rendered: list[str] = []
         for role in ClaimRole:
@@ -491,7 +575,12 @@ __all__ = [
     "DecisionClaim",
     "DecisionDeliveryCompiler",
     "FeatureLifecycle",
+    "FeatureApplicability",
+    "FeatureCertification",
+    "FeatureDelivery",
+    "FeatureOutcome",
     "FeatureStage",
+    "FeatureUptake",
     "FeatureTriggerContext",
     "SourceEvidence",
     "evaluate_feature_triggers",

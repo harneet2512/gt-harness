@@ -55,6 +55,7 @@ class LifecycleCall:
     state: CallDispatchState
     request_payload_sha256: str = ""
     provider_messages_sha256: str = ""
+    provider_barrier_inputs_sha256: str = ""
     reason: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -65,6 +66,7 @@ class LifecycleCall:
             "state": self.state.value,
             "request_payload_sha256": self.request_payload_sha256,
             "provider_messages_sha256": self.provider_messages_sha256,
+            "provider_barrier_inputs_sha256": self.provider_barrier_inputs_sha256,
             "reason": self.reason,
         }
 
@@ -137,6 +139,14 @@ def build_runtime_lifecycle_receipt(
             state=_call_state(row.get("dispatch_status")),
             request_payload_sha256=str(row.get("request_payload_sha256") or ""),
             provider_messages_sha256=str(row.get("provider_messages_sha256") or ""),
+            provider_barrier_inputs_sha256=str(
+                (
+                    row.get("mechanical_completeness_barrier")
+                    if isinstance(row.get("mechanical_completeness_barrier"), Mapping)
+                    else {}
+                ).get("inputs_sha256")
+                or ""
+            ),
             reason=str(row.get("dispatch_reason") or ""),
         )
         for position, row in enumerate(model_call_contexts, start=1)

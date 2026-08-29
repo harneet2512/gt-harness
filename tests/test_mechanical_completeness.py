@@ -1,8 +1,10 @@
 from itertools import product
 
 from gt_engine.mechanical_completeness import (
+    ProviderBarrierInputsV2,
     build_task_execution_certificate,
     evaluate_provider_barrier,
+    evaluate_provider_barrier_v2,
 )
 
 
@@ -37,6 +39,46 @@ def test_provider_barrier_passes_only_with_complete_current_inputs() -> None:
     assert barrier["status"] == "PASS"
     assert barrier["failures"] == []
     assert all(row["status"] == "SATISFIED" for row in barrier["requirements"])
+
+
+def test_v2_provider_barrier_receipts_the_exact_immutable_inputs() -> None:
+    inputs = ProviderBarrierInputsV2(
+        call=1,
+        request_payload_sha256="a" * 64,
+        provider_messages_sha256="b" * 64,
+        observation_id="observation-1",
+        decision_boundary="PRE_EDIT",
+        repository_applicability="source_backed",
+        graph_required=True,
+        graph_input_revision="source-r1",
+        graph_revision="graph-r1",
+        graph_freshness="CURRENT",
+        dense_required=True,
+        dense_status="available",
+        augmentation_disposition="delivered",
+        source_snapshot_complete=True,
+        runtime_contract_ready=True,
+        task_semantic_ready=True,
+        graph_current=True,
+        repository_intelligence_ready=True,
+        retrieval_ready=True,
+        persistent_state_ready=True,
+        previous_actions_finalized=True,
+        context_candidate_count=1,
+        context_accounted_count=1,
+        contribution_candidate_count=1,
+        contribution_accounted_count=1,
+        selected_contribution_ids=("claim-1",),
+        provider_value_contribution_ids=("claim-1",),
+        replay_capture_enabled=True,
+    )
+
+    barrier = evaluate_provider_barrier_v2(inputs)
+
+    assert barrier["schema"] == "gt.provider_mechanical_barrier.v2"
+    assert barrier["status"] == "PASS"
+    assert barrier["inputs"] == inputs.as_dict()
+    assert barrier["inputs_sha256"] == inputs.sha256
 
 
 def test_provider_barrier_rejects_stale_graph_and_unfinalized_action() -> None:

@@ -234,6 +234,7 @@ def test_gate_cli_scores_independent_corpus_mode(tmp_path: Path) -> None:
         )
     observations_path = tmp_path / "observations.json"
     observations_path.write_text(json.dumps(observations), encoding="utf-8")
+    readiness_path = tmp_path / "benchmark-readiness.json"
     receipt_path = tmp_path / "gt-run-receipt.json"
     RunReceiptFinalizer(
         receipt_path,
@@ -258,6 +259,8 @@ def test_gate_cli_scores_independent_corpus_mode(tmp_path: Path) -> None:
             str(corpus_path),
             "--observations",
             str(observations_path),
+            "--output",
+            str(readiness_path),
         ],
         cwd=Path(__file__).resolve().parents[1],
         check=False,
@@ -270,6 +273,11 @@ def test_gate_cli_scores_independent_corpus_mode(tmp_path: Path) -> None:
     assert report["passed"] is True
     assert report["certified_source_precision"] == 1.0
     assert report["implementation_owner_top3_recall"] == 1.0
+    readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
+    assert readiness["schema"] == "gt.benchmark_readiness.v1"
+    assert readiness["status"] == "PASS"
+    assert readiness["benchmark_admissible"] is True
+    assert readiness["decision_value"] == report
 
 
 def test_observation_export_uses_only_provider_visible_certified_claims(

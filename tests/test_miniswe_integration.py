@@ -182,7 +182,8 @@ def test_verified_envelope_reaches_validated_lifecycle_through_provider_boundary
         output="execution outcome unavailable",
         returncode=None,
     )
-    assert adapter.feature_lifecycle_receipts()[0]["stage"] == FeatureStage.CONSUMED
+    assert adapter.feature_lifecycle_receipts()[0]["stage"] == FeatureStage.DELIVERED
+    assert adapter.feature_lifecycle_receipts()[0]["uptake"] == "ACTION_CONSISTENT"
     adapter.validate_consumed_lifecycles(
         "rg resolve_identity",
         output="def resolve_identity():",

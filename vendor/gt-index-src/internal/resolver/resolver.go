@@ -423,6 +423,11 @@ type ResolvedCall struct {
 	// `;`-separated key=value convention the promote pass uses for `dataflow=`. Purely
 	// additive: zero-value "" leaves the edge's metadata byte-identical to before.
 	ReceiverType string
+	// ReceiverOrigin and ReceiverShape make the proof route explicit for readers.
+	// They remain empty when receiver identity is not structurally established.
+	ReceiverOrigin string
+	ReceiverShape  string
+	ReceiverChain  []string
 }
 
 // edgeKey is used for deduplication.

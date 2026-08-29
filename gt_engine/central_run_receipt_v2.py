@@ -339,7 +339,9 @@ def finalize_central_run_receipt(
                     or delivery.get("next_command")
                     or ""
                 )
-                consumed = str(delivery.get("semantic_utilization") or "") == "matched"
+                action_consistent = (
+                    str(delivery.get("semantic_utilization") or "") == "matched"
+                )
                 transitions = [
                     {"from": None, "to": "CANDIDATE", "reason": "central trigger matched"},
                     {
@@ -353,25 +355,17 @@ def finalize_central_run_receipt(
                         "reason": "exact bytes exposed",
                     },
                 ]
-                if consumed:
-                    transitions.extend(
-                        (
-                            {
-                                "from": "DELIVERED",
-                                "to": "CONSUMED",
-                                "reason": "later action used delivery",
-                            },
-                            {
-                                "from": "CONSUMED",
-                                "to": "VALIDATED",
-                                "reason": "source identity and matched action remained consistent",
-                            },
-                        )
-                    )
                 lifecycle = {
-                    "schema": "gt.feature_lifecycle.v1",
+                    "schema": "gt.feature_lifecycle.v2",
                     "feature_id": feature_id,
-                    "stage": "VALIDATED" if consumed else "DELIVERED",
+                    "stage": "DELIVERED",
+                    "applicability": "APPLICABLE",
+                    "certification": "CERTIFIED",
+                    "delivery": "DELIVERED",
+                    "uptake": (
+                        "ACTION_CONSISTENT" if action_consistent else "UNOBSERVED"
+                    ),
+                    "outcome": "UNVALIDATED",
                     "triggering_event": triggering_event,
                     "repository_revision": delivery_repository_revision,
                     "graph_revision": delivery_graph_revision,
@@ -381,20 +375,23 @@ def finalize_central_run_receipt(
                     "model_visible_bytes_sha256": str(
                         delivery.get("model_visible_bytes_sha256") or ""
                     ),
-                    "resulting_agent_action": resulting_action if consumed else "",
-                    "validation_result": (
-                        "source identity and matched action remained consistent"
-                        if consumed
-                        else ""
+                    "resulting_agent_action": (
+                        resulting_action if action_consistent else ""
                     ),
+                    "validation_result": "",
                     "terminal_reason": "",
                     "transitions": transitions,
                 }
             else:
                 lifecycle = {
-                    "schema": "gt.feature_lifecycle.v1",
+                    "schema": "gt.feature_lifecycle.v2",
                     "feature_id": str(delivery.get("feature_id") or delivery_kind),
                     "stage": "ABSTAINED",
+                    "applicability": "APPLICABLE",
+                    "certification": "ABSTAINED",
+                    "delivery": "NOT_DELIVERED",
+                    "uptake": "UNOBSERVED",
+                    "outcome": "UNVALIDATED",
                     "triggering_event": triggering_event,
                     "repository_revision": delivery_repository_revision,
                     "graph_revision": delivery_graph_revision or "not-applicable",

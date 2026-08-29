@@ -87,7 +87,7 @@ class GraphLease:
         graph_path: str,
         freshness: GraphFreshness,
     ) -> None:
-        self.graph_repository_revision = graph_repository_revision
+        self.graph_input_revision = graph_repository_revision
         self.workspace_revision = workspace_revision
         self.graph_revision = graph_revision
         self.graph_path = graph_path
@@ -97,7 +97,8 @@ class GraphLease:
         self.receipts: list[GraphRefreshReceipt] = []
         self._dirty_paths: set[str] = set()
         self._operations: set[str] = set()
-        self._refresh_attempted_revisions: set[str] = set()
+        self._refresh_attempts: dict[str, set[GraphRefreshMode]] = {}
+        self._published_revisions: set[str] = set()
         self._supported_file_count = 0
         self._dependency_closure_size = 0
         self._adapter_can_incremental = True
@@ -135,6 +136,16 @@ class GraphLease:
     def dirty_paths(self) -> tuple[str, ...]:
         return tuple(sorted(self._dirty_paths))
 
+    @property
+    def graph_repository_revision(self) -> str:
+        """Compatibility name for callers not yet migrated to graph input identity."""
+
+        return self.graph_input_revision
+
+    @graph_repository_revision.setter
+    def graph_repository_revision(self, value: str) -> None:
+        self.graph_input_revision = value
+
     def mark_edit(
         self,
         *,
@@ -166,7 +177,7 @@ class GraphLease:
     def claims_current(self, repository_revision: str, graph_revision: str) -> bool:
         return bool(
             self.freshness is GraphFreshness.CURRENT
-            and repository_revision == self.graph_repository_revision
+            and repository_revision == self.graph_input_revision
             and graph_revision == self.graph_revision
         )
 
@@ -194,69 +205,82 @@ class GraphLease:
     ) -> GraphRefreshReceipt | None:
         if (
             self.freshness is GraphFreshness.CURRENT
-            and repository_revision != self.graph_repository_revision
+            and repository_revision != self.graph_input_revision
         ):
             self.freshness = GraphFreshness.STALE
         if boundary not in _GRAPH_BOUNDARIES or self.freshness is GraphFreshness.CURRENT:
             return None
-        if self.workspace_revision in self._refresh_attempted_revisions:
+        if self.workspace_revision in self._published_revisions:
             return None
-        self._refresh_attempted_revisions.add(self.workspace_revision)
         mode, reason = self._refresh_mode()
-        identity_payload = "\0".join(
-            (
-                self.workspace_revision,
-                repository_revision,
-                mode.value,
-                *self.dirty_paths,
+        modes = (mode, GraphRefreshMode.FULL) if mode is GraphRefreshMode.INCREMENTAL else (mode,)
+        attempts = self._refresh_attempts.setdefault(self.workspace_revision, set())
+        last_receipt: GraphRefreshReceipt | None = None
+        for attempt_mode in modes:
+            if attempt_mode in attempts:
+                continue
+            attempts.add(attempt_mode)
+            attempt_reason = (
+                reason
+                if attempt_mode is mode
+                else "incremental_failed_full_fallback"
             )
-        ).encode("utf-8")
-        build_identity = hashlib.sha256(identity_payload).hexdigest()
-        request = GraphRefreshRequest(
-            build_identity=build_identity,
-            workspace_revision=self.workspace_revision,
-            repository_revision=repository_revision,
-            prior_graph_revision=self.graph_revision,
-            dirty_paths=self.dirty_paths,
-            operations=tuple(sorted(self._operations)),
-            mode=mode,
-            reason=reason,
-        )
-        self.active_build_identity = build_identity
-        self.freshness = GraphFreshness.BUILDING
-        try:
-            result = refresh(request)
-        except Exception as exc:  # correct-or-quiet; prior graph stays non-authoritative
-            result = GraphBuildResult(
-                success=False,
-                graph_repository_revision=self.graph_repository_revision,
-                graph_revision=self.graph_revision,
-                graph_path=self.graph_path,
-                duration_ms=0.0,
-                health_valid=False,
-                mode=mode,
-                error=f"{type(exc).__name__}: {exc}",
+            identity_payload = "\0".join(
+                (
+                    self.workspace_revision,
+                    repository_revision,
+                    attempt_mode.value,
+                    *self.dirty_paths,
+                )
+            ).encode("utf-8")
+            build_identity = hashlib.sha256(identity_payload).hexdigest()
+            request = GraphRefreshRequest(
+                build_identity=build_identity,
+                workspace_revision=self.workspace_revision,
+                repository_revision=repository_revision,
+                prior_graph_revision=self.graph_revision,
+                dirty_paths=self.dirty_paths,
+                operations=tuple(sorted(self._operations)),
+                mode=attempt_mode,
+                reason=attempt_reason,
             )
-        receipt = GraphRefreshReceipt(request=request, result=result)
-        self.receipts.append(receipt)
-        self.active_build_identity = ""
-        if (
-            result.success
-            and result.health_valid
-            and result.graph_repository_revision == repository_revision
-            and result.graph_revision
-            and result.graph_path
-        ):
-            self.graph_repository_revision = result.graph_repository_revision
-            self.graph_revision = result.graph_revision
-            self.graph_path = result.graph_path
-            self.freshness = GraphFreshness.CURRENT
-            self.last_successful_graph_receipt = receipt
-            self._dirty_paths.clear()
-            self._operations.clear()
-        else:
-            self.freshness = GraphFreshness.FAILED
-        return receipt
+            self.active_build_identity = build_identity
+            self.freshness = GraphFreshness.BUILDING
+            try:
+                result = refresh(request)
+            except Exception as exc:  # correct-or-quiet; prior graph stays non-authoritative
+                result = GraphBuildResult(
+                    success=False,
+                    graph_repository_revision=self.graph_input_revision,
+                    graph_revision=self.graph_revision,
+                    graph_path=self.graph_path,
+                    duration_ms=0.0,
+                    health_valid=False,
+                    mode=attempt_mode,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            receipt = GraphRefreshReceipt(request=request, result=result)
+            self.receipts.append(receipt)
+            last_receipt = receipt
+            self.active_build_identity = ""
+            if (
+                result.success
+                and result.health_valid
+                and result.graph_repository_revision == repository_revision
+                and result.graph_revision
+                and result.graph_path
+            ):
+                self.graph_input_revision = result.graph_repository_revision
+                self.graph_revision = result.graph_revision
+                self.graph_path = result.graph_path
+                self.freshness = GraphFreshness.CURRENT
+                self.last_successful_graph_receipt = receipt
+                self._published_revisions.add(self.workspace_revision)
+                self._dirty_paths.clear()
+                self._operations.clear()
+                return receipt
+        self.freshness = GraphFreshness.FAILED
+        return last_receipt
 
 
 __all__ = [

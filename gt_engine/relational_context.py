@@ -13,7 +13,12 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import StrEnum
 
-from gt_engine.hybrid_retrieval import HybridRetrievalResult, StructuralLink
+from gt_engine.hybrid_retrieval import (
+    HybridRetrievalResult,
+    RelationUse,
+    StructuralLink,
+    certify_structural_link,
+)
 
 
 class RelationalContextStatus(StrEnum):
@@ -255,16 +260,9 @@ class RelationalContextComposer:
 
     @staticmethod
     def _accepted_link(link: StructuralLink) -> tuple[ProcessStep | None, str | None]:
-        if not link.certified:
-            return None, "uncertified_edge_rejected"
-        if link.origin != "program":
-            return None, _ORIGIN_REJECTIONS.get(
-                link.origin, "unknown_origin_edge_rejected"
-            )
-        if link.resolution_outcome != "exact":
-            return None, _RESOLUTION_REJECTIONS.get(
-                link.resolution_outcome, "unknown_resolution_edge_rejected"
-            )
+        authority = certify_structural_link(link, RelationUse.PROCESS)
+        if not authority.certified:
+            return None, authority.reason
         if (
             not link.source_content_sha256
             or not link.target_content_sha256

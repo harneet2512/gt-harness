@@ -620,12 +620,20 @@ def main() -> int:
     args = parser.parse_args()
     task_id = hashlib.sha256(args.task.encode("utf-8")).hexdigest()[:16]
     from gt_engine.run_receipt_v2 import RunReceiptFinalizer
+    from gt_engine.runtime_attestation import capture_runtime_attestation
 
     run_receipt_path = Path(args.state_dir) / task_id / "gt-run-receipt.json"
     run_finalizer = RunReceiptFinalizer(
         run_receipt_path,
         task_id=task_id,
         requested_model=args.model,
+    )
+    run_finalizer.record_runtime_attestation(
+        capture_runtime_attestation(
+            gt_source_revision=os.environ.get("GT_COMMIT", ""),
+            provider_route_identity=args.model,
+            index_binary_path=os.environ.get("GT_INDEX_BINARY"),
+        ).as_dict()
     )
 
     def finalize_if_unwound() -> None:

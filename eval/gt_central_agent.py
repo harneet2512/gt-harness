@@ -60,6 +60,7 @@ from gt_engine.central_runtime import (
     ChangeOrigin,
     EvidenceLedger,
     InterventionDecision,
+    SourceRevisionReceipt,
     ValidationAuthority,
     ValidationClassification,
     ValidationStatus,
@@ -106,6 +107,7 @@ from gt_engine.decision_sufficiency import (
     ProviderVisibleState,
     compile_decision_sufficiency,
 )
+from gt_engine.decision_value import DecisionBoundary
 from gt_engine.decisive_derivation import (
     DecisiveDerivation,
     DecisiveStatus,
@@ -134,7 +136,10 @@ from gt_engine.intervention_chain import (
     audit_intervention_artifacts,
     write_intervention_chain,
 )
-from gt_engine.mechanical_completeness import evaluate_provider_barrier
+from gt_engine.mechanical_completeness import (
+    ProviderBarrierInputsV2,
+    evaluate_provider_barrier_v2,
+)
 from gt_engine.observed_facts import (
     MAX_OBSERVED_FACTS_PER_TASK,
     ObservedFact,
@@ -201,6 +206,7 @@ from gt_engine.provider_view import (
     DEFAULT_SOFT_COMPACTION_TRIGGER_CHARS,
     ProviderViewSession,
     build_provider_view,
+    inject_same_observation,
     provider_compaction_required,
     provider_compaction_target_chars,
     provider_request_budget,
@@ -230,7 +236,13 @@ from gt_engine.repository_intelligence import (
     graph_gate_failures,
 )
 from gt_engine.repository_mirror import SourceMirrorPlan, plan_source_mirror
+from gt_engine.repository_service import (
+    RepositoryActionObservation,
+    RepositoryDecisionRequest,
+    RepositoryIntelligenceService,
+)
 from gt_engine.retrieval_profile import FINAL_RETRIEVAL_PROFILE
+from gt_engine.runtime_attestation import capture_runtime_attestation
 from gt_engine.runtime_lifecycle import build_runtime_lifecycle_receipt
 from gt_engine.runtime_safety import (
     assess_provider_dispatch,
@@ -1024,23 +1036,6 @@ def _preemptive_frame_identity(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()[:20]
-
-
-def _inject_runtime_evidence(
-    messages: list[dict[str, Any]], evidence: str
-) -> tuple[list[dict[str, Any]], int, int]:
-    """Place evidence in the next normal observation without mutating history."""
-    prepared = [dict(item) for item in messages]
-    for index in range(len(prepared) - 1, -1, -1):
-        if prepared[index].get("role") != "tool":
-            continue
-        separator = "\n\n"
-        prepared[index]["content"] = (
-            str(prepared[index].get("content") or "") + separator + evidence
-        )
-        return prepared, index, len(separator) + len(evidence)
-    prepared.append({"role": "user", "content": evidence})
-    return prepared, len(prepared) - 1, len(evidence)
 
 
 def _retrieval_intent(
@@ -3010,6 +3005,7 @@ class MiniSweCentralAgent(BaseAgent):
         *,
         snapshot: Any,
         source_revision: str,
+        graph_revision: SourceRevisionReceipt | None = None,
         task_deliverables: set[str] | frozenset[str] = frozenset(),
     ) -> tuple[RepositoryEvidence, RepositorySession | None]:
         """Mirror, index, and rank the repository on the host before call one."""
@@ -3039,6 +3035,7 @@ class MiniSweCentralAgent(BaseAgent):
                 mirror_plan = plan_source_mirror(
                     snapshot,
                     excluded_paths=frozenset(task_deliverables),
+                    graph_revision=graph_revision,
                 )
                 self._repository_work_receipts.append(
                     {"kind": "source_mirror_plan", **mirror_plan.as_dict()}
@@ -3798,12 +3795,14 @@ class MiniSweCentralAgent(BaseAgent):
         observed_fact_extractions: list[dict[str, Any]] = []
         pending_observed_fact: ObservedFact | None = None
         queued_observed_facts: list[ObservedFact] = []
+        repository_service: RepositoryIntelligenceService | None = None
         if graph_receipt.complete:
             repository_evidence, repository_session = await self._start_repository_session(
                 environment,
                 instruction,
                 snapshot=snapshot,
                 source_revision=graph_source_revision,
+                graph_revision=graph_receipt,
                 task_deliverables=frozenset(task_deliverables),
             )
         else:
@@ -3820,6 +3819,8 @@ class MiniSweCentralAgent(BaseAgent):
                     "revision_scope": "graph_input",
                 }
             )
+        if repository_session is not None:
+            repository_service = RepositoryIntelligenceService.open(repository_session)
         if repository_evidence.substrate_ready:
             repository_fact_tracker.record_task_start_paths(
                 tuple(
@@ -6014,11 +6015,14 @@ class MiniSweCentralAgent(BaseAgent):
                             ),
                         ]
                 if runtime_message_index is None and legacy_runtime_payload:
-                    (
+                    runtime_injection = inject_same_observation(
                         query_messages,
-                        runtime_message_index,
-                        runtime_enrichment_chars,
-                    ) = _inject_runtime_evidence(query_messages, legacy_runtime_payload)
+                        legacy_runtime_payload,
+                        allow_initial_context=actions_count == 0,
+                    )
+                    query_messages = list(runtime_injection.messages)
+                    runtime_message_index = runtime_injection.message_index
+                    runtime_enrichment_chars = runtime_injection.added_chars
                 preemptive_retrieval_decisions.append(preemptive_decision)
                 logical_messages_sha256 = hashlib.sha256(
                     _canonical_json(query_messages)
@@ -6064,11 +6068,14 @@ class MiniSweCentralAgent(BaseAgent):
                     runtime_enrichment_chars = 0
                     runtime_message_index = None
                     if runtime_payload:
-                        (
+                        runtime_injection = inject_same_observation(
                             query_messages,
-                            runtime_message_index,
-                            runtime_enrichment_chars,
-                        ) = _inject_runtime_evidence(query_messages, runtime_payload)
+                            runtime_payload,
+                            allow_initial_context=actions_count == 0,
+                        )
+                        query_messages = list(runtime_injection.messages)
+                        runtime_message_index = runtime_injection.message_index
+                        runtime_enrichment_chars = runtime_injection.added_chars
                     logical_messages_sha256 = hashlib.sha256(
                         _canonical_json(query_messages)
                     ).hexdigest()
@@ -6534,15 +6541,15 @@ class MiniSweCentralAgent(BaseAgent):
                         ),
                         "fact_ids": fact_ids,
                         "claim_ids": claim_ids,
-                            "facts": [
-                                {
-                                    **fact.as_dict(),
-                                    "content_sha256": _snapshot_content_sha256(
-                                        snapshot, fact.path, cwd=self.cwd
-                                    ),
-                                }
-                                for fact in frontier_decision.facts
-                            ],
+                        "facts": [
+                            {
+                                **fact.as_dict(),
+                                "content_sha256": _snapshot_content_sha256(
+                                    snapshot, fact.path, cwd=self.cwd
+                                ),
+                            }
+                            for fact in frontier_decision.facts
+                        ],
                         "message_index": runtime_message_index,
                         "request_payload_sha256": request_payload_sha256,
                         "provider_messages_sha256": provider_messages_sha256,
@@ -7062,7 +7069,9 @@ class MiniSweCentralAgent(BaseAgent):
                     break
                 provider_barrier: dict[str, Any] | None = None
                 if mechanical_completeness_required:
-                    graph_applicable_now = not source_less_task
+                    graph_applicable_now = (
+                        repository_applicability != "not_applicable_no_supported_source"
+                    )
                     graph_current_now = bool(
                         not graph_applicable_now
                         or (
@@ -7073,10 +7082,37 @@ class MiniSweCentralAgent(BaseAgent):
                             and repository_session.indexed_source_revision == graph_source_revision
                         )
                     )
-                    provider_barrier = evaluate_provider_barrier(
+                    barrier_decision_boundary = next(
+                        (
+                            str(row.get("decision_point") or "")
+                            for row in compiled_contributions.value_certificates
+                            if str(row.get("decision_point") or "")
+                        ),
+                        "REPOSITORY_START" if calls == 1 else "POST_EDIT_GRAPH_DELTA",
+                    )
+                    barrier_inputs = ProviderBarrierInputsV2(
                         call=calls,
                         request_payload_sha256=request_payload_sha256,
                         provider_messages_sha256=provider_messages_sha256,
+                        observation_id=f"action:{actions_count}:call:{calls}",
+                        decision_boundary=barrier_decision_boundary,
+                        repository_applicability=repository_applicability,
+                        graph_required=graph_applicable_now,
+                        graph_input_revision=graph_source_revision,
+                        graph_revision=str(repository_evidence.graph_revision or ""),
+                        graph_freshness=("CURRENT" if graph_current_now else "STALE"),
+                        dense_required=graph_applicable_now,
+                        dense_status=(
+                            "available"
+                            if self._preemptive_dense_backend is not None
+                            and not self._preemptive_dense_backend_error
+                            else "not_applicable"
+                            if not graph_applicable_now
+                            else "unavailable"
+                        ),
+                        augmentation_disposition=(
+                            "delivered" if compiled_contributions.selected_ids else "abstained"
+                        ),
                         source_snapshot_complete=source_receipt.complete,
                         runtime_contract_ready=bool(
                             self.treatment_runtime_contract
@@ -7086,7 +7122,6 @@ class MiniSweCentralAgent(BaseAgent):
                             )
                         ),
                         task_semantic_ready=(task_semantic_substrate is not None),
-                        graph_applicable=graph_applicable_now,
                         graph_current=graph_current_now,
                         repository_intelligence_ready=bool(
                             not graph_applicable_now
@@ -7134,6 +7169,7 @@ class MiniSweCentralAgent(BaseAgent):
                         ),
                         replay_capture_enabled=replay_bundle.enabled,
                     )
+                    provider_barrier = evaluate_provider_barrier_v2(barrier_inputs)
                     model_call_contexts[-1]["mechanical_completeness_barrier"] = provider_barrier
                     mechanical_provider_barriers.append(provider_barrier)
                 dispatch_assessment = assess_provider_dispatch(provider_barrier)
@@ -8420,15 +8456,24 @@ class MiniSweCentralAgent(BaseAgent):
                             changed_paths=graph_changed_paths,
                             source_revision=graph_source_revision,
                         )
-                        mirror_advanced, repository_evidence = (
-                            repository_session.apply_transition_and_refresh(
-                                transition,
-                                source_revision=graph_source_revision,
+                        repository_update = repository_service.record_action(
+                            RepositoryActionObservation(
+                                transition=transition,
+                                graph_input_revision=graph_source_revision,
                                 changed_paths=graph_changed_paths,
-                                timeout=self.repository_refresh_timeout_sec,
+                                refresh_timeout=self.repository_refresh_timeout_sec,
                             )
                         )
+                        mirror_advanced = repository_update.advanced
+                        repository_evidence = repository_update.evidence
                         if mirror_advanced:
+                            repository_evidence = repository_service.prepare(
+                                RepositoryDecisionRequest(
+                                    boundary=DecisionBoundary.POST_EDIT_GRAPH_DELTA,
+                                    graph_input_revision=graph_source_revision,
+                                    refresh_timeout=self.repository_refresh_timeout_sec,
+                                )
+                            ).evidence
                             if repository_evidence.available:
                                 repository_evidence_action = actions_count
                                 repository_evidence_eligible_call = calls + 1
@@ -8452,8 +8497,8 @@ class MiniSweCentralAgent(BaseAgent):
                             )
                     elif not graph_receipt.complete:
                         if repository_session is not None:
-                            repository_session.invalidate(
-                                source_revision=graph_source_revision,
+                            repository_service.mark_incomplete(
+                                graph_input_revision=graph_source_revision,
                                 status=RepositoryIntelligenceStatus.MIRROR_INCOMPLETE.value,
                             )
                             repository_evidence = repository_session.evidence
@@ -8524,14 +8569,24 @@ class MiniSweCentralAgent(BaseAgent):
                             ActionOperation.VALIDATE,
                         }
                     ):
-                        repository_evidence = await asyncio.to_thread(
-                            repository_session.query,
-                            source_revision=graph_source_revision,
-                            active_paths=action_graph_paths,
-                            active_symbols=action_graph_symbols,
-                            diagnostic_fingerprint=(classification.diagnostic_fingerprint),
-                            boundary=f"post_{proposed.operation.value}",
+                        decision_boundary = (
+                            DecisionBoundary.VERIFICATION_SELECTION
+                            if proposed.operation is ActionOperation.VALIDATE
+                            else DecisionBoundary.POST_EDIT_GRAPH_DELTA
+                            if proposed.operation in {ActionOperation.EDIT, ActionOperation.CREATE}
+                            else DecisionBoundary.PRE_EDIT
                         )
+                        prepared_repository = repository_service.prepare(
+                            RepositoryDecisionRequest(
+                                boundary=decision_boundary,
+                                graph_input_revision=graph_source_revision,
+                                active_paths=action_graph_paths,
+                                active_symbols=action_graph_symbols,
+                                diagnostic_fingerprint=(classification.diagnostic_fingerprint),
+                                refresh_timeout=self.repository_refresh_timeout_sec,
+                            )
+                        )
+                        repository_evidence = prepared_repository.evidence
                         if repository_evidence.available:
                             repository_evidence_action = actions_count
                             repository_evidence_eligible_call = calls + 1
@@ -11355,6 +11410,14 @@ class MiniSweCentralAgent(BaseAgent):
                 encoding="utf-8",
             )
             replay_bundle_metadata = replay_bundle.finalize()
+            provider_route = _provider_route_configuration(model)
+            runtime_attestation = capture_runtime_attestation(
+                gt_source_revision=(os.environ.get("GT_COMMIT") or "").strip(),
+                provider_route_identity=str(
+                    provider_route.get("route_id") or provider_route.get("model") or ""
+                ),
+                index_binary_path=os.environ.get("GT_INDEX_BINARY"),
+            ).as_dict()
             _atomic_write_text(
                 self.logs_dir / "central_receipt.json",
                 json.dumps(
@@ -11368,7 +11431,8 @@ class MiniSweCentralAgent(BaseAgent):
                         "benchmark_identity": self.benchmark_identity,
                         "treatment_runtime_contract": self.treatment_runtime_contract,
                         "observed_runtime_contract": (self._observed_benchmark_runtime_contract()),
-                        "provider_route": _provider_route_configuration(model),
+                        "provider_route": provider_route,
+                        "runtime_attestation": runtime_attestation,
                         "provider_prompt_identity": provider_prompt_identity,
                         "provider_response_identity": {
                             "executor": _provider_response_summary(provider_response_identities),
@@ -11528,12 +11592,28 @@ class MiniSweCentralAgent(BaseAgent):
                             "complete": source_receipt.complete,
                             "source_paths": list(source_receipt.source_paths),
                             "missing_digest_paths": list(source_receipt.missing_digest_paths),
+                            "entries": [
+                                {
+                                    "path": entry.path,
+                                    "content_sha256": entry.content_sha256,
+                                    "size_bytes": entry.size_bytes,
+                                }
+                                for entry in source_receipt.entries
+                            ],
                         },
                         "graph_source_revision": {
                             "revision": graph_receipt.revision,
                             "complete": graph_receipt.complete,
                             "source_paths": list(graph_receipt.source_paths),
                             "missing_digest_paths": list(graph_receipt.missing_digest_paths),
+                            "entries": [
+                                {
+                                    "path": entry.path,
+                                    "content_sha256": entry.content_sha256,
+                                    "size_bytes": entry.size_bytes,
+                                }
+                                for entry in graph_receipt.entries
+                            ],
                         },
                         "repository_evidence": repository_evidence.as_dict(),
                         "source_file_digests": {
@@ -11544,6 +11624,11 @@ class MiniSweCentralAgent(BaseAgent):
                         },
                         "repository_session": (
                             repository_session.summary() if repository_session is not None else None
+                        ),
+                        "repository_service": (
+                            repository_service.final_receipt()
+                            if repository_service is not None
+                            else None
                         ),
                         "repository_work_receipts": list(self._repository_work_receipts),
                         "checkpoint_ledger": self._checkpoints.summary(),
@@ -11914,7 +11999,9 @@ class MiniSweCentralAgent(BaseAgent):
                 "deadline_reserve_exits": deadline_reserve_exits,
                 "workspace_sensor_healthy": snapshot.healthy,
             }
-            if repository_session is not None:
+            if repository_service is not None:
+                repository_service.close()
+            elif repository_session is not None:
                 repository_session.close()
 
 

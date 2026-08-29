@@ -1987,7 +1987,11 @@ def _mechanical_completeness_runtime(
         if barrier != embedded:
             failures.append(f"{label}:provider_barrier_join_mismatch:{call}")
             continue
-        if barrier.get("schema") != "gt.provider_mechanical_barrier.v1":
+        barrier_schema = str(barrier.get("schema") or "")
+        if barrier_schema not in {
+            "gt.provider_mechanical_barrier.v1",
+            "gt.provider_mechanical_barrier.v2",
+        }:
             failures.append(f"{label}:provider_barrier_schema:{call}")
         if context.get("dispatch_status") in {
             "prepared_not_sent",
@@ -2008,6 +2012,27 @@ def _mechanical_completeness_runtime(
             for row in requirements
         ):
             failures.append(f"{label}:provider_barrier_requirement_invalid:{call}")
+        if barrier_schema == "gt.provider_mechanical_barrier.v2":
+            inputs = barrier.get("inputs") or {}
+            encoded = json.dumps(
+                inputs, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            if (
+                not isinstance(inputs, dict)
+                or inputs.get("schema") != "gt.provider_barrier_inputs.v2"
+                or hashlib.sha256(encoded).hexdigest()
+                != str(barrier.get("inputs_sha256") or "")
+                or int(inputs.get("call") or 0) != call
+                or str(inputs.get("request_payload_sha256") or "")
+                != str(context.get("request_payload_sha256") or "")
+                or str(inputs.get("provider_messages_sha256") or "")
+                != str(context.get("provider_messages_sha256") or "")
+            ):
+                failures.append(f"{label}:provider_barrier_inputs_invalid:{call}")
+            # V2 is the contemporaneous observation.  Reconstructing it from
+            # terminal repository state would recreate the defect this schema
+            # exists to remove.
+            continue
         compiler = contribution_by_call.get(call) or {}
         evidence = receipt.get("repository_evidence") or {}
         graph_applicable = (

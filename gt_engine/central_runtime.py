@@ -195,6 +195,15 @@ class WorkspaceSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class RevisionEntry:
+    """One canonical content-addressed repository input."""
+
+    path: str
+    content_sha256: str
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class SourceRevisionReceipt:
     """Content-addressed identity of the validation-relevant source mirror.
 
@@ -209,6 +218,24 @@ class SourceRevisionReceipt:
     complete: bool
     source_paths: tuple[str, ...]
     missing_digest_paths: tuple[str, ...]
+    entries: tuple[RevisionEntry, ...] = ()
+
+
+def revision_changed_paths(
+    before: SourceRevisionReceipt,
+    after: SourceRevisionReceipt,
+) -> tuple[str, ...]:
+    """Return paths whose presence or full-content identity changed."""
+
+    before_entries = {entry.path: entry.content_sha256 for entry in before.entries}
+    after_entries = {entry.path: entry.content_sha256 for entry in after.entries}
+    return tuple(
+        sorted(
+            path
+            for path in before_entries.keys() | after_entries.keys()
+            if before_entries.get(path) != after_entries.get(path)
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +337,7 @@ def source_revision_receipt(
     digest = hashlib.sha256()
     source_paths: list[str] = []
     missing_digest_paths: list[str] = []
+    entries: list[RevisionEntry] = []
     for path, item in sorted(snapshot.entries.items()):
         if item.kind != "f":
             continue
@@ -331,6 +359,13 @@ def source_revision_receipt(
             else:
                 missing_digest_paths.append(canonical_path)
                 content_digest = "missing"
+        entries.append(
+            RevisionEntry(
+                path=canonical_path,
+                content_sha256="" if content_digest == "missing" else content_digest,
+                size_bytes=max(0, int(item.size)),
+            )
+        )
         digest.update(canonical_path.encode("utf-8", "surrogateescape"))
         digest.update(b"\0")
         digest.update(content_digest.encode("ascii"))
@@ -340,6 +375,7 @@ def source_revision_receipt(
         complete=not missing_digest_paths,
         source_paths=tuple(source_paths),
         missing_digest_paths=tuple(missing_digest_paths),
+        entries=tuple(entries),
     )
 
 
@@ -353,6 +389,7 @@ def graph_revision_receipt(
     digest = hashlib.sha256()
     source_paths: list[str] = []
     missing_digest_paths: list[str] = []
+    entries: list[RevisionEntry] = []
     for path, item in sorted(snapshot.entries.items()):
         if item.kind != "f":
             continue
@@ -369,6 +406,13 @@ def graph_revision_receipt(
             else:
                 missing_digest_paths.append(canonical_path)
                 content_digest = "missing"
+        entries.append(
+            RevisionEntry(
+                path=canonical_path,
+                content_sha256="" if content_digest == "missing" else content_digest,
+                size_bytes=max(0, int(item.size)),
+            )
+        )
         digest.update(canonical_path.encode("utf-8", "surrogateescape"))
         digest.update(b"\0")
         digest.update(content_digest.encode("ascii"))
@@ -378,6 +422,7 @@ def graph_revision_receipt(
         complete=not missing_digest_paths,
         source_paths=tuple(source_paths),
         missing_digest_paths=tuple(missing_digest_paths),
+        entries=tuple(entries),
     )
 
 
@@ -1554,6 +1599,7 @@ class WorkspaceSensor:
                 if state.kind == "f"
                 and (
                     is_validation_source(path)
+                    or is_graph_input(path, state.content)
                     or _workspace_relative_path(path) in tracked
                     or _workspace_relative_path(path) in shebang_candidates
                     or _may_be_content_signature_source(path)
@@ -1566,6 +1612,7 @@ class WorkspaceSensor:
                 if state.kind == "f"
                 and (
                     is_validation_source(path)
+                    or is_graph_input(path, state.content)
                     or _workspace_relative_path(path) in tracked
                     or _workspace_relative_path(path) in shebang_candidates
                     or _may_be_content_signature_source(path)
@@ -1642,6 +1689,7 @@ class WorkspaceSensor:
             for path in changed
             if (
                 is_validation_source(path)
+                or is_graph_input(path, entries[path].content)
                 or _workspace_relative_path(path) in shebang_candidates
                 or _may_be_content_signature_source(path)
             )

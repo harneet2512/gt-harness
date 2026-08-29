@@ -29,7 +29,7 @@ import (
 
 // EdgeMetadataSchemaVersion is stamped on every normalized row so the format is
 // self-describing. Bump when the canonical key set / encoding changes.
-const EdgeMetadataSchemaVersion = 1
+const EdgeMetadataSchemaVersion = 2
 
 // ParseEdgeMetadata parses a raw edges.metadata value (JSON object OR semicolon-separated
 // key=value) into a normalized key→value map. Deterministic and total: an empty / malformed

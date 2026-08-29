@@ -1580,7 +1580,34 @@ func receiverEdgeMetadata(rc resolver.ResolvedCall) string {
 	if strings.ContainsAny(rc.ReceiverType, ";= \t\n\r") {
 		return ""
 	}
-	return "receiver_type=" + rc.ReceiverType
+	origin := rc.ReceiverOrigin
+	if origin == "" {
+		switch {
+		case strings.Contains(rc.Method, "field"):
+			origin = "explicit_type"
+		case strings.Contains(rc.Method, "param"):
+			origin = "parameter"
+		case strings.Contains(rc.Method, "return"):
+			origin = "return_type"
+		case strings.Contains(rc.Method, "import"):
+			origin = "import"
+		case strings.Contains(rc.Method, "assign"), strings.Contains(rc.Method, "type_flow"):
+			origin = "local_assignment"
+		default:
+			origin = "explicit_type"
+		}
+	}
+	shape := rc.ReceiverShape
+	if shape == "" {
+		shape = "instance"
+	}
+	for _, value := range []string{origin, shape} {
+		if strings.ContainsAny(value, ";= \t\n\r") {
+			return ""
+		}
+	}
+	return "receiver_type=" + rc.ReceiverType + ";receiver_origin=" + origin +
+		";receiver_shape=" + shape
 }
 
 // computeMedianConfidence returns the P50 of confidences across all resolved

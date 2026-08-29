@@ -41,6 +41,49 @@ class FactFreshness(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class SameObservationInjection:
+    messages: tuple[dict[str, Any], ...]
+    message_index: int | None
+    added_chars: int
+    disposition: str
+
+
+def inject_same_observation(
+    messages: list[dict[str, Any]],
+    evidence: str,
+    *,
+    allow_initial_context: bool,
+) -> SameObservationInjection:
+    """Attach evidence to its tool observation or one typed initial context."""
+
+    prepared = [copy.deepcopy(item) for item in messages]
+    for index in range(len(prepared) - 1, -1, -1):
+        if prepared[index].get("role") != "tool":
+            continue
+        separator = "\n\n"
+        prepared[index]["content"] = (
+            str(prepared[index].get("content") or "") + separator + evidence
+        )
+        return SameObservationInjection(
+            tuple(prepared), index, len(separator) + len(evidence), "same_tool_observation"
+        )
+    if allow_initial_context:
+        prepared.append(
+            {
+                "role": "user",
+                "content": evidence,
+                "extra": {"gt_context_kind": "initial_repository_context"},
+            }
+        )
+        return SameObservationInjection(
+            tuple(prepared), len(prepared) - 1, len(evidence), "initial_context"
+        )
+    return SameObservationInjection(
+        tuple(prepared), None, 0, "no_matching_tool_observation"
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ContextFact:
     """A deterministic source-backed fact considered for a provider view."""
 

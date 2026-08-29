@@ -107,9 +107,7 @@ def test_incremental_refresh_rejects_mismatched_graph_manifest(tmp_path, monkeyp
         "binary_sha256": binary_sha256,
         "binary_certified": True,
     }
-    graph.with_suffix(".manifest.json").write_text(
-        json.dumps(manifest), encoding="utf-8"
-    )
+    graph.with_suffix(".manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: str(binary_path))
     monkeypatch.setattr(
         indexer,
@@ -206,9 +204,7 @@ def test_published_graph_certification_rejects_hash_matching_invalid_sqlite(tmp_
 
 
 def test_graph_schema_rejects_unknown_schema_version(tmp_path: Path) -> None:
-    (tmp_path / "app.py").write_text(
-        "def value():\n    return 1\n", encoding="utf-8"
-    )
+    (tmp_path / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
     receipt = ensure_index_with_receipt(
         tmp_path,
         state_dir=tmp_path / "state",
@@ -224,17 +220,13 @@ def test_graph_schema_rejects_unknown_schema_version(tmp_path: Path) -> None:
     finally:
         connection.close()
 
-    valid, _nodes, _edges, _fts, detail = _graph_schema_receipt(
-        Path(receipt.graph_db)
-    )
+    valid, _nodes, _edges, _fts, detail = _graph_schema_receipt(Path(receipt.graph_db))
 
     assert valid is False
     assert detail == "unsupported_schema_version:v999-unknown"
 
 
-def test_graph_pair_publication_restores_previous_pair_on_manifest_failure(
-    tmp_path, monkeypatch
-):
+def test_graph_pair_publication_restores_previous_pair_on_manifest_failure(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     state = tmp_path / "state"
     root.mkdir()
@@ -250,8 +242,7 @@ def test_graph_pair_publication_restores_previous_pair_on_manifest_failure(
     connection = sqlite3.connect(candidate)
     try:
         connection.execute(
-            "INSERT OR REPLACE INTO project_meta(key,value) VALUES "
-            "('manifest_failure_test','1')"
+            "INSERT OR REPLACE INTO project_meta(key,value) VALUES ('manifest_failure_test','1')"
         )
         connection.commit()
     finally:
@@ -290,9 +281,7 @@ def test_graph_pair_publication_restores_previous_pair_on_manifest_failure(
     assert manifest.read_bytes() == old_manifest
 
 
-def test_interrupted_graph_pair_publication_recovers_new_certified_pair(
-    tmp_path, monkeypatch
-):
+def test_interrupted_graph_pair_publication_recovers_new_certified_pair(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     state = tmp_path / "state"
     root.mkdir()
@@ -440,6 +429,7 @@ def test_graph_reader_cannot_certify_while_publication_lock_is_held(tmp_path):
         child.terminate()
         child.wait(timeout=5)
 
+
 def test_source_backed_graph_failure_remains_a_hard_gate():
     evidence = RepositoryEvidence(
         status=RepositoryIntelligenceStatus.INDEX_UNAVAILABLE.value,
@@ -451,6 +441,7 @@ def test_source_backed_graph_failure_remains_a_hard_gate():
 
     assert "index_unavailable" in failures
     assert "repository_intelligence_invalid" in failures
+
 
 def test_source_backed_empty_retrieval_remains_applicable():
     evidence = RepositoryEvidence(
@@ -464,8 +455,7 @@ def test_source_backed_empty_retrieval_remains_applicable():
     )
 
     assert (
-        classify_repository_applicability(evidence)
-        == RepositoryApplicability.SOURCE_BACKED.value
+        classify_repository_applicability(evidence) == RepositoryApplicability.SOURCE_BACKED.value
     )
 
 
@@ -648,12 +638,45 @@ def test_structural_roles_preserve_node_types_and_property_provenance(tmp_path: 
         connection.executemany(
             "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
-                (1, "Function", "load_user", "service.load_user", "src/service.py", 3,
-                 "def load_user(id: int) -> User", "python", "User", 1, 0),
-                (2, "Function", "handle", "api.handle", "src/api.py", 8,
-                 "def handle()", "python", "", 0, 0),
-                (3, "Function", "guess", "other.guess", "src/other.py", 5,
-                 "def guess()", "python", "", 0, 0),
+                (
+                    1,
+                    "Function",
+                    "load_user",
+                    "service.load_user",
+                    "src/service.py",
+                    3,
+                    "def load_user(id: int) -> User",
+                    "python",
+                    "User",
+                    1,
+                    0,
+                ),
+                (
+                    2,
+                    "Function",
+                    "handle",
+                    "api.handle",
+                    "src/api.py",
+                    8,
+                    "def handle()",
+                    "python",
+                    "",
+                    0,
+                    0,
+                ),
+                (
+                    3,
+                    "Function",
+                    "guess",
+                    "other.guess",
+                    "src/other.py",
+                    5,
+                    "def guess()",
+                    "python",
+                    "",
+                    0,
+                    0,
+                ),
             ),
         )
         connection.execute(
@@ -718,10 +741,32 @@ def test_structural_roles_abstain_on_ambiguous_same_file_symbol(tmp_path: Path):
         connection.executemany(
             "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
-                (1, "Function", "run", "First.run", "src/app.py", 3,
-                 "def run()", "python", "", 0, 0),
-                (2, "Function", "run", "Second.run", "src/app.py", 13,
-                 "def run()", "python", "", 0, 0),
+                (
+                    1,
+                    "Function",
+                    "run",
+                    "First.run",
+                    "src/app.py",
+                    3,
+                    "def run()",
+                    "python",
+                    "",
+                    0,
+                    0,
+                ),
+                (
+                    2,
+                    "Function",
+                    "run",
+                    "Second.run",
+                    "src/app.py",
+                    13,
+                    "def run()",
+                    "python",
+                    "",
+                    0,
+                    0,
+                ),
             ),
         )
         connection.execute(
@@ -807,9 +852,7 @@ def test_repository_session_persists_and_refreshes_captured_source(tmp_path: Pat
     assert session.refresh_log[-1]["elapsed_ms"] == 0.0
 
 
-def test_incremental_refresh_holds_publication_lock_across_build(
-    tmp_path: Path, monkeypatch
-):
+def test_incremental_refresh_holds_publication_lock_across_build(tmp_path: Path, monkeypatch):
     root = tmp_path / "repo"
     state = tmp_path / "state"
     root.mkdir()
@@ -1035,11 +1078,14 @@ def test_repository_session_rejects_unexplained_graph_revision_advance(tmp_path:
     # This simulates a caller-side selector defect.  The repository session is
     # the last authority before publication and must fail closed rather than
     # rebind the old graph to s2 through the source_revision_only path.
-    assert session.apply_transition(
-        transition,
-        source_revision="s2",
-        changed_paths=(),
-    ) is False
+    assert (
+        session.apply_transition(
+            transition,
+            source_revision="s2",
+            changed_paths=(),
+        )
+        is False
+    )
     assert session.fresh is False
     assert session.evidence.status == "unexplained_graph_revision"
 
@@ -1254,10 +1300,14 @@ def test_full_index_forwards_the_host_budget_to_the_binary(monkeypatch, tmp_path
         return False
 
     monkeypatch.setattr(binary, "run_index", bounded_index)
-    monkeypatch.setattr(indexer, "_binary_certification", lambda: {
-        "path_sha256": "a" * 64,
-        "binary_sha256": "b" * 64,
-    })
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {
+            "path_sha256": "a" * 64,
+            "binary_sha256": "b" * 64,
+        },
+    )
     (tmp_path / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
 
     receipt = ensure_index_with_receipt(tmp_path, timeout=7.9)
@@ -1289,9 +1339,7 @@ def test_transition_and_refresh_is_one_synchronous_session_operation(monkeypatch
             source_revision="r1",
         )
 
-    monkeypatch.setattr(
-        "gt_engine.repository_intelligence.inspect_repository", bounded_inspection
-    )
+    monkeypatch.setattr("gt_engine.repository_intelligence.inspect_repository", bounded_inspection)
 
     advanced, evidence = session.apply_transition_and_refresh(
         transition,
@@ -1307,17 +1355,17 @@ def test_transition_and_refresh_is_one_synchronous_session_operation(monkeypatch
 
 
 def test_central_host_never_wraps_repository_refresh_in_an_abandonable_thread():
-    source = (
-        Path(__file__).resolve().parents[1] / "eval" / "gt_central_agent.py"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "eval" / "gt_central_agent.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "asyncio.to_thread(session.refresh" not in source
     abandonable_call = (
-        "asyncio.to_thread(\n"
-        "                                        repository_session.refresh"
+        "asyncio.to_thread(\n                                        repository_session.refresh"
     )
     assert abandonable_call not in source
-    assert "apply_transition_and_refresh(" in source
+    assert "repository_service.record_action(" in source
+    assert "repository_service.prepare(" in source
 
 
 def test_failed_refresh_never_serves_previous_graph_as_current(tmp_path):

@@ -8,12 +8,65 @@ for the task passed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass
 from typing import Any
 
 _SATISFIED = "SATISFIED"
 _NOT_APPLICABLE = "PROVEN_NOT_APPLICABLE"
 _FAILED = "FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderBarrierInputsV2:
+    call: int
+    request_payload_sha256: str
+    provider_messages_sha256: str
+    observation_id: str
+    decision_boundary: str
+    repository_applicability: str
+    graph_required: bool
+    graph_input_revision: str
+    graph_revision: str
+    graph_freshness: str
+    dense_required: bool
+    dense_status: str
+    augmentation_disposition: str
+    source_snapshot_complete: bool
+    runtime_contract_ready: bool
+    task_semantic_ready: bool
+    graph_current: bool
+    repository_intelligence_ready: bool
+    retrieval_ready: bool
+    persistent_state_ready: bool
+    previous_actions_finalized: bool
+    context_candidate_count: int
+    context_accounted_count: int
+    contribution_candidate_count: int
+    contribution_accounted_count: int
+    selected_contribution_ids: tuple[str, ...]
+    provider_value_contribution_ids: tuple[str, ...]
+    replay_capture_enabled: bool
+    dispatch_proof_sha256: str = ""
+    runtime_attestation_sha256: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        row = asdict(self)
+        row["schema"] = "gt.provider_barrier_inputs.v2"
+        row["selected_contribution_ids"] = list(self.selected_contribution_ids)
+        row["provider_value_contribution_ids"] = list(
+            self.provider_value_contribution_ids
+        )
+        return row
+
+    @property
+    def sha256(self) -> str:
+        encoded = json.dumps(
+            self.as_dict(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
 
 def _requirement(
@@ -212,6 +265,38 @@ def evaluate_provider_barrier(
         "status": "PASS" if not failures else "BLOCKED",
         "requirements": requirements,
         "failures": failures,
+    }
+
+
+def evaluate_provider_barrier_v2(inputs: ProviderBarrierInputsV2) -> dict[str, Any]:
+    """Evaluate and receipt the exact immutable facts present before dispatch."""
+
+    result = evaluate_provider_barrier(
+        call=inputs.call,
+        request_payload_sha256=inputs.request_payload_sha256,
+        provider_messages_sha256=inputs.provider_messages_sha256,
+        source_snapshot_complete=inputs.source_snapshot_complete,
+        runtime_contract_ready=inputs.runtime_contract_ready,
+        task_semantic_ready=inputs.task_semantic_ready,
+        graph_applicable=inputs.graph_required,
+        graph_current=inputs.graph_current,
+        repository_intelligence_ready=inputs.repository_intelligence_ready,
+        retrieval_ready=inputs.retrieval_ready,
+        persistent_state_ready=inputs.persistent_state_ready,
+        previous_actions_finalized=inputs.previous_actions_finalized,
+        context_candidate_count=inputs.context_candidate_count,
+        context_accounted_count=inputs.context_accounted_count,
+        contribution_candidate_count=inputs.contribution_candidate_count,
+        contribution_accounted_count=inputs.contribution_accounted_count,
+        selected_contribution_ids=inputs.selected_contribution_ids,
+        provider_value_contribution_ids=inputs.provider_value_contribution_ids,
+        replay_capture_enabled=inputs.replay_capture_enabled,
+    )
+    return {
+        **result,
+        "schema": "gt.provider_mechanical_barrier.v2",
+        "inputs": inputs.as_dict(),
+        "inputs_sha256": inputs.sha256,
     }
 
 

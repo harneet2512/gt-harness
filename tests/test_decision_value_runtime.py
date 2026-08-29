@@ -13,6 +13,7 @@ from gt_engine.decision_value import (
     FeatureLifecycle,
     FeatureStage,
     FeatureTriggerContext,
+    FeatureUptake,
     SourceEvidence,
     evaluate_feature_triggers,
 )
@@ -80,7 +81,9 @@ def test_feature_lifecycle_requires_certification_before_delivery() -> None:
         boundary=DecisionBoundary.PRE_EDIT,
         model_visible_bytes=b"[edit owners]\nowner",
     )
-    lifecycle.consume(resulting_agent_action="sed -i ... src/service.py")
+    lifecycle.record_action_consistency(
+        resulting_agent_action="sed -i ... src/service.py"
+    )
     lifecycle.validate(
         validation="pytest tests/test_service.py -q: pass",
         contradicted=False,
@@ -91,9 +94,10 @@ def test_feature_lifecycle_requires_certification_before_delivery() -> None:
         FeatureStage.CANDIDATE,
         FeatureStage.CERTIFIED,
         FeatureStage.DELIVERED,
-        FeatureStage.CONSUMED,
         FeatureStage.VALIDATED,
     ]
+    assert receipt["schema"] == "gt.feature_lifecycle.v2"
+    assert receipt["uptake"] == FeatureUptake.ACTION_CONSISTENT
     assert receipt["triggering_event"] == "repository_start:task-1"
     assert receipt["model_visible_bytes_hex"] == b"[edit owners]\nowner".hex()
     assert receipt["resulting_agent_action"].startswith("sed")
@@ -306,6 +310,63 @@ def test_graph_lease_falls_back_to_full_for_large_or_unsafe_closure() -> None:
         ),
     )
     assert requests[0].mode.value == "full"
+
+
+def test_graph_lease_retries_failed_incremental_once_as_full_and_publishes_once() -> None:
+    lease = GraphLease.current(
+        graph_repository_revision="repo-r1",
+        workspace_revision="work-r1",
+        graph_revision="graph-r1",
+        graph_path="graph.db",
+    )
+    lease.mark_edit(
+        workspace_revision="work-r2",
+        dirty_paths=("src/a.py",),
+        operations=("modify",),
+        supported_file_count=100,
+        dependency_closure_size=1,
+    )
+    requests = []
+
+    def refresh(request):
+        requests.append(request)
+        if request.mode.value == "incremental":
+            return GraphBuildResult(
+                success=False,
+                graph_repository_revision="repo-r1",
+                graph_revision="graph-r1",
+                graph_path="graph.db",
+                duration_ms=1,
+                health_valid=False,
+                mode=request.mode,
+                error="incremental adapter failed",
+            )
+        return GraphBuildResult(
+            success=True,
+            graph_repository_revision="repo-r2",
+            graph_revision="graph-r2",
+            graph_path="graph.db",
+            duration_ms=2,
+            health_valid=True,
+            mode=request.mode,
+        )
+
+    receipt = lease.refresh_for_boundary(
+        DecisionBoundary.POST_EDIT_GRAPH_DELTA,
+        repository_revision="repo-r2",
+        refresh=refresh,
+    )
+    duplicate = lease.refresh_for_boundary(
+        DecisionBoundary.VERIFICATION_SELECTION,
+        repository_revision="repo-r2",
+        refresh=refresh,
+    )
+
+    assert [request.mode.value for request in requests] == ["incremental", "full"]
+    assert receipt is not None and receipt.success is True
+    assert duplicate is None
+    assert lease.graph_input_revision == "repo-r2"
+    assert lease.freshness is GraphFreshness.CURRENT
 
 
 def test_v2_finalizer_always_writes_terminal_receipt_and_loader_rejects_missing(tmp_path) -> None:

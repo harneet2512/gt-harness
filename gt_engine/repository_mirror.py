@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from gt_engine.central_runtime import WorkspaceSnapshot
+from gt_engine.central_runtime import RevisionEntry, SourceRevisionReceipt, WorkspaceSnapshot
 from gt_engine.graph_inputs import is_graph_metadata
 from gt_engine.language_registry import is_indexable_source
 
@@ -56,6 +56,8 @@ class SourceMirrorPlan:
     manifest_sha256: str
     complete: bool
     reason_codes: tuple[str, ...]
+    graph_source_revision: str = ""
+    selected_entries: tuple[RevisionEntry, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -86,6 +88,7 @@ def _safe_relative(path: str) -> str:
 def plan_source_mirror(
     snapshot: WorkspaceSnapshot,
     *,
+    graph_revision: SourceRevisionReceipt | None = None,
     excluded_paths: set[str] | frozenset[str] = frozenset(),
     max_source_file_bytes: int = 50_000_000,
     max_metadata_file_bytes: int = 256_000,
@@ -109,6 +112,8 @@ def plan_source_mirror(
             manifest_sha256=hashlib.sha256(b"").hexdigest(),
             complete=False,
             reason_codes=("workspace_snapshot_unhealthy",),
+            graph_source_revision=(graph_revision.revision if graph_revision else ""),
+            selected_entries=(),
         )
     candidates: list[tuple[int, str, int, str]] = []
     normalized_exclusions = {
@@ -173,14 +178,44 @@ def plan_source_mirror(
             source_files += 1
         else:
             metadata_files += 1
+    # Priority controls admission under pressure; identity is always canonical
+    # path order so it can be compared byte-for-byte with graph receipts.
+    selected.sort()
+    graph_entries = {
+        safe_path: RevisionEntry(
+            path=safe_path,
+            content_sha256=entry.content_sha256,
+            size_bytes=entry.size_bytes,
+        )
+        for entry in (graph_revision.entries if graph_revision is not None else ())
+        if (safe_path := _safe_relative(entry.path))
+    }
+    selected_entries = tuple(
+        graph_entries[path]
+        for path in selected
+        if path in graph_entries
+    )
     manifest = b"".join(
-        path.encode("utf-8", "surrogateescape") + b"\0" for path in selected
+        path.encode("utf-8", "surrogateescape")
+        + b"\0"
+        + graph_entries.get(path, RevisionEntry(path, "", 0)).content_sha256.encode("ascii")
+        + b"\0"
+        for path in selected
     )
     reasons: list[str] = []
     if excluded_source_oversize:
         reasons.append("source_mirror_source_oversize")
     if excluded_source_budget:
         reasons.append("source_mirror_source_budget_exceeded")
+    if graph_revision is not None and not graph_revision.complete:
+        reasons.append("graph_revision_incomplete")
+    expected_graph_paths = tuple(
+        safe_path
+        for path in graph_revision.source_paths
+        if (safe_path := _safe_relative(path))
+    ) if graph_revision is not None else ()
+    if graph_revision is not None and tuple(selected) != expected_graph_paths:
+        reasons.append("graph_mirror_manifest_mismatch")
     complete = not reasons
     return SourceMirrorPlan(
         paths=tuple(selected),
@@ -195,7 +230,9 @@ def plan_source_mirror(
         excluded_source_budget=excluded_source_budget,
         manifest_sha256=hashlib.sha256(manifest).hexdigest(),
         complete=complete,
-        reason_codes=tuple(reasons),
+        reason_codes=tuple(dict.fromkeys(reasons)),
+        graph_source_revision=(graph_revision.revision if graph_revision else ""),
+        selected_entries=selected_entries,
     )
 
 

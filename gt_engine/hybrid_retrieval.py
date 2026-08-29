@@ -152,6 +152,90 @@ class EvidenceAuthority(StrEnum):
     DETERMINISTIC_DERIVED = "deterministic_derived"
 
 
+class RelationOrigin(StrEnum):
+    PROGRAM = "program"
+    BUILTIN = "builtin"
+    STDLIB = "stdlib"
+    THIRD_PARTY = "third_party"
+    FRAMEWORK = "framework"
+    EXTERNAL = "external"
+    UNKNOWN = "unknown"
+
+
+class ResolutionOutcome(StrEnum):
+    EXACT = "exact"
+    AMBIGUOUS = "ambiguous"
+    UNRESOLVED = "unresolved"
+    EXTERNAL = "external"
+    HEURISTIC = "heuristic"
+    DYNAMIC = "dynamic"
+    GLOBAL_FALLBACK = "global_fallback"
+    REEXPORT_UNPROVEN = "reexport_unproven"
+    UNKNOWN = "unknown"
+
+
+class ReceiverOrigin(StrEnum):
+    EXPLICIT_TYPE = "explicit_type"
+    CONSTRUCTOR = "constructor"
+    IMPORT = "import"
+    LOCAL_ASSIGNMENT = "local_assignment"
+    PARAMETER = "parameter"
+    RETURN_TYPE = "return_type"
+    UNKNOWN = "unknown"
+
+
+class ReceiverShape(StrEnum):
+    INSTANCE = "instance"
+    CLASS = "class"
+    MODULE = "module"
+    COLLECTION_ELEMENT = "collection_element"
+    CALL_RESULT = "call_result"
+    UNKNOWN = "unknown"
+
+
+class RelationUse(StrEnum):
+    EDIT_OWNER = "edit_owner"
+    INSPECTION = "inspection"
+    PROCESS = "process"
+    IMPACT = "impact"
+    TEST = "test"
+    PUBLIC_SURFACE = "public_surface"
+
+
+class RelationDisposition(StrEnum):
+    CERTIFIED = "certified"
+    INSPECTION_ONLY = "inspection_only"
+    ABSTAINED = "abstained"
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionEvidence:
+    outcome: ResolutionOutcome
+    method: str
+    candidate_count: int | None
+    evidence_type: str
+    verification_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiverEvidence:
+    origin: ReceiverOrigin
+    shape: ReceiverShape
+    receiver_type: str
+    chain: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RelationDecision:
+    disposition: RelationDisposition
+    use: RelationUse
+    reason: str
+
+    @property
+    def certified(self) -> bool:
+        return self.disposition is RelationDisposition.CERTIFIED
+
+
 _CHANNEL_ORDER = {
     RetrievalChannel.EXACT: 0,
     RetrievalChannel.LEXICAL: 1,
@@ -573,13 +657,16 @@ class StructuralLink:
     target_content_sha256: str = ""
     source_evidence_origin: str = "unknown"
     target_evidence_origin: str = "unknown"
-    origin: str = "unknown"
-    resolution_outcome: str = "unknown"
+    origin: RelationOrigin = RelationOrigin.UNKNOWN
+    resolution_outcome: ResolutionOutcome = ResolutionOutcome.UNKNOWN
     resolution_method: str = ""
     candidate_count: int | None = None
     evidence_type: str = ""
     verification_status: str = ""
     receiver_type: str = ""
+    receiver_origin: ReceiverOrigin = ReceiverOrigin.UNKNOWN
+    receiver_shape: ReceiverShape = ReceiverShape.UNKNOWN
+    receiver_chain: tuple[str, ...] = ()
     route: str = ""
     http_method: str = ""
     source_kind: str = ""
@@ -607,30 +694,18 @@ class StructuralLink:
             if value not in allowed_evidence_origins:
                 raise ValueError(f"unsupported endpoint evidence origin: {value}")
             object.__setattr__(self, field_name, value)
-        origin = str(self.origin or "unknown").strip().lower()
-        if origin not in {
-            "program",
-            "builtin",
-            "stdlib",
-            "third_party",
-            "framework",
-            "external",
-            "unknown",
-        }:
-            raise ValueError(f"unsupported structural link origin: {origin}")
-        outcome = str(self.resolution_outcome or "unknown").strip().lower()
-        if outcome not in {
-            "exact",
-            "ambiguous",
-            "unresolved",
-            "external",
-            "heuristic",
-            "dynamic",
-            "global_fallback",
-            "reexport_unproven",
-            "unknown",
-        }:
-            raise ValueError(f"unsupported structural resolution outcome: {outcome}")
+        try:
+            origin = RelationOrigin(str(self.origin or "unknown").strip().lower())
+        except ValueError as exc:
+            raise ValueError(f"unsupported structural link origin: {self.origin}") from exc
+        try:
+            outcome = ResolutionOutcome(
+                str(self.resolution_outcome or "unknown").strip().lower()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"unsupported structural resolution outcome: {self.resolution_outcome}"
+            ) from exc
         object.__setattr__(self, "origin", origin)
         object.__setattr__(self, "resolution_outcome", outcome)
         candidates = self.candidate_count
@@ -642,6 +717,24 @@ class StructuralLink:
             if candidates < 0:
                 raise ValueError("candidate_count must not be negative")
         object.__setattr__(self, "candidate_count", candidates)
+        try:
+            object.__setattr__(
+                self,
+                "receiver_origin",
+                ReceiverOrigin(str(self.receiver_origin or "unknown").strip().lower()),
+            )
+            object.__setattr__(
+                self,
+                "receiver_shape",
+                ReceiverShape(str(self.receiver_shape or "unknown").strip().lower()),
+            )
+        except ValueError as exc:
+            raise ValueError("unsupported receiver provenance") from exc
+        object.__setattr__(
+            self,
+            "receiver_chain",
+            tuple(str(item).strip() for item in self.receiver_chain if str(item).strip()),
+        )
         for field_name in (
             "resolution_method",
             "evidence_type",
@@ -655,6 +748,130 @@ class StructuralLink:
             "target_return_type",
         ):
             object.__setattr__(self, field_name, str(getattr(self, field_name) or "").strip())
+
+    @property
+    def resolution_evidence(self) -> ResolutionEvidence:
+        return ResolutionEvidence(
+            outcome=self.resolution_outcome,
+            method=self.resolution_method,
+            candidate_count=self.candidate_count,
+            evidence_type=self.evidence_type,
+            verification_status=self.verification_status,
+        )
+
+    @property
+    def receiver_evidence(self) -> ReceiverEvidence:
+        return ReceiverEvidence(
+            origin=self.receiver_origin,
+            shape=self.receiver_shape,
+            receiver_type=self.receiver_type,
+            chain=self.receiver_chain,
+        )
+
+
+def certify_structural_link(
+    link: StructuralLink,
+    use: RelationUse,
+) -> RelationDecision:
+    """Classify one link once; consumers must not reconstruct authority."""
+
+    if not isinstance(use, RelationUse):
+        use = RelationUse(str(use))
+    inspect_only = {
+        ResolutionOutcome.AMBIGUOUS,
+        ResolutionOutcome.HEURISTIC,
+        ResolutionOutcome.GLOBAL_FALLBACK,
+        ResolutionOutcome.REEXPORT_UNPROVEN,
+        ResolutionOutcome.UNKNOWN,
+    }
+    if link.resolution_outcome in inspect_only:
+        return RelationDecision(
+            RelationDisposition.INSPECTION_ONLY,
+            use,
+            {
+                ResolutionOutcome.AMBIGUOUS: "ambiguous_edge_rejected",
+                ResolutionOutcome.HEURISTIC: "heuristic_edge_rejected",
+                ResolutionOutcome.GLOBAL_FALLBACK: "ambiguous_edge_rejected",
+                ResolutionOutcome.REEXPORT_UNPROVEN: "unproven_reexport_edge_rejected",
+                ResolutionOutcome.UNKNOWN: "unknown_resolution_edge_rejected",
+            }[link.resolution_outcome],
+        )
+    if link.resolution_outcome is not ResolutionOutcome.EXACT:
+        return RelationDecision(
+            RelationDisposition.ABSTAINED,
+            use,
+            {
+                ResolutionOutcome.UNRESOLVED: "unresolved_edge_rejected",
+                ResolutionOutcome.EXTERNAL: "external_edge_rejected",
+                ResolutionOutcome.DYNAMIC: "dynamic_edge_rejected",
+            }.get(
+                link.resolution_outcome,
+                f"resolution_{link.resolution_outcome.value}",
+            ),
+        )
+    allowed_origins = (
+        {RelationOrigin.PROGRAM}
+        if use is RelationUse.EDIT_OWNER
+        else {RelationOrigin.PROGRAM, RelationOrigin.FRAMEWORK}
+    )
+    if link.origin not in allowed_origins:
+        return RelationDecision(
+            RelationDisposition.ABSTAINED,
+            use,
+            {
+                RelationOrigin.BUILTIN: "builtin_edge_rejected",
+                RelationOrigin.STDLIB: "stdlib_edge_rejected",
+                RelationOrigin.THIRD_PARTY: "third_party_edge_rejected",
+                RelationOrigin.FRAMEWORK: "framework_edge_rejected",
+                RelationOrigin.EXTERNAL: "external_edge_rejected",
+            }.get(link.origin, "unknown_origin_edge_rejected"),
+        )
+    endpoint_identity = bool(
+        link.source_path
+        and link.target_path
+        and int(link.source_start_line or 0) > 0
+        and int(link.target_start_line or 0) > 0
+        and link.source_content_sha256
+        and link.target_content_sha256
+        and (
+            use is not RelationUse.EDIT_OWNER
+            or (link.source_symbol and link.target_symbol)
+        )
+    )
+    if not link.certified:
+        return RelationDecision(
+            RelationDisposition.INSPECTION_ONLY,
+            use,
+            "uncertified_edge_rejected",
+        )
+    if not endpoint_identity:
+        return RelationDecision(
+            RelationDisposition.INSPECTION_ONLY,
+            use,
+            "incomplete_edge_identity_rejected",
+        )
+    if float(link.confidence) < 0.95:
+        return RelationDecision(
+            RelationDisposition.INSPECTION_ONLY,
+            use,
+            "low_confidence_edge_rejected",
+        )
+    if link.candidate_count != 1:
+        return RelationDecision(
+            RelationDisposition.INSPECTION_ONLY,
+            use,
+            "candidate_count_not_unique",
+        )
+    if (
+        link.source_evidence_origin != EvidenceOrigin.PREEXISTING_REPOSITORY.value
+        or link.target_evidence_origin != EvidenceOrigin.PREEXISTING_REPOSITORY.value
+    ):
+        return RelationDecision(
+            RelationDisposition.ABSTAINED,
+            use,
+            "endpoint_origin_not_preexisting_repository",
+        )
+    return RelationDecision(RelationDisposition.CERTIFIED, use, "exact_unique_relation")
 
 
 @dataclass(frozen=True)

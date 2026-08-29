@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gt_engine.central_runtime import FileState, WorkspaceSnapshot
+from gt_engine.central_runtime import FileState, WorkspaceSnapshot, graph_revision_receipt
 from gt_engine.repository_mirror import plan_source_mirror
 
 
@@ -157,3 +157,37 @@ def test_allowlisted_external_nginx_source_is_mirrored_under_safe_prefix():
 
     assert plan.paths == ("__external__/etc/nginx/nginx.conf",)
     assert plan.source_files == 1
+
+
+def test_source_mirror_is_bound_to_exact_graph_receipt_entries():
+    snapshot = WorkspaceSnapshot(
+        revision="w1",
+        healthy=True,
+        entries={
+            "src/app.py": FileState("f", 8, "1", "1", "", digest="a" * 64),
+            "requirements.txt": FileState("f", 12, "1", "1", "", digest="b" * 64),
+        },
+    )
+    receipt = graph_revision_receipt(snapshot)
+
+    plan = plan_source_mirror(snapshot, graph_revision=receipt)
+
+    assert plan.complete is True
+    assert plan.graph_source_revision == receipt.revision
+    assert plan.selected_entries == receipt.entries
+    assert plan.paths == tuple(entry.path for entry in receipt.entries)
+
+
+def test_source_mirror_rejects_incomplete_graph_receipt():
+    snapshot = WorkspaceSnapshot(
+        revision="w1",
+        healthy=True,
+        entries={"requirements.txt": FileState("f", 12, "1", "1", "")},
+    )
+    receipt = graph_revision_receipt(snapshot)
+
+    plan = plan_source_mirror(snapshot, graph_revision=receipt)
+
+    assert receipt.complete is False
+    assert plan.complete is False
+    assert "graph_revision_incomplete" in plan.reason_codes

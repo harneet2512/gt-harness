@@ -29,6 +29,9 @@ def StructuralLink(*args, **kwargs):
     kwargs.setdefault("target_start_line", 1)
     kwargs.setdefault("source_content_sha256", "a" * 64)
     kwargs.setdefault("target_content_sha256", "b" * 64)
+    kwargs.setdefault("source_evidence_origin", "preexisting_repository")
+    kwargs.setdefault("target_evidence_origin", "preexisting_repository")
+    kwargs.setdefault("candidate_count", 1)
     return _StructuralLink(*args, **kwargs)
 
 

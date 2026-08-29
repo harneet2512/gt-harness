@@ -1439,12 +1439,14 @@ class MiniSweAdapter(GroundtruthController):
                         break
                 if not selected_action:
                     continue
-                lifecycle.consume(resulting_agent_action=selected_action)
+                lifecycle.record_action_consistency(
+                    resulting_agent_action=selected_action
+                )
                 self._pending_lifecycle_validation.append(
                     (lifecycle, selected_action)
                 )
                 self.store.append(
-                    "feature_lifecycle_consumed",
+                    "feature_lifecycle_action_consistent",
                     request_id=self._latest_delivery.request_id,
                     feature_id=lifecycle.feature_id,
                     resulting_agent_action=selected_action,

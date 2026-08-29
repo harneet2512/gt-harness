@@ -26,6 +26,9 @@ def test_lifecycle_conserves_dispatched_and_not_sent_calls_model_agnostically() 
                 "dispatch_status": "response_received",
                 "request_payload_sha256": "a" * 64,
                 "provider_messages_sha256": "b" * 64,
+                "mechanical_completeness_barrier": {
+                    "inputs_sha256": "c" * 64,
+                },
             },
             {"call": 2, "dispatch_status": "prepared"},
         ),
@@ -39,6 +42,7 @@ def test_lifecycle_conserves_dispatched_and_not_sent_calls_model_agnostically() 
     assert receipt.lifecycle_conservation_valid is True
     assert receipt.complete is True
     assert receipt.as_dict()["model_agnostic"] is True
+    assert receipt.calls[0].provider_barrier_inputs_sha256 == "c" * 64
 
 
 def test_lifecycle_rejects_unknown_dispatch_state_and_missing_identity() -> None:

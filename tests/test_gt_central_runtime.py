@@ -29,6 +29,7 @@ from gt_engine.central_runtime import (
     parse_manifest,
     render_runtime_advisory,
     render_runtime_feedback,
+    revision_changed_paths,
     select_declared_check,
     source_revision_of,
     source_revision_receipt,
@@ -1713,6 +1714,71 @@ async def test_initial_sensor_hashes_oversized_source_without_inline_capture():
     assert receipt.complete is True
     assert receipt.source_paths == ("large.py",)
     assert snapshot.entries["large.py"].content is None
+
+
+@pytest.mark.asyncio
+async def test_sensor_hashes_and_captures_graph_metadata_not_used_for_validation():
+    import base64
+    import json
+    import shlex
+
+    class Result:
+        def __init__(self, stdout="", return_code=0):
+            self.stdout = stdout
+            self.return_code = return_code
+
+    calls: list[str] = []
+
+    class Environment:
+        async def exec(self, command, **kwargs):
+            calls.append(command)
+            if "find . -xdev" in command:
+                return Result("f\t12\t1.0\t1.0\trequirements.txt\t\n")
+            if command.startswith("sha256sum"):
+                paths = shlex.split(command)[2:]
+                return Result("".join(("c" * 64) + f"  {path}\n" for path in paths))
+            if command.startswith("python3 -c"):
+                paths = shlex.split(command)[3:]
+                encoded = base64.b64encode(b"pytest==8.0\n").decode()
+                return Result(json.dumps({path: encoded for path in paths}))
+            raise AssertionError(command)
+
+    snapshot = await WorkspaceSensor().scan(Environment(), cwd="/workspace")
+    receipt = graph_revision_receipt(snapshot)
+
+    assert snapshot.healthy is True
+    assert receipt.complete is True
+    assert receipt.source_paths == ("requirements.txt",)
+    assert receipt.entries[0].content_sha256 == "c" * 64
+    assert snapshot.entries["requirements.txt"].content == "pytest==8.0\n"
+    assert any(command.startswith("sha256sum") for command in calls)
+
+
+def test_revision_changed_paths_compares_content_addressed_entries():
+    before = graph_revision_receipt(
+        _snapshot(
+            "w1",
+            **{
+                "src/app.py": FileState("f", 1, "1", "1", "", digest="a" * 64),
+                "Cargo.lock": FileState("f", 1, "1", "1", "", digest="b" * 64),
+            },
+        )
+    )
+    after = graph_revision_receipt(
+        _snapshot(
+            "w2",
+            **{
+                "src/app.py": FileState("f", 2, "2", "2", "", digest="c" * 64),
+                "package.json": FileState("f", 1, "2", "2", "", digest="d" * 64),
+            },
+        )
+    )
+
+    assert revision_changed_paths(before, after) == (
+        "Cargo.lock",
+        "package.json",
+        "src/app.py",
+    )
 
 
 def test_source_revision_ignores_artifact_changes_but_not_source_edits():

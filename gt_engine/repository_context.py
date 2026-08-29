@@ -20,7 +20,12 @@ from gt_engine.contributions import (
     GTContribution,
     build_provider_value_certificates,
 )
-from gt_engine.hybrid_retrieval import EvidenceOrigin, StructuralLink
+from gt_engine.hybrid_retrieval import (
+    EvidenceOrigin,
+    RelationUse,
+    StructuralLink,
+    certify_structural_link,
+)
 from gt_engine.repository_intelligence import RepositoryEvidence
 from gt_engine.semantic_evidence import (
     SemanticEvidenceBridge,
@@ -32,6 +37,21 @@ from gt_engine.semantic_evidence import (
 class RepositoryContextStatus(StrEnum):
     DELIVER = "deliver"
     ABSTAIN = "abstain"
+
+
+class EpistemicCompleteness(StrEnum):
+    EXACT = "exact"
+    LOWER_BOUND = "lower_bound"
+    PARTIAL = "partial"
+    TRUNCATED = "truncated"
+
+
+@dataclass(frozen=True, slots=True)
+class EpistemicEnvelope:
+    completeness: EpistemicCompleteness
+    truncated_count: int
+    rejected_edge_count: int
+    reason_codes: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -250,6 +270,26 @@ class RepositoryContextProjection:
     # view-list that was silently truncated.
     process_coverage: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def epistemic_envelope(self) -> EpistemicEnvelope:
+        process_truncated = any(
+            int(self.process_coverage.get(key) or 0) > 0
+            for key in ("branch_truncated", "expansion_truncated", "depth_truncated")
+        )
+        completeness = (
+            EpistemicCompleteness.TRUNCATED
+            if self.truncated_count or process_truncated
+            else EpistemicCompleteness.PARTIAL
+            if self.rejected_edge_count
+            else EpistemicCompleteness.LOWER_BOUND
+        )
+        return EpistemicEnvelope(
+            completeness=completeness,
+            truncated_count=self.truncated_count,
+            rejected_edge_count=self.rejected_edge_count,
+            reason_codes=self.reason_codes,
+        )
+
     def as_dict(self) -> dict[str, Any]:
         row = asdict(self)
         row["status"] = self.status.value
@@ -268,6 +308,10 @@ class RepositoryContextProjection:
             self.semantic_evidence.as_dict() if self.semantic_evidence is not None else None
         )
         row["process_coverage"] = dict(self.process_coverage)
+        row["epistemic_envelope"] = asdict(self.epistemic_envelope)
+        row["epistemic_envelope"]["completeness"] = (
+            self.epistemic_envelope.completeness.value
+        )
         return row
 
 
@@ -338,18 +382,9 @@ def _node(source: bool, link: StructuralLink) -> SymbolRef:
 
 def _certified(link: StructuralLink) -> bool:
     return bool(
-        link.certified
-        and link.origin == "program"
-        and link.resolution_outcome == "exact"
-        and float(link.confidence) >= 0.95
+        certify_structural_link(link, RelationUse.PROCESS).certified
         and link.source_symbol
         and link.target_symbol
-        and int(link.source_start_line or 0) > 0
-        and int(link.target_start_line or 0) > 0
-        and link.source_content_sha256
-        and link.target_content_sha256
-        and link.source_evidence_origin == EvidenceOrigin.PREEXISTING_REPOSITORY.value
-        and link.target_evidence_origin == EvidenceOrigin.PREEXISTING_REPOSITORY.value
     )
 
 

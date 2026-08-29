@@ -91,9 +91,32 @@ def _graph_refresh_dispatch_shape(source: str) -> tuple[bool, dict[str, Any]]:
             if isinstance(node.func, ast.Name)
             else ""
         )
-        if function_name == "apply_transition_and_refresh":
+        if function_name in {"apply_transition_and_refresh", "prepare"}:
+            receiver_name = (
+                node.func.value.id
+                if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                else ""
+            )
+            if function_name == "prepare" and receiver_name != "repository_service":
+                continue
             refresh_calls += 1
-            if any(keyword.arg == "timeout" for keyword in node.keywords):
+            direct_timeout = any(keyword.arg == "timeout" for keyword in node.keywords)
+            request_timeout = any(
+                isinstance(argument, ast.Call)
+                and (
+                    (
+                        isinstance(argument.func, ast.Name)
+                        and argument.func.id == "RepositoryDecisionRequest"
+                    )
+                    or (
+                        isinstance(argument.func, ast.Attribute)
+                        and argument.func.attr == "RepositoryDecisionRequest"
+                    )
+                )
+                and any(keyword.arg == "refresh_timeout" for keyword in argument.keywords)
+                for argument in node.args
+            )
+            if direct_timeout or request_timeout:
                 timeout_bound_calls += 1
         if function_name == "to_thread" and node.args:
             target = node.args[0]
@@ -104,12 +127,10 @@ def _graph_refresh_dispatch_shape(source: str) -> tuple[bool, dict[str, Any]]:
                 if isinstance(target, ast.Name)
                 else ""
             )
-            if "refresh" in target_name:
+            if "refresh" in target_name or target_name == "prepare":
                 abandonable_workers += 1
     passed = (
-        bool(refresh_calls)
-        and refresh_calls == timeout_bound_calls
-        and not abandonable_workers
+        bool(refresh_calls) and refresh_calls == timeout_bound_calls and not abandonable_workers
     )
     return passed, {
         "scope": "source_call_shape_live_receipt_still_required",
@@ -127,9 +148,7 @@ def _typed_outcome_witnesses() -> tuple[bool, dict[str, Any]]:
         "error": {"exception_info": {"exception_type": "VerifierTimeoutError"}},
         "missing_verifier": {},
     }
-    observed = {
-        name: classify_trial_outcome(payload).value for name, payload in witnesses.items()
-    }
+    observed = {name: classify_trial_outcome(payload).value for name, payload in witnesses.items()}
     expected = {item.value for item in TrialOutcome}
     return set(observed.values()) == expected and len(set(observed.values())) == len(expected), {
         "scope": "executable_synthetic_classifier_witnesses",
@@ -141,21 +160,15 @@ def _observed_fact_accounting_witnesses() -> tuple[bool, dict[str, Any]]:
     trajectory = {"messages": []}
     unaccounted_receipt = {
         "observed_facts": {
-            "fact_extractions": [
-                {"fact_id": "observed-witness", "eligible_call": 1}
-            ],
+            "fact_extractions": [{"fact_id": "observed-witness", "eligible_call": 1}],
             "fact_deliveries": [],
             "fact_decisions": [],
         }
     }
     accounted_receipt = {
         "observed_facts": {
-            "fact_extractions": [
-                {"fact_id": "observed-witness", "eligible_call": 1}
-            ],
-            "fact_deliveries": [
-                {"fact_ids": ["observed-witness"], "call": 1}
-            ],
+            "fact_extractions": [{"fact_id": "observed-witness", "eligible_call": 1}],
+            "fact_deliveries": [{"fact_ids": ["observed-witness"], "call": 1}],
             "fact_decisions": [
                 {
                     "fact_id": "observed-witness",
@@ -192,8 +205,7 @@ def audit_configuration(
     release = load_release_manifest(root / ACTIVE_RELEASE_PATH, root=root)
     paid_path = paid_workflow_path or root / ".github/workflows/tb2_miniswe_central.yml"
     provider_path = (
-        provider_free_workflow_path
-        or root / ".github/workflows/central_provider_free.yml"
+        provider_free_workflow_path or root / ".github/workflows/central_provider_free.yml"
     )
     selected_treatment_path = treatment_path or release.treatment_path
     paid = paid_path.read_text(encoding="utf-8")
@@ -204,9 +216,7 @@ def audit_configuration(
         source_sha=release.runtime_commit,
         max_steps=100,
     )["agent_kwargs"]
-    release_gate_source = (root / "scripts/central_release_gate.py").read_text(
-        encoding="utf-8"
-    )
+    release_gate_source = (root / "scripts/central_release_gate.py").read_text(encoding="utf-8")
     agent_source = (root / "eval/gt_central_agent.py").read_text(encoding="utf-8")
     merge_source = (root / "scripts/tb2_merge_results.py").read_text(encoding="utf-8")
     graph_shape_ok, graph_shape_evidence = _graph_refresh_dispatch_shape(agent_source)
@@ -269,11 +279,9 @@ def audit_configuration(
         ),
         _check(
             "fail_open_solver_dispatch",
-            "evaluate_provider_barrier(" in agent_source
-            and "dispatch_assessment = assess_provider_dispatch(provider_barrier)"
-            in agent_source
-            and 'model_call_contexts[-1]["provider_dispatch_assessment"]'
-            in agent_source
+            "evaluate_provider_barrier_v2(" in agent_source
+            and "dispatch_assessment = assess_provider_dispatch(provider_barrier)" in agent_source
+            and 'model_call_contexts[-1]["provider_dispatch_assessment"]' in agent_source
             and 'contribution_receipt["treatment_validity"]' in agent_source
             and '"solver_continued": bool(' in agent_source
             and 'terminal = "MechanicalCompletenessBlocked"' not in agent_source,
@@ -339,9 +347,10 @@ def audit_configuration(
             and "GT_LITELLM_MODEL: openai/" not in paid
             and "OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" not in paid
             and "--bind-credential" in paid
-            and "baseline_runtime_contract.get(\"response_model\")" in merge_source
-            and "baseline_runtime_contract.get(\"adapter_provider\")" in merge_source,
-            {"identity_source": "frozen_baseline_manifest"},
+            and 'expected_bootstrap_route.get("expected_response_model")' in merge_source
+            and 'expected_bootstrap_route.get("expected_adapter_provider")' in merge_source
+            and "observed_treatment_runtime_contracts" in merge_source,
+            {"identity_source": "treatment_receipts_and_frozen_route_contract"},
         ),
         _check(
             "repository_refresh_dispatch_shape",
@@ -372,9 +381,7 @@ def audit_configuration(
 
 
 def _head(root: Path) -> str:
-    return subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=root, text=True
-    ).strip()
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
 
 
 def _tracked_worktree_changes(root: Path) -> tuple[str, ...]:
@@ -410,9 +417,7 @@ def main() -> int:
                 *report["failures"],
                 "tracked_worktree_not_clean",
             ]
-            raise ValueError(
-                "tracked worktree changes are not bound to the release commit"
-            )
+            raise ValueError("tracked worktree changes are not bound to the release commit")
         report["release_identity_proof"] = verify_release_manifest(
             manifest_path=root / ACTIVE_RELEASE_PATH,
             current_commit=_head(root),
