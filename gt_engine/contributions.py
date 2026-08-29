@@ -58,7 +58,7 @@ class ProviderValueCompleteness(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
-# The 17 historical features remain active and auditable, but only the rows
+# The 18 direct features remain active and auditable, but only the rows
 # below can independently establish one of the three provider-value classes.
 # Keeping this table here makes the authority boundary exhaustive instead of
 # treating every feature that happens to render text as an execution failure.
@@ -79,6 +79,7 @@ _FEATURE_CONTROLLER_ONLY = frozenset(
         "GT_LOC_RESLOT",
         "GT_PATCH_DELTA",
         "GT_SS_SUBMIT_RED",
+        "select_catalog",
     }
 )
 FEATURE_PROVIDER_VALUE_FEATURE_IDS = frozenset().union(

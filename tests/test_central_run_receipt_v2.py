@@ -25,6 +25,20 @@ def test_central_projection_preserves_graph_and_exact_delivery_identity(tmp_path
             }
         ],
         "source_file_digests": {"src/identity.py": "c" * 64},
+        "product_mechanism_census": {
+            "select_catalog": {
+                "schema": "gt.select_catalog_lifecycle.v1",
+                "feature_id": "select_catalog",
+                "stage": "CONSUMED",
+                "delivery_id": "select-catalog-fixture",
+                "repository_revision": repository_revision,
+                "graph_revision": graph_revision,
+                "selected_ids": ["pes-focus"],
+                "visible_item_ids": ["pes-focus"],
+                "selected_ids_subset_visible": True,
+                "transitions": [],
+            }
+        },
         "semantic_evidence": {
             "deliveries": [
                 {
@@ -80,6 +94,10 @@ def test_central_projection_preserves_graph_and_exact_delivery_identity(tmp_path
     assert lifecycle["claims"][0]["symbol_identity"] == (
         "python:src/identity.py:resolve_identity"
     )
+    select_lifecycle = receipt["feature_lifecycle_transitions"][1]
+    assert select_lifecycle["schema"] == "gt.feature_lifecycle.v2"
+    assert select_lifecycle["feature_id"] == "select_catalog"
+    assert select_lifecycle["delivery_id"] == "select-catalog-fixture"
 
 
 def test_central_projection_counts_only_graph_publications(tmp_path):

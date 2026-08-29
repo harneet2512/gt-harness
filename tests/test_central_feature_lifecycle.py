@@ -18,6 +18,7 @@ FEATURE_IDS = (
     "GT_LOC_RESLOT",
     "GT_PATCH_DELTA",
     "GT_SS_SUBMIT_RED",
+    "select_catalog",
 )
 FORCED_PROOF = {
     "status": "passed",
@@ -107,7 +108,7 @@ def _receipt(*, missed: str = "", pending: bool = False) -> dict:
         "model_call_contexts": [],
         "features": {
             "enabled": True,
-            "feature_count": 17,
+            "feature_count": 18,
             "feature_ids": list(FEATURE_IDS),
             "produced_counts": produced,
             "effects": [{"receipt_id": "receipt-1"}],
@@ -126,9 +127,10 @@ def _receipt(*, missed: str = "", pending: bool = False) -> dict:
             "context_compiler_effect_accountability": compiler,
         },
         "product_mechanism_census": {
+            "accounting_contract": "18_direct_features_with_select_catalog",
             "product_mechanism_count": 18,
             "configured_mechanism_count": 18,
-            "configured_mechanism_ids": [*FEATURE_IDS, "persistent_execution_state"],
+            "configured_mechanism_ids": list(FEATURE_IDS),
             "persistent_execution_state": {
                 "configured": True,
                 "applicable": True,
@@ -153,10 +155,10 @@ def test_lifecycle_report_separates_live_and_forced_only_features():
     )
 
     assert report["passed"] is True
-    rows = {row["feature_id"]: row for row in report["legacy_features"]}
+    rows = {row["feature_id"]: row for row in report["direct_features"]}
     assert rows["obligations"]["status"] == "working_live"
     assert rows["recovery"]["status"] == "working_forced_only"
-    assert report["naturally_fired_legacy_feature_count"] == 1
+    assert report["naturally_fired_direct_feature_count"] == 1
     assert report["persistent_execution_state"]["passed"] is True
 
 
@@ -204,7 +206,7 @@ def test_controller_accounted_claim_is_not_reported_as_pending():
 
     assert report["passed"] is True
     obligations = next(
-        row for row in report["legacy_features"] if row["feature_id"] == "obligations"
+        row for row in report["direct_features"] if row["feature_id"] == "obligations"
     )
     assert obligations["accountability"]["controller_state_considered"] == 1
     assert obligations["accountability"].get("pending_decision_claim", 0) == 0
@@ -221,7 +223,7 @@ def test_compiler_accounting_overrides_an_archived_expired_claim_label():
     )
 
     obligations = next(
-        row for row in report["legacy_features"] if row["feature_id"] == "obligations"
+        row for row in report["direct_features"] if row["feature_id"] == "obligations"
     )
     assert obligations["accountability"]["controller_state_considered"] == 1
     assert obligations["accountability"].get("expired_unconsumed_claim", 0) == 0

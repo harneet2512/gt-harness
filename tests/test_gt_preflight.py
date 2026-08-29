@@ -619,9 +619,11 @@ def test_low_confidence_rewrite_contract_can_be_rejected_by_dispatch():
     assert replace(proposal, parser_confidence=0.2).parser_confidence < 1.0
 
 
-def test_all_17_features_have_explicit_lifecycle_placement():
+def test_all_action_bound_features_have_explicit_lifecycle_placement():
     runtime = CentralFeatureRuntime(model_visible=True)
-    assert set(PREFLIGHT_FEATURE_PLACEMENT) == set(runtime.summary()["feature_ids"])
+    assert set(PREFLIGHT_FEATURE_PLACEMENT) == (
+        set(runtime.summary()["feature_ids"]) - {"select_catalog"}
+    )
     assert sum(value.postflight_only for value in PREFLIGHT_FEATURE_PLACEMENT.values()) == 5
 
 

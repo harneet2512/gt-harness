@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate live 17+1 feature lifecycles from central runtime receipts."""
+"""Aggregate the 18 direct-feature lifecycles from central receipts."""
 
 from __future__ import annotations
 
@@ -113,7 +113,11 @@ def build_feature_lifecycle_report(
             if isinstance(row, dict)
         ]
         accountability = normalized_effect_accountability(receipt)
-        expected_mechanisms = {*CENTRAL_FEATURE_IDS, "persistent_execution_state"}
+        expected_mechanisms = set(CENTRAL_FEATURE_IDS)
+        if str(census.get("accounting_contract") or "") != (
+            "18_direct_features_with_select_catalog"
+        ):
+            failures.append(f"{task}:direct_feature_accounting_contract_mismatch")
         if configured != expected_mechanisms:
             failures.append(f"{task}:configured_mechanism_set_mismatch")
         if int(census.get("product_mechanism_count") or 0) != len(expected_mechanisms):
@@ -121,9 +125,9 @@ def build_feature_lifecycle_report(
         if int(census.get("configured_mechanism_count") or 0) != len(configured):
             failures.append(f"{task}:configured_mechanism_count_mismatch")
         if set(features.get("feature_ids") or ()) != set(CENTRAL_FEATURE_IDS):
-            failures.append(f"{task}:legacy_feature_set_mismatch")
+            failures.append(f"{task}:direct_feature_set_mismatch")
         if int(features.get("feature_count") or 0) != len(CENTRAL_FEATURE_IDS):
-            failures.append(f"{task}:legacy_feature_count_mismatch")
+            failures.append(f"{task}:direct_feature_count_mismatch")
         if not features.get("all_feature_opportunities_accounted", False):
             failures.append(f"{task}:feature_opportunities_unaccounted")
 
@@ -336,7 +340,7 @@ def build_feature_lifecycle_report(
             operational["context_recap_receipts"] += recap_receipts
             operational["context_recap_fallbacks"] += recap_fallbacks
 
-    legacy_rows: list[dict[str, Any]] = []
+    direct_rows: list[dict[str, Any]] = []
     naturally_fired: list[str] = []
     for feature_id in CENTRAL_FEATURE_IDS:
         bucket = aggregates[feature_id]
@@ -354,7 +358,7 @@ def build_feature_lifecycle_report(
         else:
             status = "not_observed_live"
             failures.append(f"feature:{feature_id}:no_live_or_forced_proof")
-        legacy_rows.append(
+        direct_rows.append(
             {
                 **{
                     key: value
@@ -377,10 +381,10 @@ def build_feature_lifecycle_report(
         "schema": "gt.feature_lifecycle_report.v2",
         "passed": not failures,
         "task_count": len(rows),
-        "legacy_feature_count": len(CENTRAL_FEATURE_IDS),
-        "naturally_fired_legacy_feature_count": len(naturally_fired),
-        "naturally_fired_legacy_feature_ids": naturally_fired,
-        "legacy_features": legacy_rows,
+        "direct_feature_count": len(CENTRAL_FEATURE_IDS),
+        "naturally_fired_direct_feature_count": len(naturally_fired),
+        "naturally_fired_direct_feature_ids": naturally_fired,
+        "direct_features": direct_rows,
         "forced_feature_proof": dict(forced_proof or {}),
         "persistent_execution_state": persistent,
         "operational_controls": operational,
@@ -401,7 +405,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--receipts-root", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--forced-all-17", action="store_true")
+    parser.add_argument("--forced-all-18", action="store_true")
     parser.add_argument("--forced-proof-commit")
     args = parser.parse_args()
     receipts = []
@@ -411,14 +415,14 @@ def main() -> int:
         receipts.append(receipt)
     report = build_feature_lifecycle_report(
         receipts,
-        forced_feature_ids=CENTRAL_FEATURE_IDS if args.forced_all_17 else (),
+        forced_feature_ids=CENTRAL_FEATURE_IDS if args.forced_all_18 else (),
         forced_proof=(
             {
                 "status": "passed",
                 "exact_commit": args.forced_proof_commit,
                 "feature_ids": list(CENTRAL_FEATURE_IDS),
             }
-            if args.forced_all_17 and args.forced_proof_commit
+            if args.forced_all_18 and args.forced_proof_commit
             else None
         ),
     )

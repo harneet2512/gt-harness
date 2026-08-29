@@ -1772,13 +1772,28 @@ async def test_persistent_state_bootstraps_once_then_runs_at_every_live_boundary
     assert task_start_retrieval["status"] == "abstained"
     assert task_start_retrieval["reason_codes"] == ["persistent_bootstrap_owns_task_start"]
     assert persistent["valid"] is True
-    assert product_census["legacy_feature_count"] == 17
+    assert product_census["direct_feature_count"] == 18
     assert product_census["product_mechanism_count"] == 18
     assert product_census["configured_mechanism_count"] == 18
     assert product_census["persistent_execution_state"]["exercised"] is True
     assert product_census["persistent_execution_state"]["repeated_deterministic_use"] is True
     assert product_census["persistent_execution_state"]["lifecycle_use_count"] > 1
-    assert product_census["mechanism_ids"][-1] == "persistent_execution_state"
+    assert product_census["mechanism_ids"][-1] == "select_catalog"
+    assert product_census["select_catalog"]["stage"] == "CONSUMED"
+    selection_lifecycle = product_census["select_catalog"]
+    assert selection_lifecycle["catalog_schema"] == "gt.persistent_bootstrap_catalog.v1"
+    assert len(selection_lifecycle["catalog_version"]) == 64
+    assert len(selection_lifecycle["model_visible_bytes_sha256"]) == 64
+    assert len(selection_lifecycle["tool_schema_sha256"]) == 64
+    assert selection_lifecycle["delivery_id"].startswith("select-catalog-")
+    assert selection_lifecycle["selected_ids"]
+    assert set(selection_lifecycle["selected_ids"]) <= set(
+        selection_lifecycle["visible_item_ids"]
+    )
+    assert selection_lifecycle["resulting_agent_action"] == (
+        "persistent_execution_state.apply_bootstrap"
+    )
+    assert "source_excerpt" not in json.dumps(selection_lifecycle)
     assert not any("bootstrap-selection" in item for item in model.observed_history[1])
     executed = [command for command, _ in environment.commands]
     assert not any("primary_focus_id" in command for command in executed)
@@ -2716,8 +2731,9 @@ async def test_relational_v2_delivers_certified_process_after_existing_read_acti
     census = receipt["product_mechanism_census"]
     assert census["schema"] == "gt.product_mechanism_census.v1"
     assert census["profile_id"] == "central_relational_v2"
-    assert census["accounting_contract"] == "17_legacy_features_plus_1_persistent_state"
-    assert "persistent_execution_state" in census["mechanism_ids"]
+    assert census["accounting_contract"] == "18_direct_features_with_select_catalog"
+    assert "select_catalog" in census["mechanism_ids"]
+    assert "persistent_execution_state" not in census["mechanism_ids"]
     assert "relational_context_state" not in census["mechanism_ids"]
     assert census["persistent_execution_state"]["configured"] is True
     assert census["persistent_execution_state"]["exercised"] is True
@@ -5100,7 +5116,7 @@ async def test_actual_loop_tracks_edit_lints_and_submits_without_private_context
 
 
 @pytest.mark.asyncio
-async def test_actual_agent_loop_routes_all_17_features_with_nonpredictive_effects(tmp_path):
+async def test_actual_agent_loop_accounts_all_18_features_with_nonpredictive_effects(tmp_path):
     """Strict release proof: real agent lifecycle, not runtime-only fixtures."""
 
     submit = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
@@ -5229,12 +5245,16 @@ async def test_actual_agent_loop_routes_all_17_features_with_nonpredictive_effec
 
     receipt = json.loads((tmp_path / "central_receipt.json").read_text(encoding="utf-8"))
     features = receipt["features"]
+    action_bound_features = set(features["feature_ids"]) - {"select_catalog"}
     assert set(features["consumer_paths"]) == set(features["feature_ids"])
-    assert {row["feature_id"] for row in features["receipts"]} == set(features["feature_ids"])
-    assert {row["feature_id"] for row in features["effects"]} == set(features["feature_ids"])
+    assert {row["feature_id"] for row in features["receipts"]} == action_bound_features
+    assert {row["feature_id"] for row in features["effects"]} == action_bound_features
     assert {
         row["feature_id"] for row in features["effect_applications"] if row["state_fields_changed"]
-    } == set(features["feature_ids"])
+    } == action_bound_features
+    assert receipt["product_mechanism_census"]["select_catalog"]["stage"] == (
+        "NOT_APPLICABLE"
+    )
     assert all(row["evidence_before_effect"] for row in features["effects"])
     assert all(row["effect_before_next_action"] for row in features["effects"])
     assert all(row["non_late"] and not row["predictive"] for row in features["effects"])

@@ -817,7 +817,7 @@ def _repository_context_state(receipt: dict[str, Any], label: str) -> ReleaseGat
 
 
 def _product_mechanism_census(receipt: dict[str, Any], label: str) -> ReleaseGateCheck:
-    """Require the one canonical product identity: 17 features plus PES."""
+    """Require 18 direct features; PES is select_catalog's subsystem."""
 
     census = receipt.get("product_mechanism_census") or {}
     mechanism_ids = tuple(str(item) for item in census.get("mechanism_ids") or ())
@@ -827,18 +827,40 @@ def _product_mechanism_census(receipt: dict[str, Any], label: str) -> ReleaseGat
     mechanism_key = "persistent_execution_state"
     mechanism = census.get(mechanism_key) or {}
     failures: list[str] = []
-    expected_contract = "17_legacy_features_plus_1_persistent_state"
+    expected_contract = "18_direct_features_with_select_catalog"
     if str(census.get("accounting_contract") or "") != expected_contract:
         failures.append(f"{label}:product_mechanism_contract_missing")
-    if int(census.get("legacy_feature_count") or 0) != 17:
-        failures.append(f"{label}:legacy_feature_count_not_17")
+    if int(census.get("direct_feature_count") or 0) != 18:
+        failures.append(f"{label}:direct_feature_count_not_18")
     if int(census.get("product_mechanism_count") or 0) != 18 or len(mechanism_ids) != 18:
         failures.append(f"{label}:product_mechanism_count_not_18")
-    expected_ids = (*CENTRAL_FEATURE_IDS, mechanism_key)
+    expected_ids = CENTRAL_FEATURE_IDS
     if mechanism_ids != expected_ids or len(set(mechanism_ids)) != 18:
         failures.append(f"{label}:product_mechanism_identity_invalid")
     if int(census.get("configured_mechanism_count") or 0) != 18 or configured_ids != mechanism_ids:
         failures.append(f"{label}:not_all_product_mechanisms_configured")
+    selection_lifecycle = census.get("select_catalog") or {}
+    if selection_lifecycle.get("feature_id") != "select_catalog":
+        failures.append(f"{label}:select_catalog_lifecycle_missing")
+    selection_stage = str(selection_lifecycle.get("stage") or "")
+    if selection_stage not in {
+        "NOT_APPLICABLE", "ABSTAINED", "CERTIFIED", "DELIVERED",
+        "CONSUMED", "VALIDATED", "CONTRADICTED",
+    }:
+        failures.append(f"{label}:select_catalog_lifecycle_invalid")
+    if selection_stage in {"DELIVERED", "CONSUMED", "VALIDATED", "CONTRADICTED"}:
+        if not selection_lifecycle.get("delivery_id"):
+            failures.append(f"{label}:select_catalog_delivery_identity_missing")
+    if selection_stage in {"CONSUMED", "VALIDATED", "CONTRADICTED"}:
+        selected_ids = tuple(selection_lifecycle.get("selected_ids") or ())
+        visible_ids = set(selection_lifecycle.get("visible_item_ids") or ())
+        if (
+            not selected_ids
+            or len(selected_ids) != len(set(selected_ids))
+            or not set(selected_ids) <= visible_ids
+            or selection_lifecycle.get("selected_ids_subset_visible") is not True
+        ):
+            failures.append(f"{label}:select_catalog_selected_ids_invalid")
     mechanism_applicable = mechanism.get("applicable") is not False
     activation = (receipt.get("persistent_execution_state") or {}).get("activation") or {}
     dynamic_deactivation = bool(
@@ -904,8 +926,8 @@ def _product_mechanism_census(receipt: dict[str, Any], label: str) -> ReleaseGat
     # Natural trigger absence is evidence about the trajectory, not a failed
     # feature implementation. Preserve its separate count and never inflate it
     # to manufacture an 18/18 live-fire claim.
-    naturally_fired = int(census.get("naturally_fired_legacy_feature_count") or 0)
-    if not 0 <= naturally_fired <= 17:
+    naturally_fired = int(census.get("naturally_fired_direct_feature_count") or 0)
+    if not 0 <= naturally_fired <= 18:
         failures.append(f"{label}:natural_feature_fire_count_invalid")
     return ReleaseGateCheck(
         "product_mechanism_census",
@@ -914,7 +936,7 @@ def _product_mechanism_census(receipt: dict[str, Any], label: str) -> ReleaseGat
         {
             "task": label,
             "configured": len(configured_ids),
-            "naturally_fired_legacy": naturally_fired,
+            "naturally_fired_direct": naturally_fired,
             "profile_id": str(receipt.get("treatment_profile") or "central_pes_v1"),
             f"{failure_prefix}_exercised": mechanism.get("exercised") is True,
         },

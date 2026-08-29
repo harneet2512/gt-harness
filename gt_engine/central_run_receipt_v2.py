@@ -439,6 +439,15 @@ def finalize_central_run_receipt(
                     ],
                 }
             finalizer.record_feature_lifecycle(lifecycle)
+    select_catalog_lifecycle = dict(
+        (central.get("product_mechanism_census") or {}).get("select_catalog") or {}
+    )
+    if select_catalog_lifecycle.get("feature_id") == "select_catalog":
+        # The bootstrap request is a distinct provider boundary, not a context
+        # delivery. Preserve its content-safe lifecycle in gt.run_receipt.v2
+        # without inventing model-visible bytes or delivery-token accounting.
+        select_catalog_lifecycle["schema"] = "gt.feature_lifecycle.v2"
+        finalizer.record_feature_lifecycle(select_catalog_lifecycle)
     terminal = _terminal(central, trajectory, exception)
     return finalizer.finalize(
         terminal=terminal,

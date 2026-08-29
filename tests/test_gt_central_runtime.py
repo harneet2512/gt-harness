@@ -414,9 +414,13 @@ def test_all_seventeen_central_features_have_real_trigger_receipts():
     runtime.record_submit(action_id=5, revision="r1", refused=True, sensor_healthy=True)
 
     summary = runtime.summary()
-    assert summary["feature_count"] == 17
+    assert summary["feature_count"] == 18
     assert set(summary["feature_ids"]) == set(CENTRAL_FEATURE_IDS)
-    assert all(summary["produced_counts"][feature] >= 1 for feature in CENTRAL_FEATURE_IDS)
+    assert all(
+        summary["produced_counts"][feature] >= 1
+        for feature in set(CENTRAL_FEATURE_IDS) - {"select_catalog"}
+    )
+    assert summary["produced_counts"]["select_catalog"] == 0
     assert all(item["fresh"] for item in summary["receipts"])
     visible = {item["feature_id"] for item in summary["receipts"] if item["model_visible"]}
     assert visible == {
@@ -1023,13 +1027,13 @@ def test_signature_delta_requires_explicit_before_after_evidence():
     assert receipt["payload"]["before_signature"] != receipt["payload"]["after_signature"]
 
 
-def test_all_seventeen_census_proves_producers_and_fails_consumer_proof():
+def test_all_eighteen_census_proves_producers_and_consumer_paths():
     result = census()
 
-    # Producer-side proof must hold: all 17 IDs produced a valid, on-boundary,
+    # Producer-side proof must hold: all 18 IDs produced a valid, on-boundary,
     # fresh receipt and every guidance window was on time.
-    assert result["all_17_producers_proven"] is True
-    assert result["all_17_timing_valid"] is True
+    assert result["all_18_producers_proven"] is True
+    assert result["all_18_timing_valid"] is True
     assert result["all_guidance_on_time"] is True
     assert set(result["timing_audit"]) == {*CENTRAL_FEATURE_IDS, "_global"}
     assert all(row["valid"] for row in result["timing_audit"].values())
@@ -1039,10 +1043,10 @@ def test_all_seventeen_census_proves_producers_and_fails_consumer_proof():
     )
     # Every produced receipt routes to a registered consumer with valid
     # timing, and every model-visible payload names concrete evidence.
-    assert result["all_17_consumers_proven"] is True
+    assert result["all_18_consumers_proven"] is True
     assert result["all_effects_timing_valid"] is True
     assert result["all_payloads_semantically_grounded"] is True
-    assert result["all_17_consumer_paths_proven"] is True
+    assert result["all_18_consumer_paths_proven"] is True
     assert result["effect_window_audit"]
     assert all(
         row["evidence_before_effect"] and row["effect_before_next_action"] and row["non_late"]

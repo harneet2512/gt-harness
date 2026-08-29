@@ -603,7 +603,7 @@ def merge_results() -> int:
 
     out = ["# TB2 miniswe central matrix (GT-on)", ""]
     out.append("- arm: **certified_full**")
-    out.append("- feature: **integrated 17+1**")
+    out.append("- feature: **18 direct features with select_catalog**")
     if missing:
         out.append(
             f"> **INCOMPLETE**: {len(missing)} task(s) produced no "
@@ -846,15 +846,15 @@ def merge_results() -> int:
         "",
         "## Release verdicts",
         "",
-        f"- 17+1 mechanism lifecycle: **{'PASS' if lifecycle_report['passed'] else 'FAIL'}**",
+        f"- 18-direct mechanism lifecycle: **{'PASS' if lifecycle_report['passed'] else 'FAIL'}**",
         (
             "- frozen-baseline promotion: **NOT APPLIED (diagnostic smoke profile)**"
             if diagnostic_only
             else f"- frozen-baseline promotion: **{'PASS' if promotion_report.passed else 'FAIL'}**"
         ),
         (
-            "- legacy features naturally fired: "
-            f"**{lifecycle_report['naturally_fired_legacy_feature_count']}/17**"
+            "- direct features naturally fired: "
+            f"**{lifecycle_report['naturally_fired_direct_feature_count']}/18**"
         ),
         f"- solve flips: **{', '.join(promotion_report.flips) or 'none'}**",
         f"- baseline solve losses: **{', '.join(promotion_report.losses) or 'none'}**",

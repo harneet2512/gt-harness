@@ -3,7 +3,7 @@
 
 This is deliberately narrower than the repository test suite.  It checks the
 exact workflow that GitHub executes, invokes the census exactly as documented,
-and exercises all 17 feature identities through the real agent loop with no
+and exercises all 18 direct-feature identities through the real agent loop with no
 provider or task-container cost.
 """
 
@@ -42,7 +42,7 @@ RELEASE_TESTS = (
     "tests/test_gt_progress.py",
     "tests/test_harbor_budget.py",
     "tests/test_central_readiness.py",
-    "tests/test_gt_central_agent.py::test_actual_agent_loop_routes_all_17_features_with_nonpredictive_effects",
+    "tests/test_gt_central_agent.py::test_actual_agent_loop_accounts_all_18_features_with_nonpredictive_effects",
     "tests/test_gt_feature_applicability_repair.py",
     "tests/test_gt_repository_intelligence.py",
     "tests/test_gt_repository_mirror.py",

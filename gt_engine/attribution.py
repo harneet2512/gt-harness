@@ -129,6 +129,16 @@ DIRECT_FEATURES: dict[str, dict[str, Any]] = {
         "trigger": "the submit gate yields refusal for an observed unresolved RED check",
         "intended_action": "refuse once after an observed unresolved test failure",
     },
+    "select_catalog": {
+        "kind": "CAP", "boundaries": ("task_start",),
+        "trigger": (
+            "a complete revision-bound catalog is sealed into a bounded "
+            "select_catalog provider request"
+        ),
+        "intended_action": (
+            "select only visible stable catalog IDs before executor planning"
+        ),
+    },
 }
 
 CAPABILITY_OWNERS: dict[str, str] = {
@@ -172,7 +182,7 @@ _EVIDENCE_FEATURES = {
 
 
 def feature_for_evidence(evidence_type: str | None) -> str | None:
-    """Map a concrete envelope type to its 17-feature census identity."""
+    """Map a concrete envelope type to its direct-feature census identity."""
     value = str(evidence_type or "")
     if value.startswith(("missing_role:", "missing_role_postcreate:")):
         return "newfile_precedent"
@@ -507,7 +517,7 @@ def verify_sdlc_timing_rows(rows: Iterable[dict[str, Any]]) -> list[str]:
 def summarize_features(
     rows: Iterable[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Build a conservative 17-feature projection from attribution events.
+    """Build a conservative direct-feature projection from attribution events.
 
     Exact-byte exposure and response linkage are observable. Semantic
     consumption and causal benefit are intentionally not inferred here.

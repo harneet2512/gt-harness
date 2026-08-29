@@ -3,7 +3,7 @@
 Loads the frozen 129-row inventory (role_audit.csv), the 17 DIRECT
 capabilities (direct_capabilities.csv), and the committed transition rows.
 This inventory is legacy crosswalk evidence, not semantic implementation proof
-for the active 17+1 product.  Mechanically enforces:
+for the active 18-direct-feature product. Mechanically enforces:
 
 - exactly 129 unique identities with category counts 12/48/11/58 (ACQ/CAP/FACT/PERF);
 - every target disposition in {BUILD, MODIFY, KEEP, REMOVE} (DEFER forbidden);

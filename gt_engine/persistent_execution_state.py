@@ -1037,10 +1037,18 @@ def parse_bootstrap_selection(
     if extra_keys:
         return BootstrapSelection(False, reason_codes=("unknown_field",))
 
+    for key in ("ordered_item_ids", "risk_item_ids", "validation_item_ids"):
+        raw_ids = value.get(key, [])
+        if not isinstance(raw_ids, list) or not all(
+            isinstance(item, str) for item in raw_ids
+        ):
+            return BootstrapSelection(False, reason_codes=("invalid_shape",))
+        nonempty = [item for item in raw_ids if item]
+        if len(nonempty) != len(set(nonempty)):
+            return BootstrapSelection(False, reason_codes=("duplicate_catalog_id",))
+
     def ids(key: str, limit: int) -> tuple[str, ...] | None:
         raw_ids = value.get(key, [])
-        if not isinstance(raw_ids, list) or not all(isinstance(item, str) for item in raw_ids):
-            return None
         result = tuple(dict.fromkeys(item for item in raw_ids if item))
         return result if len(result) <= limit else None
 
@@ -1074,6 +1082,198 @@ def parse_bootstrap_selection(
         risk_item_ids=risks or (),
         validation_item_ids=kept_validations,
     )
+
+
+def build_select_catalog_lifecycle(
+    *,
+    catalog: BootstrapCatalog,
+    visible_item_ids: Iterable[str],
+    selection: BootstrapSelection,
+    selection_mode: str,
+    request_payload_sha256: str,
+    provider_messages_sha256: str,
+    tool_schema_sha256: str,
+    raw_tool_arguments_sha256: str = "",
+    attempted_item_ids: Iterable[str] = (),
+    provider_dispatch_started: bool,
+    resulting_agent_action: str = "",
+    validation_result: str = "",
+    contradicted: bool = False,
+) -> dict[str, Any]:
+    """Build a content-safe lifecycle for the direct select_catalog feature.
+
+    Stable catalog IDs are safe to retain. Prompt, source, and response bytes
+    are represented only by hashes. A provider schema existing in memory is
+    never sufficient for DELIVERED; the transport boundary must have started.
+    """
+
+    visible = tuple(sorted(dict.fromkeys(str(item) for item in visible_item_ids if item)))
+    selected = tuple(
+        dict.fromkeys(
+            item
+            for item in (
+                selection.primary_focus_id,
+                *selection.ordered_item_ids,
+                *selection.risk_item_ids,
+                *selection.validation_item_ids,
+            )
+            if item
+        )
+    )
+    attempted = tuple(
+        dict.fromkeys(str(item) for item in attempted_item_ids if str(item))
+    )
+    visible_set = set(visible)
+    selected_subset_valid = len(selected) == len(set(selected)) and set(selected) <= visible_set
+    catalog_payload = catalog.as_dict()
+    catalog_payload["items"] = [
+        {
+            "item_id": item.item_id,
+            "kind": item.kind.value,
+            "certified": item.certified,
+            "authority": item.authority.value,
+            "origin_revision": item.origin_revision,
+        }
+        for item in catalog.items
+    ]
+    catalog_version = hashlib.sha256(
+        json.dumps(
+            catalog_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8", "surrogatepass")
+    ).hexdigest()
+    delivery_id = (
+        "select-catalog-"
+        + hashlib.sha256(
+            "\0".join(
+                (
+                    catalog.source_revision,
+                    catalog.graph_revision,
+                    request_payload_sha256,
+                )
+            ).encode("utf-8", "surrogatepass")
+        ).hexdigest()[:20]
+        if request_payload_sha256
+        else ""
+    )
+    transitions: list[dict[str, str | None]] = [
+        {"from": None, "to": "CANDIDATE", "reason": "complete catalog constructed"}
+    ]
+    stage = "CANDIDATE"
+    terminal_reason = ""
+    certification = "CANDIDATE"
+    delivery = "NOT_DELIVERED"
+    uptake = "UNOBSERVED"
+    outcome = "UNVALIDATED"
+
+    if not catalog.complete:
+        stage = "ABSTAINED"
+        certification = "ABSTAINED"
+        terminal_reason = "catalog_incomplete"
+        transitions.append(
+            {"from": "CANDIDATE", "to": stage, "reason": terminal_reason}
+        )
+    elif selection_mode == "deterministic_v1":
+        stage = "ABSTAINED"
+        certification = "ABSTAINED"
+        terminal_reason = "deterministic_selection_has_no_provider_delivery"
+        transitions.append(
+            {"from": "CANDIDATE", "to": stage, "reason": terminal_reason}
+        )
+    elif not (
+        len(request_payload_sha256) == 64
+        and len(provider_messages_sha256) == 64
+        and len(tool_schema_sha256) == 64
+    ):
+        stage = "ABSTAINED"
+        certification = "ABSTAINED"
+        terminal_reason = "provider_request_not_sealed"
+        transitions.append(
+            {"from": "CANDIDATE", "to": stage, "reason": terminal_reason}
+        )
+    else:
+        stage = "CERTIFIED"
+        certification = "CERTIFIED"
+        transitions.append(
+            {"from": "CANDIDATE", "to": stage, "reason": "request identities sealed"}
+        )
+        if provider_dispatch_started:
+            transitions.append(
+                {"from": "CERTIFIED", "to": "DELIVERED", "reason": "provider dispatch started"}
+            )
+            stage = "DELIVERED"
+            delivery = "DELIVERED"
+            if (
+                selection.valid
+                and selected
+                and selected_subset_valid
+                and resulting_agent_action
+            ):
+                transitions.append(
+                    {
+                        "from": "DELIVERED",
+                        "to": "CONSUMED",
+                        "reason": "validated visible catalog IDs applied",
+                    }
+                )
+                stage = "CONSUMED"
+                uptake = "ACTION_CONSISTENT"
+                if validation_result:
+                    terminal = "CONTRADICTED" if contradicted else "VALIDATED"
+                    transitions.append(
+                        {"from": "CONSUMED", "to": terminal, "reason": validation_result}
+                    )
+                    stage = terminal
+                    outcome = terminal
+            elif selection.valid:
+                terminal_reason = "valid_no_selection"
+            else:
+                terminal_reason = (
+                    selection.reason_codes[0]
+                    if selection.reason_codes
+                    else "selection_validation_failed"
+                )
+
+    return {
+        "schema": "gt.select_catalog_lifecycle.v1",
+        "feature_id": SELECT_CATALOG_TOOL_NAME,
+        "stage": stage,
+        "applicability": "APPLICABLE",
+        "certification": certification,
+        "delivery": delivery,
+        "uptake": uptake,
+        "outcome": outcome,
+        "triggering_event": f"catalog:{catalog_version}",
+        "repository_revision": catalog.source_revision,
+        "workspace_revision": catalog.source_revision,
+        "graph_source_revision": catalog.graph_source_revision,
+        "graph_revision": catalog.graph_revision,
+        "decision_boundary": "REPOSITORY_START",
+        "catalog_schema": str(catalog.as_dict().get("schema") or ""),
+        "catalog_version": catalog_version,
+        "visible_item_ids": list(visible),
+        "visible_item_ids_sha256": hashlib.sha256(
+            json.dumps(list(visible), separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "attempted_item_ids": list(attempted),
+        "selected_ids": list(selected),
+        "selected_ids_subset_visible": selected_subset_valid,
+        "selection_valid": selection.valid,
+        "selection_reason_codes": list(selection.reason_codes),
+        "request_payload_sha256": request_payload_sha256,
+        "model_visible_bytes_sha256": provider_messages_sha256,
+        "tool_schema_sha256": tool_schema_sha256,
+        "raw_tool_arguments_sha256": raw_tool_arguments_sha256,
+        "delivery_id": delivery_id if provider_dispatch_started else "",
+        "resulting_agent_action": resulting_agent_action if stage in {
+            "CONSUMED", "VALIDATED", "CONTRADICTED"
+        } else "",
+        "validation_result": validation_result,
+        "terminal_reason": terminal_reason,
+        "transitions": transitions,
+    }
 
 
 def deterministic_bootstrap_fallback(
@@ -2737,6 +2937,7 @@ __all__ = [
     "StateValidationStatus",
     "build_bootstrap_catalog",
     "build_bootstrap_messages",
+    "build_select_catalog_lifecycle",
     "build_select_catalog_tool",
     "bootstrap_args_preview",
     "bootstrap_visible_item_ids",

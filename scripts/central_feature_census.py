@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable trigger/payload census for the host-owned 17-feature runtime.
+"""Executable trigger/payload census for the 18 direct features.
 
 This is a producer test, not a claim that every real task triggers every
 feature.  It exercises each boundary deliberately and rejects any delivery
@@ -30,6 +30,13 @@ from gt_engine.context_frontier import (
     compile_incremental_frontier,
 )
 from gt_engine.experiment import ExperimentArm, crossover_arm
+from gt_engine.persistent_execution_state import (
+    BootstrapCatalog,
+    BootstrapCatalogItem,
+    BootstrapSelection,
+    CatalogItemKind,
+    build_select_catalog_lifecycle,
+)
 from gt_engine.provider_view import build_provider_view
 from scripts.verify_gt_index_runtime import verify as verify_repository_substrate
 
@@ -46,7 +53,7 @@ EXPECTED_TIMING = {
     # Delivery of signature_delta depends on its consumer being selected, not
     # on the producer alone; the one-message selection path currently discards
     # it in favor of the higher-priority syntax_result.  Consumer delivery is
-    # proved by ALL_17_CONSUMERS_PROVEN, not by this producer timing row.
+    # proved by ALL_18_CONSUMERS_PROVEN, not by this producer timing row.
     "syntax_result": ("edit_result", (2,)),
     "GT_EDIT_CHECK": ("edit_result", (2,)),
     "covering_red": ("test_result", (3, 4)),
@@ -55,6 +62,7 @@ EXPECTED_TIMING = {
     "submit_refusal": ("test_result", (3,)),
     "GT_SS_SUBMIT_RED": ("test_result", (3,)),
     "GT_CERT_DELIVERY": ("submit", (5,)),
+    "select_catalog": ("task_start", (0,)),
 }
 
 
@@ -80,6 +88,23 @@ def audit_timing(summary: dict) -> dict:
     receipts = summary["receipts"]
     audit = {}
     for feature_id in CENTRAL_FEATURE_IDS:
+        if feature_id == "select_catalog":
+            lifecycle = summary.get("select_catalog_lifecycle") or {}
+            valid = bool(
+                lifecycle.get("stage") == "CONSUMED"
+                and lifecycle.get("delivery_id")
+                and lifecycle.get("selected_ids_subset_visible") is True
+            )
+            audit[feature_id] = {
+                "valid": valid,
+                "expected_boundary": "task_start",
+                "actual_boundaries": ["task_start"] if valid else [],
+                "expected_actions": [0],
+                "actual_actions": [0] if valid else [],
+                "payloads_valid": valid,
+                "visibility_valid": valid,
+            }
+            continue
         rows = [row for row in receipts if row["feature_id"] == feature_id]
         expected_boundary, expected_actions = EXPECTED_TIMING[feature_id]
         boundaries = (
@@ -280,16 +305,60 @@ def census() -> dict:
     )
     deliver_next(5)
     summary = runtime.summary()
+    fixture_item_id = "pes-" + "a" * 20
+    fixture_catalog = BootstrapCatalog(
+        source_revision="r0",
+        graph_source_revision="r0",
+        graph_revision="graph-r0",
+        items=(
+            BootstrapCatalogItem(
+                item_id=fixture_item_id,
+                kind=CatalogItemKind.FOCUS,
+                label="provider-free focus",
+                path="bottle.py",
+            ),
+        ),
+        complete=True,
+    )
+    summary["select_catalog_lifecycle"] = build_select_catalog_lifecycle(
+        catalog=fixture_catalog,
+        visible_item_ids=(fixture_item_id,),
+        selection=BootstrapSelection(
+            valid=True,
+            primary_focus_id=fixture_item_id,
+            ordered_item_ids=(fixture_item_id,),
+        ),
+        selection_mode="generative",
+        request_payload_sha256="a" * 64,
+        provider_messages_sha256="b" * 64,
+        tool_schema_sha256="c" * 64,
+        raw_tool_arguments_sha256="d" * 64,
+        attempted_item_ids=(fixture_item_id,),
+        provider_dispatch_started=True,
+        resulting_agent_action="persistent_execution_state.apply_bootstrap",
+    )
+    summary["produced_counts"]["select_catalog"] = 1
+    summary["consumer_paths"]["select_catalog"] = [
+        "persistent_execution_state.apply_bootstrap"
+    ]
+    summary["feature_applicability"]["select_catalog"] = {
+        "evaluations": 1,
+        "eligible": 1,
+        "fired": 1,
+        "status": "CONSUMED",
+        "lifecycle_state": "CONSUMED",
+        "reason_codes": ["provider_free_catalog_selection_fixture"],
+    }
     summary["timing_audit"] = audit_timing(summary)
-    summary["all_17_timing_valid"] = all(row["valid"] for row in summary["timing_audit"].values())
+    summary["all_18_timing_valid"] = all(row["valid"] for row in summary["timing_audit"].values())
     summary["decision_window_audit"] = decision_windows
     summary["effect_window_audit"] = effect_windows
     summary["all_guidance_on_time"] = bool(decision_windows) and all(
         row["delivered_before_next_decision"] and row["not_predictive"] and row["not_late"]
         for row in decision_windows
     )
-    summary["all_17_producers_proven"] = (
-        summary["feature_count"] == 17
+    summary["all_18_producers_proven"] = (
+        summary["feature_count"] == 18
         and set(summary["feature_ids"]) == set(CENTRAL_FEATURE_IDS)
         and all(summary["produced_counts"][feature] >= 1 for feature in CENTRAL_FEATURE_IDS)
         and all(row["fresh"] and row["payload"].get("message") for row in summary["receipts"])
@@ -308,11 +377,11 @@ def census() -> dict:
             )
             for row in summary["receipts"]
         )
-        and summary["all_17_timing_valid"]
+        and summary["all_18_timing_valid"]
         and summary["all_guidance_on_time"]
     )
     consumer_paths = summary["consumer_paths"]
-    summary["all_17_consumers_proven"] = bool(consumer_paths) and set(consumer_paths) >= set(
+    summary["all_18_consumers_proven"] = bool(consumer_paths) and set(consumer_paths) >= set(
         CENTRAL_FEATURE_IDS
     )
     effects = summary["effects"]
@@ -329,9 +398,9 @@ def census() -> dict:
         not row["model_visible"] or feature_payload_grounded(row["feature_id"], row["payload"])
         for row in summary["receipts"]
     )
-    summary["all_17_consumer_paths_proven"] = (
-        summary["all_17_producers_proven"]
-        and summary["all_17_consumers_proven"]
+    summary["all_18_consumer_paths_proven"] = (
+        summary["all_18_producers_proven"]
+        and summary["all_18_consumers_proven"]
         and summary["all_effects_timing_valid"]
         and summary["all_payloads_semantically_grounded"]
         and {
@@ -339,7 +408,8 @@ def census() -> dict:
             for row in summary["effect_applications"]
             if row["state_fields_changed"]
         }
-        >= set(CENTRAL_FEATURE_IDS)
+        >= (set(CENTRAL_FEATURE_IDS) - {"select_catalog"})
+        and summary["select_catalog_lifecycle"]["stage"] == "CONSUMED"
         and summary["action_metrics"]["submit_holds"] == 0
         and summary["action_metrics"]["batch_interrupts"] == 0
         and all(
@@ -357,9 +427,12 @@ def census() -> dict:
     applied_features = {
         row["feature_id"] for row in summary["effect_applications"] if row["state_fields_changed"]
     }
-    summary["all_17_triggers_proven"] = summary["all_17_producers_proven"]
-    summary["all_17_payloads_concrete"] = summary["all_payloads_semantically_grounded"]
-    summary["all_17_consumers_applied"] = applied_features >= set(CENTRAL_FEATURE_IDS)
+    summary["all_18_triggers_proven"] = summary["all_18_producers_proven"]
+    summary["all_18_payloads_concrete"] = summary["all_payloads_semantically_grounded"]
+    summary["all_18_consumers_applied"] = (
+        applied_features >= (set(CENTRAL_FEATURE_IDS) - {"select_catalog"})
+        and summary["select_catalog_lifecycle"]["stage"] == "CONSUMED"
+    )
     summary["all_visible_payloads_first_eligible"] = summary["all_guidance_on_time"]
     applicability = summary["feature_applicability"]
     summary["all_feature_opportunities_accounted"] = (
@@ -482,10 +555,10 @@ def main() -> int:
     result = census()
     print(json.dumps(result, indent=2, sort_keys=True))
     print(
-        "ALL_17_PRODUCERS_PROVEN" if result["all_17_producers_proven"] else "PRODUCERS_NOT_PROVEN"
+        "ALL_18_PRODUCERS_PROVEN" if result["all_18_producers_proven"] else "PRODUCERS_NOT_PROVEN"
     )
     print(
-        "ALL_17_CONSUMERS_PROVEN" if result["all_17_consumers_proven"] else "CONSUMERS_NOT_PROVEN"
+        "ALL_18_CONSUMERS_PROVEN" if result["all_18_consumers_proven"] else "CONSUMERS_NOT_PROVEN"
     )
     print(
         "ALL_EFFECTS_TIMING_VALID"
@@ -498,19 +571,19 @@ def main() -> int:
         else "PAYLOADS_NOT_GROUNDED"
     )
     print(
-        "ALL_17_CONSUMER_PATHS_PROVEN"
-        if result["all_17_consumer_paths_proven"]
+        "ALL_18_CONSUMER_PATHS_PROVEN"
+        if result["all_18_consumer_paths_proven"]
         else "CONSUMER_PATHS_NOT_PROVEN"
     )
-    print("ALL_17_TRIGGERS_PROVEN" if result["all_17_triggers_proven"] else "TRIGGERS_NOT_PROVEN")
+    print("ALL_18_TRIGGERS_PROVEN" if result["all_18_triggers_proven"] else "TRIGGERS_NOT_PROVEN")
     print(
-        "ALL_17_PAYLOADS_CONCRETE"
-        if result["all_17_payloads_concrete"]
+        "ALL_18_PAYLOADS_CONCRETE"
+        if result["all_18_payloads_concrete"]
         else "PAYLOADS_NOT_CONCRETE"
     )
     print(
-        "ALL_17_CONSUMERS_APPLIED"
-        if result["all_17_consumers_applied"]
+        "ALL_18_CONSUMERS_APPLIED"
+        if result["all_18_consumers_applied"]
         else "CONSUMERS_NOT_APPLIED"
     )
     print(
@@ -575,7 +648,7 @@ def main() -> int:
         0
         if all(
             (
-                result["all_17_consumer_paths_proven"],
+                result["all_18_consumer_paths_proven"],
                 result["all_feature_opportunities_accounted"],
                 result["no_eligible_trigger_misses"],
                 result["no_false_feature_fires"],

@@ -76,9 +76,9 @@ ACTIVE_GT_COMPONENTS: dict[str, ComponentContract] = {
         ComponentContract(
             "postflight_features",
             ComponentStage.POST_ACTION,
-            "17 feature receipts and effects",
+            "18 direct-feature receipts and effects",
             DefaultVisibility.CONDITIONAL_PROVIDER,
-            "all-17 census and lifecycle applicability audit",
+            "all-18 census and lifecycle applicability audit",
         ),
         ComponentContract(
             "contribution_compiler",
@@ -182,6 +182,20 @@ FEATURE_COMPONENT_CONTRACTS: dict[str, FeatureComponentContract] = {
     for feature_id in CENTRAL_FEATURE_IDS
     if feature_id in PREFLIGHT_FEATURE_PLACEMENT
 }
+FEATURE_COMPONENT_CONTRACTS["select_catalog"] = FeatureComponentContract(
+    feature_id="select_catalog",
+    kind=str(_FEATURE_ROWS["select_catalog"]["kind"]),
+    owner="persistent_execution_state",
+    trigger="task_start",
+    postflight_only=False,
+    required_inputs=(
+        "complete_revision_bound_catalog",
+        "sealed_provider_request",
+        "visible_stable_item_ids",
+    ),
+    decision="select only visible catalog IDs or fail closed",
+    delivery_contract="sealed_bootstrap_provider_dispatch",
+)
 
 
 def audit_component_registry() -> dict[str, Any]:
@@ -195,6 +209,7 @@ def audit_component_registry() -> dict[str, Any]:
     valid_delivery_contracts = {
         "postflight_grounded_only",
         "private_or_first_eligible_grounded",
+        "sealed_bootstrap_provider_dispatch",
     }
     invalid_delivery_contracts = sorted(
         feature_id

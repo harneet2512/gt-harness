@@ -39,8 +39,9 @@ def test_direct_feature_registry_is_exact_and_complete():
         "GT_LOC_RESLOT",
         "GT_PATCH_DELTA",
         "GT_SS_SUBMIT_RED",
+        "select_catalog",
     }
-    assert len(DIRECT_FEATURES) == 17
+    assert len(DIRECT_FEATURES) == 18
     assert all(spec["boundaries"] for spec in DIRECT_FEATURES.values())
     assert all(spec["trigger"] for spec in DIRECT_FEATURES.values())
     assert all(spec["intended_action"] for spec in DIRECT_FEATURES.values())
@@ -90,7 +91,7 @@ def test_newfile_missing_role_evidence_maps_to_canonical_feature():
     )
 
 
-def test_groundtruth_registry_aliases_map_to_the_same_17_identities():
+def test_groundtruth_registry_aliases_map_to_the_same_direct_identities():
     assert feature_for_evidence("name_fold") == "def_partition"
     assert feature_for_evidence("wrong_surface") == "def_partition"
     assert feature_for_evidence("body_concept") == "def_partition"

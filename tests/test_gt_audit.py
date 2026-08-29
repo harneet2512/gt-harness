@@ -196,7 +196,7 @@ def test_audit_does_not_count_explicit_gt_exclusions_as_access(tmp_path):
     assert audit.forbidden_harness_path_attempt_count == 0
 
 
-def test_attribution_trace_is_loaded_and_projects_all_17_features(tmp_path):
+def test_attribution_trace_is_loaded_and_projects_all_18_features(tmp_path):
     from gt_engine.attribution import AttributionTrace
 
     task = make_task_dir(
@@ -228,7 +228,7 @@ def test_attribution_trace_is_loaded_and_projects_all_17_features(tmp_path):
 
     assert audit.attribution_present is True
     assert audit.attribution_issues == []
-    assert len(audit.feature_attribution) == 17
+    assert len(audit.feature_attribution) == 18
     assert audit.feature_attribution["recovery"]["status"] == "TRIGGERED_DARK"
 
 

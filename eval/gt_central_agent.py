@@ -160,6 +160,7 @@ from gt_engine.persistent_execution_state import (
     bootstrap_visible_item_ids,
     build_bootstrap_catalog,
     build_bootstrap_messages,
+    build_select_catalog_lifecycle,
     build_select_catalog_tool,
     deterministic_bootstrap_selection,
     parse_bootstrap_selection,
@@ -310,7 +311,6 @@ RELATIONAL_CONTEXT_STATE_MECHANISM_ID = "relational_context_state"
 SEMANTIC_EVIDENCE_STATE_MECHANISM_ID = "semantic_evidence_state"
 PRODUCT_MECHANISM_IDS = (
     *CENTRAL_FEATURE_IDS,
-    PERSISTENT_EXECUTION_STATE_MECHANISM_ID,
 )
 
 
@@ -2414,6 +2414,7 @@ class MiniSweCentralAgent(BaseAgent):
         )
         visible_item_ids = bootstrap_visible_item_ids(bootstrap_messages)
         catalog_tool = build_select_catalog_tool(visible_item_ids)
+        tool_schema_sha256 = hashlib.sha256(_canonical_json(catalog_tool)).hexdigest()
         bootstrap_call_kwargs = _bootstrap_provider_call_kwargs(
             model,
             max_tokens=self.persistent_state_bootstrap_output_tokens,
@@ -2450,6 +2451,7 @@ class MiniSweCentralAgent(BaseAgent):
             "provider_messages_sha256": provider_messages_sha256,
             "provider_message_count": len(provider_messages),
             "provider_request_chars": provider_request_chars,
+            "tool_schema_sha256": tool_schema_sha256,
             "temperature": 0.0,
             "max_output_tokens": self.persistent_state_bootstrap_output_tokens,
             "call_contract": {
@@ -2474,6 +2476,7 @@ class MiniSweCentralAgent(BaseAgent):
             "raw_tool_arguments_preview": "",
             "attempted_item_ids": [],
             "dropped_validation_item_ids": [],
+            "provider_dispatch_started": False,
             "transport": (
                 "direct_single_provider_call"
                 if (
@@ -2509,7 +2512,22 @@ class MiniSweCentralAgent(BaseAgent):
                     "selection_input_sha256": request_payload_sha256,
                 }
             )
+            receipt["feature_lifecycle"] = build_select_catalog_lifecycle(
+                catalog=catalog,
+                visible_item_ids=visible_item_ids,
+                selection=selection,
+                selection_mode="deterministic_v1",
+                request_payload_sha256=request_payload_sha256,
+                provider_messages_sha256=provider_messages_sha256,
+                tool_schema_sha256=tool_schema_sha256,
+                provider_dispatch_started=False,
+            )
             return selection, receipt
+
+        selection = BootstrapSelection(
+            valid=False,
+            reason_codes=("bootstrap_not_dispatched",),
+        )
 
         def query_bootstrap_once() -> dict[str, Any]:
             """Use one direct select_catalog call. Mini-SWE Bash parse is forbidden."""
@@ -2573,6 +2591,7 @@ class MiniSweCentralAgent(BaseAgent):
                 receipt["status"] = BootstrapStatus.ERROR_FALLBACK.value
                 return selection, receipt
             receipt["provider_calls"] = 1
+            receipt["provider_dispatch_started"] = True
             response = await asyncio.to_thread(query_bootstrap_once)
             receipt["response_received"] = True
             extra = response.get("extra") or {}
@@ -2661,6 +2680,54 @@ class MiniSweCentralAgent(BaseAgent):
             return selection, receipt
         finally:
             receipt["latency_ms"] = round((time.perf_counter() - started) * 1_000.0, 6)
+            receipt["feature_lifecycle"] = build_select_catalog_lifecycle(
+                catalog=catalog,
+                visible_item_ids=visible_item_ids,
+                selection=selection,
+                selection_mode="generative",
+                request_payload_sha256=request_payload_sha256,
+                provider_messages_sha256=provider_messages_sha256,
+                tool_schema_sha256=tool_schema_sha256,
+                raw_tool_arguments_sha256=str(
+                    receipt.get("raw_tool_arguments_sha256") or ""
+                ),
+                attempted_item_ids=receipt.get("attempted_item_ids") or (),
+                provider_dispatch_started=bool(
+                    receipt.get("provider_dispatch_started")
+                ),
+            )
+
+    @staticmethod
+    def _mark_select_catalog_consumed(
+        receipt: dict[str, Any],
+        *,
+        catalog: BootstrapCatalog,
+        selection: BootstrapSelection,
+    ) -> None:
+        """Link a valid delivered selection to the state application boundary."""
+
+        lifecycle = receipt.get("feature_lifecycle") or {}
+        receipt["feature_lifecycle"] = build_select_catalog_lifecycle(
+            catalog=catalog,
+            visible_item_ids=lifecycle.get("visible_item_ids") or (),
+            selection=selection,
+            selection_mode=str(receipt.get("selection_mode") or "generative"),
+            request_payload_sha256=str(receipt.get("request_payload_sha256") or ""),
+            provider_messages_sha256=str(
+                receipt.get("provider_messages_sha256") or ""
+            ),
+            tool_schema_sha256=str(receipt.get("tool_schema_sha256") or ""),
+            raw_tool_arguments_sha256=str(
+                receipt.get("raw_tool_arguments_sha256") or ""
+            ),
+            attempted_item_ids=receipt.get("attempted_item_ids") or (),
+            provider_dispatch_started=bool(receipt.get("provider_dispatch_started")),
+            resulting_agent_action=(
+                "persistent_execution_state.apply_bootstrap"
+                if selection.valid
+                else ""
+            ),
+        )
 
     def _write_provider_query_marker(
         self,
@@ -4421,6 +4488,11 @@ class MiniSweCentralAgent(BaseAgent):
                                     if self.persistent_state_selection_mode == "deterministic_v1"
                                     else None
                                 ),
+                            )
+                            self._mark_select_catalog_consumed(
+                                persistent_state_bootstrap,
+                                catalog=catalog,
+                                selection=selection,
                             )
                             input_tokens += int(persistent_state_bootstrap.get("input_tokens") or 0)
                             output_tokens += int(
@@ -8950,6 +9022,11 @@ class MiniSweCentralAgent(BaseAgent):
                                         else None
                                     ),
                                 )
+                                self._mark_select_catalog_consumed(
+                                    persistent_state_bootstrap,
+                                    catalog=catalog,
+                                    selection=selection,
+                                )
                                 input_tokens += int(
                                     persistent_state_bootstrap.get("input_tokens") or 0
                                 )
@@ -9773,6 +9850,88 @@ class MiniSweCentralAgent(BaseAgent):
                 if row.get("dispatch_status") in {"invoked", "response_received", "response_error"}
             ]
             feature_summary = self._features.summary()
+            select_catalog_lifecycle = dict(
+                persistent_state_bootstrap.get("feature_lifecycle") or {}
+            )
+            if not select_catalog_lifecycle:
+                select_catalog_reason = (
+                    "persistent_execution_state_disabled"
+                    if not self.enable_persistent_execution_state
+                    else "not_applicable_no_supported_source"
+                    if source_less_task
+                    else str(
+                        persistent_state_bootstrap.get("status")
+                        or "catalog_selection_unavailable"
+                    )
+                )
+                select_catalog_lifecycle = {
+                    "schema": "gt.select_catalog_lifecycle.v1",
+                    "feature_id": SELECT_CATALOG_TOOL_NAME,
+                    "stage": "NOT_APPLICABLE",
+                    "applicability": "NOT_APPLICABLE",
+                    "certification": "NONE",
+                    "delivery": "NOT_DELIVERED",
+                    "uptake": "UNOBSERVED",
+                    "outcome": "UNVALIDATED",
+                    "triggering_event": "catalog:unavailable",
+                    "repository_revision": source_revision,
+                    "workspace_revision": source_revision,
+                    "graph_source_revision": graph_source_revision,
+                    "graph_revision": repository_evidence.graph_revision or "not-applicable",
+                    "decision_boundary": "",
+                    "catalog_schema": "",
+                    "catalog_version": "",
+                    "visible_item_ids": [],
+                    "visible_item_ids_sha256": "",
+                    "attempted_item_ids": [],
+                    "selected_ids": [],
+                    "selected_ids_subset_visible": True,
+                    "selection_valid": False,
+                    "selection_reason_codes": [select_catalog_reason],
+                    "request_payload_sha256": "",
+                    "model_visible_bytes_sha256": "",
+                    "tool_schema_sha256": "",
+                    "raw_tool_arguments_sha256": "",
+                    "delivery_id": "",
+                    "resulting_agent_action": "",
+                    "validation_result": "",
+                    "terminal_reason": select_catalog_reason,
+                    "transitions": [
+                        {
+                            "from": None,
+                            "to": "NOT_APPLICABLE",
+                            "reason": select_catalog_reason,
+                        }
+                    ],
+                }
+            feature_summary["feature_applicability"][SELECT_CATALOG_TOOL_NAME] = {
+                "evaluations": int(
+                    select_catalog_lifecycle.get("stage") != "NOT_APPLICABLE"
+                ),
+                "eligible": int(
+                    select_catalog_lifecycle.get("stage")
+                    not in {"NOT_APPLICABLE", "ABSTAINED"}
+                ),
+                "fired": 0,
+                "status": str(select_catalog_lifecycle.get("stage") or "NOT_APPLICABLE"),
+                "lifecycle_state": str(
+                    select_catalog_lifecycle.get("stage") or "NOT_APPLICABLE"
+                ),
+                "reason_codes": list(
+                    select_catalog_lifecycle.get("selection_reason_codes")
+                    or (
+                        select_catalog_lifecycle.get("terminal_reason")
+                        or "select_catalog_lifecycle_recorded",
+                    )
+                ),
+            }
+            feature_summary["consumer_paths"].setdefault(
+                SELECT_CATALOG_TOOL_NAME,
+                [
+                    str(select_catalog_lifecycle.get("resulting_agent_action") or "")
+                    or "persistent_execution_state.catalog_selection_lifecycle"
+                ],
+            )
             provider_evidence_summary = provider_evidence.as_dict()
             certification_decisions = [
                 *feature_summary.get("certification_decisions", ()),
@@ -11388,12 +11547,23 @@ class MiniSweCentralAgent(BaseAgent):
                 ),
                 **action_metrics,
             }
-            legacy_fired_ids = tuple(
+            direct_fired_ids = tuple(
                 feature_id
                 for feature_id in CENTRAL_FEATURE_IDS
-                if int((feature_summary.get("produced_counts") or {}).get(feature_id) or 0) > 0
+                if (
+                    int(
+                        (feature_summary.get("produced_counts") or {}).get(feature_id)
+                        or 0
+                    )
+                    > 0
+                    or (
+                        feature_id == SELECT_CATALOG_TOOL_NAME
+                        and str(select_catalog_lifecycle.get("stage") or "")
+                        in {"CERTIFIED", "DELIVERED", "CONSUMED", "VALIDATED", "CONTRADICTED"}
+                    )
+                )
             )
-            legacy_consumed_ids = tuple(
+            direct_consumed_ids = tuple(
                 sorted(
                     {
                         str(row.get("feature_id") or "")
@@ -11401,6 +11571,12 @@ class MiniSweCentralAgent(BaseAgent):
                         if row.get("state_fields_changed")
                     }
                     & set(CENTRAL_FEATURE_IDS)
+                    | (
+                        {SELECT_CATALOG_TOOL_NAME}
+                        if str(select_catalog_lifecycle.get("stage") or "")
+                        in {"CONSUMED", "VALIDATED", "CONTRADICTED"}
+                        else set()
+                    )
                 )
             )
             persistent_exercised = bool(
@@ -11431,26 +11607,31 @@ class MiniSweCentralAgent(BaseAgent):
                 else 0
             )
             configured_mechanism_ids = (
-                *(CENTRAL_FEATURE_IDS if self.enable_all_features else ()),
                 *(
-                    (PERSISTENT_EXECUTION_STATE_MECHANISM_ID,)
-                    if self.enable_persistent_execution_state
+                    tuple(
+                        feature_id
+                        for feature_id in CENTRAL_FEATURE_IDS
+                        if feature_id != SELECT_CATALOG_TOOL_NAME
+                    )
+                    if self.enable_all_features
                     else ()
                 ),
+                *((SELECT_CATALOG_TOOL_NAME,) if self.enable_persistent_execution_state else ()),
             )
             shared_mechanism_census = {
                 "schema": "gt.product_mechanism_census.v1",
                 "profile_id": self.treatment_profile,
-                "accounting_contract": "17_legacy_features_plus_1_persistent_state",
-                "legacy_feature_count": len(CENTRAL_FEATURE_IDS),
+                "accounting_contract": "18_direct_features_with_select_catalog",
+                "direct_feature_count": len(CENTRAL_FEATURE_IDS),
                 "product_mechanism_count": len(PRODUCT_MECHANISM_IDS),
                 "mechanism_ids": list(PRODUCT_MECHANISM_IDS),
                 "configured_mechanism_count": len(configured_mechanism_ids),
                 "configured_mechanism_ids": list(configured_mechanism_ids),
-                "naturally_fired_legacy_feature_count": len(legacy_fired_ids),
-                "naturally_fired_legacy_feature_ids": list(legacy_fired_ids),
-                "consumed_legacy_feature_count": len(legacy_consumed_ids),
-                "consumed_legacy_feature_ids": list(legacy_consumed_ids),
+                "naturally_fired_direct_feature_count": len(direct_fired_ids),
+                "naturally_fired_direct_feature_ids": list(direct_fired_ids),
+                "consumed_direct_feature_count": len(direct_consumed_ids),
+                "consumed_direct_feature_ids": list(direct_consumed_ids),
+                "select_catalog": select_catalog_lifecycle,
             }
             persistent_mechanism_census = {
                 "configured": self.enable_persistent_execution_state,

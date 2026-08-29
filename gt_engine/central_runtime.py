@@ -524,8 +524,8 @@ class CheckEvidence:
     authority: str = ""
 
 
-# The historical direct inventory is 10 FACT identities plus 7 CAP_OWNER
-# identities.  Keep the inventory in the host-owned runtime as data, rather
+# The direct inventory is 10 FACT identities plus 8 CAP identities. Keep the
+# inventory in the host-owned runtime as data, rather
 # than claiming that a legacy import or an environment flag is an active
 # implementation.  A feature is only reported as delivered after its
 # boundary-specific trigger is observed.
@@ -547,6 +547,11 @@ CENTRAL_FEATURES: tuple[dict[str, str], ...] = (
     {"id": "GT_LOC_RESLOT", "kind": "CAP", "owner": "localization"},
     {"id": "GT_PATCH_DELTA", "kind": "CAP", "owner": "signature_delta"},
     {"id": "GT_SS_SUBMIT_RED", "kind": "CAP", "owner": "submit_refusal"},
+    {
+        "id": "select_catalog",
+        "kind": "CAP",
+        "owner": "persistent_execution_state",
+    },
 )
 CENTRAL_FEATURE_IDS = tuple(item["id"] for item in CENTRAL_FEATURES)
 CENTRAL_CAP_OWNERS = {
@@ -570,6 +575,7 @@ CENTRAL_FEATURE_BOUNDARIES = {
     "GT_LOC_RESLOT": ("task_start", "search_result"),
     "GT_PATCH_DELTA": "edit_result",
     "GT_SS_SUBMIT_RED": ("test_result", "submit"),
+    "select_catalog": "task_start",
 }
 
 
@@ -614,6 +620,11 @@ def feature_payload_valid(
         "GT_LOC_RESLOT": ("owner_feature",),
         "GT_PATCH_DELTA": ("owner_feature",),
         "GT_SS_SUBMIT_RED": ("owner_feature", "blockers"),
+        "select_catalog": (
+            "catalog_version",
+            "visible_catalog_ids_sha256",
+            "request_payload_sha256",
+        ),
     }[feature_id]
     if feature_id == "newfile_precedent":
         return bool(payload.get("precedent_verified") or payload.get("created_files"))
@@ -2035,14 +2046,15 @@ class CentralControllerState:
 
 
 class CentralFeatureRuntime:
-    """Host-side trigger router for the complete 17-feature inventory.
+    """Host-side trigger router for action-bound direct features.
 
     This deliberately does not scrape task source or inject a second tool. It
     observes only action metadata, command text, return status, and the
     non-Git workspace transition already collected by :class:`WorkspaceSensor`.
-    Every feature is enabled by default, but a feature is marked DELIVERED only
-    when its conservative trigger is present. CAP rows are emitted with their
-    owning FACT, making ownership and delivery auditable without pretending
+    The task-start select_catalog lifecycle is merged by the harness at its
+    provider boundary. Every other feature is enabled by default, but a feature
+    is marked DELIVERED only when its conservative trigger is present. CAP rows
+    are emitted with their owning FACT, making ownership and delivery auditable without pretending
     that an untriggered feature fired.
     """
 

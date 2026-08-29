@@ -1,14 +1,14 @@
 from gt_engine.central_runtime import CENTRAL_FEATURE_IDS
 
 
-def test_registry_covers_every_active_gt_subsystem_and_all_17_features():
+def test_registry_covers_every_active_gt_subsystem_and_all_18_features():
     from gt_engine.component_registry import (
         ACTIVE_GT_COMPONENTS,
         FEATURE_COMPONENT_CONTRACTS,
     )
 
     assert set(FEATURE_COMPONENT_CONTRACTS) == set(CENTRAL_FEATURE_IDS)
-    assert len(FEATURE_COMPONENT_CONTRACTS) == 17
+    assert len(FEATURE_COMPONENT_CONTRACTS) == 18
     assert {
         "workspace_sensor",
         "repository_graph",
@@ -49,7 +49,7 @@ def test_component_registry_is_machine_auditable_and_fail_closed():
 
     result = audit_component_registry()
     assert result["ready"] is True
-    assert result["feature_count"] == 17
+    assert result["feature_count"] == 18
     assert result["duplicate_components"] == []
     assert result["missing_feature_placements"] == []
     assert result["invalid_delivery_contracts"] == []

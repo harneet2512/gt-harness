@@ -166,16 +166,17 @@ def audit() -> dict[str, bool]:
             "treatment_profile": "central_relational_v3",
             "executor_calls": 1,
             "product_mechanism_census": {
-                "accounting_contract": "17_legacy_features_plus_1_persistent_state",
-                "legacy_feature_count": 17,
+                "accounting_contract": "18_direct_features_with_select_catalog",
+                "direct_feature_count": 18,
                 "product_mechanism_count": 18,
-                "mechanism_ids": [*CENTRAL_FEATURE_IDS, "persistent_execution_state"],
+                "mechanism_ids": list(CENTRAL_FEATURE_IDS),
                 "configured_mechanism_count": 18,
-                "configured_mechanism_ids": [
-                    *CENTRAL_FEATURE_IDS,
-                    "persistent_execution_state",
-                ],
-                "naturally_fired_legacy_feature_count": 0,
+                "configured_mechanism_ids": list(CENTRAL_FEATURE_IDS),
+                "naturally_fired_direct_feature_count": 0,
+                "select_catalog": {
+                    "feature_id": "select_catalog",
+                    "stage": "ABSTAINED",
+                },
                 "persistent_execution_state": {
                     "configured": True,
                     "applicable": True,
@@ -433,16 +434,19 @@ def audit() -> dict[str, bool]:
             and "persistent_initial_retrieval_not_in_catalog"
             in (ROOT / "scripts/central_release_gate.py").read_text(encoding="utf-8")
         ),
-        "product_mechanism_contract_is_17_plus_1": (
+        "product_mechanism_contract_is_18_direct": (
             "PRODUCT_MECHANISM_IDS" in run_source
             and '"product_mechanism_census": product_mechanism_census' in run_source
-            and '"legacy_feature_count": len(CENTRAL_FEATURE_IDS)' in run_source
+            and '"direct_feature_count": len(CENTRAL_FEATURE_IDS)' in run_source
             and '"product_mechanism_count": len(PRODUCT_MECHANISM_IDS)' in run_source
             # The workflow deliberately routes all integrity failures through
             # one merge-gate accumulator.  Do not pin this readiness check to
             # an obsolete direct SystemExit spelling: verify the live gate
-            # records the 17+1 failure and fails outside diagnostic mode.
-            and 'gate_errors.append("17+1 GT product mechanism census failed")' in deepswe_workflow
+            # records the direct-feature failure and fails outside diagnostic mode.
+            and (
+                'gate_errors.append("18-direct GT product mechanism census failed")'
+                in deepswe_workflow
+            )
             and 'if os.environ.get("DIAGNOSTIC_ONLY") != "1":' in deepswe_workflow
         ),
         "paid_live_retrieval_matches_arb_profile": all(
@@ -631,7 +635,7 @@ def audit() -> dict[str, bool]:
             and "tests/test_gt_progress.py" in verification_workflow
         ),
         "central_features_consumer_paths_proven": bool(
-            feature_result["all_17_consumer_paths_proven"]
+            feature_result["all_18_consumer_paths_proven"]
         ),
         "all_effects_context_accounted": bool(feature_result["all_effects_context_accounted"]),
         "repository_substrate_and_frontier_proven": bool(

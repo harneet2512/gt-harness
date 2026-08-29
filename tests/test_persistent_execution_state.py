@@ -21,6 +21,7 @@ from gt_engine.persistent_execution_state import (
     BootstrapCatalog,
     BootstrapCatalogItem,
     BootstrapMode,
+    BootstrapSelection,
     BootstrapStatus,
     CatalogItemKind,
     CompletionReadiness,
@@ -33,6 +34,7 @@ from gt_engine.persistent_execution_state import (
     bootstrap_visible_item_ids,
     build_bootstrap_catalog,
     build_bootstrap_messages,
+    build_select_catalog_lifecycle,
     build_select_catalog_tool,
     deterministic_bootstrap_selection,
     parse_bootstrap_selection,
@@ -571,6 +573,105 @@ def test_bootstrap_cannot_select_a_catalog_item_omitted_by_the_request_budget():
 
     assert selection.valid is False
     assert selection.reason_codes == ("unshown_catalog_id",)
+
+
+def test_bootstrap_rejects_duplicate_ids_in_one_role():
+    catalog = _catalog()
+    focus = next(item.item_id for item in catalog.items if item.path == "src/service.py")
+
+    selection = parse_bootstrap_selection(
+        {
+            "primary_focus_id": focus,
+            "ordered_item_ids": [focus, focus],
+            "risk_item_ids": [],
+            "validation_item_ids": [],
+        },
+        catalog,
+    )
+
+    assert selection.valid is False
+    assert selection.reason_codes == ("duplicate_catalog_id",)
+
+
+def test_select_catalog_lifecycle_requires_dispatch_before_delivery():
+    catalog = _catalog()
+    focus = next(item.item_id for item in catalog.items if item.path == "src/service.py")
+    selection = parse_bootstrap_selection(
+        {
+            "primary_focus_id": focus,
+            "ordered_item_ids": [focus],
+            "risk_item_ids": [],
+            "validation_item_ids": [],
+        },
+        catalog,
+        visible_item_ids=frozenset({focus}),
+    )
+    digest = "a" * 64
+
+    certified = build_select_catalog_lifecycle(
+        catalog=catalog,
+        visible_item_ids=(focus,),
+        selection=selection,
+        selection_mode="generative",
+        request_payload_sha256=digest,
+        provider_messages_sha256="b" * 64,
+        tool_schema_sha256="c" * 64,
+        provider_dispatch_started=False,
+    )
+    consumed = build_select_catalog_lifecycle(
+        catalog=catalog,
+        visible_item_ids=(focus,),
+        selection=selection,
+        selection_mode="generative",
+        request_payload_sha256=digest,
+        provider_messages_sha256="b" * 64,
+        tool_schema_sha256="c" * 64,
+        raw_tool_arguments_sha256="d" * 64,
+        attempted_item_ids=(focus,),
+        provider_dispatch_started=True,
+        resulting_agent_action="persistent_execution_state.apply_bootstrap",
+    )
+
+    assert certified["stage"] == "CERTIFIED"
+    assert certified["delivery_id"] == ""
+    assert consumed["stage"] == "CONSUMED"
+    assert consumed["delivery_id"].startswith("select-catalog-")
+    assert consumed["selected_ids"] == [focus]
+    assert consumed["selected_ids_subset_visible"] is True
+    assert "source_excerpt" not in json.dumps(consumed)
+
+
+def test_select_catalog_lifecycle_distinguishes_no_selection_and_fallback():
+    catalog = _catalog()
+    digest = "a" * 64
+    no_selection = BootstrapSelection(valid=True)
+    malformed = BootstrapSelection(valid=False, reason_codes=("invalid_json",))
+
+    no_selection_receipt = build_select_catalog_lifecycle(
+        catalog=catalog,
+        visible_item_ids=catalog.item_ids,
+        selection=no_selection,
+        selection_mode="generative",
+        request_payload_sha256=digest,
+        provider_messages_sha256="b" * 64,
+        tool_schema_sha256="c" * 64,
+        provider_dispatch_started=True,
+    )
+    fallback_receipt = build_select_catalog_lifecycle(
+        catalog=catalog,
+        visible_item_ids=catalog.item_ids,
+        selection=malformed,
+        selection_mode="generative",
+        request_payload_sha256=digest,
+        provider_messages_sha256="b" * 64,
+        tool_schema_sha256="c" * 64,
+        provider_dispatch_started=True,
+    )
+
+    assert no_selection_receipt["stage"] == "DELIVERED"
+    assert no_selection_receipt["terminal_reason"] == "valid_no_selection"
+    assert fallback_receipt["stage"] == "DELIVERED"
+    assert fallback_receipt["terminal_reason"] == "invalid_json"
 
 
 def test_bootstrap_goldens_reject_shell_and_old_bash_envelope():

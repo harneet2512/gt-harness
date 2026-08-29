@@ -6,8 +6,9 @@ first model request after its evidence. Most effects stay internal and cost zero
 prompt tokens; related novel grounded facts are coalesced into one observation
 enrichment. Consumers never block or cancel Mini-SWE actions.
 
-This module holds the operational role for all 17 feature IDs (diagnosis
-section 7).  A feature without a registered consumer is not operational even
+This module holds the operational role for action-bound direct feature IDs.
+The bootstrap-bound select_catalog consumer is the persistent-state apply
+boundary. A feature without a registered consumer is not operational even
 when its producer fires.
 """
 

@@ -1312,7 +1312,7 @@ jobs:
           for r in rows:
               census = r.get("product_mechanism_census") or {}
               persistent = census.get("persistent_execution_state") or {}
-              md.append(f"| {r['task']} | {r['outcome_class']} | {int(r['solved'])} | {census.get('configured_mechanism_count', 0)}/18 | {census.get('naturally_fired_legacy_feature_count', 0)}/17 | {persistent.get('lifecycle_use_count', 0)} | {r['provider_delivery_count']} | {r['graph_status']} | {int(r['dense_available'])} | {r['provider_calls']} | {r['assistant_steps']} | {r['effective_actions']} | {r['total_tokens']} | {r['persistent_state_bootstrap_calls']} | {r['persistent_state_context_compilations']} |")
+              md.append(f"| {r['task']} | {r['outcome_class']} | {int(r['solved'])} | {census.get('configured_mechanism_count', 0)}/18 | {census.get('naturally_fired_direct_feature_count', 0)}/18 | {persistent.get('lifecycle_use_count', 0)} | {r['provider_delivery_count']} | {r['graph_status']} | {int(r['dense_available'])} | {r['provider_calls']} | {r['assistant_steps']} | {r['effective_actions']} | {r['total_tokens']} | {r['persistent_state_bootstrap_calls']} | {r['persistent_state_context_compilations']} |")
           Path("DEEPSWE_EVALUATION_RESULTS.md").write_text("\n".join(md) + "\n", encoding="utf-8")
           print("\n".join(md))
           gate_errors = []
@@ -1329,7 +1329,7 @@ jobs:
           if any(not r["provider_response_identity_valid"] for r in rows):
               gate_errors.append("actual provider response identity gate failed")
           if (os.environ.get("ARM") or "gt_on") == "gt_on" and any(
-              int((r.get("product_mechanism_census") or {}).get("legacy_feature_count") or 0) != 17
+              int((r.get("product_mechanism_census") or {}).get("direct_feature_count") or 0) != 18
               or int((r.get("product_mechanism_census") or {}).get("product_mechanism_count") or 0) != 18
               or int((r.get("product_mechanism_census") or {}).get("configured_mechanism_count") or 0) != 18
               or (r.get("product_mechanism_census") or {}).get("mechanism_ids", [])[-1:]
@@ -1339,7 +1339,7 @@ jobs:
               ).get("exercised") is not True
               for r in rows
           ):
-              gate_errors.append("17+1 GT product mechanism census failed")
+              gate_errors.append("18-direct GT product mechanism census failed")
           if any(r["workspace_prompt_contract"] != "resolved_workspace_v1" for r in rows):
               gate_errors.append("workspace prompt contract gate failed")
           if gate_errors:

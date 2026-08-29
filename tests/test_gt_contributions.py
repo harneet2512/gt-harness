@@ -242,12 +242,12 @@ def test_feature_value_rules_distinguish_failures_from_uncertified_relations():
     assert signature_with_callers.value_class is ProviderValueClass.ACTION_LOCAL_RELATION
 
 
-def test_provider_value_rule_table_exhaustively_covers_17_feature_registry():
+def test_provider_value_rule_table_exhaustively_covers_18_feature_registry():
     from gt_engine.central_runtime import CENTRAL_FEATURE_IDS
     from gt_engine.contributions import FEATURE_PROVIDER_VALUE_FEATURE_IDS
 
     assert FEATURE_PROVIDER_VALUE_FEATURE_IDS == frozenset(CENTRAL_FEATURE_IDS)
-    assert len(FEATURE_PROVIDER_VALUE_FEATURE_IDS) == 17
+    assert len(FEATURE_PROVIDER_VALUE_FEATURE_IDS) == 18
 
 
 def test_contribution_compiler_accounts_every_candidate_once():
