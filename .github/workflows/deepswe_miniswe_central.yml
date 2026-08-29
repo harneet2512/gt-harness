@@ -567,7 +567,7 @@ jobs:
       # Docker Hub's anonymous pull quota cannot turn a valid benchmark into
       # registry-only failures.  This changes start concurrency, not task
       # selection, rollout count, model, or per-task execution budget.
-      max-parallel: 5
+      max-parallel: 20
       matrix:
         task: ${{ fromJson(needs.plan.outputs.tasks) }}
     env:
