@@ -563,10 +563,11 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      # The requested cohort is genuinely 20-way parallel.  Provider-specific
-      # throttling is an infrastructure concern and must be recorded per task,
-      # not hidden by silently shrinking the cohort.
-      max-parallel: 20
+      # Keep the cohort at 20 tasks, but cap simultaneous container starts so
+      # Docker Hub's anonymous pull quota cannot turn a valid benchmark into
+      # registry-only failures.  This changes start concurrency, not task
+      # selection, rollout count, model, or per-task execution budget.
+      max-parallel: 5
       matrix:
         task: ${{ fromJson(needs.plan.outputs.tasks) }}
     env:
