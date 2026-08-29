@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -71,12 +72,28 @@ func main() {
 	maxFiles := flag.Int("max-files", 0, "Maximum files to index (0 = unlimited; a reached limit fails coverage)")
 	workers := flag.Int("workers", 0, "Parallel parse workers (0 = NumCPU)")
 	file := flag.String("file", "", "Incremental mode: re-index only this single file (relative to -root) into an existing -output graph.db")
+	filesManifest := flag.String("files-manifest", "", "Incremental batch mode: JSON array of files relative to -root; updates one unpublished graph generation and rebuilds derived surfaces once")
 	closureEnabled := flag.Bool("closure", true, "C7: compute the transitive-closure sidecar over VERIFIED CALLS edges (default on)")
 	rebuildClosure := flag.Bool("rebuild-closure", false, "Recompute the closure sidecar on an existing -output graph.db over its CURRENT edges. Run AFTER the LSP resolve pass so the closure reflects LSP-promoted/re-pointed/deleted edges (it is built once at index time and goes stale otherwise). Clears the old closure first.")
 	flag.Parse()
 
 	if *workers <= 0 {
 		*workers = runtime.NumCPU()
+	}
+
+	// The caller runs this against an unpublished copy of graph.db. A failure
+	// after any file therefore leaves the previous complete graph authoritative.
+	if *filesManifest != "" {
+		if *file != "" || *rebuildClosure {
+			fmt.Fprintln(os.Stderr, "gt-index -files-manifest: cannot combine batch, -file, or -rebuild-closure modes")
+			os.Exit(1)
+		}
+		if err := runIncrementalBatch(*root, *filesManifest, *output); err != nil {
+			msg := strings.ReplaceAll(err.Error(), "\n", " ")
+			fmt.Fprintf(os.Stderr, "gt-index -files-manifest: %s\n", msg)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Incremental single-file mode: file-keyed delete-and-replace against an
@@ -968,6 +985,70 @@ func main() {
 	fmt.Println()
 }
 
+// runIncrementalBatch applies a complete set of file updates to one private
+// graph generation and finalizes closure/FTS/revision once. Individual file
+// updates remain transactional; the caller's copy-and-publish boundary makes
+// the complete multi-file operation atomic for concurrent readers.
+func runIncrementalBatch(root, manifestPath, dbPath string) error {
+	payload, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read manifest %s: %w", manifestPath, err)
+	}
+	var paths []string
+	if err := json.Unmarshal(payload, &paths); err != nil {
+		return fmt.Errorf("decode manifest: %w", err)
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("manifest contains no files")
+	}
+	seen := make(map[string]struct{}, len(paths))
+	for _, raw := range paths {
+		rel := filepath.ToSlash(strings.TrimSpace(raw))
+		if rel == "" || filepath.IsAbs(raw) || rel == ".." || strings.HasPrefix(rel, "../") {
+			return fmt.Errorf("unsafe manifest path %q", raw)
+		}
+		if _, duplicate := seen[rel]; duplicate {
+			continue
+		}
+		seen[rel] = struct{}{}
+		if err := runIncrementalFile(root, rel, dbPath, false, true); err != nil {
+			return fmt.Errorf("reindex %s: %w", rel, err)
+		}
+	}
+	return rebuildDerivedSurfaces(dbPath)
+}
+
+func rebuildDerivedSurfaces(dbPath string) error {
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", dbPath, err)
+	}
+	defer db.Close()
+	if _, err := resolver.PromotePropertyEdges(db); err != nil {
+		return fmt.Errorf("promote property edges: %w", err)
+	}
+	before := db.ClosureCount()
+	if err := db.ClearClosure(); err != nil {
+		return fmt.Errorf("clear closure: %w", err)
+	}
+	n, err := closure.ComputeTransitiveClosure(db, "CALLS", closure.MaxDepth, closure.MinEdgeConfidence)
+	if err != nil {
+		return fmt.Errorf("compute closure: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "rebuild-closure: %d -> %d closure rows (recomputed over current edges)\n", before, n)
+	if err := db.PopulateFTS5(); err != nil {
+		log.Printf("[WARN] rebuild-closure: FTS5 re-population failed: %v", err)
+	}
+	if err := db.PopulateEdgeMetadata(); err != nil {
+		log.Printf("WARNING: rebuild-closure: populate edge_metadata: %v", err)
+	}
+	if _, err := db.StampCompositeRevision(); err != nil {
+		return fmt.Errorf("stamp composite revision: %w", err)
+	}
+	db.CheckpointWAL()
+	return nil
+}
+
 // runIncremental performs a file-keyed delete-and-replace reindex of a
 // single file inside an existing graph.db. Steps follow the Track B0 spec:
 //
@@ -983,6 +1064,10 @@ func main() {
 //  10. COMMIT.
 //  11. Print one JSON line to stdout.
 func runIncremental(root, relpath, dbPath string) error {
+	return runIncrementalFile(root, relpath, dbPath, true, false)
+}
+
+func runIncrementalFile(root, relpath, dbPath string, finalizeDerived, force bool) error {
 	startWall := time.Now()
 
 	// Step 1 — db must already exist.
@@ -1017,7 +1102,10 @@ func runIncremental(root, relpath, dbPath string) error {
 	// the overlay still learns the exact graph state it is running against
 	// (identical to what a re-run after the last real reindex would report).
 	storedHash := db.GetFileHash(relSlash)
-	if storedHash == newHash {
+	if storedHash == newHash && !force {
+		if !finalizeDerived {
+			return nil
+		}
 		// Stamp the COMPOSITE revision (post_revision + subrev_<surface> + property
 		// source_revision) so the meta table always reflects the summary the overlay just
 		// parsed (idempotent: the db content is unchanged, so it re-computes identically).
@@ -1038,9 +1126,12 @@ func runIncremental(root, relpath, dbPath string) error {
 	// mutates anything. `changed` in the summary is the honest pre!=post
 	// comparison (a comment-only edit that re-parses to the identical graph
 	// reports changed=false even though the reindex ran).
-	preRev, err := db.ComputeRevision()
-	if err != nil {
-		return fmt.Errorf("compute pre-reindex revision: %w", err)
+	preRev := ""
+	if finalizeDerived {
+		preRev, err = db.ComputeRevision()
+		if err != nil {
+			return fmt.Errorf("compute pre-reindex revision: %w", err)
+		}
 	}
 
 	// Step 7 (early) — re-parse the single file BEFORE opening the write tx,
@@ -1467,13 +1558,15 @@ func runIncremental(root, relpath, dbPath string) error {
 	// here converges the reindexed file's depth edges. Non-fatal: a failure degrades to
 	// the CALLS/IMPORTS graph, never aborts. (Perf residual: whole-graph re-promote per
 	// -file reindex; a file-scoped tx variant is the future optimization.)
-	if _, promErr := resolver.PromotePropertyEdges(db); promErr != nil {
-		log.Printf("WARNING: incremental property->edge promotion: %v", promErr)
-	}
-	// B-24: refresh the normalized edge_metadata sub-table after the promote pass finalized
-	// the dataflow/usage annotations. Non-fatal (a derived index over edges.metadata).
-	if err := db.PopulateEdgeMetadata(); err != nil {
-		log.Printf("WARNING: incremental populate edge_metadata: %v", err)
+	if finalizeDerived {
+		if _, promErr := resolver.PromotePropertyEdges(db); promErr != nil {
+			log.Printf("WARNING: incremental property->edge promotion: %v", promErr)
+		}
+		// B-24: refresh the normalized edge_metadata sub-table after the promote pass finalized
+		// the dataflow/usage annotations. Non-fatal (a derived index over edges.metadata).
+		if err := db.PopulateEdgeMetadata(); err != nil {
+			log.Printf("WARNING: incremental populate edge_metadata: %v", err)
+		}
 	}
 
 	// Stamp schema_version + indexer provenance on every incremental run.
@@ -1494,14 +1587,19 @@ func runIncremental(root, relpath, dbPath string) error {
 
 	// Refresh FTS5 index after incremental node changes so BM25 queries
 	// stay current. Same call as the full-index path (idempotent).
-	if err := db.PopulateFTS5(); err != nil {
-		log.Printf("[WARN] FTS5 refresh after incremental reindex: %v", err)
+	if finalizeDerived {
+		if err := db.PopulateFTS5(); err != nil {
+			log.Printf("[WARN] FTS5 refresh after incremental reindex: %v", err)
+		}
 	}
 	// B1: refresh the content surface for the reindexed file only (delete + re-insert
 	// its symbols) so symbol_content_fts stays current after a -file reindex. No-op when
 	// the table is absent (a graph.db built before B1, or FTS5 off).
 	if err := db.RepopulateContentFTSForFile(root, relSlash); err != nil {
 		log.Printf("[WARN] content FTS refresh after incremental reindex: %v", err)
+	}
+	if !finalizeDerived {
+		return nil
 	}
 
 	// B-29: stamp the COMPOSITE post_revision + per-surface sub-revisions + property

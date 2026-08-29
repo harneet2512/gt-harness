@@ -94,6 +94,7 @@ def test_feature_lifecycle_requires_certification_before_delivery() -> None:
         FeatureStage.CANDIDATE,
         FeatureStage.CERTIFIED,
         FeatureStage.DELIVERED,
+        FeatureStage.CONSUMED,
         FeatureStage.VALIDATED,
     ]
     assert receipt["schema"] == "gt.feature_lifecycle.v2"
@@ -292,6 +293,7 @@ def test_graph_lease_falls_back_to_full_for_large_or_unsafe_closure() -> None:
         operations=("create",),
         supported_file_count=100,
         dependency_closure_size=1,
+        adapter_can_incremental=False,
     )
     requests = []
     lease.refresh_for_boundary(
@@ -310,6 +312,40 @@ def test_graph_lease_falls_back_to_full_for_large_or_unsafe_closure() -> None:
         ),
     )
     assert requests[0].mode.value == "full"
+
+
+def test_graph_lease_allows_identity_changes_when_adapter_certifies_them() -> None:
+    lease = GraphLease.current(
+        graph_repository_revision="repo-r1",
+        workspace_revision="work-r1",
+        graph_revision="graph-r1",
+        graph_path="graph.db",
+    )
+    lease.mark_edit(
+        workspace_revision="work-r2",
+        dirty_paths=("src/new.py", "src/old.py"),
+        operations=("create", "delete"),
+        supported_file_count=100,
+        dependency_closure_size=2,
+        adapter_can_incremental=True,
+    )
+    requests = []
+    lease.refresh_for_boundary(
+        DecisionBoundary.POST_EDIT_GRAPH_DELTA,
+        repository_revision="repo-r2",
+        refresh=lambda request: requests.append(request)
+        or GraphBuildResult(
+            success=True,
+            graph_repository_revision="repo-r2",
+            graph_revision="graph-r2",
+            graph_path="graph.db",
+            duration_ms=1,
+            health_valid=True,
+            mode=request.mode,
+        ),
+    )
+
+    assert [request.mode.value for request in requests] == ["incremental"]
 
 
 def test_graph_lease_retries_failed_incremental_once_as_full_and_publishes_once() -> None:

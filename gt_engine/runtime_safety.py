@@ -120,6 +120,8 @@ class ActionAccounting:
 
 def assess_provider_dispatch(
     mechanical_barrier: Mapping[str, Any] | None,
+    *,
+    fail_closed: bool = False,
 ) -> ProviderDispatchAssessment:
     """Allow solving while recording whether the GT treatment is valid.
 
@@ -141,7 +143,7 @@ def assess_provider_dispatch(
             treatment_validity=TreatmentValidity.VALID,
         )
     return ProviderDispatchAssessment(
-        dispatch_allowed=True,
+        dispatch_allowed=not fail_closed,
         treatment_validity=TreatmentValidity.INVALID,
         reason_codes=failures or ("mechanical_completeness_not_passed",),
     )

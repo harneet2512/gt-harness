@@ -529,7 +529,7 @@ def test_bootstrap_selection_is_strictly_catalog_bounded():
     assert "unknown_catalog_id" in invalid.reason_codes
 
 
-def test_bootstrap_transport_uses_select_catalog_without_repo_bytes():
+def test_bootstrap_transport_uses_select_catalog_with_bounded_source_evidence():
     catalog = _catalog()
     messages = build_bootstrap_messages(
         task="Fix save_user and its tests.",
@@ -542,8 +542,12 @@ def test_bootstrap_transport_uses_select_catalog_without_repo_bytes():
     assert "primary_focus_id" in serialized
     assert "select_catalog" in serialized
     assert "bash tool" not in serialized.lower()
-    assert "def save_user" not in serialized
-    assert sum(len(item["content"].encode("utf-8")) for item in messages) <= 2_000
+    assert "def save_user" in serialized
+    from gt_engine.persistent_execution_state import _default_token_counter
+
+    assert sum(_default_token_counter(item["content"]) for item in messages) <= 2_000
+    assert "source_excerpt" in serialized
+    assert "evidence_authority" in serialized
     assert bootstrap_visible_item_ids(messages)
 
 

@@ -43,7 +43,7 @@ _REQUIRED_RUNTIME = {
     "enable_decision_sufficiency": True,
     "enable_replay_capture": True,
     "retrieval_delivery_mode": "integrated_same_observation",
-    "persistent_state_selection_mode": "deterministic_v1",
+    "persistent_state_selection_mode": "generative",
 }
 
 _REQUIRED_TASK_CHECKS = (
@@ -240,7 +240,7 @@ def audit_configuration(
         ),
         _check(
             "final_treatment_contract",
-            treatment.get("profile_id") == "central_relational_v2"
+            treatment.get("profile_id") == "central_relational_v3"
             and all(runtime.get(key) == value for key, value in _REQUIRED_RUNTIME.items()),
             {
                 "profile_id": treatment.get("profile_id"),
@@ -278,16 +278,17 @@ def audit_configuration(
             {"provider_credentials_declared": False},
         ),
         _check(
-            "fail_open_solver_dispatch",
+            "mode_specific_solver_dispatch",
             "evaluate_provider_barrier_v2(" in agent_source
-            and "dispatch_assessment = assess_provider_dispatch(provider_barrier)" in agent_source
+            and "dispatch_assessment = assess_provider_dispatch(" in agent_source
+            and "fail_closed=bool(" in agent_source
             and 'model_call_contexts[-1]["provider_dispatch_assessment"]' in agent_source
             and 'contribution_receipt["treatment_validity"]' in agent_source
             and '"solver_continued": bool(' in agent_source
-            and 'terminal = "MechanicalCompletenessBlocked"' not in agent_source,
+            and 'terminal = "MechanicalCompletenessBlocked"' in agent_source,
             {
-                "optional_substrate_failure_invalidates_treatment": True,
-                "optional_substrate_failure_does_not_block_solver": True,
+                "interactive_failure_is_fail_open": True,
+                "benchmark_v3_failure_is_fail_closed": True,
             },
         ),
         _check(

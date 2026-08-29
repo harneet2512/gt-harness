@@ -1717,7 +1717,7 @@ async def test_initial_sensor_hashes_oversized_source_without_inline_capture():
 
 
 @pytest.mark.asyncio
-async def test_sensor_hashes_and_captures_graph_metadata_not_used_for_validation():
+async def test_sensor_does_not_put_unconsumed_validation_metadata_in_graph_identity():
     import base64
     import json
     import shlex
@@ -1748,10 +1748,11 @@ async def test_sensor_hashes_and_captures_graph_metadata_not_used_for_validation
 
     assert snapshot.healthy is True
     assert receipt.complete is True
-    assert receipt.source_paths == ("requirements.txt",)
-    assert receipt.entries[0].content_sha256 == "c" * 64
-    assert snapshot.entries["requirements.txt"].content == "pytest==8.0\n"
-    assert any(command.startswith("sha256sum") for command in calls)
+    assert receipt.source_paths == ()
+    assert receipt.entries == ()
+    assert snapshot.entries["requirements.txt"].digest == ""
+    assert snapshot.entries["requirements.txt"].content is None
+    assert not any(command.startswith("sha256sum") for command in calls)
 
 
 def test_revision_changed_paths_compares_content_addressed_entries():
@@ -1774,11 +1775,7 @@ def test_revision_changed_paths_compares_content_addressed_entries():
         )
     )
 
-    assert revision_changed_paths(before, after) == (
-        "Cargo.lock",
-        "package.json",
-        "src/app.py",
-    )
+    assert revision_changed_paths(before, after) == ("package.json", "src/app.py")
 
 
 def test_source_revision_ignores_artifact_changes_but_not_source_edits():

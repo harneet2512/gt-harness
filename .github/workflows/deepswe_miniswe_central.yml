@@ -46,8 +46,8 @@ on:
         description: "Frozen provider route for this final comparison"
         type: choice
         required: true
-        options: [openrouter, tokenrouter, deepseek]
-        default: "openrouter"
+        options: [deepseek, openrouter, tokenrouter]
+        default: "deepseek"
       provider_base_url:
         description: "OpenAI-compatible provider base URL supplied by the run configuration"
         type: string
@@ -772,9 +772,9 @@ jobs:
               # Match the preceding central comparison exactly, adding only
               # the graph-first persistent execution state mechanism.
               PROFILE_ARGS=(
-                --ak treatment_profile=central_relational_v2
+                --ak treatment_profile=central_relational_v3
                 --ak integration_mode=active --ak policy_mode=certified_active
-                --ak preflight_mode=shadow
+                --ak preflight_mode=assistive_safe
                 --ak enable_all_features=true --ak enable_submit_readiness=true
                 --ak enable_repository_intelligence=true --ak require_graph_ready=true
                 --ak repository_initial_index_timeout_sec=60
@@ -783,7 +783,7 @@ jobs:
                 --ak enable_context_frontier=true --ak enable_preemptive_retrieval=true
                 --ak enable_persistent_execution_state=true
                 --ak persistent_state_bootstrap_timeout_sec=45
-                --ak persistent_state_bootstrap_input_tokens=2000
+                --ak persistent_state_bootstrap_input_tokens=8192
                 --ak persistent_state_bootstrap_output_tokens=512
                 --ak persistent_state_context_tokens=512
                 --ak gt_request_token_budget=1200
@@ -796,9 +796,9 @@ jobs:
               )
             elif [ "$PROFILE" = "certified_full" ]; then
               PROFILE_ARGS=(
-                --ak treatment_profile=central_relational_v2
+                --ak treatment_profile=central_relational_v3
                 --ak integration_mode=active --ak policy_mode=certified_active
-                --ak preflight_mode=shadow
+                --ak preflight_mode=assistive_safe
                 --ak enable_all_features=true --ak enable_submit_readiness=true
                 --ak enable_repository_intelligence=true --ak require_graph_ready=true
                 --ak repository_initial_index_timeout_sec=60
@@ -807,7 +807,7 @@ jobs:
                 --ak enable_context_frontier=true --ak enable_preemptive_retrieval=true
                 --ak enable_persistent_execution_state=true
                 --ak persistent_state_bootstrap_timeout_sec=45
-                --ak persistent_state_bootstrap_input_tokens=2000
+                --ak persistent_state_bootstrap_input_tokens=8192
                 --ak persistent_state_bootstrap_output_tokens=512
                 --ak persistent_state_context_tokens=512
                 --ak gt_request_token_budget=1200

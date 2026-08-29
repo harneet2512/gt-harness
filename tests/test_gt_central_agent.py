@@ -252,6 +252,22 @@ def test_explicit_runtime_observation_wins_over_environment_conflict(tmp_path, m
     assert agent._observed_benchmark_runtime_contract()["execution_contract"] == contract
 
 
+def test_relational_v3_uses_generative_graph_first_planning(tmp_path):
+    agent = MiniSweCentralAgent(
+        logs_dir=tmp_path,
+        model_name="test",
+        treatment_profile="central_relational_v3",
+    )
+
+    assert agent.treatment_profile == "central_relational_v3"
+    assert agent.persistent_state_selection_mode == "generative"
+    assert agent.enable_persistent_execution_state is True
+    assert agent.enable_preemptive_retrieval is True
+    assert agent.retrieval_delivery_mode == "integrated_same_observation"
+    assert agent.enable_relational_context is True
+    assert agent.enable_semantic_evidence is True
+
+
 def test_agent_rejects_two_runtime_observation_sources(tmp_path):
     observation_path = tmp_path / "runtime-observation.json"
     observation_path.write_text("{}", encoding="utf-8")
@@ -470,13 +486,13 @@ def test_deepswe_workflow_provider_preflight_matches_gateway_model_routing():
     assert "OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}" in workflow
     assert 'base = (os.environ.get("OPENAI_BASE_URL") or "").strip()' in workflow
     assert 'model = f"openai/{model}"' in workflow
-    assert "options: [openrouter, tokenrouter, deepseek]" in workflow
+    assert "options: [deepseek, openrouter, tokenrouter]" in workflow
     assert "TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}" in workflow
     assert "DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" in workflow
     assert 'tokenrouter_base = os.environ["PROVIDER_BASE_URL"].strip()' in workflow
     assert "PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}" in workflow
     assert 'echo "GT_LITELLM_MODEL=${executor_model}"' in workflow
-    assert workflow.count("--ak treatment_profile=central_relational_v2") >= 2
+    assert workflow.count("--ak treatment_profile=central_relational_v3") >= 2
     assert "python -m scripts.central_bootstrap_canary" in workflow
     assert "--provider-proof provider-route-proof.json" in workflow
     fingerprint_gate = (
@@ -710,8 +726,7 @@ def test_deepswe_final_workflow_is_commit_provider_outcome_and_timeout_exact():
     assert "--ak gt_request_token_budget=1200" in workflow
     assert "default: persistent_state_only" not in workflow
     assert "default: certified_full" in workflow
-    assert "--ak preflight_mode=assistive_safe" not in workflow
-    assert workflow.count("--ak preflight_mode=shadow") >= 2
+    assert workflow.count("--ak preflight_mode=assistive_safe") >= 2
     assert 'timeout --signal=TERM --kill-after=30s "${AGENT_TIMEOUT_SEC}s" pier run' in workflow
     assert '"execution_budget_sec"' in workflow
     assert "provider_query_started.json" in workflow
@@ -2734,6 +2749,12 @@ async def test_relational_v2_delivers_certified_process_after_existing_read_acti
     assert receipt["metrics"]["semantic_evidence_deliveries"] == 0
     assert receipt["repository_context"]["enabled"] is True
     assert receipt["repository_context"]["deliveries"]
+    repository_delivery = receipt["repository_context"]["deliveries"][0]
+    assert repository_delivery["decision_boundary"] == "PRE_EDIT"
+    assert any(
+        int(fact.get("line") or 0) > 0 and len(str(fact.get("content_sha256") or "")) == 64
+        for fact in repository_delivery["facts"]
+    )
     mechanical = receipt["mechanical_completeness"]
     assert mechanical["required"] is True
     assert len(mechanical["provider_barriers"]) == receipt["executor_calls"]
@@ -2787,6 +2808,14 @@ async def test_relational_v2_delivers_certified_process_after_existing_read_acti
     _rows, failures, totals = audit_provider_deliveries(receipt, task="relational-v2-integration")
     assert failures == []
     assert totals["surfaces"]["repository_context"]["delivery_count"] == 1
+    v2_receipt = json.loads((tmp_path / "gt-run-receipt.json").read_text(encoding="utf-8"))
+    repository_lifecycles = [
+        row
+        for row in v2_receipt["feature_lifecycle_transitions"]
+        if row["triggering_event"] == repository_delivery["delivery_id"]
+    ]
+    assert repository_lifecycles
+    assert all(row["stage"] != "ABSTAINED" for row in repository_lifecycles)
 
 
 @pytest.mark.asyncio

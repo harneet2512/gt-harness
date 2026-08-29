@@ -106,14 +106,15 @@ def _trajectory_metrics(trajectory: dict[str, Any]) -> dict[str, Any]:
         left != right for left, right in zip(distinct_edits, distinct_edits[1:], strict=False)
     )
     first_edit = distinct_edits[0] if distinct_edits else ""
-    unrelated_before = (
-        sum(path != first_edit for path in inspected) if first_edit else len(inspected)
-    )
     return {
         "iteration_count": sum(message.get("role") == "assistant" for message in messages),
+        "inspected_paths": list(inspected),
+        "edited_paths": list(edited),
+        "first_edit_path": first_edit,
+        "inspections_before_first_edit": len(inspected),
         "first_correct_target_inspection": "",
-        "first_correct_edit": first_edit,
-        "unrelated_inspections_before_first_correct_edit": unrelated_before,
+        "first_correct_edit": "",
+        "unrelated_inspections_before_first_correct_edit": None,
         "target_switches": target_switches,
         "reverted_edits": reverted,
         "failure_to_relevant_action_latency": None,

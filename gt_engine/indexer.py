@@ -1296,53 +1296,39 @@ def refresh_index_files(
         dir=database.parent, prefix=".graph.incremental.", suffix=".db", delete=False
     ) as handle:
         candidate = Path(handle.name)
+    with tempfile.NamedTemporaryFile(
+        dir=database.parent,
+        prefix=".graph.incremental.",
+        suffix=".files.json",
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    ) as handle:
+        json.dump(selected, handle, ensure_ascii=False, separators=(",", ":"))
+        batch_manifest = Path(handle.name)
     try:
         shutil.copyfile(database, candidate)
-        per_call_timeout = max(1.0, float(timeout) / (len(selected) + 1))
-        for relative in selected:
-            completed = subprocess.run(
-                [
-                    binary,
-                    "-root",
-                    str(root_path),
-                    "-output",
-                    str(candidate),
-                    "-file",
-                    relative,
-                    "-closure=false",
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=per_call_timeout,
-                check=False,
-            )
-            if completed.returncode:
-                return result(
-                    IndexBuildStatus.BUILD_FAILED,
-                    error_type=f"incremental_file:{completed.returncode}",
-                )
-        closure = subprocess.run(
+        completed = subprocess.run(
             [
                 binary,
                 "-root",
                 str(root_path),
                 "-output",
                 str(candidate),
-                "-rebuild-closure",
+                "-files-manifest",
+                str(batch_manifest),
             ],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=per_call_timeout,
+            timeout=max(1.0, float(timeout)),
             check=False,
         )
-        if closure.returncode:
+        if completed.returncode:
             return result(
                 IndexBuildStatus.BUILD_FAILED,
-                error_type=f"incremental_closure:{closure.returncode}",
+                error_type=f"incremental_batch:{completed.returncode}",
             )
         schema_valid, nodes, edges, fts, check = _graph_schema_receipt(candidate)
         if not schema_valid:
@@ -1397,3 +1383,4 @@ def refresh_index_files(
         return result(IndexBuildStatus.BUILD_FAILED, error_type=type(exc).__name__)
     finally:
         candidate.unlink(missing_ok=True)
+        batch_manifest.unlink(missing_ok=True)

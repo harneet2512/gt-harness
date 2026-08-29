@@ -187,11 +187,8 @@ class GraphLease:
             if self._supported_file_count
             else 1.0
         )
-        unsafe_operation = bool(self._operations & {"create", "delete", "rename"})
         if not self._adapter_can_incremental:
             return GraphRefreshMode.FULL, "language_adapter_not_incrementally_safe"
-        if unsafe_operation:
-            return GraphRefreshMode.FULL, "file_identity_change_requires_full_rebuild"
         if ratio > 0.20:
             return GraphRefreshMode.FULL, "dependency_closure_exceeds_20_percent"
         return GraphRefreshMode.INCREMENTAL, "bounded_modified_file_closure"
@@ -231,6 +228,7 @@ class GraphLease:
                     repository_revision,
                     attempt_mode.value,
                     *self.dirty_paths,
+                    *sorted(self._operations),
                 )
             ).encode("utf-8")
             build_identity = hashlib.sha256(identity_payload).hexdigest()

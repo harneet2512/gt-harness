@@ -28,6 +28,7 @@ from gt_engine.indexer import (
     IndexBuildReceipt,
     IndexBuildStatus,
     ensure_index_with_receipt,
+    graph_reverse_dependents,
     refresh_index_files,
 )
 from gt_engine.language_registry import is_indexable_source
@@ -286,6 +287,47 @@ class RepositorySession:
                 status="unexplained_graph_revision",
             )
             return False
+        prior_index = self.evidence.index
+        if prior_index is not None and not self.fresh:
+            # A dependency closure can only be computed from the authoritative
+            # generation. Never incrementally extend a stale or failed graph.
+            self._requires_full_rebuild = True
+        prior_graph_paths: list[str] = []
+        for path in selected_paths:
+            if self._target(str(path)) is None:
+                self.invalidate(source_revision=source_revision, status="unsafe_mirror_path")
+                return False
+            if self.mirrored_path_is_graph_input(str(path)):
+                normalized = str(path).replace("\\", "/")
+                if normalized.startswith(("/etc/nginx/", "/var/log/nginx/")):
+                    normalized = "__external__" + normalized
+                prior_graph_paths.append(normalized)
+        if (
+            prior_graph_paths
+            and prior_index is not None
+            and prior_index.graph_db
+            and self.fresh
+        ):
+            try:
+                reverse_dependents = graph_reverse_dependents(
+                    prior_index.graph_db,
+                    tuple(dict.fromkeys(prior_graph_paths)),
+                )
+            except Exception:  # noqa: BLE001 - unsafe closure requires full rebuild
+                self._requires_full_rebuild = True
+            else:
+                supported = max(0, int(prior_index.indexable_files))
+                if supported and len(reverse_dependents) / supported > 0.20:
+                    self._requires_full_rebuild = True
+                else:
+                    for dependent in reverse_dependents:
+                        target = self._target(dependent)
+                        if target is None or not self.mirrored_path_is_graph_input(dependent):
+                            self._requires_full_rebuild = True
+                            break
+                        self._pending_index_paths.add(
+                            str(dependent).replace("\\", "/")
+                        )
         for path in selected_paths:
             target = self._target(str(path))
             if target is None:
@@ -367,9 +409,11 @@ class RepositorySession:
             return self.evidence
         prior_index = self.evidence.index
         mode = "full"
+        attempted_incremental = False
         if prior_index is not None and prior_index.graph_db and not self._requires_full_rebuild:
             if self._pending_index_paths:
                 mode = "incremental"
+                attempted_incremental = True
                 index_receipt = refresh_index_files(
                     self.root,
                     prior_index.graph_db,
@@ -386,6 +430,16 @@ class RepositorySession:
                     source_revision=source_revision,
                     timeout=timeout,
                 )
+                if not evidence.intelligence_valid:
+                    mode = "incremental_then_full"
+                    evidence = inspect_repository(
+                        self.root,
+                        self.instruction,
+                        state_dir=self.state_dir,
+                        limit=limit,
+                        source_revision=source_revision,
+                        timeout=timeout,
+                    )
             else:
                 mode = "source_revision_only"
                 evidence = self.evidence
@@ -398,23 +452,29 @@ class RepositorySession:
                 source_revision=source_revision,
                 timeout=timeout,
             )
+        published = bool(
+            evidence.substrate_ready
+            and evidence.status == RepositoryIntelligenceStatus.HEALTHY_CURRENT.value
+            and source_revision
+            and evidence.index is not None
+            and evidence.index.graph_db
+            and evidence.index.source_revision == source_revision
+        )
         evidence = replace(
             evidence,
             source_revision=source_revision,
-            index_current=bool(evidence.substrate_ready and source_revision),
-            intelligence_valid=bool(
-                evidence.substrate_ready
-                and evidence.status == RepositoryIntelligenceStatus.HEALTHY_CURRENT.value
-                and source_revision
-            ),
+            index_current=published,
+            intelligence_valid=published,
         )
         self.source_revision = source_revision
-        self.indexed_source_revision = source_revision
-        self.fresh = evidence.intelligence_valid
+        if published:
+            self.indexed_source_revision = source_revision
+        self.fresh = published
         self.evidence = evidence
         self._query_cache.clear()
-        self._pending_index_paths.clear()
-        self._requires_full_rebuild = False
+        if published:
+            self._pending_index_paths.clear()
+            self._requires_full_rebuild = False
         self.refresh_log.append(
             {
                 "source_revision": source_revision,
@@ -422,6 +482,8 @@ class RepositorySession:
                 "available": evidence.available,
                 "status": evidence.status,
                 "mode": mode,
+                "attempted_incremental": attempted_incremental,
+                "published": published,
                 "elapsed_ms": (
                     float(evidence.index.elapsed_ms) if evidence.index is not None else 0.0
                 ),

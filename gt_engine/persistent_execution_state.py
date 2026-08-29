@@ -1160,6 +1160,7 @@ def build_bootstrap_messages(
     task: str,
     catalog: BootstrapCatalog,
     max_input_tokens: int = 2_000,
+    token_counter: Callable[[str], int] = _default_token_counter,
 ) -> list[dict[str, str]]:
     """Create a bounded one-call selection request using select_catalog."""
 
@@ -1168,13 +1169,25 @@ def build_bootstrap_messages(
             "id": item.item_id,
             "kind": item.kind.value,
             "label": item.label,
+            "path": item.path,
+            "symbol": item.symbol,
+            "relation": item.relation,
+            "anchors": list(item.anchors),
             "required": item.required,
+            "certified": item.certified,
+            "evidence_authority": item.evidence_authority.value,
+            "retrieval_rank": item.retrieval_rank,
+            "support_channels": list(item.support_channels),
+            "source_lines": [item.source_start_line, item.source_end_line],
+            "source_claim_id": item.source_claim_id,
+            "source_excerpt": item.source_excerpt,
         }
         for item in catalog.items
     ]
     system = (
         "You select an execution focus from repository-certified entities and explicitly "
-        "labeled hybrid-ranked candidates. Candidate relevance is not a requirement. "
+        "labeled hybrid-ranked inspection candidates. Ranking support authorizes inspection, "
+        "not an edit. Only certified identity or relation evidence authorizes an edit owner. "
         "You may order IDs but may not add facts, paths, symbols, or commands. "
         "Use the select_catalog tool only. It is not executed as a shell command."
     )
@@ -1201,24 +1214,20 @@ def build_bootstrap_messages(
 
     task_excerpt = _bounded(task, 1_200)
     user = render_user(compact_items, task_excerpt)
-    # Fixed byte ceiling is an independent transport bound, not a token estimate.
-    # One UTF-8 byte is a conservative upper bound on one provider token.  The
-    # byte ceiling therefore makes the declared input-token limit true even
-    # when the exact tokenizer is unavailable at catalog construction time.
-    byte_ceiling = max(1_024, int(max_input_tokens))
+    token_ceiling = max(256, int(max_input_tokens))
     selected_items = list(compact_items)
     task_limits = (1_200, 600, 300, 0)
     for task_limit in task_limits:
         candidate_task = task_excerpt[:task_limit]
         user = render_user(selected_items, candidate_task)
-        if len(system.encode("utf-8")) + len(user.encode("utf-8")) <= byte_ceiling:
+        if token_counter(system) + token_counter(user) <= token_ceiling:
             break
     else:
         candidate_task = task_excerpt[:300]
         while selected_items:
             selected_items.pop()
             user = render_user(selected_items, candidate_task)
-            if len(system.encode("utf-8")) + len(user.encode("utf-8")) <= byte_ceiling:
+            if token_counter(system) + token_counter(user) <= token_ceiling:
                 break
     return [
         {

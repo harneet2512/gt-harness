@@ -30,6 +30,8 @@ def _certified_claims(
         facts = delivery.get("facts") or ()
     elif delivery_kind == "semantic_evidence":
         facts = delivery.get("items") or ()
+    elif delivery_kind == "repository_context":
+        facts = delivery.get("facts") or ()
     else:
         return []
     repository_revision = str(delivery.get("source_revision") or "")
@@ -91,7 +93,7 @@ def _certified_claims(
                         "start_line": line,
                         "end_line": line,
                         "content_sha256": digest,
-                        "excerpt": "",
+                        "excerpt": str(fact.get("excerpt") or ""),
                     }
                 ],
                 "action": action,
@@ -190,6 +192,11 @@ def _graph_rows(central: dict[str, Any]) -> list[dict[str, Any]]:
     for receipt in session.get("refresh_log") or ():
         if not isinstance(receipt, dict):
             continue
+        mode = str(receipt.get("mode") or "")
+        if mode not in {"full", "incremental", "incremental_then_full"}:
+            continue
+        if receipt.get("published") is False:
+            continue
         rows.append(
             {
                 "kind": "refresh",
@@ -201,7 +208,7 @@ def _graph_rows(central: dict[str, Any]) -> list[dict[str, Any]]:
                 "success": str(receipt.get("status") or "")
                 not in {"failed", "error", "unavailable"},
                 "workspace_revision": str(receipt.get("workspace_revision") or ""),
-                "mode": str(receipt.get("mode") or "central_incremental"),
+                "mode": mode,
             }
         )
     return rows
@@ -217,7 +224,11 @@ def finalize_central_run_receipt(
 
     root = Path(logs_dir)
     central = _read_json(root / "central_receipt.json")
-    trajectory = _read_json(root / "miniswe_trajectory.json")
+    trajectory = (
+        _read_json(root / "gt-run.trajectory.json")
+        or _read_json(root / "miniswe_trajectory.json")
+        or _read_json(root / "trajectory.json")
+    )
     metrics = central.get("metrics") or {}
     finalizer.record_provider_usage(
         calls=int(metrics.get("api_calls", central.get("calls", 0)) or 0),
@@ -284,7 +295,11 @@ def finalize_central_run_receipt(
                     "repository_revision": str(delivery.get("source_revision") or source_revision),
                     "graph_revision": delivery_graph_revision,
                     "role": str(delivery.get("feature_id") or delivery_kind),
-                    "decision_boundary": str(delivery.get("decision_need_kind") or ""),
+                    "decision_boundary": str(
+                        delivery.get("decision_boundary")
+                        or delivery.get("decision_need_kind")
+                        or ""
+                    ),
                     "delivery_tokens": max(0, (len(visible_hex) // 2 + 3) // 4),
                     "resulting_agent_action": str(delivery.get("next_command") or ""),
                 }
@@ -328,12 +343,14 @@ def finalize_central_run_receipt(
                     if any(claim["role"] == "affected_test" for claim in claims)
                     else "inspection_files"
                 )
-                boundary = (
-                    "REPOSITORY_START"
-                    if int(delivery.get("call") or delivery.get("delivered_before_call") or 0)
-                    <= 1
-                    else "PRE_EDIT"
-                )
+                boundary = str(delivery.get("decision_boundary") or "")
+                if not boundary:
+                    boundary = (
+                        "REPOSITORY_START"
+                        if int(delivery.get("call") or delivery.get("delivered_before_call") or 0)
+                        <= 1
+                        else "PRE_EDIT"
+                    )
                 resulting_action = str(
                     delivery.get("semantic_use_action_id")
                     or delivery.get("next_command")
@@ -355,10 +372,20 @@ def finalize_central_run_receipt(
                         "reason": "exact bytes exposed",
                     },
                 ]
+                stage = "DELIVERED"
+                if action_consistent:
+                    transitions.append(
+                        {
+                            "from": "DELIVERED",
+                            "to": "CONSUMED",
+                            "reason": "resulting agent action consumed delivered evidence",
+                        }
+                    )
+                    stage = "CONSUMED"
                 lifecycle = {
                     "schema": "gt.feature_lifecycle.v2",
                     "feature_id": feature_id,
-                    "stage": "DELIVERED",
+                    "stage": stage,
                     "applicability": "APPLICABLE",
                     "certification": "CERTIFIED",
                     "delivery": "DELIVERED",

@@ -77,7 +77,8 @@ def test_cli_can_resolve_treatment_only_from_canonical_release_manifest(
         ]
     ) == 0
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["profile_id"] == "central_relational_v2"
+    assert payload["profile_id"] == "central_relational_v3"
+    assert payload["agent_kwargs"]["persistent_state_selection_mode"] == "generative"
     assert payload["agent_kwargs"]["enable_replay_capture"] is True
 
 

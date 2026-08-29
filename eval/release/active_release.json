@@ -1,10 +1,13 @@
 {
   "schema": "gt.release_manifest.v1",
-  "release_id": "gt-decision-value-reliability-2026-08-28-v34",
+  "release_id": "gt-decision-value-reliability-v3-repair-in-progress",
   "task_profile": "repair20-v1",
   "runtime_commit": "8e9cdf3e519f057ed3e8990348ae9abc05a46821",
-  "benchmark_authorized": true,
-  "authorization_blockers": [],
+  "benchmark_authorized": false,
+  "authorization_blockers": [
+    "central_relational_v3 deterministic gates have not been completed",
+    "runtime_commit must be pinned after verification"
+  ],
   "authorized_workflows": [
     "tb2_miniswe_central.yml",
     "deepswe_miniswe_central.yml"
@@ -18,8 +21,8 @@
     "sha256": "f75ebc8dd1eb25cb31cfa099b196d54346016b9f2de8e6f026e420cc213dd0bf"
   },
   "treatment": {
-    "path": "eval/treatments/tb2_central_relational_v2.json",
-    "sha256": "4ed36bb2d762d3d21a1a45bd4620306a0ac789ceb7fa503ffcf3d8e52a2f8056"
+    "path": "eval/treatments/tb2_central_relational_v3.json",
+    "sha256": "75513683e02edb0fc676fe388458a754011470f27259c211f97a48db885ab351"
   },
   "allowed_post_runtime_paths": [
     "eval/release/active_release.json",

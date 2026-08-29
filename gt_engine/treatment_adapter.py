@@ -163,8 +163,15 @@ class GroundTruthTreatmentAdapter:
             "source_sha",
             _require_sha40(self.source_sha, field="GroundTruth source SHA"),
         )
-        if self.profile_id not in {"central_pes_v1", "central_relational_v2"}:
-            raise ValueError("GroundTruth profile must be central_pes_v1 or central_relational_v2")
+        if self.profile_id not in {
+            "central_pes_v1",
+            "central_relational_v2",
+            "central_relational_v3",
+        }:
+            raise ValueError(
+                "GroundTruth profile must be central_pes_v1, "
+                "central_relational_v2, or central_relational_v3"
+            )
 
     def agent_kwargs(self) -> dict[str, Any]:
         kwargs = {

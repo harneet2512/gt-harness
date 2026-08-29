@@ -80,7 +80,7 @@ def test_paid_central_workflow_installs_and_proves_repository_runtime():
     assert result["provider_free_gate_uses_real_live_dense_asset"] is True
     assert result["provider_free_gate_covers_persistent_execution_state"] is True
     assert result["paid_persistent_state_contract_is_explicit"] is True
-    assert result["paid_persistent_selection_is_deterministic"] is True
+    assert result["paid_persistent_selection_is_graph_conditioned"] is True
     assert result["paid_retrieval_delivery_is_integrated"] is True
     assert result["persistent_state_is_graph_first_and_repeated"] is True
     assert result["provider_contributions_are_typed_and_accounted"] is True

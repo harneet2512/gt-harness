@@ -55,6 +55,11 @@ _PERSISTENT_NONE_FRAME_REASONS = frozenset(
         "bootstrap_not_applied",
     }
 )
+_RELATIONAL_PROFILES = frozenset({"central_relational_v2", "central_relational_v3"})
+
+
+def _is_relational_profile(receipt: dict[str, Any]) -> bool:
+    return str(receipt.get("treatment_profile") or "") in _RELATIONAL_PROFILES
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -173,7 +178,7 @@ def _substrate(receipt: dict[str, Any], label: str) -> ReleaseGateCheck:
             failures.append(f"{label}:repository_index_not_current")
         if evidence.get("intelligence_valid") is not True:
             failures.append(f"{label}:repository_evidence_invalid")
-        if str(receipt.get("treatment_profile") or "") == "central_relational_v2":
+        if _is_relational_profile(receipt):
             index = evidence.get("index") or {}
             sha = re.compile(r"[0-9a-f]{64}")
             graph_revision = str(index.get("graph_revision") or "")
@@ -264,7 +269,7 @@ def _dense(receipt: dict[str, Any], label: str) -> ReleaseGateCheck:
             failures.append(f"{label}:dense_backend_network_calls")
         if int(backend.get("provider_calls") or 0) != 0:
             failures.append(f"{label}:dense_backend_provider_calls")
-        if str(receipt.get("treatment_profile") or "") == "central_relational_v2":
+        if _is_relational_profile(receipt):
             expected = {
                 "backend": "snowflake_onnx",
                 "model_name": SNOWFLAKE_MODEL_NAME,
@@ -1036,7 +1041,7 @@ def _contribution_budget(receipt: dict[str, Any], label: str) -> ReleaseGateChec
 def _provider_value_contract(receipt: dict[str, Any], label: str) -> ReleaseGateCheck:
     """Fail closed when provider text lacks counterfactual information value."""
 
-    required = str(receipt.get("treatment_profile") or "") == "central_relational_v2"
+    required = _is_relational_profile(receipt)
     if not required:
         return ReleaseGateCheck(
             "provider_value_contract",
@@ -1286,7 +1291,7 @@ def _treatment_runtime_identity(
     contract = receipt.get("treatment_runtime_contract")
     failures: list[str] = []
     observed_profile = str(receipt.get("treatment_profile") or "")
-    if observed_profile != "central_relational_v2":
+    if observed_profile not in _RELATIONAL_PROFILES:
         failures.append(f"{label}:required_treatment_profile_mismatch")
     if not isinstance(contract, dict):
         failures.append(f"{label}:treatment_runtime_contract_missing")
@@ -1392,7 +1397,7 @@ def _outcome_preservation(receipt: dict[str, Any], label: str) -> ReleaseGateChe
     failures = list(
         f"{label}:{name}_disabled" for name in required if configuration.get(name) is not True
     )
-    if str(receipt.get("treatment_profile") or "") == "central_relational_v2":
+    if _is_relational_profile(receipt):
         epochs = (receipt.get("metrics") or {}).get("context_compaction_epochs") or ()
         if any(
             str(row.get("trigger_kind") or "") == "character_pressure"
@@ -1432,7 +1437,7 @@ def _outcome_preservation(receipt: dict[str, Any], label: str) -> ReleaseGateChe
 def _completion_integrity(receipt: dict[str, Any], label: str) -> ReleaseGateCheck:
     """Fail closed on partial, stale, or internally inconsistent auto-submit proof."""
 
-    if str(receipt.get("treatment_profile") or "") != "central_relational_v2":
+    if not _is_relational_profile(receipt):
         return ReleaseGateCheck(
             "completion_integrity",
             True,
@@ -1574,7 +1579,7 @@ def _project_validation(receipt: dict[str, Any], label: str) -> ReleaseGateCheck
         seen_revisions.add(revision)
         status = str(probe.get("status") or "")
         allowed_statuses = {"pass", "fail"}
-        if str(receipt.get("treatment_profile") or "") != "central_relational_v2":
+        if not _is_relational_profile(receipt):
             allowed_statuses.add("failed_open")
         if status not in allowed_statuses:
             failures.append(f"{label}:project_probe_status_invalid:{index}")
@@ -1610,7 +1615,7 @@ def _retrieval_efficiency(receipt: dict[str, Any], label: str) -> ReleaseGateChe
         reasons = set(row.get("reason_codes") or ())
         channels = row.get("channel_receipts") or []
         if (
-            str(receipt.get("treatment_profile") or "") == "central_relational_v2"
+            _is_relational_profile(receipt)
             and (receipt.get("repository_intelligence") or {}).get("denominator_excluded")
             is not True
             and channels
@@ -1721,7 +1726,7 @@ def _audit_treatment_runtime_requirements(
         if profile == "persistent_state_only"
         else _outcome_preservation(receipt, label)
     )
-    relational_profile = str(receipt.get("treatment_profile") or "") == "central_relational_v2"
+    relational_profile = _is_relational_profile(receipt)
     capability_checks: tuple[ReleaseGateCheck, ...] = (
         (
             _provider_route_integrity(receipt, label),
@@ -1798,7 +1803,7 @@ def _observed_execution_fact_accounting(
 
     section = receipt.get("observed_facts") or {}
     failures: list[str] = []
-    if str(receipt.get("treatment_profile") or "") == "central_relational_v2" and not _bool(
+    if _is_relational_profile(receipt) and not _bool(
         section.get("enabled")
     ):
         failures.append(f"{label}:observed_fact_surface_disabled")
@@ -1816,7 +1821,7 @@ def _observed_execution_fact_accounting(
 
 
 def _task_artifact_integrity(receipt: dict[str, Any], label: str) -> ReleaseGateCheck:
-    if str(receipt.get("treatment_profile") or "") != "central_relational_v2":
+    if not _is_relational_profile(receipt):
         return ReleaseGateCheck(
             "task_artifact_integrity",
             True,
@@ -1933,7 +1938,7 @@ def _mechanical_completeness_runtime(
 ) -> ReleaseGateCheck:
     """Require one passing live barrier for every executor provider call."""
 
-    if str(receipt.get("treatment_profile") or "") != "central_relational_v2":
+    if not _is_relational_profile(receipt):
         return ReleaseGateCheck(
             "mechanical_completeness_runtime",
             True,
@@ -2159,7 +2164,7 @@ def _task_execution_certificate(
 ) -> ReleaseGateCheck:
     """Verify the embedded certificate against independently recomputed state."""
 
-    if str(receipt.get("treatment_profile") or "") != "central_relational_v2":
+    if not _is_relational_profile(receipt):
         return ReleaseGateCheck(
             "task_execution_certificate",
             True,
@@ -2233,7 +2238,7 @@ def _replay_and_intervention_audit(
 ) -> ReleaseGateCheck:
     """Require exact replay and intervention joins for the final profile."""
 
-    if str(receipt.get("treatment_profile") or "") != "central_relational_v2":
+    if not _is_relational_profile(receipt):
         return ReleaseGateCheck(
             "replay_and_intervention_audit", True, (), {"task": label, "required": False}
         )
@@ -2278,7 +2283,7 @@ def _repository_context_integrated_consequence(
     relational = [
         receipt
         for receipt in receipts
-        if str(receipt.get("treatment_profile") or "") == "central_relational_v2"
+        if _is_relational_profile(receipt)
     ]
     applicable = [
         receipt
@@ -2381,8 +2386,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--static-evidence", type=Path, required=True)
     parser.add_argument(
         "--required-treatment-profile",
-        default="central_relational_v2",
-        choices=("central_pes_v1", "central_relational_v2"),
+        default="central_relational_v3",
+        choices=("central_pes_v1", "central_relational_v2", "central_relational_v3"),
     )
     parser.add_argument("--json", type=Path)
     args = parser.parse_args(argv)

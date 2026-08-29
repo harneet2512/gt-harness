@@ -858,11 +858,14 @@ def test_incremental_refresh_holds_publication_lock_across_build(tmp_path: Path,
     root.mkdir()
     source = root / "app.py"
     source.write_text("def value():\n    return 1\n", encoding="utf-8")
+    helper = root / "helper.py"
+    helper.write_text("def helper():\n    return 1\n", encoding="utf-8")
     initial = ensure_index_with_receipt(root, state_dir=state, source_revision="s1")
     assert initial.graph_db
     source.write_text("def value():\n    return 2\n", encoding="utf-8")
+    helper.write_text("def helper():\n    return 2\n", encoding="utf-8")
 
-    lock_state = {"depth": 0, "provider_runs": 0}
+    lock_state = {"depth": 0, "provider_runs": 0, "manifest_paths": []}
 
     @contextmanager
     def tracked_lock(_directory: Path, *, timeout: float = 30.0):
@@ -878,6 +881,9 @@ def test_incremental_refresh_holds_publication_lock_across_build(tmp_path: Path,
     def guarded_run(*args, **kwargs):
         assert lock_state["depth"] == 1
         lock_state["provider_runs"] += 1
+        command = list(args[0])
+        manifest = Path(command[command.index("-files-manifest") + 1])
+        lock_state["manifest_paths"] = json.loads(manifest.read_text(encoding="utf-8"))
         return original_run(*args, **kwargs)
 
     monkeypatch.setattr(indexer, "_graph_publication_lock", tracked_lock)
@@ -886,12 +892,60 @@ def test_incremental_refresh_holds_publication_lock_across_build(tmp_path: Path,
     refreshed = refresh_index_files(
         root,
         initial.graph_db,
-        ("app.py",),
+        ("app.py", "helper.py"),
         source_revision="s2",
     )
 
     assert refreshed.status is IndexBuildStatus.AVAILABLE
-    assert lock_state == {"depth": 0, "provider_runs": 2}
+    assert lock_state == {
+        "depth": 0,
+        "provider_runs": 1,
+        "manifest_paths": ["app.py", "helper.py"],
+    }
+
+
+def test_repository_session_reindexes_reverse_dependents_in_same_generation(tmp_path: Path):
+    mirror = tmp_path / "mirror"
+    state = tmp_path / "state"
+    mirror.mkdir()
+    (mirror / "app.py").write_text(
+        "def value():\n    return 1\n", encoding="utf-8"
+    )
+    (mirror / "caller.py").write_text(
+        "from app import value\n\ndef use():\n    return value()\n", encoding="utf-8"
+    )
+    for index in range(5):
+        (mirror / f"spare_{index}.py").write_text(
+            f"def spare_{index}():\n    return {index}\n", encoding="utf-8"
+        )
+    session = RepositorySession(
+        root=mirror,
+        state_dir=state,
+        instruction="Change value while preserving its callers.",
+    )
+    initial = session.refresh(source_revision="r1")
+    assert initial.intelligence_valid is True
+
+    transition = SimpleNamespace(
+        sensor_healthy=True,
+        deleted=(),
+        after_contents={"app.py": "def value():\n    return 2\n"},
+        changed_paths=("app.py",),
+    )
+    assert session.apply_transition(transition, source_revision="r2") is True
+    assert session._pending_index_paths == {"app.py", "caller.py"}
+    assert session._requires_full_rebuild is False
+
+    refreshed = session.refresh(source_revision="r2")
+    assert refreshed.intelligence_valid is True
+    assert refreshed.index is not None and refreshed.index.graph_db
+    manifest = json.loads(
+        Path(refreshed.index.graph_db).with_suffix(".manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["refresh_mode"] == "incremental"
+    assert manifest["changed_paths"] == ["app.py", "caller.py"]
 
 
 def test_repository_session_recovers_when_source_is_created_after_initial_empty_mirror(
@@ -1096,7 +1150,7 @@ def test_repository_session_rebuilds_resolution_after_metadata_change(
     mirror = tmp_path / "mirror"
     mirror.mkdir()
     (mirror / "app.py").write_text("x = 1\n", encoding="utf-8")
-    (mirror / "pyproject.toml").write_text("[project]\nname='one'\n", encoding="utf-8")
+    (mirror / "package.json").write_text('{"name":"one"}\n', encoding="utf-8")
     session = RepositorySession(
         root=mirror,
         state_dir=tmp_path / "state",
@@ -1105,17 +1159,17 @@ def test_repository_session_rebuilds_resolution_after_metadata_change(
     initial = session.refresh(source_revision="s1")
     assert initial.substrate_ready is True
     transition = SimpleNamespace(
-        changed_paths=("pyproject.toml",),
+        changed_paths=("package.json",),
         deleted=(),
-        before_contents={"pyproject.toml": "[project]\nname='one'\n"},
-        after_contents={"pyproject.toml": "[project]\nname='two'\n"},
+        before_contents={"package.json": '{"name":"one"}\n'},
+        after_contents={"package.json": '{"name":"two"}\n'},
         sensor_healthy=True,
     )
 
     advanced, refreshed = session.apply_transition_and_refresh(
         transition,
         source_revision="s2",
-        changed_paths=("pyproject.toml",),
+        changed_paths=("package.json",),
     )
 
     assert advanced is True
@@ -1352,6 +1406,48 @@ def test_transition_and_refresh_is_one_synchronous_session_operation(monkeypatch
     assert observed["timeout"] == 11.5
     assert evidence.status == RepositoryIntelligenceStatus.INDEX_UNAVAILABLE.value
     assert session.source_revision == "r1"
+
+
+def test_failed_refresh_retains_dirty_work_and_does_not_advance_index_revision(
+    monkeypatch, tmp_path
+):
+    session = RepositorySession(
+        root=tmp_path / "mirror",
+        state_dir=tmp_path / "state",
+        instruction="fix the bug",
+    )
+    session.root.mkdir(parents=True)
+    (session.root / "app.py").write_text(
+        "def value():\n    return 1\n", encoding="utf-8"
+    )
+    initial = session.refresh(source_revision="r1")
+    assert initial.intelligence_valid is True
+    transition = SimpleNamespace(
+        sensor_healthy=True,
+        deleted=(),
+        after_contents={"app.py": "def value():\n    return 2\n"},
+        changed_paths=("app.py",),
+    )
+    assert session.apply_transition(transition, source_revision="r2") is True
+
+    def failed_inspection(*args, **kwargs):
+        return RepositoryEvidence(
+            status=RepositoryIntelligenceStatus.INDEX_UNAVAILABLE.value,
+            source_revision="r2",
+            index_current=False,
+            intelligence_valid=False,
+            substrate_ready=False,
+        )
+
+    monkeypatch.setattr(
+        "gt_engine.repository_intelligence.inspect_repository", failed_inspection
+    )
+    failed = session.refresh(source_revision="r2")
+
+    assert failed.intelligence_valid is False
+    assert session.indexed_source_revision == "r1"
+    assert session._pending_index_paths == {"app.py"}
+    assert session.refresh_log[-1]["published"] is False
 
 
 def test_central_host_never_wraps_repository_refresh_in_an_abandonable_thread():

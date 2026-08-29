@@ -48,6 +48,7 @@ class FeatureStage(StrEnum):
     CANDIDATE = "CANDIDATE"
     CERTIFIED = "CERTIFIED"
     DELIVERED = "DELIVERED"
+    CONSUMED = "CONSUMED"
     VALIDATED = "VALIDATED"
     CONTRADICTED = "CONTRADICTED"
     ABSTAINED = "ABSTAINED"
@@ -372,6 +373,11 @@ class FeatureLifecycle:
             raise ValueError(
                 f"action consistency requires DELIVERED; found {self.stage.value}"
             )
+        self._move(
+            FeatureStage.DELIVERED,
+            FeatureStage.CONSUMED,
+            "resulting agent action consumed delivered evidence",
+        )
         self.resulting_agent_action = resulting_agent_action
         self.uptake = (
             FeatureUptake.ACTION_CONTRARY
@@ -382,12 +388,12 @@ class FeatureLifecycle:
     def validate(self, *, validation: str, contradicted: bool) -> None:
         if not validation:
             raise ValueError("validation or contradiction evidence is required")
-        if self.stage is not FeatureStage.DELIVERED:
+        if self.stage is not FeatureStage.CONSUMED:
             raise ValueError(
-                f"validation requires DELIVERED; found {self.stage.value}"
+                f"validation requires CONSUMED; found {self.stage.value}"
             )
         target = FeatureStage.CONTRADICTED if contradicted else FeatureStage.VALIDATED
-        self._move(FeatureStage.DELIVERED, target, validation)
+        self._move(FeatureStage.CONSUMED, target, validation)
         self.outcome = (
             FeatureOutcome.CONTRADICTED if contradicted else FeatureOutcome.VALIDATED
         )

@@ -88,7 +88,13 @@ class RepositoryIntelligenceService:
                 source_revision=request.graph_input_revision,
                 timeout=request.refresh_timeout,
             )
-            self._pending_refresh = False
+            self._pending_refresh = not bool(
+                evidence.substrate_ready
+                and evidence.index_current
+                and evidence.intelligence_valid
+                and self._session.indexed_source_revision
+                == request.graph_input_revision
+            )
             refreshed = True
         query_performed = bool(
             request.active_paths

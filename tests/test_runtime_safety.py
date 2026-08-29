@@ -48,6 +48,22 @@ def test_complete_mechanical_evidence_keeps_treatment_valid() -> None:
     assert assessment.reason_codes == ()
 
 
+def test_benchmark_mechanical_failure_blocks_provider_dispatch() -> None:
+    assessment = assess_provider_dispatch(
+        {
+            "schema": "gt.provider_mechanical_barrier.v2",
+            "call": 1,
+            "status": "BLOCKED",
+            "failures": ["graph_not_current"],
+        },
+        fail_closed=True,
+    )
+
+    assert assessment.dispatch_allowed is False
+    assert assessment.treatment_validity is TreatmentValidity.INVALID
+    assert assessment.reason_codes == ("graph_not_current",)
+
+
 def test_zero_denominator_is_not_measured_instead_of_perfect() -> None:
     measurement = measure_rate(0, 0)
 

@@ -80,3 +80,108 @@ def test_central_projection_preserves_graph_and_exact_delivery_identity(tmp_path
     assert lifecycle["claims"][0]["symbol_identity"] == (
         "python:src/identity.py:resolve_identity"
     )
+
+
+def test_central_projection_counts_only_graph_publications(tmp_path):
+    revision = "r" * 64
+    graph = "g" * 64
+    central = {
+        "source_revision": revision,
+        "metrics": {},
+        "repository_work_receipts": [
+            {
+                "kind": "initial_index",
+                "status": "source_backed",
+                "source_revision": revision,
+                "graph_revision": graph,
+            }
+        ],
+        "repository_session": {
+            "refresh_log": [
+                {"mode": "action_query", "source_revision": revision},
+                {"mode": "action_query_cache_hit", "source_revision": revision},
+                {"mode": "revision_cache_hit", "source_revision": revision},
+                {
+                    "mode": "incremental",
+                    "source_revision": revision,
+                    "graph_revision": "h" * 64,
+                    "status": "source_backed",
+                    "published": True,
+                },
+            ]
+        },
+    }
+    (tmp_path / "central_receipt.json").write_text(json.dumps(central), encoding="utf-8")
+    (tmp_path / "miniswe_trajectory.json").write_text(
+        json.dumps({"info": {"exit_status": "Submitted"}, "messages": []}),
+        encoding="utf-8",
+    )
+    finalizer = RunReceiptFinalizer(
+        tmp_path / "gt-run-receipt.json",
+        task_id="fixture",
+        requested_model="fixture/model",
+    )
+
+    receipt = finalize_central_run_receipt(finalizer, logs_dir=tmp_path)
+
+    assert receipt["graph_build_count"] == 1
+    assert receipt["graph_refresh_count"] == 1
+    assert [row["mode"] for row in receipt["graph_builds"]] == ["full", "incremental"]
+
+
+def test_repository_context_fact_is_certified_instead_of_posthoc_abstention(tmp_path):
+    visible = b"Current certified repository context:\n- Definition src/owner.py:3 owner"
+    revision = "r" * 64
+    graph = "g" * 64
+    central = {
+        "source_revision": revision,
+        "metrics": {},
+        "repository_work_receipts": [
+            {
+                "kind": "initial_index",
+                "status": "source_backed",
+                "source_revision": revision,
+                "graph_revision": graph,
+            }
+        ],
+        "source_file_digests": {"src/owner.py": "c" * 64},
+        "repository_context": {
+            "deliveries": [
+                {
+                    "delivery_id": "repository-context-1",
+                    "source_revision": revision,
+                    "graph_revision": graph,
+                    "decision_boundary": "PRE_EDIT",
+                    "model_visible_bytes_hex": visible.hex(),
+                    "model_visible_bytes_sha256": hashlib.sha256(visible).hexdigest(),
+                    "facts": [
+                        {
+                            "kind": "definition",
+                            "path": "src/owner.py",
+                            "line": 3,
+                            "symbol": "owner",
+                            "language": "python",
+                            "content_sha256": "c" * 64,
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    (tmp_path / "central_receipt.json").write_text(json.dumps(central), encoding="utf-8")
+    (tmp_path / "miniswe_trajectory.json").write_text(
+        json.dumps({"info": {"exit_status": "Submitted"}, "messages": []}),
+        encoding="utf-8",
+    )
+    finalizer = RunReceiptFinalizer(
+        tmp_path / "gt-run-receipt.json",
+        task_id="fixture",
+        requested_model="fixture/model",
+    )
+
+    receipt = finalize_central_run_receipt(finalizer, logs_dir=tmp_path)
+
+    lifecycle = receipt["feature_lifecycle_transitions"][0]
+    assert lifecycle["stage"] == "DELIVERED"
+    assert lifecycle["decision_boundary"] == "PRE_EDIT"
+    assert lifecycle["claims"][0]["claim_id"].startswith("symbol:python")

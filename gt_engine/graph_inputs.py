@@ -6,41 +6,18 @@ from pathlib import PurePosixPath
 
 from gt_engine.language_registry import is_indexable_source
 
+# This set is deliberately limited to files read by the native indexer's
+# resolver passes.  Validation/build metadata is useful to the agent, but it
+# cannot participate in graph identity unless the graph builder consumes it.
+# Keeping that distinction prevents an unconsumed lockfile from making the
+# graph receipt and the source mirror disagree.
 GRAPH_METADATA_NAMES = frozenset(
     {
-        "build.gradle",
-        "build.gradle.kts",
-        "cargo.lock",
         "cargo.toml",
-        "cmakelists.txt",
-        "composer.json",
-        "composer.lock",
-        "configure.ac",
-        "gemfile",
-        "gemfile.lock",
         "go.mod",
-        "go.sum",
-        "go.work",
-        "go.work.sum",
-        "gradle.properties",
-        "makefile",
-        "meson.build",
-        "mix.exs",
-        "mix.lock",
-        "package-lock.json",
+        "jsconfig.json",
         "package.json",
-        "pnpm-lock.yaml",
-        "pom.xml",
-        "pyproject.toml",
-        "pytest.ini",
-        "requirements.txt",
-        "setup.cfg",
-        "setup.py",
-        "settings.gradle",
-        "settings.gradle.kts",
-        "tox.ini",
         "tsconfig.json",
-        "yarn.lock",
     }
 )
 
@@ -49,9 +26,7 @@ def is_graph_metadata(path: str) -> bool:
     """Return whether a file can alter parsing, imports, or validation discovery."""
 
     name = PurePosixPath(str(path or "").replace("\\", "/")).name.lower()
-    return name in GRAPH_METADATA_NAMES or (
-        name.startswith("requirements-") and name.endswith(".txt")
-    )
+    return name in GRAPH_METADATA_NAMES
 
 
 def is_graph_input(path: str, content: str | bytes | None = None) -> bool:

@@ -128,6 +128,7 @@ def audit() -> dict[str, bool]:
     workflows = tuple(path.read_text(encoding="utf-8") for path in workflow_paths)
     workflow = workflows[0]
     verification_workflow = workflows[1]
+    paid_workflow_contract = "\n".join(workflows)
     release_manifest = load_release_manifest(root=ROOT)
     treatment_descriptor = json.loads(release_manifest.treatment_path.read_text(encoding="utf-8"))
     treatment_runtime = treatment_descriptor.get("runtime_agent_kwargs") or {}
@@ -162,7 +163,7 @@ def audit() -> dict[str, bool]:
     component_result = audit_component_registry()
     deterministic_census_check = _product_mechanism_census(
         {
-            "treatment_profile": "central_relational_v2",
+            "treatment_profile": "central_relational_v3",
             "executor_calls": 1,
             "product_mechanism_census": {
                 "accounting_contract": "17_legacy_features_plus_1_persistent_state",
@@ -194,7 +195,7 @@ def audit() -> dict[str, bool]:
     )
     provider_value_check = _provider_value_contract(
         {
-            "treatment_profile": "central_relational_v2",
+            "treatment_profile": "central_relational_v3",
             "contribution_compiler": {
                 "schema": "gt.contribution_compiler.runtime.v2",
                 "provider_value_contract": "gt.provider_value.v1",
@@ -392,17 +393,17 @@ def audit() -> dict[str, bool]:
         ),
         "paid_persistent_state_contract_is_explicit": (
             central_uses_typed_treatment
-            and treatment_descriptor.get("profile_id") == "central_relational_v2"
+            and treatment_descriptor.get("profile_id") == "central_relational_v3"
             and treatment_runtime.get("persistent_state_bootstrap_timeout_sec") == 45
-            and treatment_runtime.get("persistent_state_bootstrap_input_tokens") == 2000
+            and treatment_runtime.get("persistent_state_bootstrap_input_tokens") == 8192
             and treatment_runtime.get("persistent_state_bootstrap_output_tokens") == 512
             and treatment_runtime.get("persistent_state_context_tokens") == 512
             and all(
-                marker in verification_workflow
+                marker in paid_workflow_contract
                 for marker in (
                     "--ak enable_persistent_execution_state=true",
                     "--ak persistent_state_bootstrap_timeout_sec=45",
-                    "--ak persistent_state_bootstrap_input_tokens=2000",
+                    "--ak persistent_state_bootstrap_input_tokens=8192",
                     "--ak persistent_state_bootstrap_output_tokens=512",
                     "--ak persistent_state_context_tokens=512",
                 )
@@ -486,11 +487,11 @@ def audit() -> dict[str, bool]:
             and "--ak enable_context_frontier=true" in verification_workflow
         ),
         "provider_information_value_contract_executes": provider_value_check.passed,
-        "paid_persistent_selection_is_deterministic": (
+        "paid_persistent_selection_is_graph_conditioned": (
             central_uses_typed_treatment
-            and treatment_runtime.get("persistent_state_selection_mode") == "deterministic_v1"
+            and treatment_runtime.get("persistent_state_selection_mode") == "generative"
             and 'persistent_state_selection_mode: str = "generative"' in source
-            and '"deterministic_v1"' in source
+            and "await self._run_persistent_state_bootstrap(" in run_source
         ),
         "paid_retrieval_delivery_is_integrated": (
             central_uses_typed_treatment
@@ -504,7 +505,7 @@ def audit() -> dict[str, bool]:
         )
         and "graph_gate_failures" in run_source
         and "graph_degraded_fallback" in run_source
-        and "graph_gate_blocked = False" in run_source,
+        and "mechanical_completeness_required" in run_source,
         "paid_deterministic_compaction_enabled": (
             treatment_runtime.get("enable_context_compaction") is True
             and "--ak enable_context_compaction=true" in verification_workflow

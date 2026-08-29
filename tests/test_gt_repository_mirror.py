@@ -27,8 +27,8 @@ def test_source_mirror_excludes_task_data_binaries_and_caches():
     plan = plan_source_mirror(snapshot)
 
     assert plan.paths == ("gpt2.c", "include/gpt2.h", "pyproject.toml")
-    assert plan.source_files == 2
-    assert plan.metadata_files == 1
+    assert plan.source_files == 3
+    assert plan.metadata_files == 0
     assert plan.total_bytes == 22_800
     assert plan.complete is True
     assert "gpt2-124M.ckpt" not in plan.paths
@@ -78,7 +78,8 @@ def test_multi_megabyte_authored_source_is_selected_for_archive_transfer():
     plan = plan_source_mirror(snapshot)
 
     assert plan.paths == ("large.py",)
-    assert plan.excluded_oversize == 1
+    assert plan.excluded_oversize == 0
+    assert plan.excluded_artifacts == 1
     assert plan.excluded_source_oversize == 0
     assert plan.complete is True
     assert plan.reason_codes == ()
@@ -178,7 +179,31 @@ def test_source_mirror_is_bound_to_exact_graph_receipt_entries():
     assert plan.paths == tuple(entry.path for entry in receipt.entries)
 
 
-def test_source_mirror_rejects_incomplete_graph_receipt():
+def test_unconsumed_lockfile_does_not_split_graph_and_mirror_identity():
+    snapshot = WorkspaceSnapshot(
+        revision="w1",
+        healthy=True,
+        entries={
+            "main.py": FileState(
+                "f", 10, "1", "1", "", content="value = 1\n"
+            ),
+            "package-lock.json": FileState(
+                "f", 300_000, "1", "1", "", digest="b" * 64
+            ),
+        },
+    )
+
+    receipt = graph_revision_receipt(snapshot)
+    plan = plan_source_mirror(snapshot, graph_revision=receipt)
+
+    assert receipt.source_paths == ("main.py",)
+    assert plan.paths == ("main.py",)
+    assert plan.selected_entries == receipt.entries
+    assert plan.complete is True
+    assert "graph_mirror_manifest_mismatch" not in plan.reason_codes
+
+
+def test_source_mirror_ignores_unconsumed_validation_metadata():
     snapshot = WorkspaceSnapshot(
         revision="w1",
         healthy=True,
@@ -188,6 +213,7 @@ def test_source_mirror_rejects_incomplete_graph_receipt():
 
     plan = plan_source_mirror(snapshot, graph_revision=receipt)
 
-    assert receipt.complete is False
-    assert plan.complete is False
-    assert "graph_revision_incomplete" in plan.reason_codes
+    assert receipt.complete is True
+    assert receipt.source_paths == ()
+    assert plan.complete is True
+    assert plan.paths == ()

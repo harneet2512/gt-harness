@@ -393,7 +393,7 @@ jobs:
                 --ak enable_decision_sufficiency=true
                 --ak enable_persistent_execution_state=true
                 --ak persistent_state_bootstrap_timeout_sec=45
-                --ak persistent_state_bootstrap_input_tokens=2000
+                --ak persistent_state_bootstrap_input_tokens=8192
                 --ak persistent_state_bootstrap_output_tokens=512
                 --ak persistent_state_context_tokens=512
                 --ak preemptive_retrieval_model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"
@@ -425,7 +425,7 @@ jobs:
                 --ak enable_decision_sufficiency=true
                 --ak enable_persistent_execution_state=true
                 --ak persistent_state_bootstrap_timeout_sec=45
-                --ak persistent_state_bootstrap_input_tokens=2000
+                --ak persistent_state_bootstrap_input_tokens=8192
                 --ak persistent_state_bootstrap_output_tokens=512
                 --ak persistent_state_context_tokens=512
                 --ak preemptive_retrieval_model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"

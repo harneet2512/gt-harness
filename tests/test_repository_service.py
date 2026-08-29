@@ -69,3 +69,34 @@ def test_service_coalesces_action_update_and_refreshes_at_decision_boundary():
     assert decision.refreshed is True
     assert decision.query_performed is True
     assert decision.graph_revision == "graph-r2"
+
+
+def test_service_keeps_refresh_pending_when_publication_fails():
+    session = _Session()
+    service = RepositoryIntelligenceService.open(session)  # type: ignore[arg-type]
+    service.record_action(RepositoryActionObservation(object(), "r2", ("src/a.py",)))
+
+    def failed_refresh(*, source_revision, timeout):
+        del timeout
+        session.calls.append("refresh")
+        session.evidence = replace(
+            session.evidence,
+            source_revision=source_revision,
+            substrate_ready=False,
+            index_current=False,
+            intelligence_valid=False,
+        )
+        return session.evidence
+
+    session.refresh = failed_refresh
+    decision = service.prepare(
+        RepositoryDecisionRequest(
+            boundary=DecisionBoundary.POST_EDIT_GRAPH_DELTA,
+            graph_input_revision="r2",
+            active_paths=("src/a.py",),
+        )
+    )
+
+    assert decision.refreshed is True
+    assert decision.query_performed is False
+    assert service.final_receipt()["pending_refresh"] is True

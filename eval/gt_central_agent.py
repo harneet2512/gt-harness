@@ -342,6 +342,17 @@ def _snapshot_content_sha256(snapshot: Any, path: str, *, cwd: str) -> str:
     return digest if len(digest) == 64 else ""
 
 
+def _repository_decision_boundary(opportunity_kind: str) -> str:
+    return {
+        "post_read_search": DecisionBoundary.PRE_EDIT.value,
+        "post_mutation": DecisionBoundary.POST_EDIT_GRAPH_DELTA.value,
+        "post_diagnostic": DecisionBoundary.FAILURE_OBSERVATION.value,
+        "post_validation": DecisionBoundary.VERIFICATION_SELECTION.value,
+        "post_submit": DecisionBoundary.PRE_SUBMIT.value,
+        "pre_submit": DecisionBoundary.PRE_SUBMIT.value,
+    }.get(str(opportunity_kind or ""), DecisionBoundary.REPOSITORY_START.value)
+
+
 _RED_TEST_TEST_ARTIFACT_RE = re.compile(
     r"(?i)(?:^|[._/-])(?:test|tests|verify|check)[A-Za-z0-9_.-]*"
     r"(?:\.(?:py|sh|rb|js|mjs|cjs|ts|go|c|cpp|rs|java|pl))?$"
@@ -1866,10 +1877,12 @@ class MiniSweCentralAgent(BaseAgent):
         if normalized_treatment_profile not in {
             "central_pes_v1",
             "central_relational_v2",
+            "central_relational_v3",
         }:
             raise ValueError(
                 "unknown GT treatment profile "
-                f"{treatment_profile!r}; expected central_pes_v1 or central_relational_v2"
+                f"{treatment_profile!r}; expected central_pes_v1, "
+                "central_relational_v2, or central_relational_v3"
             )
         self.treatment_profile = normalized_treatment_profile
         self.treatment_runtime_contract: dict[str, Any] | None = None
@@ -1924,13 +1937,17 @@ class MiniSweCentralAgent(BaseAgent):
         self.runtime_observation = (
             copy.deepcopy(runtime_observation) if isinstance(runtime_observation, dict) else None
         )
-        if self.treatment_profile == "central_relational_v2":
+        if self.treatment_profile in {"central_relational_v2", "central_relational_v3"}:
             # Relational v2 strengthens the canonical living state; it never
             # replaces the eighteenth product mechanism or creates a parallel
             # zero-bootstrap product identity.
             enable_persistent_execution_state = True
             enable_preemptive_retrieval = True
-            persistent_state_selection_mode = "deterministic_v1"
+            persistent_state_selection_mode = (
+                "generative"
+                if self.treatment_profile == "central_relational_v3"
+                else "deterministic_v1"
+            )
             retrieval_delivery_mode = "integrated_same_observation"
             if enable_relational_context is None:
                 enable_relational_context = True
@@ -3954,7 +3971,8 @@ class MiniSweCentralAgent(BaseAgent):
         model_call_contexts: list[dict[str, Any]] = []
         mechanical_provider_barriers: list[dict[str, Any]] = []
         mechanical_completeness_required = bool(
-            self.runtime_mode == "treatment" and self.treatment_profile == "central_relational_v2"
+            self.runtime_mode == "treatment"
+            and self.treatment_profile in {"central_relational_v2", "central_relational_v3"}
         )
         pending_guidance = ""
         pending_prepared_after_call = 0
@@ -4570,7 +4588,7 @@ class MiniSweCentralAgent(BaseAgent):
                 compaction_epoch_started = False
                 if (
                     self.enable_context_compaction
-                    and self.treatment_profile != "central_relational_v2"
+                    and self.treatment_profile not in {"central_relational_v2", "central_relational_v3"}
                 ):
                     raw_context_chars = sum(_message_context_chars(message) for message in messages)
                     checkpoint_exists = bool(provider_view_session.checkpoint_messages)
@@ -4690,7 +4708,7 @@ class MiniSweCentralAgent(BaseAgent):
                         max_tokens=self.persistent_state_context_tokens,
                         provider_messages=query_messages,
                         include_advisory_obligations=(
-                            self.treatment_profile != "central_relational_v2"
+                            self.treatment_profile not in {"central_relational_v2", "central_relational_v3"}
                         ),
                     )
                     if persistent_state_engine is not None
@@ -5176,7 +5194,7 @@ class MiniSweCentralAgent(BaseAgent):
                     )
                 if (
                     self.enable_relational_context
-                    and self.treatment_profile != "central_relational_v2"
+                    and self.treatment_profile not in {"central_relational_v2", "central_relational_v3"}
                     and retrieval_result is not None
                     and preemptive_repository is not None
                 ):
@@ -5236,7 +5254,7 @@ class MiniSweCentralAgent(BaseAgent):
                     )
                 if (
                     self.enable_semantic_evidence
-                    and self.treatment_profile != "central_relational_v2"
+                    and self.treatment_profile not in {"central_relational_v2", "central_relational_v3"}
                     and retrieval_opportunity_kind
                     in {
                         "post_read_search",
@@ -5274,7 +5292,7 @@ class MiniSweCentralAgent(BaseAgent):
                         }
                     )
                 if (
-                    self.treatment_profile == "central_relational_v2"
+                    self.treatment_profile in {"central_relational_v2", "central_relational_v3"}
                     and self.enable_relational_context
                     and self.enable_semantic_evidence
                     and preemptive_repository is not None
@@ -5434,7 +5452,7 @@ class MiniSweCentralAgent(BaseAgent):
                         ),
                     )
                 if (
-                    self.treatment_profile == "central_relational_v2"
+                    self.treatment_profile in {"central_relational_v2", "central_relational_v3"}
                     and repository_context_projection is not None
                     and repository_context_projection.status is RepositoryContextStatus.DELIVER
                 ):
@@ -6394,13 +6412,40 @@ class MiniSweCentralAgent(BaseAgent):
                     and repository_context_payload
                     and repository_context_projection is not None
                 ):
+                    repository_context_documents = {
+                        document.path: document
+                        for document in preemptive_repository.documents
+                    }
+
+                    def repository_context_digest(path: str) -> str:
+                        digest = _snapshot_content_sha256(snapshot, path, cwd=self.cwd)
+                        if digest:
+                            return digest
+                        document = repository_context_documents.get(path)
+                        return (
+                            hashlib.sha256(
+                                document.text.encode("utf-8", "surrogatepass")
+                            ).hexdigest()
+                            if document is not None
+                            else ""
+                        )
+
+                    def repository_context_excerpt(path: str) -> str:
+                        document = repository_context_documents.get(path)
+                        return str(document.text if document is not None else "")[:800]
+
                     repository_context_fact_rows: list[dict[str, Any]] = []
                     if repository_context_projection.semantic_evidence is not None:
                         repository_context_fact_rows.extend(
                             {
                                 "path": item.path,
+                                "line": item.line,
                                 "symbol": item.symbol,
                                 "kind": item.kind,
+                                "language": "",
+                                "relation": item.relation,
+                                "content_sha256": repository_context_digest(item.path),
+                                "excerpt": repository_context_excerpt(item.path),
                             }
                             for item in repository_context_projection.semantic_evidence.items
                         )
@@ -6410,13 +6455,25 @@ class MiniSweCentralAgent(BaseAgent):
                                 (
                                     {
                                         "path": step.source.path,
+                                        "line": step.source.line,
                                         "symbol": step.source.symbol,
                                         "kind": "execution_source",
+                                        "relation": "CALLS",
+                                        "content_sha256": repository_context_digest(
+                                            step.source.path
+                                        ),
+                                        "excerpt": repository_context_excerpt(step.source.path),
                                     },
                                     {
                                         "path": step.target.path,
+                                        "line": step.target.line,
                                         "symbol": step.target.symbol,
                                         "kind": "execution_target",
+                                        "relation": "CALLED_BY",
+                                        "content_sha256": repository_context_digest(
+                                            step.target.path
+                                        ),
+                                        "excerpt": repository_context_excerpt(step.target.path),
                                     },
                                 )
                             )
@@ -6425,29 +6482,47 @@ class MiniSweCentralAgent(BaseAgent):
                             (
                                 {
                                     "path": fact.source.path,
+                                    "line": fact.source.line,
                                     "symbol": fact.source.symbol,
                                     "kind": "impact_source",
+                                    "relation": fact.relation,
+                                    "content_sha256": repository_context_digest(
+                                        fact.source.path
+                                    ),
+                                    "excerpt": repository_context_excerpt(fact.source.path),
                                 },
                                 {
                                     "path": fact.target.path,
+                                    "line": fact.target.line,
                                     "symbol": fact.target.symbol,
                                     "kind": "impact_target",
+                                    "relation": fact.relation,
+                                    "content_sha256": repository_context_digest(
+                                        fact.target.path
+                                    ),
+                                    "excerpt": repository_context_excerpt(fact.target.path),
                                 },
                             )
                         )
                     repository_context_fact_rows.extend(
                         {
                             "path": fact.path,
+                            "line": fact.line,
                             "symbol": "",
                             "kind": "observed_diagnostic",
+                            "content_sha256": repository_context_digest(fact.path),
+                            "excerpt": repository_context_excerpt(fact.path),
                         }
                         for fact in repository_context_projection.diagnostic_facts
                     )
                     repository_context_fact_rows.extend(
                         {
                             "path": fact.impacted_path,
+                            "line": 0,
                             "symbol": "",
                             "kind": "validation_target",
+                            "content_sha256": repository_context_digest(fact.impacted_path),
+                            "excerpt": repository_context_excerpt(fact.impacted_path),
                         }
                         for fact in repository_context_projection.validation_facts
                     )
@@ -6455,8 +6530,15 @@ class MiniSweCentralAgent(BaseAgent):
                         repository_context_fact_rows.append(
                             {
                                 "path": convention.subject.path,
+                                "line": convention.subject.line,
                                 "symbol": convention.subject.symbol,
                                 "kind": "resolved_convention_subject",
+                                "content_sha256": repository_context_digest(
+                                    convention.subject.path
+                                ),
+                                "excerpt": repository_context_excerpt(
+                                    convention.subject.path
+                                ),
                             }
                         )
                         repository_context_fact_rows.extend(
@@ -6475,6 +6557,7 @@ class MiniSweCentralAgent(BaseAgent):
                         {
                             (
                                 str(row.get("path") or ""),
+                                int(row.get("line") or 0),
                                 str(row.get("symbol") or ""),
                                 str(row.get("kind") or ""),
                             ): row
@@ -6496,6 +6579,9 @@ class MiniSweCentralAgent(BaseAgent):
                         "call": calls,
                         "source_revision": graph_source_revision,
                         "graph_revision": repository_evidence.graph_revision,
+                        "decision_boundary": _repository_decision_boundary(
+                            retrieval_opportunity_kind
+                        ),
                         "claim_ids": list(repository_context_projection.claim_ids),
                         "evidence_action": retrieval_evidence_action,
                         "first_eligible_call": retrieval_eligible_call,
@@ -7172,21 +7258,33 @@ class MiniSweCentralAgent(BaseAgent):
                     provider_barrier = evaluate_provider_barrier_v2(barrier_inputs)
                     model_call_contexts[-1]["mechanical_completeness_barrier"] = provider_barrier
                     mechanical_provider_barriers.append(provider_barrier)
-                dispatch_assessment = assess_provider_dispatch(provider_barrier)
+                dispatch_assessment = assess_provider_dispatch(
+                    provider_barrier,
+                    fail_closed=bool(
+                        self.treatment_profile == "central_relational_v3"
+                        and (
+                            self.benchmark_identity is not None
+                            or self.treatment_runtime_contract is not None
+                        )
+                    ),
+                )
                 model_call_contexts[-1]["provider_dispatch_assessment"] = (
                     dispatch_assessment.as_dict()
                 )
                 if dispatch_assessment.reason_codes:
-                    # Mechanical completeness remains fail-closed evidence for
-                    # release and efficacy analysis.  It is not permission to
-                    # run the baseline solver: dispatch continues without
-                    # turning an optional GT failure into a task failure.
+                    # Historical/interactive profiles preserve fail-open
+                    # solving.  A benchmark-bound v3 treatment stops before
+                    # spending an executor call on an invalid GT state.
                     contribution_receipt["treatment_validity"] = (
                         dispatch_assessment.treatment_validity.value
                     )
                     contribution_receipt["treatment_invalid_reasons"] = list(
                         dispatch_assessment.reason_codes
                     )
+                if not dispatch_assessment.dispatch_allowed:
+                    terminal = "MechanicalCompletenessBlocked"
+                    solver_exhausted_reason = "mechanical_completeness_barrier"
+                    break
                 previous_provider_messages = [dict(item) for item in provider_messages]
                 try:
                     query_started_at = time.monotonic()
@@ -8024,7 +8122,7 @@ class MiniSweCentralAgent(BaseAgent):
                             self.preflight_mode is PreflightMode.ASSISTIVE_SAFE
                             or (
                                 self.runtime_mode == "treatment"
-                                and self.treatment_profile == "central_relational_v2"
+                                and self.treatment_profile in {"central_relational_v2", "central_relational_v3"}
                             )
                         )
                         if (
@@ -11841,7 +11939,7 @@ class MiniSweCentralAgent(BaseAgent):
                         "repository_context": {
                             "schema": "gt.repository_context_runtime.v1",
                             "enabled": bool(
-                                self.treatment_profile == "central_relational_v2"
+                                self.treatment_profile in {"central_relational_v2", "central_relational_v3"}
                                 and self.enable_relational_context
                                 and self.enable_semantic_evidence
                             ),
@@ -11933,7 +12031,7 @@ class MiniSweCentralAgent(BaseAgent):
             receipt_document["intervention_chain"] = intervention_chain_metadata
             if (
                 self.runtime_mode == "treatment"
-                and self.treatment_profile == "central_relational_v2"
+                and self.treatment_profile in {"central_relational_v2", "central_relational_v3"}
             ):
                 # Import lazily to keep the runtime implementation independent
                 # of CLI startup while still using the exact authoritative
