@@ -1,7 +1,9 @@
-"""Provider-free all-17 producer/consumer proof suite.
+"""Provider-free action-bound producer/consumer proof suite.
 
-One positive and one adversarial negative scenario per feature identity,
-plus the mandatory cross-feature scenarios.  Every positive scenario asserts:
+One positive and one adversarial negative scenario per action-bound feature
+identity, plus the mandatory cross-feature scenarios. The bootstrap-bound
+``select_catalog`` lifecycle is proved by the central-agent bootstrap suite,
+not fabricated by ``CentralFeatureRuntime``. Every positive scenario asserts:
 
 1. exact triggering event;
 2. grounded payload fields;
@@ -871,7 +873,7 @@ def test_cert_delivery_records_submission_readiness():
     )
 
 
-def test_all_17_positive_scenarios_cover_every_feature_id():
+def test_all_17_action_bound_positive_scenarios_cover_every_runtime_feature():
     runtime = CentralFeatureRuntime(model_visible=True)
     runtime.begin_task(
         "Run `pytest -q`.", revision=WR0, source_revision=SR0,
@@ -924,8 +926,10 @@ def test_all_17_positive_scenarios_cover_every_feature_id():
         for feature_id in CENTRAL_FEATURE_IDS
         if _feature_rows(summary, feature_id)
     }
-    assert produced == set(CENTRAL_FEATURE_IDS)
-    assert set(summary["consumer_paths"]) == set(CENTRAL_FEATURE_IDS)
+    action_bound_features = set(CENTRAL_FEATURE_IDS) - {"select_catalog"}
+    assert len(action_bound_features) == 17
+    assert produced == action_bound_features
+    assert set(summary["consumer_paths"]) == action_bound_features
 
 
 def test_identical_retrigger_does_not_duplicate_receipts():

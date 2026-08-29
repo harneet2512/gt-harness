@@ -478,7 +478,7 @@ def audit() -> dict[str, bool]:
             and "gt_engine/contributions.py" in provider_free_workflow
         ),
         "active_component_registry_is_complete": bool(component_result["ready"])
-        and int(component_result["feature_count"]) == 17
+        and int(component_result["feature_count"]) == 18
         and "tests/test_gt_component_registry.py" in provider_free_workflow,
         "provider_free_gate_covers_pinned_benchmark_languages": (
             "tests/test_gt_language_resolution.py" in provider_free_workflow

@@ -1002,6 +1002,7 @@ def test_task_start_receipts_complete_profile_two_control_activation(
         if row["event_type"] == "run.started"
     )
     payload = started["payload"]
+    assert payload["feature_count"] == 18
     assert payload["profile"] == "2"
     assert payload["missing_profile_controls"] == []
     assert payload["expected_profile_control_count"] == (
@@ -1496,7 +1497,7 @@ def test_submit_probe_quiet_on_clean_or_unedited(indexed_repo):
         row for row in b._attribution.rows
         if row["event_type"] == "run.feature_census"
     ]
-    assert len(census[-1]["payload"]["features"]) == 17
+    assert len(census[-1]["payload"]["features"]) == 18
     assert {
         item["feature_id"] for item in census[-1]["payload"]["features"]
     } == {
@@ -1505,6 +1506,7 @@ def test_submit_probe_quiet_on_clean_or_unedited(indexed_repo):
         "submit_refusal", "syntax_result", "GT_CERT_DELIVERY",
         "GT_CHANGE_SURFACE", "GT_EDIT_CHECK", "GT_HYPOTHESIS",
         "GT_LOC_RESLOT", "GT_PATCH_DELTA", "GT_SS_SUBMIT_RED",
+        "select_catalog",
     }
     b.edited_files.append("pkg/alpha.py")    # syntactically fine
     assert b.submit_probe() is None

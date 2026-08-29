@@ -4002,7 +4002,7 @@ class GTBridge:
                 {
                     "gt_enabled": True,
                     "graph_available": bool(self.graph_db),
-                    "feature_count": 17,
+                    "feature_count": 18,
                     "provider_final_receipts_required": True,
                     **profile_receipt,
                 },

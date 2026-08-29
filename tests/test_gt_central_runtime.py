@@ -2244,10 +2244,10 @@ def test_documented_direct_census_entrypoint_is_executable():
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "ALL_17_CONSUMER_PATHS_PROVEN" in completed.stdout
-    assert "ALL_17_TRIGGERS_PROVEN" in completed.stdout
-    assert "ALL_17_PAYLOADS_CONCRETE" in completed.stdout
-    assert "ALL_17_CONSUMERS_APPLIED" in completed.stdout
+    assert "ALL_18_CONSUMER_PATHS_PROVEN" in completed.stdout
+    assert "ALL_18_TRIGGERS_PROVEN" in completed.stdout
+    assert "ALL_18_PAYLOADS_CONCRETE" in completed.stdout
+    assert "ALL_18_CONSUMERS_APPLIED" in completed.stdout
     assert "ALL_VISIBLE_PAYLOADS_IN_FIRST_ELIGIBLE_REQUEST" in completed.stdout
     assert "NO_ACTIONS_BLOCKED" in completed.stdout
     assert "ALL_EFFECTS_CONTEXT_ACCOUNTED" in completed.stdout
