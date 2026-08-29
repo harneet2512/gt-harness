@@ -707,6 +707,19 @@ jobs:
             echo "OPENAI_BASE_URL=${PROVIDER_BASE_URL}" >> "$GITHUB_ENV"
             echo "OPENAI_API_KEY=${DEEPSEEK_API_KEY}" >> "$GITHUB_ENV"
           fi
+          provider_host="${PROVIDER_BASE_URL#https://}"
+          provider_host="${provider_host%%/*}"
+          case "${PROVIDER:-configured}" in
+            deepseek)
+              echo "GT_PROVIDER_ROUTE_ID=deepseek:native:${provider_host}" >> "$GITHUB_ENV"
+              ;;
+            openrouter)
+              echo "GT_PROVIDER_ROUTE_ID=openrouter:deepseek:only:no-fallback" >> "$GITHUB_ENV"
+              ;;
+            tokenrouter)
+              echo "GT_PROVIDER_ROUTE_ID=tokenrouter:exact-catalog:${provider_host}" >> "$GITHUB_ENV"
+              ;;
+          esac
       - name: Resolve exact DeepSWE task budget
         run: |
           set -euo pipefail
