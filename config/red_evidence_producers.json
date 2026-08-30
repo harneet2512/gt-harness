@@ -1,10 +1,110 @@
 {
   "canonical_library": "scripts/red_evidence.py",
+  "historical_producers": [
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/cha_rta_boundary_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "representative_replay"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/cha_rta_fixed_point_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/cha_rta_receiver_scope_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/cha_rta_root_completeness_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/cha_rta_root_policy_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/cha_rta_roots_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "9e89322e09c330cc94eca663f7f87b32760c5583",
+      "path": ".githooks/tests/vta_step5_candidate_proof_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "representative_replay"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_step5_closed_boundary_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_step5_evidence_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_step5_scope_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_step5_typed_fact_refs_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_step5_typed_facts_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_step5_typed_provenance_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    },
+    {
+      "repository": "harneet2512/groundtruth",
+      "commit": "7674304191f9f53bee9a3e0ce42033da7973e665",
+      "path": ".githooks/tests/vta_variable_flow_red.sh",
+      "status": "frozen_historical",
+      "replay_disposition": "inventory_only"
+    }
+  ],
   "historical_roots": [
     "tests/red_artifacts"
   ],
   "operative_producers": [
     ".github/workflows/red-evidence-integrity.yml"
   ],
-  "schema": "gt.red_evidence_producers.v1"
+  "schema": "gt.red_evidence_producers.v2"
 }

@@ -37,6 +37,8 @@ def _logical_text(raw: bytes) -> str:
 
 
 def _logical_path(raw_path: str, root: Path) -> str:
+    if not isinstance(raw_path, str) or not raw_path or "\0" in raw_path:
+        raise GoGrammarError("diagnostic_path_invalid")
     path = raw_path.replace("\\", "/")
     roots = {str(root.resolve()).replace("\\", "/"), root.resolve().as_posix()}
     for spelling in sorted(roots, key=len, reverse=True):
@@ -66,6 +68,10 @@ def canonicalize_go_red(
     """Parse one failing Go package without erasing diagnostic content."""
 
     resolved_root = Path(root)
+    if not isinstance(expected_source_path, str) or not expected_source_path:
+        raise GoGrammarError("invalid_expected_source_path")
+    if not isinstance(expected_diagnostic, str):
+        raise GoGrammarError("invalid_expected_diagnostic")
     try:
         expected_path = _logical_path(expected_source_path, resolved_root)
     except GoGrammarError as exc:
@@ -88,7 +94,7 @@ def canonicalize_go_red(
 
     for line_number, line in enumerate(lines, start=1):
         if not line:
-            continue
+            raise GoGrammarError(f"blank_line_not_permitted:{line_number}")
         if terminal_fail:
             raise GoGrammarError(f"output_after_terminal_fail:{line_number}")
         banner = BANNER.fullmatch(line)
@@ -162,12 +168,20 @@ def validate_canonical_body(
 ) -> tuple[str, tuple[str, ...]]:
     """Validate the sidecar grammar without reconstructing discarded raw summaries."""
 
+    if not isinstance(expected_source_path, str) or not expected_source_path:
+        raise GoGrammarError("canonical:invalid_expected_source_path")
+    if not isinstance(expected_diagnostic, str) or not expected_diagnostic:
+        raise GoGrammarError("canonical:invalid_expected_diagnostic")
+    if not isinstance(expected_match_count, int) or isinstance(expected_match_count, bool):
+        raise GoGrammarError("canonical:invalid_expected_match_count")
     if not body.endswith(b"\n") or b"\r" in body:
         raise GoGrammarError("canonical:invalid_line_endings")
     try:
         lines = body.decode("utf-8").splitlines()
     except UnicodeDecodeError as exc:
         raise GoGrammarError("invalid_utf8:canonical") from exc
+    if any(line == "" for line in lines):
+        raise GoGrammarError("canonical:blank_line_not_permitted")
     if len(lines) < 3 or BANNER.fullmatch(lines[0]) is None:
         raise GoGrammarError("canonical:invalid_banner")
     if lines.count(CANONICAL_OUTCOME) != 1 or lines[-1] != CANONICAL_OUTCOME:

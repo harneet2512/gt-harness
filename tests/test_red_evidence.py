@@ -152,6 +152,32 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
                 report = verify(root=root, evidence_dir=evidence, expected_receipt_sha256=original)
                 self.assertEqual(report["status"], "fail", name)
 
+    def test_malformed_nested_types_fail_closed_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(Path(directory), "root")
+            result = self._capture(root)
+            mutations = (
+                lambda row: row["matcher"].update(source_path=7),
+                lambda row: row["matcher"].update(substring=7),
+                lambda row: row["matcher"].update(expected_count="1"),
+                lambda row: row["diagnostic"].update(matched_diagnostics=7),
+                lambda row: row["command"].update(argv=[7]),
+                lambda row: row["runner"].update(image_label=7),
+            )
+            for index, mutate in enumerate(mutations):
+                with self.subTest(index=index):
+                    changed = copy.deepcopy(result.receipt)
+                    mutate(changed)
+                    changed["receipt_sha256"] = _receipt_sha256(changed)
+                    evidence = self._publish(root, result, f"nested-{index}")
+                    (evidence / "receipt.json").write_bytes(encode_receipt(changed))
+                    report = verify(
+                        root=root,
+                        evidence_dir=evidence,
+                        expected_receipt_sha256=result.receipt["receipt_sha256"],
+                    )
+                    self.assertEqual(report["status"], "fail")
+
     def test_duplicate_json_key_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(Path(directory), "root")
@@ -180,10 +206,12 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(CaptureError, "command_input_outside_root"):
                 capture(
                     root=root,
-                    sources=[SOURCE], fixtures=["fixture.py"],
+                    sources=[SOURCE],
+                    fixtures=["fixture.py"],
                     command=[sys.executable, "../outside.py"],
                     toolchain_command=[sys.executable, "--version"],
-                    expected_source_path=SOURCE, expected_diagnostic=EXPECTED,
+                    expected_source_path=SOURCE,
+                    expected_diagnostic=EXPECTED,
                 )
             link = root / "escape.py"
             try:
@@ -193,10 +221,12 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(CaptureError, "path_outside_root"):
                 capture(
                     root=root,
-                    sources=[SOURCE], fixtures=["escape.py"],
+                    sources=[SOURCE],
+                    fixtures=["escape.py"],
                     command=[sys.executable, "fixture.py"],
                     toolchain_command=[sys.executable, "--version"],
-                    expected_source_path=SOURCE, expected_diagnostic=EXPECTED,
+                    expected_source_path=SOURCE,
+                    expected_diagnostic=EXPECTED,
                 )
 
     def test_atomic_directory_is_fresh_and_preserves_prior_bytes(self) -> None:
@@ -219,21 +249,45 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
             root = self._root(Path(directory), "root")
             evidence = Path(directory) / "artifact"
             base = [
-                sys.executable, str(cli), "capture", "--root", str(root),
-                "--source", SOURCE, "--fixture", "fixture.py",
-                "--command-json", json.dumps([sys.executable, "fixture.py"]),
-                "--toolchain-command-json", json.dumps([sys.executable, "--version"]),
-                "--expected-source-path", SOURCE, "--expected-diagnostic", EXPECTED,
-                "--evidence-dir", str(evidence),
+                sys.executable,
+                str(cli),
+                "capture",
+                "--root",
+                str(root),
+                "--source",
+                SOURCE,
+                "--fixture",
+                "fixture.py",
+                "--command-json",
+                json.dumps([sys.executable, "fixture.py"]),
+                "--toolchain-command-json",
+                json.dumps([sys.executable, "--version"]),
+                "--expected-source-path",
+                SOURCE,
+                "--expected-diagnostic",
+                EXPECTED,
+                "--evidence-dir",
+                str(evidence),
             ]
             captured = subprocess.run(base, capture_output=True, text=True, check=False)
             self.assertEqual(captured.returncode, 0, captured.stderr)
             digest = json.loads(captured.stdout)["receipt_sha256"]
             verified = subprocess.run(
-                [sys.executable, str(cli), "verify", "--root", str(root),
-                 "--evidence-dir", str(evidence), "--expected-receipt-sha256", digest,
-                 "--replay"],
-                capture_output=True, text=True, check=False,
+                [
+                    sys.executable,
+                    str(cli),
+                    "verify",
+                    "--root",
+                    str(root),
+                    "--evidence-dir",
+                    str(evidence),
+                    "--expected-receipt-sha256",
+                    digest,
+                    "--replay",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             self.assertEqual(verified.returncode, 0, verified.stdout)
 

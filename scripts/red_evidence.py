@@ -508,10 +508,14 @@ def _validate_receipt(
         if receipt.get(field) != expected:
             errors.append(f"unexpected_{field}")
     environment = receipt.get("environment")
-    environment_keys = set(FIXED_ENVIRONMENT) | set(WORK_ENVIRONMENT_KEYS) | {
-        *SYSTEM_ENVIRONMENT_KEYS,
-        "PATH",
-    }
+    environment_keys = (
+        set(FIXED_ENVIRONMENT)
+        | set(WORK_ENVIRONMENT_KEYS)
+        | {
+            *SYSTEM_ENVIRONMENT_KEYS,
+            "PATH",
+        }
+    )
     if not isinstance(environment, dict) or set(environment) != environment_keys:
         errors.append("environment:invalid")
     else:
@@ -523,8 +527,7 @@ def _validate_receipt(
         if environment.get("PATH") != "<RESOLVED_TOOL_DIRS>":
             errors.append("environment:invalid_path")
         if any(
-            environment.get(key) not in {"", "<SYSTEM_ROOT>"}
-            for key in SYSTEM_ENVIRONMENT_KEYS
+            environment.get(key) not in {"", "<SYSTEM_ROOT>"} for key in SYSTEM_ENVIRONMENT_KEYS
         ):
             errors.append("environment:invalid_system_path")
     runner = receipt.get("runner")
@@ -552,18 +555,19 @@ def _validate_receipt(
     if source_paths & fixture_paths:
         errors.append("source_fixture_overlap")
     matcher = receipt.get("matcher")
-    if (
-        not isinstance(matcher, dict)
-        or set(matcher) != {"source_path", "substring", "expected_count"}
-        or not isinstance(matcher.get("source_path"), str)
-        or matcher.get("source_path") not in source_paths
-        or not isinstance(matcher.get("substring"), str)
-        or not matcher.get("substring")
-        or _invalid_string(matcher.get("substring"))
-        or not isinstance(matcher.get("expected_count"), int)
-        or isinstance(matcher.get("expected_count"), bool)
-        or matcher.get("expected_count", 0) < 1
-    ):
+    matcher_valid = (
+        isinstance(matcher, dict)
+        and set(matcher) == {"source_path", "substring", "expected_count"}
+        and isinstance(matcher.get("source_path"), str)
+        and matcher.get("source_path") in source_paths
+        and isinstance(matcher.get("substring"), str)
+        and bool(matcher.get("substring"))
+        and not _invalid_string(matcher.get("substring"))
+        and isinstance(matcher.get("expected_count"), int)
+        and not isinstance(matcher.get("expected_count"), bool)
+        and matcher.get("expected_count", 0) >= 1
+    )
+    if not matcher_valid:
         errors.append("matcher:invalid")
 
     command = receipt.get("command")
@@ -635,25 +639,23 @@ def _validate_receipt(
             errors.append("diagnostic_hash_mismatch")
         if diagnostic.get("size") != len(canonical_bytes):
             errors.append("diagnostic_size_mismatch")
-        matcher_source = matcher.get("source_path", "") if isinstance(matcher, dict) else ""
-        matcher_text = matcher.get("substring", "") if isinstance(matcher, dict) else ""
-        matcher_count = matcher.get("expected_count", 0) if isinstance(matcher, dict) else 0
-        try:
-            banner, matched = validate_canonical_body(
-                canonical_bytes,
-                expected_source_path=matcher_source,
-                expected_diagnostic=matcher_text,
-                expected_match_count=matcher_count,
-            )
-        except GoGrammarError as exc:
-            errors.append(str(exc))
-        else:
-            if diagnostic.get("package_banner") != banner:
-                errors.append("diagnostic_package_mismatch")
-            if diagnostic.get("package_outcome") != "build_failed":
-                errors.append("diagnostic_outcome_mismatch")
-            if diagnostic.get("matched_diagnostics") != list(matched):
-                errors.append("diagnostic_match_mismatch")
+        if matcher_valid:
+            try:
+                banner, matched = validate_canonical_body(
+                    canonical_bytes,
+                    expected_source_path=matcher["source_path"],
+                    expected_diagnostic=matcher["substring"],
+                    expected_match_count=matcher["expected_count"],
+                )
+            except (GoGrammarError, TypeError, AttributeError) as exc:
+                errors.append(str(exc))
+            else:
+                if diagnostic.get("package_banner") != banner:
+                    errors.append("diagnostic_package_mismatch")
+                if diagnostic.get("package_outcome") != "build_failed":
+                    errors.append("diagnostic_outcome_mismatch")
+                if diagnostic.get("matched_diagnostics") != list(matched):
+                    errors.append("diagnostic_match_mismatch")
 
 
 def _report(errors: Sequence[str], receipt_sha256: str | None = None) -> dict[str, Any]:
@@ -733,7 +735,7 @@ def verify(
                 expected_diagnostic=matcher["substring"],
                 expected_match_count=matcher["expected_count"],
             )
-        except (GoGrammarError, TypeError) as exc:
+        except (GoGrammarError, TypeError, AttributeError) as exc:
             errors.append(f"raw_output:{exc}")
         else:
             if raw_parse.body != canonical_bytes:

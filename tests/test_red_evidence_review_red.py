@@ -40,8 +40,7 @@ def test_preserves_banner_column_tab_and_diagnostic_duration(tmp_path: Path) -> 
     second = _parse(_raw("undefined: VTAFlowProof after 99s", separator=" "), tmp_path)
     assert first.body != second.body
     assert first.body.startswith(
-        b"# example.invalid/redfixture [example.invalid/redfixture.test]\n"
-        b"./proof_red_test.go:6:6:"
+        b"# example.invalid/redfixture [example.invalid/redfixture.test]\n./proof_red_test.go:6:6:"
     )
 
 
@@ -68,19 +67,27 @@ def test_root_metacharacters_are_normalized_only_in_path_token(tmp_path: Path) -
     [
         (_raw() + b"\xff", "invalid_utf8"),
         (_raw().replace(b"FAIL\n", b"", 1), "missing_terminal_fail"),
-        (_raw().replace(b"FAIL\texample.invalid/redfixture [build failed]\n", b""),
-         "unexpected_terminal_fail"),
-        (_raw().replace(b"FAIL\n", b"PASS\n"), "unrecognized_output_line"),
-        (_raw().replace(b"FAIL\n", b"ok\texample.invalid/redfixture\n"),
-         "unrecognized_output_line"),
-        (_raw().replace(b"FAIL\n", b"unknown output\nFAIL\n"), "unrecognized_output_line"),
-        (_raw().replace(
-            b"# example.invalid/redfixture [example.invalid/redfixture.test]\n",
-            b"# example.invalid/redfixture [example.invalid/redfixture.test]\n# second\n",
+        (
+            _raw().replace(b"FAIL\texample.invalid/redfixture [build failed]\n", b""),
+            "unexpected_terminal_fail",
         ),
-         "multiple_package_banners"),
-        (_raw().replace(b"FAIL\n", b"FAIL\texample.invalid/redfixture [build failed]\nFAIL\n"),
-         "multiple_package_outcomes"),
+        (_raw().replace(b"FAIL\n", b"PASS\n"), "unrecognized_output_line"),
+        (
+            _raw().replace(b"FAIL\n", b"ok\texample.invalid/redfixture\n"),
+            "unrecognized_output_line",
+        ),
+        (_raw().replace(b"FAIL\n", b"unknown output\nFAIL\n"), "unrecognized_output_line"),
+        (
+            _raw().replace(
+                b"# example.invalid/redfixture [example.invalid/redfixture.test]\n",
+                b"# example.invalid/redfixture [example.invalid/redfixture.test]\n# second\n",
+            ),
+            "multiple_package_banners",
+        ),
+        (
+            _raw().replace(b"FAIL\n", b"FAIL\texample.invalid/redfixture [build failed]\nFAIL\n"),
+            "multiple_package_outcomes",
+        ),
     ],
 )
 def test_closed_grammar_rejects_unknown_success_and_duplicate_states(
@@ -101,3 +108,9 @@ def test_matcher_requires_declared_path_substring_and_exact_count(tmp_path: Path
     with pytest.raises(GoGrammarError, match="expected_diagnostic_match_count:2:1"):
         _parse(duplicate, tmp_path)
     assert len(_parse(duplicate, tmp_path, count=2).matched_diagnostics) == 2
+
+
+@pytest.mark.parametrize("raw", [_raw().replace(b"\n", b"\n\n", 1), _raw() + b"\n"])
+def test_blank_lines_are_not_silently_discarded(tmp_path: Path, raw: bytes) -> None:
+    with pytest.raises(GoGrammarError, match="blank_line_not_permitted"):
+        _parse(raw, tmp_path)

@@ -22,6 +22,13 @@ def test_repository_producer_inventory_routes_through_canonical_cli() -> None:
 
     assert report["status"] == "pass"
     assert report["operative_producers"] == [".github/workflows/red-evidence-integrity.yml"]
+    historical = report["historical_producers"]
+    assert len(historical) == 14
+    assert {item["status"] for item in historical} == {"frozen_historical"}
+    assert {item["replay_disposition"] for item in historical} == {
+        "inventory_only",
+        "representative_replay",
+    }
 
 
 def test_producer_guard_rejects_bypass_and_unregistered_red_workflow(tmp_path: Path) -> None:
@@ -50,6 +57,14 @@ def test_producer_guard_rejects_bypass_and_unregistered_red_workflow(tmp_path: P
     _write(tmp_path / ".github" / "workflows" / "rogue-red.yml", "name: rogue\n")
     inventory = validate(tmp_path)
     assert "operative_producers:inventory_mismatch" in inventory["errors"]
+
+    (tmp_path / ".github" / "workflows" / "rogue-red.yml").unlink()
+    (tmp_path / ".github" / "workflows" / "alternate-name.yml").write_text(
+        "name: decoy\nrun: scripts/red_evidence.py capture --evidence-dir x\n",
+        encoding="utf-8",
+    )
+    alternate = validate(tmp_path)
+    assert "operative_producers:inventory_mismatch" in alternate["errors"]
 
 
 def test_cross_runner_compare_binds_body_and_toolchain(tmp_path: Path) -> None:

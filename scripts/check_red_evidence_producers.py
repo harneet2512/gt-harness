@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "gt.red_evidence_producer_check.v1"
-MANIFEST_SCHEMA = "gt.red_evidence_producers.v1"
+MANIFEST_SCHEMA = "gt.red_evidence_producers.v2"
 REQUIRED_TOKENS = (
     "scripts/red_evidence.py capture",
     "--evidence-dir",
@@ -48,6 +48,7 @@ def validate(root: str | Path) -> dict[str, Any]:
         "canonical_library",
         "operative_producers",
         "historical_roots",
+        "historical_producers",
     }:
         errors.append("manifest:invalid_schema")
         manifest = {}
@@ -81,13 +82,61 @@ def validate(root: str | Path) -> dict[str, Any]:
         for token in FORBIDDEN_TOKENS:
             if token.lower() in padded:
                 errors.append(f"operative:private_normalizer:{logical}:{token.strip()}")
-    discovered = sorted(
-        path.relative_to(resolved).as_posix()
-        for path in (resolved / ".github" / "workflows").glob("*red*.yml")
-        if path.is_file()
-    )
+    workflows = resolved / ".github" / "workflows"
+    discovered: list[str] = []
+    if workflows.is_dir():
+        for path in sorted(workflows.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in {".yml", ".yaml", ".sh"}:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                errors.append(f"discovery:unreadable:{path.relative_to(resolved).as_posix()}")
+                continue
+            logical = path.relative_to(resolved).as_posix()
+            if (
+                "red" in path.name.lower()
+                or "scripts/red_evidence.py" in text
+                or "gt.red_evidence" in text
+                or "RED evidence" in text
+            ):
+                discovered.append(logical)
+    discovered.sort()
     if discovered != operative:
         errors.append("operative_producers:inventory_mismatch")
+    historical_producers = manifest.get("historical_producers")
+    expected_historical_paths = {
+        ".githooks/tests/cha_rta_boundary_red.sh",
+        ".githooks/tests/cha_rta_fixed_point_red.sh",
+        ".githooks/tests/cha_rta_receiver_scope_red.sh",
+        ".githooks/tests/cha_rta_root_completeness_red.sh",
+        ".githooks/tests/cha_rta_root_policy_red.sh",
+        ".githooks/tests/cha_rta_roots_red.sh",
+        ".githooks/tests/vta_step5_candidate_proof_red.sh",
+        ".githooks/tests/vta_step5_closed_boundary_red.sh",
+        ".githooks/tests/vta_step5_evidence_red.sh",
+        ".githooks/tests/vta_step5_scope_red.sh",
+        ".githooks/tests/vta_step5_typed_fact_refs_red.sh",
+        ".githooks/tests/vta_step5_typed_facts_red.sh",
+        ".githooks/tests/vta_step5_typed_provenance_red.sh",
+        ".githooks/tests/vta_variable_flow_red.sh",
+    }
+    if (
+        not isinstance(historical_producers, list)
+        or len(historical_producers) != len(expected_historical_paths)
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"repository", "commit", "path", "status", "replay_disposition"}
+            or item.get("repository") != "harneet2512/groundtruth"
+            or item.get("status") != "frozen_historical"
+            or item.get("path") not in expected_historical_paths
+            or not re.fullmatch(r"[0-9a-f]{40}", item.get("commit", ""))
+            or item.get("replay_disposition") not in {"inventory_only", "representative_replay"}
+            for item in (historical_producers or [])
+        )
+        or {item.get("path") for item in (historical_producers or [])} != expected_historical_paths
+    ):
+        errors.append("historical_producers:invalid")
     historical = manifest.get("historical_roots")
     if (
         not isinstance(historical, list)
@@ -107,6 +156,9 @@ def validate(root: str | Path) -> dict[str, Any]:
         "canonical_library": canonical,
         "operative_producers": operative,
         "historical_roots": historical,
+        "historical_producers": (
+            historical_producers if isinstance(historical_producers, list) else []
+        ),
     }
 
 
