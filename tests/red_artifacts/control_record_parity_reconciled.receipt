@@ -1,6 +1,6 @@
 format=gt.parity-reconciliation.v1
 unit=minimal-existing-record-id-idempotency-fd021-parity
-parent_sha=ae8b0d86ce17b1c5373444bb821e904227cb35c5
+parent_sha=fe089deff1bd82a8fc01efea56a4c12dce1dc842
 fixture_path=tests/red_artifacts/run_control_record_parity_reconciled.py
 fixture_sha256=9d2346f167900a3e1f20a354312377a988a6e94164610134052bfecb1bda932a
 command=python tests/red_artifacts/run_control_record_parity_reconciled.py
