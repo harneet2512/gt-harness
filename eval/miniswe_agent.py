@@ -99,11 +99,12 @@ class MiniSweAgent(BaseInstalledAgent):
     @staticmethod
     def _gt_binary_host() -> Path:
         override = os.environ.get("GT_INDEX_BINARY_HOST", "")
-        path = Path(override) if override else _VENDOR_DIR / "gt-index-linux-amd64"
+        path = Path(override) if override else Path(os.environ.get("GT_INDEX_BINARY", ""))
         if not path.is_file():
             raise FileNotFoundError(
-                f"Mini-SWE treatment bundle needs a Linux gt-index binary at "
-                f"{path} (or set GT_INDEX_BINARY_HOST)"
+                f"Mini-SWE treatment bundle needs the pinned external Linux "
+                f"gt-index binary at {path} (set GT_INDEX_BINARY_HOST or run "
+                "scripts/build_external_gt_index.sh)"
             )
         return path
 

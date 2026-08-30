@@ -85,11 +85,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Checkout pinned Groundtruth producer
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/groundtruth
+          ref: 4967e0080cef47f614b1761a3152b784c0355a30
+          path: .gt-index-source
+
       - name: Set up Go (for gt-index)
         uses: actions/setup-go@v5
         with:
-          go-version-file: vendor/gt-index-src/go.mod
-          cache-dependency-path: vendor/gt-index-src/go.sum
+          go-version-file: .gt-index-source/gt-index/go.mod
+          cache-dependency-path: .gt-index-source/gt-index/go.sum
 
       # CGO (mattn/go-sqlite3) + `-tags sqlite_fts5` is MANDATORY: without the
       # tag the FTS tables are silently compiled out and GT's search legs
@@ -97,27 +104,20 @@ jobs:
       # Static link first (swebench images are glibc Ubuntu, but static keeps
       # the binary image-agnostic); fall back to dynamic with a warning.
       - name: Build gt-index (linux-amd64, CGO + sqlite_fts5)
-        working-directory: vendor/gt-index-src
         run: |
-          set -uo pipefail
-          export CGO_ENABLED=1
-          if go build -tags sqlite_fts5 \
-               -ldflags '-linkmode external -extldflags "-static"' \
-               -o ../gt-index-linux-amd64 ./cmd/gt-index/; then
-            echo "static build ok"
-          else
-            echo "::warning::static link failed; falling back to a dynamically linked gt-index (will not run on musl/alpine task images)"
-            go build -tags sqlite_fts5 -o ../gt-index-linux-amd64 ./cmd/gt-index/
-          fi
-          file ../gt-index-linux-amd64 || true
-          ldd ../gt-index-linux-amd64 || true
+          set -euo pipefail
+          export GT_INDEX_SOURCE_DIR="$GITHUB_WORKSPACE/.gt-index-source/gt-index"
+          export GT_INDEX_BINARY_OUTPUT="$RUNNER_TEMP/gt-index-linux-amd64"
+          bash scripts/build_external_gt_index.sh
+          echo "GT_INDEX_BINARY=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
+          echo "GT_INDEX_BINARY_HOST=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
 
       # Prove the binary indexes AND that FTS5 made it in (the failure mode is
       # silent) before spending a single API dollar.
       - name: Smoke gt-index
         run: |
           set -euo pipefail
-          ./vendor/gt-index-linux-amd64 -root nano -output /tmp/gt-smoke.db
+          "$GT_INDEX_BINARY" -root nano -output /tmp/gt-smoke.db
           python3 - <<'EOF'
           import sqlite3
           names = {r[0] for r in sqlite3.connect("/tmp/gt-smoke.db")
@@ -125,6 +125,11 @@ jobs:
           assert {"nodes", "edges"} <= names, f"core tables missing: {names}"
           missing = {"nodes_fts", "symbol_content_fts"} - names
           assert not missing, f"FTS5 tables missing (built without -tags sqlite_fts5?): {missing}"
+          meta = dict(sqlite3.connect("/tmp/gt-smoke.db").execute(
+              "SELECT key,value FROM project_meta"))
+          assert meta.get("graph_resolution_schema_version") == "2"
+          assert meta.get("graph_resolution_complete") == "1"
+          assert meta.get("graph_completion_schema") == "gt-index.graph-completion.v1"
           print("gt-index smoke ok:", len(names), "tables")
           EOF
 
@@ -238,7 +243,7 @@ jobs:
         run: |
           set -euo pipefail
           ls vendor/groundtruth_mcp-*.whl
-          test -x vendor/gt-index-linux-amd64
+          test -x "$GT_INDEX_BINARY_HOST"
           python - <<'EOF'
           from eval.swe_agent import GTNanoSweAgent
           print("wheel:", GTNanoSweAgent._gt_wheel())

@@ -212,13 +212,11 @@ class GTNanoAgent(NanoAgent):
     @staticmethod
     def _gt_binary_host() -> Path:
         override = os.environ.get("GT_INDEX_BINARY_HOST", "")
-        path = Path(override) if override else _VENDOR_DIR / "gt-index-linux-amd64"
+        path = Path(override) if override else Path(os.environ.get("GT_INDEX_BINARY", ""))
         if not path.is_file():
             raise FileNotFoundError(
-                f"GT arm needs a Linux gt-index binary at {path} (or set "
-                "GT_INDEX_BINARY_HOST). In CI the tb2_gt.yml build step creates "
-                "it; locally: cd vendor/gt-index-src && CGO_ENABLED=1 go build "
-                "-tags sqlite_fts5 -o ../gt-index-linux-amd64 ./cmd/gt-index/"
+                f"GT arm needs the pinned external Linux gt-index binary at {path} "
+                "(set GT_INDEX_BINARY_HOST or run scripts/build_external_gt_index.sh)"
             )
         return path
 

@@ -23,6 +23,7 @@ GRAPH_SURFACES = (
     "cochange_sets",
     "file_hashes",
     "project_meta",
+    "resolution_v2",
 )
 
 
@@ -265,6 +266,86 @@ def build_graph_projection(
                         confidence=max(0.5, 1.0 - ((rank - 1) / max(1, limit))),
                         revision=revision,
                     ))
+            except sqlite3.Error:
+                pass
+
+        # HAR-6: consume the producer's graph-native callsite/candidate
+        # relationships from primary nodes/edges. Candidate edges are
+        # intentionally score-free; zero-candidate callsites remain visible
+        # through the LEFT JOIN and are rendered as an explicit abstention.
+        if query and {"nodes", "edges", "project_meta"} <= tables:
+            try:
+                meta = {
+                    str(key): str(value or "")
+                    for key, value in con.execute(
+                        "SELECT key,value FROM project_meta"
+                    ).fetchall()
+                }
+                if (
+                    meta.get("graph_resolution_schema_version") == "2"
+                    and meta.get("graph_resolution_complete") == "1"
+                    and meta.get("graph_resolution_revision")
+                ):
+                    terms = graph_query_terms(contract, limit=12)
+                    match = " OR ".join(
+                        "lower(coalesce(c.name,'')) LIKE ? OR "
+                        "lower(coalesce(c.qualified_name,'')) LIKE ? OR "
+                        "lower(coalesce(c.file_path,'')) LIKE ?"
+                        for _ in terms
+                    )
+                    params: list[object] = []
+                    for term in terms:
+                        value = f"%{term}%"
+                        params.extend((value, value, value))
+                    rows = con.execute(
+                        "SELECT c.id,c.file_path,c.name,"
+                        "coalesce(c.candidate_state,''),"
+                        "coalesce(c.candidate_count_v2,0),coalesce(c.start_line,0),"
+                        "count(case when e.type='CANDIDATE_TARGET' "
+                        "and coalesce(e.viability,'')='viable' then 1 end),"
+                        "coalesce(group_concat(distinct t.name), '') "
+                        "FROM nodes c "
+                        "LEFT JOIN edges e ON e.source_id=c.id "
+                        "LEFT JOIN nodes t ON t.id=e.target_id "
+                        "WHERE (c.node_type='callsite' or c.label='Callsite') "
+                        "AND coalesce(c.is_test,0)=0 AND (" + match + ") "
+                        "GROUP BY c.id,c.file_path,c.name,c.candidate_state,"
+                        "c.candidate_count_v2,c.start_line "
+                        "ORDER BY c.file_path,c.start_line,c.id LIMIT ?",
+                        (*params, limit),
+                    ).fetchall()
+                    hits["resolution_v2"] += len(rows)
+                    for (
+                        node_id,
+                        file_path,
+                        name,
+                        state,
+                        declared_count,
+                        line,
+                        retained_count,
+                        target_names,
+                    ) in rows:
+                        count = max(int(declared_count or 0), int(retained_count or 0))
+                        target_text = str(target_names or "")
+                        detail = f"state={state or 'unknown'}; {count} candidates"
+                        if target_text:
+                            detail += f"; targets={target_text}"
+                        node_ids.add(int(node_id))
+                        files.add(str(file_path).replace("\\", "/"))
+                        symbols.add(str(name))
+                        semantic_facts.append(
+                            GraphSemanticFact(
+                                "resolution_v2",
+                                int(node_id),
+                                str(file_path).replace("\\", "/"),
+                                str(name),
+                                "graph_native_callsite",
+                                detail[:500],
+                                int(line or 0),
+                                0.0,
+                                revision,
+                            )
+                        )
             except sqlite3.Error:
                 pass
 
