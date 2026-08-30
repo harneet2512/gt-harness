@@ -304,6 +304,8 @@ def _outputs() -> dict[Path, bytes]:
 
 
 def main() -> int:
+    if not SPEC_ROOT.is_dir() or not COMPATIBILITY_UPSTREAM.is_file():
+        raise RuntimeError("groundtruth_dependency_unavailable")
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="fail if generated files drift")
     args = parser.parse_args()
