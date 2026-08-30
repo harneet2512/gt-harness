@@ -189,3 +189,39 @@ jobs:
           "$PYTHON_EXE" scripts/red_evidence.py verify --root tests/fixtures/red_evidence_go --evidence-dir artifacts/ubuntu-22 --expected-receipt-sha256 "$EXPECTED_22"
           "$PYTHON_EXE" scripts/red_evidence.py verify --root tests/fixtures/red_evidence_go --evidence-dir artifacts/ubuntu-24 --expected-receipt-sha256 "$EXPECTED_24"
           "$PYTHON_EXE" scripts/compare_red_evidence.py artifacts/ubuntu-22 artifacts/ubuntu-24
+
+  frozen-replay:
+    needs: [capture-ubuntu-22, capture-ubuntu-24]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Materialize pinned Groundtruth objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init groundtruth
+          git -C groundtruth remote add origin https://github.com/harneet2512/groundtruth.git
+          git -C groundtruth fetch --no-tags --depth=1 origin \
+            7674304191f9f53bee9a3e0ce42033da7973e665 \
+            9e89322e09c330cc94eca663f7f87b32760c5583
+          git -C groundtruth cat-file -e 7674304191f9f53bee9a3e0ce42033da7973e665^{commit}
+          git -C groundtruth cat-file -e 9e89322e09c330cc94eca663f7f87b32760c5583^{commit}
+      - name: Validate lineage and execute real frozen runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          "$PYTHON_EXE" scripts/check_red_evidence_producers.py --root . --groundtruth-root groundtruth
+          "$PYTHON_EXE" scripts/replay_frozen_red_producers.py \
+            --harness-root . --groundtruth-root groundtruth \
+            --output "$RUNNER_TEMP/frozen-replay/replay.json"
+          "$PYTHON_EXE" -c 'import json, pathlib; p=pathlib.Path(__import__("os").environ["RUNNER_TEMP"])/"frozen-replay/replay.json"; r=json.loads(p.read_text()); assert r["status"]=="pass"; assert {"cha_rta_boundary", "vta_step5_candidate_proof"}==set(r["results"]); assert all(x["verification"]["status"]=="pass" for x in r["results"].values())'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frozen-red-replay
+          path: ${{ runner.temp }}/frozen-replay
+          if-no-files-found: error
+          retention-days: 7

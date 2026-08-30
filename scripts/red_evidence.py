@@ -30,6 +30,7 @@ SCHEMA = "gt.red_evidence.receipt.v2"
 VERIFY_SCHEMA = "gt.red_evidence.verify.v2"
 NORMALIZER_VERSION = "go-build-red-normalizer.v2"
 OUTPUT_GRAMMAR = "go-build-diagnostic-lines.v1"
+EXACT_TEXT_GRAMMAR = "exact-text-failure.v1"
 STREAM_MODEL = "merged-stdout-stderr.v1"
 ENVIRONMENT_POLICY = "closed-go-red-environment.v1"
 FIXED_ENVIRONMENT = {
@@ -308,6 +309,7 @@ def capture(
     runner_image: str | None = None,
     runner_image_version: str | None = None,
     runner_architecture: str | None = None,
+    output_grammar: str = OUTPUT_GRAMMAR,
 ) -> CaptureResult:
     """Execute a real failing Go command and seal body plus provenance."""
 
@@ -356,16 +358,32 @@ def capture(
         )
         if command_observation.exit_code == 0:
             raise CaptureError("command_did_not_fail")
-        try:
-            canonical = canonicalize_go_red(
-                command_observation.raw,
-                root=resolved_root,
-                expected_source_path=expected_source,
-                expected_diagnostic=expected_diagnostic,
-                expected_match_count=expected_match_count,
-            )
-        except GoGrammarError as exc:
-            raise CaptureError(str(exc)) from exc
+        if output_grammar == EXACT_TEXT_GRAMMAR:
+            normalized = _strict_text(command_observation.raw, "command")
+            expected_text = _strict_text(expected_diagnostic.encode("utf-8"), "expected_diagnostic")
+            if normalized != expected_text:
+                raise CaptureError("exact_text_mismatch")
+            canonical_body = normalized.encode("utf-8")
+            package_banner = ""
+            package_outcome = "exact_text_failure"
+            matched_diagnostics = [normalized]
+        elif output_grammar == OUTPUT_GRAMMAR:
+            try:
+                canonical = canonicalize_go_red(
+                    command_observation.raw,
+                    root=resolved_root,
+                    expected_source_path=expected_source,
+                    expected_diagnostic=expected_diagnostic,
+                    expected_match_count=expected_match_count,
+                )
+            except GoGrammarError as exc:
+                raise CaptureError(str(exc)) from exc
+            canonical_body = canonical.body
+            package_banner = canonical.package_banner
+            package_outcome = canonical.package_outcome
+            matched_diagnostics = list(canonical.matched_diagnostics)
+        else:
+            raise CaptureError("unsupported_output_grammar")
         _entries_unchanged(resolved_root, source_entries, "source")
         _entries_unchanged(resolved_root, fixture_entries, "fixture")
 
@@ -373,7 +391,7 @@ def capture(
         receipt: dict[str, Any] = {
             "schema": SCHEMA,
             "normalizer_version": NORMALIZER_VERSION,
-            "output_grammar": OUTPUT_GRAMMAR,
+            "output_grammar": output_grammar,
             "stream_model": STREAM_MODEL,
             "environment_policy": ENVIRONMENT_POLICY,
             "environment": logical_environment,
@@ -413,16 +431,16 @@ def capture(
                 "size": len(command_observation.raw),
             },
             "diagnostic": {
-                "sha256": _sha256(canonical.body),
-                "size": len(canonical.body),
-                "package_banner": canonical.package_banner,
-                "package_outcome": canonical.package_outcome,
-                "matched_diagnostics": list(canonical.matched_diagnostics),
+                "sha256": _sha256(canonical_body),
+                "size": len(canonical_body),
+                "package_banner": package_banner,
+                "package_outcome": package_outcome,
+                "matched_diagnostics": matched_diagnostics,
             },
         }
         receipt["receipt_sha256"] = _receipt_sha256(receipt)
         return CaptureResult(
-            receipt, encode_receipt(receipt), canonical.body, command_observation.raw
+            receipt, encode_receipt(receipt), canonical_body, command_observation.raw
         )
 
 
@@ -501,12 +519,13 @@ def _validate_receipt(
     for field, expected in (
         ("schema", SCHEMA),
         ("normalizer_version", NORMALIZER_VERSION),
-        ("output_grammar", OUTPUT_GRAMMAR),
         ("stream_model", STREAM_MODEL),
         ("environment_policy", ENVIRONMENT_POLICY),
     ):
         if receipt.get(field) != expected:
             errors.append(f"unexpected_{field}")
+    if receipt.get("output_grammar") not in {OUTPUT_GRAMMAR, EXACT_TEXT_GRAMMAR}:
+        errors.append("unexpected_output_grammar")
     environment = receipt.get("environment")
     environment_keys = (
         set(FIXED_ENVIRONMENT)
@@ -639,7 +658,16 @@ def _validate_receipt(
             errors.append("diagnostic_hash_mismatch")
         if diagnostic.get("size") != len(canonical_bytes):
             errors.append("diagnostic_size_mismatch")
-        if matcher_valid:
+        if receipt.get("output_grammar") == EXACT_TEXT_GRAMMAR:
+            if diagnostic.get("package_banner") != "":
+                errors.append("diagnostic_package_mismatch")
+            if diagnostic.get("package_outcome") != "exact_text_failure":
+                errors.append("diagnostic_outcome_mismatch")
+            if diagnostic.get("matched_diagnostics") != [
+                canonical_bytes.decode("utf-8", errors="replace")
+            ]:
+                errors.append("diagnostic_match_mismatch")
+        if matcher_valid and receipt.get("output_grammar") == OUTPUT_GRAMMAR:
             try:
                 banner, matched = validate_canonical_body(
                     canonical_bytes,
@@ -727,19 +755,28 @@ def verify(
         "substring",
         "expected_count",
     }:
-        try:
-            raw_parse = canonicalize_go_red(
-                raw_bytes,
-                root=resolved_root,
-                expected_source_path=matcher["source_path"],
-                expected_diagnostic=matcher["substring"],
-                expected_match_count=matcher["expected_count"],
-            )
-        except (GoGrammarError, TypeError, AttributeError) as exc:
-            errors.append(f"raw_output:{exc}")
-        else:
-            if raw_parse.body != canonical_bytes:
+        if receipt.get("output_grammar") == EXACT_TEXT_GRAMMAR:
+            try:
+                if _strict_text(raw_bytes, "raw_output") != matcher["substring"]:
+                    errors.append("raw_output:exact_text_mismatch")
+            except CaptureError as exc:
+                errors.append(f"raw_output:{exc}")
+            if raw_bytes != canonical_bytes:
                 errors.append("raw_output_canonical_mismatch")
+        else:
+            try:
+                raw_parse = canonicalize_go_red(
+                    raw_bytes,
+                    root=resolved_root,
+                    expected_source_path=matcher["source_path"],
+                    expected_diagnostic=matcher["substring"],
+                    expected_match_count=matcher["expected_count"],
+                )
+            except (GoGrammarError, TypeError, AttributeError) as exc:
+                errors.append(f"raw_output:{exc}")
+            else:
+                if raw_parse.body != canonical_bytes:
+                    errors.append("raw_output_canonical_mismatch")
 
     for section in ("command", "toolchain"):
         row = receipt.get(section)
@@ -775,13 +812,18 @@ def verify(
                 observed_command = _observe(
                     command["argv"], resolved_root, environment, command_executable
                 )
-                parsed = canonicalize_go_red(
-                    observed_command.raw,
-                    root=resolved_root,
-                    expected_source_path=receipt["matcher"]["source_path"],
-                    expected_diagnostic=receipt["matcher"]["substring"],
-                    expected_match_count=receipt["matcher"]["expected_count"],
-                )
+                if receipt["output_grammar"] == EXACT_TEXT_GRAMMAR:
+                    observed_text = _strict_text(observed_command.raw, "replay_output")
+                    parsed_body = observed_text.encode("utf-8")
+                else:
+                    parsed = canonicalize_go_red(
+                        observed_command.raw,
+                        root=resolved_root,
+                        expected_source_path=receipt["matcher"]["source_path"],
+                        expected_diagnostic=receipt["matcher"]["substring"],
+                        expected_match_count=receipt["matcher"]["expected_count"],
+                    )
+                    parsed_body = parsed.body
                 observed_toolchain_text = _strict_text(observed_toolchain.raw, "toolchain")
             except (CaptureError, GoGrammarError) as exc:
                 errors.append(f"replay:{exc}")
@@ -800,7 +842,7 @@ def verify(
                     errors.append("replay:command_executable_mismatch")
                 if _sha256(observed_command.raw) != receipt["raw_output"]["sha256"]:
                     errors.append("replay:raw_output_mismatch")
-                if parsed.body != canonical_bytes:
+                if parsed_body != canonical_bytes:
                     errors.append("replay:canonical_mismatch")
     return _report(errors, computed)
 
@@ -868,6 +910,7 @@ def _parser() -> argparse.ArgumentParser:
     capture_parser.add_argument("--runner-image")
     capture_parser.add_argument("--runner-image-version")
     capture_parser.add_argument("--runner-architecture")
+    capture_parser.add_argument("--output-grammar", default=OUTPUT_GRAMMAR)
     capture_parser.add_argument("--evidence-dir", required=True)
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("--root", required=True)
@@ -894,6 +937,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runner_image=args.runner_image,
                 runner_image_version=args.runner_image_version,
                 runner_architecture=args.runner_architecture,
+                output_grammar=args.output_grammar,
             )
             publish_evidence_directory(
                 evidence_dir=args.evidence_dir,
