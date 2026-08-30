@@ -303,9 +303,18 @@ def build_graph_projection(
                     rows = con.execute(
                         "SELECT c.id,c.file_path,c.name,"
                         "coalesce(c.candidate_state,''),"
-                        "coalesce(c.candidate_count_v2,0),coalesce(c.start_line,0),"
+                        "coalesce(c.candidate_count_v2,0),coalesce(c.selected_target_id,''),"
+                        "coalesce(c.start_line,0),"
                         "count(case when e.type='CANDIDATE_TARGET' "
                         "and coalesce(e.viability,'')='viable' then 1 end),"
+                        "count(distinct case when e.type='CANDIDATE_TARGET' "
+                        "and coalesce(e.viability,'')='viable' then e.target_symbol_id end),"
+                        "count(case when e.type='CANDIDATE_TARGET' "
+                        "and coalesce(e.viability,'')='viable' "
+                        "and coalesce(e.target_symbol_id,'')='' then 1 end),"
+                        "count(case when e.type='CANDIDATE_TARGET' "
+                        "and coalesce(e.viability,'')='viable' "
+                        "and e.target_symbol_id=coalesce(c.selected_target_id,'') then 1 end),"
                         "coalesce(group_concat(distinct t.name), '') "
                         "FROM nodes c "
                         "LEFT JOIN edges e ON e.source_id=c.id "
@@ -313,7 +322,7 @@ def build_graph_projection(
                         "WHERE (c.node_type='callsite' or c.label='Callsite') "
                         "AND coalesce(c.is_test,0)=0 AND (" + match + ") "
                         "GROUP BY c.id,c.file_path,c.name,c.candidate_state,"
-                        "c.candidate_count_v2,c.start_line "
+                        "c.candidate_count_v2,c.selected_target_id,c.start_line "
                         "ORDER BY c.file_path,c.start_line,c.id LIMIT ?",
                         (*params, limit),
                     ).fetchall()
@@ -324,11 +333,45 @@ def build_graph_projection(
                         name,
                         state,
                         declared_count,
+                        selected_target,
                         line,
                         retained_count,
+                        distinct_target_count,
+                        missing_target_identity_count,
+                        selected_target_count,
                         target_names,
                     ) in rows:
-                        count = max(int(declared_count or 0), int(retained_count or 0))
+                        declared = int(declared_count or 0)
+                        retained = int(retained_count or 0)
+                        distinct_targets = int(distinct_target_count or 0)
+                        missing_target_identity = int(missing_target_identity_count or 0)
+                        selected = str(selected_target or "")
+                        selected_matches = int(selected_target_count or 0)
+                        integrity_reason = ""
+                        if declared != retained:
+                            integrity_reason = "candidate_count_mismatch"
+                        elif retained != distinct_targets:
+                            integrity_reason = "duplicate_candidate_identity"
+                        elif missing_target_identity:
+                            integrity_reason = "candidate_identity_missing"
+                        elif selected and selected_matches != 1:
+                            integrity_reason = "selected_target_not_retained"
+                        if integrity_reason:
+                            semantic_facts.append(
+                                GraphSemanticFact(
+                                    "resolution_v2_abstention",
+                                    int(node_id),
+                                    str(file_path).replace("\\", "/"),
+                                    str(name),
+                                    "graph_native_callsite",
+                                    f"abstention={integrity_reason}; v2 authority withheld",
+                                    int(line or 0),
+                                    0.0,
+                                    revision,
+                                )
+                            )
+                            continue
+                        count = declared
                         target_text = str(target_names or "")
                         detail = f"state={state or 'unknown'}; {count} candidates"
                         if target_text:

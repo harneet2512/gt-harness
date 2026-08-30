@@ -146,7 +146,7 @@ def test_graph_projection_reads_primary_v2_candidates_and_zero_candidate_callsit
             CREATE TABLE nodes(
                 id INTEGER PRIMARY KEY, label TEXT, name TEXT, qualified_name TEXT,
                 file_path TEXT, is_test INTEGER, start_line INTEGER, node_type TEXT,
-                candidate_state TEXT, candidate_count_v2 INTEGER
+                candidate_state TEXT, selected_target_id TEXT, candidate_count_v2 INTEGER
             );
             CREATE TABLE edges(
                 id INTEGER PRIMARY KEY, source_id INTEGER, target_id INTEGER,
@@ -158,10 +158,10 @@ def test_graph_projection_reads_primary_v2_candidates_and_zero_candidate_callsit
             INSERT INTO project_meta VALUES ('graph_resolution_complete','1');
             INSERT INTO project_meta VALUES ('graph_resolution_revision','rev');
             INSERT INTO nodes VALUES
-                (1,'Function','caller','caller','src.py',0,1,'symbol','',''),
-                (2,'Callsite','missing_target','caller.missing_target','src.py',0,2,'callsite','empty',0),
-                (3,'Function','missing_target','missing_target','impl.py',0,1,'symbol','',''),
-                (4,'Callsite','ambiguous_target','caller.ambiguous_target','src.py',0,3,'callsite','ambiguous',2);
+                (1,'Function','caller','caller','src.py',0,1,'symbol','','',''),
+                (2,'Callsite','missing_target','caller.missing_target','src.py',0,2,'callsite','empty','',0),
+                (3,'Function','missing_target','missing_target','impl.py',0,1,'symbol','','',''),
+                (4,'Callsite','ambiguous_target','caller.ambiguous_target','src.py',0,3,'callsite','ambiguous','',2);
             INSERT INTO edges VALUES (1,1,2,'HAS_CALLSITE',NULL,NULL,NULL,NULL);
             INSERT INTO edges VALUES (2,4,3,'CANDIDATE_TARGET',NULL,'target-3',0,'viable');
             """
@@ -217,3 +217,118 @@ def test_exact_producer_publishes_v2_completion_and_candidate_rows(tmp_path: Pat
         ) > 0
     finally:
         con.close()
+
+
+def _write_projection_fixture(
+    graph: Path,
+    *,
+    declared_count: int,
+    selected_target: str = "",
+    candidates: tuple[str, ...] = ("target-3",),
+    include_v2_metadata: bool = True,
+) -> None:
+    con = sqlite3.connect(graph)
+    try:
+        con.executescript(
+            """
+            CREATE TABLE nodes(
+                id INTEGER PRIMARY KEY, label TEXT, name TEXT, qualified_name TEXT,
+                file_path TEXT, is_test INTEGER, start_line INTEGER, node_type TEXT,
+                candidate_state TEXT, selected_target_id TEXT, candidate_count_v2 INTEGER
+            );
+            CREATE TABLE edges(
+                id INTEGER PRIMARY KEY, source_id INTEGER, target_id INTEGER,
+                type TEXT, confidence REAL, target_symbol_id TEXT, ordinal INTEGER,
+                viability TEXT
+            );
+            CREATE TABLE project_meta(key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO nodes VALUES
+                (1,'Function','caller','caller','src.py',0,1,'symbol','','',NULL),
+                (2,'Callsite','target','caller.target','src.py',0,3,'callsite','ambiguous','',0);
+            """
+        )
+        con.execute(
+            "UPDATE nodes SET selected_target_id=?, candidate_count_v2=? WHERE id=2",
+            (selected_target, declared_count),
+        )
+        for offset, target in enumerate(candidates, 3):
+            con.execute(
+                "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (offset, "Function", target, target, "impl.py", 0, 1, "symbol", "", "", None),
+            )
+            con.execute(
+                "INSERT INTO edges VALUES (?,?,?,?,?,?,?,?)",
+                (offset, 2, offset, "CANDIDATE_TARGET", None, target, offset - 3, "viable"),
+            )
+        if include_v2_metadata:
+            con.executemany(
+                "INSERT INTO project_meta VALUES (?,?)",
+                (
+                    ("graph_resolution_schema_version", "2"),
+                    ("graph_resolution_complete", "1"),
+                    ("graph_resolution_revision", "rev"),
+                ),
+            )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _projection_for(graph: Path) -> object:
+    contract = TaskContract(
+        role="code_behavior",
+        obligations=(Obligation("o1", "resolve target callsites", "test", ("target",)),),
+    )
+    return build_graph_projection(str(graph), contract)
+
+
+@pytest.mark.parametrize(
+    ("declared_count", "selected_target", "candidates", "reason"),
+    (
+        (2, "", ("target-3",), "candidate_count_mismatch"),
+        (1, "not-retained", ("target-3",), "selected_target_not_retained"),
+        (2, "", ("target-3", "target-3"), "duplicate_candidate_identity"),
+    ),
+)
+def test_v2_projection_withholds_inconsistent_candidate_authority(
+    tmp_path: Path,
+    declared_count: int,
+    selected_target: str,
+    candidates: tuple[str, ...],
+    reason: str,
+):
+    graph = tmp_path / "graph.db"
+    _write_projection_fixture(
+        graph,
+        declared_count=declared_count,
+        selected_target=selected_target,
+        candidates=candidates,
+    )
+
+    projection = _projection_for(graph)
+
+    assert not [fact for fact in projection.semantic_facts if fact.surface == "resolution_v2"]
+    abstentions = [
+        fact for fact in projection.semantic_facts
+        if fact.surface == "resolution_v2_abstention"
+    ]
+    assert len(abstentions) == 1
+    assert reason in abstentions[0].value
+
+
+def test_old_schema_does_not_claim_v2_authority(tmp_path: Path):
+    graph = tmp_path / "old-graph.db"
+    _write_projection_fixture(
+        graph,
+        declared_count=1,
+        candidates=("target-3",),
+        include_v2_metadata=False,
+    )
+
+    projection = _projection_for(graph)
+
+    assert not [fact for fact in projection.semantic_facts if fact.surface == "resolution_v2"]
+    assert not [
+        fact for fact in projection.semantic_facts
+        if fact.surface == "resolution_v2_abstention"
+    ]
