@@ -5,11 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 SCHEMA = "gt.red_evidence_producer_check.v1"
 MANIFEST_SCHEMA = "gt.red_evidence_producers.v2"
+FROZEN_PARENT = "7674304191f9f53bee9a3e0ce42033da7973e665"
+FROZEN_CANDIDATE = "9e89322e09c330cc94eca663f7f87b32760c5583"
+LIVE_DEFAULT = "5817206811265f9b166296662c6d2f21231fd92e"
 REQUIRED_TOKENS = (
     "scripts/red_evidence.py capture",
     "--evidence-dir",
@@ -32,7 +36,7 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def validate(root: str | Path) -> dict[str, Any]:
+def validate(root: str | Path, *, groundtruth_root: str | Path | None = None) -> dict[str, Any]:
     resolved = Path(root).resolve()
     errors: list[str] = []
     manifest_path = resolved / "config" / "red_evidence_producers.json"
@@ -49,6 +53,7 @@ def validate(root: str | Path) -> dict[str, Any]:
         "operative_producers",
         "historical_roots",
         "historical_producers",
+        "live_default",
     }:
         errors.append("manifest:invalid_schema")
         manifest = {}
@@ -137,6 +142,59 @@ def validate(root: str | Path) -> dict[str, Any]:
         or {item.get("path") for item in (historical_producers or [])} != expected_historical_paths
     ):
         errors.append("historical_producers:invalid")
+    else:
+        for item in historical_producers:
+            expected_commit = (
+                FROZEN_CANDIDATE
+                if item["path"].endswith("vta_step5_candidate_proof_red.sh")
+                else FROZEN_PARENT
+            )
+            if item["commit"] != expected_commit:
+                errors.append(f"historical_producers:wrong_commit:{item['path']}")
+    live_default = manifest.get("live_default")
+    if (
+        not isinstance(live_default, dict)
+        or set(live_default) != {"repository", "commit", "red_producer_count"}
+        or live_default.get("repository") != "harneet2512/groundtruth"
+        or live_default.get("commit") != LIVE_DEFAULT
+        or live_default.get("red_producer_count") != 0
+    ):
+        errors.append("live_default:invalid")
+
+    if groundtruth_root is not None:
+        repo = Path(groundtruth_root)
+        try:
+            for item in historical_producers if isinstance(historical_producers, list) else []:
+                subprocess.run(
+                    ["git", "-C", str(repo), "cat-file", "-e", f"{item['commit']}:{item['path']}"],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            listing = subprocess.run(
+                ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", FROZEN_CANDIDATE],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            ).stdout.splitlines()
+            live_listing = subprocess.run(
+                ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", LIVE_DEFAULT],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            ).stdout.splitlines()
+        except (OSError, subprocess.CalledProcessError, UnicodeError):
+            errors.append("historical_producers:groundtruth_unreadable")
+        else:
+            expected = {item["path"] for item in historical_producers}
+            actual = {path for path in listing if path.endswith("_red.sh")}
+            if actual != expected:
+                errors.append("historical_producers:tree_mismatch")
+            live_actual = {path for path in live_listing if path.endswith("_red.sh")}
+            if live_actual:
+                errors.append("live_default:red_producers_present")
     historical = manifest.get("historical_roots")
     if (
         not isinstance(historical, list)
@@ -159,13 +217,16 @@ def validate(root: str | Path) -> dict[str, Any]:
         "historical_producers": (
             historical_producers if isinstance(historical_producers, list) else []
         ),
+        "live_default": live_default if isinstance(live_default, dict) else {},
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
-    report = validate(parser.parse_args().root)
+    parser.add_argument("--groundtruth-root")
+    args = parser.parse_args()
+    report = validate(args.root, groundtruth_root=args.groundtruth_root)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["status"] == "pass" else 1
 

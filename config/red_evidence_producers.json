@@ -1,5 +1,10 @@
 {
   "canonical_library": "scripts/red_evidence.py",
+  "live_default": {
+    "repository": "harneet2512/groundtruth",
+    "commit": "5817206811265f9b166296662c6d2f21231fd92e",
+    "red_producer_count": 0
+  },
   "historical_producers": [
     {
       "repository": "harneet2512/groundtruth",

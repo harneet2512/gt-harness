@@ -67,6 +67,29 @@ def test_producer_guard_rejects_bypass_and_unregistered_red_workflow(tmp_path: P
     assert "operative_producers:inventory_mismatch" in alternate["errors"]
 
 
+def test_producer_guard_binds_historical_commit_lineage(tmp_path: Path) -> None:
+    repository = Path(__file__).resolve().parents[1]
+    config = repository / "config" / "red_evidence_producers.json"
+    target = tmp_path / "config" / "red_evidence_producers.json"
+    target.parent.mkdir(parents=True)
+    manifest = json.loads(config.read_text(encoding="utf-8"))
+    manifest["historical_producers"][0]["commit"] = "0" * 40
+    target.write_text(json.dumps(manifest), encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    shutil.copyfile(repository / "scripts/red_evidence.py", tmp_path / "scripts/red_evidence.py")
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    shutil.copyfile(
+        repository / ".github/workflows/red-evidence-integrity.yml",
+        tmp_path / ".github/workflows/red-evidence-integrity.yml",
+    )
+    (tmp_path / "tests" / "red_artifacts").mkdir(parents=True)
+    report = validate(tmp_path)
+    assert (
+        "historical_producers:wrong_commit:.githooks/tests/cha_rta_boundary_red.sh"
+        in report["errors"]
+    )
+
+
 def test_cross_runner_compare_binds_body_and_toolchain(tmp_path: Path) -> None:
     body = (
         b"# example.invalid/redfixture [example.invalid/redfixture.test]\n"

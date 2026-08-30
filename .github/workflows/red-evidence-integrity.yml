@@ -35,9 +35,9 @@ jobs:
         shell: bash
         run: |
           PYTHON_EXE="${pythonLocation}/bin/python"
-          "$PYTHON_EXE" -m ruff check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
-          "$PYTHON_EXE" -m ruff format --check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
-          "$PYTHON_EXE" -m compileall -q scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py
+          "$PYTHON_EXE" -m ruff check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py scripts/compare_red_evidence.py scripts/replay_frozen_red_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
+          "$PYTHON_EXE" -m ruff format --check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py scripts/compare_red_evidence.py scripts/replay_frozen_red_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
+          "$PYTHON_EXE" -m compileall -q scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py scripts/compare_red_evidence.py scripts/replay_frozen_red_producers.py
           git diff --check
           "$PYTHON_EXE" -c 'from pathlib import Path; import yaml; yaml.safe_load(Path(".github/workflows/red-evidence-integrity.yml").read_text(encoding="utf-8"))'
       - name: Exercise grammar, mutation, publication, and producer gates
@@ -107,9 +107,9 @@ jobs:
         shell: bash
         run: |
           PYTHON_EXE="${pythonLocation}/bin/python"
-          "$PYTHON_EXE" -m ruff check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
-          "$PYTHON_EXE" -m ruff format --check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
-          "$PYTHON_EXE" -m compileall -q scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py
+          "$PYTHON_EXE" -m ruff check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py scripts/compare_red_evidence.py scripts/replay_frozen_red_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
+          "$PYTHON_EXE" -m ruff format --check scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py scripts/compare_red_evidence.py scripts/replay_frozen_red_producers.py tests/test_red_evidence.py tests/test_red_evidence_review_red.py tests/test_red_evidence_integration.py
+          "$PYTHON_EXE" -m compileall -q scripts/red_evidence.py scripts/red_evidence_go.py scripts/check_red_evidence_producers.py scripts/compare_red_evidence.py scripts/replay_frozen_red_producers.py
           git diff --check
           "$PYTHON_EXE" -c 'from pathlib import Path; import yaml; yaml.safe_load(Path(".github/workflows/red-evidence-integrity.yml").read_text(encoding="utf-8"))'
       - name: Exercise grammar, mutation, publication, and producer gates
