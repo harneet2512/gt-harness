@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +11,32 @@ def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _write_snapshot(path: Path, *, revision: str | None = None) -> Path:
+    description_sha256 = "a" * 64
+    revision = revision or f"sha256:{description_sha256}"
+    payload = {
+        "schema": "failure-id-ledger-snapshot.v1",
+        "source": {
+            "issue": "HAR-55",
+            "revision": revision,
+            "observed_updated_at": "2026-08-30T00:00:00.000Z",
+            "description_sha256": description_sha256,
+        },
+        "canonical_definitions": {
+            "FD-001": "first canonical defect",
+            "FD-002": "second canonical defect",
+        },
+        "last_allocated_id": "FD-002",
+        "next_unused_id": "FD-003",
+        "legacy_ambiguities": {
+            "FD-001": ["first historical title", "second historical title"],
+        },
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    payload["payload_sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
+    return _write(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def test_references_do_not_create_duplicate_definitions(tmp_path: Path) -> None:
@@ -71,3 +98,168 @@ def test_cli_emits_deterministic_json_and_nonzero_for_duplicates(tmp_path: Path,
     assert exit_code == 1
     assert output["duplicate_definitions"]["FD-001"] == ["a.md:1", "z.md:1"]
     assert output["schema"] == "failure-id-validation.v1"
+
+
+def test_directory_scan_includes_receipt_evidence(tmp_path: Path) -> None:
+    _write(tmp_path / "a.receipt", "failure_id: FD-010\n")
+    _write(tmp_path / "nested" / "b.receipt", "failure_id: FD-010\n")
+
+    report = validate_failure_ids.validate([tmp_path])
+
+    assert report["status"] == "fail"
+    assert report["duplicate_definitions"] == {
+        "FD-010": ["a.receipt:1", "nested/b.receipt:1"],
+    }
+
+
+def test_machine_fields_are_found_at_any_supported_position(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "ledger.json",
+        '{"schema":"x","failure_id":"FD-010","failure_id":"FD-010"}\n',
+    )
+    _write(tmp_path / "ledger.jsonl", '{"x":1,"failure_id":"FD-010"}\n')
+    _write(tmp_path / "ledger.yaml", "- failure_id: FD-010\n")
+
+    report = validate_failure_ids.validate([tmp_path])
+
+    assert report["status"] == "fail"
+    assert report["duplicate_definitions"] == {
+        "FD-010": ["ledger.json:1", "ledger.json:1", "ledger.jsonl:1", "ledger.yaml:1"],
+    }
+
+
+def test_report_is_checkout_location_invariant(tmp_path: Path) -> None:
+    first = _write(tmp_path / "one" / "same" / "ledger.md", "### FD-010 - definition\n")
+    second = _write(tmp_path / "two" / "same" / "ledger.md", first.read_text(encoding="utf-8"))
+
+    first_report = validate_failure_ids.validate([first.parent])
+    second_report = validate_failure_ids.validate([second.parent])
+
+    assert json.dumps(first_report, sort_keys=True) == json.dumps(second_report, sort_keys=True)
+
+
+def test_snapshot_reports_legacy_ambiguity_without_accepting_new_duplicates(
+    tmp_path: Path,
+) -> None:
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    source = _write(tmp_path / "repo" / "README.md", "Reference FD-001.\n")
+
+    report = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_next="FD-003",
+        expected_ledger_revision=f"sha256:{'a' * 64}",
+    )
+
+    assert report["status"] == "pass"
+    assert report["next_unused_id"] == "FD-003"
+    assert report["legacy_ambiguities"] == {
+        "FD-001": ["first historical title", "second historical title"],
+    }
+
+    _write(source.parent / "new.md", "### FD-001 - divergent new definition\n")
+    rejected = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    assert rejected["status"] == "fail"
+    assert rejected["snapshot_conflicts"] == {"FD-001": ["new.md:1"]}
+
+
+def test_snapshot_missing_tampered_and_stale_fail_closed(tmp_path: Path) -> None:
+    source = _write(tmp_path / "repo" / "README.md", "Reference FD-001.\n")
+    missing = validate_failure_ids.validate(
+        [source.parent], ledger_snapshot=tmp_path / "missing.json"
+    )
+    assert missing["status"] == "fail"
+    assert missing["snapshot_errors"] == ["snapshot:not_found"]
+
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    tampered_data = json.loads(snapshot.read_text(encoding="utf-8"))
+    tampered_data["canonical_definitions"]["FD-001"] = "tampered"
+    snapshot.write_text(json.dumps(tampered_data), encoding="utf-8")
+    tampered = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    assert tampered["status"] == "fail"
+    assert tampered["snapshot_errors"] == ["snapshot:payload_sha256_mismatch"]
+
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    stale = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_revision=f"sha256:{'b' * 64}",
+    )
+    assert stale["status"] == "fail"
+    assert stale["snapshot_errors"] == ["snapshot:unexpected_source_revision"]
+
+    gap_data = json.loads(snapshot.read_text(encoding="utf-8"))
+    gap_data["canonical_definitions"].pop("FD-002")
+    gap_data["canonical_definitions"]["FD-003"] = "third canonical defect"
+    gap_data["last_allocated_id"] = "FD-003"
+    gap_data["next_unused_id"] = "FD-004"
+    gap_data["legacy_ambiguities"] = {}
+    gap_data.pop("payload_sha256")
+    encoded = json.dumps(gap_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    gap_data["payload_sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
+    snapshot.write_text(json.dumps(gap_data), encoding="utf-8")
+    gap = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    assert gap["status"] == "fail"
+    assert gap["snapshot_errors"] == ["snapshot:allocation_gap"]
+
+
+def test_snapshot_detects_cross_repository_duplicate_definitions(tmp_path: Path) -> None:
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    first = _write(tmp_path / "one" / "ledger.md", "### FD-001 - new one\n")
+    second = _write(tmp_path / "two" / "ledger.md", "### FD-001 - new two\n")
+
+    report = validate_failure_ids.validate([first.parent, second.parent], ledger_snapshot=snapshot)
+
+    assert report["status"] == "fail"
+    assert report["duplicate_definitions"] == {
+        "FD-001": ["root-1/ledger.md:1", "root-2/ledger.md:1"],
+    }
+    assert report["snapshot_conflicts"] == {
+        "FD-001": ["root-1/ledger.md:1", "root-2/ledger.md:1"],
+    }
+
+
+def test_snapshot_rejects_single_unallocated_definition(tmp_path: Path) -> None:
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    source = _write(tmp_path / "repo" / "ledger.md", "### FD-003 - not allocated yet\n")
+
+    report = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+
+    assert report["status"] == "fail"
+    assert report["unallocated_definitions"] == {"FD-003": ["ledger.md:1"]}
+
+
+def test_snapshot_report_is_checkout_location_invariant(tmp_path: Path) -> None:
+    first_root = tmp_path / "one" / "same"
+    second_root = tmp_path / "two" / "same"
+    _write(first_root / "README.md", "Reference FD-001.\n")
+    _write(second_root / "README.md", "Reference FD-001.\n")
+    first_snapshot = _write_snapshot(first_root / "snapshot.json")
+    second_snapshot = _write_snapshot(second_root / "snapshot.json")
+
+    first = validate_failure_ids.validate([first_root], ledger_snapshot=first_snapshot)
+    second = validate_failure_ids.validate([second_root], ledger_snapshot=second_snapshot)
+
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+def test_repository_snapshot_and_ci_are_wired() -> None:
+    repository = Path(__file__).resolve().parents[1]
+    snapshot = repository / "config" / "failure_id_ledger_snapshot.json"
+
+    report = validate_failure_ids.validate(
+        [repository],
+        ledger_snapshot=snapshot,
+        expected_next="FD-031",
+        expected_ledger_revision=(
+            "sha256:b9828534a6ca2b1e935fc795e54505f25b958c28ae5a415fe147fe9cde103507"
+        ),
+    )
+
+    assert report["status"] == "pass"
+    assert report["next_unused_id"] == "FD-031"
+    workflow = (repository / ".github" / "workflows" / "failure-id-validation.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "scripts/validate_failure_ids.py" in workflow
+    assert "config/failure_id_ledger_snapshot.json" in workflow

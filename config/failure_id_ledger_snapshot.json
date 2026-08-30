@@ -1,0 +1,58 @@
+{
+  "canonical_definitions": {
+    "FD-001": "confidence threshold creates source authority",
+    "FD-002": "invented candidate confidence persisted as fixed weights",
+    "FD-003": "open ReceiverOrigin vocabulary",
+    "FD-004": "incomplete graph/build identity binding",
+    "FD-005": "candidate-first query hides unresolved callsites",
+    "FD-006": "dynamic-call policy inconsistent across layers",
+    "FD-007": "structural authority leaks into target authority",
+    "FD-008": "selected target published twice as generic CALLS",
+    "FD-009": "unexecuted passes fabricated as closed completeness",
+    "FD-010": "completeness recurs as winner-only inference",
+    "FD-011": "R40 RED checkpoint missing before push",
+    "FD-012": "launcher instruction overrides live-turn contract",
+    "FD-013": "protected root commit omitted from indeterminate-range scan",
+    "FD-014": "repair authorization contradicted the live hook",
+    "FD-015": "construction authorization redispatched as CONTROL-only",
+    "FD-016": "nested Git commands inherited the source repository environment",
+    "FD-017": "non-executable RED fixture accepted",
+    "FD-018": "RED receipt hashes checkout bytes and captures a worktree-specific path",
+    "FD-019": "malformed envelope bypass plus generated source-byte drift",
+    "FD-020": "parity RED depends on ambient sibling checkout",
+    "FD-021": "repair commit carries stale contradictory RED receipt",
+    "FD-022": "prompt prose cannot provide process re-invocation",
+    "FD-023": "stale protocol text contradicts current state machine",
+    "FD-024": "synthetic dependency is reported as pinned Groundtruth",
+    "FD-025": "receipt claims clean diff while immutable diff fails",
+    "FD-026": "receipt parent binding drift after staging recovery",
+    "FD-027": "candidate authority laundered through confidence",
+    "FD-028": "zero-candidate evidence omitted by main query",
+    "FD-029": "reserved historical defect (title not present in current HAR-55 narrative)",
+    "FD-030": "canonical RED evidence capture is non-reproducible"
+  },
+  "last_allocated_id": "FD-030",
+  "legacy_ambiguities": {
+    "FD-013": [
+      "protected root commit omitted from indeterminate-range scan",
+      "hashed RED receipt accepts fabricated execution"
+    ],
+    "FD-025": [
+      "receipt claims clean diff while immutable diff fails",
+      "exact source fixture violates mechanical diff gate"
+    ],
+    "FD-027": [
+      "candidate authority laundered through confidence",
+      "post-hoc ordinal assignment misbinds same-line calls"
+    ]
+  },
+  "next_unused_id": "FD-031",
+  "payload_sha256": "ba37ea27439f5c36b131a5325b9d81f0a8df16a872d2761b5a0e15effebcd48d",
+  "schema": "failure-id-ledger-snapshot.v1",
+  "source": {
+    "description_sha256": "b9828534a6ca2b1e935fc795e54505f25b958c28ae5a415fe147fe9cde103507",
+    "issue": "HAR-55",
+    "observed_updated_at": "2026-08-30T17:40:46.040Z",
+    "revision": "sha256:b9828534a6ca2b1e935fc795e54505f25b958c28ae5a415fe147fe9cde103507"
+  }
+}
