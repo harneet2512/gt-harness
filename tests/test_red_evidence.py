@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,198 +11,231 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.red_evidence import CaptureError, capture, encode_receipt, verify
+from scripts.red_evidence import (
+    CaptureError,
+    _receipt_sha256,
+    capture,
+    encode_receipt,
+    publish_evidence_directory,
+    verify,
+)
+
+EXPECTED = "undefined: VTAFlowProof"
+SOURCE = "proof_red_test.go"
+GO_RAW = (
+    "# example.invalid/redfixture [example.invalid/redfixture.test]\n"
+    "./proof_red_test.go:6:6: undefined: VTAFlowProof\n"
+    "FAIL\texample.invalid/redfixture [build failed]\n"
+    "FAIL\n"
+)
+CANONICAL = (
+    b"# example.invalid/redfixture [example.invalid/redfixture.test]\n"
+    b"./proof_red_test.go:6:6: undefined: VTAFlowProof\n"
+    b"PACKAGE_OUTCOME=build_failed\n"
+)
 
 
 class CanonicalRedEvidenceTests(unittest.TestCase):
-    def _root(self, parent: Path, name: str) -> Path:
+    def _root(self, parent: Path, name: str, *, mutate: bool = False) -> Path:
         root = parent / name
         root.mkdir()
-        (root / "source.txt").write_text("immutable source\n", encoding="utf-8")
+        (root / SOURCE).write_text("package redfixture\n", encoding="utf-8")
+        mutation = f"Path({SOURCE!r}).write_text('mutated\\n')\n" if mutate else ""
         (root / "fixture.py").write_text(
-            "from pathlib import Path\n"
-            "import sys\n"
-            "sys.stdout.write('\\x1b[31mRED root=' + str(Path.cwd()) + "
-            "' after 0.123s\\r\\n')\n"
-            "raise SystemExit(7)\n",
+            "from pathlib import Path\nimport sys\n"
+            f"{mutation}sys.stdout.write({GO_RAW!r})\nraise SystemExit(7)\n",
             encoding="utf-8",
         )
         return root
 
-    def _capture(self, root: Path) -> tuple[dict, bytes]:
+    def _capture(self, root: Path):
         return capture(
             root=root,
-            sources=["source.txt"],
+            sources=[SOURCE],
             fixtures=["fixture.py"],
-            command=["python", "fixture.py"],
-            toolchain_command=["python", "--version"],
+            command=[sys.executable, "fixture.py"],
+            toolchain_command=[sys.executable, "--version"],
+            expected_source_path=SOURCE,
+            expected_diagnostic=EXPECTED,
         )
 
-    def test_independent_roots_emit_byte_identical_evidence(self) -> None:
+    def _publish(self, root: Path, result, name: str = "evidence") -> Path:
+        evidence = root.parent / name
+        publish_evidence_directory(
+            evidence_dir=evidence,
+            root=root,
+            inputs=[SOURCE, "fixture.py"],
+            result=result,
+        )
+        return evidence
+
+    def test_independent_roots_emit_identical_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
-            first, first_bytes = self._capture(self._root(parent, "first"))
-            second, second_bytes = self._capture(self._root(parent, "second"))
+            first = self._capture(self._root(parent, "first"))
+            second = self._capture(self._root(parent, "second"))
+        self.assertEqual(first.canonical_bytes, CANONICAL)
+        self.assertEqual(first.canonical_bytes, second.canonical_bytes)
+        self.assertEqual(first.receipt_bytes, second.receipt_bytes)
 
-        self.assertEqual(first_bytes, second_bytes)
-        self.assertEqual(first["diagnostic"]["text"], "RED root=<ROOT> after <DURATION>\n")
-        self.assertEqual(first["command"]["exit_code"], 7)
-        self.assertEqual(first["normalizer_version"], "red-normalizer.v1")
-        self.assertEqual(
-            first["output_grammar"],
-            "utf8-lf-ansi-stripped-root-duration-redacted.v1",
+    def test_real_go_fixture_matches_observed_grammar(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        fixture = repository / "tests" / "fixtures" / "red_evidence_go"
+        if shutil.which("go") is None:
+            self.skipTest("Go is unavailable")
+        result = capture(
+            root=fixture,
+            sources=[SOURCE],
+            fixtures=["go.mod"],
+            command=["go", "test", "-count=1", "-p=1", "./..."],
+            toolchain_command=["go", "version"],
+            expected_source_path=SOURCE,
+            expected_diagnostic=EXPECTED,
         )
+        self.assertEqual(result.canonical_bytes, CANONICAL)
 
-    def test_verifier_replays_and_rejects_input_mutation(self) -> None:
+    def test_directory_verify_replay_and_input_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(Path(directory), "root")
-            receipt, receipt_bytes = self._capture(root)
-            receipt_path = root / "receipt.json"
-            receipt_path.write_bytes(receipt_bytes)
-            expected = receipt["receipt_sha256"]
-
-            report = verify(
+            result = self._capture(root)
+            evidence = self._publish(root, result)
+            arguments = dict(
                 root=root,
-                receipt_path=receipt_path,
-                expected_receipt_sha256=expected,
-                replay=True,
+                evidence_dir=evidence,
+                expected_receipt_sha256=result.receipt["receipt_sha256"],
             )
-            self.assertEqual(report["status"], "pass")
+            self.assertEqual(verify(**arguments)["status"], "pass")
+            self.assertEqual(verify(**arguments, replay=True)["status"], "pass")
+            (root / SOURCE).write_text("mutated\n", encoding="utf-8")
+            self.assertIn(f"source_hash_mismatch:{SOURCE}", verify(**arguments)["errors"])
 
-            source = root / "source.txt"
-            source.write_text("mutated source\n", encoding="utf-8")
-            source_report = verify(
-                root=root,
-                receipt_path=receipt_path,
-                expected_receipt_sha256=expected,
-            )
-            self.assertIn("source_hash_mismatch:source.txt", source_report["errors"])
-            source.write_text("immutable source\n", encoding="utf-8")
-
-            fixture = root / "fixture.py"
-            original_fixture = fixture.read_text(encoding="utf-8")
-            fixture.write_text(original_fixture + "# mutation\n", encoding="utf-8")
-            fixture_report = verify(
-                root=root,
-                receipt_path=receipt_path,
-                expected_receipt_sha256=expected,
-            )
-            self.assertIn("fixture_hash_mismatch:fixture.py", fixture_report["errors"])
-
-    def test_external_digest_rejects_every_decisive_receipt_mutation(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = self._root(Path(directory), "root")
-            receipt, _ = self._capture(root)
-            expected = receipt["receipt_sha256"]
-            mutations = {
-                "diagnostic": lambda row: row["diagnostic"].update(text="different\n"),
-                "exit": lambda row: row["command"].update(exit_code=8),
-                "toolchain": lambda row: row["toolchain"].update(text="different\n"),
-                "normalizer": lambda row: row.update(normalizer_version="red-normalizer.v2"),
-                "grammar": lambda row: row.update(output_grammar="other-grammar.v1"),
-                "source-hash": lambda row: row["sources"][0].update(sha256="0" * 64),
-                "fixture-hash": lambda row: row["fixtures"][0].update(sha256="0" * 64),
-            }
-            for name, mutate in mutations.items():
-                changed = copy.deepcopy(receipt)
-                mutate(changed)
-                changed["receipt_sha256"] = "0" * 64
-                changed_bytes = encode_receipt(changed)
-                path = root / f"{name}.json"
-                path.write_bytes(changed_bytes)
+    def test_raw_mutations_fail_with_unchanged_canonical(self) -> None:
+        for filename in ("raw.log", "raw.sha256"):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
+                root = self._root(Path(directory), "root")
+                result = self._capture(root)
+                evidence = self._publish(root, result)
+                (evidence / filename).write_bytes((evidence / filename).read_bytes() + b"x")
                 report = verify(
                     root=root,
-                    receipt_path=path,
-                    expected_receipt_sha256=expected,
+                    evidence_dir=evidence,
+                    expected_receipt_sha256=result.receipt["receipt_sha256"],
                 )
+                self.assertEqual(report["status"], "fail")
+
+    def test_schema_and_external_digest_reject_decisive_mutations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(Path(directory), "root")
+            result = self._capture(root)
+            mutations = {
+                "green": lambda row: row["command"].update(exit_code=0),
+                "cwd": lambda row: row["command"].update(cwd="../../outside"),
+                "missing": lambda row: row.pop("matcher"),
+                "duplicate": lambda row: row["sources"].append(copy.deepcopy(row["sources"][0])),
+                "overlap": lambda row: row["fixtures"].append(copy.deepcopy(row["sources"][0])),
+                "normalizer": lambda row: row.update(normalizer_version="other"),
+                "grammar": lambda row: row.update(output_grammar="other"),
+                "source": lambda row: row["sources"][0].update(sha256="0" * 64),
+                "fixture": lambda row: row["fixtures"][0].update(sha256="0" * 64),
+                "toolchain": lambda row: row["toolchain"].update(text="different\n"),
+                "executable": lambda row: row["command"]["executable"].update(sha256="0" * 64),
+                "matcher": lambda row: row["matcher"].update(expected_count=2),
+                "environment": lambda row: row["environment"].update(GOENV="ambient"),
+            }
+            original = result.receipt["receipt_sha256"]
+            for name, mutate in mutations.items():
+                changed = copy.deepcopy(result.receipt)
+                mutate(changed)
+                changed["receipt_sha256"] = _receipt_sha256(changed)
+                evidence = self._publish(root, result, f"evidence-{name}")
+                (evidence / "receipt.json").write_bytes(encode_receipt(changed))
+                report = verify(root=root, evidence_dir=evidence, expected_receipt_sha256=original)
                 self.assertEqual(report["status"], "fail", name)
-                self.assertIn("unexpected_receipt_sha256", report["errors"], name)
 
-    def test_capture_rejects_success_and_path_escape(self) -> None:
+    def test_duplicate_json_key_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(Path(directory), "root")
-            with self.assertRaisesRegex(CaptureError, "command_did_not_fail"):
-                capture(
-                    root=root,
-                    sources=["source.txt"],
-                    fixtures=["fixture.py"],
-                    command=["python", "-c", "raise SystemExit(0)"],
-                    toolchain_command=["python", "--version"],
-                )
-            with self.assertRaisesRegex(CaptureError, "path_outside_root"):
-                capture(
-                    root=root,
-                    sources=["../outside.txt"],
-                    fixtures=["fixture.py"],
-                    command=["python", "fixture.py"],
-                    toolchain_command=["python", "--version"],
-                )
-
-    def test_receipt_is_strict_json(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = self._root(Path(directory), "root")
-            receipt, receipt_bytes = self._capture(root)
-            duplicate = receipt_bytes.decode().replace(
-                '{\n  "command":', '{\n  "schema": "contradictory",\n  "command":', 1
+            result = self._capture(root)
+            evidence = self._publish(root, result)
+            receipt = (evidence / "receipt.json").read_text(encoding="utf-8")
+            receipt = receipt.replace(
+                '{\n  "capture_runtime"', '{\n  "schema": "duplicate",\n  "capture_runtime"'
             )
-            path = root / "duplicate.json"
-            path.write_text(duplicate, encoding="utf-8")
+            (evidence / "receipt.json").write_text(receipt, encoding="utf-8")
             report = verify(
                 root=root,
-                receipt_path=path,
-                expected_receipt_sha256=receipt["receipt_sha256"],
+                evidence_dir=evidence,
+                expected_receipt_sha256=result.receipt["receipt_sha256"],
             )
             self.assertEqual(report["errors"], ["receipt:duplicate_key"])
 
-    def test_cli_captures_and_replays_the_same_receipt(self) -> None:
-        repository = Path(__file__).resolve().parents[1]
-        cli = repository / "scripts" / "red_evidence.py"
+    def test_capture_rejects_mutation_outside_code_and_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            with self.assertRaisesRegex(CaptureError, "source_mutated_during_capture"):
+                self._capture(self._root(parent, "mutating", mutate=True))
+            outside = parent / "outside.py"
+            outside.write_text("raise SystemExit(1)\n", encoding="utf-8")
+            root = self._root(parent, "root")
+            with self.assertRaisesRegex(CaptureError, "command_input_outside_root"):
+                capture(
+                    root=root,
+                    sources=[SOURCE], fixtures=["fixture.py"],
+                    command=[sys.executable, "../outside.py"],
+                    toolchain_command=[sys.executable, "--version"],
+                    expected_source_path=SOURCE, expected_diagnostic=EXPECTED,
+                )
+            link = root / "escape.py"
+            try:
+                link.symlink_to(outside)
+            except OSError:
+                return
+            with self.assertRaisesRegex(CaptureError, "path_outside_root"):
+                capture(
+                    root=root,
+                    sources=[SOURCE], fixtures=["escape.py"],
+                    command=[sys.executable, "fixture.py"],
+                    toolchain_command=[sys.executable, "--version"],
+                    expected_source_path=SOURCE, expected_diagnostic=EXPECTED,
+                )
+
+    def test_atomic_directory_is_fresh_and_preserves_prior_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(Path(directory), "root")
-            receipt_path = root / "receipt.json"
-            captured = subprocess.run(
-                [
-                    sys.executable,
-                    str(cli),
-                    "capture",
-                    "--root",
-                    str(root),
-                    "--source",
-                    "source.txt",
-                    "--fixture",
-                    "fixture.py",
-                    "--command-json",
-                    '["python","fixture.py"]',
-                    "--toolchain-command-json",
-                    '["python","--version"]',
-                    "--output",
-                    str(receipt_path),
-                ],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            result = self._capture(root)
+            evidence = self._publish(root, result)
+            before = {path.name: path.read_bytes() for path in evidence.iterdir()}
+            with self.assertRaisesRegex(CaptureError, "evidence_directory_exists"):
+                self._publish(root, result)
+            self.assertEqual(before, {path.name: path.read_bytes() for path in evidence.iterdir()})
+            with self.assertRaisesRegex(CaptureError, "evidence_directory_exists"):
+                publish_evidence_directory(
+                    evidence_dir=root, root=root, inputs=[SOURCE, "fixture.py"], result=result
+                )
+
+    def test_cli_round_trip_uses_one_directory(self) -> None:
+        cli = Path(__file__).resolve().parents[1] / "scripts" / "red_evidence.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(Path(directory), "root")
+            evidence = Path(directory) / "artifact"
+            base = [
+                sys.executable, str(cli), "capture", "--root", str(root),
+                "--source", SOURCE, "--fixture", "fixture.py",
+                "--command-json", json.dumps([sys.executable, "fixture.py"]),
+                "--toolchain-command-json", json.dumps([sys.executable, "--version"]),
+                "--expected-source-path", SOURCE, "--expected-diagnostic", EXPECTED,
+                "--evidence-dir", str(evidence),
+            ]
+            captured = subprocess.run(base, capture_output=True, text=True, check=False)
             self.assertEqual(captured.returncode, 0, captured.stderr)
-            receipt_sha256 = json.loads(captured.stdout)["receipt_sha256"]
+            digest = json.loads(captured.stdout)["receipt_sha256"]
             verified = subprocess.run(
-                [
-                    sys.executable,
-                    str(cli),
-                    "verify",
-                    "--root",
-                    str(root),
-                    "--receipt",
-                    str(receipt_path),
-                    "--expected-receipt-sha256",
-                    receipt_sha256,
-                    "--replay",
-                ],
-                text=True,
-                capture_output=True,
-                check=False,
+                [sys.executable, str(cli), "verify", "--root", str(root),
+                 "--evidence-dir", str(evidence), "--expected-receipt-sha256", digest,
+                 "--replay"],
+                capture_output=True, text=True, check=False,
             )
-            self.assertEqual(verified.returncode, 0, verified.stderr)
-            self.assertEqual(json.loads(verified.stdout)["status"], "pass")
+            self.assertEqual(verified.returncode, 0, verified.stdout)
 
 
 if __name__ == "__main__":

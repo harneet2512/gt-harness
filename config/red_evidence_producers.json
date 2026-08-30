@@ -1,0 +1,10 @@
+{
+  "canonical_library": "scripts/red_evidence.py",
+  "historical_roots": [
+    "tests/red_artifacts"
+  ],
+  "operative_producers": [
+    ".github/workflows/red-evidence-integrity.yml"
+  ],
+  "schema": "gt.red_evidence_producers.v1"
+}

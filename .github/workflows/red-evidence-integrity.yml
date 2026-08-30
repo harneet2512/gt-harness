@@ -8,12 +8,109 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
+  capture:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner_id: ubuntu-22
+            image: ubuntu-22.04
+          - runner_id: ubuntu-24
+            image: ubuntu-24.04
+    runs-on: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Exercise capture, mutation gates, and replay
-        run: python tests/test_red_evidence.py
+          python-version: "3.10.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          check-latest: false
+      - name: Install exact test dependency
+        shell: bash
+        run: |
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          "$PYTHON_EXE" -m pip install --disable-pip-version-check pytest==9.1.1
+      - name: Exercise grammar, mutation, publication, and producer gates
+        shell: bash
+        run: |
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          "$PYTHON_EXE" -m pytest \
+            tests/test_red_evidence.py \
+            tests/test_red_evidence_review_red.py \
+            tests/test_red_evidence_integration.py \
+            -q
+      - name: Verify canonical producer inventory
+        shell: bash
+        run: |
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          "$PYTHON_EXE" scripts/check_red_evidence_producers.py --root .
+      - name: Capture real Go RED evidence
+        shell: bash
+        run: |
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          "$PYTHON_EXE" scripts/red_evidence.py capture \
+            --root tests/fixtures/red_evidence_go \
+            --source proof_red_test.go \
+            --fixture go.mod \
+            --command-json '["go","test","-count=1","-p=1","./..."]' \
+            --toolchain-command-json '["go","version"]' \
+            --expected-source-path proof_red_test.go \
+            --expected-diagnostic 'undefined: VTAFlowProof' \
+            --runner-image '${{ matrix.image }}' \
+            --runner-image-version "${ImageVersion}" \
+            --runner-architecture "${RUNNER_ARCH}" \
+            --evidence-dir "${RUNNER_TEMP}/red-artifact"
+      - name: Verify captured receipt with replay
+        shell: bash
+        run: |
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          "$PYTHON_EXE" -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"red-artifact"; r=json.loads((p/"receipt.json").read_text()); assert r["capture_runtime"]["python_version"]=="3.10.12"; assert r["toolchain"]["text"]=="go version go1.26.6 linux/amd64\n"; assert (p/"raw.sha256").read_text().split()[0]=="ee29265e7cf6ce4e409e7e3cff12461c27d96755841a7d65c4f1e7aa22ba3709"'
+          RECEIPT_SHA=$("$PYTHON_EXE" -c 'import json,os,pathlib; print(json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"red-artifact/receipt.json").read_text())["receipt_sha256"])')
+          "$PYTHON_EXE" scripts/red_evidence.py verify \
+            --root tests/fixtures/red_evidence_go \
+            --evidence-dir "${RUNNER_TEMP}/red-artifact" \
+            --expected-receipt-sha256 "${RECEIPT_SHA}" \
+            --replay
+      - uses: actions/upload-artifact@v4
+        with:
+          name: red-evidence-${{ matrix.runner_id }}
+          path: ${{ runner.temp }}/red-artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    needs: capture
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          check-latest: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: red-evidence-ubuntu-22
+          path: artifacts/ubuntu-22
+      - uses: actions/download-artifact@v4
+        with:
+          name: red-evidence-ubuntu-24
+          path: artifacts/ubuntu-24
+      - name: Compare canonical bytes and sealed identities
+        shell: bash
+        run: |
+          PYTHON_EXE="${pythonLocation}/bin/python"
+          cmp artifacts/ubuntu-22/canonical.txt artifacts/ubuntu-24/canonical.txt
+          sha256sum artifacts/ubuntu-22/canonical.txt artifacts/ubuntu-24/canonical.txt
+          for ARTIFACT in artifacts/ubuntu-22 artifacts/ubuntu-24; do
+            RECEIPT_SHA=$("$PYTHON_EXE" -c 'import json,sys,pathlib; print(json.loads((pathlib.Path(sys.argv[1])/"receipt.json").read_text())["receipt_sha256"])' "$ARTIFACT")
+            "$PYTHON_EXE" scripts/red_evidence.py verify \
+              --root tests/fixtures/red_evidence_go \
+              --evidence-dir "$ARTIFACT" \
+              --expected-receipt-sha256 "$RECEIPT_SHA"
+          done
+          "$PYTHON_EXE" scripts/compare_red_evidence.py artifacts/ubuntu-22 artifacts/ubuntu-24

@@ -13,5 +13,13 @@ tests/red_artifacts/groundtruth_fixture.tar binary
 tests/test_failure_id_validator.py text eol=lf
 tests/test_failure_id_validator_boundaries.py text eol=lf
 scripts/red_evidence.py text eol=lf
+scripts/red_evidence_go.py text eol=lf
+scripts/check_red_evidence_producers.py text eol=lf
+scripts/compare_red_evidence.py text eol=lf
 tests/test_red_evidence.py text eol=lf
+tests/test_red_evidence_review_red.py text eol=lf
+tests/test_red_evidence_integration.py text eol=lf
+tests/fixtures/red_evidence_go/go.mod text eol=lf
+tests/fixtures/red_evidence_go/proof_red_test.go text eol=lf
+config/red_evidence_producers.json text eol=lf
 .github/workflows/red-evidence-integrity.yml text eol=lf
