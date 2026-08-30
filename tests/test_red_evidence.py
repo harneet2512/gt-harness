@@ -83,6 +83,37 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
                 "pass",
             )
 
+    def test_prepared_replay_requires_the_seed_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(Path(directory), "prepared")
+            expected = "CHA/RTA implementation missing\n"
+            (root / "runner.py").write_text(
+                "import sys\nsys.stdout.write(" + repr(expected) + ")\nraise SystemExit(1)\n",
+                encoding="utf-8",
+            )
+            cache = Path(directory) / "cache"
+            result = capture(
+                root=root,
+                sources=[SOURCE],
+                fixtures=["fixture.py", "runner.py"],
+                command=[sys.executable, "runner.py"],
+                toolchain_command=[sys.executable, "--version"],
+                expected_source_path=SOURCE,
+                expected_diagnostic=expected,
+                output_grammar=EXACT_TEXT_GRAMMAR,
+                cgo_enabled="1",
+                cache_seed=cache,
+            )
+            evidence = self._publish(root, result, "prepared-evidence")
+            report = verify(
+                root=root,
+                evidence_dir=evidence,
+                expected_receipt_sha256=result.receipt["receipt_sha256"],
+                replay=True,
+            )
+            self.assertEqual(report["status"], "fail")
+            self.assertIn("replay:prepared_cache_required", report["errors"])
+
     def _capture(self, root: Path):
         return capture(
             root=root,
