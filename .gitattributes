@@ -1,3 +1,4 @@
+/.gitattributes text eol=lf
 scripts/linear_control_record.py text eol=lf
 scripts/validate_failure_ids.py text eol=lf
 config/failure_id_ledger_snapshot.json text eol=lf

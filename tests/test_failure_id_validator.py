@@ -39,6 +39,10 @@ def _write_snapshot(path: Path, *, revision: str | None = None) -> Path:
     return _write(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def _snapshot_payload_sha256(path: Path) -> str:
+    return json.loads(path.read_text(encoding="utf-8"))["payload_sha256"]
+
+
 def test_references_do_not_create_duplicate_definitions(tmp_path: Path) -> None:
     _write(
         tmp_path / "ledger.md",
@@ -149,6 +153,7 @@ def test_snapshot_reports_legacy_ambiguity_without_accepting_new_duplicates(
         ledger_snapshot=snapshot,
         expected_next="FD-003",
         expected_ledger_revision=f"sha256:{'a' * 64}",
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
     )
 
     assert report["status"] == "pass"
@@ -158,7 +163,11 @@ def test_snapshot_reports_legacy_ambiguity_without_accepting_new_duplicates(
     }
 
     _write(source.parent / "new.md", "### FD-001 - divergent new definition\n")
-    rejected = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    rejected = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
+    )
     assert rejected["status"] == "fail"
     assert rejected["snapshot_conflicts"] == {"FD-001": ["new.md:1"]}
 
@@ -172,18 +181,30 @@ def test_snapshot_missing_tampered_and_stale_fail_closed(tmp_path: Path) -> None
     assert missing["snapshot_errors"] == ["snapshot:not_found"]
 
     snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    unpinned = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    assert unpinned["status"] == "fail"
+    assert unpinned["snapshot_errors"] == ["snapshot:expected_payload_sha256_required"]
+
     tampered_data = json.loads(snapshot.read_text(encoding="utf-8"))
     tampered_data["canonical_definitions"]["FD-001"] = "tampered"
     snapshot.write_text(json.dumps(tampered_data), encoding="utf-8")
-    tampered = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    tampered = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256=tampered_data["payload_sha256"],
+    )
     assert tampered["status"] == "fail"
-    assert tampered["snapshot_errors"] == ["snapshot:payload_sha256_mismatch"]
+    assert tampered["snapshot_errors"] == [
+        "snapshot:payload_sha256_mismatch",
+        "snapshot:unexpected_payload_sha256",
+    ]
 
     snapshot = _write_snapshot(tmp_path / "snapshot.json")
     stale = validate_failure_ids.validate(
         [source.parent],
         ledger_snapshot=snapshot,
         expected_ledger_revision=f"sha256:{'b' * 64}",
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
     )
     assert stale["status"] == "fail"
     assert stale["snapshot_errors"] == ["snapshot:unexpected_source_revision"]
@@ -198,9 +219,50 @@ def test_snapshot_missing_tampered_and_stale_fail_closed(tmp_path: Path) -> None
     encoded = json.dumps(gap_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     gap_data["payload_sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
     snapshot.write_text(json.dumps(gap_data), encoding="utf-8")
-    gap = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    gap = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
+    )
     assert gap["status"] == "fail"
     assert gap["snapshot_errors"] == ["snapshot:allocation_gap"]
+
+
+def test_snapshot_rejects_recomputed_self_hash_when_external_pin_differs(
+    tmp_path: Path,
+) -> None:
+    source = _write(tmp_path / "repo" / "README.md", "Reference FD-001.\n")
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+    expected_payload_sha256 = _snapshot_payload_sha256(snapshot)
+    tampered_data = json.loads(snapshot.read_text(encoding="utf-8"))
+    tampered_data["canonical_definitions"]["FD-001"] = "tampered and re-signed"
+    tampered_data.pop("payload_sha256")
+    encoded = json.dumps(tampered_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    tampered_data["payload_sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
+    snapshot.write_text(json.dumps(tampered_data), encoding="utf-8")
+
+    report = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256=expected_payload_sha256,
+    )
+
+    assert report["status"] == "fail"
+    assert report["snapshot_errors"] == ["snapshot:unexpected_payload_sha256"]
+
+
+def test_snapshot_rejects_malformed_external_payload_pin(tmp_path: Path) -> None:
+    source = _write(tmp_path / "repo" / "README.md", "Reference FD-001.\n")
+    snapshot = _write_snapshot(tmp_path / "snapshot.json")
+
+    report = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256="not-a-sha256",
+    )
+
+    assert report["status"] == "fail"
+    assert report["snapshot_errors"] == ["snapshot:unexpected_payload_sha256"]
 
 
 def test_snapshot_detects_cross_repository_duplicate_definitions(tmp_path: Path) -> None:
@@ -208,7 +270,11 @@ def test_snapshot_detects_cross_repository_duplicate_definitions(tmp_path: Path)
     first = _write(tmp_path / "one" / "ledger.md", "### FD-001 - new one\n")
     second = _write(tmp_path / "two" / "ledger.md", "### FD-001 - new two\n")
 
-    report = validate_failure_ids.validate([first.parent, second.parent], ledger_snapshot=snapshot)
+    report = validate_failure_ids.validate(
+        [first.parent, second.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
+    )
 
     assert report["status"] == "fail"
     assert report["duplicate_definitions"] == {
@@ -223,7 +289,11 @@ def test_snapshot_rejects_single_unallocated_definition(tmp_path: Path) -> None:
     snapshot = _write_snapshot(tmp_path / "snapshot.json")
     source = _write(tmp_path / "repo" / "ledger.md", "### FD-003 - not allocated yet\n")
 
-    report = validate_failure_ids.validate([source.parent], ledger_snapshot=snapshot)
+    report = validate_failure_ids.validate(
+        [source.parent],
+        ledger_snapshot=snapshot,
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
+    )
 
     assert report["status"] == "fail"
     assert report["unallocated_definitions"] == {"FD-003": ["ledger.md:1"]}
@@ -237,8 +307,16 @@ def test_snapshot_report_is_checkout_location_invariant(tmp_path: Path) -> None:
     first_snapshot = _write_snapshot(first_root / "snapshot.json")
     second_snapshot = _write_snapshot(second_root / "snapshot.json")
 
-    first = validate_failure_ids.validate([first_root], ledger_snapshot=first_snapshot)
-    second = validate_failure_ids.validate([second_root], ledger_snapshot=second_snapshot)
+    first = validate_failure_ids.validate(
+        [first_root],
+        ledger_snapshot=first_snapshot,
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(first_snapshot),
+    )
+    second = validate_failure_ids.validate(
+        [second_root],
+        ledger_snapshot=second_snapshot,
+        expected_ledger_payload_sha256=_snapshot_payload_sha256(second_snapshot),
+    )
 
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
@@ -254,6 +332,9 @@ def test_repository_snapshot_and_ci_are_wired() -> None:
         expected_ledger_revision=(
             "sha256:b9828534a6ca2b1e935fc795e54505f25b958c28ae5a415fe147fe9cde103507"
         ),
+        expected_ledger_payload_sha256=(
+            "ba37ea27439f5c36b131a5325b9d81f0a8df16a872d2761b5a0e15effebcd48d"
+        ),
     )
 
     assert report["status"] == "pass"
@@ -263,3 +344,4 @@ def test_repository_snapshot_and_ci_are_wired() -> None:
     )
     assert "scripts/validate_failure_ids.py" in workflow
     assert "config/failure_id_ledger_snapshot.json" in workflow
+    assert "--expected-ledger-payload-sha256 ba37ea27439f5c36" in workflow

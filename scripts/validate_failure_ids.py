@@ -98,7 +98,9 @@ def _snapshot_payload_sha256(snapshot: dict[str, Any]) -> str:
 
 
 def _load_snapshot(
-    path: str | Path, expected_revision: str | None
+    path: str | Path,
+    expected_revision: str | None,
+    expected_payload_sha256: str | None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     snapshot_path = Path(path)
     if not snapshot_path.is_file():
@@ -113,9 +115,17 @@ def _load_snapshot(
     errors: list[str] = []
     if snapshot.get("schema") != SNAPSHOT_SCHEMA:
         errors.append("snapshot:invalid_schema")
+    computed_hash = _snapshot_payload_sha256(snapshot)
     declared_hash = snapshot.get("payload_sha256")
-    if not isinstance(declared_hash, str) or declared_hash != _snapshot_payload_sha256(snapshot):
+    if not isinstance(declared_hash, str) or declared_hash != computed_hash:
         errors.append("snapshot:payload_sha256_mismatch")
+    if expected_payload_sha256 is None:
+        errors.append("snapshot:expected_payload_sha256_required")
+    elif (
+        not re.fullmatch(r"[0-9a-f]{64}", expected_payload_sha256)
+        or computed_hash != expected_payload_sha256
+    ):
+        errors.append("snapshot:unexpected_payload_sha256")
 
     source = snapshot.get("source")
     if (
@@ -170,6 +180,7 @@ def validate(
     expected_next: str | None = None,
     ledger_snapshot: str | Path | None = None,
     expected_ledger_revision: str | None = None,
+    expected_ledger_payload_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Return a deterministic validation report for ``roots``."""
 
@@ -185,7 +196,11 @@ def validate(
     snapshot_path: Path | None = None
     if ledger_snapshot is not None:
         snapshot_path = Path(ledger_snapshot).resolve()
-        snapshot, snapshot_errors = _load_snapshot(snapshot_path, expected_ledger_revision)
+        snapshot, snapshot_errors = _load_snapshot(
+            snapshot_path,
+            expected_ledger_revision,
+            expected_ledger_payload_sha256,
+        )
 
     for root_index, root in enumerate(resolved_roots):
         if not root.exists():
@@ -305,6 +320,7 @@ def validate(
         "next_unused_id": next_unused,
         "expected_next_id": expected_next,
         "expected_next_matches": expected_next_valid and expected_next_format_valid,
+        "expected_ledger_payload_sha256": expected_ledger_payload_sha256,
     }
 
 
@@ -323,7 +339,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--expected-ledger-revision",
-        help="Fail unless the pinned snapshot carries this exact HAR-55 updatedAt value",
+        help="Fail unless the snapshot carries this exact content-derived HAR-55 revision",
+    )
+    parser.add_argument(
+        "--expected-ledger-payload-sha256",
+        help=(
+            "Required with --ledger-snapshot; fail unless independently pinned content "
+            "matches this SHA-256"
+        ),
     )
     return parser
 
@@ -335,6 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         expected_next=args.expected_next,
         ledger_snapshot=args.ledger_snapshot,
         expected_ledger_revision=args.expected_ledger_revision,
+        expected_ledger_payload_sha256=args.expected_ledger_payload_sha256,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["status"] == "pass" else 1
