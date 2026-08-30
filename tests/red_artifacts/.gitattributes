@@ -1,0 +1,3 @@
+run_control_record_red.py text eol=lf
+control_record_idempotency.out text eol=lf
+control_record_idempotency.receipt text eol=lf
