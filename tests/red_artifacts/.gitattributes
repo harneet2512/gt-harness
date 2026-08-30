@@ -7,3 +7,6 @@ control_record_review.out text eol=lf
 control_record_review.receipt text eol=lf
 control_record_parity.out text eol=lf
 control_record_parity.receipt text eol=lf
+run_control_record_parity_reconciled.py text eol=lf
+control_record_parity_reconciled.out text eol=lf
+control_record_parity_reconciled.receipt text eol=lf

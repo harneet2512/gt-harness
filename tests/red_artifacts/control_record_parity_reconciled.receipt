@@ -1,0 +1,27 @@
+format=gt.parity-reconciliation.v1
+unit=minimal-existing-record-id-idempotency-fd021-parity
+parent_sha=84faa4869b152f28f608b8f4f5c8549cd7eabe6b
+fixture_path=tests/red_artifacts/run_control_record_parity_reconciled.py
+fixture_sha256=7d2b0fc59d531d3bf039309d89584489e358cd8934204bb9d55b913111aa0b17
+command=python tests/red_artifacts/run_control_record_parity_reconciled.py
+exit_code=0
+output_path=tests/red_artifacts/control_record_parity_reconciled.out
+output_sha256=49ebf05fb4d1b7c847e6ae3805b68b69b005f8cd791fd6b1ecd8668f961658f2
+missing_probe=GROUNDTRUTH_ROOT points to an empty isolated directory
+missing_exit_code=1
+missing_failure=groundtruth_dependency_unavailable
+pinned_present_probe=30 deterministic spec filenames plus frozen compatibility authority
+pinned_present_exit_code=0
+focused_command=python -m pytest -q tests/test_linear_control_record.py tests/test_gt_finalstand.py
+focused_exit_code=0
+full_python_command=python -m pytest -q
+full_python_exit_code=1
+full_python_failures=tests/test_gt_engine.py::test_covering_green_stays_quiet_and_rechecks_after_later_edit; tests/test_gt_engine.py::test_ledger_one_line_per_sealed_delivery; tests/test_gt_engine.py::test_deliveries_file_joins_ledger_one_to_one
+full_python_skips=3 documented platform/integration skips
+vendored_go_command=go test ./...
+vendored_go_exit_code=0
+ruff_command=python -m ruff check tests/red_artifacts/run_control_record_parity_reconciled.py
+ruff_exit_code=0
+diff_check=git diff --check; exit=0
+vendor_diff=empty
+supersedes=tests/red_artifacts/control_record_parity.receipt
