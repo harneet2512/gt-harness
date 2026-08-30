@@ -1,1 +1,2 @@
 scripts/linear_control_record.py text eol=lf
+scripts/generate_gt_finalstand.py text eol=lf
