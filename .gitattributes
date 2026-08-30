@@ -12,3 +12,6 @@ gt_engine/generated_typed_capabilities.py text eol=lf
 tests/red_artifacts/groundtruth_fixture.tar binary
 tests/test_failure_id_validator.py text eol=lf
 tests/test_failure_id_validator_boundaries.py text eol=lf
+scripts/red_evidence.py text eol=lf
+tests/test_red_evidence.py text eol=lf
+.github/workflows/red-evidence-integrity.yml text eol=lf

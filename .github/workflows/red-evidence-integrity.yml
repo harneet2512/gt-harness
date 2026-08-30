@@ -1,0 +1,19 @@
+name: Canonical RED evidence integrity
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Exercise capture, mutation gates, and replay
+        run: python tests/test_red_evidence.py
