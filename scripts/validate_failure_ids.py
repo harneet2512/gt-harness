@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import re
+import tomllib
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -22,26 +23,8 @@ SNAPSHOT_SCHEMA = "failure-id-ledger-snapshot.v1"
 ID_PATTERN = re.compile(r"\bFD-(\d{3})\b")
 HEADING_DEFINITION = re.compile(r"^\s*#{1,6}\s+(FD-\d{3})\s*(?:-|:)")
 HEADING_CANDIDATE = re.compile(r"^\s*#{1,6}\s+(FD-\d+)\s*(?:-|:)")
-FIELD_DEFINITION = re.compile(r"(?:^|[{,\s-])[\"']?failure_id[\"']?\s*[:=]\s*[\"']?(FD-\d{3})\b")
 FIELD_CANDIDATE = re.compile(r"(?:^|[{,\s-])[\"']?failure_id[\"']?\s*[:=]\s*[\"']?(FD-\d+)\b")
 
-TEXT_SUFFIXES = frozenset(
-    {
-        ".go",
-        ".json",
-        ".jsonl",
-        ".md",
-        ".ps1",
-        ".py",
-        ".receipt",
-        ".sh",
-        ".text",
-        ".toml",
-        ".txt",
-        ".yaml",
-        ".yml",
-    }
-)
 MACHINE_FIELD_SUFFIXES = frozenset({".json", ".jsonl", ".receipt", ".toml", ".yaml", ".yml"})
 EXCLUDED_DIRECTORIES = frozenset(
     {
@@ -76,7 +59,7 @@ def _iter_files(root: Path) -> Iterable[Path]:
         yield root
         return
     for path in sorted(root.rglob("*"), key=lambda candidate: candidate.as_posix()):
-        if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+        if not path.is_file():
             continue
         try:
             relative_parts = path.relative_to(root).parts
@@ -108,6 +91,63 @@ def _snapshot_payload_sha256(snapshot: dict[str, Any]) -> str:
         payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _nested_failure_ids(value: Any) -> Iterable[Any]:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "failure_id":
+                yield nested
+            yield from _nested_failure_ids(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _nested_failure_ids(nested)
+
+
+def _structured_machine_fields(
+    path: Path, text: str
+) -> tuple[list[tuple[str, int]], list[tuple[int, str]]]:
+    suffix = path.suffix.lower()
+    documents: list[tuple[Any, int]] = []
+    try:
+        if suffix == ".json":
+            documents.append((json.loads(text, object_pairs_hook=_strict_json_object), 1))
+        elif suffix == ".jsonl":
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if line.strip():
+                    documents.append(
+                        (json.loads(line, object_pairs_hook=_strict_json_object), line_number)
+                    )
+        elif suffix == ".toml":
+            documents.append((tomllib.loads(text), 1))
+        else:
+            definitions: list[tuple[str, int]] = []
+            malformed: list[tuple[int, str]] = []
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                candidates = list(FIELD_CANDIDATE.finditer(line))
+                for candidate in candidates:
+                    failure_id = candidate.group(1)
+                    if re.fullmatch(r"FD-\d{3}", failure_id):
+                        definitions.append((failure_id, line_number))
+                    else:
+                        malformed.append((line_number, failure_id))
+                if re.search(r"[\"']?failure_id[\"']?\s*[:=]", line) and not candidates:
+                    malformed.append((line_number, "failure_id_unparsed"))
+            return definitions, malformed
+    except _DuplicateJsonKeyError:
+        return [], [(1, "duplicate_json_key")]
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError):
+        return [], [(1, "invalid_machine_syntax")]
+
+    definitions = []
+    malformed = []
+    for document, line_number in documents:
+        for value in _nested_failure_ids(document):
+            if isinstance(value, str) and re.fullmatch(r"FD-\d{3}", value):
+                definitions.append((value, line_number))
+            else:
+                malformed.append((line_number, str(value)))
+    return definitions, malformed
 
 
 def _load_snapshot(
@@ -146,10 +186,15 @@ def _load_snapshot(
         errors.append("snapshot:unexpected_payload_sha256")
 
     source = snapshot.get("source")
+    description = source.get("description") if isinstance(source, dict) else None
+    description_bytes = description.encode() if isinstance(description, str) else None
     if (
         not isinstance(source, dict)
         or source.get("issue") != "HAR-55"
         or not isinstance(source.get("observed_updated_at"), str)
+        or description_bytes is None
+        or source.get("description_utf8_bytes") != len(description_bytes)
+        or source.get("description_sha256") != hashlib.sha256(description_bytes).hexdigest()
         or not re.fullmatch(r"[0-9a-f]{64}", str(source.get("description_sha256", "")))
         or source.get("revision") != f"sha256:{source.get('description_sha256', '')}"
     ):
@@ -166,6 +211,7 @@ def _load_snapshot(
         for failure_id, title in canonical.items()
     ):
         errors.append("snapshot:invalid_canonical_definitions")
+        canonical = {}
 
     canonical_numbers = sorted(int(failure_id[3:]) for failure_id in canonical)
     last_allocated = snapshot.get("last_allocated_id")
@@ -232,9 +278,15 @@ def validate(
                 continue
             display = _display_path(path, root, root_index, len(resolved_roots))
             try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeError) as exc:
+                raw = path.read_bytes()
+            except OSError as exc:
                 unreadable.append(f"{display}:{type(exc).__name__}")
+                continue
+            if b"\0" in raw:
+                continue
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeError:
                 continue
             files_scanned += 1
             for match in ID_PATTERN.finditer(text):
@@ -244,26 +296,18 @@ def validate(
                 references[failure_id].append(f"{display}:{line_number}")
             for line_number, line in enumerate(text.splitlines(), start=1):
                 heading_definition = HEADING_DEFINITION.match(line)
-                field_definitions = (
-                    list(FIELD_DEFINITION.finditer(line))
-                    if path.suffix.lower() in MACHINE_FIELD_SUFFIXES
-                    else []
-                )
                 if heading_definition:
                     definitions[heading_definition.group(1)].append(f"{display}:{line_number}")
-                for definition in field_definitions:
-                    definitions[definition.group(1)].append(f"{display}:{line_number}")
                 heading_candidate = HEADING_CANDIDATE.match(line)
-                field_candidates = (
-                    list(FIELD_CANDIDATE.finditer(line))
-                    if path.suffix.lower() in MACHINE_FIELD_SUFFIXES
-                    else []
-                )
                 if heading_candidate and not re.fullmatch(r"FD-\d{3}", heading_candidate.group(1)):
                     malformed.append(f"{display}:{line_number}:{heading_candidate.group(1)}")
-                for candidate in field_candidates:
-                    if not re.fullmatch(r"FD-\d{3}", candidate.group(1)):
-                        malformed.append(f"{display}:{line_number}:{candidate.group(1)}")
+            if path.suffix.lower() in MACHINE_FIELD_SUFFIXES:
+                machine_definitions, machine_malformed = _structured_machine_fields(path, text)
+                for failure_id, line_number in machine_definitions:
+                    definitions[failure_id].append(f"{display}:{line_number}")
+                    observed_numbers.add(int(failure_id[3:]))
+                for line_number, value in machine_malformed:
+                    malformed.append(f"{display}:{line_number}:{value}")
 
     ordered_definitions = {
         failure_id: sorted(locations) for failure_id, locations in sorted(definitions.items())
@@ -273,8 +317,10 @@ def validate(
         for failure_id, locations in ordered_definitions.items()
         if len(locations) > 1
     }
-    canonical = snapshot.get("canonical_definitions", {}) if snapshot else {}
-    legacy_ambiguities = snapshot.get("legacy_ambiguities", {}) if snapshot else {}
+    snapshot_canonical = snapshot.get("canonical_definitions", {}) if snapshot else {}
+    canonical = snapshot_canonical if isinstance(snapshot_canonical, dict) else {}
+    snapshot_legacy = snapshot.get("legacy_ambiguities", {}) if snapshot else {}
+    legacy_ambiguities = snapshot_legacy if isinstance(snapshot_legacy, dict) else {}
     snapshot_conflicts = {
         failure_id: locations
         for failure_id, locations in ordered_definitions.items()
@@ -285,7 +331,12 @@ def validate(
         for failure_id, locations in ordered_definitions.items()
         if snapshot and failure_id not in canonical
     }
-    next_unused = str(snapshot["next_unused_id"]) if snapshot else _next_unused(observed_numbers)
+    snapshot_next = snapshot.get("next_unused_id") if snapshot else None
+    next_unused = (
+        snapshot_next
+        if isinstance(snapshot_next, str) and re.fullmatch(r"FD-\d{3}", snapshot_next)
+        else _next_unused(observed_numbers)
+    )
     allowed_references = set(canonical)
     if snapshot:
         allowed_references.add(next_unused)
@@ -331,7 +382,20 @@ def validate(
         "ledger_snapshot": (
             {
                 "schema": snapshot.get("schema"),
-                "source": snapshot.get("source"),
+                "source": (
+                    {
+                        key: snapshot["source"].get(key)
+                        for key in (
+                            "issue",
+                            "revision",
+                            "observed_updated_at",
+                            "description_sha256",
+                            "description_utf8_bytes",
+                        )
+                    }
+                    if isinstance(snapshot.get("source"), dict)
+                    else snapshot.get("source")
+                ),
                 "payload_sha256": snapshot.get("payload_sha256"),
             }
             if snapshot

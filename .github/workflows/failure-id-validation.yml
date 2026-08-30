@@ -19,6 +19,6 @@ jobs:
         run: >-
           python scripts/validate_failure_ids.py .
           --ledger-snapshot config/failure_id_ledger_snapshot.json
-          --expected-ledger-revision sha256:b9828534a6ca2b1e935fc795e54505f25b958c28ae5a415fe147fe9cde103507
-          --expected-ledger-payload-sha256 ba37ea27439f5c36b131a5325b9d81f0a8df16a872d2761b5a0e15effebcd48d
+          --expected-ledger-revision sha256:86fe88f99aef31db9214a9c82364936fb1523a465043aee0c3b325fa823c6eb6
+          --expected-ledger-payload-sha256 3aefe224c70975266cdc777d231bc4ecb8b3fa38e98d7921d4ffcb5f6a2c7592
           --expected-next FD-031

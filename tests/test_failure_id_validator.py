@@ -13,16 +13,18 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _write_snapshot(path: Path, *, revision: str | None = None) -> Path:
-    description_sha256 = "a" * 64
-    revision = revision or f"sha256:{description_sha256}"
+def _write_snapshot(path: Path) -> Path:
+    description = "### FD-001 - first\n### FD-002 - second\n"
+    description_sha256 = hashlib.sha256(description.encode()).hexdigest()
     payload = {
         "schema": "failure-id-ledger-snapshot.v1",
         "source": {
             "issue": "HAR-55",
-            "revision": revision,
+            "revision": f"sha256:{description_sha256}",
             "observed_updated_at": "2026-08-30T00:00:00.000Z",
             "description_sha256": description_sha256,
+            "description_utf8_bytes": len(description.encode()),
+            "description": description,
         },
         "canonical_definitions": {
             "FD-001": "first canonical defect",
@@ -41,6 +43,10 @@ def _write_snapshot(path: Path, *, revision: str | None = None) -> Path:
 
 def _snapshot_payload_sha256(path: Path) -> str:
     return json.loads(path.read_text(encoding="utf-8"))["payload_sha256"]
+
+
+def _snapshot_source_revision(path: Path) -> str:
+    return json.loads(path.read_text(encoding="utf-8"))["source"]["revision"]
 
 
 def test_references_do_not_create_duplicate_definitions(tmp_path: Path) -> None:
@@ -128,8 +134,9 @@ def test_machine_fields_are_found_at_any_supported_position(tmp_path: Path) -> N
 
     assert report["status"] == "fail"
     assert report["duplicate_definitions"] == {
-        "FD-010": ["ledger.json:1", "ledger.json:1", "ledger.jsonl:1", "ledger.yaml:1"],
+        "FD-010": ["ledger.jsonl:1", "ledger.yaml:1"],
     }
+    assert report["malformed_definitions"] == ["ledger.json:1:duplicate_json_key"]
 
 
 def test_report_is_checkout_location_invariant(tmp_path: Path) -> None:
@@ -152,7 +159,7 @@ def test_snapshot_reports_legacy_ambiguity_without_accepting_new_duplicates(
         [source.parent],
         ledger_snapshot=snapshot,
         expected_next="FD-003",
-        expected_ledger_revision=f"sha256:{'a' * 64}",
+        expected_ledger_revision=_snapshot_source_revision(snapshot),
         expected_ledger_payload_sha256=_snapshot_payload_sha256(snapshot),
     )
 
@@ -405,10 +412,10 @@ def test_repository_snapshot_and_ci_are_wired() -> None:
         ledger_snapshot=snapshot,
         expected_next="FD-031",
         expected_ledger_revision=(
-            "sha256:b9828534a6ca2b1e935fc795e54505f25b958c28ae5a415fe147fe9cde103507"
+            "sha256:86fe88f99aef31db9214a9c82364936fb1523a465043aee0c3b325fa823c6eb6"
         ),
         expected_ledger_payload_sha256=(
-            "ba37ea27439f5c36b131a5325b9d81f0a8df16a872d2761b5a0e15effebcd48d"
+            "3aefe224c70975266cdc777d231bc4ecb8b3fa38e98d7921d4ffcb5f6a2c7592"
         ),
     )
 
@@ -419,4 +426,7 @@ def test_repository_snapshot_and_ci_are_wired() -> None:
     )
     assert "scripts/validate_failure_ids.py" in workflow
     assert "config/failure_id_ledger_snapshot.json" in workflow
-    assert "--expected-ledger-payload-sha256 ba37ea27439f5c36" in workflow
+    assert (
+        "--expected-ledger-payload-sha256 "
+        "3aefe224c70975266cdc777d231bc4ecb8b3fa38e98d7921d4ffcb5f6a2c7592"
+    ) in workflow
