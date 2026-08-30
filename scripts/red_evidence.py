@@ -738,6 +738,7 @@ def verify(
     evidence_dir: str | Path,
     expected_receipt_sha256: str,
     replay: bool = False,
+    prepared_cache: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate the closed schema; optionally add independent execution proof."""
 
@@ -838,13 +839,31 @@ def verify(
     if replay and not errors:
         command = receipt["command"]
         toolchain = receipt["toolchain"]
+        if (
+            receipt.get("environment_policy") == PREPARED_ENVIRONMENT_POLICY
+            and prepared_cache is None
+        ):
+            errors.append("replay:prepared_cache_required")
+        if errors:
+            return _report(errors, computed)
         with tempfile.TemporaryDirectory(prefix="gt-red-verify-") as directory:
             try:
                 command_executable = _resolve_executable(command["argv"][0], resolved_root)
                 toolchain_executable = _resolve_executable(toolchain["argv"][0], resolved_root)
+                executable_paths = [command_executable, toolchain_executable, Path(sys.executable)]
+                if receipt["environment_policy"] == PREPARED_ENVIRONMENT_POLICY:
+                    executable_paths.append(_resolve_executable("gcc", resolved_root))
                 environment, logical_environment = _closed_environment(
                     Path(directory),
-                    [command_executable, toolchain_executable, Path(sys.executable)],
+                    executable_paths,
+                    cgo_enabled=(
+                        "1"
+                        if receipt["environment_policy"] == PREPARED_ENVIRONMENT_POLICY
+                        else None
+                    ),
+                    cache_seed=(
+                        Path(prepared_cache).resolve() if prepared_cache is not None else None
+                    ),
                 )
                 observed_toolchain = _observe(
                     toolchain["argv"], resolved_root, environment, toolchain_executable
@@ -957,6 +976,7 @@ def _parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--evidence-dir", required=True)
     verify_parser.add_argument("--expected-receipt-sha256", required=True)
     verify_parser.add_argument("--replay", action="store_true")
+    verify_parser.add_argument("--prepared-cache")
     return parser
 
 
@@ -1002,6 +1022,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             evidence_dir=args.evidence_dir,
             expected_receipt_sha256=args.expected_receipt_sha256,
             replay=args.replay,
+            prepared_cache=args.prepared_cache,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["status"] == "pass" else 1

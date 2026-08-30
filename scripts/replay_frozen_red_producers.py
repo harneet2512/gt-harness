@@ -19,6 +19,7 @@ try:
         EXACT_TEXT_GRAMMAR,
         OUTPUT_GRAMMAR,
         CaptureError,
+        _executable_identity,
         _receipt_sha256,
         capture,
         publish_evidence_directory,
@@ -30,6 +31,7 @@ except ModuleNotFoundError:
         EXACT_TEXT_GRAMMAR,
         OUTPUT_GRAMMAR,
         CaptureError,
+        _executable_identity,
         _receipt_sha256,
         capture,
         publish_evidence_directory,
@@ -45,7 +47,7 @@ REPRESENTATIVES = {
         "grammar": EXACT_TEXT_GRAMMAR,
         "diagnostic": "CHA/RTA implementation missing\n",
         "expected_source": ".githooks/tests/cha_rta_boundary_red.sh",
-        "toolchain": ["sh", "--version"],
+        "toolchain": ["sh", "-c", "printf '%s\\n' frozen-posix-shell"],
         "base": "0f09e993574bbeffe04bcb18401574b15c310bd9",
         "overlays": [
             ".githooks/tests/cha_rta_boundary_red.sh",
@@ -69,6 +71,47 @@ REPRESENTATIVES = {
         "prefixes": ["gt-index", ".githooks/tests", ".githooks/red-artifacts"],
     },
 }
+EXPECTED_BLOBS = {
+    "cha_rta_boundary": {
+        "base": "0f09e993574bbeffe04bcb18401574b15c310bd9",
+        "overlay": GROUNDTRUTH_PARENT,
+        "blobs": {
+            ".githooks/tests/cha_rta_boundary_red.sh": (
+                "9db5ed7c789d5eb9f614ced9e3c31283710992b97abd7e124e21cc5233ff507f"
+            ),
+            ".githooks/red-artifacts/cha_rta_boundary_red.receipt": (
+                "f779c85ed06c670512a792beb5425545ff8ec59fbb32e1306dc045247cc0a0e6"
+            ),
+        },
+        "expected_output": "4e5a94d86ff35d088c69a038023fd47665174c7417fcde5795e97b91a27fb00b",
+    },
+    "vta_step5_candidate_proof": {
+        "base": GROUNDTRUTH_PARENT,
+        "overlay": GROUNDTRUTH_CANDIDATE,
+        "blobs": {
+            "gt-index/internal/resolver/vta_candidate_proof_red_test.go": (
+                "2f862f21dbc3ff18b05ca36fb7b19559f463c21f7719d58d2c86e2c0b50c5656"
+            ),
+            ".githooks/tests/vta_step5_candidate_proof_red.sh": (
+                "99fe24379c6a0ad92f61be8ee71faf21fdb81086446a994a8b559e6807827234"
+            ),
+            ".githooks/red-artifacts/vta_step5_candidate_proof_red.receipt": (
+                "7232164cb8602ae0790bc977d00a69b7c8bfe8b38c5ef34a16a24928b34096c7"
+            ),
+        },
+    },
+}
+VTA_DIAGNOSTICS = [
+    "./internal/resolver/vta_candidate_proof_red_test.go:29:27: undefined: VTAFlowProof",
+    (
+        "./internal/resolver/vta_candidate_proof_red_test.go:29:56: results[0].FlowProofs "
+        "undefined (type VTAResult has no field or method FlowProofs)"
+    ),
+    (
+        "./internal/resolver/vta_candidate_proof_red_test.go:30:35: results[0].FlowProofs "
+        "undefined (type VTAResult has no field or method FlowProofs)"
+    ),
+]
 
 
 def _shell() -> str:
@@ -85,12 +128,36 @@ def _shell() -> str:
     raise RuntimeError("posix_shell_unavailable")
 
 
+def _resolve_tool(name: str) -> str:
+    selected = shutil.which(name)
+    if selected is None:
+        raise RuntimeError(f"tool_unavailable:{name}")
+    return str(Path(selected).resolve())
+
+
 def _git_show(repo: Path, commit: str, path: str) -> bytes:
     return subprocess.run(
         ["git", "-C", str(repo), "show", f"{commit}:{path}"],
         check=True,
         capture_output=True,
     ).stdout
+
+
+def _assert_manifest(repo: Path, name: str) -> None:
+    manifest = EXPECTED_BLOBS[name]
+    for commit_key in ("base", "overlay"):
+        commit = str(manifest[commit_key])
+        if subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "-e", f"{commit}^{{commit}}"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode:
+            raise RuntimeError(f"manifest_commit_missing:{name}:{commit_key}:{commit}")
+    for path, expected in manifest["blobs"].items():
+        actual = hashlib.sha256(_git_show(repo, str(manifest["overlay"]), path)).hexdigest()
+        if actual != expected:
+            raise RuntimeError(f"manifest_hash_mismatch:{name}:{path}:{actual}:{expected}")
 
 
 def _materialize(
@@ -145,7 +212,7 @@ def _all_files(root: Path) -> list[str]:
     )
 
 
-def _prepare_vta(root: Path, cache: Path) -> None:
+def _prepare_vta(root: Path, cache: Path, evidence_parent: Path) -> dict[str, object]:
     """Warm content-addressed Go caches before the offline evidence phase."""
 
     for name in ("GOCACHE", "GOMODCACHE", "GOPATH"):
@@ -157,38 +224,168 @@ def _prepare_vta(root: Path, cache: Path) -> None:
             "GOCACHE": str(cache / "GOCACHE"),
             "GOMODCACHE": str(cache / "GOMODCACHE"),
             "GOPATH": str(cache / "GOPATH"),
+            "GOPROXY": "https://proxy.golang.org,direct",
             "GOSUMDB": "off",
             "GOWORK": "off",
         }
     )
-    subprocess.run(["go", "mod", "download"], cwd=root, env=environment, check=True)
+    preparation_log = evidence_parent / "preparation.log"
+    preparation_log.parent.mkdir(parents=True, exist_ok=True)
+    log_parts: list[bytes] = []
+    download = subprocess.run(
+        ["go", "mod", "download"], cwd=root, env=environment, check=False, capture_output=True
+    )
+    log_parts.append(download.stdout + download.stderr)
+    if download.returncode != 0:
+        preparation_log.write_bytes(b"".join(log_parts))
+        raise RuntimeError(f"dependency_preparation_failed:{download.returncode}")
     preparation = subprocess.run(
         ["go", "test", "./internal/parser", "-run", "^$", "-count=1"],
-        cwd=root,
-        env=environment,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    if preparation.returncode != 0:
-        raise RuntimeError(f"dependency_preparation_failed:{preparation.returncode}")
-    evidence_probe = subprocess.run(
-        [
-            "go",
-            "test",
-            "./internal/resolver",
-            "-run",
-            "^TestVTAPreservesCandidateSpecificProofPaths$",
-            "-count=1",
-        ],
         cwd=root,
         env=environment,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    if evidence_probe.returncode == 0:
-        raise RuntimeError("dependency_preparation_expected_red")
+    log_parts.append(preparation.stdout)
+    preparation_log.write_bytes(b"".join(log_parts))
+    go_path = Path(_resolve_tool("go"))
+    gcc_path = Path(_resolve_tool("gcc"))
+    record = {
+        "phase": "dependency_preparation",
+        "commands": [
+            {"argv": ["go", "mod", "download"], "exit_code": download.returncode},
+            {
+                "argv": ["go", "test", "./internal/parser", "-run", "^$", "-count=1"],
+                "exit_code": preparation.returncode,
+            },
+        ],
+        "cwd": str(root),
+        "environment": {
+            "CGO_ENABLED": "1",
+            "GOPROXY": environment["GOPROXY"],
+            "GOMODCACHE": str(cache / "GOMODCACHE"),
+            "GOCACHE": str(cache / "GOCACHE"),
+            "GOPATH": str(cache / "GOPATH"),
+        },
+        "exit_code": download.returncode,
+        "test_exit_code": preparation.returncode,
+        "log_sha256": hashlib.sha256(preparation_log.read_bytes()).hexdigest(),
+        "log_size": preparation_log.stat().st_size,
+        "go_executable": str(go_path),
+        "go_identity": _executable_identity(go_path),
+        "gcc_executable": str(gcc_path),
+        "gcc_identity": _executable_identity(gcc_path),
+    }
+    (evidence_parent / "preparation.json").write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    if download.returncode != 0:
+        raise RuntimeError(f"dependency_preparation_failed:{download.returncode}")
+    if preparation.returncode != 0:
+        raise RuntimeError(f"dependency_preparation_failed:{preparation.returncode}")
+    return record
+
+
+def _cache_manifest(cache: Path, destination: Path) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    paths = [p for p in cache.rglob("*") if p.is_file()]
+    for path in sorted(paths, key=lambda item: item.relative_to(cache).as_posix()):
+        data = path.read_bytes()
+        entries.append(
+            {
+                "path": path.relative_to(cache).as_posix(),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size": len(data),
+            }
+        )
+    manifest = {"schema": "gt.red_evidence.prepared_cache.v1", "entries": entries}
+    encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    result = {
+        **manifest,
+        "entry_count": len(entries),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "size": len(encoded),
+    }
+    destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "schema": result["schema"],
+        "entry_count": result["entry_count"],
+        "sha256": result["sha256"],
+        "size": result["size"],
+    }
+
+
+def _verify_cache_manifest(cache: Path, manifest_path: Path) -> dict[str, object]:
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"prepared_cache_manifest_unreadable:{type(exc).__name__}") from exc
+    entries = manifest.get("entries") if isinstance(manifest, dict) else None
+    if (
+        not isinstance(entries, list)
+        or manifest.get("schema") != "gt.red_evidence.prepared_cache.v1"
+    ):
+        raise RuntimeError("prepared_cache_manifest_invalid")
+    paths: list[str] = []
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"path", "sha256", "size"}
+            or not isinstance(entry.get("path"), str)
+            or not isinstance(entry.get("sha256"), str)
+            or not isinstance(entry.get("size"), int)
+        ):
+            raise RuntimeError("prepared_cache_manifest_entry_invalid")
+        paths.append(entry["path"])
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise RuntimeError("prepared_cache_manifest_order")
+    for entry in entries:
+        path = (cache / entry["path"]).resolve()
+        try:
+            path.relative_to(cache.resolve())
+        except ValueError as exc:
+            raise RuntimeError("prepared_cache_manifest_path_escape") from exc
+        if not path.is_file():
+            raise RuntimeError(f"prepared_cache_file_missing:{entry['path']}")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != entry["sha256"] or len(data) != entry["size"]:
+            raise RuntimeError(f"prepared_cache_file_mismatch:{entry['path']}")
+    payload = {"schema": manifest["schema"], "entries": entries}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    if manifest.get("sha256") != hashlib.sha256(encoded).hexdigest():
+        raise RuntimeError("prepared_cache_manifest_digest_mismatch")
+    if manifest.get("entry_count") != len(entries) or manifest.get("size") != len(encoded):
+        raise RuntimeError("prepared_cache_manifest_metadata_mismatch")
+    return {
+        "schema": manifest["schema"],
+        "entry_count": len(entries),
+        "sha256": manifest["sha256"],
+        "size": manifest["size"],
+    }
+
+
+def _composite_manifest(root: Path, spec: dict[str, object]) -> dict[str, object]:
+    entries = []
+    for path in _all_files(root):
+        data = (root / path).read_bytes()
+        entries.append(
+            {"path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+        )
+    payload = {
+        "schema": "gt.red_evidence.composite_tree.v1",
+        "base": spec["base"],
+        "overlay": spec["commit"],
+        "prefixes": spec["prefixes"],
+        "overlays": spec["overlays"],
+        "entries": entries,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return {
+        "schema": payload["schema"],
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "entry_count": len(entries),
+    }
 
 
 def _run_capture(
@@ -210,7 +407,13 @@ def _run_capture(
         files = _all_files(capture_root)
         source = "internal/resolver/vta_candidate_proof_red_test.go"
         cache = evidence.parent / "prepared-cache"
-        _prepare_vta(capture_root, cache)
+        preparation = _prepare_vta(capture_root, cache, evidence.parent)
+        preparation["cache_manifest"] = _cache_manifest(
+            cache, evidence.parent / "cache-manifest.json"
+        )
+        (evidence.parent / "preparation.json").write_text(
+            json.dumps(preparation, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         command = [
             "go",
             "test",
@@ -232,13 +435,28 @@ def _run_capture(
         output_grammar=str(spec["grammar"]),
         **capture_kwargs,
     )
+    if spec["grammar"] == OUTPUT_GRAMMAR:
+        lines = result.canonical_bytes.decode("utf-8").splitlines()
+        if (
+            len(lines) != 5
+            or lines[1:4] != VTA_DIAGNOSTICS
+            or lines[-1] != "PACKAGE_OUTCOME=build_failed"
+        ):
+            raise RuntimeError("vta_diagnostic_conservation_failed")
     publish_evidence_directory(
         evidence_dir=evidence, root=capture_root, inputs=files, result=result
     )
+    prepared_cache = (
+        evidence.parent / "prepared-cache" if spec["grammar"] == OUTPUT_GRAMMAR else None
+    )
+    if prepared_cache is not None:
+        _verify_cache_manifest(prepared_cache, evidence.parent / "cache-manifest.json")
     report = verify(
         root=capture_root,
         evidence_dir=evidence,
         expected_receipt_sha256=str(result.receipt["receipt_sha256"]),
+        replay=True,
+        prepared_cache=prepared_cache,
     )
     if report["status"] != "pass":
         raise RuntimeError(json.dumps(report, sort_keys=True))
@@ -255,6 +473,8 @@ def _mutation_matrix(
         "diagnostic": "receipt",
         "exit": "receipt",
         "toolchain": "receipt",
+        "normalizer": "receipt",
+        "canonical": "canonical",
         "raw": "raw",
         "external_digest": "receipt",
     }
@@ -270,6 +490,10 @@ def _mutation_matrix(
         elif kind == "fixture":
             path = case_root / str(receipt["fixtures"][0]["path"])
             path.write_bytes(path.read_bytes() + b"\nmutation")
+        elif kind == "canonical":
+            (case / "canonical.txt").write_bytes(
+                (case / "canonical.txt").read_bytes() + b"mutation"
+            )
         elif kind == "raw":
             (case / "raw.log").write_bytes((case / "raw.log").read_bytes() + b"mutation")
         else:
@@ -282,9 +506,11 @@ def _mutation_matrix(
                 payload["command"]["exit_code"] = 7
             elif name == "toolchain":
                 payload["toolchain"]["sha256"] = "0" * 64
+            elif name == "normalizer":
+                payload["normalizer_version"] = "mutated-normalizer"
             else:
                 payload["receipt_sha256"] = "0" * 64
-            if name in {"diagnostic", "exit", "toolchain"}:
+            if name in {"diagnostic", "exit", "toolchain", "normalizer"}:
                 payload["receipt_sha256"] = _receipt_sha256(
                     {key: value for key, value in payload.items() if key != "receipt_sha256"}
                 )
@@ -311,6 +537,7 @@ def replay(*, harness_root: Path, groundtruth_root: Path, output: Path) -> dict[
     with tempfile.TemporaryDirectory(prefix="gt-frozen-replay-") as temporary_name:
         temporary = Path(temporary_name)
         for name, spec in REPRESENTATIVES.items():
+            _assert_manifest(groundtruth_root, name)
             root = temporary / name
             _materialize(
                 groundtruth_root,
@@ -319,6 +546,10 @@ def replay(*, harness_root: Path, groundtruth_root: Path, output: Path) -> dict[
                 overlay_commit=str(spec["commit"]),
                 overlays=list(spec["overlays"]),
                 prefixes=list(spec["prefixes"]),
+            )
+            composite = _composite_manifest(root, spec)
+            (evidence_root / f"{name}-composite.json").write_text(
+                json.dumps(composite, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
             evidence = evidence_root / name
             receipt, verification, capture_root = _run_capture(
@@ -338,10 +569,27 @@ def replay(*, harness_root: Path, groundtruth_root: Path, output: Path) -> dict[
                 "toolchain": receipt["toolchain"],
                 "raw_output_sha256": receipt["raw_output"]["sha256"],
                 "canonical_sha256": receipt["diagnostic"]["sha256"],
+                "diagnostics": (
+                    receipt["diagnostic"]["matched_diagnostics"]
+                    if spec["grammar"] == EXACT_TEXT_GRAMMAR
+                    else (evidence / "canonical.txt").read_text(encoding="utf-8").splitlines()[1:-1]
+                ),
+                "environment_policy": receipt["environment_policy"],
                 "receipt_sha256": receipt["receipt_sha256"],
                 "verification": verification,
                 "mutations": mutations,
+                "composite_manifest": composite,
             }
+            if spec["grammar"] == OUTPUT_GRAMMAR:
+                preparation_path = evidence.parent / "preparation.json"
+                results[name]["preparation"] = json.loads(
+                    preparation_path.read_text(encoding="utf-8")
+                )
+            expected_output = EXPECTED_BLOBS[name].get("expected_output")
+            if expected_output is not None and receipt["diagnostic"]["sha256"] != expected_output:
+                raise RuntimeError(
+                    f"observed_output_hash_mismatch:{name}:{receipt['diagnostic']['sha256']}:{expected_output}"
+                )
     report = {"schema": "gt.red_evidence.frozen_replay.v2", "status": "pass", "results": results}
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report

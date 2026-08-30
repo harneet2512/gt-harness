@@ -223,10 +223,14 @@ jobs:
           set -euo pipefail
           PYTHON_EXE="${pythonLocation}/bin/python"
           "$PYTHON_EXE" scripts/check_red_evidence_producers.py --root . --groundtruth-root groundtruth
-          "$PYTHON_EXE" scripts/replay_frozen_red_producers.py \
+          if ! "$PYTHON_EXE" scripts/replay_frozen_red_producers.py \
             --harness-root . --groundtruth-root groundtruth \
-            --output "$RUNNER_TEMP/frozen-replay/replay.json"
-          "$PYTHON_EXE" -c 'import json, pathlib; p=pathlib.Path(__import__("os").environ["RUNNER_TEMP"])/"frozen-replay/replay.json"; r=json.loads(p.read_text()); assert r["status"]=="pass"; assert {"cha_rta_boundary", "vta_step5_candidate_proof"}==set(r["results"]); assert all(x["verification"]["status"]=="pass" for x in r["results"].values())'
+            --output "$RUNNER_TEMP/frozen-replay/replay.json"; then
+            cat "$RUNNER_TEMP/frozen-replay/replay.json" || true
+            find "$RUNNER_TEMP/frozen-replay" -name preparation.log -exec sh -c 'echo "--- $1"; tail -n 80 "$1"' _ {} \; || true
+            exit 1
+          fi
+          "$PYTHON_EXE" -c 'import json, pathlib; p=pathlib.Path(__import__("os").environ["RUNNER_TEMP"])/"frozen-replay/replay.json"; r=json.loads(p.read_text()); cha=r["results"]["cha_rta_boundary"]; vta=r["results"]["vta_step5_candidate_proof"]; assert r["status"]=="pass"; assert {"cha_rta_boundary", "vta_step5_candidate_proof"}==set(r["results"]); assert all(x["verification"]["status"]=="pass" for x in r["results"].values()); assert cha["canonical_sha256"]=="4e5a94d86ff35d088c69a038023fd47665174c7417fcde5795e97b91a27fb00b"; assert cha["command"]["exit_code"]==1; assert vta["command"]["exit_code"]==1; assert vta["diagnostics"]==["./internal/resolver/vta_candidate_proof_red_test.go:29:27: undefined: VTAFlowProof", "./internal/resolver/vta_candidate_proof_red_test.go:29:56: results[0].FlowProofs undefined (type VTAResult has no field or method FlowProofs)", "./internal/resolver/vta_candidate_proof_red_test.go:30:35: results[0].FlowProofs undefined (type VTAResult has no field or method FlowProofs)"]; assert vta["environment_policy"]=="prepared-go-red-environment.v1"; assert vta["preparation"]["cache_manifest"]["schema"]=="gt.red_evidence.prepared_cache.v1"; assert cha["composite_manifest"]["schema"]=="gt.red_evidence.composite_tree.v1"'
       - uses: actions/upload-artifact@v4
         with:
           name: frozen-red-replay
