@@ -51,6 +51,7 @@ _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 # producer. The stale compatibility copy under vendor/ is never authoritative.
 GROUNDTRUTH_REPOSITORY_URL = "https://github.com/harneet2512/groundtruth.git"
 GROUNDTRUTH_PRODUCER_COMMIT = "4967e0080cef47f614b1761a3152b784c0355a30"
+GROUNDTRUTH_PRODUCER_SOURCE_TREE = "d6f5ef0177ddc35c4588c919569ee918119fd0f7"
 PRODUCER_BUILD_INFO_SCHEMA = "gt-index.build.v1"
 PRODUCER_GRAPH_COMPLETION_SCHEMA = "gt-index.graph-completion.v1"
 PRODUCER_GRAPH_SCHEMA_VERSION = "v15.2-trust-tier"
@@ -176,6 +177,8 @@ def _validate_producer_binary(
     source_fingerprint = str(info.get("source_fingerprint") or "")
     if not source_fingerprint or source_fingerprint == "unknown":
         raise ProducerContractError("producer source fingerprint is incomplete")
+    if source_fingerprint != GROUNDTRUTH_PRODUCER_SOURCE_TREE:
+        raise ProducerContractError("producer source tree fingerprint mismatch")
     build_tags = {
         tag.strip()
         for tag in str(info.get("build_tags") or "").replace(",", " ").split()
@@ -206,6 +209,24 @@ def _validate_producer_binary(
         )
         if result.returncode != 0 or result.stdout.strip().lower() != GROUNDTRUTH_PRODUCER_COMMIT:
             raise ProducerContractError("producer source checkout commit mismatch")
+        tree = subprocess.run(
+            ["git", "-C", source_dir, "rev-parse", "HEAD:gt-index"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if tree.returncode != 0 or tree.stdout.strip().lower() != GROUNDTRUTH_PRODUCER_SOURCE_TREE:
+            raise ProducerContractError("producer source tree fingerprint mismatch")
+        clean = subprocess.run(
+            ["git", "-C", source_dir, "status", "--porcelain", "--untracked-files=all", "--", "."],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if clean.returncode != 0 or clean.stdout.strip():
+            raise ProducerContractError("producer source checkout is dirty")
     return {
         "path": str(path),
         "path_sha256": hashlib.sha256(str(path).encode("utf-8")).hexdigest(),

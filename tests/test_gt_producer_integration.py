@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ def test_build_info_binds_exact_external_producer(tmp_path: Path, monkeypatch):
         "schema": indexer.PRODUCER_BUILD_INFO_SCHEMA,
         "complete": True,
         "git_commit": indexer.GROUNDTRUTH_PRODUCER_COMMIT,
-        "source_fingerprint": "source-fingerprint",
+        "source_fingerprint": indexer.GROUNDTRUTH_PRODUCER_SOURCE_TREE,
         "build_tags": "sqlite_fts5",
         "graph_schema_version": indexer.PRODUCER_GRAPH_SCHEMA_VERSION,
         "capabilities": sorted(indexer.PRODUCER_REQUIRED_CAPABILITIES),
@@ -40,7 +41,69 @@ def test_build_info_binds_exact_external_producer(tmp_path: Path, monkeypatch):
     identity = indexer._validate_producer_binary(str(binary))
 
     assert identity["git_commit"] == indexer.GROUNDTRUTH_PRODUCER_COMMIT
-    assert identity["source_fingerprint"] == "source-fingerprint"
+    assert identity["source_fingerprint"] == indexer.GROUNDTRUTH_PRODUCER_SOURCE_TREE
+
+
+def test_build_info_rejects_unexpected_source_tree(tmp_path: Path, monkeypatch):
+    binary = tmp_path / "gt-index"
+    binary.write_bytes(b"producer")
+    info = {
+        "schema": indexer.PRODUCER_BUILD_INFO_SCHEMA,
+        "complete": True,
+        "git_commit": indexer.GROUNDTRUTH_PRODUCER_COMMIT,
+        "source_fingerprint": "tampered-source-tree",
+        "build_tags": "sqlite_fts5",
+        "graph_schema_version": indexer.PRODUCER_GRAPH_SCHEMA_VERSION,
+        "capabilities": sorted(indexer.PRODUCER_REQUIRED_CAPABILITIES),
+        "executable_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+    }
+    monkeypatch.setattr(indexer, "_run_producer_build_info", lambda _path: info)
+
+    with pytest.raises(indexer.ProducerContractError, match="source tree fingerprint"):
+        indexer._validate_producer_binary(str(binary))
+
+
+def test_same_head_dirty_source_checkout_is_rejected(tmp_path: Path, monkeypatch):
+    binary = tmp_path / "gt-index"
+    binary.write_bytes(b"producer")
+    info = {
+        "schema": indexer.PRODUCER_BUILD_INFO_SCHEMA,
+        "complete": True,
+        "git_commit": indexer.GROUNDTRUTH_PRODUCER_COMMIT,
+        "source_fingerprint": indexer.GROUNDTRUTH_PRODUCER_SOURCE_TREE,
+        "build_tags": "sqlite_fts5",
+        "graph_schema_version": indexer.PRODUCER_GRAPH_SCHEMA_VERSION,
+        "capabilities": sorted(indexer.PRODUCER_REQUIRED_CAPABILITIES),
+        "executable_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+    }
+    monkeypatch.setattr(indexer, "_run_producer_build_info", lambda _path: info)
+    monkeypatch.setenv("GT_INDEX_SOURCE_DIR", str(tmp_path / "gt-index"))
+
+    def fake_run(command, **kwargs):
+        if command[-2:] == ["rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(
+                command, 0, indexer.GROUNDTRUTH_PRODUCER_COMMIT + "\n", ""
+            )
+        if command[-2:] == ["rev-parse", "HEAD:gt-index"]:
+            return subprocess.CompletedProcess(
+                command, 0, indexer.GROUNDTRUTH_PRODUCER_SOURCE_TREE + "\n", ""
+            )
+        if command[-3:] == ["--untracked-files=all", "--", "."]:
+            return subprocess.CompletedProcess(command, 0, " M internal/resolver/resolver.go\n", "")
+        raise AssertionError(command)
+
+    monkeypatch.setattr(indexer.subprocess, "run", fake_run)
+    with pytest.raises(indexer.ProducerContractError, match="source checkout is dirty"):
+        indexer._validate_producer_binary(str(binary))
+
+
+def test_external_builder_binds_independent_tree_and_static_artifact():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "build_external_gt_index.sh"
+    script = script_path.read_text(encoding="utf-8")
+    assert indexer.GROUNDTRUTH_PRODUCER_SOURCE_TREE in script
+    assert "status --porcelain --untracked-files=all" in script
+    assert r'-extldflags \"-static\"' in script
+    assert "readelf -d" in script
 
 
 def test_graph_completion_rejects_tampered_receipt(tmp_path: Path):
