@@ -7,8 +7,8 @@
 #      container; runs nano with --gt-root "$PWD").
 #   2. a gt_profile input exported as GT_RL_PROFILE (default "2", the GT
 #      production law; the agent forwards every host GT_* var in-container).
-#   3. a build step that compiles gt-index for linux-amd64 from the vendored
-#      Go source (vendor/gt-index-src) with CGO + `-tags sqlite_fts5`.
+#   3. a build step that checks out Groundtruth at the immutable producer pin
+#      and compiles gt-index for linux-amd64 with CGO + `-tags sqlite_fts5`.
 #
 # Why build here instead of downloading: the public groundtruth repo has NO
 # binary release assets (tag v1.1.0, which _binary.py's auto-downloader

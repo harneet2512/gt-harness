@@ -23,7 +23,6 @@ GRAPH_SURFACES = (
     "cochange_sets",
     "file_hashes",
     "project_meta",
-    "resolution_v2",
 )
 
 
@@ -173,6 +172,10 @@ def build_graph_projection(
     symbols: set[str] = set()
     node_ids: set[int] = set()
     hits = {name: 0 for name in GRAPH_SURFACES}
+    # The v2 resolver projection is a query/runtime surface, not a legacy
+    # receipt surface. Keep its hit counter local so the public receipt schema
+    # remains backward-compatible while callers can still observe v2 facts.
+    hits["resolution_v2"] = 0
     semantic_facts: list[GraphSemanticFact] = []
     revision = graph_revision(graph_db)
     try:

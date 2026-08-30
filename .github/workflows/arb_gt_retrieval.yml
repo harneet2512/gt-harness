@@ -53,12 +53,25 @@ jobs:
         with:
           ref: ${{ inputs.harness_ref }}
 
+      - name: Checkout pinned Groundtruth producer
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: harneet2512/groundtruth
+          ref: 4967e0080cef47f614b1761a3152b784c0355a30
+          path: .gt-index-source
+
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
+
+      - name: Set up Go for the pinned producer
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .gt-index-source/gt-index/go.mod
+          cache-dependency-path: .gt-index-source/gt-index/go.sum
 
       - name: Install harness dependencies
         run: |
@@ -138,10 +151,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
-      - name: Configure pinned GT index binary
+      - name: Build and configure pinned GT index binary
         run: |
-          chmod +x vendor/gt-index-linux-amd64
-          echo "GT_INDEX_BINARY=$GITHUB_WORKSPACE/vendor/gt-index-linux-amd64" >> "$GITHUB_ENV"
+          set -euo pipefail
+          export GT_INDEX_SOURCE_DIR="$GITHUB_WORKSPACE/.gt-index-source/gt-index"
+          export GT_INDEX_BINARY_OUTPUT="$RUNNER_TEMP/gt-index-linux-amd64"
+          bash scripts/build_external_gt_index.sh
+          echo "GT_INDEX_BINARY=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
+          echo "GT_INDEX_BINARY_HOST=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
 
       - name: Download gold-free inputs
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093

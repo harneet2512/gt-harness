@@ -29,6 +29,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout pinned Groundtruth producer
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/groundtruth
+          ref: 4967e0080cef47f614b1761a3152b784c0355a30
+          path: .gt-index-source
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -37,27 +44,22 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: vendor/gt-index-src/go.mod
-          cache-dependency-path: vendor/gt-index-src/go.sum
+          go-version-file: .gt-index-source/gt-index/go.mod
+          cache-dependency-path: .gt-index-source/gt-index/go.sum
 
       - name: Build gt-index with sqlite_fts5
-        working-directory: vendor/gt-index-src
         run: |
           set -euo pipefail
-          export CGO_ENABLED=1
-          if go build -tags sqlite_fts5 \
-               -ldflags '-linkmode external -extldflags "-static"' \
-               -o ../gt-index-linux-amd64 ./cmd/gt-index/; then
-            echo "static build ok"
-          else
-            echo "::warning::static link failed; using a dynamically linked gt-index"
-            go build -tags sqlite_fts5 -o ../gt-index-linux-amd64 ./cmd/gt-index/
-          fi
+          export GT_INDEX_SOURCE_DIR="$GITHUB_WORKSPACE/.gt-index-source/gt-index"
+          export GT_INDEX_BINARY_OUTPUT="$RUNNER_TEMP/gt-index-linux-amd64"
+          bash scripts/build_external_gt_index.sh
+          echo "GT_INDEX_BINARY=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
+          echo "GT_INDEX_BINARY_HOST=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
 
       - name: Prove gt-index schema includes FTS5
         run: |
           set -euo pipefail
-          ./vendor/gt-index-linux-amd64 -root nano -output /tmp/gt-smoke.db
+          "$GT_INDEX_BINARY" -root nano -output /tmp/gt-smoke.db
           python - <<'PY'
           import sqlite3
 
@@ -174,8 +176,6 @@ jobs:
 
       - name: Run exactly one GT advisory trial
         id: harbor
-        env:
-          GT_INDEX_BINARY_HOST: ${{ github.workspace }}/vendor/gt-index-linux-amd64
         run: |
           set -euo pipefail
           job_name="tb2-miniswe-gt-single-${GITHUB_RUN_ID}"

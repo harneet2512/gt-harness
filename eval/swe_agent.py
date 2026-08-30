@@ -31,7 +31,8 @@ Usage (host needs Docker running):
         -l 5 -n 2 -o results/swebench --job-name swe-smoke -y
     # GT arm (full container plumbing — wheel, binary, gt_engine, smoke):
     #   -a eval.swe_agent:GTNanoSweAgent   (gt_root defaults ON to /testbed;
-    #   needs vendor/groundtruth_mcp-*.whl + vendor/gt-index-linux-amd64 —
+    #   needs vendor/groundtruth_mcp-*.whl plus the externally built pinned
+    #   GT_INDEX_BINARY_HOST artifact —
     #   the swe_gt.yml workflow stages both, see eval/tb_agent.py:GTNanoAgent)
 
 Results land in results/swebench/<job-name>/; per-task agent stdout in

@@ -82,35 +82,38 @@ jobs:
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
       GH_TOKEN: ${{ github.token }}
-      GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
       SNOWFLAKE_MODEL_SHA256: 564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971
       SNOWFLAKE_TOKENIZER_SHA256: 91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+      - name: Checkout pinned Groundtruth producer
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/groundtruth
+          ref: 4967e0080cef47f614b1761a3152b784c0355a30
+          path: .gt-index-source
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: vendor/gt-index-src/go.mod
-          cache-dependency-path: vendor/gt-index-src/go.sum
+          go-version-file: .gt-index-source/gt-index/go.mod
+          cache-dependency-path: .gt-index-source/gt-index/go.sum
 
-      - name: Build certified gt-index from the checked-out source
-        working-directory: vendor/gt-index-src
-        env:
-          CGO_ENABLED: "1"
+      - name: Build certified pinned gt-index
         run: |
           set -euo pipefail
-          go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
-          chmod +x "$RUNNER_TEMP/gt-index"
-          echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+          export GT_INDEX_SOURCE_DIR="$GITHUB_WORKSPACE/.gt-index-source/gt-index"
+          export GT_INDEX_BINARY_OUTPUT="$RUNNER_TEMP/gt-index-linux-amd64"
+          bash scripts/build_external_gt_index.sh
+          echo "GT_INDEX_BINARY=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
+          echo "GT_INDEX_BINARY_HOST=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
 
       - name: Install nano-harness + harbor
         run: |
           python -m pip install --upgrade pip
-          chmod +x vendor/gt-index-linux-amd64
           python -m pip install -e '.[retrieval]' "mini-swe-agent==2.2.8" "harbor==0.20.0" \
             vendor/groundtruth_mcp-*.whl
 
@@ -251,30 +254,34 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.OPENAI_BASE_URL }}
       PYTHONUTF8: "1"
-      GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
       # Provider credentials remain on the Harbor host. The external agent
       # passes an empty env mapping to every model-selected task command.
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+      - name: Checkout pinned Groundtruth producer
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/groundtruth
+          ref: 4967e0080cef47f614b1761a3152b784c0355a30
+          path: .gt-index-source
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: vendor/gt-index-src/go.mod
-          cache-dependency-path: vendor/gt-index-src/go.sum
+          go-version-file: .gt-index-source/gt-index/go.mod
+          cache-dependency-path: .gt-index-source/gt-index/go.sum
 
-      - name: Build certified gt-index from the checked-out source
-        working-directory: vendor/gt-index-src
-        env:
-          CGO_ENABLED: "1"
+      - name: Build certified pinned gt-index
         run: |
           set -euo pipefail
-          go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index/
-          chmod +x "$RUNNER_TEMP/gt-index"
-          echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+          export GT_INDEX_SOURCE_DIR="$GITHUB_WORKSPACE/.gt-index-source/gt-index"
+          export GT_INDEX_BINARY_OUTPUT="$RUNNER_TEMP/gt-index-linux-amd64"
+          bash scripts/build_external_gt_index.sh
+          echo "GT_INDEX_BINARY=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
+          echo "GT_INDEX_BINARY_HOST=$GT_INDEX_BINARY_OUTPUT" >> "$GITHUB_ENV"
 
       - name: Free disk space
         run: |
@@ -285,7 +292,6 @@ jobs:
       - name: Install nano-harness + harbor
         run: |
           python -m pip install --upgrade pip
-          chmod +x vendor/gt-index-linux-amd64
           pip install -e . "mini-swe-agent==2.2.8" "harbor==0.20.0" \
             vendor/groundtruth_mcp-*.whl
 

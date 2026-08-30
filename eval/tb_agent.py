@@ -167,9 +167,10 @@ class GTNanoAgent(NanoAgent):
     Why an uploaded binary + $GT_INDEX_BINARY, not _binary.py auto-download:
     same finding — there are no gt-index release assets to download, and the
     downloader targets the nonexistent v1.1.0 tag. The workflow builds
-    linux-amd64 from ``vendor/gt-index-src`` (CGO + ``-tags sqlite_fts5``)
-    into ``vendor/gt-index-linux-amd64``; install() uploads it and run()
-    pins ``GT_INDEX_BINARY`` so find_binary() never touches the network.
+    linux-amd64 from the separately checked-out pinned Groundtruth producer
+    (CGO + ``-tags sqlite_fts5``); install() uploads the externally built
+    artifact and run() pins ``GT_INDEX_BINARY`` so find_binary() never touches
+    the network.
 
     GT flags: run() forwards every host ``GT_*`` env var into the container
     and resolves ``GT_RL_PROFILE`` via the ``gt_profile`` kwarg (harbor

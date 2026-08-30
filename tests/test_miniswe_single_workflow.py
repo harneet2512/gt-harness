@@ -42,8 +42,10 @@ def test_single_witness_workflow_gates_snapshot_task_and_runner_defaults():
 def test_single_witness_workflow_builds_gt_and_preserves_receipts_on_failure():
     text = _workflow_text()
 
-    assert "go build -tags sqlite_fts5" in text
-    assert 'GT_INDEX_BINARY_HOST: ${{ github.workspace }}/vendor/gt-index-linux-amd64' in text
+    assert "repository: harneet2512/groundtruth" in text
+    assert "ref: 4967e0080cef47f614b1761a3152b784c0355a30" in text
+    assert "bash scripts/build_external_gt_index.sh" in text
+    assert 'GT_INDEX_BINARY_HOST=$GT_INDEX_BINARY_OUTPUT' in text
     assert "if: always()" in text
     assert "actions/upload-artifact@v4" in text
     assert "results/terminal-bench/" in text
