@@ -1,0 +1,10 @@
+format=gt.fixture-red.v1
+unit=minimal-existing-record-id-idempotency-fd019-parity
+base_sha=6568f3d86e6d403682f06329556601a844127921
+fixture_path=tests/red_artifacts/run_control_record_parity_red.py
+fixture_sha256=7a482670af9fbb3554a5071394962ad46a92ff2e021f77fca4c909ab251d88a1
+command=python tests/red_artifacts/run_control_record_parity_red.py
+exit_code=1
+output_path=tests/red_artifacts/control_record_parity.out
+output_sha256=bccc930990a6e3ad16629149ffffed470ae3ef1362f0eafd9026a42aa3aec159
+failure=fresh-checkout finalstand inventory drift
