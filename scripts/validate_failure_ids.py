@@ -23,9 +23,31 @@ SNAPSHOT_SCHEMA = "failure-id-ledger-snapshot.v1"
 ID_PATTERN = re.compile(r"\bFD-(\d{3})\b")
 HEADING_DEFINITION = re.compile(r"^\s*#{1,6}\s+(FD-\d{3})\s*(?:-|:)")
 HEADING_CANDIDATE = re.compile(r"^\s*#{1,6}\s+(FD-\d+)\s*(?:-|:)")
-FIELD_CANDIDATE = re.compile(r"(?:^|[{,\s-])[\"']?failure_id[\"']?\s*[:=]\s*[\"']?(FD-\d+)\b")
+YAML_PAIR = re.compile(
+    r"(?=(?P<key>\"(?:\\.|[^\"])*\"|'(?:''|[^'])*'|[A-Za-z_][A-Za-z0-9_-]*)"
+    r"\s*:\s*(?P<value>\"(?:\\.|[^\"])*\"|'(?:''|[^'])*'|[^,}\]]*))"
+)
 
 MACHINE_FIELD_SUFFIXES = frozenset({".json", ".jsonl", ".receipt", ".toml", ".yaml", ".yml"})
+YAML_DOUBLE_ESCAPES = {
+    "0": "\0",
+    "a": "\a",
+    "b": "\b",
+    "t": "\t",
+    "n": "\n",
+    "v": "\v",
+    "f": "\f",
+    "r": "\r",
+    "e": "\x1b",
+    " ": " ",
+    '"': '"',
+    "/": "/",
+    "\\": "\\",
+    "N": "\x85",
+    "_": "\xa0",
+    "L": "\u2028",
+    "P": "\u2029",
+}
 EXCLUDED_DIRECTORIES = frozenset(
     {
         ".git",
@@ -104,6 +126,98 @@ def _nested_failure_ids(value: Any) -> Iterable[Any]:
             yield from _nested_failure_ids(nested)
 
 
+def _yaml_double_quoted(token: str) -> str | None:
+    value = token[1:-1]
+    decoded: list[str] = []
+    index = 0
+    while index < len(value):
+        if value[index] != "\\":
+            decoded.append(value[index])
+            index += 1
+            continue
+        index += 1
+        if index == len(value):
+            return None
+        escape = value[index]
+        if escape in YAML_DOUBLE_ESCAPES:
+            decoded.append(YAML_DOUBLE_ESCAPES[escape])
+            index += 1
+            continue
+        widths = {"x": 2, "u": 4, "U": 8}
+        width = widths.get(escape)
+        digits = value[index + 1 : index + 1 + width] if width else ""
+        if width is None or len(digits) != width or not re.fullmatch(r"[0-9a-fA-F]+", digits):
+            return None
+        try:
+            decoded.append(chr(int(digits, 16)))
+        except ValueError:
+            return None
+        index += width + 1
+    return "".join(decoded)
+
+
+def _yaml_scalar(token: str) -> str | None:
+    token = token.strip()
+    if token.startswith('"') and token.endswith('"'):
+        return _yaml_double_quoted(token)
+    if token.startswith("'") and token.endswith("'"):
+        return token[1:-1].replace("''", "'")
+    return token
+
+
+def _yaml_machine_fields(text: str) -> tuple[list[tuple[str, int]], list[tuple[int, str]]]:
+    """Consume a deterministic YAML subset and fail closed on reserved forms."""
+
+    definitions: list[tuple[str, int]] = []
+    malformed: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    handled_key_lines: set[int] = set()
+
+    for index, line in enumerate(lines):
+        explicit = re.match(r"^\s*\?\s*(.+?)\s*(?:#.*)?$", line)
+        if not explicit or _yaml_scalar(explicit.group(1)) != "failure_id":
+            continue
+        handled_key_lines.add(index)
+        value_index = index + 1
+        while value_index < len(lines) and not lines[value_index].strip():
+            value_index += 1
+        value_match = (
+            re.match(r"^\s*:\s*(.*?)\s*(?:#.*)?$", lines[value_index])
+            if value_index < len(lines)
+            else None
+        )
+        value = _yaml_scalar(value_match.group(1)) if value_match else None
+        if isinstance(value, str) and re.fullmatch(r"FD-\d{3}", value):
+            definitions.append((value, index + 1))
+        else:
+            malformed.append((index + 1, str(value) if value else "failure_id_unparsed"))
+
+    for index, line in enumerate(lines):
+        matched_failure_key = False
+        for pair in YAML_PAIR.finditer(line):
+            if _yaml_scalar(pair.group("key")) != "failure_id":
+                continue
+            matched_failure_key = True
+            handled_key_lines.add(index)
+            value = _yaml_scalar(pair.group("value"))
+            if isinstance(value, str) and re.fullmatch(r"FD-\d{3}", value):
+                definitions.append((value, index + 1))
+            elif isinstance(value, str) and re.fullmatch(r"FD-\d+", value):
+                malformed.append((index + 1, value))
+            else:
+                malformed.append((index + 1, "failure_id_unparsed"))
+
+        if matched_failure_key or index in handled_key_lines:
+            continue
+        decoded_scalars = []
+        for quoted in re.finditer(r'"(?:\\.|[^\"])*"|\'(?:\'\'|[^\'])*\'', line):
+            decoded_scalars.append(_yaml_scalar(quoted.group(0)))
+        if re.search(r"\bfailure_id\b", line) or "failure_id" in decoded_scalars:
+            malformed.append((index + 1, "failure_id_unparsed"))
+
+    return definitions, malformed
+
+
 def _structured_machine_fields(
     path: Path, text: str
 ) -> tuple[list[tuple[str, int]], list[tuple[int, str]]]:
@@ -121,19 +235,7 @@ def _structured_machine_fields(
         elif suffix == ".toml":
             documents.append((tomllib.loads(text), 1))
         else:
-            definitions: list[tuple[str, int]] = []
-            malformed: list[tuple[int, str]] = []
-            for line_number, line in enumerate(text.splitlines(), start=1):
-                candidates = list(FIELD_CANDIDATE.finditer(line))
-                for candidate in candidates:
-                    failure_id = candidate.group(1)
-                    if re.fullmatch(r"FD-\d{3}", failure_id):
-                        definitions.append((failure_id, line_number))
-                    else:
-                        malformed.append((line_number, failure_id))
-                if re.search(r"[\"']?failure_id[\"']?\s*[:=]", line) and not candidates:
-                    malformed.append((line_number, "failure_id_unparsed"))
-            return definitions, malformed
+            return _yaml_machine_fields(text)
     except _DuplicateJsonKeyError:
         return [], [(1, "duplicate_json_key")]
     except (json.JSONDecodeError, tomllib.TOMLDecodeError):
@@ -173,7 +275,10 @@ def _load_snapshot(
     errors: list[str] = []
     if snapshot.get("schema") != SNAPSHOT_SCHEMA:
         errors.append("snapshot:invalid_schema")
-    computed_hash = _snapshot_payload_sha256(snapshot)
+    try:
+        computed_hash = _snapshot_payload_sha256(snapshot)
+    except UnicodeEncodeError:
+        return snapshot, ["snapshot:invalid_unicode"]
     declared_hash = snapshot.get("payload_sha256")
     if not isinstance(declared_hash, str) or declared_hash != computed_hash:
         errors.append("snapshot:payload_sha256_mismatch")
@@ -282,11 +387,16 @@ def validate(
             except OSError as exc:
                 unreadable.append(f"{display}:{type(exc).__name__}")
                 continue
+            machine_file = path.suffix.lower() in MACHINE_FIELD_SUFFIXES
             if b"\0" in raw:
+                if machine_file:
+                    unreadable.append(f"{display}:nul_byte")
                 continue
             try:
                 text = raw.decode("utf-8-sig")
             except UnicodeError:
+                if machine_file:
+                    unreadable.append(f"{display}:invalid_utf8")
                 continue
             files_scanned += 1
             for match in ID_PATTERN.finditer(text):
@@ -301,7 +411,7 @@ def validate(
                 heading_candidate = HEADING_CANDIDATE.match(line)
                 if heading_candidate and not re.fullmatch(r"FD-\d{3}", heading_candidate.group(1)):
                     malformed.append(f"{display}:{line_number}:{heading_candidate.group(1)}")
-            if path.suffix.lower() in MACHINE_FIELD_SUFFIXES:
+            if machine_file:
                 machine_definitions, machine_malformed = _structured_machine_fields(path, text)
                 for failure_id, line_number in machine_definitions:
                     definitions[failure_id].append(f"{display}:{line_number}")
