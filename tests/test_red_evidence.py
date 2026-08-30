@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.red_evidence import (
+    EXACT_TEXT_GRAMMAR,
     CaptureError,
     _receipt_sha256,
     capture,
@@ -47,6 +48,40 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
             encoding="utf-8",
         )
         return root
+
+    def test_exact_text_failure_profile_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(Path(directory), "exact")
+            expected = "CHA/RTA implementation missing\n"
+            (root / "runner.py").write_text(
+                "import sys\nsys.stdout.write(" + repr(expected) + ")\nraise SystemExit(1)\n",
+                encoding="utf-8",
+            )
+            result = capture(
+                root=root,
+                sources=[SOURCE],
+                fixtures=["fixture.py", "runner.py"],
+                command=[sys.executable, "runner.py"],
+                toolchain_command=[sys.executable, "--version"],
+                expected_source_path=SOURCE,
+                expected_diagnostic=expected,
+                output_grammar=EXACT_TEXT_GRAMMAR,
+            )
+            evidence = Path(directory) / "evidence"
+            publish_evidence_directory(
+                evidence_dir=evidence,
+                root=root,
+                inputs=[SOURCE, "fixture.py", "runner.py"],
+                result=result,
+            )
+            self.assertEqual(
+                verify(
+                    root=root,
+                    evidence_dir=evidence,
+                    expected_receipt_sha256=result.receipt["receipt_sha256"],
+                )["status"],
+                "pass",
+            )
 
     def _capture(self, root: Path):
         return capture(

@@ -29,10 +29,12 @@ except ModuleNotFoundError:  # Direct `python scripts/red_evidence.py` execution
 SCHEMA = "gt.red_evidence.receipt.v2"
 VERIFY_SCHEMA = "gt.red_evidence.verify.v2"
 NORMALIZER_VERSION = "go-build-red-normalizer.v2"
+EXACT_TEXT_NORMALIZER_VERSION = "exact-text-normalizer.v1"
 OUTPUT_GRAMMAR = "go-build-diagnostic-lines.v1"
 EXACT_TEXT_GRAMMAR = "exact-text-failure.v1"
 STREAM_MODEL = "merged-stdout-stderr.v1"
 ENVIRONMENT_POLICY = "closed-go-red-environment.v1"
+PREPARED_ENVIRONMENT_POLICY = "prepared-go-red-environment.v1"
 FIXED_ENVIRONMENT = {
     "CGO_ENABLED": "0",
     "GOENV": "off",
@@ -135,7 +137,11 @@ def _argv(value: Sequence[str], name: str) -> list[str]:
 
 
 def _closed_environment(
-    work: Path, executable_paths: Sequence[Path]
+    work: Path,
+    executable_paths: Sequence[Path],
+    *,
+    cgo_enabled: str | None = None,
+    cache_seed: Path | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     directories = {
         "GOCACHE": work / "go-cache",
@@ -146,10 +152,15 @@ def _closed_environment(
         "TMP": work / "tmp",
         "TMPDIR": work / "tmp",
     }
+    if cache_seed is not None:
+        for name in ("GOCACHE", "GOMODCACHE", "GOPATH"):
+            directories[name] = cache_seed / name
     for directory in set(directories.values()):
         directory.mkdir(parents=True, exist_ok=True)
     environment = dict(FIXED_ENVIRONMENT)
     environment.update({key: str(value.resolve()) for key, value in directories.items()})
+    if cgo_enabled is not None:
+        environment["CGO_ENABLED"] = cgo_enabled
     tool_directories = list(dict.fromkeys(str(path.parent.resolve()) for path in executable_paths))
     if os.name == "nt":
         system_root = os.environ.get("SYSTEMROOT", os.environ.get("WINDIR", ""))
@@ -162,6 +173,8 @@ def _closed_environment(
         environment[key] = os.environ.get(key, "")
     logical = dict(FIXED_ENVIRONMENT)
     logical.update({key: f"<WORK>/{key.lower()}" for key in WORK_ENVIRONMENT_KEYS})
+    if cgo_enabled is not None:
+        logical["CGO_ENABLED"] = cgo_enabled
     logical["PATH"] = "<RESOLVED_TOOL_DIRS>"
     for key in SYSTEM_ENVIRONMENT_KEYS:
         logical[key] = "<SYSTEM_ROOT>" if environment[key] else ""
@@ -310,6 +323,8 @@ def capture(
     runner_image_version: str | None = None,
     runner_architecture: str | None = None,
     output_grammar: str = OUTPUT_GRAMMAR,
+    cgo_enabled: str | None = None,
+    cache_seed: str | Path | None = None,
 ) -> CaptureResult:
     """Execute a real failing Go command and seal body plus provenance."""
 
@@ -344,8 +359,14 @@ def capture(
     toolchain_executable = _resolve_executable(toolchain_argv[0], resolved_root)
 
     with tempfile.TemporaryDirectory(prefix="gt-red-") as directory:
+        executable_paths = [command_executable, toolchain_executable, Path(sys.executable)]
+        if cgo_enabled == "1":
+            executable_paths.append(_resolve_executable("gcc", resolved_root))
         environment, logical_environment = _closed_environment(
-            Path(directory), [command_executable, toolchain_executable, Path(sys.executable)]
+            Path(directory),
+            executable_paths,
+            cgo_enabled=cgo_enabled,
+            cache_seed=Path(cache_seed).resolve() if cache_seed is not None else None,
         )
         toolchain = _observe(
             toolchain_argv, resolved_root, environment, executable_path=toolchain_executable
@@ -390,10 +411,16 @@ def capture(
         toolchain_bytes = toolchain_text.encode("utf-8")
         receipt: dict[str, Any] = {
             "schema": SCHEMA,
-            "normalizer_version": NORMALIZER_VERSION,
+            "normalizer_version": (
+                EXACT_TEXT_NORMALIZER_VERSION
+                if output_grammar == EXACT_TEXT_GRAMMAR
+                else NORMALIZER_VERSION
+            ),
             "output_grammar": output_grammar,
             "stream_model": STREAM_MODEL,
-            "environment_policy": ENVIRONMENT_POLICY,
+            "environment_policy": (
+                PREPARED_ENVIRONMENT_POLICY if cgo_enabled is not None else ENVIRONMENT_POLICY
+            ),
             "environment": logical_environment,
             "runner": _runner_provenance(
                 image_label=runner_image,
@@ -516,16 +543,21 @@ def _validate_receipt(
     }
     if set(receipt) != required:
         errors.append("receipt:invalid_fields")
-    for field, expected in (
-        ("schema", SCHEMA),
-        ("normalizer_version", NORMALIZER_VERSION),
-        ("stream_model", STREAM_MODEL),
-        ("environment_policy", ENVIRONMENT_POLICY),
-    ):
+    for field, expected in (("schema", SCHEMA), ("stream_model", STREAM_MODEL)):
         if receipt.get(field) != expected:
             errors.append(f"unexpected_{field}")
     if receipt.get("output_grammar") not in {OUTPUT_GRAMMAR, EXACT_TEXT_GRAMMAR}:
         errors.append("unexpected_output_grammar")
+    expected_normalizer = (
+        EXACT_TEXT_NORMALIZER_VERSION
+        if receipt.get("output_grammar") == EXACT_TEXT_GRAMMAR
+        else NORMALIZER_VERSION
+    )
+    if receipt.get("normalizer_version") != expected_normalizer:
+        errors.append("unexpected_normalizer_version")
+    policy = receipt.get("environment_policy")
+    if policy not in {ENVIRONMENT_POLICY, PREPARED_ENVIRONMENT_POLICY}:
+        errors.append("unexpected_environment_policy")
     environment = receipt.get("environment")
     environment_keys = (
         set(FIXED_ENVIRONMENT)
@@ -538,7 +570,10 @@ def _validate_receipt(
     if not isinstance(environment, dict) or set(environment) != environment_keys:
         errors.append("environment:invalid")
     else:
-        for key, expected in FIXED_ENVIRONMENT.items():
+        expected_environment = dict(FIXED_ENVIRONMENT)
+        if policy == PREPARED_ENVIRONMENT_POLICY:
+            expected_environment["CGO_ENABLED"] = "1"
+        for key, expected in expected_environment.items():
             if environment.get(key) != expected:
                 errors.append(f"environment:unexpected_{key.lower()}")
         if any(environment.get(key) != f"<WORK>/{key.lower()}" for key in WORK_ENVIRONMENT_KEYS):
@@ -761,8 +796,13 @@ def verify(
                     errors.append("raw_output:exact_text_mismatch")
             except CaptureError as exc:
                 errors.append(f"raw_output:{exc}")
-            if raw_bytes != canonical_bytes:
-                errors.append("raw_output_canonical_mismatch")
+            try:
+                normalized_raw = _strict_text(raw_bytes, "raw_output").encode("utf-8")
+            except CaptureError as exc:
+                errors.append(f"raw_output:{exc}")
+            else:
+                if normalized_raw != canonical_bytes:
+                    errors.append("raw_output_canonical_mismatch")
         else:
             try:
                 raw_parse = canonicalize_go_red(
