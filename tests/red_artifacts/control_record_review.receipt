@@ -1,0 +1,10 @@
+format=gt.fixture-red.v1
+unit=minimal-existing-record-id-idempotency-fd019
+base_sha=1b0058513ab7264dfba000ccabddc5d033ecbaea
+fixture_path=tests/red_artifacts/run_control_record_review_red.py
+fixture_sha256=a7ab358641cfd9559877c23d8a1e2c311702485cb8f3b8f2c2ab9ec1d4ec2688
+command=python tests/red_artifacts/run_control_record_review_red.py
+exit_code=1
+output_path=tests/red_artifacts/control_record_review.out
+output_sha256=46d8332fbd4ab9ee7594a7b208a11e41231ff9212f6473723b8c2dbddd487d30
+failure=malformed reserved marker accepted; source eol unspecified

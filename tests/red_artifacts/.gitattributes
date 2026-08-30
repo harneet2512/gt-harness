@@ -1,3 +1,6 @@
 run_control_record_red.py text eol=lf
+run_control_record_review_red.py text eol=lf
 control_record_idempotency.out text eol=lf
 control_record_idempotency.receipt text eol=lf
+control_record_review.out text eol=lf
+control_record_review.receipt text eol=lf
