@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 GENERATOR = ROOT / "scripts" / "generate_gt_finalstand.py"
-FIXTURE_ROOT = ROOT / "tests" / "red_artifacts" / "groundtruth_fixture"
+FIXTURE_ARCHIVE = ROOT / "tests" / "red_artifacts" / "groundtruth_fixture.tar"
 GROUNDTRUTH_SOURCE_SHA = "5817206811265f9b166296662c6d2f21231fd92e"
 GROUNDTRUTH_SOURCE_TREE = "a6e344542112a01a41c1835e41dce6346abfe2c6"
 SOURCE_HASHES = {
@@ -60,7 +62,7 @@ def _fixture_error(source_root: Path) -> str | None:
         return f"fixture file set differs: {sorted(actual)}"
     for filename, expected_hash in SOURCE_HASHES.items():
         path = spec_root / filename
-        actual_hash = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual_hash != expected_hash:
             return f"fixture hash mismatch: {filename}"
         if filename != "spec.go":
@@ -71,6 +73,23 @@ def _fixture_error(source_root: Path) -> str | None:
             ):
                 return f"fixture semantic identity mismatch: {filename}"
     return None
+
+
+def _extract_fixture(destination: Path) -> None:
+    with tarfile.open(FIXTURE_ARCHIVE, mode="r") as archive:
+        for member in archive.getmembers():
+            if not member.name.startswith("gt-index/") and member.name != "gt-index":
+                raise RuntimeError(f"unexpected Groundtruth fixture member: {member.name}")
+            target = destination / member.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if member.isdir():
+                continue
+            if not member.isfile():
+                raise RuntimeError(f"unsupported Groundtruth fixture member: {member.name}")
+            source = archive.extractfile(member)
+            if source is None:
+                raise RuntimeError(f"unreadable Groundtruth fixture member: {member.name}")
+            target.write_bytes(source.read())
 
 
 def _run(source_root: Path) -> subprocess.CompletedProcess[bytes]:
@@ -96,14 +115,14 @@ with tempfile.TemporaryDirectory(prefix="gt-missing-dependency-") as missing_dir
 
 with tempfile.TemporaryDirectory(prefix="gt-pinned-present-") as present_dir:
     present = Path(present_dir)
-    shutil.copytree(FIXTURE_ROOT / "gt-index", present / "gt-index")
+    _extract_fixture(present)
     fixture_error = _fixture_error(present)
     if fixture_error is not None:
         print(f"FAIL: accepted Groundtruth fixture rejected: {fixture_error}")
         raise SystemExit(1)
     with tempfile.TemporaryDirectory(prefix="gt-mutated-source-") as mutated_dir:
         mutated = Path(mutated_dir)
-        shutil.copytree(FIXTURE_ROOT / "gt-index", mutated / "gt-index")
+        _extract_fixture(mutated)
         mutated_source = mutated / "gt-index" / "internal" / "specs" / "bash.go"
         mutated_source.write_bytes(mutated_source.read_bytes() + b"// mutation\n")
         if _fixture_error(mutated) is None:
