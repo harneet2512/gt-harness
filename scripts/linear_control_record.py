@@ -66,7 +66,11 @@ def _utf8_prefix(text: str, byte_count: int) -> str:
 
 def _marker_state(description: str) -> dict[str, str]:
     state: dict[str, str] = {}
-    for marker in _MARKER.finditer(description):
+    markers = list(_MARKER.finditer(description))
+    reserved = re.findall(r"(?m)^<!-- GT-TYPED-RECORD v1\b", description)
+    if len(markers) != len(reserved):
+        raise RecordConflict("malformed typed record marker")
+    for marker in markers:
         record_id = marker.group("id")
         claimed_sha = marker.group("sha")
         body = _utf8_prefix(description[marker.end() :], int(marker.group("bytes")))
