@@ -58,6 +58,19 @@ EXCLUDED_DIRECTORIES = frozenset(
 )
 
 
+class _DuplicateJsonKeyError(ValueError):
+    """Raised before a snapshot's duplicate JSON key can be collapsed."""
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError(key)
+        result[key] = value
+    return result
+
+
 def _iter_files(root: Path) -> Iterable[Path]:
     if root.is_file():
         yield root
@@ -106,7 +119,12 @@ def _load_snapshot(
     if not snapshot_path.is_file():
         return None, ["snapshot:not_found"]
     try:
-        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        snapshot = json.loads(
+            snapshot_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except _DuplicateJsonKeyError:
+        return None, ["snapshot:duplicate_key"]
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None, ["snapshot:invalid_json"]
     if not isinstance(snapshot, dict):
@@ -201,6 +219,8 @@ def validate(
             expected_ledger_revision,
             expected_ledger_payload_sha256,
         )
+    elif expected_ledger_revision is not None or expected_ledger_payload_sha256 is not None:
+        snapshot_errors = ["snapshot:expectation_without_snapshot"]
 
     for root_index, root in enumerate(resolved_roots):
         if not root.exists():

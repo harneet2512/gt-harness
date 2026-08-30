@@ -265,6 +265,81 @@ def test_snapshot_rejects_malformed_external_payload_pin(tmp_path: Path) -> None
     assert report["snapshot_errors"] == ["snapshot:unexpected_payload_sha256"]
 
 
+def test_snapshot_rejects_duplicate_keys_at_every_object_level(tmp_path: Path, capsys) -> None:
+    source = _write(tmp_path / "repo" / "README.md", "Reference FD-001.\n")
+    original = _write_snapshot(tmp_path / "original.json")
+    expected_payload_sha256 = _snapshot_payload_sha256(original)
+    original_text = original.read_text(encoding="utf-8")
+    variants = {
+        "top-level": original_text.replace("{\n", '{\n  "schema": "contradictory-schema",\n', 1),
+        "canonical": original_text.replace(
+            '  "canonical_definitions": {\n',
+            '  "canonical_definitions": {\n    "FD-001": "contradictory definition",\n',
+            1,
+        ),
+        "nested-source": original_text.replace(
+            '  "source": {\n', '  "source": {\n    "issue": "contradictory-issue",\n', 1
+        ),
+    }
+
+    for name, text in variants.items():
+        snapshot = _write(tmp_path / f"{name}.json", text)
+        report = validate_failure_ids.validate(
+            [source.parent],
+            ledger_snapshot=snapshot,
+            expected_ledger_payload_sha256=expected_payload_sha256,
+        )
+
+        assert report["status"] == "fail", name
+        assert report["snapshot_errors"] == ["snapshot:duplicate_key"], name
+        exit_code = validate_failure_ids.main(
+            [
+                str(source.parent),
+                "--ledger-snapshot",
+                str(snapshot),
+                "--expected-ledger-payload-sha256",
+                expected_payload_sha256,
+            ]
+        )
+        cli_report = json.loads(capsys.readouterr().out)
+        assert exit_code == 1, name
+        assert cli_report["snapshot_errors"] == ["snapshot:duplicate_key"], name
+
+
+def test_orphan_ledger_expectations_fail_closed_in_library(tmp_path: Path) -> None:
+    source = _write(tmp_path / "repo" / "README.md", "No failure IDs.\n")
+    revision = f"sha256:{'a' * 64}"
+    payload_sha256 = "b" * 64
+    variants = (
+        {"expected_ledger_revision": revision},
+        {"expected_ledger_payload_sha256": payload_sha256},
+        {
+            "expected_ledger_revision": revision,
+            "expected_ledger_payload_sha256": payload_sha256,
+        },
+    )
+
+    unpinned = validate_failure_ids.validate([source.parent])
+    assert unpinned["status"] == "pass"
+
+    for expectations in variants:
+        report = validate_failure_ids.validate([source.parent], **expectations)
+        assert report["status"] == "fail"
+        assert report["snapshot_errors"] == ["snapshot:expectation_without_snapshot"]
+
+
+def test_orphan_ledger_expectations_fail_closed_in_cli(tmp_path: Path, capsys) -> None:
+    source = _write(tmp_path / "repo" / "README.md", "No failure IDs.\n")
+    revision_args = ["--expected-ledger-revision", f"sha256:{'a' * 64}"]
+    payload_args = ["--expected-ledger-payload-sha256", "b" * 64]
+
+    for expectation_args in (revision_args, payload_args, revision_args + payload_args):
+        exit_code = validate_failure_ids.main([str(source.parent), *expectation_args])
+        report = json.loads(capsys.readouterr().out)
+        assert exit_code == 1
+        assert report["snapshot_errors"] == ["snapshot:expectation_without_snapshot"]
+
+
 def test_snapshot_detects_cross_repository_duplicate_definitions(tmp_path: Path) -> None:
     snapshot = _write_snapshot(tmp_path / "snapshot.json")
     first = _write(tmp_path / "one" / "ledger.md", "### FD-001 - new one\n")
