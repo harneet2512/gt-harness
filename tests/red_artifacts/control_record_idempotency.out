@@ -1,0 +1,14 @@
+=================================== ERRORS ====================================
+____________ ERROR collecting tests/test_linear_control_record.py _____________
+ImportError while importing test module 'D:\gt-harness-control-idempotency\tests\test_linear_control_record.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python312\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_linear_control_record.py:9: in <module>
+    from scripts.linear_control_record import (
+E   ModuleNotFoundError: No module named 'scripts.linear_control_record'
+=========================== short test summary info ===========================
+ERROR tests/test_linear_control_record.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
