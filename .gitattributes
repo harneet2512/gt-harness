@@ -1,2 +1,7 @@
 scripts/linear_control_record.py text eol=lf
 scripts/generate_gt_finalstand.py text eol=lf
+gt_finalstand/role_inventory_source.json text eol=lf
+gt_finalstand/language_operation_compatibility.json text eol=lf
+gt_finalstand/role_audit.csv text eol=lf
+gt_finalstand/language_operation_certification.csv text eol=lf
+gt_engine/generated_typed_capabilities.py text eol=lf

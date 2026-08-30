@@ -1,1 +1,1 @@
-PASS: missing dependency fails closed; pinned-present dependency passes
+PASS: accepted Groundtruth source fixture and mutated-source rejection; missing dependency fails closed; pinned-present dependency passes
