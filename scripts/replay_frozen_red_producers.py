@@ -290,6 +290,8 @@ def _prepare_vta(root: Path, cache: Path, evidence_parent: Path) -> dict[str, ob
 def _cache_manifest(cache: Path, destination: Path) -> dict[str, object]:
     entries: list[dict[str, object]] = []
     paths = [p for p in cache.rglob("*") if p.is_file()]
+    if any(path.is_symlink() for path in cache.rglob("*")):
+        raise RuntimeError("prepared_cache_symlink_present")
     for path in sorted(paths, key=lambda item: item.relative_to(cache).as_posix()):
         data = path.read_bytes()
         entries.append(
@@ -341,6 +343,9 @@ def _verify_cache_manifest(cache: Path, manifest_path: Path) -> dict[str, object
     if paths != sorted(paths) or len(paths) != len(set(paths)):
         raise RuntimeError("prepared_cache_manifest_order")
     for entry in entries:
+        relative = Path(entry["path"])
+        if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != entry["path"]:
+            raise RuntimeError("prepared_cache_manifest_path_invalid")
         path = (cache / entry["path"]).resolve()
         try:
             path.relative_to(cache.resolve())
@@ -348,6 +353,8 @@ def _verify_cache_manifest(cache: Path, manifest_path: Path) -> dict[str, object
             raise RuntimeError("prepared_cache_manifest_path_escape") from exc
         if not path.is_file():
             raise RuntimeError(f"prepared_cache_file_missing:{entry['path']}")
+        if path.is_symlink():
+            raise RuntimeError(f"prepared_cache_symlink:{entry['path']}")
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != entry["sha256"] or len(data) != entry["size"]:
             raise RuntimeError(f"prepared_cache_file_mismatch:{entry['path']}")
@@ -357,6 +364,13 @@ def _verify_cache_manifest(cache: Path, manifest_path: Path) -> dict[str, object
         raise RuntimeError("prepared_cache_manifest_digest_mismatch")
     if manifest.get("entry_count") != len(entries) or manifest.get("size") != len(encoded):
         raise RuntimeError("prepared_cache_manifest_metadata_mismatch")
+    actual_paths = sorted(
+        path.relative_to(cache).as_posix()
+        for path in cache.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    )
+    if actual_paths != paths:
+        raise RuntimeError("prepared_cache_manifest_file_set_mismatch")
     return {
         "schema": manifest["schema"],
         "entry_count": len(entries),
@@ -382,14 +396,52 @@ def _composite_manifest(root: Path, spec: dict[str, object]) -> dict[str, object
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return {
-        "schema": payload["schema"],
+        **payload,
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "entry_count": len(entries),
+        "size": len(encoded),
     }
 
 
+def _write_environment_failure(*, evidence_parent: Path, name: str, error: CaptureError) -> None:
+    """Keep decisive command bytes when canonical publication is refused."""
+
+    evidence_parent.mkdir(parents=True, exist_ok=True)
+    raw_path: Path | None = None
+    raw = error.raw_bytes
+    if raw is not None:
+        raw_path = evidence_parent / f"{name}-environment-failure.raw.log"
+        raw_path.write_bytes(raw)
+    record: dict[str, object] = {
+        "schema": "gt.red_evidence.replay_environment_failure.v1",
+        "status": "fail",
+        "type": "REPLAY_ENVIRONMENT_UNVERIFIED",
+        "message": str(error),
+        "command": error.command,
+        "toolchain": error.toolchain,
+        "environment": error.environment,
+    }
+    if raw_path is not None and raw is not None:
+        record["raw_output"] = {
+            "path": raw_path.name,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "size": len(raw),
+        }
+    (evidence_parent / f"{name}-environment-failure.json").write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
 def _run_capture(
-    *, root: Path, spec: dict[str, object], evidence: Path
+    *,
+    root: Path,
+    spec: dict[str, object],
+    evidence: Path,
+    composite: dict[str, object],
+    composite_name: str,
+    runner_image: str | None = None,
+    runner_image_version: str | None = None,
+    runner_architecture: str | None = None,
 ) -> tuple[dict[str, object], dict[str, object], Path]:
     files = _all_files(root)
     source = str(spec["expected_source"])
@@ -424,17 +476,42 @@ def _run_capture(
         ]
         toolchain = ["go", "version"]
         capture_kwargs = {"cgo_enabled": "1", "cache_seed": cache}
-    result = capture(
-        root=capture_root,
-        sources=[source],
-        fixtures=[path for path in files if path != source],
-        command=command,
-        toolchain_command=toolchain,
-        expected_source_path=source,
-        expected_diagnostic=str(spec["diagnostic"]),
-        output_grammar=str(spec["grammar"]),
-        **capture_kwargs,
-    )
+        preparation_path = evidence.parent / "preparation.json"
+        preparation_provenance = {
+            "schema": "gt.red_evidence.prepared_provenance.v1",
+            "preparation_sha256": hashlib.sha256(preparation_path.read_bytes()).hexdigest(),
+            "cache_manifest_sha256": str(preparation["cache_manifest"]["sha256"]),
+            "composite_manifest_sha256": str(composite["sha256"]),
+            "composite_manifest_name": composite_name,
+            "go_identity": preparation["go_identity"],
+            "gcc_identity": preparation["gcc_identity"],
+        }
+        preparation_provenance["sha256"] = hashlib.sha256(
+            json.dumps(
+                {key: value for key, value in preparation_provenance.items() if key != "sha256"},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        capture_kwargs["prepared_provenance"] = preparation_provenance
+    try:
+        result = capture(
+            root=capture_root,
+            sources=[source],
+            fixtures=[path for path in files if path != source],
+            command=command,
+            toolchain_command=toolchain,
+            expected_source_path=source,
+            expected_diagnostic=str(spec["diagnostic"]),
+            output_grammar=str(spec["grammar"]),
+            runner_image=runner_image,
+            runner_image_version=runner_image_version,
+            runner_architecture=runner_architecture,
+            **capture_kwargs,
+        )
+    except CaptureError as exc:
+        _write_environment_failure(evidence_parent=evidence.parent, name=evidence.name, error=exc)
+        raise RuntimeError(f"REPLAY_ENVIRONMENT_UNVERIFIED:{exc}") from exc
     if spec["grammar"] == OUTPUT_GRAMMAR:
         lines = result.canonical_bytes.decode("utf-8").splitlines()
         if (
@@ -457,6 +534,7 @@ def _run_capture(
         expected_receipt_sha256=str(result.receipt["receipt_sha256"]),
         replay=True,
         prepared_cache=prepared_cache,
+        prepared_provenance_dir=evidence.parent if prepared_cache is not None else None,
     )
     if report["status"] != "pass":
         raise RuntimeError(json.dumps(report, sort_keys=True))
@@ -526,7 +604,15 @@ def _mutation_matrix(
     return reports
 
 
-def replay(*, harness_root: Path, groundtruth_root: Path, output: Path) -> dict[str, object]:
+def replay(
+    *,
+    harness_root: Path,
+    groundtruth_root: Path,
+    output: Path,
+    runner_image: str | None = None,
+    runner_image_version: str | None = None,
+    runner_architecture: str | None = None,
+) -> dict[str, object]:
     inventory = validate(harness_root, groundtruth_root=groundtruth_root)
     if inventory["status"] != "pass":
         raise RuntimeError(json.dumps(inventory, sort_keys=True))
@@ -553,7 +639,14 @@ def replay(*, harness_root: Path, groundtruth_root: Path, output: Path) -> dict[
             )
             evidence = evidence_root / name
             receipt, verification, capture_root = _run_capture(
-                root=root, spec=spec, evidence=evidence
+                root=root,
+                spec=spec,
+                evidence=evidence,
+                composite=composite,
+                composite_name=f"{name}-composite.json",
+                runner_image=runner_image,
+                runner_image_version=runner_image_version,
+                runner_architecture=runner_architecture,
             )
             mutation_workspace = temporary / f"mutations-{name}"
             mutation_workspace.mkdir()
@@ -600,12 +693,18 @@ def main() -> int:
     parser.add_argument("--harness-root", default=".")
     parser.add_argument("--groundtruth-root", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--runner-image")
+    parser.add_argument("--runner-image-version")
+    parser.add_argument("--runner-architecture")
     args = parser.parse_args()
     try:
         report = replay(
             harness_root=Path(args.harness_root).resolve(),
             groundtruth_root=Path(args.groundtruth_root).resolve(),
             output=Path(args.output).resolve(),
+            runner_image=args.runner_image,
+            runner_image_version=args.runner_image_version,
+            runner_architecture=args.runner_architecture,
         )
     except (
         OSError,

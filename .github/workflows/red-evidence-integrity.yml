@@ -225,6 +225,7 @@ jobs:
           "$PYTHON_EXE" scripts/check_red_evidence_producers.py --root . --groundtruth-root groundtruth
           if ! "$PYTHON_EXE" scripts/replay_frozen_red_producers.py \
             --harness-root . --groundtruth-root groundtruth \
+            --runner-image ubuntu-24.04 --runner-architecture "${RUNNER_ARCH}" \
             --output "$RUNNER_TEMP/frozen-replay/replay.json"; then
             cat "$RUNNER_TEMP/frozen-replay/replay.json" || true
             find "$RUNNER_TEMP/frozen-replay" -name preparation.log -exec sh -c 'echo "--- $1"; tail -n 80 "$1"' _ {} \; || true

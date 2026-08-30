@@ -58,6 +58,21 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 class CaptureError(ValueError):
     """A requested capture cannot produce authoritative RED evidence."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_bytes: bytes | None = None,
+        command: dict[str, Any] | None = None,
+        toolchain: dict[str, Any] | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.raw_bytes = raw_bytes
+        self.command = command
+        self.toolchain = toolchain
+        self.environment = environment
+
 
 class _DuplicateKey(ValueError):
     pass
@@ -117,6 +132,12 @@ def _receipt_payload(receipt: dict[str, Any]) -> dict[str, Any]:
 
 def _receipt_sha256(receipt: dict[str, Any]) -> str:
     return _sha256(_canonical_bytes(_receipt_payload(receipt)))
+
+
+def _prepared_provenance_sha256(provenance: dict[str, Any]) -> str:
+    return _sha256(
+        _canonical_bytes({key: value for key, value in provenance.items() if key != "sha256"})
+    )
 
 
 def encode_receipt(receipt: dict[str, Any]) -> bytes:
@@ -325,6 +346,7 @@ def capture(
     output_grammar: str = OUTPUT_GRAMMAR,
     cgo_enabled: str | None = None,
     cache_seed: str | Path | None = None,
+    prepared_provenance: dict[str, Any] | None = None,
 ) -> CaptureResult:
     """Execute a real failing Go command and seal body plus provenance."""
 
@@ -372,18 +394,86 @@ def capture(
             toolchain_argv, resolved_root, environment, executable_path=toolchain_executable
         )
         if toolchain.exit_code != 0:
-            raise CaptureError(f"toolchain_command_failed:{toolchain.exit_code}")
-        toolchain_text = _strict_text(toolchain.raw, "toolchain")
+            raise CaptureError(
+                f"toolchain_command_failed:{toolchain.exit_code}",
+                raw_bytes=toolchain.raw,
+                toolchain={
+                    "argv": toolchain_argv,
+                    "exit_code": toolchain.exit_code,
+                    "executable": toolchain.executable,
+                },
+                environment=logical_environment,
+            )
+        try:
+            toolchain_text = _strict_text(toolchain.raw, "toolchain")
+        except CaptureError as exc:
+            raise CaptureError(
+                str(exc),
+                raw_bytes=toolchain.raw,
+                toolchain={
+                    "argv": toolchain_argv,
+                    "exit_code": toolchain.exit_code,
+                    "executable": toolchain.executable,
+                },
+                environment=logical_environment,
+            ) from exc
         command_observation = _observe(
             command_argv, resolved_root, environment, executable_path=command_executable
         )
         if command_observation.exit_code == 0:
-            raise CaptureError("command_did_not_fail")
+            raise CaptureError(
+                "command_did_not_fail",
+                raw_bytes=command_observation.raw,
+                command={
+                    "argv": command_argv,
+                    "exit_code": command_observation.exit_code,
+                    "executable": command_observation.executable,
+                },
+                toolchain={
+                    "argv": toolchain_argv,
+                    "exit_code": toolchain.exit_code,
+                    "executable": toolchain.executable,
+                },
+                environment=logical_environment,
+            )
         if output_grammar == EXACT_TEXT_GRAMMAR:
-            normalized = _strict_text(command_observation.raw, "command")
-            expected_text = _strict_text(expected_diagnostic.encode("utf-8"), "expected_diagnostic")
+            try:
+                normalized = _strict_text(command_observation.raw, "command")
+                expected_text = _strict_text(
+                    expected_diagnostic.encode("utf-8"), "expected_diagnostic"
+                )
+            except CaptureError as exc:
+                raise CaptureError(
+                    str(exc),
+                    raw_bytes=command_observation.raw,
+                    command={
+                        "argv": command_argv,
+                        "exit_code": command_observation.exit_code,
+                        "executable": command_observation.executable,
+                    },
+                    toolchain={
+                        "argv": toolchain_argv,
+                        "exit_code": toolchain.exit_code,
+                        "executable": toolchain.executable,
+                    },
+                    environment=logical_environment,
+                ) from exc
             if normalized != expected_text:
-                raise CaptureError("exact_text_mismatch")
+                raise CaptureError(
+                    "exact_text_mismatch",
+                    raw_bytes=command_observation.raw,
+                    command={
+                        "argv": command_argv,
+                        "exit_code": command_observation.exit_code,
+                        "executable": command_observation.executable,
+                    },
+                    toolchain={
+                        "argv": toolchain_argv,
+                        "exit_code": toolchain.exit_code,
+                        "executable": toolchain.executable,
+                    },
+                    environment=logical_environment,
+                )
             canonical_body = normalized.encode("utf-8")
             package_banner = ""
             package_outcome = "exact_text_failure"
@@ -398,7 +488,21 @@ def capture(
                     expected_match_count=expected_match_count,
                 )
             except GoGrammarError as exc:
-                raise CaptureError(str(exc)) from exc
+                raise CaptureError(
+                    str(exc),
+                    raw_bytes=command_observation.raw,
+                    command={
+                        "argv": command_argv,
+                        "exit_code": command_observation.exit_code,
+                        "executable": command_observation.executable,
+                    },
+                    toolchain={
+                        "argv": toolchain_argv,
+                        "exit_code": toolchain.exit_code,
+                        "executable": toolchain.executable,
+                    },
+                    environment=logical_environment,
+                ) from exc
             canonical_body = canonical.body
             package_banner = canonical.package_banner
             package_outcome = canonical.package_outcome
@@ -465,6 +569,8 @@ def capture(
                 "matched_diagnostics": matched_diagnostics,
             },
         }
+        if prepared_provenance is not None:
+            receipt["prepared_provenance"] = prepared_provenance
         receipt["receipt_sha256"] = _receipt_sha256(receipt)
         return CaptureResult(
             receipt, encode_receipt(receipt), canonical_body, command_observation.raw
@@ -541,6 +647,8 @@ def _validate_receipt(
         "diagnostic",
         "receipt_sha256",
     }
+    if receipt.get("environment_policy") == PREPARED_ENVIRONMENT_POLICY:
+        required.add("prepared_provenance")
     if set(receipt) != required:
         errors.append("receipt:invalid_fields")
     for field, expected in (("schema", SCHEMA), ("stream_model", STREAM_MODEL)):
@@ -558,6 +666,47 @@ def _validate_receipt(
     policy = receipt.get("environment_policy")
     if policy not in {ENVIRONMENT_POLICY, PREPARED_ENVIRONMENT_POLICY}:
         errors.append("unexpected_environment_policy")
+    provenance = receipt.get("prepared_provenance")
+    if receipt.get("environment_policy") == PREPARED_ENVIRONMENT_POLICY:
+        provenance_fields = {
+            "schema",
+            "sha256",
+            "preparation_sha256",
+            "cache_manifest_sha256",
+            "composite_manifest_sha256",
+            "composite_manifest_name",
+            "go_identity",
+            "gcc_identity",
+        }
+        if not isinstance(provenance, dict) or set(provenance) != provenance_fields:
+            errors.append("prepared_provenance:invalid")
+        else:
+            if provenance.get("schema") != "gt.red_evidence.prepared_provenance.v1":
+                errors.append("prepared_provenance:unexpected_schema")
+            for key in (
+                "preparation_sha256",
+                "cache_manifest_sha256",
+                "composite_manifest_sha256",
+                "sha256",
+            ):
+                if not isinstance(provenance.get(key), str) or not HEX64.fullmatch(provenance[key]):
+                    errors.append(f"prepared_provenance:invalid_{key}")
+            if isinstance(provenance.get("composite_manifest_name"), str):
+                name = provenance["composite_manifest_name"]
+                if (
+                    not name
+                    or Path(name).name != name
+                    or Path(name).suffix != ".json"
+                    or _invalid_string(name)
+                ):
+                    errors.append("prepared_provenance:invalid_composite_name")
+            else:
+                errors.append("prepared_provenance:invalid_composite_name")
+            for key in ("go_identity", "gcc_identity"):
+                if not _valid_executable(provenance.get(key)):
+                    errors.append(f"prepared_provenance:invalid_{key}")
+            if provenance.get("sha256") != _prepared_provenance_sha256(provenance):
+                errors.append("prepared_provenance:sha256_mismatch")
     environment = receipt.get("environment")
     environment_keys = (
         set(FIXED_ENVIRONMENT)
@@ -732,6 +881,206 @@ def _report(errors: Sequence[str], receipt_sha256: str | None = None) -> dict[st
     return report
 
 
+def _validate_prepared_artifacts(
+    *,
+    provenance: dict[str, Any],
+    provenance_dir: Path,
+    cache_dir: Path,
+    composite_root: Path,
+    errors: list[str],
+) -> None:
+    composite_name = provenance.get("composite_manifest_name")
+    required_digests = (
+        "preparation_sha256",
+        "cache_manifest_sha256",
+        "composite_manifest_sha256",
+    )
+    if not isinstance(composite_name, str) or any(
+        not isinstance(provenance.get(key), str) for key in required_digests
+    ):
+        errors.append("prepared_provenance:invalid_artifact_binding")
+        return
+
+    def read_json(name: str) -> dict[str, Any] | None:
+        try:
+            value = json.loads((provenance_dir / name).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            errors.append(f"prepared_provenance:{name}_unreadable")
+            return None
+        if not isinstance(value, dict):
+            errors.append(f"prepared_provenance:{name}_invalid")
+            return None
+        return value
+
+    preparation_path = provenance_dir / "preparation.json"
+    cache_manifest_path = provenance_dir / "cache-manifest.json"
+    composite_path = provenance_dir / composite_name
+    for path, digest, label in (
+        (preparation_path, provenance["preparation_sha256"], "preparation"),
+        (cache_manifest_path, provenance["cache_manifest_sha256"], "cache_manifest"),
+        (composite_path, provenance["composite_manifest_sha256"], "composite_manifest"),
+    ):
+        try:
+            actual = _sha256(path.read_bytes())
+        except OSError:
+            errors.append(f"prepared_provenance:{label}_missing")
+        else:
+            if actual != digest:
+                errors.append(f"prepared_provenance:{label}_digest_mismatch")
+
+    preparation = read_json("preparation.json")
+    if preparation is not None:
+        if preparation.get("go_identity") != provenance["go_identity"]:
+            errors.append("prepared_provenance:go_identity_mismatch")
+        if preparation.get("gcc_identity") != provenance["gcc_identity"]:
+            errors.append("prepared_provenance:gcc_identity_mismatch")
+        if not isinstance(preparation.get("cache_manifest"), dict):
+            errors.append("prepared_provenance:cache_manifest_missing")
+        elif not isinstance(preparation["cache_manifest"].get("sha256"), str):
+            errors.append("prepared_provenance:cache_manifest_binding_mismatch")
+
+    cache_manifest = read_json("cache-manifest.json")
+    if cache_manifest is not None:
+        entries = cache_manifest.get("entries")
+        if cache_manifest.get("schema") != "gt.red_evidence.prepared_cache.v1" or not isinstance(
+            entries, list
+        ):
+            errors.append("prepared_cache_manifest:invalid")
+        else:
+            paths: list[str] = []
+            for entry in entries:
+                if (
+                    not isinstance(entry, dict)
+                    or set(entry) != {"path", "sha256", "size"}
+                    or not isinstance(entry.get("path"), str)
+                    or not isinstance(entry.get("sha256"), str)
+                    or not HEX64.fullmatch(entry.get("sha256", ""))
+                    or not isinstance(entry.get("size"), int)
+                    or isinstance(entry.get("size"), bool)
+                    or entry.get("size", -1) < 0
+                ):
+                    errors.append("prepared_cache_manifest:invalid_entry")
+                    continue
+                paths.append(entry["path"])
+                relative = Path(entry["path"])
+                if (
+                    relative.is_absolute()
+                    or ".." in relative.parts
+                    or relative.as_posix() != entry["path"]
+                ):
+                    errors.append("prepared_cache_manifest:path_invalid")
+                    continue
+                path = (cache_dir / relative).resolve()
+                try:
+                    path.relative_to(cache_dir.resolve())
+                except ValueError:
+                    errors.append("prepared_cache_manifest:path_escape")
+                    continue
+                if path.is_symlink() or not path.is_file():
+                    errors.append(f"prepared_cache_manifest:missing:{entry['path']}")
+                    continue
+                data = path.read_bytes()
+                if _sha256(data) != entry["sha256"] or len(data) != entry["size"]:
+                    errors.append(f"prepared_cache_manifest:mismatch:{entry['path']}")
+            actual_paths = sorted(
+                path.relative_to(cache_dir).as_posix()
+                for path in cache_dir.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            )
+            if any(path.is_symlink() for path in cache_dir.rglob("*")):
+                errors.append("prepared_cache_manifest:symlink_present")
+            if paths != sorted(paths):
+                errors.append("prepared_cache_manifest:not_sorted")
+            if actual_paths != sorted(paths):
+                errors.append("prepared_cache_manifest:file_set_mismatch")
+            payload = {"schema": cache_manifest["schema"], "entries": entries}
+            if cache_manifest.get("sha256") != _sha256(_canonical_bytes(payload)):
+                errors.append("prepared_cache_manifest:digest_mismatch")
+            if cache_manifest.get("entry_count") != len(entries):
+                errors.append("prepared_cache_manifest:count_mismatch")
+            if (
+                preparation is not None
+                and isinstance(preparation.get("cache_manifest"), dict)
+                and preparation["cache_manifest"].get("sha256") != cache_manifest.get("sha256")
+            ):
+                errors.append("prepared_provenance:cache_manifest_binding_mismatch")
+
+    composite = read_json(composite_name)
+    if composite is not None:
+        entries = composite.get("entries")
+        payload = {
+            key: value
+            for key, value in composite.items()
+            if key not in {"sha256", "entry_count", "size"}
+        }
+        if (
+            composite.get("schema") != "gt.red_evidence.composite_tree.v1"
+            or not isinstance(entries, list)
+            or not isinstance(composite.get("base"), str)
+            or not isinstance(composite.get("overlay"), str)
+            or not isinstance(composite.get("prefixes"), list)
+            or not isinstance(composite.get("overlays"), list)
+        ):
+            errors.append("composite_manifest:invalid")
+        else:
+            paths: list[str] = []
+            for entry in entries:
+                if (
+                    not isinstance(entry, dict)
+                    or set(entry) != {"path", "sha256", "size"}
+                    or not isinstance(entry.get("path"), str)
+                    or not isinstance(entry.get("sha256"), str)
+                    or not HEX64.fullmatch(entry.get("sha256", ""))
+                    or not isinstance(entry.get("size"), int)
+                    or isinstance(entry.get("size"), bool)
+                    or entry.get("size", -1) < 0
+                ):
+                    errors.append("composite_manifest:invalid_entry")
+                    continue
+                relative = Path(entry["path"])
+                if (
+                    relative.is_absolute()
+                    or ".." in relative.parts
+                    or relative.as_posix() != entry["path"]
+                ):
+                    errors.append("composite_manifest:path_invalid")
+                    continue
+                paths.append(entry["path"])
+                path = (composite_root / relative).resolve()
+                try:
+                    path.relative_to(composite_root.resolve())
+                except ValueError:
+                    errors.append("composite_manifest:path_escape")
+                    continue
+                if path.is_symlink() or not path.is_file():
+                    errors.append(f"composite_manifest:missing:{entry['path']}")
+                    continue
+                data = path.read_bytes()
+                if _sha256(data) != entry["sha256"] or len(data) != entry["size"]:
+                    errors.append(f"composite_manifest:mismatch:{entry['path']}")
+            actual_paths = sorted(
+                path.relative_to(composite_root).as_posix()
+                for path in composite_root.rglob("*")
+                if path.is_file() and ".git" not in path.parts and not path.is_symlink()
+            )
+            if any(
+                path.is_symlink() for path in composite_root.rglob("*") if ".git" not in path.parts
+            ):
+                errors.append("composite_manifest:symlink_present")
+            if paths != sorted(paths):
+                errors.append("composite_manifest:not_sorted")
+            if len(paths) != len(set(paths)):
+                errors.append("composite_manifest:duplicate")
+            if actual_paths != sorted(paths):
+                errors.append("composite_manifest:file_set_mismatch")
+            if composite.get("sha256") != _sha256(_canonical_bytes(payload)):
+                errors.append("composite_manifest:digest_mismatch")
+            if composite.get("entry_count") != len(entries):
+                errors.append("composite_manifest:count_mismatch")
+            if composite.get("size") != len(_canonical_bytes(payload)):
+                errors.append("composite_manifest:size_mismatch")
+
+
 def verify(
     *,
     root: str | Path,
@@ -739,6 +1088,7 @@ def verify(
     expected_receipt_sha256: str,
     replay: bool = False,
     prepared_cache: str | Path | None = None,
+    prepared_provenance_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate the closed schema; optionally add independent execution proof."""
 
@@ -836,6 +1186,22 @@ def verify(
         if runtime.get("python_version") != platform.python_version():
             errors.append("capture_runtime:python_version_mismatch")
 
+    if receipt.get("environment_policy") == PREPARED_ENVIRONMENT_POLICY:
+        provenance = receipt.get("prepared_provenance")
+        if not isinstance(provenance, dict):
+            errors.append("prepared_provenance:missing")
+        if isinstance(provenance, dict) and replay:
+            if prepared_provenance_dir is None or prepared_cache is None:
+                errors.append("replay:prepared_provenance_required")
+            elif not errors:
+                _validate_prepared_artifacts(
+                    provenance=provenance,
+                    provenance_dir=Path(prepared_provenance_dir).resolve(),
+                    cache_dir=Path(prepared_cache).resolve(),
+                    composite_root=resolved_root,
+                    errors=errors,
+                )
+
     if replay and not errors:
         command = receipt["command"]
         toolchain = receipt["toolchain"]
@@ -852,7 +1218,10 @@ def verify(
                 toolchain_executable = _resolve_executable(toolchain["argv"][0], resolved_root)
                 executable_paths = [command_executable, toolchain_executable, Path(sys.executable)]
                 if receipt["environment_policy"] == PREPARED_ENVIRONMENT_POLICY:
-                    executable_paths.append(_resolve_executable("gcc", resolved_root))
+                    gcc_executable = _resolve_executable("gcc", resolved_root)
+                    executable_paths.append(gcc_executable)
+                else:
+                    gcc_executable = None
                 environment, logical_environment = _closed_environment(
                     Path(directory),
                     executable_paths,
@@ -895,6 +1264,18 @@ def verify(
                     errors.append("replay:toolchain_text_mismatch")
                 if observed_toolchain.executable != toolchain["executable"]:
                     errors.append("replay:toolchain_executable_mismatch")
+                if (
+                    receipt["output_grammar"] == OUTPUT_GRAMMAR
+                    and isinstance(receipt.get("prepared_provenance"), dict)
+                ):
+                    provenance = receipt["prepared_provenance"]
+                    if observed_toolchain.executable != provenance["go_identity"]:
+                        errors.append("replay:prepared_go_identity_mismatch")
+                    if (
+                        gcc_executable is None
+                        or _executable_identity(gcc_executable) != provenance["gcc_identity"]
+                    ):
+                        errors.append("replay:prepared_gcc_identity_mismatch")
                 if observed_command.exit_code != command["exit_code"]:
                     errors.append("replay:command_exit_mismatch")
                 if observed_command.executable != command["executable"]:
@@ -977,6 +1358,7 @@ def _parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--expected-receipt-sha256", required=True)
     verify_parser.add_argument("--replay", action="store_true")
     verify_parser.add_argument("--prepared-cache")
+    verify_parser.add_argument("--prepared-provenance-dir")
     return parser
 
 
@@ -1023,6 +1405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_receipt_sha256=args.expected_receipt_sha256,
             replay=args.replay,
             prepared_cache=args.prepared_cache,
+            prepared_provenance_dir=args.prepared_provenance_dir,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["status"] == "pass" else 1

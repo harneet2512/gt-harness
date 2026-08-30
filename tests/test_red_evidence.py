@@ -112,7 +112,7 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
                 replay=True,
             )
             self.assertEqual(report["status"], "fail")
-            self.assertIn("replay:prepared_cache_required", report["errors"])
+            self.assertIn("prepared_provenance:invalid", report["errors"])
 
     def _capture(self, root: Path):
         return capture(
