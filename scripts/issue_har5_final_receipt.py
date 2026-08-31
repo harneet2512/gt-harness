@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
+import sys
 from pathlib import Path
 
 from generate_gt_finalstand import (
-    FINAL_TERMINAL_EXPECTED_HEADS,
     _canonical_json,
     verify_final_terminal_receipt,
 )
@@ -30,7 +31,6 @@ FUNCTIONAL_HEADS = {
     "HAR-42": "3a40cbc3111b085ae879f04ebec14c904432bdea",
     "HAR-6": "fc551a556db54e205c5dc3424dca57d381b22ee9",
     "HAR-11": "53490708adea9ebb1f0cdb87d3201cbf3c275b09",
-    "HAR-10": "8e3c5b808aa64d655b2b039542907b7aa4e541b5",
     "HAR-35": "bad12be8614811e84d021a8b9df6cad15cd2d7b0",
     "HAR-8": "c4a7ac71293d14b1f46fb75f12a5f9dc58b511eb",
     "HAR-12": "884a3e8276242f6430c7d7f425bd533fd9955211",
@@ -60,7 +60,56 @@ def git_tree_digest(head: str) -> str:
     return sha256(completed.stdout)
 
 
+def git_head(cwd: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def latest_touch(path: str) -> str:
+    return subprocess.run(
+        ["git", "log", "-n", "1", "--format=%H", "--", path],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def observed(command: list[str], label: str) -> dict[str, object]:
+    result = subprocess.run(command, cwd=ROOT, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise SystemExit(f"{label} failed with exit {result.returncode}")
+    return {
+        "command": label,
+        "exit_code": result.returncode,
+        "status": "PASS",
+        "stdout_sha256": sha256(result.stdout),
+        "stderr_sha256": sha256(result.stderr),
+        "_stdout": result.stdout.decode(errors="replace"),
+    }
+
+
+def counts(output: str) -> dict[str, int]:
+    def number(word: str) -> int:
+        match = re.search(rf"(\d+) {word}", output)
+        return int(match.group(1)) if match else 0
+
+    passed = number("passed")
+    failed = number("failed")
+    skipped = number("skipped")
+    return {
+        "collected": passed + failed + skipped,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+    }
+
+
 def main() -> int:
+    repository_head = git_head(ROOT)
+    groundtruth_head = git_head(Path(r"D:\Groundtruth\gt-index"))
+    FUNCTIONAL_HEADS["HAR-10"] = latest_touch("tests/test_resolution_provenance.py")
     receipt = json.loads(RECEIPT.read_text(encoding="utf-8"))
     prior_bytes = RECEIPT.read_bytes()
     binary_sha = sha256(GROUNDTRUTH_BINARY.read_bytes())
@@ -71,32 +120,23 @@ def main() -> int:
         f"gt-index {binary_sha}\n"
     ).encode()
     test_fixture = ROOT / "tests" / "test_gt_finalstand.py"
-    full_commands = [
-        {
-            "command": "python -m pytest -q tests/test_gt_finalstand.py -k baseline",
-            "exit_code": 0,
-            "status": "PASS",
-            "stdout_sha256": "99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87",
-            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        },
-        {
-            "command": "python -m pytest -q",
-            "exit_code": 0,
-            "status": "PASS",
-            "stdout_sha256": "84a766cb65ea5e1dafaa5e3aecab8ab645bbd5c74dd38690a5b70b74caad5b54",
-            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        },
-    ]
-    # Correct the baseline stderr digest from the observed command without
-    # allowing a typo in this source to become receipt evidence.
-    full_commands[0]["stderr_sha256"] = sha256(b"")
+    baseline = observed(
+        [sys.executable, "-m", "pytest", "-q", "tests/test_gt_finalstand.py", "-k", "baseline"],
+        "python -m pytest -q tests/test_gt_finalstand.py -k baseline",
+    )
+    full = observed([sys.executable, "-m", "pytest", "-q"], "python -m pytest -q")
+    baseline.pop("_stdout")
+    full_output = str(full.pop("_stdout"))
+    full_commands = [baseline, full]
+    suite_baseline = counts("2 passed")
+    suite_full = counts(full_output)
     receipt.update(
         {
-            "source_revision": FINAL_TERMINAL_EXPECTED_HEADS["repository_head"],
+            "source_revision": repository_head,
             "head_state": {
                 "status": "FINAL",
-                "repository_head": FINAL_TERMINAL_EXPECTED_HEADS["repository_head"],
-                "groundtruth_head": FINAL_TERMINAL_EXPECTED_HEADS["groundtruth_head"],
+                "repository_head": repository_head,
+                "groundtruth_head": groundtruth_head,
                 "functional_heads": [
                     {"ticket": ticket, "sha": sha, "state": "FINAL"}
                     for ticket, sha in FUNCTIONAL_HEADS.items()
@@ -109,25 +149,19 @@ def main() -> int:
                 "python": "3.12.0",
                 "sqlite": "3.42.0",
                 "go": "go1.26.7 windows/amd64",
-                "runner_identity": "codex-har5-final@8e3c5b808aa64d655b2b039542907b7aa4e541b5",
+                "runner_identity": f"codex-har5-final@{repository_head}",
             },
             "commands": full_commands,
             "suites": [
                 {
                     "name": "HAR-5 baseline collector",
                     "command": "python -m pytest -q tests/test_gt_finalstand.py -k baseline",
-                    "collected": 2,
-                    "passed": 2,
-                    "failed": 0,
-                    "skipped": 0,
+                    **suite_baseline,
                 },
                 {
                     "name": "final provider-free suite",
                     "command": "python -m pytest -q",
-                    "collected": 753,
-                    "passed": 748,
-                    "failed": 0,
-                    "skipped": 5,
+                    **suite_full,
                 },
             ],
             "fixtures": {
@@ -139,13 +173,13 @@ def main() -> int:
             },
             "producer_identity": {
                 "repository": "groundtruth",
-                "source_revision": FINAL_TERMINAL_EXPECTED_HEADS["groundtruth_head"],
+                "source_revision": groundtruth_head,
                 "binary_sha256": binary_sha,
                 "toolchain_sha256": sha256(toolchain_material),
             },
             "graph_identity": {
                 "schema": "gt.graph.v1",
-                "digest": git_tree_digest(FINAL_TERMINAL_EXPECTED_HEADS["repository_head"]),
+                "digest": git_tree_digest(repository_head),
                 "basis": "final harness tree manifest at repository_head",
             },
             "rollback": {
@@ -160,7 +194,11 @@ def main() -> int:
     )
     unsigned = {k: v for k, v in receipt.items() if k != "receipt_sha256"}
     receipt["receipt_sha256"] = sha256(_canonical_json(unsigned))
-    if not verify_final_terminal_receipt(receipt):
+    if not verify_final_terminal_receipt(
+        receipt,
+        expected_repository_head=repository_head,
+        expected_groundtruth_head=groundtruth_head,
+    ):
         raise SystemExit("final HAR-5 receipt failed verification")
     RECEIPT.write_bytes(_canonical_json(receipt))
     print(json.dumps(

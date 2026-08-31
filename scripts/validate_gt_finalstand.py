@@ -950,6 +950,13 @@ def validate() -> dict[str, object]:
 
     result = {
         "schema": "gt.finalstand.validation.v1",
+        "harness_commit": subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=HARNESS_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
         "ok": not errors,
         "counts": {
             "direct": len(direct),

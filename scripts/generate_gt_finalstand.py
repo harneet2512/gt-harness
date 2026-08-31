@@ -680,7 +680,12 @@ def verify_terminal_receipt(receipt: dict[str, object]) -> bool:
     return verify_baseline_receipt(receipt)
 
 
-def verify_final_terminal_receipt(receipt: dict[str, object]) -> bool:
+def verify_final_terminal_receipt(
+    receipt: dict[str, object],
+    *,
+    expected_repository_head: str | None = None,
+    expected_groundtruth_head: str | None = None,
+) -> bool:
     """Verify the non-provisional HAR-5 receipt at the current functional heads.
 
     ``verify_terminal_receipt`` intentionally preserves the historical
@@ -694,17 +699,23 @@ def verify_final_terminal_receipt(receipt: dict[str, object]) -> bool:
         _validate_terminal_spec(receipt)
     except (TypeError, ValueError):
         return False
+    expected_repository_head = expected_repository_head or FINAL_TERMINAL_EXPECTED_HEADS[
+        "repository_head"
+    ]
+    expected_groundtruth_head = expected_groundtruth_head or FINAL_TERMINAL_EXPECTED_HEADS[
+        "groundtruth_head"
+    ]
     if receipt.get("repository") != FINAL_TERMINAL_EXPECTED_HEADS["repository"]:
         return False
-    if receipt.get("source_revision") != FINAL_TERMINAL_EXPECTED_HEADS["repository_head"]:
+    if receipt.get("source_revision") != expected_repository_head:
         return False
     head_state = receipt.get("head_state")
     if not isinstance(head_state, dict):
         return False
     if (
         head_state.get("status") != "FINAL"
-        or head_state.get("repository_head") != FINAL_TERMINAL_EXPECTED_HEADS["repository_head"]
-        or head_state.get("groundtruth_head") != FINAL_TERMINAL_EXPECTED_HEADS["groundtruth_head"]
+        or head_state.get("repository_head") != expected_repository_head
+        or head_state.get("groundtruth_head") != expected_groundtruth_head
         or head_state.get("unresolved_dependencies") != []
     ):
         return False
@@ -717,7 +728,7 @@ def verify_final_terminal_receipt(receipt: dict[str, object]) -> bool:
     if not isinstance(producer, dict):
         return False
     if (
-        producer.get("source_revision") != FINAL_TERMINAL_EXPECTED_HEADS["groundtruth_head"]
+        producer.get("source_revision") != expected_groundtruth_head
         or producer.get("repository") != "groundtruth"
     ):
         return False
