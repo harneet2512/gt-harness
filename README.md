@@ -407,6 +407,14 @@ audit from a clean checkout:
 
 `python scripts/gt_reaudit.py --groundtruth-root <clean-root> --output <receipt>`
 
+For a checkout rooted at the harness repository, the equivalent explicit
+alias is:
+
+`python scripts/gt_reaudit.py --harness-root <clean-root> --output <receipt>`
+
+On a valid clean checkout both forms emit a PASS receipt with
+`failure_code: null`.
+
 The command inspects immutable Git identities, source manifests, shipped test
 and producer surfaces, and emits a deterministic `gt.public_reaudit.v1` receipt.
 It never changes a default branch and returns a nonzero status with a stable
