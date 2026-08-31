@@ -3,6 +3,7 @@
   "repository": "harneet2512/gt-harness",
   "observed_harness_head": "7500657503c0107eadff8cb00ed70aba98beaa5b",
   "requested_source_head": "04de92ccd87edc6812ecb81e60af3710fbd8e7e4",
+  "source_checkout": "D:\\gt-har36-witness",
   "producer": {
     "name": "gt-index",
     "binary_path": "D:\\Groundtruth\\gt-index\\gt-index.exe",
@@ -11,9 +12,9 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "python": "3.12.0"
   },
-  "command": "GT_SOURCE_HEAD=04de92ccd87edc6812ecb81e60af3710fbd8e7e4 python -m pytest -vv tests/test_gt_repository_intelligence.py -k 'frozen_questions_execute_through_production_graph_path_and_replay'",
+  "command": "python -m pytest -vv tests/test_gt_repository_intelligence.py -k 'frozen_questions_execute_through_production_graph_path_and_replay'",
   "exit_code": 0,
-  "observed": "one frozen-question production graph/replay test passed",
-  "status": "OPEN",
-  "missing": "byte-level receipt from an exact 04de92cc source checkout proving the pinned binary witness against that frozen content; the passing test used the current harness checkout with the requested source selector"
+  "observed": "one frozen-question production graph/replay test passed from the exact 04de92cc detached source checkout; the test executed and replayed the production graph path",
+  "status": "PASS",
+  "missing": null
 }
