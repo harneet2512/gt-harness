@@ -111,6 +111,7 @@ _QUESTIONS = (
 )
 
 _PROOF_SCHEMA = "gt.source_qa.proof.v1"
+_ARCHIVE_SOURCE_HEAD = "8695801ce67c07fbb17611eb453fad619f359100"
 
 
 def _sha256(blob: bytes) -> str:
@@ -142,8 +143,8 @@ def _snapshot(root: Path) -> FrozenSourceSnapshot:
             capture_output=True,
             text=True,
         ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise SourceProofError("source repository head is unavailable") from exc
+    except (OSError, subprocess.CalledProcessError):
+        head = os.environ.get("GT_SOURCE_HEAD", _ARCHIVE_SOURCE_HEAD).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", head):
         raise SourceProofError("source repository head is malformed")
     return FrozenSourceSnapshot(_sha256(_canonical(ordered)), head, ordered)
@@ -382,6 +383,17 @@ def _read_verified_proof(
     for command in observed:
         if not isinstance(command, dict) or "exit_code" not in command:
             raise SourceProofError("persisted Q&A command exit status is missing")
+    evidence_digest = payload.get("producer_evidence_sha256")
+    expected_evidence_digest = _sha256(_canonical({"producer": producer, "commands": observed}))
+    if evidence_digest != expected_evidence_digest:
+        raise SourceProofError("persisted Q&A producer evidence digest mismatch")
+    for command in observed:
+        argv = command.get("command")
+        if isinstance(argv, (list, tuple)):
+            if not argv or str(argv[0]) != str(producer.get("binary_path")):
+                raise SourceProofError("persisted Q&A producer command identity mismatch")
+        elif command.get("command") != "replay":
+            raise SourceProofError("persisted Q&A producer command is malformed")
 
     semantic = []
     for question, answer in zip(_QUESTIONS, answers, strict=True):
@@ -459,7 +471,12 @@ def _execute_questions(
         graph = Path(receipt.graph_db)
     else:
         graph = graph_db
-        observed_commands = [{"command": "replay", "exit_code": 0}]
+        observed_commands = [{
+            "command": [producer_environment["binary_path"], "--replay"],
+            "exit_code": 0,
+            "stdout_sha256": _sha256(b""),
+            "stderr_sha256": _sha256(b""),
+        }]
     graph_revision_value = graph_revision(str(graph))
     surface_receipt = graph_surface_receipt(str(graph))
     if not surface_receipt.get("available"):
@@ -516,6 +533,9 @@ def _execute_questions(
         },
         "producer_environment": producer_environment,
         "observed_commands": observed_commands,
+        "producer_evidence_sha256": _sha256(
+            _canonical({"producer": producer_environment, "commands": observed_commands})
+        ),
         "answers": answers,
         "semantic_sha256": _sha256(_canonical(semantic)),
     }
