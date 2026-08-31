@@ -399,3 +399,15 @@ provider-free baseline.
 The root README is descriptive only. Executable truth lives in the production
 modules and their receipts; the HAR-29 documentation boundary is satisfied only
 when every statement here resolves to those pinned bytes.
+
+## Public re-audit
+
+After normal project dependencies are installed, run the provider-free public
+audit from a clean checkout:
+
+`python scripts/gt_reaudit.py --groundtruth-root <clean-root> --output <receipt>`
+
+The command inspects immutable Git identities, source manifests, shipped test
+and producer surfaces, and emits a deterministic `gt.public_reaudit.v1` receipt.
+It never changes a default branch and returns a nonzero status with a stable
+failure code when an identity or receipt-chain check cannot be completed.
