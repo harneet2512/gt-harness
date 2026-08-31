@@ -94,7 +94,12 @@ def observed(command: list[str], label: str) -> dict[str, object]:
 def counts(output: str) -> dict[str, int]:
     passed = len(re.findall(r"(?m)^PASSED\s", output))
     failed = len(re.findall(r"(?m)^(?:FAILED|ERROR)\s", output))
-    skipped = len(re.findall(r"(?m)^SKIPPED\s", output))
+    skipped = sum(
+        int(match.group(1))
+        for match in re.finditer(r"(?m)^SKIPPED\s+\[(\d+)\]", output)
+    )
+    if skipped == 0:
+        skipped = len(re.findall(r"(?m)^SKIPPED\s", output))
     if passed == failed == skipped == 0:
         def number(word: str) -> int:
             match = re.search(rf"(\d+) {word}", output)
