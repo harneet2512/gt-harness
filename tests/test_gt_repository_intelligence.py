@@ -114,7 +114,33 @@ _PROOF_SCHEMA = "gt.source_qa.proof.v1"
 _ARCHIVE_SOURCE_HEAD = "UNVERIFIED"
 # The source inputs used by this proof were last reviewed at this immutable
 # head.  Archive runners supply it explicitly because they have no .git.
-_ARCHIVE_REVIEWED_SOURCE_HEAD = "17ad7ef968b8ea48bcb0338a7d4966755bbc2ecd"
+_ARCHIVE_REVIEWED_SOURCE_HEAD = "4d3a834c9d1c10c3cddbbb053d02cf1f102479b2"
+_ARCHIVE_SOURCE_BLOB_SHA256 = {
+    "gt_engine/indexer.py": (
+        "68e3b97f596af58bd014031ddb5d0312f7fc02b570a8c71f96e034a12f4bfae6"
+    ),
+    "gt_engine/graph_context.py": (
+        "ac04813d834e2704785beab2380663104cf217bc428454ce5c64609369efc91b"
+    ),
+    "gt_engine/bridge.py": (
+        "72505bb541532f5b9528aec0a8c5d75906e474e493c64e756c2722b4aa6068b5"
+    ),
+    "gt_engine/graph_lease.py": (
+        "29ee14ae08e4c170c2dac4cc560616be60973bff446acc058a295d3fdfe6c1a9"
+    ),
+    "gt_engine/attribution.py": (
+        "08f582cc7e44a7f2c52d2120f1bc636b269e93f486958e2263aa87242c184f7e"
+    ),
+    "gt_engine/replay_bundle.py": (
+        "18d3677dd7094569a37872c4ec584950f28886a835fa7552b6281061b7776b03"
+    ),
+    "gt_engine/graph_evidence.py": (
+        "0693f5b60b6476d2b448b75b98545702a8b6a6e82708a2f6bc49e3cca2337e31"
+    ),
+    "gt_engine/miniswe_runtime.py": (
+        "af05d1ed8a07d973a070ca5b6679ddb722ff792203c17060269e74ac3d6f77ff"
+    ),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -158,6 +184,33 @@ def _snapshot(root: Path) -> FrozenSourceSnapshot:
         head = os.environ.get("GT_SOURCE_HEAD", _ARCHIVE_SOURCE_HEAD).strip()
     if head != "UNVERIFIED" and not re.fullmatch(r"[0-9a-f]{40}", head):
         raise SourceProofError("source repository head is malformed")
+    if head == _ARCHIVE_REVIEWED_SOURCE_HEAD:
+        for question in _QUESTIONS:
+            expected_hash = _ARCHIVE_SOURCE_BLOB_SHA256[question.source_path]
+            actual_hash = _sha256((root / question.source_path).read_bytes())
+            if actual_hash != expected_hash:
+                raise SourceProofError(
+                    f"archive source blob mismatch: {question.source_path}"
+                )
+        if (checkout / ".git").exists():
+            for question in _QUESTIONS:
+                result = subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(checkout),
+                        "cat-file",
+                        "blob",
+                        f"{head}:{question.source_path}",
+                    ],
+                    check=False,
+                    capture_output=True,
+                )
+                expected_hash = _ARCHIVE_SOURCE_BLOB_SHA256[question.source_path]
+                if result.returncode != 0 or _sha256(result.stdout) != expected_hash:
+                    raise SourceProofError(
+                        f"archive source revision does not match: {question.source_path}"
+                    )
     return FrozenSourceSnapshot(_sha256(_canonical(ordered)), head, ordered)
 
 
@@ -167,7 +220,15 @@ def _copy_frozen_sources(root: Path) -> None:
         source = checkout / question.source_path
         target = root / question.source_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
+        if (checkout / ".git").exists():
+            result = subprocess.run(
+                ["git", "-C", str(checkout), "show", f"HEAD:{question.source_path}"],
+                check=True,
+                capture_output=True,
+            )
+            target.write_bytes(result.stdout)
+        else:
+            target.write_bytes(source.read_bytes())
 
 
 def _citation(root: Path, question: FrozenSourceQuestion) -> dict[str, object]:
@@ -720,3 +781,22 @@ def test_persisted_unverified_archive_head_is_rejected(tmp_path):
 
     with pytest.raises(SourceProofError, match="source head is unverified"):
         _read_verified_proof(proof_path, root=root, expected=archive_expected)
+
+
+def test_archive_reviewed_head_binds_copied_source_blobs(tmp_path, monkeypatch):
+    root = tmp_path / "frozen-source"
+    _copy_frozen_sources(root)
+    monkeypatch.setenv("GT_SOURCE_HEAD", _ARCHIVE_REVIEWED_SOURCE_HEAD)
+    real_run = subprocess.run
+
+    def archive_run(args, **kwargs):
+        if "rev-parse" in args:
+            raise subprocess.CalledProcessError(128, args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", archive_run)
+    _snapshot(root)
+    source = root / "gt_engine" / "graph_context.py"
+    source.write_bytes(source.read_bytes() + b"\n# archive mutation\n")
+    with pytest.raises(SourceProofError, match="archive source blob mismatch"):
+        _snapshot(root)
