@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import re
+import sys
 import warnings
 import zipfile
 from pathlib import Path
@@ -33,6 +34,58 @@ def test_finalstand_is_machine_valid() -> None:
         "language_operation_pairs": 210,
         "todo_statuses": 26,
     }
+
+
+def _load_baseline_generator():
+    path = ROOT / "scripts" / "generate_gt_finalstand.py"
+    spec = importlib.util.spec_from_file_location("generate_gt_finalstand", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _baseline_spec() -> dict[str, object]:
+    return {
+        "repository": "example/gt-harness",
+        "source_revision": "a" * 40,
+        "environment": {"runner": "clean", "python": "3.12"},
+        "commands": ["pytest -q"],
+        "suites": [{"name": "provider-free", "exit_code": 0}],
+        "fixtures": {"task_set_sha256": "b" * 64},
+        "results": {"provider_calls": 0, "tests": 12, "failures": 0},
+        "producer_identity": {"repository": "groundtruth", "source_revision": "c" * 40},
+        "graph_identity": {"schema": "gt.graph.v1", "digest": "d" * 64},
+        "rollback": {"prior_complete_sha256": "e" * 64},
+    }
+
+
+def test_baseline_receipt_is_deterministic_and_mutation_rejected(tmp_path: Path) -> None:
+    generator = _load_baseline_generator()
+    first = generator.build_baseline_receipt(_baseline_spec())
+    reordered = dict(reversed(list(_baseline_spec().items())))
+    second = generator.build_baseline_receipt(reordered)
+    assert first == second
+    assert generator.verify_baseline_receipt(first)
+    mutated = json.loads(json.dumps(first))
+    mutated["results"]["tests"] = 13
+    assert not generator.verify_baseline_receipt(mutated)
+
+
+def test_baseline_cli_writes_atomic_provider_free_receipt(tmp_path: Path) -> None:
+    generator = _load_baseline_generator()
+    spec_path = tmp_path / "spec.json"
+    output = tmp_path / "receipt.json"
+    spec_path.write_text(json.dumps(_baseline_spec()), encoding="utf-8")
+    assert generator.main.__name__ == "main"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "generate_gt_finalstand.py"),
+         "--baseline-spec", str(spec_path), "--baseline-output", str(output)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert generator.verify_baseline_receipt(json.loads(output.read_text(encoding="utf-8")))
 
 
 def test_single_witness_closes_fs024_without_claiming_population_efficacy() -> None:
