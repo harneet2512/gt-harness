@@ -1,0 +1,42 @@
+{
+  "schema": "gt.har37.whole_system_audit.v1",
+  "status": "PASS",
+  "repository": "harneet2512/gt-harness",
+  "harness_head": "7500657503c0107eadff8cb00ed70aba98beaa5b",
+  "groundtruth_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
+  "tree_manifest_sha256": "cef2b4a277fc4209ff603063dbdb6cc24f53dcde1878a53bbe6bfa6e51d7849d",
+  "checks": [
+    {
+      "command": "python -m pytest -q",
+      "exit_code": 0,
+      "collected": 753,
+      "passed": 748,
+      "skipped": 5,
+      "stdout_sha256": "84a766cb65ea5e1dafaa5e3aecab8ab645bbd5c74dd38690a5b70b74caad5b54",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "GH_TOKEN=<gh auth token> python scripts/validate_gt_finalstand.py",
+      "exit_code": 0,
+      "result": "ok=true; errors=[]; direct=17; role_audit=129; languages=30; language_operation_pairs=210; todo_statuses=26",
+      "validation_receipt_sha256": "0917e9bff40436c27e00f5bbd4008a6ae03b062fdb4c06697e3766ef14112cd4"
+    },
+    {
+      "command": "python -c verify_terminal_receipt(har5_terminal_baseline.json)",
+      "exit_code": 0,
+      "result": "True; benchmark_ready=false; provider_calls=0; benchmark_runs=0",
+      "receipt_sha256": "02455e75825ed8967190d381a95cf7b473aa2a53180895994ae280bc02661e94"
+    }
+  ],
+  "cross_boundary": {
+    "har5_final_receipt_sha256": "636476144efae506469870003cc701ce1f17cfdc89922c686a9379b4faea9d83",
+    "har36_windows_witness_status": "PASS",
+    "groundtruth_engine_probe_status": "PASS",
+    "provider_calls": 0,
+    "benchmark_runs": 0
+  },
+  "authorization": {
+    "benchmark_ready": false,
+    "reason": "explicit_user_approval_required"
+  }
+}
