@@ -2,9 +2,9 @@
   "schema": "gt.har37.whole_system_audit.v1",
   "status": "PASS",
   "repository": "harneet2512/gt-harness",
-  "harness_head": "39c056567ef91740a5db10a08dfe40ab439cdc75",
+  "harness_head": "d51fc57517336dd806307064669d3b00466ac811",
   "groundtruth_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
-  "tree_manifest_sha256": "f6f861587b3a715b7f97737a4d45b7fd0ba4e4bf670ab2d734595e4a76ae1e67",
+  "tree_manifest_sha256": "4729d3b3a636c89d679889c0734372717d8df3e70de671a1015e58df9d68cf4d",
   "checks": [
     {
       "command": "python -m pytest -q",
@@ -12,24 +12,24 @@
       "collected": 758,
       "passed": 752,
       "skipped": 6,
-      "stdout_sha256": "9d7799f7b1ff2d58d5bc9009afbf1a5e0b32cce65efa20cf21fb578e5d79812d",
+      "stdout_sha256": "7286c879a6bce973d931ac3449017d72a4caccb555dad23a9d921eb3d713be4d",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "command": "GH_TOKEN=<gh auth token> python scripts/validate_gt_finalstand.py",
       "exit_code": 0,
       "result": "ok=true; errors=[]; direct=17; role_audit=129; languages=30; language_operation_pairs=210; todo_statuses=26",
-      "validation_receipt_sha256": "c8bda254b443b56a2a54a02515992bba5eec621860c8d533e9d4494201fe9db4"
+      "validation_receipt_sha256": "c8952d443bddb0a3068a211420b58bbef40d36f3436c05ffe2065e28f30f4731"
     },
     {
       "command": "python -c verify_terminal_receipt(har5_terminal_baseline.json)",
       "exit_code": 0,
       "result": "True; benchmark_ready=false; provider_calls=0; benchmark_runs=0",
-      "receipt_sha256": "7fbcfd560c9febec1efa01b55859c0c51672518f68d652e56322efefb5dfb65c"
+      "receipt_sha256": "b19f6a27e27c64289bfd67cfc557129f16ea95b5e9415abd22d166f376616ac3"
     }
   ],
   "cross_boundary": {
-    "har5_final_receipt_sha256": "7fbcfd560c9febec1efa01b55859c0c51672518f68d652e56322efefb5dfb65c",
+    "har5_final_receipt_sha256": "b19f6a27e27c64289bfd67cfc557129f16ea95b5e9415abd22d166f376616ac3",
     "har36_windows_witness_status": "PASS",
     "groundtruth_engine_probe_status": "PASS",
     "provider_calls": 0,
