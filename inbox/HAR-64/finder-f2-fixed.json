@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T23:03:36.163439Z",
+  "detail":"Builder pushed issue_har64_eligibility_receipt.py and gt_finalstand/receipts/har64_eligibility_receipt.json at 39d330f2. Supersedes open F2 at e01fe0c1; pending Finder re-review and Bugbot gate.",
+  "file":"scripts/issue_har64_eligibility_receipt.py",
+  "head_sha":"39d330f2cbd7df564858ce220f01b3edf02a53a1",
+  "kind":"finding",
+  "line":1,
+  "message":"Shipped receipt artifact landed",
+  "packet_digest_sha256":"00643e2ea7db2562a74b4e1f830edc05d0f2d87803eb83b9af971ab59ffaf0d1",
+  "packet_id":"finder-f2-fixed",
+  "pr":26,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"directed-fix-landed",
+    "system":"cursor-finder"
+  },
+  "status":"fixed",
+  "supersedes":"finder-f2",
+  "ticket":"HAR-64"
+}

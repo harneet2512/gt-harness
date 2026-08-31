@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T23:03:41.172731Z",
+  "detail":"Builder pushed README harness-root alias documentation at f3aad21b. Supersedes open F2 at cd2c0bb0; pending Finder re-review and Bugbot gate.",
+  "file":"README.md",
+  "head_sha":"f3aad21bdf280c7edcad55285a41507fc72240d4",
+  "kind":"finding",
+  "line":408,
+  "message":"Harness-root re-audit path documented",
+  "packet_digest_sha256":"1c7f51830bd770351aeab106135901b49e2929e36d72a53adf92cca7647e371f",
+  "packet_id":"finder-f2-fixed",
+  "pr":29,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"directed-fix-landed",
+    "system":"cursor-finder"
+  },
+  "status":"fixed",
+  "supersedes":"finder-f2",
+  "ticket":"HAR-67"
+}

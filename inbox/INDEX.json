@@ -2,8 +2,7 @@
   "live_packets":[
     "finder-f1",
     "finder-f2",
-    "finder-f2",
-    "finder-f2"
+    "finder-f2-fixed"
   ],
   "schema":"gt.review_inbox.v1",
   "tickets":{
@@ -12,10 +11,12 @@
       "finder-f2"
     ],
     "HAR-64":[
-      "finder-f2"
+      "finder-f2",
+      "finder-f2-fixed"
     ],
     "HAR-67":[
-      "finder-f2"
+      "finder-f2",
+      "finder-f2-fixed"
     ]
   }
 }
