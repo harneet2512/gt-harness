@@ -53,6 +53,7 @@ class ProvenanceMechanism(StrEnum):
     DYNAMIC = "dynamic"
     EXTERNAL = "external"
     PARSER_INCOMPLETE = "parser_incomplete"
+    VTA = "vta"
 
 
 class VerificationStatus(StrEnum):
@@ -60,6 +61,7 @@ class VerificationStatus(StrEnum):
     UNVERIFIED = "unverified"
     VERIFIED = "verified"
     REJECTED = "rejected"
+    CANDIDATE_ONLY = "candidate_only"
 
 
 class DispatchState(StrEnum):
