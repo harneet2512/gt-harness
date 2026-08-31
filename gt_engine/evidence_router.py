@@ -368,6 +368,52 @@ class EvidenceRouter:
         if fingerprint in self._scope_challenge_candidates:
             self._scope_challenge_delivered = True
 
+    def seal_eligibility_receipt(
+        self,
+        *,
+        decision_id: str,
+        iteration_id: str,
+        claims: list[dict[str, Any]],
+        baseline_request: Any,
+        final_request: Any,
+        framing_encoding_bytes: int = 0,
+        prior_event_digest: str | None = None,
+        provider_exception: str | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Seal the model-bound decision, degrading to native bytes on failure."""
+        try:
+            receipt = build_eligibility_receipt(
+                decision_id=decision_id,
+                iteration_id=iteration_id,
+                claims=claims,
+                baseline_request=baseline_request,
+                final_request=final_request,
+                framing_encoding_bytes=framing_encoding_bytes,
+                prior_event_digest=prior_event_digest,
+            )
+            if provider_exception:
+                receipt["provider_exception"] = provider_exception
+                receipt["receipt_digest_sha256"] = hashlib.sha256(_receipt_bytes(receipt)).hexdigest()
+            return final_request, receipt
+        except EligibilityReceiptError as exc:
+            # No sealed benefit may survive a failed receipt: transport only the
+            # untouched native baseline and mark the run degraded/unverified.
+            degraded = {
+                "schema": "gt.eligibility_receipt.v1",
+                "status": "DEGRADED",
+                "degraded": True,
+                "unverified": True,
+                "decision_id": decision_id,
+                "iteration_id": iteration_id,
+                "failure_reason": str(exc),
+                "provider_exception": provider_exception,
+                "native_baseline_only": True,
+                "provider_calls": 0,
+                "benchmark_runs": 0,
+            }
+            degraded["receipt_digest_sha256"] = hashlib.sha256(_receipt_bytes(degraded)).hexdigest()
+            return baseline_request, degraded
+
     def carry_delivery_state_from(self, prior: EvidenceRouter | None) -> None:
         """Preserve semantic deduplication across a graph-context refresh."""
         if prior is not None:

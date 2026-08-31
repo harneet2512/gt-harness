@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 
 from gt_engine.evidence_router import (
+    EvidenceRouter,
     EligibilityReceiptError,
     build_eligibility_receipt,
     verify_eligibility_receipt,
 )
+from gt_engine.task_contract import TaskContract
 
 
 def _claims():
@@ -95,3 +97,27 @@ def test_zero_evidence_and_digest_tampering_are_explicit():
     assert receipt["status"] == "SEALED"
     assert not verify_eligibility_receipt({**receipt, "receipt_digest_sha256": "0" * 64})
 
+
+def test_router_model_boundary_emits_receipt_and_degrades_to_native_on_seal_failure():
+    router = EvidenceRouter(TaskContract(role="content_scan", obligations=()))
+    baseline = {"messages": [{"content": "native"}]}
+    final = {"messages": [{"content": "nativealpha"}]}
+    transported, receipt = router.seal_eligibility_receipt(
+        decision_id="d",
+        iteration_id="i",
+        claims=[_claims()[1]],
+        baseline_request=baseline,
+        final_request=final,
+    )
+    assert transported == final
+    assert receipt["status"] == "SEALED"
+    transported, degraded = router.seal_eligibility_receipt(
+        decision_id="d2",
+        iteration_id="i2",
+        claims=_claims(),
+        baseline_request=baseline,
+        final_request={"messages": [{"content": "nativealphabeta"}]},
+    )
+    assert transported == baseline
+    assert degraded["status"] == "DEGRADED"
+    assert degraded["native_baseline_only"] is True
