@@ -1,24 +1,29 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from gt_engine.resolution_provenance import (
     CallCandidate,
     CallsiteRecord,
     DispatchState,
+    LabeledResolutionCase,
     NormalizedSymbolKind,
     OracleOutcome,
     ProvenanceMechanism,
     ResolutionEvent,
+    ResolutionTier,
     SymbolRecord,
     VerificationStatus,
+    derive_resolution_tier,
+    execute_labeled_resolution_cases,
     legacy_callsite_from_edge,
     normalize_symbol_kind,
     report_per_resolver_metrics,
     stable_callsite_id,
     stable_symbol_id,
-    ResolutionTier,
-    derive_resolution_tier,
     wilson_interval,
 )
 
@@ -406,3 +411,47 @@ def test_per_resolver_reporting_matches_frozen_event_fixture():
 def test_per_resolver_reporting_rejects_revision_mismatch():
     with pytest.raises(ValueError, match="repository_revision mismatch"):
         report_per_resolver_metrics(_FROZEN_RESOLUTION_EVENTS, repository_revision="rev-other")
+
+
+def _load_labeled_cases(path: Path) -> tuple[LabeledResolutionCase, ...]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return tuple(
+        LabeledResolutionCase(
+            case_id=str(row["case_id"]),
+            mechanism=ProvenanceMechanism(str(row["mechanism"])),
+            candidate_count=int(row["candidate_count"]),
+            declared_scope=str(row["declared_scope"]),
+            receiver_type=str(row["receiver_type"]),
+            parser_complete=row["parser_complete"],
+            dynamic_dispatch=bool(row["dynamic_dispatch"]),
+            oracle_outcome=OracleOutcome(str(row["oracle_outcome"])),
+            expected_tier=ResolutionTier(str(row["expected_tier"])),
+        )
+        for row in payload["cases"]
+    )
+
+
+def test_frozen_labeled_case_execution_is_deterministic_and_matches_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "har10_frozen_labeled_cases.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    cases = _load_labeled_cases(fixture_path)
+    revision = str(fixture["repository_revision"])
+
+    before = execute_labeled_resolution_cases(cases, repository_revision=revision)
+    after = execute_labeled_resolution_cases(cases, repository_revision=revision)
+
+    assert before["payload_sha256"] == after["payload_sha256"]
+    assert before["payload_sha256"] == fixture["payload_sha256"]
+    assert len(before["events"]) == len(cases)
+    assert before["reports"]
+
+
+def test_groundtruth_deferral_record_is_present_and_complete():
+    fixture_path = Path(__file__).parent / "fixtures" / "har10_groundtruth_deferral.json"
+    record = json.loads(fixture_path.read_text(encoding="utf-8"))
+    assert record["schema"] == "gt.har10.groundtruth_deferral.v1"
+    assert "gt-index/internal/resolver/vta.go" in record["deferred_paths"]
+    assert "gt-index/internal/store/resolution_v2.go" in record["deferred_paths"]
+    assert record["reason"]
+    assert record["safe_because"]
+    assert record["resume_when"]

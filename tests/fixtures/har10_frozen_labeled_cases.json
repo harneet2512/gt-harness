@@ -1,0 +1,40 @@
+{
+  "schema": "gt.resolution.labeled_fixture.v1",
+  "repository_revision": "rev-frozen-exec",
+  "payload_sha256": "0302ab3f9b38a20221c3e68f964eb74e630051090df2e0832ddab444c8ec8680",
+  "cases": [
+    {
+      "case_id": "case-exact-1",
+      "mechanism": "import_exact",
+      "candidate_count": 1,
+      "declared_scope": "pkg.mod",
+      "receiver_type": "Runner",
+      "parser_complete": true,
+      "dynamic_dispatch": false,
+      "oracle_outcome": "agreed",
+      "expected_tier": "exact"
+    },
+    {
+      "case_id": "case-ambiguous-1",
+      "mechanism": "name_match",
+      "candidate_count": 2,
+      "declared_scope": "pkg.mod",
+      "receiver_type": "Runner",
+      "parser_complete": true,
+      "dynamic_dispatch": false,
+      "oracle_outcome": "disagreed",
+      "expected_tier": "ambiguous"
+    },
+    {
+      "case_id": "case-indeterminate-1",
+      "mechanism": "import_exact",
+      "candidate_count": 1,
+      "declared_scope": "pkg.mod",
+      "receiver_type": "Runner",
+      "parser_complete": false,
+      "dynamic_dispatch": false,
+      "oracle_outcome": "indeterminate",
+      "expected_tier": "indeterminate"
+    }
+  ]
+}

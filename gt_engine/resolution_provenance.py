@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -679,6 +679,60 @@ def report_per_resolver_metrics(
     return tuple(reports)
 
 
+@dataclass(frozen=True, slots=True)
+class LabeledResolutionCase:
+    case_id: str
+    mechanism: ProvenanceMechanism
+    candidate_count: int
+    declared_scope: str
+    receiver_type: str
+    parser_complete: bool | None
+    dynamic_dispatch: bool
+    oracle_outcome: OracleOutcome
+    expected_tier: ResolutionTier
+
+
+def execute_labeled_resolution_cases(
+    cases: Sequence[LabeledResolutionCase],
+    *,
+    repository_revision: str,
+) -> dict[str, object]:
+    """Execute labeled cases through tier derivation and persist resolver events."""
+    events: list[ResolutionEvent] = []
+    tier_trace: list[str] = []
+    for case in cases:
+        tier = derive_resolution_tier(
+            provenance=case.mechanism,
+            candidate_count=case.candidate_count,
+            declared_scope=case.declared_scope,
+            receiver_type=case.receiver_type,
+            parser_complete=case.parser_complete,
+            dynamic_dispatch=case.dynamic_dispatch,
+        )
+        if tier is not case.expected_tier:
+            raise ValueError(f"{case.case_id}: tier {tier.value} != {case.expected_tier.value}")
+        tier_trace.append(f"{case.case_id}:{tier.value}")
+        events.append(
+            ResolutionEvent(
+                repository_revision=repository_revision,
+                mechanism=case.mechanism,
+                oracle_outcome=case.oracle_outcome,
+                callsite_id=case.case_id,
+            )
+        )
+    reports = report_per_resolver_metrics(events, repository_revision=repository_revision)
+    payload = {
+        "schema": "gt.resolution.labeled_execution.v1",
+        "repository_revision": repository_revision,
+        "tier_trace": tier_trace,
+        "events": [event.to_row() for event in events],
+        "reports": [report.as_dict() for report in reports],
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload["payload_sha256"] = hashlib.sha256(canonical).hexdigest()
+    return payload
+
+
 __all__ = [
     "SCHEMA_VERSION",
     "CallCandidate",
@@ -689,6 +743,8 @@ __all__ = [
     "ProvenanceMechanism",
     "SymbolRecord",
     "VerificationStatus",
+    "LabeledResolutionCase",
+    "execute_labeled_resolution_cases",
     "legacy_callsite_from_edge",
     "derive_resolution_tier",
     "normalize_symbol_kind",
