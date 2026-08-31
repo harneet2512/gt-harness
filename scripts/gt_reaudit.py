@@ -50,17 +50,42 @@ def _source_manifest(root: Path) -> tuple[str, int]:
     return hashlib.sha256(payload).hexdigest(), len(rows)
 
 
+def _run_provider_free(root: Path, command: list[str]) -> dict[str, Any]:
+    result = subprocess.run(command, cwd=root, capture_output=True, text=True, check=False)
+    return {
+        "command": command,
+        "exit_code": result.returncode,
+        "stdout_sha256": hashlib.sha256(result.stdout.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(result.stderr.encode()).hexdigest(),
+    }
+
+
 def run_reaudit(groundtruth_root: str | Path) -> dict[str, Any]:
     root = Path(groundtruth_root).resolve()
     failure_code = None
     head = "UNVERIFIED"
     source_manifest = "UNVERIFIED"
     tracked_count = 0
+    red_replay: dict[str, Any] | None = None
+    mutation_check: dict[str, Any] | None = None
     try:
         if not root.is_dir() or not all((root / path).exists() for path in REQUIRED_PATHS):
             raise RuntimeError("SOURCE_MISSING")
         head = _git(root, "rev-parse", "HEAD")
         source_manifest, tracked_count = _source_manifest(root)
+        red_replay = _run_provider_free(root, ["python", "-m", "pytest", "-q", "tests/test_failure_ids.py"])
+        mutation_check = {
+            "command": ["git", "-C", str(root), "diff", "--exit-code"],
+            "exit_code": subprocess.run(
+                ["git", "-C", str(root), "diff", "--exit-code"],
+                capture_output=True,
+                check=False,
+            ).returncode,
+        }
+        if red_replay["exit_code"] != 0:
+            raise RuntimeError("PRODUCER_REPLAY_FAILED")
+        if mutation_check["exit_code"] != 0:
+            raise RuntimeError("RECEIPT_CHAIN_MISMATCH")
     except RuntimeError as exc:
         failure_code = str(exc)
     receipt: dict[str, Any] = {
@@ -72,8 +97,8 @@ def run_reaudit(groundtruth_root: str | Path) -> dict[str, Any]:
         "source_manifest_sha256": source_manifest,
         "tracked_blob_count": tracked_count,
         "immutable_git_inspection": True,
-        "canonical_red_replay": "not_run_provider_free" if failure_code else "replayed_provider_free",
-        "mutation_checks": "not_run" if failure_code else "source_fixture_toolchain_receipt_checks",
+        "canonical_red_replay": red_replay or "not_run",
+        "mutation_checks": mutation_check or "not_run",
         "provider_calls": 0,
         "benchmark_runs": 0,
         "benchmark_ready": False,
