@@ -2,11 +2,153 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from gt_engine.task_contract import TaskContract, significant_tokens
+
+
+class EligibilityReceiptError(ValueError):
+    """The eligibility receipt could not be sealed without losing evidence."""
+
+
+def _logical_request_bytes(payload: Any) -> bytes:
+    """Return transport-independent request content, excluding credentials/headers."""
+    excluded = {
+        "headers", "header", "credentials", "credential", "auth",
+        "authorization", "api_key", "token",
+    }
+
+    def leaves(value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            return [item for child in value for item in leaves(child)]
+        if isinstance(value, dict):
+            return [
+                item
+                for key, child in value.items()
+                if str(key).lower() not in excluded
+                for item in leaves(child)
+            ]
+        return []
+
+    return "".join(leaves(payload)).encode("utf-8", "surrogatepass")
+
+
+def _receipt_bytes(value: dict[str, Any]) -> bytes:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def build_eligibility_receipt(
+    *,
+    decision_id: str,
+    iteration_id: str,
+    claims: list[dict[str, Any]],
+    baseline_request: Any,
+    final_request: Any,
+    framing_encoding_bytes: int = 0,
+    prior_event_digest: str | None = None,
+) -> dict[str, Any]:
+    """Seal an eligibility decision at the complete logical request boundary."""
+    if not isinstance(decision_id, str) or not decision_id.strip():
+        raise EligibilityReceiptError("decision_identity")
+    if not isinstance(iteration_id, str) or not iteration_id.strip():
+        raise EligibilityReceiptError("iteration_identity")
+    if not isinstance(claims, list):
+        raise EligibilityReceiptError("claims_invalid")
+    normalised: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for claim in claims:
+        if not isinstance(claim, dict):
+            raise EligibilityReceiptError("claims_invalid")
+        claim_id = str(claim.get("claim_id") or "").strip()
+        source = str(claim.get("source") or "").strip()
+        content = claim.get("content")
+        disposition = str(claim.get("disposition") or "").strip().lower()
+        reason = str(claim.get("reason") or "").strip()
+        if not claim_id or claim_id in seen or not source or not isinstance(content, str):
+            raise EligibilityReceiptError("claim_identity")
+        if disposition not in {"admitted", "refused"} or not reason:
+            raise EligibilityReceiptError("claim_disposition")
+        seen.add(claim_id)
+        content_bytes = content.encode("utf-8", "surrogatepass")
+        normalised.append({
+            "claim_id": claim_id,
+            "source": source,
+            "content_sha256": hashlib.sha256(content_bytes).hexdigest(),
+            "byte_count": len(content_bytes),
+            "disposition": disposition,
+            "reason": reason,
+        })
+    normalised.sort(key=lambda item: item["claim_id"])
+    try:
+        framing = int(framing_encoding_bytes)
+    except (TypeError, ValueError):
+        raise EligibilityReceiptError("framing_encoding_invalid") from None
+    if framing < 0:
+        raise EligibilityReceiptError("framing_encoding_invalid")
+    baseline_bytes = _logical_request_bytes(baseline_request)
+    final_bytes = _logical_request_bytes(final_request)
+    admitted = sum(
+        item["byte_count"] for item in normalised if item["disposition"] == "admitted"
+    )
+    refused = sum(
+        item["byte_count"] for item in normalised if item["disposition"] == "refused"
+    )
+    refused_contents = [
+        claim["content"].encode("utf-8", "surrogatepass")
+        for claim in claims
+        if str(claim.get("disposition") or "").lower() == "refused"
+        and isinstance(claim.get("content"), str)
+    ]
+    if any(content and content in final_bytes for content in refused_contents):
+        raise EligibilityReceiptError("refused_content_in_final")
+    provider_delta = len(final_bytes) - len(baseline_bytes)
+    if provider_delta < 0 or provider_delta != admitted + framing:
+        raise EligibilityReceiptError("provider_delta_conservation")
+    receipt: dict[str, Any] = {
+        "schema": "gt.eligibility_receipt.v1",
+        "status": "SEALED",
+        "degraded": False,
+        "unverified": False,
+        "decision_id": decision_id.strip(),
+        "iteration_id": iteration_id.strip(),
+        "claims": normalised,
+        "baseline_logical_request_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+        "baseline_logical_request_bytes": len(baseline_bytes),
+        "final_logical_request_sha256": hashlib.sha256(final_bytes).hexdigest(),
+        "final_logical_request_bytes": len(final_bytes),
+        "admitted_bytes": admitted,
+        "refused_bytes": refused,
+        "framing_encoding_bytes": framing,
+        "provider_delta_bytes": provider_delta,
+        "refused_bytes_in_final": 0,
+        "prior_event_digest": prior_event_digest,
+    }
+    receipt["receipt_digest_sha256"] = hashlib.sha256(_receipt_bytes(receipt)).hexdigest()
+    return receipt
+
+
+def verify_eligibility_receipt(receipt: dict[str, Any]) -> bool:
+    try:
+        if (
+            receipt.get("schema") != "gt.eligibility_receipt.v1"
+            or receipt.get("status") != "SEALED"
+        ):
+            return False
+        supplied = receipt.get("receipt_digest_sha256")
+        if not isinstance(supplied, str):
+            return False
+        body = dict(receipt)
+        body.pop("receipt_digest_sha256", None)
+        return hashlib.sha256(_receipt_bytes(body)).hexdigest() == supplied
+    except (TypeError, ValueError):
+        return False
 
 _PATH_RE = re.compile(
     r"(?<![\w.-])(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9_]+"
