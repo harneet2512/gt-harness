@@ -1,6 +1,7 @@
 {
   "live_packets":[
     "finder-f1",
+    "finder-f1-fixed",
     "finder-f2",
     "finder-f2-fixed"
   ],
@@ -8,6 +9,7 @@
   "tickets":{
     "HAR-63":[
       "finder-f1",
+      "finder-f1-fixed",
       "finder-f2"
     ],
     "HAR-64":[

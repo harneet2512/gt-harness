@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T23:05:02.567646Z",
+  "detail":"Builder added harvest_resolution_substrate() with canonical substrate digest verification and WhyThisEdgeStore.publish_substrate() for atomic certification/publication of all shipped candidate and flow-witness rows. Issuer now consumes substrate rows instead of hand-built facts; substrate-to-query test passes.",
+  "file":"gt_engine/why_this_edge.py",
+  "head_sha":"d88b40fef046358f901b2d65fa0a3b98bd940d7b",
+  "kind":"finding",
+  "line":208,
+  "message":"Retained-candidate substrate producer path landed",
+  "packet_digest_sha256":"07e21038489947e9d096d307f3b5b210ba71b0d613a790b0e6bcca501b10a899",
+  "packet_id":"finder-f1-fixed",
+  "pr":25,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"directed-fix-landed",
+    "system":"cursor-finder"
+  },
+  "status":"fixed",
+  "supersedes":"finder-f1",
+  "ticket":"HAR-63"
+}
