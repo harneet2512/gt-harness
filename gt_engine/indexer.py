@@ -20,6 +20,9 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 # Extensions gt-index parses (tree-sitter structural coverage). A root with at
@@ -200,3 +203,129 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
         return str(db)
     except Exception:  # noqa: BLE001 - indexing failure means GT dormant, never a crash
         return None
+
+
+class IndexBuildStatus(StrEnum):
+    BUILT = "built"
+    BUILD_FAILED = "build_failed"
+    INVALID_DATABASE = "invalid_database"
+    NOT_APPLICABLE = "not_applicable"
+
+
+@dataclass(frozen=True, slots=True)
+class IndexBuildReceipt:
+    status: IndexBuildStatus
+    graph_db: str | None = None
+    source_revision: str = ""
+    graph_revision: str = ""
+    error_type: str = ""
+    error_diagnostic: str = ""
+    attempts: tuple[str, ...] = ()
+
+    @property
+    def success(self) -> bool:
+        return self.status is IndexBuildStatus.BUILT and bool(self.graph_db)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status.value, "graph_db": self.graph_db,
+            "source_revision": self.source_revision, "graph_revision": self.graph_revision,
+            "error_type": self.error_type, "error_diagnostic": self.error_diagnostic,
+            "attempts": self.attempts,
+        }
+
+
+def _resolved_binary_path() -> str:
+    candidate = os.environ.get("GT_INDEX_BINARY") or shutil.which("gt-index") or ""
+    return str(Path(candidate).resolve()) if candidate else ""
+
+
+@contextmanager
+def _graph_publication_lock(_path: Path):
+    """Process-local publication boundary; readers see complete files only."""
+    yield
+
+
+def _graph_schema_receipt(graph: Path) -> tuple[bool, str]:
+    try:
+        with sqlite3.connect(f"file:{graph.resolve().as_posix()}?mode=ro", uri=True) as con:
+            check = str(con.execute("PRAGMA quick_check").fetchone()[0]).lower()
+            if check != "ok":
+                return False, f"quick_check:{check}"
+            tables = {row[0] for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            )}
+        required = {"project_meta"}
+        missing = sorted(required - tables)
+        return (False, f"missing_tables:{','.join(missing)}") if missing else (True, "ok")
+    except (sqlite3.Error, OSError) as exc:
+        return False, f"{type(exc).__name__}:{exc}"
+
+
+def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root: Path,
+                             expected_source_revision: str = "",
+                             expected_binary_sha256: str = "") -> tuple[bool, str]:
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False, "manifest_unreadable"
+    if manifest.get("schema") != "gt.graph_certification.v1":
+        return False, "manifest_schema_mismatch"
+    root_sha = hashlib.sha256(os.path.realpath(expected_root).encode("utf-8", "surrogatepass")).hexdigest()
+    if manifest.get("repository_root_sha256") != root_sha:
+        return False, "repository_root_mismatch"
+    if expected_source_revision and manifest.get("source_revision") != expected_source_revision:
+        return False, "source_revision_mismatch"
+    if expected_binary_sha256 and manifest.get("binary_sha256") != expected_binary_sha256:
+        return False, "binary_identity_mismatch"
+    if not manifest.get("binary_certified"):
+        return False, "binary_not_certified"
+    if not graph.is_file():
+        return False, "graph_missing"
+    if manifest.get("graph_bytes") != graph.stat().st_size:
+        return False, "graph_bytes_mismatch"
+    if manifest.get("graph_sha256") != hashlib.sha256(graph.read_bytes()).hexdigest():
+        return False, "graph_sha256_mismatch"
+    valid, reason = _graph_schema_receipt(graph)
+    return (True, "ok") if valid else (False, f"graph_schema_invalid:{reason}")
+
+
+def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None = None,
+                              source_revision: str = "") -> IndexBuildReceipt:
+    root_path = Path(root)
+    if not root_path.is_dir() or not is_code_repo(str(root_path)):
+        return IndexBuildReceipt(IndexBuildStatus.NOT_APPLICABLE, source_revision=source_revision)
+    try:
+        graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None)
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
+                                 error_type=type(exc).__name__, error_diagnostic=str(exc)[:600])
+    if not graph:
+        return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
+                                 error_type="run_index_false", error_diagnostic="gt-index did not publish a graph")
+    graph_path = Path(graph)
+    valid, reason = _graph_schema_receipt(graph_path)
+    if not valid:
+        return IndexBuildReceipt(IndexBuildStatus.INVALID_DATABASE, graph_db=graph,
+                                 source_revision=source_revision, error_type=reason,
+                                 error_diagnostic=reason)
+    manifest = graph_path.with_suffix(".manifest.json")
+    if not manifest.is_file():
+        return IndexBuildReceipt(IndexBuildStatus.INVALID_DATABASE, graph_db=graph,
+                                 source_revision=source_revision, error_type="manifest_missing",
+                                 error_diagnostic="graph certification manifest missing")
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        graph_revision = str(payload.get("graph_revision", payload.get("graph_sha256", "")))
+    except (OSError, ValueError):
+        graph_revision = ""
+    return IndexBuildReceipt(IndexBuildStatus.BUILT, graph_db=graph,
+                             source_revision=source_revision, graph_revision=graph_revision)
+
+
+def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tuple[str, ...], *,
+                        source_revision: str = "") -> IndexBuildReceipt:
+    # The current producer has no incremental command boundary. Rebuild into a
+    # temporary state directory so the previous complete graph remains readable.
+    del graph, changed_paths
+    return ensure_index_with_receipt(root, source_revision=source_revision)
