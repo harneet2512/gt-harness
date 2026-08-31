@@ -55,6 +55,27 @@ def test_optional_vec0_falls_back_and_exact_rescore_owns_order(tmp_path) -> None
     assert result.candidate_ids == ("dependency", "owner", "test")
 
 
+def test_sqlite_vec_import_failure_is_a_typed_fallback(tmp_path) -> None:
+    def missing_extension(_connection: sqlite3.Connection) -> bool:
+        raise ImportError("sqlite_vec is not installed")
+
+    index = SQLiteVectorIndex(
+        tmp_path / "vectors.sqlite",
+        model_id="model-v1",
+        tokenizer_id="tokenizer-v1",
+        dimension=2,
+        source_revision="source-r1",
+        graph_revision="graph-r1",
+        extension_loader=missing_extension,
+    )
+    index.upsert([_record("owner", (1.0, 0.0), "owner")])
+
+    result = index.query(HybridQuery(vector=(1.0, 0.0), limit=1))
+
+    assert result.fallback_reason == "vec0_load_failed"
+    assert result.items[0].document_id == "owner"
+
+
 def test_metadata_mismatch_is_named_and_does_not_use_stale_rows(tmp_path) -> None:
     path = tmp_path / "vectors.sqlite"
     first = SQLiteVectorIndex(

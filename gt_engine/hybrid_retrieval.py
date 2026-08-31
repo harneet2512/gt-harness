@@ -307,7 +307,7 @@ class SQLiteVectorIndex:
             try:
                 loaded = bool(extension_loader(self._connection))
                 self._vec0_available = loaded and self._ensure_vec0_table()
-            except (OSError, RuntimeError, sqlite3.Error):
+            except (ImportError, OSError, RuntimeError, sqlite3.Error):
                 self._vec0_available = False
                 self._vec0_error = "vec0_load_failed"
 
@@ -513,7 +513,7 @@ class SQLiteVectorIndex:
             "FROM gt_vector_documents ORDER BY document_id"
         ).fetchall()
         if not rows:
-            reason = None if self._vec0_available else "vec0_unavailable"
+            reason = None if self._vec0_available else (self._vec0_error or "vec0_unavailable")
             return HybridQueryResult((), (), reason, self._metadata_digest)
         scored = []
         for row in rows:
@@ -573,7 +573,7 @@ class SQLiteVectorIndex:
                 )
             )
         items.sort(key=lambda item: (-item.exact_score, item.document_id))
-        fallback = None if self._vec0_available else "vec0_unavailable"
+        fallback = None if self._vec0_available else (self._vec0_error or "vec0_unavailable")
         return HybridQueryResult(
             tuple(items[: query.limit]), candidate_ids, fallback, self._metadata_digest
         )
