@@ -1,0 +1,51 @@
+{
+  "schema": "gt.har56.gate_status.v1",
+  "repository": "harneet2512/gt-harness",
+  "observed_main": "7500657503c0107eadff8cb00ed70aba98beaa5b",
+  "authorization": {
+    "benchmark_ready": false,
+    "provider_calls": 0,
+    "benchmark_runs": 0
+  },
+  "gates": {
+    "har36_pinned_binary_rewitness": {
+      "status": "OPEN",
+      "command": "python -m pytest -q tests/test_gt_repository_intelligence.py -k 'archive_reviewed_head_binds_copied_source_blobs or pinned'",
+      "exit_code": 0,
+      "observed": "focused archive/pinned test passed on current main",
+      "missing": "dedicated receipt proving the pinned gt-index binary re-witness against 04de92ccd87edc6812ecb81e60af3710fbd8e7e4 on the Windows host"
+    },
+    "har5_final_receipt": {
+      "status": "OPEN",
+      "artifact": "gt_finalstand/receipts/har5_terminal_baseline.json",
+      "observed": "artifact exists but contains PROVISIONAL_WAITING_FOR_FINAL_FUNCTIONAL_HEADS and UNVERIFIED fields",
+      "missing": "non-provisional final-head receipt"
+    },
+    "fs023_validator_closure": {
+      "status": "OPEN",
+      "command": "python -m pytest -q tests/test_gt_finalstand.py -k 'finalstand_is_machine_valid or fs023_provenance_cross_binds_terminal_workflow_and_artifact'",
+      "exit_code": 0,
+      "observed": "both current-main tests passed",
+      "missing": "refreshed receipt artifact and closure rationale required by HAR-56"
+    },
+    "groundtruth_engine_probe": {
+      "status": "OPEN",
+      "command": "python -m pytest -q tests/test_gt_engine.py -k 'submit_probe_quiet_on_clean_or_unedited'",
+      "exit_code": 0,
+      "observed": "current-main probe passed",
+      "missing": "dedicated receipt from the Groundtruth-installed environment"
+    },
+    "v25_ff_handshake": {
+      "status": "ACKNOWLEDGED",
+      "observed": "future default-branch fast-forwards require an explicit coordinator grant naming the exact candidate SHA and current main tip; no merge was performed"
+    }
+  },
+  "cleanup": {
+    "status": "OPEN",
+    "stale_branches": {
+      "codex/har11-suite-repair2": "3f86ca90fd358b914452df69192f63e3fbbc41b0",
+      "codex/har36-repin": "7500657503c0107eadff8cb00ed70aba98beaa5b"
+    }
+  },
+  "next": "Obtain the missing gate receipt artifacts, remove stale branches, obtain a minted TERMINAL_PASS for HAR-9, merge in queue order, regenerate the final closeout against final default heads, and run the HAR-58 readiness audit."
+}
