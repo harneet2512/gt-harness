@@ -1,0 +1,22 @@
+{
+  "schema": "gt.har56.groundtruth_engine_probe.v1",
+  "repository": "harneet2512/gt-harness",
+  "harness_head": "7500657503c0107eadff8cb00ed70aba98beaa5b",
+  "groundtruth_checkout_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.0",
+    "producer_binary": "D:\\Groundtruth\\gt-index\\gt-index.exe",
+    "producer_binary_sha256": "9c1342b9525e032f391e7a3bf34b9bb421a93be27f115606e7c755d9af8c6c35"
+  },
+  "command": "python -m pytest -vv tests/test_gt_engine.py -k 'submit_probe_quiet_on_clean_or_unedited'",
+  "exit_code": 0,
+  "collected": 126,
+  "deselected": 125,
+  "passed": 1,
+  "status": "PASS",
+  "observed": "Groundtruth-installed engine submit probe is quiet on clean and unedited workspaces",
+  "benchmark_ready": false,
+  "provider_calls": 0,
+  "benchmark_runs": 0
+}
