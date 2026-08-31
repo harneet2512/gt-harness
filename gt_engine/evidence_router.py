@@ -150,6 +150,21 @@ def verify_eligibility_receipt(receipt: dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         return False
 
+
+def reconcile_provider_bytes(receipt: dict[str, Any], provider_request: Any) -> dict[str, Any]:
+    """Reconcile the sealed logical request against the actual provider view."""
+    if not verify_eligibility_receipt(receipt):
+        raise EligibilityReceiptError("receipt_unverified")
+    logical = _logical_request_bytes(provider_request)
+    digest = hashlib.sha256(logical).hexdigest()
+    return {
+        "receipt_digest_sha256": receipt["receipt_digest_sha256"],
+        "provider_logical_request_sha256": digest,
+        "provider_logical_request_bytes": len(logical),
+        "provider_final_matches": digest == receipt.get("final_logical_request_sha256")
+        and len(logical) == receipt.get("final_logical_request_bytes"),
+    }
+
 _PATH_RE = re.compile(
     r"(?<![\w.-])(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9_]+"
 )
@@ -267,6 +282,7 @@ class EvidenceRouter:
     _delivered: set[str] = field(default_factory=set)
     _scope_challenge_candidates: set[str] = field(default_factory=set)
     _scope_challenge_delivered: bool = False
+    last_eligibility_receipt: dict[str, Any] = field(default_factory=dict, init=False)
 
     def admit(
         self,
@@ -393,7 +409,9 @@ class EvidenceRouter:
             )
             if provider_exception:
                 receipt["provider_exception"] = provider_exception
-                receipt["receipt_digest_sha256"] = hashlib.sha256(_receipt_bytes(receipt)).hexdigest()
+                receipt["receipt_digest_sha256"] = hashlib.sha256(
+                    _receipt_bytes(receipt)
+                ).hexdigest()
             return final_request, receipt
         except EligibilityReceiptError as exc:
             # No sealed benefit may survive a failed receipt: transport only the
@@ -413,6 +431,48 @@ class EvidenceRouter:
             }
             degraded["receipt_digest_sha256"] = hashlib.sha256(_receipt_bytes(degraded)).hexdigest()
             return baseline_request, degraded
+
+    def admit_decision(
+        self,
+        *,
+        decision_id: str,
+        iteration_id: str,
+        candidates: list[dict[str, Any]],
+        baseline_request: Any,
+        final_request: Any,
+        prior_event_digest: str | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Model-facing admission boundary that always seals, including empty evidence."""
+        claims: list[dict[str, Any]] = []
+        for index, candidate in enumerate(candidates):
+            evidence_type = str(candidate.get("evidence_type") or "")
+            rendered = str(candidate.get("rendered") or "")
+            keep, reason = self.admit(
+                evidence_type,
+                rendered,
+                command=str(candidate.get("command") or ""),
+                output=str(candidate.get("output") or ""),
+                commit=False,
+            )
+            claims.append(
+                {
+                    "claim_id": str(candidate.get("claim_id") or f"claim-{index}"),
+                    "source": evidence_type or "gt",
+                    "content": rendered,
+                    "disposition": "admitted" if keep else "refused",
+                    "reason": reason,
+                }
+            )
+        transported, receipt = self.seal_eligibility_receipt(
+            decision_id=decision_id,
+            iteration_id=iteration_id,
+            claims=claims,
+            baseline_request=baseline_request,
+            final_request=final_request,
+            prior_event_digest=prior_event_digest,
+        )
+        self.last_eligibility_receipt = receipt
+        return transported, receipt
 
     def carry_delivery_state_from(self, prior: EvidenceRouter | None) -> None:
         """Preserve semantic deduplication across a graph-context refresh."""

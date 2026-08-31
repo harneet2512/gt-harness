@@ -3,9 +3,10 @@ from __future__ import annotations
 import pytest
 
 from gt_engine.evidence_router import (
-    EvidenceRouter,
     EligibilityReceiptError,
+    EvidenceRouter,
     build_eligibility_receipt,
+    reconcile_provider_bytes,
     verify_eligibility_receipt,
 )
 from gt_engine.task_contract import TaskContract
@@ -121,3 +122,28 @@ def test_router_model_boundary_emits_receipt_and_degrades_to_native_on_seal_fail
     assert transported == baseline
     assert degraded["status"] == "DEGRADED"
     assert degraded["native_baseline_only"] is True
+
+
+def test_admit_decision_always_seals_and_provider_reconciliation_is_explicit():
+    router = EvidenceRouter(TaskContract(role="content_scan", obligations=()))
+    baseline = {"messages": [{"content": "native"}]}
+    final = {"messages": [{"content": "nativealpha"}]}
+    transported, receipt = router.admit_decision(
+        decision_id="d3",
+        iteration_id="i3",
+        candidates=[
+            {
+                "claim_id": "c1",
+                "evidence_type": "graph",
+                "rendered": "alpha",
+                "command": "rg alpha",
+                "output": "alpha",
+            }
+        ],
+        baseline_request=baseline,
+        final_request=final,
+    )
+    assert transported == final
+    assert router.last_eligibility_receipt == receipt
+    reconciliation = reconcile_provider_bytes(receipt, final)
+    assert reconciliation["provider_final_matches"] is True
