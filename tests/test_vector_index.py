@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from gt_engine.hybrid_retrieval import (
     EmbeddingRecord,
     HybridQuery,
@@ -167,7 +169,23 @@ def _load_sqlite_vec(connection: sqlite3.Connection) -> bool:
     return True
 
 
+def _require_working_sqlite_vec() -> None:
+    """Skip the accelerated witness unless the optional extension is usable."""
+    try:
+        import sqlite_vec
+
+        with sqlite3.connect(":memory:") as connection:
+            connection.enable_load_extension(True)
+            sqlite_vec.load(connection)
+            connection.execute(
+                "CREATE VIRTUAL TABLE witness_vec0 USING vec0(embedding float[3])"
+            )
+    except (ImportError, OSError, RuntimeError, sqlite3.Error) as exc:
+        pytest.skip(f"sqlite_vec accelerated witness unavailable: {exc}")
+
+
 def test_accelerated_mode_unions_lexical_graph_candidates_with_ann_pool(tmp_path) -> None:
+    _require_working_sqlite_vec()
     index = SQLiteVectorIndex(
         tmp_path / "vectors.sqlite",
         model_id="model-v1",
