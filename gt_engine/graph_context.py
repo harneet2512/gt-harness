@@ -205,6 +205,12 @@ def verify_capability_matrix(
     cells = matrix.get("cells")
     if not isinstance(cells, list) or len(cells) != len(_CAPABILITY_PROBES) * 2:
         return False
+    source_revision = matrix.get("source_revision")
+    gitnexus_revision = matrix.get("gitnexus_revision")
+    if not isinstance(source_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", source_revision):
+        return False
+    if gitnexus_revision != GITNEXUS_PINNED_REVISION:
+        return False
     unsigned = {key: value for key, value in matrix.items() if key != "matrix_sha256"}
     digest = hashlib.sha256(
         json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -219,6 +225,9 @@ def verify_capability_matrix(
         path = citation.get("path")
         revision = citation.get("revision")
         if tool not in roots or not isinstance(path, str) or not isinstance(revision, str):
+            return False
+        expected_revision = source_revision if tool == "gt" else gitnexus_revision
+        if revision != expected_revision:
             return False
         blob = _git_blob(roots[tool], revision, path)
         if blob is None or hashlib.sha256(blob).hexdigest() != citation.get("sha256"):

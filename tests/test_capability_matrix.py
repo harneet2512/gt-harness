@@ -82,6 +82,14 @@ def test_capability_matrix_rejects_mutated_citation_and_symbol(tmp_path: Path) -
     matrix["cells"][0]["citation"]["symbol"] = "invented_symbol"
     assert not verify_capability_matrix(matrix, roots)
 
+    matrix = build_capability_matrix(
+        GT_ROOT,
+        gt_revision=GT_REVISION,
+        gitnexus_root=roots["gitnexus"],
+    )
+    matrix["cells"][0]["citation"]["revision"] = "8f1bef056e4be9138afe76c253014dc0f2d038af"
+    assert not verify_capability_matrix(matrix, roots)
+
 
 def test_checked_in_matrix_artifact_is_verifiable() -> None:
     roots = _pinned_roots()
