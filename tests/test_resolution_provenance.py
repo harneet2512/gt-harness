@@ -223,3 +223,59 @@ def test_legacy_selected_edge_is_conservatively_reconciled_without_candidate():
     assert legacy.legacy_reported_candidate_count == 4
     assert legacy.mechanism is ProvenanceMechanism.UNKNOWN_LEGACY
     assert legacy.verification_status is VerificationStatus.UNKNOWN
+
+
+def test_producer_two_candidate_vta_rows_decode_without_invention():
+    # Provisional observed rows from Groundtruth 944d37ec9332eedaca06845462c36a5149587afb
+    # indexing closeout/fixture/main.go (HAR-61 closeout SHA a3156504).
+    rows = [
+        {
+            "callsite_id": "01d5978d232e0b32b44d98766adce2feee8d5902b8a8161897e296f1335a3a3b",
+            "target_id": 4,
+            "target_stable_id": "88e6b52f1afe0d0bd3f18655c6c3d87eee6fc234bb292c5fe08bcb6ff7aaa24b",
+            "target_native_id": "4",
+            "ordinal": 0,
+            "mechanism": "vta",
+            "declared_scope": "ImplA.Run",
+            "receiver_type": "ImplA,ImplB",
+            "receiver_origin": "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f",
+            "receiver_shape": "runner.Run",
+            "receiver_chain": '["runner"]',
+            "import_chain": "[]",
+            "dynamic_dispatch": 0,
+            "export_status": "exported",
+            "parser_complete": 1,
+            "verification_status": "candidate_only",
+            "selected": 0,
+        },
+        {
+            "callsite_id": "01d5978d232e0b32b44d98766adce2feee8d5902b8a8161897e296f1335a3a3b",
+            "target_id": 6,
+            "target_stable_id": "853d5a7acc47858cba1ce7c11c74ef5ab8fa711d2b35cf72bd32b86b55e98d49",
+            "target_native_id": "6",
+            "ordinal": 1,
+            "mechanism": "vta",
+            "declared_scope": "ImplB.Run",
+            "receiver_type": "ImplA,ImplB",
+            "receiver_origin": "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f",
+            "receiver_shape": "runner.Run",
+            "receiver_chain": '["runner"]',
+            "import_chain": "[]",
+            "dynamic_dispatch": 0,
+            "export_status": "exported",
+            "parser_complete": 1,
+            "verification_status": "candidate_only",
+            "selected": 0,
+        },
+    ]
+    decoded = [CallCandidate.from_row(row) for row in rows]
+    assert len(decoded) == 2
+    assert [item.ordinal for item in decoded] == [0, 1]
+    assert {item.target_stable_id for item in decoded} == {
+        "88e6b52f1afe0d0bd3f18655c6c3d87eee6fc234bb292c5fe08bcb6ff7aaa24b",
+        "853d5a7acc47858cba1ce7c11c74ef5ab8fa711d2b35cf72bd32b86b55e98d49",
+    }
+    assert {item.declared_scope for item in decoded} == {"ImplA.Run", "ImplB.Run"}
+    assert all(item.mechanism is ProvenanceMechanism.VTA for item in decoded)
+    assert all(item.verification_status is VerificationStatus.CANDIDATE_ONLY for item in decoded)
+    assert not any(item.selected for item in decoded)
