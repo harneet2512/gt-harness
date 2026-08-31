@@ -1,0 +1,46 @@
+{
+  "schema": "gt.resolution_substrate.v1",
+  "source_fixture": "tests/fixtures/har10_frozen_labeled_cases.json",
+  "source_revision": "rev-frozen-exec",
+  "rows_digest_sha256": "07a92264579f4f020860f8eecdc2cff9b1e6a5feffbae68d3ef6f1e1402d49fb",
+  "rows": [
+    {
+      "edge_id": "har10:case-ambiguous-1:edge",
+      "callsite_id": "har10:case-ambiguous-1:callsite",
+      "edge_kind": "CANDIDATE_TARGET",
+      "target_id": "har10:case-ambiguous-1:target-0",
+      "dispatch_state": "ambiguous",
+      "candidate_count": 2,
+      "candidates": [
+        {"target_id": "har10:case-ambiguous-1:target-0", "flow_witnesses": ["har10:case-ambiguous-1:flow-0"]},
+        {"target_id": "har10:case-ambiguous-1:target-1", "flow_witnesses": ["har10:case-ambiguous-1:flow-1"]}
+      ],
+      "flow_witnesses": {
+        "har10:case-ambiguous-1:target-0": ["har10:case-ambiguous-1:flow-0"],
+        "har10:case-ambiguous-1:target-1": ["har10:case-ambiguous-1:flow-1"]
+      },
+      "source_revision": "rev-frozen-exec",
+      "graph_revision": "har10-resolution-graph",
+      "completion_identity": "har10-frozen-resolution-build",
+      "complete": true
+    },
+    {
+      "edge_id": "har10:case-exact-1:edge",
+      "callsite_id": "har10:case-exact-1:callsite",
+      "edge_kind": "SELECTED_TARGET",
+      "target_id": "har10:case-exact-1:target-0",
+      "dispatch_state": "unique",
+      "candidate_count": 1,
+      "candidates": [
+        {"target_id": "har10:case-exact-1:target-0", "flow_witnesses": ["har10:case-exact-1:flow-0"]}
+      ],
+      "flow_witnesses": {
+        "har10:case-exact-1:target-0": ["har10:case-exact-1:flow-0"]
+      },
+      "source_revision": "rev-frozen-exec",
+      "graph_revision": "har10-resolution-graph",
+      "completion_identity": "har10-frozen-resolution-build",
+      "complete": true
+    }
+  ]
+}

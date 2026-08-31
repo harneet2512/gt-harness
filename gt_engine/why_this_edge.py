@@ -18,6 +18,7 @@ from typing import Any
 
 SCHEMA = "gt.why_this_edge.v1"
 ALLOWED_EDGE_KINDS = {"HAS_CALLSITE", "CANDIDATE_TARGET", "SELECTED_TARGET"}
+SUBSTRATE_SCHEMA = "gt.resolution_substrate.v1"
 
 
 class WhyThisEdgeAbstention(ValueError):
@@ -199,6 +200,31 @@ def why_this_edge_receipt(result: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def harvest_resolution_substrate(root: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    """Load producer-emitted candidate/witness rows from a shipped substrate."""
+    path = Path(root) / "gt_finalstand" / "receipts" / "har63_resolution_substrate.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WhyThisEdgeAbstention("resolution_substrate_unavailable") from exc
+    if not isinstance(payload, Mapping) or payload.get("schema") != SUBSTRATE_SCHEMA:
+        raise WhyThisEdgeAbstention("resolution_substrate_invalid")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise WhyThisEdgeAbstention("resolution_substrate_empty")
+    result = [dict(row) for row in rows if isinstance(row, Mapping)]
+    if len(result) != len(rows):
+        raise WhyThisEdgeAbstention("resolution_substrate_invalid")
+    supplied = payload.get("rows_digest_sha256")
+    if supplied is not None:
+        digest = hashlib.sha256(
+            json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if supplied != digest:
+            raise WhyThisEdgeAbstention("resolution_substrate_digest_mismatch")
+    return result
+
+
 class WhyThisEdgeStore:
     """Producer-owned content-addressed store for certified edge facts."""
 
@@ -227,6 +253,35 @@ class WhyThisEdgeStore:
             )
         os.replace(temporary, self.path)
         return receipt
+
+    def publish_substrate(self, rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        """Certify and atomically publish every row harvested from the substrate."""
+        if not isinstance(rows, list) or not rows:
+            raise WhyThisEdgeAbstention("resolution_substrate_empty")
+        records = self._load()
+        receipts: list[dict[str, Any]] = []
+        for facts in rows:
+            certified = certify_why_this_edge(facts)
+            records[certified["edge_id"]] = certified
+            receipts.append(why_this_edge_receipt(certified))
+        payload = {
+            "schema": "gt.why_this_edge_store.v1",
+            "records": [records[key] for key in sorted(records)],
+            "receipts": receipts,
+            "receipt": receipts[-1],
+        }
+        payload["store_digest_sha256"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", newline="\n", dir=self.path.parent, delete=False
+        ) as handle:
+            temporary = handle.name
+            handle.write(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                + "\n"
+            )
+        os.replace(temporary, self.path)
+        return receipts
 
     def query(self, edge_id: str, **expected: str | None) -> dict[str, Any]:
         records = self._load()
@@ -257,5 +312,7 @@ __all__ = [
     "verify_why_this_edge",
     "why_this_edge_receipt",
     "WhyThisEdgeStore",
+    "SUBSTRATE_SCHEMA",
+    "harvest_resolution_substrate",
     "why_this_edge",
 ]

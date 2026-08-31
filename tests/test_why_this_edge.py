@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,7 @@ from gt_engine.why_this_edge import (
     WhyThisEdgeAbstention,
     WhyThisEdgeStore,
     certify_why_this_edge,
+    harvest_resolution_substrate,
     query_why_this_edge,
     verify_why_this_edge,
     why_this_edge_receipt,
@@ -119,3 +121,24 @@ def test_producer_store_publishes_and_queries_by_stable_edge_id(tmp_path):
     assert receipt["explanation_digest_sha256"]
     queried = store.query("edge-1", expected_callsite_id="call-1")
     assert queried["target_id"] == "target-a"
+
+
+def test_shipped_resolution_substrate_harvests_all_rows_and_queries(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    rows = harvest_resolution_substrate(root)
+    store = WhyThisEdgeStore(tmp_path / "why-edge.json")
+    receipts = store.publish_substrate(rows)
+    assert len(receipts) == len(rows) == 2
+    assert store.query("har10:case-exact-1:edge")["candidate_count"] == 1
+
+
+def test_red_substrate_digest_mutation_abstains(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    source = root / "gt_finalstand" / "receipts" / "har63_resolution_substrate.json"
+    target = tmp_path / "gt_finalstand" / "receipts" / source.name
+    target.parent.mkdir(parents=True)
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["rows"][0]["target_id"] = "tampered-target"
+    target.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(WhyThisEdgeAbstention, match="digest_mismatch"):
+        harvest_resolution_substrate(tmp_path)

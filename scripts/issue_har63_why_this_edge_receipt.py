@@ -18,25 +18,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = args.root.resolve()
     sys.path.insert(0, str(root))
-    from gt_engine.why_this_edge import WhyThisEdgeStore  # noqa: PLC0415
+    from gt_engine.why_this_edge import (  # noqa: PLC0415
+        WhyThisEdgeStore,
+        harvest_resolution_substrate,
+    )
 
-    facts = {
-        "edge_id": "har63-fixture-edge",
-        "callsite_id": "har63-fixture-callsite",
-        "edge_kind": "SELECTED_TARGET",
-        "target_id": "har63-fixture-target",
-        "dispatch_state": "unique",
-        "candidate_count": 1,
-        "candidates": [{"target_id": "har63-fixture-target", "flow_witnesses": ["har63-flow"]}],
-        "flow_witnesses": {"har63-fixture-target": ["har63-flow"]},
-        "source_revision": "har63-fixture-source",
-        "graph_revision": "har63-fixture-graph",
-        "completion_identity": "har63-fixture-build",
-        "complete": True,
-    }
+    rows = harvest_resolution_substrate(root)
     output = args.output if args.output.is_absolute() else root / args.output
-    receipt = WhyThisEdgeStore(output).publish(facts)
-    print({"schema": receipt["schema"], "output": str(output)})
+    receipts = WhyThisEdgeStore(output).publish_substrate(rows)
+    print({"schema": receipts[-1]["schema"], "records": len(receipts), "output": str(output)})
     return 0
 
 
