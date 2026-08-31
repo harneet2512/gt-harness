@@ -91,6 +91,21 @@ def test_baseline_cli_writes_atomic_provider_free_receipt(tmp_path: Path) -> Non
     assert generator.verify_baseline_receipt(json.loads(output.read_text(encoding="utf-8")))
 
 
+def test_terminal_receipt_is_provisional_and_rejects_recomputed_head_mutation() -> None:
+    generator = _load_baseline_generator()
+    receipt = generator.build_terminal_receipt(generator.terminal_receipt_spec())
+    assert generator.verify_terminal_receipt(receipt)
+    assert receipt["authorization"]["benchmark_ready"] is False
+
+    mutated = copy.deepcopy(receipt)
+    mutated["head_state"]["repository_head"] = "f" * 40
+    unsigned = {key: value for key, value in mutated.items() if key != "receipt_sha256"}
+    mutated["receipt_sha256"] = hashlib.sha256(
+        generator._canonical_json(unsigned)
+    ).hexdigest()
+    assert not generator.verify_terminal_receipt(mutated)
+
+
 def test_single_witness_closes_fs024_without_claiming_population_efficacy() -> None:
     validator = _load_validator()
     statuses = validator._rows("closeout_status.csv")
