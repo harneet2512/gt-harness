@@ -10,6 +10,7 @@ from gt_engine.evidence_router import (
     verify_eligibility_receipt,
 )
 from gt_engine.task_contract import TaskContract
+from scripts.issue_har64_eligibility_receipt import issue
 
 
 def _claims():
@@ -147,3 +148,12 @@ def test_admit_decision_always_seals_and_provider_reconciliation_is_explicit():
     assert router.last_eligibility_receipt == receipt
     reconciliation = reconcile_provider_bytes(receipt, final)
     assert reconciliation["provider_final_matches"] is True
+
+
+def test_har64_issuer_publishes_verified_receipt(tmp_path):
+    output = tmp_path / "har64-eligibility.json"
+    receipt = issue(output)
+    assert output.is_file()
+    assert receipt["schema"] == "gt.eligibility_receipt.v1"
+    assert verify_eligibility_receipt(receipt)
+    assert receipt["provider_delta_bytes"] == receipt["admitted_bytes"]
