@@ -35,9 +35,13 @@ def _digest(payload: Mapping[str, Any]) -> str:
 
 def _case_digest(case: Mapping[str, Any]) -> str:
     """Bind a frozen case's identity before adding derived split metadata."""
+    values = _stratum_values(case)
     source = dict(case)
     for field in (*STRATUM_FIELDS, "case_digest", "stratum_id"):
         source.pop(field, None)
+    # Include normalized stratum inputs explicitly so the case digest binds the
+    # sampling dimensions while remaining stable after derived fields are added.
+    source["_stratum_inputs"] = values
     return hashlib.sha256(_canonical_bytes(source)).hexdigest()
 
 
