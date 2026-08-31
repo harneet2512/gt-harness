@@ -601,10 +601,10 @@ class ResolverMetricReport:
     agreed: int
     disagreed: int
     indeterminate: int
-    precision: float
+    precision: float | None
     coverage: float
-    precision_ci_low: float
-    precision_ci_high: float
+    precision_ci_low: float | None
+    precision_ci_high: float | None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -659,9 +659,14 @@ def report_per_resolver_metrics(
         )
         labeled = agreed + disagreed
         population = len(rows)
-        precision = agreed / labeled if labeled else 0.0
+        if labeled:
+            precision = agreed / labeled
+            ci_low, ci_high = wilson_interval(agreed, labeled)
+        else:
+            precision = None
+            ci_low = None
+            ci_high = None
         coverage = labeled / population if population else 0.0
-        ci_low, ci_high = wilson_interval(agreed, labeled)
         reports.append(
             ResolverMetricReport(
                 mechanism=mechanism,

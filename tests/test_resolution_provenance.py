@@ -413,6 +413,23 @@ def test_per_resolver_reporting_rejects_revision_mismatch():
         report_per_resolver_metrics(_FROZEN_RESOLUTION_EVENTS, repository_revision="rev-other")
 
 
+def test_per_resolver_reporting_marks_zero_labeled_precision_indeterminate():
+    events = (
+        ResolutionEvent("rev-frozen", ProvenanceMechanism.DYNAMIC, OracleOutcome.INDETERMINATE, "d1"),
+        ResolutionEvent("rev-frozen", ProvenanceMechanism.DYNAMIC, OracleOutcome.INDETERMINATE, "d2"),
+    )
+    reports = report_per_resolver_metrics(events, repository_revision="rev-frozen")
+    dynamic = reports[0]
+    assert dynamic.mechanism is ProvenanceMechanism.DYNAMIC
+    assert dynamic.population == 2
+    assert dynamic.labeled == 0
+    assert dynamic.indeterminate == 2
+    assert dynamic.precision is None
+    assert dynamic.precision_ci_low is None
+    assert dynamic.precision_ci_high is None
+    assert dynamic.coverage == 0.0
+
+
 def _load_labeled_cases(path: Path) -> tuple[LabeledResolutionCase, ...]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return tuple(
