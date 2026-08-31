@@ -538,7 +538,12 @@ def execute_typed_action(
     core = _core_compiler()
     query_api = _deterministic_query_api()
     certification_omission = ""
-    if kind not in CERTIFIED_TYPED_KINDS:
+    if kind == "why_this_edge":
+        # HAR-63 private compatibility path: an old wheel cannot expose the
+        # producer-owned query kind, but the harness may consume a complete
+        # producer record without laundering it into shell text.
+        certification_omission = ""
+    elif kind not in CERTIFIED_TYPED_KINDS:
         certification_omission = "typed_kind_removed"
     elif kind == "syntax":
         arguments = wire.get("arguments")
@@ -563,6 +568,59 @@ def execute_typed_action(
         }
         direct_answer = None
         decision, reason, returncode = "PASS_THROUGH", certification_omission, 2
+        decision_payload = {
+            "schema": "gt.interception_decision.v1",
+            "mode": decision,
+            "reason_codes": [reason],
+        }
+    elif kind == "why_this_edge":
+        from gt_engine.why_this_edge import WhyThisEdgeAbstention, query_why_this_edge
+
+        arguments = wire.get("arguments")
+        arguments = dict(arguments) if isinstance(arguments, Mapping) else {}
+        try:
+            certified = query_why_this_edge(arguments)
+            evidence = {
+                "schema": "gt.evidence_artifact.v1",
+                "action_id": wire.get("action_id", ""),
+                "answer": certified,
+                "anchors": [certified["edge_id"], certified["callsite_id"]],
+                "witnesses": sorted(
+                    witness
+                    for values in certified["flow_witnesses"].values()
+                    for witness in values
+                ),
+                "producer": "groundtruth.why_this_edge.v1",
+                "freshness": {
+                    "source_revision": certified["source_revision"],
+                    "graph_revision": certified["graph_revision"],
+                    "completion_identity": certified["completion_identity"],
+                },
+                "semantics": "exact",
+                "coverage": {"candidate_count": certified["candidate_count"]},
+                "ambiguity": [],
+                "omissions": [],
+                "raw_fallback": None,
+            }
+            direct_answer = certified
+            decision, reason, returncode = "REPLACE", "typed_why_this_edge_exact", 0
+        except WhyThisEdgeAbstention as exc:
+            evidence = {
+                "schema": "gt.evidence_artifact.v1",
+                "action_id": wire.get("action_id", ""),
+                "answer": None,
+                "anchors": [],
+                "witnesses": [],
+                "producer": "groundtruth.why_this_edge.v1",
+                "freshness": {},
+                "semantics": "incomplete",
+                "coverage": {},
+                "ambiguity": [],
+                "omissions": [f"abstention:{exc.reason}"],
+                "raw_fallback": None,
+            }
+            direct_answer = None
+            decision, reason, returncode = "PASS_THROUGH", f"why_this_edge:{exc.reason}", 2
         decision_payload = {
             "schema": "gt.interception_decision.v1",
             "mode": decision,

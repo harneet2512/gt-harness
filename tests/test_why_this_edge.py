@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import hashlib
+import json
+
+import pytest
+
+from gt_engine.miniswe_typed_actions import execute_typed_action_fail_open
+from gt_engine.why_this_edge import (
+    ALLOWED_EDGE_KINDS,
+    WhyThisEdgeAbstention,
+    certify_why_this_edge,
+    query_why_this_edge,
+    verify_why_this_edge,
+)
+
+
+def _facts() -> dict:
+    return {
+        "edge_id": "edge-1",
+        "callsite_id": "call-1",
+        "edge_kind": "SELECTED_TARGET",
+        "target_id": "target-a",
+        "dispatch_state": "unique",
+        "candidate_count": 2,
+        "candidates": [
+            {"target_id": "target-a", "flow_witnesses": ["flow-a"]},
+            {"target_id": "target-b", "flow_witnesses": ["flow-b"]},
+        ],
+        "flow_witnesses": {
+            "target-a": ["flow-a"],
+            "target-b": ["flow-b"],
+        },
+        "source_revision": "src-1",
+        "graph_revision": "graph-1",
+        "completion_identity": "build-1",
+        "complete": True,
+    }
+
+
+def test_certified_edge_preserves_candidates_and_witness_conservation():
+    result = certify_why_this_edge(_facts())
+    assert result["schema"] == "gt.why_this_edge.v1"
+    assert result["candidate_count"] == 2
+    assert result["dispatch_state"] == "unique"
+    assert result["digest_sha256"]
+    assert verify_why_this_edge(result)
+
+
+def test_query_is_deterministic_and_rejects_missing_swapped_or_invented_witnesses():
+    first = query_why_this_edge(_facts())
+    second = query_why_this_edge(json.loads(json.dumps(_facts())))
+    assert first == second
+    swapped = _facts()
+    swapped["flow_witnesses"] = {"target-a": ["flow-b"], "target-b": ["flow-a"]}
+    with pytest.raises(WhyThisEdgeAbstention, match="witness_conservation"):
+        query_why_this_edge(swapped)
+    invented = _facts()
+    invented["flow_witnesses"]["target-x"] = ["flow-x"]
+    with pytest.raises(WhyThisEdgeAbstention, match="witness_conservation"):
+        query_why_this_edge(invented)
+
+
+def test_unsupported_unknown_stale_and_incomplete_facts_abstain_typed():
+    assert ALLOWED_EDGE_KINDS == {"HAS_CALLSITE", "CANDIDATE_TARGET", "SELECTED_TARGET"}
+    for mutation in (
+        {"edge_kind": "OTHER"},
+        {"edge_kind": "SELECTED_TARGET", "graph_revision": "stale"},
+        {"edge_kind": "SELECTED_TARGET", "complete": False},
+    ):
+        facts = _facts()
+        facts.update(mutation)
+        with pytest.raises(WhyThisEdgeAbstention):
+            query_why_this_edge(facts, expected_graph_revision="graph-1")
+
+
+def test_digest_and_callsite_target_identity_mutations_fail_closed():
+    result = certify_why_this_edge(_facts())
+    result["target_id"] = "wrong-target"
+    assert not verify_why_this_edge(result)
+    with pytest.raises(WhyThisEdgeAbstention, match="target_identity"):
+        query_why_this_edge(_facts(), expected_callsite_id="other-call")
+    facts = _facts()
+    facts["digest_sha256"] = hashlib.sha256(b"fake").hexdigest()
+    with pytest.raises(WhyThisEdgeAbstention, match="digest"):
+        query_why_this_edge(facts)
+
+
+def test_private_wire_action_returns_typed_result_and_never_shell_fallback(tmp_path):
+    action = {
+        "tool_call_id": "tc-1",
+        "gt_action": {"kind": "why_this_edge", "arguments": _facts()},
+    }
+    request, result = execute_typed_action_fail_open(action, repo_root=tmp_path)
+    assert request["kind"] == "why_this_edge"
+    assert result["returncode"] == 0
+    assert result["extra"]["interception_decision"] == "REPLACE"
+    assert "typed_why_this_edge_exact" in result["output"]
+    bad = {"tool_call_id": "tc-2", "gt_action": {"kind": "why_this_edge", "arguments": {}}}
+    _, abstained = execute_typed_action_fail_open(bad, repo_root=tmp_path)
+    assert abstained["returncode"] == 2
+    assert abstained["extra"]["interception_decision"] == "PASS_THROUGH"
