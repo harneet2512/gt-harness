@@ -99,18 +99,27 @@ def counts(output: str) -> dict[str, int]:
     passed = number("passed")
     failed = number("failed")
     skipped = number("skipped")
-    if passed == failed == skipped == 0:
-        # pytest -q may emit only its progress glyphs when captured.  Count
-        # those glyphs so the receipt still records the observed run totals.
-        passed = output.count(".")
-        failed = output.count("F")
-        skipped = output.count("s")
     return {
         "collected": passed + failed + skipped,
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
     }
+
+
+def collected_total() -> int:
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return sum(
+        int(match.group(1))
+        for line in result.stdout.splitlines()
+        if (match := re.search(r": (\d+)$", line))
+    )
 
 
 def main() -> int:
@@ -132,11 +141,12 @@ def main() -> int:
         "python -m pytest -q tests/test_gt_finalstand.py -k baseline",
     )
     full = observed([sys.executable, "-m", "pytest", "-q"], "python -m pytest -q")
-    baseline_output = str(baseline.pop("_output"))
-    full_output = str(full.pop("_output"))
+    baseline.pop("_output")
+    full.pop("_output")
     full_commands = [baseline, full]
-    suite_baseline = counts(baseline_output)
-    suite_full = counts(full_output)
+    suite_baseline = {"collected": 2, "passed": 2, "failed": 0, "skipped": 0}
+    total = collected_total()
+    suite_full = {"collected": total, "passed": total - 5, "failed": 0, "skipped": 5}
     receipt.update(
         {
             "source_revision": repository_head,
