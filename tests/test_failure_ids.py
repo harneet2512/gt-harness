@@ -167,3 +167,16 @@ def test_common_hook_installation_and_post_commit_contract_are_tracked():
     assert receipt["status"] == "PASS"
     assert all(hook["mode"] == "100755" for hook in receipt["hooks"])
     assert receipt["post_commit"]["behavior"] == "preserved-auto-push"
+
+
+def test_pre_commit_direct_command_bootstraps_repository_import_path():
+    repository = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["python", str(repository / ".githooks" / "pre-commit")],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "LINEAGE_MISMATCH" in result.stdout

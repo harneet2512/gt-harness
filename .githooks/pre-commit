@@ -2,8 +2,13 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-from scripts.check_failure_ids import main
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
+from scripts.check_failure_ids import main  # noqa: E402
 
 
 def _expected_common_hooks_path() -> tuple[str, str]:
