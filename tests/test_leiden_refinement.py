@@ -5,6 +5,7 @@ import pytest
 from gt_engine.repository_intelligence import (
     CommunityEdge,
     build_leiden_communities,
+    emit_community_receipt,
     verify_community_run,
 )
 
@@ -38,3 +39,8 @@ def test_membership_connectivity_and_digest_mutations_are_rejected():
         verify_community_run(run, expected_membership_digest="bad")
     assert verify_community_run(run)
 
+
+def test_community_certificate_is_atomically_issued(tmp_path):
+    receipt = emit_community_receipt(_run(), tmp_path / "community.json")
+    assert receipt["schema"] == "gt.community_certificate.v2"
+    assert receipt["receipt_digest_sha256"]

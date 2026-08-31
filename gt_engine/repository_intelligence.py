@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from gt_engine.graph_lease import GraphLease
 from gt_engine.persistent_execution_state import ExecutionStateSnapshot
@@ -539,3 +542,34 @@ def verify_community_run(
         if len(members) != sum(len(group) for group in projection.memberships):
             return False
     return True
+
+
+def emit_community_receipt(
+    run: CommunityRun, output: str | os.PathLike[str]
+) -> dict[str, object]:
+    """Atomically publish an independently verified strict/inclusive certificate."""
+    if not verify_community_run(run):
+        raise ValueError("community_run_unverified")
+    receipt: dict[str, object] = {
+        "schema": "gt.community_certificate.v2",
+        "revision": run.revision,
+        "input_digest": run.input_digest,
+        "strict": run.strict.receipt,
+        "inclusive": run.inclusive.receipt,
+    }
+    canonical = json.dumps(
+        receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    receipt["receipt_digest_sha256"] = hashlib.sha256(canonical).hexdigest()
+    destination = Path(output)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", dir=destination.parent, delete=False) as handle:
+        temporary = handle.name
+        handle.write(
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+            + b"\n"
+        )
+    os.replace(temporary, destination)
+    return receipt
