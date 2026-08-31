@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 from dataclasses import dataclass
+from typing import Any
 
 from gt_engine.task_contract import TaskContract, significant_tokens
 
@@ -24,6 +26,8 @@ GRAPH_SURFACES = (
     "file_hashes",
     "project_meta",
 )
+CAPABILITY_MATRIX_SCHEMA = "gt.capability_matrix.v1"
+CAPABILITY_STATES = frozenset({"implemented", "evidenced", "absent", "unverified"})
 
 
 def graph_revision(graph_db: str) -> str:
@@ -65,6 +69,66 @@ class GraphProjection:
     surface_hits: tuple[tuple[str, int], ...]
     semantic_facts: tuple[GraphSemanticFact, ...] = ()
     revision: str = ""
+
+
+def build_capability_matrix(
+    gt_entries: list[dict[str, Any]],
+    gitnexus_entries: list[dict[str, Any]],
+    *,
+    source_revision: str,
+    gitnexus_revision: str,
+) -> dict[str, Any]:
+    """Build deterministic, citation-bound GT-vs-GitNexus capability cells."""
+    if not source_revision or not gitnexus_revision:
+        raise ValueError("matrix revisions are required")
+    cells: list[dict[str, Any]] = []
+    for tool, entries in (("gt", gt_entries), ("gitnexus", gitnexus_entries)):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("matrix entry must be an object")
+            name = str(entry.get("capability", "")).strip()
+            state = str(entry.get("state", "")).strip().lower()
+            citation = entry.get("citation")
+            if not name or state not in CAPABILITY_STATES or not isinstance(citation, dict):
+                raise ValueError("matrix entry is incomplete")
+            path = str(citation.get("path", "")).replace("\\", "/")
+            digest = str(citation.get("sha256", ""))
+            if not path or len(digest) != 64:
+                raise ValueError("matrix citation is incomplete")
+            cells.append({"tool": tool, "capability": name, "state": state,
+                          "citation": {"path": path, "sha256": digest}})
+    cells.sort(key=lambda row: (row["capability"], row["tool"]))
+    payload = {
+        "schema": CAPABILITY_MATRIX_SCHEMA,
+        "source_revision": source_revision,
+        "gitnexus_revision": gitnexus_revision,
+        "cells": cells,
+    }
+    payload["matrix_sha256"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return payload
+
+
+def verify_capability_matrix(matrix: dict[str, Any], source_bytes: dict[str, bytes]) -> bool:
+    """Verify matrix digest and every citation's immutable source bytes."""
+    if not isinstance(matrix, dict) or matrix.get("schema") != CAPABILITY_MATRIX_SCHEMA:
+        return False
+    cells = matrix.get("cells")
+    if not isinstance(cells, list) or not cells:
+        return False
+    unsigned = {key: value for key, value in matrix.items() if key != "matrix_sha256"}
+    digest = hashlib.sha256(
+        json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if matrix.get("matrix_sha256") != digest:
+        return False
+    for cell in cells:
+        citation = cell.get("citation", {})
+        blob = source_bytes.get(citation.get("path"))
+        if blob is None or hashlib.sha256(blob).hexdigest() != citation.get("sha256"):
+            return False
+    return True
 
 
 def _connect(graph_db: str) -> sqlite3.Connection | None:
