@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from gt_engine.trust_calibration_report import (
     CalibrationObservation,
     build_trust_calibration_report,
     collect_calibration_observations,
+    collect_from_shipped_machinery,
     emit_trust_calibration_receipt,
     verify_trust_calibration_report,
 )
@@ -135,3 +137,14 @@ def test_collector_binds_shipped_capability_rows_and_emits_atomic_receipt(tmp_pa
     report = emit_trust_calibration_receipt(observations, output)
     assert verify_trust_calibration_report(report)
     assert verify_trust_calibration_report(json.loads(output.read_text()))
+
+
+def test_shipped_capability_matrix_is_a_real_collector_source():
+    observations = collect_from_shipped_machinery(Path(__file__).parents[1])
+    assert observations
+    assert {item.capability_class for item in observations} == {
+        "resolution",
+        "retrieval",
+        "community",
+    }
+    assert all(item.oracle_outcome == "indeterminate" for item in observations)

@@ -13,6 +13,7 @@ import os
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 SCHEMA = "gt.trust_calibration_report.v2"
@@ -310,6 +311,60 @@ def collect_calibration_observations(
     return tuple(sorted(result, key=lambda item: item.observation_id))
 
 
+def collect_from_shipped_machinery(
+    root: str | os.PathLike[str],
+) -> tuple[CalibrationObservation, ...]:
+    """Harvest observations from the checked-in capability receipt.
+
+    The capability matrix is the shipped producer boundary: each citation is
+    an immutable observation and an absent oracle outcome is conservatively
+    recorded as indeterminate.  This keeps calibration measurement-only while
+    ensuring reports cannot be assembled from ad-hoc caller rows alone.
+    """
+    matrix_path = Path(root) / "gt_finalstand" / "receipts" / "har41_capability_matrix.json"
+    payload = json.loads(matrix_path.read_text(encoding="utf-8"))
+    cells = payload.get("cells")
+    if not isinstance(cells, list):
+        raise ValueError("capability_matrix_cells_missing")
+    resolution: list[dict[str, Any]] = []
+    retrieval: list[dict[str, Any]] = []
+    community: list[dict[str, Any]] = []
+    for index, cell in enumerate(cells):
+        if not isinstance(cell, Mapping):
+            raise ValueError("capability_matrix_cell_invalid")
+        capability = str(cell.get("capability") or "").lower()
+        if "resolution" in capability:
+            target = resolution
+            mechanism = "resolution-provenance"
+        elif "retrieval" in capability:
+            target = retrieval
+            mechanism = "hybrid-retrieval"
+        elif "community" in capability:
+            target = community
+            mechanism = "community-analysis"
+        else:
+            continue
+        citation = cell.get("citation")
+        citation = citation if isinstance(citation, Mapping) else {}
+        revision = str(citation.get("revision") or payload.get("source_revision") or "unknown")
+        path = str(citation.get("path") or "unknown")
+        line = str(citation.get("line") or index)
+        source_id = f"{revision}:{path}:{line}"
+        target.append(
+            {
+                "observation_id": f"har41:{index}:{capability}",
+                "mechanism": mechanism,
+                "source_id": source_id,
+                "tool_id": str(citation.get("tool") or "gt"),
+                "fixture_id": f"har41-capability-matrix:{index}",
+                "oracle_outcome": "indeterminate",
+            }
+        )
+    return collect_calibration_observations(
+        resolution=resolution, retrieval=retrieval, community=community
+    )
+
+
 def emit_trust_calibration_receipt(
     observations: Sequence[CalibrationObservation | Mapping[str, Any]],
     output: str | os.PathLike[str],
@@ -334,6 +389,7 @@ __all__ = [
     "CalibrationObservation",
     "build_trust_calibration_report",
     "collect_calibration_observations",
+    "collect_from_shipped_machinery",
     "emit_trust_calibration_receipt",
     "verify_trust_calibration_report",
     "wilson_interval",
