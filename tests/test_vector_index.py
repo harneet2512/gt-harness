@@ -112,3 +112,27 @@ def test_update_and_delete_are_atomic_and_restart_reuses_identity(tmp_path) -> N
     assert result.candidate_ids == ("new",)
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT count(*) FROM gt_vector_documents").fetchone()[0] == 1
+
+
+def test_reported_extension_must_create_real_vec0_table_before_use(tmp_path) -> None:
+    index = SQLiteVectorIndex(
+        tmp_path / "vectors.sqlite",
+        model_id="model-v1",
+        tokenizer_id="tokenizer-v1",
+        dimension=2,
+        source_revision="source-r1",
+        graph_revision="graph-r1",
+        extension_loader=lambda _connection: True,
+    )
+    index.upsert([_record("owner", (1.0, 0.0), "owner")])
+    result = index.query(HybridQuery(vector=(1.0, 0.0), limit=1))
+
+    with sqlite3.connect(tmp_path / "vectors.sqlite") as connection:
+        virtual_table = connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'gt_vector_vec0'"
+        ).fetchone()
+    if result.fallback_reason is None:
+        assert virtual_table == ("gt_vector_vec0",)
+        assert result.items[0].document_id == "owner"
+    else:
+        assert result.fallback_reason in {"vec0_unavailable", "vec0_query_failed"}

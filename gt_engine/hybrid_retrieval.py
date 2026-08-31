@@ -187,6 +187,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import struct
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -311,11 +312,37 @@ class SQLiteVectorIndex:
         self._initialize_schema()
         self._metadata_digest = self._read_metadata_digest()
         self._vec0_available = False
+        self._vec0_error: str | None = None
         if extension_loader is not None:
             try:
-                self._vec0_available = bool(extension_loader(self._connection))
+                loaded = bool(extension_loader(self._connection))
+                self._vec0_available = loaded and self._ensure_vec0_table()
             except (OSError, RuntimeError, sqlite3.Error):
                 self._vec0_available = False
+                self._vec0_error = "vec0_load_failed"
+
+    def _ensure_vec0_table(self) -> bool:
+        """Create and health-check the real vec0 virtual table after loading."""
+        try:
+            self._connection.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS gt_vector_vec0 "
+                f"USING vec0(embedding float[{int(self._identity['dimension'])}])"
+            )
+            self._connection.execute(
+                "CREATE TABLE IF NOT EXISTS gt_vector_vec0_map "
+                "(rowid INTEGER PRIMARY KEY, document_id TEXT UNIQUE NOT NULL)"
+            )
+            self._connection.execute("SELECT rowid FROM gt_vector_vec0 LIMIT 0").fetchall()
+            self._connection.commit()
+            return True
+        except sqlite3.Error:
+            self._connection.rollback()
+            self._vec0_error = "vec0_unavailable"
+            return False
+
+    @staticmethod
+    def _vector_blob(vector: Sequence[float]) -> bytes:
+        return struct.pack(f"<{len(vector)}f", *vector)
 
     def _initialize_schema(self) -> None:
         connection = self._connection
@@ -396,6 +423,18 @@ class SQLiteVectorIndex:
         try:
             connection.execute("BEGIN IMMEDIATE")
             for document_id in delete_ids:
+                if self._vec0_available:
+                    mapping = connection.execute(
+                        "SELECT rowid FROM gt_vector_vec0_map WHERE document_id = ?",
+                        (document_id,),
+                    ).fetchone()
+                    if mapping is not None:
+                        connection.execute(
+                            "DELETE FROM gt_vector_vec0 WHERE rowid = ?", (mapping[0],)
+                        )
+                        connection.execute(
+                            "DELETE FROM gt_vector_vec0_map WHERE rowid = ?", (mapping[0],)
+                        )
                 connection.execute(
                     "DELETE FROM gt_vector_documents WHERE document_id = ?", (document_id,)
                 )
@@ -446,6 +485,28 @@ class SQLiteVectorIndex:
                         record.graph_revision,
                     ),
                 )
+                if self._vec0_available:
+                    mapping = connection.execute(
+                        "SELECT rowid FROM gt_vector_vec0_map WHERE document_id = ?",
+                        (record.document_id,),
+                    ).fetchone()
+                    if mapping is None:
+                        cursor = connection.execute(
+                            "INSERT INTO gt_vector_vec0(embedding) VALUES (?)",
+                            (self._vector_blob(record.embedding),),
+                        )
+                        connection.execute(
+                            "INSERT INTO gt_vector_vec0_map(rowid, document_id) VALUES (?, ?)",
+                            (cursor.lastrowid, record.document_id),
+                        )
+                    else:
+                        connection.execute(
+                            "DELETE FROM gt_vector_vec0 WHERE rowid = ?", (mapping[0],)
+                        )
+                        connection.execute(
+                            "INSERT INTO gt_vector_vec0(rowid, embedding) VALUES (?, ?)",
+                            (mapping[0], self._vector_blob(record.embedding)),
+                        )
             connection.commit()
         except Exception:
             connection.rollback()
@@ -469,9 +530,25 @@ class SQLiteVectorIndex:
             vector = tuple(float(value) for value in json.loads(row[2]))
             scored.append((row, _cosine(query.vector, vector)))
         if self._vec0_available:
-            pool_size = min(len(scored), query.candidate_pool or max(query.limit * 4, query.limit))
-            candidate_rows = sorted(scored, key=lambda item: (-item[1], item[0][0]))[:pool_size]
-            candidate_rows = sorted(candidate_rows, key=lambda item: item[0][0])
+            pool_size = min(
+                len(scored), query.candidate_pool or max(query.limit * 4, query.limit)
+            )
+            try:
+                ann_rows = self._connection.execute(
+                    "SELECT m.document_id FROM gt_vector_vec0 "
+                    "JOIN gt_vector_vec0_map AS m ON m.rowid = gt_vector_vec0.rowid "
+                    "WHERE embedding MATCH ? AND k = ?",
+                    (self._vector_blob(query.vector), pool_size),
+                ).fetchall()
+                ids = {str(row[0]) for row in ann_rows}
+                candidate_rows = [item for item in scored if item[0][0] in ids]
+                candidate_rows.sort(key=lambda item: (-item[1], item[0][0]))
+                candidate_rows = candidate_rows[:pool_size]
+                candidate_rows.sort(key=lambda item: item[0][0])
+            except sqlite3.Error:
+                self._vec0_error = "vec0_query_failed"
+                self._vec0_available = False
+                candidate_rows = sorted(scored, key=lambda item: item[0][0])
         else:
             candidate_rows = sorted(scored, key=lambda item: item[0][0])
         candidate_ids = tuple(row[0][0] for row in candidate_rows)
