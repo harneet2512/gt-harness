@@ -66,8 +66,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from gt_engine.evidence_router import _logical_request_bytes
-
 # Budget for one delivered delta (chars). Matches the adapter default.
 MAX_DELTA_CHARS = 4000
 
@@ -485,7 +483,6 @@ class GTBridge:
         self._delivery_exposures: dict[str, int] = {}
         self._expired_delivery_ids: set[str] = set()
         self._last_context_receipt: dict[str, Any] = {}
-        self._last_eligibility_receipt: dict[str, Any] = {}
         self._active_boundary = "task_start"
         from gt_engine.progress import ProgressLedger
 
@@ -1695,13 +1692,6 @@ class GTBridge:
                 "matches": matches,
                 "message_count": len(messages) if isinstance(messages, list) else 0,
                 **self._last_context_receipt,
-                "eligibility_receipt_digest": self._last_eligibility_receipt.get(
-                    "receipt_digest_sha256"
-                ),
-                "provider_logical_request_bytes": len(_logical_request_bytes(payload)),
-                "provider_logical_request_sha256": hashlib.sha256(
-                    _logical_request_bytes(payload)
-                ).hexdigest(),
                 "payload_chars": len(canonical),
                 "payload_sha256": hashlib.sha256(
                     canonical.encode("utf-8", "surrogatepass")
@@ -4236,7 +4226,6 @@ class GTBridge:
         native = os.environ.get("GT_GATEWAY_NATIVE") == "1"
         if self._evidence_router is not None and envelopes:
             admitted: list[Any] = []
-            eligibility_claims: list[dict[str, Any]] = []
             for envelope in envelopes:
                 candidate_text = render_envelope(envelope, native=native)
                 keep, reason = self._evidence_router.admit(
@@ -4245,17 +4234,6 @@ class GTBridge:
                     command=command,
                     output=output,
                     commit=False,
-                )
-                eligibility_claims.append(
-                    {
-                        "claim_id": hashlib.sha256(
-                            candidate_text.encode("utf-8", "surrogatepass")
-                        ).hexdigest()[:16],
-                        "source": str(getattr(envelope, "evidence_type", "") or "gt"),
-                        "content": candidate_text,
-                        "disposition": "admitted" if keep else "refused",
-                        "reason": reason,
-                    }
                 )
                 self._control_record(
                     "GT_ROLE_DRIVEN_COALITION",
@@ -4294,39 +4272,6 @@ class GTBridge:
                             },
                         )
             envelopes = admitted
-            baseline_request = {"messages": [{"content": event_output}]}
-            final_text = event_output + "".join(
-                render_envelope(envelope, native=native) for envelope in admitted
-            )
-            _, eligibility_receipt = self._evidence_router.seal_eligibility_receipt(
-                decision_id=f"gateway:{self.action_index}",
-                iteration_id=f"action:{self.action_index}",
-                claims=eligibility_claims,
-                baseline_request=baseline_request,
-                final_request={"messages": [{"content": final_text}]},
-                prior_event_digest=self._attribution.trace_id,
-            )
-            self._trace_record(
-                "eligibility.receipt",
-                "model",
-                eligibility_receipt,
-            )
-            self._last_eligibility_receipt = eligibility_receipt
-        elif self._evidence_router is not None:
-            _, eligibility_receipt = self._evidence_router.seal_eligibility_receipt(
-                decision_id=f"gateway:{self.action_index}",
-                iteration_id=f"action:{self.action_index}",
-                claims=[],
-                baseline_request={"messages": [{"content": event_output}]},
-                final_request={"messages": [{"content": event_output}]},
-                prior_event_digest=self._attribution.trace_id,
-            )
-            self._trace_record(
-                "eligibility.receipt",
-                "model",
-                eligibility_receipt,
-            )
-            self._last_eligibility_receipt = eligibility_receipt
         # The pinned runtime's edit-path change-surface producer is
         # correct-or-quiet, but unlike the patch/caller producers it does not
         # emit a producer.invocation receipt when it finds no useful
