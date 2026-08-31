@@ -659,7 +659,10 @@ def verify_terminal_receipt(receipt: dict[str, object]) -> bool:
     """Verify the terminal schema and immutable coordinator head anchors."""
     if receipt.get("schema") != TERMINAL_BASELINE_SCHEMA:
         return False
-    if isinstance(receipt.get("head_state"), dict) and receipt["head_state"].get("status") == "FINAL":
+    if (
+        isinstance(receipt.get("head_state"), dict)
+        and receipt["head_state"].get("status") == "FINAL"
+    ):
         return verify_final_terminal_receipt(receipt)
     try:
         _validate_terminal_spec(receipt)
@@ -739,7 +742,10 @@ def verify_final_terminal_receipt(receipt: dict[str, object]) -> bool:
             return any(contains_unverified(item) for item in value)
         return False
 
-    if contains_unverified({key: value for key, value in receipt.items() if key != "receipt_sha256"}):
+    unsigned = {
+        key: value for key, value in receipt.items() if key != "receipt_sha256"
+    }
+    if contains_unverified(unsigned):
         return False
     authorization = receipt.get("authorization")
     if authorization != {

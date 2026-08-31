@@ -158,11 +158,19 @@ def main() -> int:
             },
         }
     )
-    receipt["receipt_sha256"] = sha256(_canonical_json({k: v for k, v in receipt.items() if k != "receipt_sha256"}))
+    unsigned = {k: v for k, v in receipt.items() if k != "receipt_sha256"}
+    receipt["receipt_sha256"] = sha256(_canonical_json(unsigned))
     if not verify_final_terminal_receipt(receipt):
         raise SystemExit("final HAR-5 receipt failed verification")
     RECEIPT.write_bytes(_canonical_json(receipt))
-    print(json.dumps({"receipt": str(RECEIPT), "receipt_sha256": receipt["receipt_sha256"], "producer_binary_sha256": binary_sha}, sort_keys=True))
+    print(json.dumps(
+        {
+            "receipt": str(RECEIPT),
+            "receipt_sha256": receipt["receipt_sha256"],
+            "producer_binary_sha256": binary_sha,
+        },
+        sort_keys=True,
+    ))
     return 0
 
 
