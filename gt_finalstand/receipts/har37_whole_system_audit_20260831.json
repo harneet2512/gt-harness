@@ -2,34 +2,34 @@
   "schema": "gt.har37.whole_system_audit.v1",
   "status": "PASS",
   "repository": "harneet2512/gt-harness",
-  "harness_head": "e6a202c3c3ba71ec16ff018e2ce27794dac6fa3f",
+  "harness_head": "39c056567ef91740a5db10a08dfe40ab439cdc75",
   "groundtruth_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
-  "tree_manifest_sha256": "47466aeb71f359f0106bdf86f19beb3ce9ecbd0257ab6cd0f9f51b0add5d7d61",
+  "tree_manifest_sha256": "f6f861587b3a715b7f97737a4d45b7fd0ba4e4bf670ab2d734595e4a76ae1e67",
   "checks": [
     {
       "command": "python -m pytest -q",
       "exit_code": 0,
       "collected": 758,
-      "passed": 753,
-      "skipped": 5,
-      "stdout_sha256": "da8f9d9418debd7351e298585915b4301aef8ea9fc96abb3c4a2272bb59ea1bf",
+      "passed": 752,
+      "skipped": 6,
+      "stdout_sha256": "9d7799f7b1ff2d58d5bc9009afbf1a5e0b32cce65efa20cf21fb578e5d79812d",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "command": "GH_TOKEN=<gh auth token> python scripts/validate_gt_finalstand.py",
       "exit_code": 0,
       "result": "ok=true; errors=[]; direct=17; role_audit=129; languages=30; language_operation_pairs=210; todo_statuses=26",
-      "validation_receipt_sha256": "73cdf16593cb56d0b4c8ea746f9562211f972f85a027ab438cbe5dd47e259f36"
+      "validation_receipt_sha256": "c8bda254b443b56a2a54a02515992bba5eec621860c8d533e9d4494201fe9db4"
     },
     {
       "command": "python -c verify_terminal_receipt(har5_terminal_baseline.json)",
       "exit_code": 0,
       "result": "True; benchmark_ready=false; provider_calls=0; benchmark_runs=0",
-      "receipt_sha256": "0e0aa5c0235e22b63d79a050adeea1b073e7559df05f19f8bac862aa79a66f2f"
+      "receipt_sha256": "7fbcfd560c9febec1efa01b55859c0c51672518f68d652e56322efefb5dfb65c"
     }
   ],
   "cross_boundary": {
-    "har5_final_receipt_sha256": "0e0aa5c0235e22b63d79a050adeea1b073e7559df05f19f8bac862aa79a66f2f",
+    "har5_final_receipt_sha256": "7fbcfd560c9febec1efa01b55859c0c51672518f68d652e56322efefb5dfb65c",
     "har36_windows_witness_status": "PASS",
     "groundtruth_engine_probe_status": "PASS",
     "provider_calls": 0,
