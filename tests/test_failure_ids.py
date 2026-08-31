@@ -19,6 +19,7 @@ def _git(root: Path, *args: str) -> str:
 def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "repo"
     root.mkdir()
+    (root / ".githooks").mkdir()
     (root / "config").mkdir()
     (root / "config" / "failure_id_ledger_snapshot.json").write_text(
         "fixture\n", encoding="utf-8"
@@ -31,18 +32,24 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     subprocess.run(
         ["git", "-C", str(root), "config", "user.name", "Test"], check=True
     )
+    subprocess.run(
+        ["git", "-C", str(root), "remote", "add", "origin", check_failure_ids.EXPECTED_REMOTE],
+        check=True,
+    )
     subprocess.run(["git", "-C", str(root), "add", "."], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
     parent = _git(root, "rev-parse", "HEAD")
     (root / "README.md").write_text("reference\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(root), "commit", "-qm", "candidate"], check=True)
-    head = _git(root, "rev-parse", "HEAD")
+    message = "candidate\n\n" + "\n".join(check_failure_ids.CANONICAL_TRAILER_LINES) + "\n"
     subprocess.run(
-        ["git", "-C", str(root), "remote", "add", "origin", check_failure_ids.EXPECTED_REMOTE],
+        ["git", "-C", str(root), "commit", "-qF", "-"],
+        input=message,
+        text=True,
         check=True,
     )
-    manifest = root / "manifest.json"
+    head = _git(root, "rev-parse", "HEAD")
+    manifest = root / ".githooks" / "failure-gate.json"
     payload = {
         "schema": check_failure_ids.MANIFEST_SCHEMA,
         "repository": "gt-harness",
@@ -110,3 +117,21 @@ def test_refusal_receipt_is_byte_stable(tmp_path):
     first = check_failure_ids._refusal("FIXTURE_MISMATCH", "same")
     second = check_failure_ids._refusal("FIXTURE_MISMATCH", "same")
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+def test_wrong_origin_is_a_lineage_refusal(tmp_path):
+    root, manifest = _fixture(tmp_path)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "remote",
+            "set-url",
+            "origin",
+            "https://example.invalid/wrong.git",
+        ],
+        check=True,
+    )
+    result = check_failure_ids.evaluate(root, manifest=manifest)
+    assert result == check_failure_ids._refusal("LINEAGE_MISMATCH", "origin_repository")

@@ -260,6 +260,8 @@ def evaluate(
     repo = Path(root).resolve()
     manifest_path = Path(manifest).resolve()
     expected_manifest = (repo / ".githooks" / "failure-gate.json").resolve()
+    if not manifest_path.is_file():
+        return _refusal("MANIFEST_MISSING", "manifest_missing")
     if manifest_path != expected_manifest:
         return _refusal("MANIFEST_INVALID", "manifest_path")
     payload, error = _load_manifest(manifest_path)
