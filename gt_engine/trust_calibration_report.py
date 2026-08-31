@@ -277,7 +277,10 @@ def verify_trust_calibration_report(report: Mapping[str, Any]) -> bool:
             return False
         observations = [CalibrationObservation(**dict(row)) for row in report["observations"]]
         rebuilt = build_trust_calibration_report(observations)
-        return rebuilt == dict(report)
+        # JSON receipts normalize tuples (Wilson bounds) to arrays on disk.
+        return json.loads(_canonical_bytes(rebuilt)) == json.loads(
+            _canonical_bytes(dict(report))
+        )
     except (KeyError, TypeError, ValueError):
         return False
 
