@@ -94,6 +94,95 @@ def _scrub_sensitive_mapping(value):
     return value
 
 
+class GTOffControlError(ValueError):
+    """A provider-free GT-off control cannot claim a complete identity."""
+
+
+_GT_OFF_IDENTITY_FIELDS = (
+    "model_label",
+    "served_model",
+    "miniswe_agent_version",
+    "task_set_hash",
+    "source_revision",
+    "scaffold_hash",
+    "provider_config_hash",
+    "temperature",
+    "step_limit",
+    "timeout",
+    "environment_hash",
+)
+
+
+def validate_gt_off_control(
+    *,
+    identity: dict[str, object],
+    events: tuple[dict[str, object], ...] | list[dict[str, object]],
+    expected_identity: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Validate and freeze a GT-off control without executing a benchmark.
+
+    This function is intentionally pure: it accepts an already-captured trace
+    and emits a content-addressed receipt.  Model-provider events are allowed;
+    GroundTruth runtime/provider hooks are forbidden.  A caller may provide a
+    previously frozen identity, in which case every field must match exactly.
+    """
+    if not isinstance(identity, dict):
+        raise GTOffControlError("identity_missing")
+    missing = [name for name in _GT_OFF_IDENTITY_FIELDS if name not in identity]
+    if missing:
+        raise GTOffControlError(f"identity_missing:{','.join(missing)}")
+    if expected_identity is not None:
+        mismatches = [
+            name
+            for name in _GT_OFF_IDENTITY_FIELDS
+            if identity.get(name) != expected_identity.get(name)
+        ]
+        if mismatches:
+            raise GTOffControlError(f"identity_mismatch:{','.join(mismatches)}")
+    if identity["model_label"] != "deepseek 0731 v4":
+        raise GTOffControlError("model_label_mismatch")
+    if identity["miniswe_agent_version"] != "2.4.6":
+        raise GTOffControlError("miniswe_agent_version_mismatch")
+    for name in _GT_OFF_IDENTITY_FIELDS:
+        value = identity[name]
+        if isinstance(value, str) and not value.strip():
+            raise GTOffControlError(f"identity_empty:{name}")
+    if float(identity["temperature"]) < 0:
+        raise GTOffControlError("temperature_invalid")
+    if int(identity["step_limit"]) < 1 or int(identity["timeout"]) < 1:
+        raise GTOffControlError("budget_invalid")
+
+    canonical_events: list[dict[str, object]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            raise GTOffControlError("trace_event_invalid")
+        event_text = json.dumps(event, sort_keys=True, separators=(",", ":")).lower()
+        if "gt_engine" in event_text or "groundtruth" in event_text or "gt." in event_text:
+            raise GTOffControlError("gt_hook_in_trace")
+        canonical_events.append(event)
+    trace_bytes = json.dumps(
+        canonical_events, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    trace_digest = hashlib.sha256(trace_bytes).hexdigest()
+    provider_events = sum(
+        1
+        for event in canonical_events
+        if "provider" in str(event.get("event", "")).lower()
+        or "model.request" in str(event.get("event", "")).lower()
+    )
+    return {
+        "schema": "gt.off_control_receipt.v1",
+        "gt_enabled": False,
+        "control_mode": "off",
+        **{name: identity[name] for name in _GT_OFF_IDENTITY_FIELDS},
+        "trace_event_count": len(canonical_events),
+        "provider_event_count": provider_events,
+        "trace_sha256": trace_digest,
+        "gt_hook_event_count": 0,
+        "research_valid": True,
+    }
+
+
 class CredentialIsolatedLocalEnvironment(LocalEnvironment):
     """Stock local execution semantics with host credentials removed.
 
