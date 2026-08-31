@@ -180,3 +180,42 @@ def test_pre_commit_direct_command_bootstraps_repository_import_path():
     assert result.returncode != 0
     assert "ModuleNotFoundError" not in result.stderr
     assert "LINEAGE_MISMATCH" in result.stdout
+
+def test_final_readiness_requires_verdict_registry(tmp_path):
+    root, manifest = _fixture(tmp_path)
+    result = check_failure_ids.evaluate(
+        root, manifest=manifest, require_verdict_coverage=True
+    )
+    assert result == check_failure_ids._refusal(
+        "VERDICT_COVERAGE_MISSING", "registry_missing"
+    )
+
+
+def test_final_readiness_rejects_nonterminal_or_duplicate_rows(tmp_path):
+    root, manifest = _fixture(tmp_path)
+    head = _git(root, "rev-parse", "HEAD")
+    digest = "0" * 64
+    registry = root / check_failure_ids.VERDICT_REGISTRY
+    registry.write_text(
+        json.dumps(
+            {
+                "schema": check_failure_ids.VERDICT_SCHEMA,
+                "source_revision": head,
+                "rows": [
+                    {
+                        "sha": head,
+                        "verdict": "REJECT",
+                        "manifest_sha256": digest,
+                        "success_criteria_sha256": digest,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = check_failure_ids.evaluate(
+        root, manifest=manifest, require_verdict_coverage=True
+    )
+    assert result == check_failure_ids._refusal(
+        "VERDICT_COVERAGE_INVALID", "registry_verdict"
+    )

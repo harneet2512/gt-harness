@@ -76,7 +76,11 @@ EXPECTED_REFUSALS = {
     "fixture_mismatch": "FIXTURE_MISMATCH",
     "trailer_invalid": "TRAILER_BLOCK_INVALID",
     "failure_ids_invalid": "FAILURE_IDS_INVALID",
+    "verdict_coverage_missing": "VERDICT_COVERAGE_MISSING",
+    "verdict_coverage_invalid": "VERDICT_COVERAGE_INVALID",
 }
+VERDICT_SCHEMA = "gt.verdict.coverage.v1"
+VERDICT_REGISTRY = ".githooks/har57-verdict-registry.json"
 
 
 def _canonical(value: object) -> bytes:
@@ -251,11 +255,43 @@ def _check_trailers(message: str) -> dict[str, Any] | None:
     return None
 
 
+def _check_verdict_coverage(root: Path, *, head: str) -> dict[str, Any] | None:
+    path = root / VERDICT_REGISTRY
+    if not path.is_file():
+        return _refusal("VERDICT_COVERAGE_MISSING", "registry_missing")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return _refusal("VERDICT_COVERAGE_INVALID", "registry_unreadable")
+    if not isinstance(payload, dict) or payload.get("schema") != VERDICT_SCHEMA:
+        return _refusal("VERDICT_COVERAGE_INVALID", "registry_schema")
+    if payload.get("source_revision") != head:
+        return _refusal("VERDICT_COVERAGE_INVALID", "registry_source_revision")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return _refusal("VERDICT_COVERAGE_INVALID", "registry_rows")
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return _refusal("VERDICT_COVERAGE_INVALID", "registry_row")
+        sha = row.get("sha")
+        if not isinstance(sha, str) or not _is_commit_sha(sha) or sha in seen:
+            return _refusal("VERDICT_COVERAGE_INVALID", "registry_sha")
+        seen.add(sha)
+        if row.get("verdict") != "TERMINAL_PASS":
+            return _refusal("VERDICT_COVERAGE_INVALID", "registry_verdict")
+        for key in ("manifest_sha256", "success_criteria_sha256"):
+            if not isinstance(row.get(key), str) or not _is_digest(row[key]):
+                return _refusal("VERDICT_COVERAGE_INVALID", "registry_evidence")
+    return None
+
+
 def evaluate(
     root: str | Path,
     *,
     manifest: str | Path,
     commit: str = "HEAD",
+    require_verdict_coverage: bool = False,
 ) -> dict[str, Any]:
     repo = Path(root).resolve()
     manifest_path = Path(manifest).resolve()
@@ -280,6 +316,10 @@ def evaluate(
     error = _check_trailers(message)
     if error:
         return error
+    if require_verdict_coverage:
+        error = _check_verdict_coverage(repo, head=lineage["head_sha"])
+        if error:
+            return error
     evidence = payload["required_evidence"]["failure_scan"]
     report = validate_failure_ids.validate(
         [repo],
@@ -309,12 +349,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", default=".githooks/failure-gate.json")
     parser.add_argument("--commit", default="HEAD")
     parser.add_argument("--receipt")
+    parser.add_argument("--final-readiness", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    result = evaluate(args.root, manifest=args.manifest, commit=args.commit)
+    result = evaluate(
+        args.root,
+        manifest=args.manifest,
+        commit=args.commit,
+        require_verdict_coverage=args.final_readiness,
+    )
     output = json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     print(output, end="")
     if args.receipt:
