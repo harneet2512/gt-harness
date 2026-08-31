@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """Revision-bound hybrid retrieval primitives.
 
 Retrieval is a ranking aid only.  It cannot become an edit-owner authority,
@@ -170,3 +171,335 @@ class HybridRetriever:
             candidates=tuple(candidates), ranked_files=ranked, query_digest=digest,
             repository_revision=repository_revision, graph_revision=graph_revision,
         )
+=======
+"""Deterministic SQLite vector candidates with GT-owned exact rescoring.
+
+The vector table is an optional accelerator.  It never owns ranking authority:
+candidate discovery is followed by exact, reproducible scoring over persisted
+source rows.  When the optional extension or its identity contract is not
+available, the same exact path runs over the complete durable corpus and emits
+a named fallback reason.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import sqlite3
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+
+def _as_vector(values: Sequence[float]) -> tuple[float, ...]:
+    vector = tuple(float(value) for value in values)
+    if not vector or any(not math.isfinite(value) for value in vector):
+        raise ValueError("embedding must contain finite values")
+    return vector
+
+
+def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
+    if len(left) != len(right):
+        return 0.0
+    left_norm = math.sqrt(sum(value * value for value in left))
+    right_norm = math.sqrt(sum(value * value for value in right))
+    if left_norm == 0.0 or right_norm == 0.0:
+        return 0.0
+    return sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)
+
+
+@dataclass(frozen=True)
+class EmbeddingRecord:
+    """A source row and all identity needed to safely reuse its embedding."""
+
+    document_id: str
+    text: str
+    embedding: tuple[float, ...]
+    content_hash: str
+    model_id: str
+    tokenizer_id: str
+    source_revision: str
+    graph_revision: str
+
+    def __post_init__(self) -> None:
+        if not self.document_id or not self.content_hash:
+            raise ValueError("document_id and content_hash are required")
+        if not self.model_id or not self.tokenizer_id:
+            raise ValueError("model and tokenizer identities are required")
+        object.__setattr__(self, "embedding", _as_vector(self.embedding))
+
+    @property
+    def embedding_hash(self) -> str:
+        encoded = json.dumps(self.embedding, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class HybridQuery:
+    vector: tuple[float, ...]
+    lexical_scores: Mapping[str, float] | None = None
+    graph_scores: Mapping[str, float] | None = None
+    limit: int = 10
+    candidate_pool: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "vector", _as_vector(self.vector))
+        if self.limit < 1:
+            raise ValueError("limit must be positive")
+        if self.candidate_pool is not None and self.candidate_pool < 1:
+            raise ValueError("candidate_pool must be positive")
+
+
+@dataclass(frozen=True)
+class HybridItem:
+    document_id: str
+    exact_score: float
+    vector_score: float
+    lexical_score: float
+    graph_score: float
+    content_hash: str
+    source_revision: str
+    graph_revision: str
+
+
+@dataclass(frozen=True)
+class HybridQueryResult:
+    items: tuple[HybridItem, ...]
+    candidate_ids: tuple[str, ...]
+    fallback_reason: str | None
+    metadata_digest: str
+
+
+class SQLiteVectorIndex:
+    """A restartable, transactionally published vector corpus.
+
+    ``extension_loader`` is injected by the runtime so extension discovery is
+    observable and testable.  It must return true only after a real vec0
+    extension has been loaded and health-checked.  The normal-library fallback
+    deliberately does not pretend that a plain SQLite table is vec0.
+    """
+
+    INDEX_VERSION = "gt.sqlite.vec0.v1"
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        model_id: str,
+        tokenizer_id: str,
+        dimension: int,
+        source_revision: str,
+        graph_revision: str,
+        extension_loader: Callable[[sqlite3.Connection], bool] | None = None,
+    ) -> None:
+        if dimension < 1:
+            raise ValueError("dimension must be positive")
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(self.path)
+        self._connection.execute("PRAGMA foreign_keys = ON")
+        self._identity = {
+            "model_id": model_id,
+            "tokenizer_id": tokenizer_id,
+            "dimension": str(dimension),
+            "source_revision": source_revision,
+            "graph_revision": graph_revision,
+            "index_version": self.INDEX_VERSION,
+        }
+        self._metadata_mismatch = False
+        self._initialize_schema()
+        self._metadata_digest = self._read_metadata_digest()
+        self._vec0_available = False
+        if extension_loader is not None:
+            try:
+                self._vec0_available = bool(extension_loader(self._connection))
+            except (OSError, RuntimeError, sqlite3.Error):
+                self._vec0_available = False
+
+    def _initialize_schema(self) -> None:
+        connection = self._connection
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gt_vector_index_metadata (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                model_id TEXT NOT NULL,
+                tokenizer_id TEXT NOT NULL,
+                dimension INTEGER NOT NULL,
+                source_revision TEXT NOT NULL,
+                graph_revision TEXT NOT NULL,
+                index_version TEXT NOT NULL,
+                metadata_digest TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gt_vector_documents (
+                document_id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                embedding_hash TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                tokenizer_id TEXT NOT NULL,
+                dimension INTEGER NOT NULL,
+                source_revision TEXT NOT NULL,
+                graph_revision TEXT NOT NULL
+            )
+            """
+        )
+        row = connection.execute(
+            "SELECT model_id, tokenizer_id, dimension, source_revision, graph_revision, "
+            "index_version "
+            "FROM gt_vector_index_metadata WHERE singleton = 1"
+        ).fetchone()
+        if row is None:
+            digest = self._digest(self._identity)
+            connection.execute(
+                "INSERT INTO gt_vector_index_metadata VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self._identity["model_id"],
+                    self._identity["tokenizer_id"],
+                    int(self._identity["dimension"]),
+                    self._identity["source_revision"],
+                    self._identity["graph_revision"],
+                    self._identity["index_version"],
+                    digest,
+                ),
+            )
+        else:
+            existing = dict(zip(self._identity, (str(value) for value in row), strict=True))
+            self._metadata_mismatch = existing != self._identity
+        connection.commit()
+
+    @staticmethod
+    def _digest(identity: Mapping[str, str]) -> str:
+        payload = json.dumps(dict(sorted(identity.items())), separators=(",", ":"))
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def _read_metadata_digest(self) -> str:
+        row = self._connection.execute(
+            "SELECT metadata_digest FROM gt_vector_index_metadata WHERE singleton = 1"
+        ).fetchone()
+        return str(row[0]) if row else ""
+
+    def upsert(
+        self,
+        records: Sequence[EmbeddingRecord],
+        *,
+        delete_ids: Sequence[str] = (),
+    ) -> None:
+        if self._metadata_mismatch:
+            raise ValueError("metadata_mismatch")
+        connection = self._connection
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for document_id in delete_ids:
+                connection.execute(
+                    "DELETE FROM gt_vector_documents WHERE document_id = ?", (document_id,)
+                )
+            for record in records:
+                if len(record.embedding) != int(self._identity["dimension"]):
+                    raise ValueError("embedding_dimension_mismatch")
+                if {
+                    "model_id": record.model_id,
+                    "tokenizer_id": record.tokenizer_id,
+                    "dimension": str(len(record.embedding)),
+                    "source_revision": record.source_revision,
+                    "graph_revision": record.graph_revision,
+                } != {
+                    key: self._identity[key]
+                    for key in (
+                        "model_id",
+                        "tokenizer_id",
+                        "dimension",
+                        "source_revision",
+                        "graph_revision",
+                    )
+                }:
+                    raise ValueError("record_identity_mismatch")
+                connection.execute(
+                    """
+                    INSERT INTO gt_vector_documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(document_id) DO UPDATE SET
+                        text=excluded.text,
+                        embedding_json=excluded.embedding_json,
+                        embedding_hash=excluded.embedding_hash,
+                        content_hash=excluded.content_hash,
+                        model_id=excluded.model_id,
+                        tokenizer_id=excluded.tokenizer_id,
+                        dimension=excluded.dimension,
+                        source_revision=excluded.source_revision,
+                        graph_revision=excluded.graph_revision
+                    """,
+                    (
+                        record.document_id,
+                        record.text,
+                        json.dumps(record.embedding, separators=(",", ":")),
+                        record.embedding_hash,
+                        record.content_hash,
+                        record.model_id,
+                        record.tokenizer_id,
+                        len(record.embedding),
+                        record.source_revision,
+                        record.graph_revision,
+                    ),
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+    def query(self, query: HybridQuery) -> HybridQueryResult:
+        if self._metadata_mismatch:
+            return HybridQueryResult((), (), "metadata_mismatch", self._metadata_digest)
+        if len(query.vector) != int(self._identity["dimension"]):
+            return HybridQueryResult((), (), "query_dimension_mismatch", self._metadata_digest)
+        rows = self._connection.execute(
+            "SELECT document_id, text, embedding_json, content_hash, source_revision, "
+            "graph_revision "
+            "FROM gt_vector_documents ORDER BY document_id"
+        ).fetchall()
+        if not rows:
+            reason = None if self._vec0_available else "vec0_unavailable"
+            return HybridQueryResult((), (), reason, self._metadata_digest)
+        scored = []
+        for row in rows:
+            vector = tuple(float(value) for value in json.loads(row[2]))
+            scored.append((row, _cosine(query.vector, vector)))
+        if self._vec0_available:
+            pool_size = min(len(scored), query.candidate_pool or max(query.limit * 4, query.limit))
+            candidate_rows = sorted(scored, key=lambda item: (-item[1], item[0][0]))[:pool_size]
+            candidate_rows = sorted(candidate_rows, key=lambda item: item[0][0])
+        else:
+            candidate_rows = sorted(scored, key=lambda item: item[0][0])
+        candidate_ids = tuple(row[0][0] for row in candidate_rows)
+        lexical = query.lexical_scores or {}
+        graph = query.graph_scores or {}
+        items = []
+        for row, vector_score in candidate_rows:
+            lexical_score = float(lexical.get(row[0], 0.0))
+            graph_score = float(graph.get(row[0], 0.0))
+            exact_score = (0.5 * vector_score) + (0.2 * lexical_score) + (0.3 * graph_score)
+            items.append(
+                HybridItem(
+                    document_id=row[0],
+                    exact_score=exact_score,
+                    vector_score=vector_score,
+                    lexical_score=lexical_score,
+                    graph_score=graph_score,
+                    content_hash=row[3],
+                    source_revision=row[4],
+                    graph_revision=row[5],
+                )
+            )
+        items.sort(key=lambda item: (-item.exact_score, item.document_id))
+        fallback = None if self._vec0_available else "vec0_unavailable"
+        return HybridQueryResult(
+            tuple(items[: query.limit]), candidate_ids, fallback, self._metadata_digest
+        )
+
+    def close(self) -> None:
+        self._connection.close()
+>>>>>>> 9816dcc8 (feat: implement HAR-8 vector fallback and exact hybrid rescore)
