@@ -104,13 +104,19 @@ class CommunityProjection:
     community_ids: tuple[str, ...]
     excluded_edges: tuple[str, ...]
     cross_community_edges: tuple[str, ...]
+    algorithm_version_v2: str = "gt.deterministic-leiden-refinement.v2"
+    modularity: float = 0.0
+    admitted_edge_count: int = 0
+    refinement_digest: str = ""
+    connectivity_witnesses: tuple[dict[str, object], ...] = ()
 
     @property
     def receipt(self) -> dict[str, object]:
         return {
             "projection_id": self.projection_id,
             "revision": self.revision,
-            "algorithm_version": self.algorithm_version,
+            "algorithm_version": self.algorithm_version_v2,
+            "legacy_algorithm_version": self.algorithm_version,
             "seed": self.seed,
             "resolution": self.resolution,
             "input_digest": self.input_digest,
@@ -118,6 +124,12 @@ class CommunityProjection:
             "community_ids": self.community_ids,
             "excluded_edges": self.excluded_edges,
             "cross_community_edges": self.cross_community_edges,
+            "algorithm_version_v2": self.algorithm_version_v2,
+            "modularity": self.modularity,
+            "admitted_edge_count": self.admitted_edge_count,
+            "refinement_digest": self.refinement_digest,
+            "membership_digest": _membership_digest(self.memberships),
+            "connectivity_witnesses": self.connectivity_witnesses,
         }
 
 
@@ -164,6 +176,12 @@ def _community_digest(nodes: Iterable[str], edges: Iterable[CommunityEdge]) -> s
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _membership_digest(memberships: tuple[tuple[str, ...], ...]) -> str:
+    return hashlib.sha256(
+        json.dumps(memberships, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 
@@ -292,6 +310,52 @@ def _projection(
             if membership_by_node[edge.source] != membership_by_node[edge.target]
         )
     )
+    total_weight = float(len(admitted))
+    degree: dict[str, float] = {node: 0.0 for node in nodes}
+    for edge in admitted:
+        degree[edge.source] += 1.0
+        degree[edge.target] += 1.0
+    internal = sum(
+        1.0 for edge in admitted if membership_by_node[edge.source] == membership_by_node[edge.target]
+    )
+    modularity = 0.0
+    if total_weight:
+        totals: dict[str, float] = {}
+        for node, community in membership_by_node.items():
+            totals[community] = totals.get(community, 0.0) + degree[node]
+        modularity = internal / total_weight - resolution * sum(
+            (value / (2.0 * total_weight)) ** 2 for value in totals.values()
+        )
+    refinement_digest = hashlib.sha256(
+        json.dumps(
+            {"seed": seed, "resolution": resolution, "memberships": memberships},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    connectivity: list[dict[str, object]] = []
+    for members in memberships:
+        member_set = set(members)
+        if len(member_set) == 1:
+            connectivity.append({"community": membership_by_node[members[0]], "isolate": members[0], "edges": []})
+            continue
+        seen = {members[0]}
+        witness_edges: list[str] = []
+        while len(seen) < len(member_set):
+            choices = sorted(
+                (
+                    edge for edge in admitted
+                    if (edge.source in seen) != (edge.target in seen)
+                    and edge.source in member_set and edge.target in member_set
+                ),
+                key=lambda edge: edge.edge_id,
+            )
+            if not choices:
+                raise ValueError("community connectivity certificate failed")
+            edge = choices[0]
+            seen.update((edge.source, edge.target))
+            witness_edges.append(edge.edge_id)
+        connectivity.append({"community": membership_by_node[members[0]], "isolate": None, "edges": witness_edges})
     return CommunityProjection(
         projection_id=projection_id,
         revision=revision,
@@ -303,6 +367,10 @@ def _projection(
         community_ids=community_ids,
         excluded_edges=tuple(sorted(excluded)),
         cross_community_edges=cross,
+        modularity=modularity,
+        admitted_edge_count=len(admitted),
+        refinement_digest=refinement_digest,
+        connectivity_witnesses=tuple(connectivity),
     )
 
 
@@ -373,3 +441,26 @@ def build_leiden_communities(
             admitted_labels=_INCLUSIVE_LABELS,
         ),
     )
+
+
+def verify_community_run(
+    run: CommunityRun,
+    *,
+    expected_membership_digest: str | None = None,
+) -> bool:
+    """Independently verify projection membership and certificate identities."""
+    if not isinstance(run, CommunityRun):
+        return False
+    for projection in (run.strict, run.inclusive):
+        if projection.input_digest != run.input_digest:
+            return False
+        if projection.algorithm_version_v2 != "gt.deterministic-leiden-refinement.v2":
+            return False
+        if expected_membership_digest is not None and _membership_digest(projection.memberships) != expected_membership_digest:
+            raise ValueError("membership digest mismatch")
+        if projection.admitted_edge_count < 0 or not projection.refinement_digest:
+            return False
+        members = {node for group in projection.memberships for node in group}
+        if len(members) != sum(len(group) for group in projection.memberships):
+            return False
+    return True
