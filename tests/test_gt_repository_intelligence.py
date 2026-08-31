@@ -363,6 +363,11 @@ def _read_verified_proof(
         raise SourceProofError("persisted Q&A proof is unreadable") from exc
     if payload.get("schema") != _PROOF_SCHEMA:
         raise SourceProofError("persisted Q&A proof schema mismatch")
+    if (
+        expected.source_head == _ARCHIVE_SOURCE_HEAD
+        or payload.get("source_head") == _ARCHIVE_SOURCE_HEAD
+    ):
+        raise SourceProofError("persisted Q&A source head is unverified")
     if payload.get("source_revision") != expected.source_head:
         raise SourceProofError("persisted Q&A source revision mismatch")
     if payload.get("source_snapshot_sha256") != expected.source_revision:
@@ -488,6 +493,8 @@ def _execute_questions(
     current = _snapshot(root)
     if current != expected:
         raise SourceProofError("pinned source revision mismatch")
+    if expected.source_head == _ARCHIVE_SOURCE_HEAD:
+        raise SourceProofError("frozen Q&A source head is unverified")
 
     producer_environment = _producer_environment()
     observed_commands: list[dict[str, object]]
@@ -666,3 +673,39 @@ def test_persisted_prompt_mutation_is_rejected_even_with_recomputed_digest(tmp_p
 
     with pytest.raises(SourceProofError, match="prompt mismatch"):
         _read_verified_proof(proof_path, root=root, expected=expected)
+
+
+def test_archive_without_git_is_explicitly_unverified_and_not_accepted(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "frozen-source"
+    state = tmp_path / "state"
+    _copy_frozen_sources(root)
+    monkeypatch.delenv("GT_SOURCE_HEAD", raising=False)
+
+    def no_git(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(128, "git")
+
+    monkeypatch.setattr(subprocess, "run", no_git)
+    expected = _snapshot(root)
+    assert expected.source_head == _ARCHIVE_SOURCE_HEAD
+    with pytest.raises(SourceProofError, match="source head is unverified"):
+        _execute_questions(root, state, expected)
+
+
+def test_persisted_unverified_archive_head_is_rejected(tmp_path):
+    root = tmp_path / "frozen-source"
+    state = tmp_path / "state"
+    _copy_frozen_sources(root)
+    expected = _snapshot(root)
+    proof_path = _execute_questions(root, state, expected)
+    payload = json.loads(proof_path.read_text(encoding="utf-8"))
+    payload["source_revision"] = _ARCHIVE_SOURCE_HEAD
+    payload["source_head"] = _ARCHIVE_SOURCE_HEAD
+    proof_path.write_text(json.dumps(payload), encoding="utf-8")
+    archive_expected = FrozenSourceSnapshot(
+        expected.source_revision, _ARCHIVE_SOURCE_HEAD, expected.file_hashes
+    )
+
+    with pytest.raises(SourceProofError, match="source head is unverified"):
+        _read_verified_proof(proof_path, root=root, expected=archive_expected)
