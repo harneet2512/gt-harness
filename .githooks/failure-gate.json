@@ -6,9 +6,9 @@
     "default_branch": "main"
   },
   "lineage": {
-    "head_sha": "666d3660901213497fccdae969efd93712061478",
-    "parent_sha": "8b3a479b0b8abff6f971ebe4b268312746d8a7b3",
-    "source_revision": "666d3660901213497fccdae969efd93712061478"
+    "head_sha": "81e40b448fccdc6f1c278103e0110f12d07af309",
+    "parent_sha": "0bc3bdc66dcca606ec295175f09b70f52b0b67b5",
+    "source_revision": "81e40b448fccdc6f1c278103e0110f12d07af309"
   },
   "fixture_hashes": {
     "config/failure_id_ledger_snapshot.json": "451bbf559e86342b22235c8751783bd97acaf194ce8407b9ccb3d862f401cefa"
