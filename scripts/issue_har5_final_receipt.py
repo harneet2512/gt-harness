@@ -118,21 +118,6 @@ def counts(output: str) -> dict[str, int]:
     }
 
 
-def collected_total() -> int:
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return sum(
-        int(match.group(1))
-        for line in result.stdout.splitlines()
-        if (match := re.search(r": (\d+)$", line))
-    )
-
-
 def main() -> int:
     repository_head = git_head(ROOT)
     groundtruth_head = git_head(Path(r"D:\Groundtruth\gt-index"))
