@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Iterable
 
 
@@ -23,7 +26,6 @@ class ExecutionStateSnapshot:
             "graph_revision": self.graph_revision,
             "graph_path": self.graph_path,
         }
-
 
 SELECT_CATALOG_FEATURE_ID = "select_catalog"
 SELECT_CATALOG_SCHEMA = "gt.select_catalog_lifecycle.v1"
@@ -280,3 +282,61 @@ __all__ = [
     "SelectCatalogStage",
     "build_feature18_catalog",
 ]
+    def persist(self, path: str | Path) -> Path:
+        """Atomically persist a revision-bound snapshot for restart/reopen."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"schema": "gt.execution_state.v1", **self.as_dict()}
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        envelope = {**payload, "payload_sha256": hashlib.sha256(canonical).hexdigest()}
+        encoded = (json.dumps(envelope, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return target
+
+    @classmethod
+    def load(cls, path: str | Path, *, expected_repository_revision: str = "",
+             expected_workspace_revision: str = "", expected_graph_revision: str = "",
+             expected_graph_path: str = "") -> "ExecutionStateSnapshot":
+        """Read a complete snapshot and reject corruption or stale identity."""
+        target = Path(path)
+        raw = json.loads(target.read_text(encoding="utf-8"))
+        if raw.get("schema") != "gt.execution_state.v1":
+            raise ValueError("execution state schema mismatch")
+        fields = cls(
+            repository_revision=str(raw.get("repository_revision", "")),
+            workspace_revision=str(raw.get("workspace_revision", "")),
+            graph_revision=str(raw.get("graph_revision", "")),
+            graph_path=str(raw.get("graph_path", "")),
+        )
+        canonical = json.dumps({"schema": raw["schema"], **fields.as_dict()},
+                               sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if raw.get("payload_sha256") != hashlib.sha256(canonical).hexdigest():
+            raise ValueError("execution state digest mismatch")
+        expected = {
+            "repository_revision": expected_repository_revision,
+            "workspace_revision": expected_workspace_revision,
+            "graph_revision": expected_graph_revision,
+            "graph_path": expected_graph_path,
+        }
+        for name, value in expected.items():
+            if value and getattr(fields, name) != value:
+                raise ValueError(f"execution state {name} mismatch")
+        if not all(fields.as_dict().values()):
+            raise ValueError("execution state is incomplete")
+        return fields
+
+    @classmethod
+    def reopen(cls, path: str | Path, *, repository_revision: str,
+               workspace_revision: str, graph_revision: str, graph_path: str) -> "ExecutionStateSnapshot":
+        return cls.load(path, expected_repository_revision=repository_revision,
+                        expected_workspace_revision=workspace_revision,
+                        expected_graph_revision=graph_revision, expected_graph_path=graph_path)
