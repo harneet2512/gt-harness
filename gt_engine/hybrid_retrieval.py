@@ -1,17 +1,23 @@
-<<<<<<< HEAD
-"""Revision-bound hybrid retrieval primitives.
+"""Revision-bound hybrid retrieval and SQLite vector acceleration.
 
-Retrieval is a ranking aid only.  It cannot become an edit-owner authority,
-and it refuses to run when its repository identity disagrees with the central
-runtime binding.
+Identity-bound lexical/structural retrieval refuses to run when repository
+identity disagrees with the central runtime binding.  The optional SQLite
+vector table is an accelerator only: candidate discovery is followed by
+exact, reproducible scoring over persisted source rows.
 """
+
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import re
+import sqlite3
+import struct
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from pathlib import Path
 
 from gt_engine.repository_intelligence import CentralRuntimeBinding, CentralRuntimeIdentityError
 
@@ -171,26 +177,6 @@ class HybridRetriever:
             candidates=tuple(candidates), ranked_files=ranked, query_digest=digest,
             repository_revision=repository_revision, graph_revision=graph_revision,
         )
-=======
-"""Deterministic SQLite vector candidates with GT-owned exact rescoring.
-
-The vector table is an optional accelerator.  It never owns ranking authority:
-candidate discovery is followed by exact, reproducible scoring over persisted
-source rows.  When the optional extension or its identity contract is not
-available, the same exact path runs over the complete durable corpus and emits
-a named fallback reason.
-"""
-
-from __future__ import annotations
-
-import hashlib
-import json
-import math
-import sqlite3
-import struct
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path
 
 
 def _as_vector(values: Sequence[float]) -> tuple[float, ...]:
@@ -579,4 +565,3 @@ class SQLiteVectorIndex:
 
     def close(self) -> None:
         self._connection.close()
->>>>>>> 9816dcc8 (feat: implement HAR-8 vector fallback and exact hybrid rescore)
