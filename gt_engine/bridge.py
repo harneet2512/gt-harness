@@ -876,7 +876,7 @@ class GTBridge:
             pass
 
     def _record_feature_census(self) -> None:
-        """Snapshot all 17 mechanisms at the penultimate submit boundary."""
+        """Snapshot all 18 census mechanisms at the penultimate submit boundary."""
         try:
             from gt_engine.attribution import census_trace_rows
 
@@ -3930,7 +3930,7 @@ class GTBridge:
                 {
                     "gt_enabled": True,
                     "graph_available": bool(self.graph_db),
-                    "feature_count": 17,
+                    "feature_count": 18,
                     "provider_final_receipts_required": True,
                     **profile_receipt,
                 },
