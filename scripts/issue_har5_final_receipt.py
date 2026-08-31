@@ -99,6 +99,12 @@ def counts(output: str) -> dict[str, int]:
     passed = number("passed")
     failed = number("failed")
     skipped = number("skipped")
+    if passed == failed == skipped == 0:
+        # pytest -q may emit only its progress glyphs when captured.  Count
+        # those glyphs so the receipt still records the observed run totals.
+        passed = output.count(".")
+        failed = output.count("F")
+        skipped = output.count("s")
     return {
         "collected": passed + failed + skipped,
         "passed": passed,
