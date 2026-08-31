@@ -93,7 +93,11 @@ def _verify_shipped_receipts(root: Path) -> dict[str, Any]:
         supplied = payload[digest_field]
         body = dict(payload)
         body.pop(digest_field, None)
-        actual = hashlib.sha256(_canonical(body)).hexdigest()
+        canonical = _canonical(body)
+        actual = hashlib.sha256(canonical).hexdigest()
+        if supplied != actual:
+            # Older finalstand issuers included the canonical trailing LF.
+            actual = hashlib.sha256(canonical + b"\n").hexdigest()
         checked += 1
         if supplied != actual:
             errors.append(path.name + ":digest_mismatch")
