@@ -24,7 +24,6 @@ from gt_engine.resolution_provenance import (
     report_per_resolver_metrics,
     stable_callsite_id,
     stable_symbol_id,
-    wilson_interval,
 )
 
 
@@ -319,7 +318,10 @@ def test_producer_two_candidate_vta_rows_decode_without_invention():
             "mechanism": "vta",
             "declared_scope": "ImplA.Run",
             "receiver_type": "ImplA,ImplB",
-            "receiver_origin": "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f",
+            "receiver_origin": (
+                "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,"
+                "db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f"
+            ),
             "receiver_shape": "runner.Run",
             "receiver_chain": '["runner"]',
             "import_chain": "[]",
@@ -338,7 +340,10 @@ def test_producer_two_candidate_vta_rows_decode_without_invention():
             "mechanism": "vta",
             "declared_scope": "ImplB.Run",
             "receiver_type": "ImplA,ImplB",
-            "receiver_origin": "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f",
+            "receiver_origin": (
+                "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,"
+                "db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f"
+            ),
             "receiver_shape": "runner.Run",
             "receiver_chain": '["runner"]',
             "import_chain": "[]",
@@ -371,18 +376,28 @@ _FROZEN_RESOLUTION_EVENTS = (
     ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c6"),
     ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.DISAGREED, "c7"),
     ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.DISAGREED, "c8"),
-    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.INDETERMINATE, "c9"),
-    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.INDETERMINATE, "c10"),
+    ResolutionEvent(
+        "rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.INDETERMINATE, "c9"
+    ),
+    ResolutionEvent(
+        "rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.INDETERMINATE, "c10"
+    ),
     ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.AGREED, "n1"),
     ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.DISAGREED, "n2"),
     ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.DISAGREED, "n3"),
-    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.INDETERMINATE, "n4"),
-    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.INDETERMINATE, "n5"),
+    ResolutionEvent(
+        "rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.INDETERMINATE, "n4"
+    ),
+    ResolutionEvent(
+        "rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.INDETERMINATE, "n5"
+    ),
 )
 
 
 def test_per_resolver_reporting_matches_frozen_event_fixture():
-    reports = report_per_resolver_metrics(_FROZEN_RESOLUTION_EVENTS, repository_revision="rev-frozen")
+    reports = report_per_resolver_metrics(
+        _FROZEN_RESOLUTION_EVENTS, repository_revision="rev-frozen"
+    )
     by_mechanism = {row.mechanism: row for row in reports}
 
     import_exact = by_mechanism[ProvenanceMechanism.IMPORT_EXACT]
@@ -415,8 +430,12 @@ def test_per_resolver_reporting_rejects_revision_mismatch():
 
 def test_per_resolver_reporting_marks_zero_labeled_precision_indeterminate():
     events = (
-        ResolutionEvent("rev-frozen", ProvenanceMechanism.DYNAMIC, OracleOutcome.INDETERMINATE, "d1"),
-        ResolutionEvent("rev-frozen", ProvenanceMechanism.DYNAMIC, OracleOutcome.INDETERMINATE, "d2"),
+        ResolutionEvent(
+            "rev-frozen", ProvenanceMechanism.DYNAMIC, OracleOutcome.INDETERMINATE, "d1"
+        ),
+        ResolutionEvent(
+            "rev-frozen", ProvenanceMechanism.DYNAMIC, OracleOutcome.INDETERMINATE, "d2"
+        ),
     )
     reports = report_per_resolver_metrics(events, repository_revision="rev-frozen")
     dynamic = reports[0]
@@ -425,9 +444,14 @@ def test_per_resolver_reporting_marks_zero_labeled_precision_indeterminate():
     assert dynamic.labeled == 0
     assert dynamic.indeterminate == 2
     assert dynamic.precision is None
-    assert dynamic.precision_ci_low is None
-    assert dynamic.precision_ci_high is None
+    assert dynamic.precision_ci_low == 0.0
+    assert dynamic.precision_ci_high == 1.0
     assert dynamic.coverage == 0.0
+
+    serialized = dynamic.as_dict()
+    assert serialized["precision"] is None
+    assert serialized["precision_ci_low"] == 0.0
+    assert serialized["precision_ci_high"] == 1.0
 
 
 def _load_labeled_cases(path: Path) -> tuple[LabeledResolutionCase, ...]:

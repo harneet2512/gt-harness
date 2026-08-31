@@ -664,8 +664,11 @@ def report_per_resolver_metrics(
             ci_low, ci_high = wilson_interval(agreed, labeled)
         else:
             precision = None
-            ci_low = None
-            ci_high = None
+            # No labeled observations provide no information about precision.
+            # Keep the confidence interval honest and maximally wide, matching
+            # the shared trust-calibration convention for an empty bucket.
+            ci_low = 0.0
+            ci_high = 1.0
         coverage = labeled / population if population else 0.0
         reports.append(
             ResolverMetricReport(
