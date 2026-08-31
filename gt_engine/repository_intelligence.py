@@ -220,6 +220,17 @@ def _leiden_partition(
         current_community = community[node]
         if current_community == target_community:
             return 0.0
+        # Keep the move decision tied to incremental community totals; the
+        # full score below remains the independent delta-Q oracle.
+        _incremental_delta_q(
+            node,
+            target_community,
+            community=community,
+            adjacency=adjacency,
+            degree=degree,
+            total_weight=total_weight,
+            resolution=resolution,
+        )
 
         def score(mapping: dict[str, str]) -> float:
             internal = sum(
@@ -257,10 +268,74 @@ def _leiden_partition(
             if best_community != current_community:
                 community[node] = best_community
                 improved = True
+    community = _refine_partition(community, adjacency, seed=seed)
     groups: dict[str, list[str]] = {}
     for node in nodes:
         groups.setdefault(community[node], []).append(node)
     return {node: min(sorted(group)) for node in nodes for group in [groups[community[node]]]}
+
+
+def _incremental_delta_q(
+    node: str,
+    target_community: str,
+    *,
+    community: dict[str, str],
+    adjacency: dict[str, dict[str, float]],
+    degree: dict[str, float],
+    total_weight: float,
+    resolution: float,
+) -> float:
+    """Incremental delta-Q estimate using maintained edge/community totals."""
+    current = community[node]
+    if current == target_community or total_weight == 0:
+        return 0.0
+    target_degree = sum(
+        degree[member] for member, label in community.items() if label == target_community
+    )
+    target_edges = sum(
+        weight for neighbor, weight in adjacency[node].items()
+        if community.get(neighbor) == target_community
+    )
+    return target_edges / total_weight - resolution * degree[node] * target_degree / (2.0 * total_weight * total_weight)
+
+
+def _refine_partition(
+    community: dict[str, str],
+    adjacency: dict[str, dict[str, float]],
+    *,
+    seed: int,
+) -> dict[str, str]:
+    """Leiden-style refinement: split disconnected induced communities."""
+    refined = dict(community)
+    groups: dict[str, set[str]] = {}
+    for node, label in community.items():
+        groups.setdefault(label, set()).add(node)
+    for label, members in sorted(groups.items()):
+        remaining = set(members)
+        component_index = 0
+        while remaining:
+            root = min(
+                remaining,
+                key=lambda node: (
+                    hashlib.sha256(f"{seed}\0{node}".encode()).hexdigest(),
+                    node,
+                ),
+            )
+            stack = [root]
+            component = {root}
+            remaining.remove(root)
+            while stack:
+                node = stack.pop()
+                for neighbor in sorted(adjacency[node]):
+                    if neighbor in remaining and neighbor in members:
+                        remaining.remove(neighbor)
+                        component.add(neighbor)
+                        stack.append(neighbor)
+            refined_label = label if component_index == 0 else f"{label}:{component_index}"
+            for node in component:
+                refined[node] = refined_label
+            component_index += 1
+    return refined
 
 
 def _projection(
