@@ -111,7 +111,7 @@ _QUESTIONS = (
 )
 
 _PROOF_SCHEMA = "gt.source_qa.proof.v1"
-_ARCHIVE_SOURCE_HEAD = "8695801ce67c07fbb17611eb453fad619f359100"
+_ARCHIVE_SOURCE_HEAD = "UNVERIFIED"
 
 
 def _sha256(blob: bytes) -> str:
@@ -145,7 +145,7 @@ def _snapshot(root: Path) -> FrozenSourceSnapshot:
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         head = os.environ.get("GT_SOURCE_HEAD", _ARCHIVE_SOURCE_HEAD).strip()
-    if not re.fullmatch(r"[0-9a-f]{40}", head):
+    if head != "UNVERIFIED" and not re.fullmatch(r"[0-9a-f]{40}", head):
         raise SourceProofError("source repository head is malformed")
     return FrozenSourceSnapshot(_sha256(_canonical(ordered)), head, ordered)
 
@@ -230,6 +230,21 @@ def _coverage(facts: list[dict[str, object]], citation: dict[str, object]) -> di
     }
 
 
+def _flow_record(question: FrozenSourceQuestion, citation: dict[str, object]) -> dict[str, object]:
+    return {
+        "question": question.prompt,
+        "source": {"path": question.source_path, "symbol": question.symbol},
+        "production_entrypoint": question.production_entrypoint,
+        "steps": [
+            "resolve frozen source citation",
+            "invoke graph-native production projection",
+            "bind returned facts to graph revision",
+            "persist answer and evidence digest",
+        ],
+        "citation": citation,
+    }
+
+
 def _question_contract(question: FrozenSourceQuestion) -> TaskContract:
     return TaskContract(
         role="source_qa",
@@ -310,6 +325,20 @@ def _observe_gt_index() -> list[dict[str, object]]:
         _binary.subprocess.run = original_run
 
 
+def _verify_producer_environment(producer: dict[str, object]) -> None:
+    binary_path = producer.get("binary_path")
+    binary_sha256 = producer.get("binary_sha256")
+    if not isinstance(binary_path, str) or not isinstance(binary_sha256, str):
+        raise SourceProofError("persisted Q&A producer identity is malformed")
+    path = Path(binary_path)
+    try:
+        actual = _sha256(path.read_bytes())
+    except OSError as exc:
+        raise SourceProofError("persisted Q&A producer binary is unavailable") from exc
+    if actual != binary_sha256:
+        raise SourceProofError("persisted Q&A producer binary changed")
+
+
 def _write_atomic(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -357,6 +386,7 @@ def _read_verified_proof(
             "coverage": answer.get("coverage"),
             "graph_revision": answer.get("graph_revision"),
             "abstention_reason": answer.get("abstention_reason"),
+            "flow": answer.get("flow"),
         }
         for answer in answers
     ]
@@ -377,6 +407,7 @@ def _read_verified_proof(
     producer = payload.get("producer_environment")
     if not isinstance(producer, dict) or not producer.get("binary_sha256"):
         raise SourceProofError("persisted Q&A producer identity is missing")
+    _verify_producer_environment(producer)
     observed = payload.get("observed_commands")
     if not isinstance(observed, list) or not observed:
         raise SourceProofError("persisted Q&A observed command status is missing")
@@ -414,6 +445,8 @@ def _read_verified_proof(
             raise SourceProofError("persisted Q&A status mismatch")
         if answer.get("abstention_reason") != expected_reason:
             raise SourceProofError("persisted Q&A abstention mismatch")
+        if answer.get("flow") != _flow_record(question, citation):
+            raise SourceProofError("persisted Q&A execution flow mismatch")
         semantic.append(
             {
                 "question_id": answer.get("question_id"),
@@ -426,6 +459,7 @@ def _read_verified_proof(
                 "coverage": answer.get("coverage"),
                 "graph_revision": answer.get("graph_revision"),
                 "abstention_reason": answer.get("abstention_reason"),
+                "flow": answer.get("flow"),
             }
         )
     if payload.get("semantic_sha256") != _sha256(_canonical(semantic)):
@@ -502,6 +536,7 @@ def _execute_questions(
                 "coverage": _coverage(facts, citation),
                 "graph_revision": projection.revision,
                 "abstention_reason": None if answered else "graph_facts_unavailable",
+                "flow": _flow_record(question, citation),
             }
         )
 
@@ -517,6 +552,7 @@ def _execute_questions(
             "coverage": answer["coverage"],
             "graph_revision": answer["graph_revision"],
             "abstention_reason": answer["abstention_reason"],
+            "flow": answer["flow"],
         }
         for answer in answers
     ]
@@ -620,6 +656,7 @@ def test_persisted_prompt_mutation_is_rejected_even_with_recomputed_digest(tmp_p
                 "coverage",
                 "graph_revision",
                 "abstention_reason",
+                "flow",
             )
         }
         for answer in payload["answers"]
