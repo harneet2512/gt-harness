@@ -329,6 +329,108 @@ class Feature18Lifecycle:
             "transitions": list(self.transitions),
         }
 
+@dataclass(frozen=True, slots=True)
+class ProcessStep:
+    node_id: str
+    edge_id: str
+    evidence_id: str
+    relation: str
+    verification_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class WitnessedProcess:
+    process_id: str
+    source_revision: str
+    graph_revision: str
+    projection: str
+    anchors: tuple[str, ...]
+    steps: tuple[ProcessStep, ...]
+    branches: tuple[tuple[str, ...], ...]
+    gaps: tuple[str, ...]
+    verification_state: str
+    stale_reason: str
+
+    @property
+    def has_gaps(self) -> bool:
+        return bool(self.gaps)
+
+    @property
+    def receipt(self) -> dict[str, Any]:
+        return {
+            "schema": "gt.witnessed_process.v1",
+            "process_id": self.process_id,
+            "source_revision": self.source_revision,
+            "graph_revision": self.graph_revision,
+            "projection": self.projection,
+            "anchors": self.anchors,
+            "steps": tuple(
+                {
+                    "node_id": step.node_id,
+                    "edge_id": step.edge_id,
+                    "evidence_id": step.evidence_id,
+                    "relation": step.relation,
+                    "verification_state": step.verification_state,
+                }
+                for step in self.steps
+            ),
+            "branches": self.branches,
+            "gaps": self.gaps,
+            "verification_state": self.verification_state,
+            "stale_reason": self.stale_reason,
+        }
+
+
+def build_witnessed_process(
+    *,
+    anchors: tuple[str, ...],
+    steps: tuple[ProcessStep, ...],
+    branches: tuple[tuple[str, ...], ...],
+    gaps: tuple[str, ...],
+    graph_revision: str,
+    source_revision: str,
+    projection: str,
+    current_graph_revision: str | None = None,
+) -> WitnessedProcess:
+    canonical_anchors = tuple(sorted(dict.fromkeys(str(item) for item in anchors)))
+    canonical_steps = tuple(sorted(steps, key=lambda step: (step.node_id, step.edge_id, step.evidence_id)))
+    canonical_branches = tuple(sorted(tuple(sorted(branch)) for branch in branches))
+    canonical_gaps = tuple(sorted(dict.fromkeys(str(item) for item in gaps)))
+    payload = {
+        "source_revision": source_revision,
+        "graph_revision": graph_revision,
+        "projection": projection,
+        "anchors": canonical_anchors,
+        "steps": [
+            {
+                "node_id": step.node_id,
+                "edge_id": step.edge_id,
+                "evidence_id": step.evidence_id,
+                "relation": step.relation,
+                "verification_state": step.verification_state,
+            }
+            for step in canonical_steps
+        ],
+        "branches": canonical_branches,
+        "gaps": canonical_gaps,
+    }
+    process_id = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    stale = current_graph_revision is not None and current_graph_revision != graph_revision
+    return WitnessedProcess(
+        process_id=process_id,
+        source_revision=source_revision,
+        graph_revision=graph_revision,
+        projection=projection,
+        anchors=canonical_anchors,
+        steps=canonical_steps,
+        branches=canonical_branches,
+        gaps=canonical_gaps,
+        verification_state="abstained" if stale else "witnessed",
+        stale_reason="graph_revision_stale" if stale else "",
+    )
+
 
 __all__ = [
     "CatalogItem",
@@ -340,4 +442,7 @@ __all__ = [
     "SelectCatalogAbstention",
     "SelectCatalogStage",
     "build_feature18_catalog",
+    "ProcessStep",
+    "WitnessedProcess",
+    "build_witnessed_process",
 ]
