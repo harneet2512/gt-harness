@@ -376,8 +376,6 @@ def verify_baseline_receipt(receipt: dict[str, object]) -> bool:
 
 
 def main() -> int:
-    if not SPEC_ROOT.is_dir() or not COMPATIBILITY_UPSTREAM.is_file():
-        raise RuntimeError("groundtruth_dependency_unavailable")
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="fail if generated files drift")
     parser.add_argument("--baseline-spec", type=Path,
@@ -391,6 +389,8 @@ def main() -> int:
         spec = json.loads(args.baseline_spec.read_text(encoding="utf-8"))
         write_baseline_receipt(spec, args.baseline_output)
         return 0
+    if not SPEC_ROOT.is_dir() or not COMPATIBILITY_UPSTREAM.is_file():
+        raise RuntimeError("groundtruth_dependency_unavailable")
     drift: list[str] = []
     for path, expected in _outputs().items():
         if args.check:

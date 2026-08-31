@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
 import sys
 import warnings
@@ -79,10 +80,12 @@ def test_baseline_cli_writes_atomic_provider_free_receipt(tmp_path: Path) -> Non
     spec_path.write_text(json.dumps(_baseline_spec()), encoding="utf-8")
     assert generator.main.__name__ == "main"
     import subprocess
+    environment = dict(os.environ)
+    environment["GROUNDTRUTH_ROOT"] = str(tmp_path / "missing-groundtruth")
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "generate_gt_finalstand.py"),
          "--baseline-spec", str(spec_path), "--baseline-output", str(output)],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, env=environment,
     )
     assert result.returncode == 0, result.stderr
     assert generator.verify_baseline_receipt(json.loads(output.read_text(encoding="utf-8")))
