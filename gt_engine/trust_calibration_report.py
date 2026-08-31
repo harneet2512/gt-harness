@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -280,11 +282,56 @@ def verify_trust_calibration_report(report: Mapping[str, Any]) -> bool:
         return False
 
 
+def collect_calibration_observations(
+    *,
+    resolution: Sequence[Mapping[str, Any]] = (),
+    retrieval: Sequence[Mapping[str, Any]] = (),
+    community: Sequence[Mapping[str, Any]] = (),
+) -> tuple[CalibrationObservation, ...]:
+    """Collect source-bound rows from the shipped capability machinery.
+
+    Producers supply identities and oracle outcomes; this adapter never derives
+    probabilities or authority from scores. Missing fields are rejected rather
+    than silently fabricated.
+    """
+    result: list[CalibrationObservation] = []
+    for capability, rows in (
+        ("resolution", resolution),
+        ("retrieval", retrieval),
+        ("community", community),
+    ):
+        for row in rows:
+            payload = dict(row)
+            payload["capability_class"] = capability
+            result.append(CalibrationObservation.from_mapping(payload))
+    return tuple(sorted(result, key=lambda item: item.observation_id))
+
+
+def emit_trust_calibration_receipt(
+    observations: Sequence[CalibrationObservation | Mapping[str, Any]],
+    output: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Atomically emit a verified v2 report through the receipt boundary."""
+    report = build_trust_calibration_report(observations)
+    if not verify_trust_calibration_report(report):
+        raise ValueError("calibration_receipt_unverified")
+    destination = os.fspath(output)
+    parent = os.path.dirname(os.path.abspath(destination)) or "."
+    os.makedirs(parent, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", dir=parent, delete=False) as handle:
+        temporary = handle.name
+        handle.write(_canonical_bytes(report) + b"\n")
+    os.replace(temporary, destination)
+    return report
+
+
 __all__ = [
     "CAPABILITY_CLASSES",
     "SCHEMA",
     "CalibrationObservation",
     "build_trust_calibration_report",
+    "collect_calibration_observations",
+    "emit_trust_calibration_receipt",
     "verify_trust_calibration_report",
     "wilson_interval",
 ]

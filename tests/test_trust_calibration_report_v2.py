@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -7,6 +8,8 @@ import pytest
 from gt_engine.trust_calibration_report import (
     CalibrationObservation,
     build_trust_calibration_report,
+    collect_calibration_observations,
+    emit_trust_calibration_receipt,
     verify_trust_calibration_report,
 )
 
@@ -114,3 +117,21 @@ def test_identity_and_closed_class_mutations_fail_and_digest_detects_tampering()
     report["observations"][0]["source_id"] = "tampered"
     assert not verify_trust_calibration_report(report)
 
+
+def test_collector_binds_shipped_capability_rows_and_emits_atomic_receipt(tmp_path):
+    row = {
+        "observation_id": "resolution-1",
+        "mechanism": "static",
+        "source_id": "resolution-receipt",
+        "tool_id": "gt-producer",
+        "fixture_id": "fixture-1",
+        "oracle_outcome": "agreed",
+        "probability": 0.75,
+        "probability_source": "producer-confidence",
+    }
+    observations = collect_calibration_observations(resolution=[row])
+    assert observations[0].capability_class == "resolution"
+    output = tmp_path / "calibration.json"
+    report = emit_trust_calibration_receipt(observations, output)
+    assert verify_trust_calibration_report(report)
+    assert verify_trust_calibration_report(json.loads(output.read_text()))
