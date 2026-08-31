@@ -41,11 +41,46 @@ _ARM_AGENTS = {
     )
     for arm in ARMS
 }
+HAR9_CLOSEOUT_SCHEMA = "gt.har9.closeout_receipt.v1"
 
 
 def _canonical_sha256(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def build_closeout_receipt(
+    *,
+    harness_head: str,
+    groundtruth_head: str,
+    unit_heads: dict[str, str],
+    input_receipts: dict[str, str],
+    environment_sha256: str,
+    provider_calls: int = 0,
+    benchmark_runs: int = 0,
+) -> dict[str, Any]:
+    """Assemble a provider-free closeout without authorizing a benchmark."""
+    if not harness_head or not groundtruth_head or not unit_heads:
+        raise ValueError("closeout heads are required")
+    if provider_calls != 0 or benchmark_runs != 0:
+        raise ValueError("closeout must remain provider-free and benchmark-free")
+    if not isinstance(input_receipts, dict) or not input_receipts:
+        raise ValueError("closeout receipt inputs are required")
+    payload: dict[str, Any] = {
+        "schema": HAR9_CLOSEOUT_SCHEMA,
+        "harness_head": harness_head,
+        "groundtruth_head": groundtruth_head,
+        "unit_heads": dict(sorted(unit_heads.items())),
+        "input_receipts": dict(sorted(input_receipts.items())),
+        "environment_sha256": environment_sha256,
+        "results": {"provider_calls": 0, "benchmark_runs": 0},
+        "authorization": {
+            "status": "BENCHMARK_READY_AWAITING_USER_RUN_APPROVAL",
+            "benchmark_ready": False,
+        },
+    }
+    payload["bundle_sha256"] = _canonical_sha256(payload)
+    return payload
 
 
 def _numeric_equals(value: Any, expected: float) -> bool:

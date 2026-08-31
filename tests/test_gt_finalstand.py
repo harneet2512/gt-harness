@@ -25,6 +25,15 @@ def _load_validator():
     return module
 
 
+def _load_phase2():
+    path = ROOT / "scripts" / "phase2_experiment.py"
+    spec = importlib.util.spec_from_file_location("phase2_experiment", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_finalstand_is_machine_valid() -> None:
     result = _load_validator().validate()
     assert result["errors"] == []
@@ -569,3 +578,18 @@ def test_post_audit_and_single_witness_receipts_close_terminal_rows() -> None:
         "FS-025": "COMPLETE",
         "FS-026": "COMPLETE",
     }
+
+
+def test_har9_closeout_keeps_benchmark_approval_false() -> None:
+    module = _load_phase2()
+    receipt = module.build_closeout_receipt(
+        harness_head="a" * 40,
+        groundtruth_head="b" * 40,
+        unit_heads={"HAR-9": "c" * 40},
+        input_receipts={"har5": "d" * 64},
+        environment_sha256="e" * 64,
+    )
+    assert receipt["schema"] == "gt.har9.closeout_receipt.v1"
+    assert receipt["authorization"]["status"] == "BENCHMARK_READY_AWAITING_USER_RUN_APPROVAL"
+    assert receipt["authorization"]["benchmark_ready"] is False
+    assert receipt["results"] == {"provider_calls": 0, "benchmark_runs": 0}
