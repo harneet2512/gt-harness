@@ -55,3 +55,17 @@ def test_oracle_rejects_mutated_manifest_identity():
             [{"id": "a", "label": "correct", "prediction": "correct"}],
             manifest={**manifest, "source_revision": "src-2"},
         )
+
+
+def test_probability_metrics_are_separate_from_derived_tier_labels():
+    summary = score_calibration(
+        [
+            {"id": "a", "label": "correct", "prediction": "correct", "confidence": 0.9},
+            {"id": "b", "label": "incorrect", "prediction": "correct", "confidence": 0.8},
+        ]
+    )
+    assert summary["brier_score"] == pytest.approx(((0.9 - 1) ** 2 + (0.8 - 0) ** 2) / 2)
+    assert summary["log_loss"] > 0
+    assert summary["ece"] >= 0
+    assert summary["reliability"]
+    assert summary["abstention_cost"] == 0
