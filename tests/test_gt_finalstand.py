@@ -75,6 +75,69 @@ def test_har9_terminal_closeout_requires_complete_concrete_identities() -> None:
         )
 
 
+def test_har9_closeout_rejects_unknown_units_and_missing_terminal_receipts() -> None:
+    phase2 = _load_phase2()
+    with pytest.raises(ValueError, match="unknown unit"):
+        phase2.build_closeout_receipt(
+            harness_head="a" * 40,
+            groundtruth_head="b" * 40,
+            unit_heads={"har13": "c" * 40},
+            input_receipts={"har9": "d" * 64},
+            environment_sha256="e" * 64,
+        )
+    receipt = phase2.build_closeout_receipt(
+        harness_head="a" * 40,
+        groundtruth_head="b" * 40,
+        unit_heads={"har9": "c" * 40},
+        input_receipts={"har9": "d" * 64},
+        environment_sha256="e" * 64,
+    )
+    unknown = copy.deepcopy(receipt)
+    unknown["unit_heads"]["har13"] = "f" * 40
+    assert not phase2.verify_closeout_receipt(unknown)
+    unknown = copy.deepcopy(receipt)
+    unknown["input_receipts"]["har13"] = "f" * 64
+    assert not phase2.verify_closeout_receipt(unknown)
+    terminal = copy.deepcopy(receipt)
+    terminal["unit_heads"] = {
+        name: "c" * 40 for name in phase2.HAR9_REQUIRED_UNITS
+    }
+    terminal["input_receipts"] = {"har9": "d" * 64}
+    unsigned = dict(terminal)
+    unsigned.pop("bundle_sha256")
+    terminal["bundle_sha256"] = phase2._canonical_sha256(unsigned)
+    assert not phase2.verify_closeout_receipt(terminal, require_terminal=True)
+    with pytest.raises(ValueError, match="missing input receipts"):
+        phase2.build_closeout_receipt(
+            harness_head="a" * 40,
+            groundtruth_head="b" * 40,
+            unit_heads={name: "c" * 40 for name in phase2.HAR9_REQUIRED_UNITS},
+            input_receipts={"har9": "d" * 64},
+            environment_sha256="e" * 64,
+            allow_provisional=False,
+        )
+
+
+def test_har9_closeout_requires_per_unit_repository_binding() -> None:
+    phase2 = _load_phase2()
+    receipt = phase2.build_closeout_receipt(
+        harness_head="a" * 40,
+        groundtruth_head="b" * 40,
+        unit_heads={"har42": "c" * 40, "har9": "d" * 40},
+        input_receipts={"har42": "e" * 64, "har9": "f" * 64},
+        environment_sha256="1" * 64,
+    )
+    missing = copy.deepcopy(receipt)
+    missing.pop("unit_repositories")
+    assert not phase2.verify_closeout_receipt(missing)
+    wrong = copy.deepcopy(receipt)
+    wrong["unit_repositories"]["har42"] = "harness"
+    wrong_unsigned = dict(wrong)
+    wrong_unsigned.pop("bundle_sha256")
+    wrong["bundle_sha256"] = phase2._canonical_sha256(wrong_unsigned)
+    assert not phase2.verify_closeout_receipt(wrong)
+
+
 def test_har9_assembly_input_skeleton_covers_all_units_without_authorizing_run() -> None:
     phase2 = _load_phase2()
     receipt = phase2.build_assembly_input_skeleton(
@@ -686,7 +749,7 @@ def test_har9_closeout_keeps_benchmark_approval_false() -> None:
     receipt = module.build_closeout_receipt(
         harness_head="a" * 40,
         groundtruth_head="b" * 40,
-        unit_heads={"HAR-9": "c" * 40},
+        unit_heads={"har9": "c" * 40},
         input_receipts={"har5": "d" * 64},
         environment_sha256="e" * 64,
     )

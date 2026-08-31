@@ -70,6 +70,8 @@ HAR9_REQUIRED_UNITS = frozenset(
 )
 HAR9_ASSEMBLY_INPUT_SCHEMA = "gt.har9.assembly_inputs.v1"
 HAR9_ASSEMBLY_INPUTS = tuple(sorted(HAR9_REQUIRED_UNITS))
+HAR9_GROUNDTRUTH_UNITS = frozenset({"har42", "har60", "har61"})
+HAR9_REPOSITORY_NAMES = frozenset({"harness", "groundtruth"})
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -84,6 +86,7 @@ def build_closeout_receipt(
     unit_heads: dict[str, str],
     input_receipts: dict[str, str],
     environment_sha256: str,
+    unit_repositories: dict[str, str] | None = None,
     provider_calls: int = 0,
     benchmark_runs: int = 0,
     allow_provisional: bool = True,
@@ -98,6 +101,8 @@ def build_closeout_receipt(
         for name, value in unit_heads.items()
     ):
         raise ValueError("closeout unit heads must be named full commit SHAs")
+    if not set(unit_heads) <= HAR9_REQUIRED_UNITS:
+        raise ValueError("closeout unit heads contain an unknown unit")
     if provider_calls != 0 or benchmark_runs != 0:
         raise ValueError("closeout must remain provider-free and benchmark-free")
     if not isinstance(input_receipts, dict) or not input_receipts or any(
@@ -107,6 +112,19 @@ def build_closeout_receipt(
         for name, value in input_receipts.items()
     ):
         raise ValueError("closeout inputs must be named SHA-256 receipt digests")
+    if not set(input_receipts) <= HAR9_REQUIRED_UNITS:
+        raise ValueError("closeout inputs contain an unknown unit")
+    repositories = unit_repositories or {
+        name: ("groundtruth" if name in HAR9_GROUNDTRUTH_UNITS else "harness")
+        for name in unit_heads
+    }
+    if set(repositories) != set(unit_heads) or any(
+        not isinstance(name, str) or repo not in HAR9_REPOSITORY_NAMES
+        for name, repo in repositories.items()
+    ):
+        raise ValueError(
+            "closeout unit repositories must bind every unit to harness or groundtruth"
+        )
     if not isinstance(environment_sha256, str) or (
         environment_sha256 != "UNVERIFIED" and not _SHA256_RE.fullmatch(environment_sha256)
     ):
@@ -115,6 +133,12 @@ def build_closeout_receipt(
         missing = sorted(HAR9_REQUIRED_UNITS - set(unit_heads))
         if missing:
             raise ValueError(f"terminal closeout missing unit heads: {', '.join(missing)}")
+        missing_receipts = sorted(HAR9_REQUIRED_UNITS - set(input_receipts))
+        if missing_receipts:
+            raise ValueError(
+                "terminal closeout missing input receipts: "
+                + ", ".join(missing_receipts)
+            )
         if environment_sha256 == "UNVERIFIED":
             raise ValueError("terminal closeout requires a concrete environment digest")
     payload: dict[str, Any] = {
@@ -122,6 +146,7 @@ def build_closeout_receipt(
         "harness_head": harness_head,
         "groundtruth_head": groundtruth_head,
         "unit_heads": dict(sorted(unit_heads.items())),
+        "unit_repositories": dict(sorted(repositories.items())),
         "input_receipts": dict(sorted(input_receipts.items())),
         "environment_sha256": environment_sha256,
         "results": {"provider_calls": 0, "benchmark_runs": 0},
@@ -152,6 +177,7 @@ def verify_closeout_receipt(
         "harness_head",
         "groundtruth_head",
         "unit_heads",
+        "unit_repositories",
         "input_receipts",
         "environment_sha256",
         "results",
@@ -165,15 +191,31 @@ def verify_closeout_receipt(
     ):
         return False
     unit_heads = receipt["unit_heads"]
+    unit_repositories = receipt["unit_repositories"]
     input_receipts = receipt["input_receipts"]
-    if not isinstance(unit_heads, dict) or any(
+    if not isinstance(unit_heads, dict) or not set(unit_heads) <= HAR9_REQUIRED_UNITS or any(
         not isinstance(k, str) or not _SHA1_RE.fullmatch(v)
         for k, v in unit_heads.items()
     ):
         return False
-    if not isinstance(input_receipts, dict) or any(
-        not isinstance(k, str) or not _SHA256_RE.fullmatch(v)
-        for k, v in input_receipts.items()
+    if (
+        not isinstance(unit_repositories, dict)
+        or set(unit_repositories) != set(unit_heads)
+        or any(repo not in HAR9_REPOSITORY_NAMES for repo in unit_repositories.values())
+        or unit_repositories
+        != {
+            name: ("groundtruth" if name in HAR9_GROUNDTRUTH_UNITS else "harness")
+            for name in unit_heads
+        }
+    ):
+        return False
+    if (
+        not isinstance(input_receipts, dict)
+        or not set(input_receipts) <= HAR9_REQUIRED_UNITS
+        or any(
+            not isinstance(k, str) or not _SHA256_RE.fullmatch(v)
+            for k, v in input_receipts.items()
+        )
     ):
         return False
     environment = receipt["environment_sha256"]
@@ -208,7 +250,12 @@ def verify_closeout_receipt(
         return False
     if expected_environment_sha256 is not None and environment != expected_environment_sha256:
         return False
-    if require_terminal and (set(unit_heads) != HAR9_REQUIRED_UNITS or environment == "UNVERIFIED"):
+    if require_terminal and (
+        set(unit_heads) != HAR9_REQUIRED_UNITS
+        or set(unit_repositories) != HAR9_REQUIRED_UNITS
+        or set(input_receipts) != HAR9_REQUIRED_UNITS
+        or environment == "UNVERIFIED"
+    ):
         return False
     unsigned = dict(receipt)
     unsigned.pop("bundle_sha256", None)
