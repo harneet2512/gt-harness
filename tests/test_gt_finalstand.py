@@ -13,6 +13,8 @@ import warnings
 import zipfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -32,6 +34,45 @@ def _load_phase2():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_har9_closeout_rejects_unbound_inputs_and_verifies_bundle() -> None:
+    phase2 = _load_phase2()
+    with pytest.raises(ValueError, match="full commit SHAs"):
+        phase2.build_closeout_receipt(
+            harness_head="arbitrary",
+            groundtruth_head="b" * 40,
+            unit_heads={"har9": "c" * 40},
+            input_receipts={"har9": "d" * 64},
+            environment_sha256="e" * 64,
+        )
+    receipt = phase2.build_closeout_receipt(
+        harness_head="a" * 40,
+        groundtruth_head="b" * 40,
+        unit_heads={"har9": "c" * 40},
+        input_receipts={"har9": "d" * 64},
+        environment_sha256="e" * 64,
+    )
+    assert phase2.verify_closeout_receipt(receipt)
+    mutated = copy.deepcopy(receipt)
+    mutated["unit_heads"]["har9"] = "f" * 40
+    assert not phase2.verify_closeout_receipt(mutated)
+    mutated = copy.deepcopy(receipt)
+    mutated["bundle_sha256"] = "0" * 64
+    assert not phase2.verify_closeout_receipt(mutated)
+
+
+def test_har9_terminal_closeout_requires_complete_concrete_identities() -> None:
+    phase2 = _load_phase2()
+    with pytest.raises(ValueError, match="missing unit heads"):
+        phase2.build_closeout_receipt(
+            harness_head="a" * 40,
+            groundtruth_head="b" * 40,
+            unit_heads={"har9": "c" * 40},
+            input_receipts={"har9": "d" * 64},
+            environment_sha256="e" * 64,
+            allow_provisional=False,
+        )
 
 
 def test_finalstand_is_machine_valid() -> None:
