@@ -31,6 +31,7 @@ jobs:
 
       - name: Central runtime tests
         run: |
+          python -m pytest tests/test_central_runtime_reconciliation.py -q
           python -m pytest tests/test_gt_central_runtime.py \
             tests/test_gt_central_agent.py \
             tests/test_gt_on_experiment.py -q
