@@ -1,5 +1,271 @@
-status: UNAVAILABLE
-database: none present in the HAR-61 closeout slice
-schema_digest: not computed
-reason: No indexed two-candidate SQLite database/schema artifact is available at the accepted HAR-61 producer or consumer SHAs.
-authoritative: false
+status: OBSERVED
+database: closeout/graph.db
+schema_sha256: 85e230b5424ad53ffc18c2d85ba6f9b4b3316054dd321676c8a6aa017fcbfb16
+database_sha256: 31b8e0181b21f2da771108d3ceae7a8de17f6b13d0a9a6cd118f736d7ccf6d15
+authoritative: true
+--- sqlite_master ---
+index|idx_assertions_target|CREATE INDEX idx_assertions_target ON assertions(target_node_id)
+index|idx_assertions_test|CREATE INDEX idx_assertions_test ON assertions(test_node_id)
+index|idx_calls_unique_endpoint|CREATE UNIQUE INDEX idx_calls_unique_endpoint
+		ON edges(source_id,target_id,type) WHERE type='CALLS'
+index|idx_callsite_caller_state_v2|CREATE INDEX idx_callsite_caller_state_v2 ON nodes(caller_symbol_id,candidate_state) WHERE node_type='callsite'
+index|idx_callsite_location_v2|CREATE INDEX idx_callsite_location_v2 ON nodes(repo_id,source_revision,file_node_id,byte_start) WHERE node_type='callsite'
+index|idx_candidate_callsite_v2|CREATE INDEX idx_candidate_callsite_v2 ON edges(callsite_stable_id,viability,target_symbol_id) WHERE type='CANDIDATE_TARGET'
+index|idx_candidate_reverse_v2|CREATE INDEX idx_candidate_reverse_v2 ON edges(target_symbol_id,callsite_stable_id) WHERE type='CANDIDATE_TARGET'
+index|idx_candidate_stable_id_v2|CREATE UNIQUE INDEX idx_candidate_stable_id_v2 ON edges(stable_id) WHERE stable_id IS NOT NULL
+index|idx_closure_source|CREATE INDEX idx_closure_source ON closure(source_id)
+index|idx_closure_target|CREATE INDEX idx_closure_target ON closure(target_id)
+index|idx_cochanges_a|CREATE INDEX idx_cochanges_a ON cochanges(file_a)
+index|idx_cochanges_b|CREATE INDEX idx_cochanges_b ON cochanges(file_b)
+index|idx_completeness_fact_v2|CREATE INDEX idx_completeness_fact_v2 ON nodes(callsite_id,pass_kind,fact_status) WHERE node_type='completeness_fact'
+index|idx_derivation_fact_v2|CREATE INDEX idx_derivation_fact_v2 ON nodes(callsite_id,target_symbol_id,pass_kind,step_ordinal) WHERE node_type='derivation_fact'
+index|idx_edges_candidate_policy|CREATE INDEX idx_edges_candidate_policy ON edges(type, derivation_kind, evidence_set, candidate_count, target_id)
+index|idx_edges_confidence|CREATE INDEX idx_edges_confidence ON edges(confidence)
+index|idx_edges_resolution|CREATE INDEX idx_edges_resolution ON edges(resolution_method)
+index|idx_edges_source|CREATE INDEX idx_edges_source ON edges(source_id)
+index|idx_edges_source_file|CREATE INDEX idx_edges_source_file ON edges(source_file)
+index|idx_edges_source_type|CREATE INDEX idx_edges_source_type ON edges(source_id, type)
+index|idx_edges_target|CREATE INDEX idx_edges_target ON edges(target_id)
+index|idx_edges_target_tier|CREATE INDEX idx_edges_target_tier ON edges(target_id, trust_tier)
+index|idx_edges_target_type|CREATE INDEX idx_edges_target_type ON edges(target_id, type)
+index|idx_edges_trust_tier|CREATE INDEX idx_edges_trust_tier ON edges(trust_tier)
+index|idx_edges_type|CREATE INDEX idx_edges_type ON edges(type)
+index|idx_nodes_file|CREATE INDEX idx_nodes_file ON nodes(file_path)
+index|idx_nodes_label|CREATE INDEX idx_nodes_label ON nodes(label)
+index|idx_nodes_name|CREATE INDEX idx_nodes_name ON nodes(name)
+index|idx_nodes_parent|CREATE INDEX idx_nodes_parent ON nodes(parent_id)
+index|idx_nodes_qname|CREATE INDEX idx_nodes_qname ON nodes(qualified_name)
+index|idx_nodes_stable_id|CREATE UNIQUE INDEX idx_nodes_stable_id ON nodes(stable_id) WHERE stable_id IS NOT NULL
+index|idx_nodes_test|CREATE INDEX idx_nodes_test ON nodes(is_test) WHERE is_test = 1
+index|idx_policy_version_v2|CREATE UNIQUE INDEX idx_policy_version_v2 ON nodes(policy_name,semantic_version) WHERE node_type='query_policy_version'
+index|idx_properties_kind|CREATE INDEX idx_properties_kind ON properties(kind)
+index|idx_properties_node|CREATE INDEX idx_properties_node ON properties(node_id)
+index|idx_properties_node_kind|CREATE INDEX idx_properties_node_kind ON properties(node_id, kind)
+index|idx_resolution_callsites_source|CREATE INDEX idx_resolution_callsites_source ON resolution_callsites(source_id)
+index|idx_resolution_candidates_target|CREATE INDEX idx_resolution_candidates_target ON resolution_candidates(target_id)
+table|assertions|CREATE TABLE assertions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		test_node_id INTEGER NOT NULL REFERENCES nodes(id),
+		target_node_id INTEGER DEFAULT 0,
+		resolution_score REAL DEFAULT 0.0,
+		kind TEXT NOT NULL,
+		expression TEXT NOT NULL,
+		expected TEXT,
+		line INTEGER
+	)
+table|closure|CREATE TABLE closure (
+		source_id INTEGER,
+		target_id INTEGER,
+		depth INTEGER,
+		min_confidence REAL,
+		PRIMARY KEY(source_id, target_id, depth)
+	)
+table|cochanges|CREATE TABLE cochanges (
+		file_a TEXT NOT NULL,
+		file_b TEXT NOT NULL,
+		count INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY(file_a, file_b)
+	)
+table|edges|CREATE TABLE edges (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		source_id INTEGER NOT NULL REFERENCES nodes(id),
+		target_id INTEGER NOT NULL REFERENCES nodes(id),
+		type TEXT NOT NULL,
+		source_line INTEGER,
+		source_file TEXT,
+		resolution_method TEXT,
+		confidence REAL DEFAULT 0.0,
+		metadata TEXT,
+		trust_tier TEXT DEFAULT 'SPECULATIVE',
+		candidate_count INTEGER DEFAULT 1,
+		evidence_type TEXT,
+		verification_status TEXT DEFAULT 'unverified',
+		derivation_contract TEXT,
+		derivation_kind TEXT,
+		evidence_set TEXT,
+		analysis_boundary TEXT,
+		pass_kind TEXT,
+		pass_version TEXT,
+		pass_status TEXT,
+		abstention_reason TEXT,
+		sibling_count INTEGER,
+		producer_build_id TEXT,
+		producer_source_fingerprint TEXT,
+		pass_coverage TEXT,
+		provenance_steps TEXT,
+		declared_scope TEXT,
+		receiver_type TEXT,
+		receiver_origin TEXT,
+		receiver_shape TEXT,
+		receiver_chain TEXT,
+		import_chain TEXT,
+		export_status TEXT,
+		parser_complete BOOLEAN,
+		stable_id TEXT,
+		schema_version INTEGER,
+		callsite_stable_id TEXT,
+		target_symbol_id TEXT,
+		ordinal INTEGER,
+		viability TEXT,
+		derivation_fact_ids TEXT,
+		exclusion_fact_ids TEXT,
+		selection_rule_id TEXT
+	)
+table|file_hashes|CREATE TABLE file_hashes (
+		file_path TEXT PRIMARY KEY,
+		content_hash TEXT NOT NULL,
+		language TEXT,
+		indexed_at TEXT NOT NULL
+	)
+table|nodes|CREATE TABLE nodes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		label TEXT NOT NULL,
+		name TEXT NOT NULL,
+		qualified_name TEXT,
+		file_path TEXT NOT NULL,
+		start_line INTEGER,
+		end_line INTEGER,
+		signature TEXT,
+		return_type TEXT,
+		is_exported BOOLEAN DEFAULT 0,
+		is_test BOOLEAN DEFAULT 0,
+		language TEXT NOT NULL,
+		parent_id INTEGER REFERENCES nodes(id),
+		stable_id TEXT,
+		node_type TEXT,
+		schema_version INTEGER,
+		repo_id TEXT,
+		source_revision TEXT,
+		producer_build_id TEXT,
+		file_node_id INTEGER,
+		caller_symbol_id TEXT,
+		ast_path TEXT,
+		byte_start INTEGER,
+		byte_end INTEGER,
+		line_start INTEGER,
+		column_start INTEGER,
+		dispatch_form TEXT,
+		callee_lexeme TEXT,
+		declared_receiver_type_id TEXT,
+		receiver_value_id TEXT,
+		argument_arity INTEGER,
+		parse_state TEXT,
+		candidate_state TEXT,
+		selected_target_id TEXT,
+		candidate_count_v2 INTEGER,
+		derivation_set_id TEXT,
+		completeness_set_id TEXT,
+		callsite_id TEXT,
+		target_symbol_id TEXT,
+		pass_kind TEXT,
+		pass_version TEXT,
+		step_ordinal INTEGER,
+		operation TEXT,
+		input_fact_ids TEXT,
+		declared_type_id TEXT,
+		allocated_type_id TEXT,
+		field_id TEXT,
+		allocation_site_id TEXT,
+		scope_id TEXT,
+		import_id TEXT,
+		configuration_artifact_id TEXT,
+		boundary_kind TEXT,
+		boundary_id TEXT,
+		fact_status TEXT,
+		covered_units INTEGER,
+		known_units INTEGER,
+		reason_code TEXT,
+		blocking_pass_kinds TEXT,
+		candidate_stable_ids TEXT,
+		flow_type_stable_ids TEXT,
+		allocation_type_stable_ids TEXT,
+		reachable_stable_ids TEXT,
+		root_stable_ids TEXT,
+		root_policy TEXT,
+		root_policy_version TEXT,
+		root_completeness TEXT,
+		root_boundary TEXT,
+		policy_name TEXT,
+		semantic_version TEXT,
+		policy_json TEXT,
+		policy_hash TEXT,
+		created_at TEXT,
+		created_by TEXT,
+		fact_schema_min INTEGER,
+		fact_schema_max INTEGER,
+		explanation_template_version TEXT,
+		active_from TEXT,
+		supersedes_id TEXT
+	)
+table|nodes_fts|CREATE VIRTUAL TABLE nodes_fts USING fts5(
+		name, qualified_name, signature, file_path,
+		content='nodes', content_rowid='id'
+	)
+table|nodes_fts_config|CREATE TABLE 'nodes_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID
+table|nodes_fts_data|CREATE TABLE 'nodes_fts_data'(id INTEGER PRIMARY KEY, block BLOB)
+table|nodes_fts_docsize|CREATE TABLE 'nodes_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)
+table|nodes_fts_idx|CREATE TABLE 'nodes_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID
+table|project_meta|CREATE TABLE project_meta (
+		key TEXT PRIMARY KEY,
+		value TEXT
+	)
+table|properties|CREATE TABLE properties (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		node_id INTEGER NOT NULL REFERENCES nodes(id),
+		kind TEXT NOT NULL,
+		value TEXT NOT NULL,
+		line INTEGER,
+		confidence REAL DEFAULT 1.0
+	)
+table|resolution_callsites|CREATE TABLE resolution_callsites (
+		callsite_id TEXT PRIMARY KEY,
+		callsite_ordinal INTEGER NOT NULL UNIQUE,
+		repository_revision TEXT NOT NULL,
+		source_stable_id TEXT NOT NULL REFERENCES resolution_symbols(stable_id),
+		source_native_id TEXT NOT NULL,
+		source_id INTEGER,
+		source_line INTEGER,
+		source_file TEXT NOT NULL,
+		callee TEXT NOT NULL,
+		language TEXT NOT NULL,
+		dispatch_state TEXT NOT NULL,
+		candidate_count INTEGER NOT NULL DEFAULT 0,
+		selected_target_stable_id TEXT,
+		selected_target_native_id TEXT,
+		mechanism TEXT NOT NULL,
+		verification_status TEXT NOT NULL DEFAULT 'unverified'
+	)
+table|resolution_candidates|CREATE TABLE resolution_candidates (
+		callsite_id TEXT NOT NULL REFERENCES resolution_callsites(callsite_id) ON DELETE CASCADE,
+		target_id INTEGER NOT NULL REFERENCES nodes(id),
+		target_stable_id TEXT NOT NULL REFERENCES resolution_symbols(stable_id),
+		target_native_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		mechanism TEXT NOT NULL,
+		declared_scope TEXT NOT NULL DEFAULT '',
+		receiver_type TEXT NOT NULL DEFAULT '',
+		receiver_origin TEXT NOT NULL DEFAULT '',
+		receiver_shape TEXT NOT NULL DEFAULT '',
+		receiver_chain TEXT NOT NULL DEFAULT '[]',
+		import_chain TEXT NOT NULL DEFAULT '[]',
+		dynamic_dispatch BOOLEAN NOT NULL DEFAULT 0,
+		export_status TEXT NOT NULL DEFAULT 'unknown',
+		parser_complete BOOLEAN,
+		verification_status TEXT NOT NULL,
+		selected BOOLEAN NOT NULL DEFAULT 0,
+		PRIMARY KEY(callsite_id, ordinal),
+		UNIQUE(callsite_id, target_stable_id)
+	)
+table|resolution_symbols|CREATE TABLE resolution_symbols (
+		stable_id TEXT PRIMARY KEY,
+		native_id TEXT NOT NULL UNIQUE,
+		native_kind TEXT NOT NULL,
+		normalized_kind TEXT NOT NULL,
+		language TEXT NOT NULL,
+		path TEXT NOT NULL,
+		qualified_name TEXT NOT NULL,
+		start_line INTEGER NOT NULL,
+		end_line INTEGER NOT NULL,
+		export_status TEXT NOT NULL
+	)
+table|sqlite_sequence|CREATE TABLE sqlite_sequence(name,seq)

@@ -1,7 +1,59 @@
 {
-  "status": "UNAVAILABLE",
-  "reason": "The HAR-61 producer slice does not contain an indexed two-candidate SQLite fixture or durable row export.",
-  "fixture_rows": [],
-  "authoritative": false,
-  "action": "Do not infer or fabricate candidate rows; producer CLI/database evidence remains outstanding."
+  "status": "OBSERVED",
+  "authoritative": true,
+  "producer_branch_head": "944d37ec9332eedaca06845462c36a5149587afb",
+      "fixture": "closeout/fixture",
+      "database": "closeout/graph.db",
+  "two_candidate_callsites": [
+    {
+      "callsite_id": "01d5978d232e0b32b44d98766adce2feee8d5902b8a8161897e296f1335a3a3b",
+      "candidate_count": 2,
+      "callee": "Run",
+      "dispatch_state": "ambiguous",
+      "source_file": "main.go",
+      "source_line": 18
+    }
+  ],
+  "candidate_row_count": 2,
+  "fixture_rows": [
+    {
+      "callsite_id": "01d5978d232e0b32b44d98766adce2feee8d5902b8a8161897e296f1335a3a3b",
+      "target_id": 4,
+      "target_stable_id": "88e6b52f1afe0d0bd3f18655c6c3d87eee6fc234bb292c5fe08bcb6ff7aaa24b",
+      "target_native_id": "4",
+      "ordinal": 0,
+      "mechanism": "vta",
+      "declared_scope": "ImplA.Run",
+      "receiver_type": "ImplA,ImplB",
+      "receiver_origin": "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f",
+      "receiver_shape": "runner.Run",
+      "receiver_chain": "[\"runner\"]",
+      "import_chain": "[]",
+      "dynamic_dispatch": 0,
+      "export_status": "exported",
+      "parser_complete": 1,
+      "verification_status": "candidate_only",
+      "selected": 0
+    },
+    {
+      "callsite_id": "01d5978d232e0b32b44d98766adce2feee8d5902b8a8161897e296f1335a3a3b",
+      "target_id": 6,
+      "target_stable_id": "853d5a7acc47858cba1ce7c11c74ef5ab8fa711d2b35cf72bd32b86b55e98d49",
+      "target_native_id": "6",
+      "ordinal": 1,
+      "mechanism": "vta",
+      "declared_scope": "ImplB.Run",
+      "receiver_type": "ImplA,ImplB",
+      "receiver_origin": "vta_flow_stable_ids=c4338eb99feb5cf08d4abd27b87a37013b40f3baafed430b79cea0b68f33368c,db099b132726a038e49254ac1b715beb762a7d30426e0fa79fb5f4df24c81f6f",
+      "receiver_shape": "runner.Run",
+      "receiver_chain": "[\"runner\"]",
+      "import_chain": "[]",
+      "dynamic_dispatch": 0,
+      "export_status": "exported",
+      "parser_complete": 1,
+      "verification_status": "candidate_only",
+      "selected": 0
+    }
+  ],
+  "callsites_ge_2": 1
 }

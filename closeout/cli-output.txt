@@ -1,4 +1,59 @@
-status: UNAVAILABLE
-command: not run
-reason: HAR-61 closeout slice has no indexed two-candidate producer fixture or CLI input; a CLI result would be fabricated.
-authoritative: false
+$ go build -tags sqlite_fts5 -ldflags -X main.commitSHA=test-commit -X main.buildTimeUTC=2026-08-29T00:00:00Z -X main.sourceFingerprint=test-source -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=test-toolchain -o D:\gt-har61-closeout\closeout\gt-index.exe ./cmd/gt-index
+exit=0
+--- stdout ---
+
+--- stderr ---
+
+
+$ D:\gt-har61-closeout\closeout\gt-index.exe -root D:\gt-har61-closeout\closeout\fixture -output D:\gt-har61-closeout\closeout\graph.db -workers 1
+exit=0
+--- stdout ---
+{"files":1,"nodes":25,"edges":22,"imports":0,"properties":6,"assertions":0,"edges_import":0,"edges_same_file":0,"edges_name_match":0,"time_ms":335,"workers":1}
+
+--- stderr ---
+Pass 1: discovering files in D:\gt-har61-closeout\closeout\fixture...
+  Found 1 source files
+  go: 1 files
+Pass 2: parsing 1 files (1 workers)...
+  Parsed 1/1 files in 1ms (0 parse failures, 0.0%)
+2026/08/30 22:08:57 [WARN] nodes_fts clear/insert failed (database disk image is malformed) â€” DROP+recreate to self-heal the FTS5 index
+  Inserted 7 nodes in 2ms
+  Extracted 7 definitions, 0 imports
+Pass 3: resolving 1 call references...
+  Declared-type receivers: 0 callers with typed params
+  Declared-type fields: 0 classes with typed fields
+  Return-shape receivers: 0 factories with constructor returns
+  Assignment tracking: 1 assignments in 1 files
+  Resolved 1/1 calls in 1ms [impl_method:1]
+  Inserted 1 CALLS + 3 CONTAINS edges in 308ms
+Pass 4: inserting 6 properties, 0 assertions...
+  Inserted 6 properties, 0 assertions in 1ms
+Pass 4b: resolving API edges...
+  Resolved 0 API edges in 0s
+Pass 4c: extracting relationships (inheritance, interfaces, composition, re-exports)...
+  Extracted 2 relationship edges in 2ms
+Pass 4d: detecting serialization pairs + structural twins...
+  Detected 0 serialization pair properties, 0 structural twin properties in 0s
+Pass 4f: materializing IMPORTS edges...
+  Pass 4f: 0 IMPORTS edges, 0 promoted relations in 1ms
+Pass 4e: computing transitive closure (verified CALLS, depth<=3)...
+  Computed 0 closure rows in 1ms
+Pass 5: storing metadata...
+Pass 5b: recording file hashes for 1 files...
+Pass 5c: mining co-change from git history...
+  Stored 172 co-change pairs
+
+Done in 335ms
+  Files:      1
+  Nodes:      25
+  Edges:      22
+  Imports:    0
+  Properties: 6
+  Assertions: 0
+  Workers:    1
+  BuildTime:  335 ms (diagnostic; not in project_meta)
+  Commit:     test-commit
+  BuiltAt:    2026-08-29T00:00:00Z
+  Toolchain:  test-toolchain
+  Output:     D:\gt-har61-closeout\closeout\graph.db
+
