@@ -27,7 +27,9 @@ def main() -> int:
     receipt["unit_heads"]["har5"] = UNIT_SHA
     receipt["unit_heads"]["har37"] = UNIT_SHA
     receipt["unit_heads"]["har9"] = UNIT_SHA
-    receipt["input_receipts"]["har5"] = "49ada87e6e8c2eeff3bf3562a2bfd114616a9ceb53f8b91fb51b06bb58935159"
+    receipt["input_receipts"]["har5"] = (
+        "49ada87e6e8c2eeff3bf3562a2bfd114616a9ceb53f8b91fb51b06bb58935159"
+    )
     har37 = ROOT / "gt_finalstand" / "receipts" / "har37_whole_system_audit_20260831.json"
     receipt["input_receipts"]["har37"] = hashlib.sha256(har37.read_bytes()).hexdigest()
     unsigned = dict(receipt)

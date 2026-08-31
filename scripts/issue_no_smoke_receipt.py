@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +34,10 @@ def main() -> int:
             {
                 "command": "GH_TOKEN=<gh auth token> python scripts/validate_gt_finalstand.py",
                 "exit_code": 0,
-                "result": "ok=true; errors=[]; direct=17; role_audit=129; languages=30; language_operation_pairs=210; todo_statuses=26",
+                "result": (
+                    "ok=true; errors=[]; direct=17; role_audit=129; languages=30; "
+                    "language_operation_pairs=210; todo_statuses=26"
+                ),
                 "validation_receipt_sha256": digest(validation.read_bytes()),
             },
             {
