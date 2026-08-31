@@ -4,8 +4,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from gt_engine.task_contract import TaskContract, significant_tokens
@@ -26,8 +29,82 @@ GRAPH_SURFACES = (
     "file_hashes",
     "project_meta",
 )
-CAPABILITY_MATRIX_SCHEMA = "gt.capability_matrix.v1"
-CAPABILITY_STATES = frozenset({"implemented", "evidenced", "absent", "unverified"})
+CAPABILITY_MATRIX_SCHEMA = "gt.capability_matrix.v2"
+CAPABILITY_STATES = frozenset({"demonstrated", "partial", "absent", "stale"})
+GITNEXUS_PINNED_REVISION = "7e993ab8972386294fb96bf14a8665d0b5325397"
+
+# These are probes, not claims copied from a ticket.  A cell is produced only
+# after the exact blob at the supplied revision has been read and its symbol
+# located in that blob.
+_CAPABILITY_PROBES = (
+    ("indexing and freshness", "gt_engine/indexer.py", "ensure_index_with_receipt",
+     "gitnexus/src/core/analysis-features.ts", "resolveAnalysisFeatureVersions"),
+    ("hybrid retrieval", "gt_engine/graph_context.py", "build_graph_projection",
+     "gitnexus/src/core/search/hybrid-search.ts", "hybridSearch"),
+    ("community analysis", "gt_engine/graph_context.py", "build_graph_projection",
+     "gitnexus/src/core/ingestion/community-processor.ts", "processCommunities"),
+    ("resolution provenance", "gt_engine/resolution_provenance.py", "CallCandidate",
+     "gitnexus/src/cli/eval-server.ts", "candidates"),
+    ("feature lifecycle accounting", "gt_engine/attribution.py", "summarize_features",
+     "gitnexus/src/storage/repo-meta.ts", "RepoMeta"),
+    ("production query delivery", "gt_engine/bridge.py", "GTBridge",
+     "gitnexus/src/cli/tool.ts", "output"),
+)
+
+
+def _git_blob(root: str | Path, revision: str, path: str) -> bytes | None:
+    """Read one immutable Git blob; never inspect a working-tree substitute."""
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        return None
+    normalized = path.replace("\\", "/")
+    if not normalized or normalized.startswith("/") or ".." in normalized.split("/"):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "show", f"{revision}:{normalized}"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _symbol_line(blob: bytes, symbol: str) -> int | None:
+    text = blob.decode("utf-8", "replace")
+    match = re.search(rf"(?m)^.*\b{re.escape(symbol)}\b.*$", text)
+    if match is None:
+        return None
+    return text.count("\n", 0, match.start()) + 1
+
+
+def _source_cell(
+    tool: str,
+    capability: str,
+    root: str | Path,
+    revision: str,
+    path: str,
+    symbol: str,
+) -> tuple[dict[str, Any], bytes] | None:
+    blob = _git_blob(root, revision, path)
+    if blob is None:
+        return None
+    line = _symbol_line(blob, symbol)
+    citation: dict[str, Any] = {
+        "tool": tool,
+        "path": path,
+        "sha256": hashlib.sha256(blob).hexdigest(),
+        "revision": revision,
+    }
+    if line is not None:
+        citation.update({"symbol": symbol, "line": line})
+    return {
+        "tool": tool,
+        "capability": capability,
+        "state": "demonstrated" if line is not None else "partial",
+        "citation": citation,
+    }, blob
 
 
 def graph_revision(graph_db: str) -> str:
@@ -72,35 +149,30 @@ class GraphProjection:
 
 
 def build_capability_matrix(
-    gt_entries: list[dict[str, Any]],
-    gitnexus_entries: list[dict[str, Any]],
+    gt_root: str | Path,
     *,
-    source_revision: str,
-    gitnexus_revision: str,
+    gt_revision: str,
+    gitnexus_root: str | Path,
+    gitnexus_revision: str = GITNEXUS_PINNED_REVISION,
 ) -> dict[str, Any]:
-    """Build deterministic, citation-bound GT-vs-GitNexus capability cells."""
-    if not source_revision or not gitnexus_revision:
-        raise ValueError("matrix revisions are required")
+    """Generate a matrix from pinned source bytes and resolvable symbols."""
+    if not re.fullmatch(r"[0-9a-f]{40}", gt_revision) or not re.fullmatch(
+        r"[0-9a-f]{40}", gitnexus_revision
+    ):
+        raise ValueError("matrix revisions must be full Git SHAs")
     cells: list[dict[str, Any]] = []
-    for tool, entries in (("gt", gt_entries), ("gitnexus", gitnexus_entries)):
-        for entry in entries:
-            if not isinstance(entry, dict):
-                raise ValueError("matrix entry must be an object")
-            name = str(entry.get("capability", "")).strip()
-            state = str(entry.get("state", "")).strip().lower()
-            citation = entry.get("citation")
-            if not name or state not in CAPABILITY_STATES or not isinstance(citation, dict):
-                raise ValueError("matrix entry is incomplete")
-            path = str(citation.get("path", "")).replace("\\", "/")
-            digest = str(citation.get("sha256", ""))
-            if not path or len(digest) != 64:
-                raise ValueError("matrix citation is incomplete")
-            cells.append({"tool": tool, "capability": name, "state": state,
-                          "citation": {"path": path, "sha256": digest}})
+    for capability, gt_path, gt_symbol, gn_path, gn_symbol in _CAPABILITY_PROBES:
+        gt_cell = _source_cell("gt", capability, gt_root, gt_revision, gt_path, gt_symbol)
+        gn_cell = _source_cell(
+            "gitnexus", capability, gitnexus_root, gitnexus_revision, gn_path, gn_symbol
+        )
+        if gt_cell is None or gn_cell is None:
+            raise ValueError(f"pinned source probe unavailable for {capability}")
+        cells.extend((gt_cell[0], gn_cell[0]))
     cells.sort(key=lambda row: (row["capability"], row["tool"]))
     payload = {
         "schema": CAPABILITY_MATRIX_SCHEMA,
-        "source_revision": source_revision,
+        "source_revision": gt_revision,
         "gitnexus_revision": gitnexus_revision,
         "cells": cells,
     }
@@ -110,12 +182,15 @@ def build_capability_matrix(
     return payload
 
 
-def verify_capability_matrix(matrix: dict[str, Any], source_bytes: dict[str, bytes]) -> bool:
-    """Verify matrix digest and every citation's immutable source bytes."""
+def verify_capability_matrix(
+    matrix: dict[str, Any],
+    roots: dict[str, str | Path],
+) -> bool:
+    """Verify digest, pinned revisions, paths, symbols, and immutable blobs."""
     if not isinstance(matrix, dict) or matrix.get("schema") != CAPABILITY_MATRIX_SCHEMA:
         return False
     cells = matrix.get("cells")
-    if not isinstance(cells, list) or not cells:
+    if not isinstance(cells, list) or len(cells) != len(_CAPABILITY_PROBES) * 2:
         return False
     unsigned = {key: value for key, value in matrix.items() if key != "matrix_sha256"}
     digest = hashlib.sha256(
@@ -124,11 +199,40 @@ def verify_capability_matrix(matrix: dict[str, Any], source_bytes: dict[str, byt
     if matrix.get("matrix_sha256") != digest:
         return False
     for cell in cells:
+        if not isinstance(cell, dict) or cell.get("state") not in CAPABILITY_STATES:
+            return False
         citation = cell.get("citation", {})
-        blob = source_bytes.get(citation.get("path"))
+        tool = citation.get("tool")
+        path = citation.get("path")
+        revision = citation.get("revision")
+        if tool not in roots or not isinstance(path, str) or not isinstance(revision, str):
+            return False
+        blob = _git_blob(roots[tool], revision, path)
         if blob is None or hashlib.sha256(blob).hexdigest() != citation.get("sha256"):
             return False
+        symbol = citation.get("symbol")
+        line = citation.get("line")
+        if symbol is not None and _symbol_line(blob, str(symbol)) != line:
+            return False
     return True
+
+
+def persist_capability_matrix(path: str | Path, matrix: dict[str, Any]) -> None:
+    """Atomically persist the exact matrix bytes for later independent review."""
+    destination = Path(path)
+    temporary = destination.with_name(destination.name + ".tmp")
+    temporary.write_text(
+        json.dumps(matrix, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(destination)
+
+
+def load_capability_matrix(path: str | Path) -> dict[str, Any]:
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("capability matrix artifact must be an object")
+    return value
 
 
 def _connect(graph_db: str) -> sqlite3.Connection | None:
