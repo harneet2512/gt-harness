@@ -136,3 +136,45 @@ def test_reported_extension_must_create_real_vec0_table_before_use(tmp_path) -> 
         assert result.items[0].document_id == "owner"
     else:
         assert result.fallback_reason in {"vec0_unavailable", "vec0_query_failed"}
+
+
+def _load_sqlite_vec(connection: sqlite3.Connection) -> bool:
+    import sqlite_vec
+
+    connection.enable_load_extension(True)
+    sqlite_vec.load(connection)
+    return True
+
+
+def test_accelerated_mode_unions_lexical_graph_candidates_with_ann_pool(tmp_path) -> None:
+    index = SQLiteVectorIndex(
+        tmp_path / "vectors.sqlite",
+        model_id="model-v1",
+        tokenizer_id="tokenizer-v1",
+        dimension=3,
+        source_revision="source-r1",
+        graph_revision="graph-r1",
+        extension_loader=_load_sqlite_vec,
+    )
+    index.upsert(
+        [
+            _record("lex_only", (0.0, 1.0, 0.0), "lexical-only row"),
+            _record("ann_hit", (1.0, 0.0, 0.0), "vector-nearest row"),
+            _record("orphan", (0.0, 0.0, 1.0), "outside both channels"),
+        ]
+    )
+
+    result = index.query(
+        HybridQuery(
+            vector=(1.0, 0.0, 0.0),
+            lexical_scores={"lex_only": 1.0},
+            graph_scores={},
+            limit=5,
+            candidate_pool=1,
+        )
+    )
+
+    assert result.fallback_reason is None
+    assert "ann_hit" in result.candidate_ids
+    assert "lex_only" in result.candidate_ids
+    assert "orphan" not in result.candidate_ids

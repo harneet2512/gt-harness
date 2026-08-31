@@ -3,7 +3,9 @@
 Identity-bound lexical/structural retrieval refuses to run when repository
 identity disagrees with the central runtime binding.  The optional SQLite
 vector table is an accelerator only: candidate discovery is followed by
-exact, reproducible scoring over persisted source rows.
+exact, reproducible scoring over persisted source rows.  When vec0 is active,
+the ANN pool is unioned with any lexical or graph channel hits so channel-only
+candidates are not dropped before exact rescore.
 """
 
 from __future__ import annotations
@@ -286,6 +288,8 @@ class SQLiteVectorIndex:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(self.path)
         self._connection.execute("PRAGMA foreign_keys = ON")
+        if extension_loader is not None:
+            self._connection.enable_load_extension(True)
         self._identity = {
             "model_id": model_id,
             "tokenizer_id": tokenizer_id,
@@ -527,9 +531,20 @@ class SQLiteVectorIndex:
                     (self._vector_blob(query.vector), pool_size),
                 ).fetchall()
                 ids = {str(row[0]) for row in ann_rows}
+                lexical = query.lexical_scores or {}
+                graph = query.graph_scores or {}
+                ann_candidates = sorted(
+                    [item for item in scored if item[0][0] in ids],
+                    key=lambda item: (-item[1], item[0][0]),
+                )[:pool_size]
+                ids = {item[0][0] for item in ann_candidates}
+                for row, _vector_score in scored:
+                    document_id = row[0]
+                    if float(lexical.get(document_id, 0.0)) > 0.0 or float(
+                        graph.get(document_id, 0.0)
+                    ) > 0.0:
+                        ids.add(document_id)
                 candidate_rows = [item for item in scored if item[0][0] in ids]
-                candidate_rows.sort(key=lambda item: (-item[1], item[0][0]))
-                candidate_rows = candidate_rows[:pool_size]
                 candidate_rows.sort(key=lambda item: item[0][0])
             except sqlite3.Error:
                 self._vec0_error = "vec0_query_failed"
