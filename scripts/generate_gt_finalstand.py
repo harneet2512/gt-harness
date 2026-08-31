@@ -52,6 +52,15 @@ TERMINAL_EXPECTED_HEADS = {
     "groundtruth_head": "3a40cbc3111b085ae879f04ebec14c904432bdea",
 }
 
+# Final HAR-5 closure is a separate, explicitly pinned state.  The historical
+# provisional snapshot above remains available for replay of older receipts;
+# this anchor is the exact functional head pair used by the current closeout.
+FINAL_TERMINAL_EXPECTED_HEADS = {
+    "repository": "harneet2512/gt-harness",
+    "repository_head": "7500657503c0107eadff8cb00ed70aba98beaa5b",
+    "groundtruth_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
+}
+
 OPERATIONS = (
     "exact_literal_search",
     "definition",
@@ -650,12 +659,87 @@ def verify_terminal_receipt(receipt: dict[str, object]) -> bool:
     """Verify the terminal schema and immutable coordinator head anchors."""
     if receipt.get("schema") != TERMINAL_BASELINE_SCHEMA:
         return False
+    if isinstance(receipt.get("head_state"), dict) and receipt["head_state"].get("status") == "FINAL":
+        return verify_final_terminal_receipt(receipt)
     try:
         _validate_terminal_spec(receipt)
     except (TypeError, ValueError):
         return False
     expected = terminal_receipt_spec()
     if any(receipt.get(key) != value for key, value in expected.items()):
+        return False
+    authorization = receipt.get("authorization")
+    if authorization != {
+        "benchmark_ready": False,
+        "reason": "explicit_user_approval_and_final_heads_required",
+    }:
+        return False
+    return verify_baseline_receipt(receipt)
+
+
+def verify_final_terminal_receipt(receipt: dict[str, object]) -> bool:
+    """Verify the non-provisional HAR-5 receipt at the current functional heads.
+
+    ``verify_terminal_receipt`` intentionally preserves the historical
+    provisional coordinator snapshot.  Final closure has a stricter boundary:
+    it must name the exact landed harness/GroundTruth pair and may not contain
+    an ``UNVERIFIED`` sentinel anywhere in the evidence payload.
+    """
+    if receipt.get("schema") != TERMINAL_BASELINE_SCHEMA:
+        return False
+    try:
+        _validate_terminal_spec(receipt)
+    except (TypeError, ValueError):
+        return False
+    if receipt.get("repository") != FINAL_TERMINAL_EXPECTED_HEADS["repository"]:
+        return False
+    if receipt.get("source_revision") != FINAL_TERMINAL_EXPECTED_HEADS["repository_head"]:
+        return False
+    head_state = receipt.get("head_state")
+    if not isinstance(head_state, dict):
+        return False
+    if (
+        head_state.get("status") != "FINAL"
+        or head_state.get("repository_head") != FINAL_TERMINAL_EXPECTED_HEADS["repository_head"]
+        or head_state.get("groundtruth_head") != FINAL_TERMINAL_EXPECTED_HEADS["groundtruth_head"]
+        or head_state.get("unresolved_dependencies") != []
+    ):
+        return False
+    functional_heads = head_state.get("functional_heads")
+    if not isinstance(functional_heads, list) or not functional_heads:
+        return False
+    if any(row.get("state") != "FINAL" for row in functional_heads if isinstance(row, dict)):
+        return False
+    producer = receipt.get("producer_identity")
+    if not isinstance(producer, dict):
+        return False
+    if (
+        producer.get("source_revision") != FINAL_TERMINAL_EXPECTED_HEADS["groundtruth_head"]
+        or producer.get("repository") != "groundtruth"
+    ):
+        return False
+    commands = receipt.get("commands")
+    if not isinstance(commands, list) or any(
+        not isinstance(row, dict)
+        or row.get("status") == "UNVERIFIED"
+        or not isinstance(row.get("exit_code"), int)
+        for row in commands
+    ):
+        return False
+    dependencies = receipt.get("dependencies")
+    if not isinstance(dependencies, dict) or dependencies.get("status") != "FINAL":
+        return False
+
+    def contains_unverified(value: object) -> bool:
+        if value == "UNVERIFIED":
+            return True
+        if isinstance(value, dict):
+            return any(contains_unverified(item) for item in value.values())
+        if isinstance(value, list):
+            return any(contains_unverified(item) for item in value)
+        return False
+
+    if contains_unverified({key: value for key, value in receipt.items() if key != "receipt_sha256"}):
         return False
     authorization = receipt.get("authorization")
     if authorization != {
