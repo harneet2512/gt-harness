@@ -1,0 +1,21 @@
+{
+  "live_packets":[
+    "finder-f1",
+    "finder-f2",
+    "finder-f2",
+    "finder-f2"
+  ],
+  "schema":"gt.review_inbox.v1",
+  "tickets":{
+    "HAR-63":[
+      "finder-f1",
+      "finder-f2"
+    ],
+    "HAR-64":[
+      "finder-f2"
+    ],
+    "HAR-67":[
+      "finder-f2"
+    ]
+  }
+}

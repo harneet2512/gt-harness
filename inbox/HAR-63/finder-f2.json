@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T21:17:21.855Z",
+  "detail":"Tests cover unit conservation/tamper only; no RED-pinned producer replay or mutation witness in repo. Done-criterion violated: RED witness pins the boundary. Codex fix: add frozen RED producer config plus replay test that fails loud on boundary drift (same pattern as other Phase A tickets).",
+  "file":"tests/test_why_this_edge.py",
+  "head_sha":"9d00122f186eb17d28b466c9c7add9749fa09493",
+  "kind":"finding",
+  "line":1,
+  "message":"No RED witness",
+  "packet_digest_sha256":"a2b50bc30c3c38833c2fe7953154236171fa1087e9452f53fb576d4980d61148",
+  "packet_id":"finder-f2",
+  "pr":25,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"phase-a-re-review",
+    "system":"cursor-finder"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-63"
+}

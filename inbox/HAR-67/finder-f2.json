@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T21:34:20.405Z",
+  "detail":"README Public re-audit section documents only --groundtruth-root; --harness-root alias undocumented. Done-criterion violated: single documented command for independent re-audit on a clean machine. Codex fix: document harness-root one-command path and expected PASS receipt.",
+  "file":"README.md",
+  "head_sha":"cd2c0bb0d5299f4af5455187c332138135aab444",
+  "kind":"finding",
+  "line":408,
+  "message":"README still GroundTruth-only wording",
+  "packet_digest_sha256":"60d7be342ff79be800005898167f42a7552fd56c6732aba6722be104f48b08a2",
+  "packet_id":"finder-f2",
+  "pr":29,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"phase-a-re-review",
+    "system":"cursor-finder"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-67"
+}

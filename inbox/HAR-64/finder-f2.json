@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T21:34:22.915Z",
+  "detail":"Missing scripts/issue_har64_* issuer script and gt_finalstand/receipts/ pinned artifact for HAR-64 eligibility receipt. F1 closed at 7bbbc9d0 (gateway admit_decision wired). Codex fix: add issue_har64 script and shipped gt_finalstand/receipts/har64_* receipt bound via issuer chain.",
+  "file":"scripts/",
+  "head_sha":"e01fe0c185bb83a116da9ae0bcc78619d60501f0",
+  "kind":"finding",
+  "line":0,
+  "message":"No shipped receipt artifact",
+  "packet_digest_sha256":"52fc78e1686925610a420e3ee916515ff62d1b29a4c8108c273a9ad62a62b7d8",
+  "packet_id":"finder-f2",
+  "pr":26,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"phase-a-re-review",
+    "system":"cursor-finder"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-64"
+}

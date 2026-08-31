@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T21:17:21.855Z",
+  "detail":"WhyThisEdgeStore.publish() and scripts/issue_har63_why_this_edge_receipt.py accept hand-built facts dicts; issuer uses static fixture facts, not resolution_candidates/VTA flow facts from indexed graph output. Done-criterion violated: AMPLIFY the retained-candidate substrate and expose why-this-edge as a first-class certified query kind. Codex fix: wire producer harvesting real edge/candidate/witness rows from shipped resolution substrate into WhyThisEdgeStore.publish(); end-to-end test from substrate to query.",
+  "file":"gt_engine/why_this_edge.py",
+  "head_sha":"9d00122f186eb17d28b466c9c7add9749fa09493",
+  "kind":"finding",
+  "line":208,
+  "message":"No retained-candidate substrate producer path",
+  "packet_digest_sha256":"9b12cdc94afb06b3cfce29299322f78b712ae015779e8b670b35e934b45e35a4",
+  "packet_id":"finder-f1",
+  "pr":25,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"phase-a-re-review",
+    "system":"cursor-finder"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-63"
+}
