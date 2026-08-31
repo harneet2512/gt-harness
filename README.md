@@ -363,14 +363,18 @@ MIT — see [LICENSE](LICENSE).
 This README describes the current, provisional provider-free GroundTruth (GT)
 benchmark-product boundary; it does not claim that a shipped benchmark release
 exists. Claims are subordinate to the exact source heads and receipts recorded
-in HAR-56/HAR-57; issue status is not evidence. The current source tree contains
-graph-native repository intelligence, provenance-aware resolution, deterministic
-communities, hybrid retrieval, lifecycle accounting, and source-backed
-capability-matrix work, while construction and verdict coverage remain
-incomplete: 15 of 21 GT-related units are unmerged and HAR-29 F15 remains open.
-Every capability claim is provisional until its source revision, fixture,
-manifest, and terminal verdict are present and current; missing or stale inputs
-remain fail-closed.
+in HAR-56/HAR-57; issue status is not evidence. At this exact pinned assembly
+(not merged to main), the source tree includes graph-native repository
+intelligence (`gt_engine/repository_intelligence.py`), provenance-aware
+resolution (`gt_engine/resolution_provenance.py`), and source-backed
+capability-matrix machinery (`gt_engine/graph_context.py`). Deterministic
+communities (HAR-7), hybrid retrieval (HAR-8), and lifecycle accounting remain
+on unmerged predecessor units; they are named here only as in-assembly targets,
+not as modules present in this tree. Construction remains incomplete: 15 of 21
+GT-related units are unmerged; the verdict-coverage gate (HAR-30) passed at
+`d482ca51` (REV-138) but has not merged onto main. Every capability claim is
+provisional until its source revision, fixture, manifest, and terminal verdict
+are present and current; missing or stale inputs remain fail-closed.
 
 The benchmark release gate is currently **not authorized**. Final repository
 heads, terminal verdict coverage, and the assembled provider-free receipt must
