@@ -166,6 +166,42 @@ def _citation(root: Path, question: FrozenSourceQuestion) -> dict[str, object]:
     }
 
 
+def _source_answer(root: Path, question: FrozenSourceQuestion) -> str:
+    citation = _citation(root, question)
+    lines = (root / question.source_path).read_text(encoding="utf-8").splitlines()
+    excerpt = lines[int(citation["line_start"]) - 1 : int(citation["line_end"])]
+    answer = " ".join(line.strip() for line in excerpt if line.strip())
+    if not answer:
+        raise SourceProofError(f"source answer is empty: {question.question_id}")
+    return answer
+
+
+def _fact_records(projection) -> list[dict[str, object]]:
+    return [
+        {
+            "surface": fact.surface,
+            "node_id": fact.node_id,
+            "file_path": fact.file_path,
+            "symbol": fact.symbol,
+            "kind": fact.kind,
+            "value": fact.value,
+            "line": fact.line,
+            "confidence": fact.confidence,
+            "revision": fact.revision,
+        }
+        for fact in projection.semantic_facts
+    ]
+
+
+def _coverage(facts: list[dict[str, object]], citation: dict[str, object]) -> dict[str, object]:
+    return {
+        "fact_count": len(facts),
+        "surface_count": len({fact["surface"] for fact in facts}),
+        "node_count": len({fact["node_id"] for fact in facts}),
+        "citation_lines": [citation["line_start"], citation["line_end"]],
+    }
+
+
 def _question_contract(question: FrozenSourceQuestion) -> TaskContract:
     return TaskContract(
         role="source_qa",
@@ -211,16 +247,69 @@ def _read_verified_proof(
     answers = payload.get("answers")
     if not isinstance(answers, list) or len(answers) != len(_QUESTIONS):
         raise SourceProofError("persisted Q&A answer set is incomplete")
-    semantic = [
+    persisted_semantic = [
         {
             "question_id": answer.get("question_id"),
             "prompt": answer.get("prompt"),
             "entrypoint": answer.get("entrypoint"),
             "status": answer.get("status"),
+            "answer": answer.get("answer"),
             "citation": answer.get("citation"),
+            "evidence": answer.get("evidence"),
+            "coverage": answer.get("coverage"),
+            "graph_revision": answer.get("graph_revision"),
+            "abstention_reason": answer.get("abstention_reason"),
         }
         for answer in answers
     ]
+    if payload.get("semantic_sha256") != _sha256(_canonical(persisted_semantic)):
+        raise SourceProofError("persisted Q&A semantic digest mismatch")
+    graph = payload.get("graph")
+    if not isinstance(graph, dict):
+        raise SourceProofError("persisted Q&A graph record is missing")
+    graph_path = graph.get("path")
+    graph_revision_value = graph.get("graph_revision")
+    surface_receipt = graph.get("surface_receipt")
+    if not isinstance(graph_path, str) or not isinstance(graph_revision_value, str):
+        raise SourceProofError("persisted Q&A graph identity is malformed")
+    if graph_revision(graph_path) != graph_revision_value:
+        raise SourceProofError("persisted Q&A graph revision mismatch")
+    if graph_surface_receipt(graph_path) != surface_receipt:
+        raise SourceProofError("persisted Q&A graph surface receipt mismatch")
+
+    semantic = []
+    for question, answer in zip(_QUESTIONS, answers, strict=True):
+        citation = _citation(root, question)
+        projection = build_graph_projection(
+            graph_path, _question_contract(question), limit=8
+        )
+        facts = _fact_records(projection)
+        expected_status = "ANSWERED" if facts else "ABSTAINED"
+        expected_reason = None if facts else "graph_facts_unavailable"
+        if answer.get("answer") != (_source_answer(root, question) if facts else ""):
+            raise SourceProofError("persisted Q&A answer is not source-derived")
+        if answer.get("evidence") != facts:
+            raise SourceProofError("persisted Q&A evidence does not match graph facts")
+        if answer.get("coverage") != _coverage(facts, citation):
+            raise SourceProofError("persisted Q&A coverage mismatch")
+        if answer.get("status") != expected_status:
+            raise SourceProofError("persisted Q&A status mismatch")
+        if answer.get("abstention_reason") != expected_reason:
+            raise SourceProofError("persisted Q&A abstention mismatch")
+        semantic.append(
+            {
+                "question_id": answer.get("question_id"),
+                "prompt": answer.get("prompt"),
+                "entrypoint": answer.get("entrypoint"),
+                "status": answer.get("status"),
+                "answer": answer.get("answer"),
+                "citation": answer.get("citation"),
+                "evidence": answer.get("evidence"),
+                "coverage": answer.get("coverage"),
+                "graph_revision": answer.get("graph_revision"),
+                "abstention_reason": answer.get("abstention_reason"),
+            }
+        )
     if payload.get("semantic_sha256") != _sha256(_canonical(semantic)):
         raise SourceProofError("persisted Q&A semantic digest mismatch")
     for question, answer in zip(_QUESTIONS, answers, strict=True):
@@ -230,6 +319,8 @@ def _read_verified_proof(
             raise SourceProofError("persisted Q&A entrypoint mismatch")
         if answer.get("citation") != _citation(root, question):
             raise SourceProofError("persisted Q&A citation no longer resolves")
+        if answer.get("graph_revision") != graph_revision_value:
+            raise SourceProofError("persisted Q&A answer graph revision mismatch")
     return payload
 
 
@@ -257,9 +348,7 @@ def _execute_questions(
         graph = Path(receipt.graph_db)
     else:
         graph = graph_db
-        graph_revision_value = graph_revision(str(graph))
-    if graph_db is None:
-        graph_revision_value = receipt.graph_revision
+    graph_revision_value = graph_revision(str(graph))
     surface_receipt = graph_surface_receipt(str(graph))
     if not surface_receipt.get("available"):
         raise SourceProofError("production graph projection has no readable database")
@@ -269,18 +358,21 @@ def _execute_questions(
         projection = build_graph_projection(
             str(graph), _question_contract(question), limit=8
         )
-        if not projection.revision or not projection.semantic_facts:
-            raise SourceProofError(
-                f"graph projection did not produce evidence for {question.question_id}"
-            )
+        facts = _fact_records(projection)
+        citation = _citation(root, question)
+        answered = bool(projection.revision and facts)
         answers.append(
             {
                 "question_id": question.question_id,
                 "prompt": question.prompt,
                 "entrypoint": question.production_entrypoint,
-                "status": "ANSWERED",
-                "citation": _citation(root, question),
+                "status": "ANSWERED" if answered else "ABSTAINED",
+                "answer": _source_answer(root, question) if answered else "",
+                "citation": citation,
+                "evidence": facts,
+                "coverage": _coverage(facts, citation),
                 "graph_revision": projection.revision,
+                "abstention_reason": None if answered else "graph_facts_unavailable",
             }
         )
 
@@ -290,7 +382,12 @@ def _execute_questions(
             "prompt": answer["prompt"],
             "entrypoint": answer["entrypoint"],
             "status": answer["status"],
+            "answer": answer["answer"],
             "citation": answer["citation"],
+            "evidence": answer["evidence"],
+            "coverage": answer["coverage"],
+            "graph_revision": answer["graph_revision"],
+            "abstention_reason": answer["abstention_reason"],
         }
         for answer in answers
     ]
@@ -330,6 +427,9 @@ def test_frozen_questions_execute_through_production_graph_path_and_replay(tmp_p
     assert semantic(first) == semantic(second)
     assert len(first["answers"]) == 8
     assert all(answer["status"] == "ANSWERED" for answer in first["answers"])
+    assert all(answer["answer"] for answer in first["answers"])
+    assert all(answer["evidence"] for answer in first["answers"])
+    assert all(answer["coverage"]["fact_count"] > 0 for answer in first["answers"])
 
 
 def test_frozen_question_proof_abstains_on_source_mutation(tmp_path):
