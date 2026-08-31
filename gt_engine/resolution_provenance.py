@@ -560,6 +560,125 @@ def legacy_callsite_from_edge(
     return record
 
 
+class OracleOutcome(StrEnum):
+    AGREED = "agreed"
+    DISAGREED = "disagreed"
+    INDETERMINATE = "indeterminate"
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionEvent:
+    """Persisted resolution/oracle comparison at one callsite."""
+
+    repository_revision: str
+    mechanism: ProvenanceMechanism
+    oracle_outcome: OracleOutcome
+    callsite_id: str = ""
+
+    def to_row(self) -> dict[str, str]:
+        return {
+            "repository_revision": self.repository_revision,
+            "mechanism": self.mechanism.value,
+            "oracle_outcome": self.oracle_outcome.value,
+            "callsite_id": self.callsite_id,
+        }
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> ResolutionEvent:
+        return cls(
+            repository_revision=str(row["repository_revision"]),
+            mechanism=ProvenanceMechanism(str(row["mechanism"])),
+            oracle_outcome=OracleOutcome(str(row["oracle_outcome"])),
+            callsite_id=str(row.get("callsite_id") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolverMetricReport:
+    mechanism: ProvenanceMechanism
+    population: int
+    labeled: int
+    agreed: int
+    disagreed: int
+    indeterminate: int
+    precision: float
+    coverage: float
+    precision_ci_low: float
+    precision_ci_high: float
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "mechanism": self.mechanism.value,
+            "population": self.population,
+            "labeled": self.labeled,
+            "agreed": self.agreed,
+            "disagreed": self.disagreed,
+            "indeterminate": self.indeterminate,
+            "precision": self.precision,
+            "coverage": self.coverage,
+            "precision_ci_low": self.precision_ci_low,
+            "precision_ci_high": self.precision_ci_high,
+        }
+
+
+def wilson_interval(successes: int, total: int, *, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a binomial proportion."""
+    if total < 0 or successes < 0 or successes > total:
+        raise ValueError("invalid wilson interval inputs")
+    if total == 0:
+        return (0.0, 0.0)
+    proportion = successes / total
+    z_squared = z * z
+    denominator = 1.0 + z_squared / total
+    center = (proportion + z_squared / (2.0 * total)) / denominator
+    margin = (
+        z * ((proportion * (1.0 - proportion) + z_squared / (4.0 * total)) / total) ** 0.5
+    ) / denominator
+    return (max(0.0, center - margin), min(1.0, center + margin))
+
+
+def report_per_resolver_metrics(
+    events: Iterable[ResolutionEvent],
+    *,
+    repository_revision: str,
+) -> tuple[ResolverMetricReport, ...]:
+    """Compute revision-bound precision, coverage, CI, and indeterminate counts."""
+    buckets: dict[ProvenanceMechanism, list[ResolutionEvent]] = {}
+    for event in events:
+        if event.repository_revision != repository_revision:
+            raise ValueError("resolution event repository_revision mismatch")
+        buckets.setdefault(event.mechanism, []).append(event)
+
+    reports: list[ResolverMetricReport] = []
+    for mechanism in sorted(buckets, key=lambda item: item.value):
+        rows = buckets[mechanism]
+        agreed = sum(1 for row in rows if row.oracle_outcome is OracleOutcome.AGREED)
+        disagreed = sum(1 for row in rows if row.oracle_outcome is OracleOutcome.DISAGREED)
+        indeterminate = sum(
+            1 for row in rows if row.oracle_outcome is OracleOutcome.INDETERMINATE
+        )
+        labeled = agreed + disagreed
+        population = len(rows)
+        precision = agreed / labeled if labeled else 0.0
+        coverage = labeled / population if population else 0.0
+        ci_low, ci_high = wilson_interval(agreed, labeled)
+        reports.append(
+            ResolverMetricReport(
+                mechanism=mechanism,
+                population=population,
+                labeled=labeled,
+                agreed=agreed,
+                disagreed=disagreed,
+                indeterminate=indeterminate,
+                precision=precision,
+                coverage=coverage,
+                precision_ci_low=ci_low,
+                precision_ci_high=ci_high,
+            )
+        )
+    return tuple(reports)
+
+
 __all__ = [
     "SCHEMA_VERSION",
     "CallCandidate",
@@ -573,6 +692,11 @@ __all__ = [
     "legacy_callsite_from_edge",
     "derive_resolution_tier",
     "normalize_symbol_kind",
+    "OracleOutcome",
+    "ResolutionEvent",
+    "ResolverMetricReport",
+    "report_per_resolver_metrics",
+    "wilson_interval",
     "stable_callsite_id",
     "stable_symbol_id",
 ]

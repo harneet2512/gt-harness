@@ -7,15 +7,19 @@ from gt_engine.resolution_provenance import (
     CallsiteRecord,
     DispatchState,
     NormalizedSymbolKind,
+    OracleOutcome,
     ProvenanceMechanism,
+    ResolutionEvent,
     SymbolRecord,
     VerificationStatus,
     legacy_callsite_from_edge,
     normalize_symbol_kind,
+    report_per_resolver_metrics,
     stable_callsite_id,
     stable_symbol_id,
     ResolutionTier,
     derive_resolution_tier,
+    wilson_interval,
 )
 
 
@@ -351,3 +355,54 @@ def test_producer_two_candidate_vta_rows_decode_without_invention():
     assert all(item.mechanism is ProvenanceMechanism.VTA for item in decoded)
     assert all(item.verification_status is VerificationStatus.CANDIDATE_ONLY for item in decoded)
     assert not any(item.selected for item in decoded)
+
+
+_FROZEN_RESOLUTION_EVENTS = (
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c1"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c2"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c3"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c4"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c5"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.AGREED, "c6"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.DISAGREED, "c7"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.DISAGREED, "c8"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.INDETERMINATE, "c9"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.IMPORT_EXACT, OracleOutcome.INDETERMINATE, "c10"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.AGREED, "n1"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.DISAGREED, "n2"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.DISAGREED, "n3"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.INDETERMINATE, "n4"),
+    ResolutionEvent("rev-frozen", ProvenanceMechanism.NAME_MATCH, OracleOutcome.INDETERMINATE, "n5"),
+)
+
+
+def test_per_resolver_reporting_matches_frozen_event_fixture():
+    reports = report_per_resolver_metrics(_FROZEN_RESOLUTION_EVENTS, repository_revision="rev-frozen")
+    by_mechanism = {row.mechanism: row for row in reports}
+
+    import_exact = by_mechanism[ProvenanceMechanism.IMPORT_EXACT]
+    assert import_exact.population == 10
+    assert import_exact.labeled == 8
+    assert import_exact.agreed == 6
+    assert import_exact.disagreed == 2
+    assert import_exact.indeterminate == 2
+    assert import_exact.precision == 0.75
+    assert import_exact.coverage == 0.8
+    assert import_exact.precision_ci_low == pytest.approx(0.40926987910258916)
+    assert import_exact.precision_ci_high == pytest.approx(0.9285223111419724)
+
+    name_match = by_mechanism[ProvenanceMechanism.NAME_MATCH]
+    assert name_match.population == 5
+    assert name_match.labeled == 3
+    assert name_match.agreed == 1
+    assert name_match.disagreed == 2
+    assert name_match.indeterminate == 2
+    assert name_match.precision == pytest.approx(1 / 3)
+    assert name_match.coverage == 0.6
+    assert name_match.precision_ci_low == pytest.approx(0.0614903152761605)
+    assert name_match.precision_ci_high == pytest.approx(0.7923450448735121)
+
+
+def test_per_resolver_reporting_rejects_revision_mismatch():
+    with pytest.raises(ValueError, match="repository_revision mismatch"):
+        report_per_resolver_metrics(_FROZEN_RESOLUTION_EVENTS, repository_revision="rev-other")
