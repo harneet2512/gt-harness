@@ -12,6 +12,7 @@ from gt_engine.why_this_edge import (
     certify_why_this_edge,
     query_why_this_edge,
     verify_why_this_edge,
+    why_this_edge_receipt,
 )
 
 
@@ -100,3 +101,11 @@ def test_private_wire_action_returns_typed_result_and_never_shell_fallback(tmp_p
     _, abstained = execute_typed_action_fail_open(bad, repo_root=tmp_path)
     assert abstained["returncode"] == 2
     assert abstained["extra"]["interception_decision"] == "PASS_THROUGH"
+
+
+def test_receipt_binds_certified_kind_schema_and_digest():
+    result = certify_why_this_edge(_facts())
+    receipt = why_this_edge_receipt(result)
+    assert receipt["kind"] == "why_this_edge"
+    assert receipt["explanation_schema"] == "gt.why_this_edge.v1"
+    assert receipt["explanation_digest_sha256"] == result["digest_sha256"]

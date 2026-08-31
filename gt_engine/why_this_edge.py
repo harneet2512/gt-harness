@@ -182,6 +182,20 @@ def verify_why_this_edge(result: Mapping[str, Any]) -> bool:
         return False
 
 
+def why_this_edge_receipt(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind the certified kind and explanation digest into the receipt chain."""
+    certified = certify_why_this_edge(result)
+    return {
+        "schema": "gt.why_this_edge_receipt.v1",
+        "kind": "why_this_edge",
+        "explanation_schema": SCHEMA,
+        "explanation_digest_sha256": certified["digest_sha256"],
+        "edge_id": certified["edge_id"],
+        "callsite_id": certified["callsite_id"],
+        "candidate_count": certified["candidate_count"],
+    }
+
+
 why_this_edge = query_why_this_edge
 
 __all__ = [
@@ -191,5 +205,6 @@ __all__ = [
     "certify_why_this_edge",
     "query_why_this_edge",
     "verify_why_this_edge",
+    "why_this_edge_receipt",
     "why_this_edge",
 ]
