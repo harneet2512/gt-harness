@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from gt_engine.graph_lease import GraphLease
 from gt_engine.persistent_execution_state import ExecutionStateSnapshot
@@ -129,7 +129,7 @@ class CommunityRun:
     inclusive: CommunityProjection
 
 
-_COMMUNITY_ALGORITHM = "gt.deterministic-leiden.v1"
+_COMMUNITY_ALGORITHM = "gt.deterministic-modularity-leiden.v1"
 _STRICT_LABELS = frozenset({"verified", "verified_edge", "verified_exact"})
 _INCLUSIVE_LABELS = frozenset(
     {
@@ -167,6 +167,84 @@ def _community_digest(nodes: Iterable[str], edges: Iterable[CommunityEdge]) -> s
     ).hexdigest()
 
 
+def _leiden_partition(
+    nodes: tuple[str, ...],
+    edges: tuple[CommunityEdge, ...],
+    *,
+    seed: int,
+    resolution: float,
+) -> dict[str, str]:
+    """Deterministic single-level modularity refinement."""
+    adjacency: dict[str, dict[str, float]] = {node: {} for node in nodes}
+    for edge in edges:
+        adjacency[edge.source][edge.target] = (
+            adjacency[edge.source].get(edge.target, 0.0) + 1.0
+        )
+        adjacency[edge.target][edge.source] = (
+            adjacency[edge.target].get(edge.source, 0.0) + 1.0
+        )
+
+    total_weight = (
+        sum(weight for neighbors in adjacency.values() for weight in neighbors.values())
+        / 2.0
+    )
+    if total_weight == 0.0:
+        return {node: node for node in nodes}
+
+    degree = {node: sum(adjacency[node].values()) for node in nodes}
+    community = {node: node for node in nodes}
+    ordered_nodes = tuple(sorted(nodes))
+    if len(ordered_nodes) > 1:
+        pivot = seed % len(ordered_nodes)
+        ordered_nodes = ordered_nodes[pivot:] + ordered_nodes[:pivot]
+
+    def modularity_delta(node: str, target_community: str) -> float:
+        current_community = community[node]
+        if current_community == target_community:
+            return 0.0
+
+        def score(mapping: dict[str, str]) -> float:
+            internal = sum(
+                1.0 for edge in edges if mapping[edge.source] == mapping[edge.target]
+            )
+            totals: dict[str, float] = {}
+            for member, label in mapping.items():
+                totals[label] = totals.get(label, 0.0) + degree[member]
+            expected = sum(
+                (community_degree / (2.0 * total_weight)) ** 2
+                for community_degree in totals.values()
+            )
+            return internal / total_weight - resolution * expected
+
+        candidate_mapping = dict(community)
+        candidate_mapping[node] = target_community
+        return score(candidate_mapping) - score(community)
+
+    improved = True
+    passes = 0
+    while improved and passes < len(nodes) * 4:
+        improved = False
+        passes += 1
+        for node in ordered_nodes:
+            current_community = community[node]
+            candidates = {community[neighbor] for neighbor in adjacency[node]}
+            candidates.add(current_community)
+            best_community = current_community
+            best_delta = 0.0
+            for candidate in sorted(candidates):
+                gain = modularity_delta(node, candidate)
+                if gain > best_delta + 1e-12:
+                    best_delta = gain
+                    best_community = candidate
+            if best_community != current_community:
+                community[node] = best_community
+                improved = True
+    groups: dict[str, list[str]] = {}
+    for node in nodes:
+        groups.setdefault(community[node], []).append(node)
+    return {node: min(sorted(group)) for node in nodes for group in [groups[community[node]]]}
+
+
 def _projection(
     *,
     projection_id: str,
@@ -178,35 +256,27 @@ def _projection(
     input_digest: str,
     admitted_labels: frozenset[str],
 ) -> CommunityProjection:
-    parent = {node: node for node in nodes}
-
-    def find(node: str) -> str:
-        while parent[node] != node:
-            parent[node] = parent[parent[node]]
-            node = parent[node]
-        return node
-
-    def union(left: str, right: str) -> None:
-        left_root, right_root = find(left), find(right)
-        if left_root != right_root:
-            parent[max(left_root, right_root)] = min(left_root, right_root)
-
     admitted: list[CommunityEdge] = []
     excluded: list[str] = []
     for edge in edges:
         if edge.evidence_label in admitted_labels:
             admitted.append(edge)
-            union(edge.source, edge.target)
         else:
             excluded.append(edge.edge_id)
 
+    community_map = _leiden_partition(
+        nodes,
+        tuple(admitted),
+        seed=seed,
+        resolution=resolution,
+    )
     groups: dict[str, list[str]] = {}
     for node in nodes:
-        groups.setdefault(find(node), []).append(node)
+        groups.setdefault(community_map[node], []).append(node)
     memberships = tuple(sorted(tuple(sorted(group)) for group in groups.values()))
     community_ids = tuple(
         hashlib.sha256(
-            f"{projection_id}\0{revision}\0{','.join(members)}".encode("utf-8")
+            f"{projection_id}\0{revision}\0{','.join(members)}".encode()
         ).hexdigest()
         for members in memberships
     )
@@ -246,11 +316,9 @@ def build_leiden_communities(
 ) -> CommunityRun:
     """Build reproducible strict and inclusive community projections.
 
-    The implementation uses deterministic seeded connected components as the
-    conservative baseline for the Leiden boundary.  Stable member identities,
-    sorted inputs, and explicit projection labels make the output replayable;
-    a future Leiden worker may replace the component calculation without
-    changing the receipt or evidence-authority contract.
+    Both projections run deterministic modularity refinement with the pinned seed
+    and resolution so the partition can split connected graphs when the bridge
+    is weaker than intra-community density.
     """
 
     normalized_nodes = tuple(sorted(set(str(node) for node in nodes)))
