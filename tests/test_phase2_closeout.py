@@ -6,8 +6,11 @@ import importlib.util
 import io
 import json
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,6 +22,56 @@ def _load(name: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_har9_input_digest_matches_git_lf_blob_with_autocrlf(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "true"], cwd=repo, check=True
+    )
+    (repo / ".gitattributes").write_bytes(
+        b"/receipts/** text eol=lf\n"
+    )
+    receipt = repo / "receipts" / "audit.json"
+    receipt.parent.mkdir()
+    receipt.write_bytes(b'{\r\n  "status": "PASS"\r\n}\r\n')
+
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    issuer = _load("issue_har9_closeout")
+    observed = issuer.git_blob_sha256(receipt, repo_root=repo)
+
+    subprocess.run(
+        ["git", "add", ".gitattributes", "receipts/audit.json"],
+        cwd=repo,
+        check=True,
+    )
+    committed_bytes = subprocess.run(
+        ["git", "show", ":receipts/audit.json"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert b"\r\n" not in committed_bytes
+    assert observed == hashlib.sha256(committed_bytes).hexdigest()
+
+
+def test_har9_input_digest_refuses_unpinned_receipt_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    receipt = repo / "audit.json"
+    receipt.write_bytes(b'{\r\n  "status": "PASS"\r\n}\r\n')
+
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    issuer = _load("issue_har9_closeout")
+    with pytest.raises(ValueError, match="lacks plain UTF-8 LF policy"):
+        issuer.git_blob_sha256(receipt, repo_root=repo)
 
 
 def _certification_rows() -> list[dict[str, str]]:
