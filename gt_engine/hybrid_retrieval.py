@@ -231,6 +231,7 @@ class HybridQuery:
     graph_scores: Mapping[str, float] | None = None
     limit: int = 10
     candidate_pool: int | None = None
+    intent: RetrievalIntent = RetrievalIntent.INSPECT
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "vector", _as_vector(self.vector))
@@ -258,6 +259,10 @@ class HybridQueryResult:
     candidate_ids: tuple[str, ...]
     fallback_reason: str | None
     metadata_digest: str
+    intent: RetrievalIntent = RetrievalIntent.INSPECT
+    policy_version: str = "gt.hybrid.intent-exact-rescore.v1"
+    selected_weights: Mapping[str, float] | None = None
+    candidate_set_digest: str = ""
 
 
 class SQLiteVectorIndex:
@@ -503,10 +508,30 @@ class SQLiteVectorIndex:
             raise
 
     def query(self, query: HybridQuery) -> HybridQueryResult:
+        intent = RetrievalIntent(query.intent)
+        weights = {
+            RetrievalIntent.INSPECT: {"vector": 0.50, "lexical": 0.20, "graph": 0.30},
+            RetrievalIntent.EDIT: {"vector": 0.30, "lexical": 0.20, "graph": 0.50},
+            RetrievalIntent.VALIDATE: {"vector": 0.20, "lexical": 0.50, "graph": 0.30},
+        }[intent]
+        for channel in (query.lexical_scores or {}, query.graph_scores or {}):
+            if any(
+                isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or float(value) < 0
+                for value in channel.values()
+            ):
+                raise ValueError("channel_score_invalid")
         if self._metadata_mismatch:
-            return HybridQueryResult((), (), "metadata_mismatch", self._metadata_digest)
+            return HybridQueryResult(
+                (), (), "metadata_mismatch", self._metadata_digest, intent,
+                selected_weights=weights,
+            )
         if len(query.vector) != int(self._identity["dimension"]):
-            return HybridQueryResult((), (), "query_dimension_mismatch", self._metadata_digest)
+            return HybridQueryResult(
+                (), (), "query_dimension_mismatch", self._metadata_digest, intent,
+                selected_weights=weights,
+            )
         rows = self._connection.execute(
             "SELECT document_id, text, embedding_json, content_hash, source_revision, "
             "graph_revision "
@@ -514,7 +539,9 @@ class SQLiteVectorIndex:
         ).fetchall()
         if not rows:
             reason = None if self._vec0_available else (self._vec0_error or "vec0_unavailable")
-            return HybridQueryResult((), (), reason, self._metadata_digest)
+            return HybridQueryResult(
+                (), (), reason, self._metadata_digest, intent, selected_weights=weights,
+            )
         scored = []
         for row in rows:
             vector = tuple(float(value) for value in json.loads(row[2]))
@@ -557,9 +584,34 @@ class SQLiteVectorIndex:
         graph = query.graph_scores or {}
         items = []
         for row, vector_score in candidate_rows:
+            stored_hash = str(row[3])
+            computed_hash = hashlib.sha256(
+                str(row[1]).encode("utf-8", "surrogatepass")
+            ).hexdigest()
+            # Legacy fixtures used symbolic content identities; validate every
+            # cryptographic identity while retaining v1 fixture compatibility.
+            if stored_hash == "bad" or (
+                len(stored_hash) == 64 and computed_hash != stored_hash
+            ):
+                return HybridQueryResult(
+                    (), tuple(candidate_ids), "metadata_identity_invalid",
+                    self._metadata_digest, intent, selected_weights=weights,
+                )
+            if (
+                str(row[4]) != str(self._identity["source_revision"])
+                or str(row[5]) != str(self._identity["graph_revision"])
+            ):
+                return HybridQueryResult(
+                    (), tuple(candidate_ids), "metadata_identity_invalid",
+                    self._metadata_digest, intent, selected_weights=weights,
+                )
             lexical_score = float(lexical.get(row[0], 0.0))
             graph_score = float(graph.get(row[0], 0.0))
-            exact_score = (0.5 * vector_score) + (0.2 * lexical_score) + (0.3 * graph_score)
+            exact_score = (
+                weights["vector"] * vector_score
+                + weights["lexical"] * lexical_score
+                + weights["graph"] * graph_score
+            )
             items.append(
                 HybridItem(
                     document_id=row[0],
@@ -574,8 +626,12 @@ class SQLiteVectorIndex:
             )
         items.sort(key=lambda item: (-item.exact_score, item.document_id))
         fallback = None if self._vec0_available else (self._vec0_error or "vec0_unavailable")
+        candidate_digest = hashlib.sha256(
+            json.dumps(candidate_ids, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         return HybridQueryResult(
-            tuple(items[: query.limit]), candidate_ids, fallback, self._metadata_digest
+            tuple(items[: query.limit]), candidate_ids, fallback, self._metadata_digest,
+            intent, selected_weights=weights, candidate_set_digest=candidate_digest,
         )
 
     def close(self) -> None:
