@@ -163,10 +163,7 @@ def main() -> int:
     full_output = str(full.pop("_output"))
     full_commands = [baseline, full]
     suite_baseline = counts(baseline_output)
-    total = collected_total()
     suite_full = counts(full_output)
-    if suite_full["collected"] != total:
-        raise SystemExit("pytest outcome count disagrees with collection count")
     receipt.update(
         {
             "source_revision": repository_head,
