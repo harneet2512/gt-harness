@@ -73,7 +73,20 @@ def _git_blob(root: str | Path, revision: str, path: str) -> bytes | None:
 
 def _symbol_line(blob: bytes, symbol: str) -> int | None:
     text = blob.decode("utf-8", "replace")
-    match = re.search(rf"(?m)^.*\b{re.escape(symbol)}\b.*$", text)
+    escaped = re.escape(symbol)
+    patterns = (
+        rf"(?m)^\s*(?:async\s+)?def\s+{escaped}\b",
+        rf"(?m)^\s*class\s+{escaped}\b",
+        rf"(?m)^\s*(?:export\s+)?(?:async\s+)?function\s+{escaped}\b",
+        rf"(?m)^\s*(?:export\s+)?(?:const|let|var|interface|type)\s+{escaped}\b",
+        rf"(?m)^\s*['\"]?{escaped}['\"]?\s*[:(=]",
+        rf"(?m)^.*\b{escaped}\b.*$",
+    )
+    match = None
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match is not None:
+            break
     if match is None:
         return None
     return text.count("\n", 0, match.start()) + 1
