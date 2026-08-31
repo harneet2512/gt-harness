@@ -70,4 +70,4 @@ def test_modularity_splits_one_connected_graph_and_responds_to_resolution():
     assert split.strict.memberships == (("a1", "a2", "a3"), ("b1", "b2", "b3"))
     assert split.strict.memberships != (nodes,)
     assert len(coarse.strict.memberships) <= len(split.strict.memberships)
-    assert split.strict.algorithm_version == "gt.deterministic-modularity-leiden.v1"
+    assert split.strict.algorithm_version == "gt.deterministic-modularity-local-moving.v1"

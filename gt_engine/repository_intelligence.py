@@ -129,7 +129,7 @@ class CommunityRun:
     inclusive: CommunityProjection
 
 
-_COMMUNITY_ALGORITHM = "gt.deterministic-modularity-leiden.v1"
+_COMMUNITY_ALGORITHM = "gt.deterministic-modularity-local-moving.v1"
 _STRICT_LABELS = frozenset({"verified", "verified_edge", "verified_exact"})
 _INCLUSIVE_LABELS = frozenset(
     {
@@ -174,7 +174,7 @@ def _leiden_partition(
     seed: int,
     resolution: float,
 ) -> dict[str, str]:
-    """Deterministic single-level modularity refinement."""
+    """Deterministic single-level modularity local-moving optimization."""
     adjacency: dict[str, dict[str, float]] = {node: {} for node in nodes}
     for edge in edges:
         adjacency[edge.source][edge.target] = (
@@ -316,9 +316,9 @@ def build_leiden_communities(
 ) -> CommunityRun:
     """Build reproducible strict and inclusive community projections.
 
-    Both projections run deterministic modularity refinement with the pinned seed
-    and resolution so the partition can split connected graphs when the bridge
-    is weaker than intra-community density.
+    Both projections run deterministic modularity local-moving optimization with
+    the pinned seed and resolution, so the partition can split connected graphs
+    when the bridge is weaker than intra-community density.
     """
 
     normalized_nodes = tuple(sorted(set(str(node) for node in nodes)))
