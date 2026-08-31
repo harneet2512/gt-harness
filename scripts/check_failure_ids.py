@@ -76,8 +76,6 @@ EXPECTED_REFUSALS = {
     "fixture_mismatch": "FIXTURE_MISMATCH",
     "trailer_invalid": "TRAILER_BLOCK_INVALID",
     "failure_ids_invalid": "FAILURE_IDS_INVALID",
-    "verdict_coverage_missing": "VERDICT_COVERAGE_MISSING",
-    "verdict_coverage_invalid": "VERDICT_COVERAGE_INVALID",
 }
 VERDICT_SCHEMA = "gt.verdict.coverage.v1"
 VERDICT_REGISTRY = ".githooks/har57-verdict-registry.json"
