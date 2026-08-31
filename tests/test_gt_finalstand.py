@@ -75,6 +75,66 @@ def test_har9_terminal_closeout_requires_complete_concrete_identities() -> None:
         )
 
 
+def test_har9_assembly_input_skeleton_covers_all_units_without_authorizing_run() -> None:
+    phase2 = _load_phase2()
+    receipt = phase2.build_assembly_input_skeleton(
+        harness_head="a" * 40,
+        groundtruth_head="b" * 40,
+        unit_heads={"har5": "c" * 40, "har41": "d" * 40},
+        input_receipts={"har5": "e" * 64},
+    )
+    assert phase2.verify_assembly_input_skeleton(receipt)
+    assert set(receipt["unit_heads"]) == phase2.HAR9_REQUIRED_UNITS
+    assert set(receipt["input_receipts"]) == phase2.HAR9_REQUIRED_UNITS
+    assert receipt["unit_heads"]["har5"] == "c" * 40
+    assert receipt["unit_heads"]["har41"] == "d" * 40
+    assert receipt["unit_heads"]["har6"] == "UNVERIFIED"
+    assert receipt["authorization"]["benchmark_ready"] is False
+    assert receipt["results"] == {"provider_calls": 0, "benchmark_runs": 0}
+
+    mutated = copy.deepcopy(receipt)
+    mutated["unit_heads"]["har5"] = "f" * 40
+    assert not phase2.verify_assembly_input_skeleton(mutated)
+
+
+def test_har9_assembly_input_skeleton_rejects_unknown_observations() -> None:
+    phase2 = _load_phase2()
+    with pytest.raises(ValueError, match="unknown unit"):
+        phase2.build_assembly_input_skeleton(
+            harness_head="a" * 40,
+            groundtruth_head="b" * 40,
+            unit_heads={"har13": "c" * 40},
+        )
+
+
+def test_har9_persisted_assembly_inputs_are_deterministic_and_provisional() -> None:
+    phase2 = _load_phase2()
+    receipt = json.loads(
+        (ROOT / "gt_finalstand" / "receipts" / "har9_assembly_inputs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert phase2.verify_assembly_input_skeleton(receipt)
+    assert receipt["state"] == "PROVISIONAL_INPUTS_PENDING_FINAL_HEADS"
+    assert receipt["authorization"]["benchmark_ready"] is False
+    assert set(receipt["unit_heads"]) == phase2.HAR9_REQUIRED_UNITS
+    rebuilt = phase2.build_assembly_input_skeleton(
+        harness_head=receipt["harness_head"],
+        groundtruth_head=receipt["groundtruth_head"],
+        unit_heads={
+            name: value
+            for name, value in receipt["unit_heads"].items()
+            if value != "UNVERIFIED"
+        },
+        input_receipts={
+            name: value
+            for name, value in receipt["input_receipts"].items()
+            if value != "UNVERIFIED"
+        },
+    )
+    assert rebuilt == receipt
+
+
 def test_finalstand_is_machine_valid() -> None:
     result = _load_validator().validate()
     assert result["errors"] == []
