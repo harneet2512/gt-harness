@@ -30,7 +30,7 @@ FUNCTIONAL_HEADS = {
     "HAR-42": "3a40cbc3111b085ae879f04ebec14c904432bdea",
     "HAR-6": "fc551a556db54e205c5dc3424dca57d381b22ee9",
     "HAR-11": "53490708adea9ebb1f0cdb87d3201cbf3c275b09",
-    "HAR-10": "54ae74d410d9e99ed2e1f3e94153f284c48fb5cb",
+    "HAR-10": "8e3c5b808aa64d655b2b039542907b7aa4e541b5",
     "HAR-35": "bad12be8614811e84d021a8b9df6cad15cd2d7b0",
     "HAR-8": "c4a7ac71293d14b1f46fb75f12a5f9dc58b511eb",
     "HAR-12": "884a3e8276242f6430c7d7f425bd533fd9955211",
@@ -109,7 +109,7 @@ def main() -> int:
                 "python": "3.12.0",
                 "sqlite": "3.42.0",
                 "go": "go1.26.7 windows/amd64",
-                "runner_identity": "codex-har5-final@7500657503c0107eadff8cb00ed70aba98beaa5b",
+                "runner_identity": "codex-har5-final@8e3c5b808aa64d655b2b039542907b7aa4e541b5",
             },
             "commands": full_commands,
             "suites": [

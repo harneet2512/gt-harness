@@ -2,9 +2,9 @@
   "schema": "gt.har37.whole_system_audit.v1",
   "status": "PASS",
   "repository": "harneet2512/gt-harness",
-  "harness_head": "7500657503c0107eadff8cb00ed70aba98beaa5b",
+  "harness_head": "8e3c5b808aa64d655b2b039542907b7aa4e541b5",
   "groundtruth_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
-  "tree_manifest_sha256": "cef2b4a277fc4209ff603063dbdb6cc24f53dcde1878a53bbe6bfa6e51d7849d",
+  "tree_manifest_sha256": "3261fabb5c661f146b5615487c95cbadff6d72ab3e27772140501a6c94ce8f26",
   "checks": [
     {
       "command": "python -m pytest -q",
@@ -25,11 +25,11 @@
       "command": "python -c verify_terminal_receipt(har5_terminal_baseline.json)",
       "exit_code": 0,
       "result": "True; benchmark_ready=false; provider_calls=0; benchmark_runs=0",
-      "receipt_sha256": "02455e75825ed8967190d381a95cf7b473aa2a53180895994ae280bc02661e94"
+      "receipt_sha256": "49ada87e6e8c2eeff3bf3562a2bfd114616a9ceb53f8b91fb51b06bb58935159"
     }
   ],
   "cross_boundary": {
-    "har5_final_receipt_sha256": "636476144efae506469870003cc701ce1f17cfdc89922c686a9379b4faea9d83",
+    "har5_final_receipt_sha256": "49ada87e6e8c2eeff3bf3562a2bfd114616a9ceb53f8b91fb51b06bb58935159",
     "har36_windows_witness_status": "PASS",
     "groundtruth_engine_probe_status": "PASS",
     "provider_calls": 0,

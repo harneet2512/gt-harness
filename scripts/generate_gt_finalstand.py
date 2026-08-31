@@ -57,7 +57,7 @@ TERMINAL_EXPECTED_HEADS = {
 # this anchor is the exact functional head pair used by the current closeout.
 FINAL_TERMINAL_EXPECTED_HEADS = {
     "repository": "harneet2512/gt-harness",
-    "repository_head": "7500657503c0107eadff8cb00ed70aba98beaa5b",
+    "repository_head": "8e3c5b808aa64d655b2b039542907b7aa4e541b5",
     "groundtruth_head": "f2863f8781edaeaef8787c515e36381cdbd692d5",
 }
 
@@ -510,7 +510,7 @@ def terminal_receipt_spec() -> dict[str, object]:
             "functional_heads": [
                 {
                     "ticket": "HAR-10",
-                    "sha": "54ae74d410d9e99ed2e1f3e94153f284c48fb5cb",
+                    "sha": "8e3c5b808aa64d655b2b039542907b7aa4e541b5",
                     "state": "FINAL",
                 },
                 {
