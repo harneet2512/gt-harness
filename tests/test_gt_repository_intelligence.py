@@ -11,8 +11,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import re
+import subprocess
+import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +47,7 @@ class FrozenSourceQuestion:
 @dataclass(frozen=True)
 class FrozenSourceSnapshot:
     source_revision: str
+    source_head: str
     file_hashes: tuple[tuple[str, str], ...]
 
 
@@ -129,7 +134,19 @@ def _snapshot(root: Path) -> FrozenSourceSnapshot:
             raise SourceProofError(f"pinned source unreadable: {relative}") from exc
         hashes.append((question.source_path, _sha256(blob)))
     ordered = tuple(sorted(hashes))
-    return FrozenSourceSnapshot(_sha256(_canonical(ordered)), ordered)
+    checkout = Path(__file__).resolve().parents[1]
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SourceProofError("source repository head is unavailable") from exc
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise SourceProofError("source repository head is malformed")
+    return FrozenSourceSnapshot(_sha256(_canonical(ordered)), head, ordered)
 
 
 def _copy_frozen_sources(root: Path) -> None:
@@ -169,7 +186,17 @@ def _citation(root: Path, question: FrozenSourceQuestion) -> dict[str, object]:
 def _source_answer(root: Path, question: FrozenSourceQuestion) -> str:
     citation = _citation(root, question)
     lines = (root / question.source_path).read_text(encoding="utf-8").splitlines()
-    excerpt = lines[int(citation["line_start"]) - 1 : int(citation["line_end"])]
+    start = int(citation["line_start"]) - 1
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line and len(line) - len(line.lstrip()) <= indent and re.match(
+            r"\s*(?:class|def)\s+", line
+        ):
+            end = index
+            break
+    excerpt = lines[start:end]
     answer = " ".join(line.strip() for line in excerpt if line.strip())
     if not answer:
         raise SourceProofError(f"source answer is empty: {question.question_id}")
@@ -216,6 +243,72 @@ def _question_contract(question: FrozenSourceQuestion) -> TaskContract:
     )
 
 
+def _producer_environment() -> dict[str, str]:
+    """Identify the exact gt-index binary and runner environment in use."""
+    try:
+        from groundtruth._binary import find_binary
+
+        from gt_engine.indexer import _seed_binary_env
+
+        _seed_binary_env()
+        binary = Path(find_binary()).resolve()
+        binary_sha256 = _sha256(binary.read_bytes())
+    except (OSError, RuntimeError, ImportError) as exc:
+        raise SourceProofError("pinned gt-index producer is unavailable") from exc
+    return {
+        "producer": "gt-index",
+        "binary_path": str(binary),
+        "binary_sha256": binary_sha256,
+        "gt_index_binary": os.environ.get("GT_INDEX_BINARY", ""),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "implementation": sys.implementation.name,
+    }
+
+
+@contextmanager
+def _observe_gt_index() -> list[dict[str, object]]:
+    """Observe the subprocess actually launched by the production indexer."""
+    from groundtruth import _binary
+
+    observed: list[dict[str, object]] = []
+    original_run = _binary.subprocess.run
+
+    def run_and_record(command, *args, **kwargs):
+        try:
+            result = original_run(command, *args, **kwargs)
+        except Exception as exc:
+            observed.append(
+                {
+                    "command": tuple(map(str, command)),
+                    "exit_code": None,
+                    "exception": type(exc).__name__,
+                }
+            )
+            raise
+        observed.append(
+            {
+                "command": tuple(map(str, command)),
+                "exit_code": int(result.returncode),
+                "stdout_sha256": _sha256(
+                    result.stdout if isinstance(result.stdout, bytes)
+                    else str(result.stdout or "").encode("utf-8")
+                ),
+                "stderr_sha256": _sha256(
+                    result.stderr if isinstance(result.stderr, bytes)
+                    else str(result.stderr or "").encode("utf-8")
+                ),
+            }
+        )
+        return result
+
+    _binary.subprocess.run = run_and_record
+    try:
+        yield observed
+    finally:
+        _binary.subprocess.run = original_run
+
+
 def _write_atomic(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -240,8 +333,12 @@ def _read_verified_proof(
         raise SourceProofError("persisted Q&A proof is unreadable") from exc
     if payload.get("schema") != _PROOF_SCHEMA:
         raise SourceProofError("persisted Q&A proof schema mismatch")
-    if payload.get("source_revision") != expected.source_revision:
+    if payload.get("source_revision") != expected.source_head:
         raise SourceProofError("persisted Q&A source revision mismatch")
+    if payload.get("source_snapshot_sha256") != expected.source_revision:
+        raise SourceProofError("persisted Q&A source snapshot mismatch")
+    if payload.get("source_head") != expected.source_head:
+        raise SourceProofError("persisted Q&A source head mismatch")
     if tuple(map(tuple, payload.get("source_files", ()))) != expected.file_hashes:
         raise SourceProofError("persisted Q&A source file hash mismatch")
     answers = payload.get("answers")
@@ -276,6 +373,15 @@ def _read_verified_proof(
         raise SourceProofError("persisted Q&A graph revision mismatch")
     if graph_surface_receipt(graph_path) != surface_receipt:
         raise SourceProofError("persisted Q&A graph surface receipt mismatch")
+    producer = payload.get("producer_environment")
+    if not isinstance(producer, dict) or not producer.get("binary_sha256"):
+        raise SourceProofError("persisted Q&A producer identity is missing")
+    observed = payload.get("observed_commands")
+    if not isinstance(observed, list) or not observed:
+        raise SourceProofError("persisted Q&A observed command status is missing")
+    for command in observed:
+        if not isinstance(command, dict) or "exit_code" not in command:
+            raise SourceProofError("persisted Q&A command exit status is missing")
 
     semantic = []
     for question, answer in zip(_QUESTIONS, answers, strict=True):
@@ -315,6 +421,8 @@ def _read_verified_proof(
     for question, answer in zip(_QUESTIONS, answers, strict=True):
         if answer.get("question_id") != question.question_id:
             raise SourceProofError("persisted Q&A question order mismatch")
+        if answer.get("prompt") != question.prompt:
+            raise SourceProofError("persisted Q&A prompt mismatch")
         if answer.get("entrypoint") != question.production_entrypoint:
             raise SourceProofError("persisted Q&A entrypoint mismatch")
         if answer.get("citation") != _citation(root, question):
@@ -335,12 +443,15 @@ def _execute_questions(
     if current != expected:
         raise SourceProofError("pinned source revision mismatch")
 
+    producer_environment = _producer_environment()
+    observed_commands: list[dict[str, object]]
     if graph_db is None:
-        receipt = ensure_index_with_receipt(
-            root,
-            state_dir=state_dir / "graph",
-            source_revision=expected.source_revision,
-        )
+        with _observe_gt_index() as observed_commands:
+            receipt = ensure_index_with_receipt(
+                root,
+                state_dir=state_dir / "graph",
+                source_revision=expected.source_revision,
+            )
         if receipt.status is not IndexBuildStatus.BUILT or not receipt.graph_db:
             raise SourceProofError(
                 f"production index entrypoint did not build: {receipt}"
@@ -348,6 +459,7 @@ def _execute_questions(
         graph = Path(receipt.graph_db)
     else:
         graph = graph_db
+        observed_commands = [{"command": "replay", "exit_code": 0}]
     graph_revision_value = graph_revision(str(graph))
     surface_receipt = graph_surface_receipt(str(graph))
     if not surface_receipt.get("available"):
@@ -393,13 +505,17 @@ def _execute_questions(
     ]
     proof = {
         "schema": _PROOF_SCHEMA,
-        "source_revision": expected.source_revision,
+        "source_revision": expected.source_head,
+        "source_snapshot_sha256": expected.source_revision,
+        "source_head": expected.source_head,
         "source_files": expected.file_hashes,
         "graph": {
             "path": str(graph),
             "graph_revision": graph_revision_value,
             "surface_receipt": surface_receipt,
         },
+        "producer_environment": producer_environment,
+        "observed_commands": observed_commands,
         "answers": answers,
         "semantic_sha256": _sha256(_canonical(semantic)),
     }
@@ -459,4 +575,37 @@ def test_persisted_question_mutation_is_rejected(tmp_path):
     proof_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(SourceProofError, match="semantic digest mismatch"):
+        _read_verified_proof(proof_path, root=root, expected=expected)
+
+
+def test_persisted_prompt_mutation_is_rejected_even_with_recomputed_digest(tmp_path):
+    root = tmp_path / "frozen-source"
+    state = tmp_path / "state"
+    _copy_frozen_sources(root)
+    expected = _snapshot(root)
+    proof_path = _execute_questions(root, state, expected)
+    payload = json.loads(proof_path.read_text(encoding="utf-8"))
+    payload["answers"][0]["prompt"] = "altered prompt"
+    semantic = [
+        {
+            key: answer.get(key)
+            for key in (
+                "question_id",
+                "prompt",
+                "entrypoint",
+                "status",
+                "answer",
+                "citation",
+                "evidence",
+                "coverage",
+                "graph_revision",
+                "abstention_reason",
+            )
+        }
+        for answer in payload["answers"]
+    ]
+    payload["semantic_sha256"] = _sha256(_canonical(semantic))
+    proof_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SourceProofError, match="prompt mismatch"):
         _read_verified_proof(proof_path, root=root, expected=expected)
