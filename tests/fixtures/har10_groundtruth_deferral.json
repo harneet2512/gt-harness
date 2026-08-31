@@ -1,0 +1,10 @@
+{
+  "schema": "gt.har10.groundtruth_deferral.v1",
+  "deferred_paths": [
+    "gt-index/internal/resolver/vta.go",
+    "gt-index/internal/store/resolution_v2.go"
+  ],
+  "reason": "HAR-10 harness slice validates consumer tier derivation and reporting; Groundtruth producer exercise remains on the accepted HAR-42 step-5 line in the groundtruth repository.",
+  "safe_because": "Harness decodes provisional producer VTA rows without invention and reports revision-bound resolver metrics from persisted events.",
+  "resume_when": "Cross-repository fixture binds tier inputs from producer persisted rows through the normal harness runtime entry."
+}
