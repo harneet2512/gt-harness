@@ -1,0 +1,5 @@
+status: UNAVAILABLE
+database: none present in the HAR-61 closeout slice
+schema_digest: not computed
+reason: No indexed two-candidate SQLite database/schema artifact is available at the accepted HAR-61 producer or consumer SHAs.
+authoritative: false

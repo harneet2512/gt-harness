@@ -1,0 +1,4 @@
+status: UNAVAILABLE
+command: not run
+reason: HAR-61 closeout slice has no indexed two-candidate producer fixture or CLI input; a CLI result would be fabricated.
+authoritative: false

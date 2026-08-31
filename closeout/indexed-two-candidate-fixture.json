@@ -1,0 +1,7 @@
+{
+  "status": "UNAVAILABLE",
+  "reason": "The HAR-61 producer slice does not contain an indexed two-candidate SQLite fixture or durable row export.",
+  "fixture_rows": [],
+  "authoritative": false,
+  "action": "Do not infer or fabricate candidate rows; producer CLI/database evidence remains outstanding."
+}
