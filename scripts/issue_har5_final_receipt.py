@@ -92,13 +92,19 @@ def observed(command: list[str], label: str) -> dict[str, object]:
 
 
 def counts(output: str) -> dict[str, int]:
-    def number(word: str) -> int:
-        match = re.search(rf"(\d+) {word}", output)
-        return int(match.group(1)) if match else 0
+    passed = len(re.findall(r"(?m)^PASSED\s", output))
+    failed = len(re.findall(r"(?m)^(?:FAILED|ERROR)\s", output))
+    skipped = len(re.findall(r"(?m)^SKIPPED\s", output))
+    if passed == failed == skipped == 0:
+        def number(word: str) -> int:
+            match = re.search(rf"(\d+) {word}", output)
+            return int(match.group(1)) if match else 0
 
-    passed = number("passed")
-    failed = number("failed")
-    skipped = number("skipped")
+        passed = number("passed")
+        failed = number("failed")
+        skipped = number("skipped")
+    if passed == failed == skipped == 0:
+        raise SystemExit("pytest output did not contain observable test outcomes")
     return {
         "collected": passed + failed + skipped,
         "passed": passed,
@@ -137,16 +143,30 @@ def main() -> int:
     ).encode()
     test_fixture = ROOT / "tests" / "test_gt_finalstand.py"
     baseline = observed(
-        [sys.executable, "-m", "pytest", "-q", "tests/test_gt_finalstand.py", "-k", "baseline"],
-        "python -m pytest -q tests/test_gt_finalstand.py -k baseline",
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-rA",
+            "tests/test_gt_finalstand.py",
+            "-k",
+            "baseline",
+        ],
+        "python -m pytest -q -rA tests/test_gt_finalstand.py -k baseline",
     )
-    full = observed([sys.executable, "-m", "pytest", "-q"], "python -m pytest -q")
+    full = observed(
+        [sys.executable, "-m", "pytest", "-q", "-rA"],
+        "python -m pytest -q -rA",
+    )
     baseline.pop("_output")
     full.pop("_output")
     full_commands = [baseline, full]
-    suite_baseline = {"collected": 2, "passed": 2, "failed": 0, "skipped": 0}
+    suite_baseline = counts(baseline_output)
     total = collected_total()
-    suite_full = {"collected": total, "passed": total - 5, "failed": 0, "skipped": 5}
+    suite_full = counts(full_output)
+    if suite_full["collected"] != total:
+        raise SystemExit("pytest outcome count disagrees with collection count")
     receipt.update(
         {
             "source_revision": repository_head,
