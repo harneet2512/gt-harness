@@ -159,8 +159,8 @@ def main() -> int:
         [sys.executable, "-m", "pytest", "-q", "-rA"],
         "python -m pytest -q -rA",
     )
-    baseline.pop("_output")
-    full.pop("_output")
+    baseline_output = str(baseline.pop("_output"))
+    full_output = str(full.pop("_output"))
     full_commands = [baseline, full]
     suite_baseline = counts(baseline_output)
     total = collected_total()
