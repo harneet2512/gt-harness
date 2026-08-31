@@ -129,6 +129,12 @@ DIRECT_FEATURES: dict[str, dict[str, Any]] = {
         "trigger": "the submit gate yields refusal for an observed unresolved RED check",
         "intended_action": "refuse once after an observed unresolved test failure",
     },
+    "select_catalog": {
+        "kind": "CAP", "boundaries": ("task_start",),
+        "producer": "persistent_execution_state",
+        "trigger": "a versioned bootstrap catalog is constructed and offered to the model",
+        "intended_action": "select and order existing catalog IDs for the next execution focus",
+    },
 }
 
 CAPABILITY_OWNERS: dict[str, str] = {
@@ -168,6 +174,7 @@ _EVIDENCE_FEATURES = {
     "signature_delta": "signature_delta",
     "submit_refusal": "submit_refusal",
     "syntax_result": "syntax_result",
+    "select_catalog": "select_catalog",
 }
 
 

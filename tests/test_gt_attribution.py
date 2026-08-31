@@ -39,8 +39,9 @@ def test_direct_feature_registry_is_exact_and_complete():
         "GT_LOC_RESLOT",
         "GT_PATCH_DELTA",
         "GT_SS_SUBMIT_RED",
+        "select_catalog",
     }
-    assert len(DIRECT_FEATURES) == 17
+    assert len(DIRECT_FEATURES) == 18
     assert all(spec["boundaries"] for spec in DIRECT_FEATURES.values())
     assert all(spec["trigger"] for spec in DIRECT_FEATURES.values())
     assert all(spec["intended_action"] for spec in DIRECT_FEATURES.values())
@@ -100,6 +101,7 @@ def test_groundtruth_registry_aliases_map_to_the_same_17_identities():
     assert feature_for_evidence("caller_contract_search") == "caller_contract"
     assert feature_for_evidence("coherence_collapse") == "recovery"
     assert feature_for_evidence("obligation_unexercised") == "obligations"
+    assert feature_for_evidence("select_catalog") == "select_catalog"
 
 
 def test_trace_integrity_rejects_mutated_payload(tmp_path):
