@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 SCHEMA = "gt.why_this_edge.v1"
@@ -196,6 +199,53 @@ def why_this_edge_receipt(result: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+class WhyThisEdgeStore:
+    """Producer-owned content-addressed store for certified edge facts."""
+
+    def __init__(self, path: str | os.PathLike[str]):
+        self.path = Path(path)
+
+    def publish(self, facts: Mapping[str, Any]) -> dict[str, Any]:
+        certified = certify_why_this_edge(facts)
+        records = self._load()
+        records[certified["edge_id"]] = certified
+        receipt = why_this_edge_receipt(certified)
+        payload = {
+            "schema": "gt.why_this_edge_store.v1",
+            "records": [records[key] for key in sorted(records)],
+            "receipt": receipt,
+        }
+        payload["store_digest_sha256"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", newline="\n", dir=self.path.parent, delete=False
+        ) as handle:
+            temporary = handle.name
+            handle.write(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                + "\n"
+            )
+        os.replace(temporary, self.path)
+        return receipt
+
+    def query(self, edge_id: str, **expected: str | None) -> dict[str, Any]:
+        records = self._load()
+        try:
+            facts = records[edge_id]
+        except KeyError:
+            raise WhyThisEdgeAbstention("edge_not_found") from None
+        return query_why_this_edge(facts, **expected)
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        if not self.path.exists():
+            return {}
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        records = payload.get("records") if isinstance(payload, Mapping) else None
+        if not isinstance(records, list):
+            raise WhyThisEdgeAbstention("producer_store_invalid")
+        return {str(item["edge_id"]): dict(item) for item in records if isinstance(item, Mapping)}
+
+
 why_this_edge = query_why_this_edge
 
 __all__ = [
@@ -206,5 +256,6 @@ __all__ = [
     "query_why_this_edge",
     "verify_why_this_edge",
     "why_this_edge_receipt",
+    "WhyThisEdgeStore",
     "why_this_edge",
 ]

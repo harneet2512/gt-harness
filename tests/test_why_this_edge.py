@@ -9,6 +9,7 @@ from gt_engine.miniswe_typed_actions import execute_typed_action_fail_open
 from gt_engine.why_this_edge import (
     ALLOWED_EDGE_KINDS,
     WhyThisEdgeAbstention,
+    WhyThisEdgeStore,
     certify_why_this_edge,
     query_why_this_edge,
     verify_why_this_edge,
@@ -109,3 +110,12 @@ def test_receipt_binds_certified_kind_schema_and_digest():
     assert receipt["kind"] == "why_this_edge"
     assert receipt["explanation_schema"] == "gt.why_this_edge.v1"
     assert receipt["explanation_digest_sha256"] == result["digest_sha256"]
+
+
+def test_producer_store_publishes_and_queries_by_stable_edge_id(tmp_path):
+    store = WhyThisEdgeStore(tmp_path / "why-edge.json")
+    facts = _facts()
+    receipt = store.publish(facts)
+    assert receipt["explanation_digest_sha256"]
+    queried = store.query("edge-1", expected_callsite_id="call-1")
+    assert queried["target_id"] == "target-a"
