@@ -63,4 +63,3 @@ def test_stale_graph_abstains_and_source_revision_changes_identity() -> None:
     assert stale.verification_state == "abstained"
     assert stale.stale_reason == "graph_revision_stale"
     assert stale.process_id != changed.process_id
-

@@ -6,10 +6,11 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,79 @@ class ExecutionStateSnapshot:
         return cls.load(path, expected_repository_revision=repository_revision,
                         expected_workspace_revision=workspace_revision,
                         expected_graph_revision=graph_revision, expected_graph_path=graph_path)
+
+    def persist_witnessed_process(
+        self, path: str | os.PathLike[str], process: Any
+    ) -> dict[str, Any]:
+        """Atomically persist a process bound to this execution snapshot."""
+        if process.source_revision != self.repository_revision:
+            raise ValueError("process source revision does not match execution state")
+        if process.graph_revision != self.graph_revision:
+            raise ValueError("process graph revision does not match execution state")
+        receipt = process.receipt
+        payload = {
+            "schema": "gt.execution_state.witnessed_process.v1",
+            "execution_state": self.as_dict(),
+            "process": receipt,
+            "process_receipt_sha256": _sha256(_canonical_bytes(receipt)),
+        }
+        target = os.fspath(path)
+        parent = os.path.dirname(os.path.abspath(target)) or "."
+        os.makedirs(parent, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=parent, prefix=".witnessed-process.", delete=False
+        ) as handle:
+            temporary = handle.name
+            handle.write(_canonical_bytes(payload))
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return payload
+
+    @classmethod
+    def reopen_witnessed_process(
+        cls, path: str | os.PathLike[str]
+    ) -> tuple[ExecutionStateSnapshot, WitnessedProcess]:
+        """Reopen and verify a persisted process without inventing facts."""
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("persisted witnessed process is unreadable") from exc
+        if payload.get("schema") != "gt.execution_state.witnessed_process.v1":
+            raise ValueError("persisted witnessed process schema mismatch")
+        receipt = payload.get("process")
+        if not isinstance(receipt, dict) or payload.get(
+            "process_receipt_sha256"
+        ) != _sha256(_canonical_bytes(receipt)):
+            raise ValueError("persisted witnessed process receipt mismatch")
+        state_data = payload.get("execution_state")
+        if not isinstance(state_data, dict):
+            raise ValueError("persisted witnessed process state missing")
+        try:
+            state = cls(
+                **{
+                    key: state_data[key]
+                    for key in (
+                        "repository_revision",
+                        "workspace_revision",
+                        "graph_revision",
+                        "graph_path",
+                    )
+                }
+            )
+        except (KeyError, TypeError) as exc:
+            raise ValueError("persisted witnessed process state malformed") from exc
+        process = witnessed_process_from_receipt(receipt)
+        if (
+            process.source_revision != state.repository_revision
+            or process.graph_revision != state.graph_revision
+        ):
+            raise ValueError("persisted witnessed process revision mismatch")
+        return state, process
 
 SELECT_CATALOG_FEATURE_ID = "select_catalog"
 SELECT_CATALOG_SCHEMA = "gt.select_catalog_lifecycle.v1"
@@ -217,11 +291,16 @@ class Feature18Lifecycle:
     transitions: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
-    def from_catalog(cls, catalog: Feature18Catalog, *, event_id: str) -> "Feature18Lifecycle":
+    def from_catalog(
+        cls, catalog: Feature18Catalog, *, event_id: str
+    ) -> Feature18Lifecycle:
         if not event_id.strip():
             raise ValueError("feature-18 event identity is required")
         instance = cls(catalog=catalog, event_id=event_id)
-        instance.transitions.append({"from": "", "to": SelectCatalogStage.CANDIDATE.value, "reason": "catalog_constructed"})
+        instance.transitions.append({
+            "from": "", "to": SelectCatalogStage.CANDIDATE.value,
+            "reason": "catalog_constructed",
+        })
         return instance
 
     def _move(self, expected: SelectCatalogStage, target: SelectCatalogStage, reason: str) -> None:
@@ -233,7 +312,11 @@ class Feature18Lifecycle:
     def _abstain(self, reason: SelectCatalogAbstention) -> None:
         if self.stage not in {SelectCatalogStage.CANDIDATE, SelectCatalogStage.CERTIFIED}:
             raise ValueError(f"ABSTAINED requires CANDIDATE or CERTIFIED; found {self.stage.value}")
-        self.transitions.append({"from": self.stage.value, "to": SelectCatalogStage.ABSTAINED.value, "reason": reason.value})
+        self.transitions.append({
+            "from": self.stage.value,
+            "to": SelectCatalogStage.ABSTAINED.value,
+            "reason": reason.value,
+        })
         self.stage = SelectCatalogStage.ABSTAINED
         self.abstention_reason = reason
 
@@ -267,7 +350,12 @@ class Feature18Lifecycle:
         if any(item_id not in attempted_ids for item_id in selected_ids):
             self._abstain(SelectCatalogAbstention.OUT_OF_CATALOG)
             return
-        if not request_bytes or not tool_schema_bytes or not argument_bytes or not provider_request_id.strip():
+        if (
+            not request_bytes
+            or not tool_schema_bytes
+            or not argument_bytes
+            or not provider_request_id.strip()
+        ):
             self._abstain(SelectCatalogAbstention.INCOMPLETE)
             return
         self.attempted_ids = tuple(attempted_ids)
@@ -276,7 +364,11 @@ class Feature18Lifecycle:
         self.tool_schema_sha256 = _sha256(tool_schema_bytes)
         self.argument_sha256 = _sha256(argument_bytes)
         self.provider_request_id = provider_request_id
-        self._move(SelectCatalogStage.CANDIDATE, SelectCatalogStage.CERTIFIED, "selection_request_sealed")
+        self._move(
+            SelectCatalogStage.CANDIDATE,
+            SelectCatalogStage.CERTIFIED,
+            "selection_request_sealed",
+        )
 
     def deliver(self, *, delivery_id: str) -> None:
         if self.stage is not SelectCatalogStage.CERTIFIED:
@@ -286,7 +378,11 @@ class Feature18Lifecycle:
         if not self.provider_request_id:
             raise ValueError("DELIVERED requires provider dispatch")
         self.delivery_id = delivery_id
-        self._move(SelectCatalogStage.CERTIFIED, SelectCatalogStage.DELIVERED, "provider_dispatch_started")
+        self._move(
+            SelectCatalogStage.CERTIFIED,
+            SelectCatalogStage.DELIVERED,
+            "provider_dispatch_started",
+        )
 
     def consume(self, *, selected_ids: tuple[str, ...], resulting_action: str) -> None:
         if not resulting_action.strip():
@@ -295,7 +391,11 @@ class Feature18Lifecycle:
             raise ValueError("CONSUMED requires a non-empty duplicate-free selection")
         if any(item_id not in self.selected_ids for item_id in selected_ids):
             raise ValueError("CONSUMED selection is not a visible selected-ID subset")
-        self._move(SelectCatalogStage.DELIVERED, SelectCatalogStage.CONSUMED, "versioned_bootstrap_transition_observed")
+        self._move(
+            SelectCatalogStage.DELIVERED,
+            SelectCatalogStage.CONSUMED,
+            "versioned_bootstrap_transition_observed",
+        )
         self.resulting_agent_action = resulting_action
 
     def validate(self, *, validation: str, contradicted: bool) -> None:
@@ -381,6 +481,74 @@ class WitnessedProcess:
         }
 
 
+def witnessed_process_from_receipt(receipt: dict[str, Any]) -> WitnessedProcess:
+    if receipt.get("schema") != "gt.witnessed_process.v1":
+        raise ValueError("witnessed process schema mismatch")
+    try:
+        steps = tuple(
+            ProcessStep(
+                str(step["node_id"]), str(step["edge_id"]),
+                str(step["evidence_id"]), str(step["relation"]),
+                str(step["verification_state"]),
+            )
+            for step in receipt["steps"]
+        )
+        return WitnessedProcess(
+            process_id=str(receipt["process_id"]),
+            source_revision=str(receipt["source_revision"]),
+            graph_revision=str(receipt["graph_revision"]),
+            projection=str(receipt["projection"]),
+            anchors=tuple(map(str, receipt["anchors"])),
+            steps=steps,
+            branches=tuple(tuple(map(str, branch)) for branch in receipt["branches"]),
+            gaps=tuple(map(str, receipt["gaps"])),
+            verification_state=str(receipt["verification_state"]),
+            stale_reason=str(receipt["stale_reason"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("witnessed process receipt malformed") from exc
+
+
+def build_planning_payload(
+    process: WitnessedProcess,
+    *,
+    source_revision: str,
+    graph_revision: str,
+) -> dict[str, Any]:
+    """Assemble planning input from persisted process facts only."""
+    if process.source_revision != source_revision or process.graph_revision != graph_revision:
+        return {
+            "schema": "gt.planning_process.v1",
+            "status": "ABSTAINED",
+            "process_id": process.process_id,
+            "source_revision": source_revision,
+            "graph_revision": graph_revision,
+            "steps": (),
+            "citations": (),
+            "gaps": ("stale_process_revision",),
+        }
+    citations = tuple(
+        {
+            "node_id": step.node_id,
+            "edge_id": step.edge_id,
+            "evidence_id": step.evidence_id,
+            "source_revision": process.source_revision,
+            "graph_revision": process.graph_revision,
+        }
+        for step in process.steps
+    )
+    return {
+        "schema": "gt.planning_process.v1",
+        "status": "PARTIAL" if process.gaps else "READY",
+        "process_id": process.process_id,
+        "source_revision": process.source_revision,
+        "graph_revision": process.graph_revision,
+        "steps": tuple(step.node_id for step in process.steps),
+        "citations": citations,
+        "gaps": process.gaps,
+    }
+
+
 def build_witnessed_process(
     *,
     anchors: tuple[str, ...],
@@ -393,7 +561,9 @@ def build_witnessed_process(
     current_graph_revision: str | None = None,
 ) -> WitnessedProcess:
     canonical_anchors = tuple(sorted(dict.fromkeys(str(item) for item in anchors)))
-    canonical_steps = tuple(sorted(steps, key=lambda step: (step.node_id, step.edge_id, step.evidence_id)))
+    canonical_steps = tuple(sorted(
+        steps, key=lambda step: (step.node_id, step.edge_id, step.evidence_id)
+    ))
     canonical_branches = tuple(sorted(tuple(sorted(branch)) for branch in branches))
     canonical_gaps = tuple(sorted(dict.fromkeys(str(item) for item in gaps)))
     payload = {
@@ -445,4 +615,6 @@ __all__ = [
     "ProcessStep",
     "WitnessedProcess",
     "build_witnessed_process",
+    "build_planning_payload",
+    "witnessed_process_from_receipt",
 ]
