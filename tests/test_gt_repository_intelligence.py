@@ -114,7 +114,7 @@ _PROOF_SCHEMA = "gt.source_qa.proof.v1"
 _ARCHIVE_SOURCE_HEAD = "UNVERIFIED"
 # The source inputs used by this proof were last reviewed at this immutable
 # head.  Archive runners supply it explicitly because they have no .git.
-_ARCHIVE_REVIEWED_SOURCE_HEAD = "4d3a834c9d1c10c3cddbbb053d02cf1f102479b2"
+_ARCHIVE_REVIEWED_SOURCE_HEAD = "53490708adea9ebb1f0cdb87d3201cbf3c275b09"
 _ARCHIVE_SOURCE_BLOB_SHA256 = {
     "gt_engine/indexer.py": (
         "68e3b97f596af58bd014031ddb5d0312f7fc02b570a8c71f96e034a12f4bfae6"
@@ -123,7 +123,7 @@ _ARCHIVE_SOURCE_BLOB_SHA256 = {
         "ac04813d834e2704785beab2380663104cf217bc428454ce5c64609369efc91b"
     ),
     "gt_engine/bridge.py": (
-        "72505bb541532f5b9528aec0a8c5d75906e474e493c64e756c2722b4aa6068b5"
+        "f01804c0ef775412224f100fd4f9beb1cc3f9a7538da6eead2042832f86a2886"
     ),
     "gt_engine/graph_lease.py": (
         "29ee14ae08e4c170c2dac4cc560616be60973bff446acc058a295d3fdfe6c1a9"
@@ -694,7 +694,10 @@ def test_frozen_question_proof_abstains_on_source_mutation(tmp_path):
     source = root / "gt_engine" / "graph_context.py"
     source.write_bytes(source.read_bytes() + b"\n# mutation after freeze\n")
 
-    with pytest.raises(SourceProofError, match="pinned source revision mismatch"):
+    with pytest.raises(
+        SourceProofError,
+        match="(?:pinned source revision mismatch|archive source blob mismatch)",
+    ):
         _execute_questions(root, state, expected)
     assert proof_path.read_bytes() == before
 
