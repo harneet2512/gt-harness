@@ -86,7 +86,8 @@ def observed(command: list[str], label: str) -> dict[str, object]:
         "status": "PASS",
         "stdout_sha256": sha256(result.stdout),
         "stderr_sha256": sha256(result.stderr),
-        "_stdout": result.stdout.decode(errors="replace"),
+        "_output": result.stdout.decode(errors="replace")
+        + result.stderr.decode(errors="replace"),
     }
 
 
@@ -125,10 +126,10 @@ def main() -> int:
         "python -m pytest -q tests/test_gt_finalstand.py -k baseline",
     )
     full = observed([sys.executable, "-m", "pytest", "-q"], "python -m pytest -q")
-    baseline.pop("_stdout")
-    full_output = str(full.pop("_stdout"))
+    baseline_output = str(baseline.pop("_output"))
+    full_output = str(full.pop("_output"))
     full_commands = [baseline, full]
-    suite_baseline = counts("2 passed")
+    suite_baseline = counts(baseline_output)
     suite_full = counts(full_output)
     receipt.update(
         {
