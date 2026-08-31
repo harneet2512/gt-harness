@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -17,6 +18,17 @@ except ModuleNotFoundError:  # Direct ``python scripts/run_trust_oracles.py`` ex
     from build_trust_calibration_manifest import load_manifest, verify_manifest
 
 RESULT_SCHEMA = "gt.trust_calibration_oracle_results.v1"
+NORMALIZED_LABELS = {
+    "agree_exact",
+    "agree_set",
+    "gt_false_positive",
+    "gt_false_negative",
+    "set_incomplete",
+    "oracle_indeterminate",
+}
+_CORRECT_LABELS = {"agree_exact", "agree_set"}
+_INCORRECT_LABELS = {"gt_false_positive", "gt_false_negative"}
+_SHA256 = set("0123456789abcdef")
 
 
 def wilson_interval(*, errors: int, labeled: int, z: float = 1.96) -> tuple[float, float]:
@@ -42,8 +54,8 @@ def score_calibration(
         if {str(row.get("id") or "") for row in rows} - allowed:
             raise ValueError("row_not_in_manifest")
     population = len(rows)
-    labeled_rows = [row for row in rows if row.get("label") is not None]
-    errors = sum(1 for row in labeled_rows if row.get("prediction") != row.get("label"))
+    labeled_rows = [row for row in rows if _effective_label(row) is not None]
+    errors = sum(1 for row in labeled_rows if row.get("prediction") != _effective_label(row))
     labeled = len(labeled_rows)
     probabilistic = [
         row
@@ -55,7 +67,7 @@ def score_calibration(
     log_loss = None
     if probabilistic:
         probabilities = [float(row["confidence"]) for row in probabilistic]
-        outcomes = [row.get("prediction") == row.get("label") for row in probabilistic]
+        outcomes = [row.get("prediction") == _effective_label(row) for row in probabilistic]
         brier = sum(
             (p - float(ok)) ** 2 for p, ok in zip(probabilities, outcomes, strict=True)
         ) / len(outcomes)
@@ -84,8 +96,8 @@ def score_calibration(
 def _score_core(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Calculate metrics without recursively generating grouped reports."""
     population = len(rows)
-    labeled_rows = [row for row in rows if row.get("label") is not None]
-    errors = sum(1 for row in labeled_rows if row.get("prediction") != row.get("label"))
+    labeled_rows = [row for row in rows if _effective_label(row) is not None]
+    errors = sum(1 for row in labeled_rows if row.get("prediction") != _effective_label(row))
     labeled = len(labeled_rows)
     probabilistic = [
         row
@@ -97,7 +109,7 @@ def _score_core(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     log_loss = None
     if probabilistic:
         probabilities = [float(row["confidence"]) for row in probabilistic]
-        outcomes = [row.get("prediction") == row.get("label") for row in probabilistic]
+        outcomes = [row.get("prediction") == _effective_label(row) for row in probabilistic]
         brier = sum(
             (p - float(ok)) ** 2
             for p, ok in zip(probabilities, outcomes, strict=True)
@@ -141,6 +153,108 @@ def _partition_rows(
     return partitions
 
 
+def _effective_label(row: Mapping[str, Any]) -> Any:
+    """Use an oracle-produced normalized outcome, never a resolver score."""
+    provenance = row.get("oracle_provenance")
+    if isinstance(provenance, Mapping):
+        normalized = provenance.get("normalized_label")
+        if normalized in _CORRECT_LABELS:
+            return "correct"
+        if normalized in _INCORRECT_LABELS:
+            return "incorrect"
+        if normalized in {"set_incomplete", "oracle_indeterminate"}:
+            return None
+    return row.get("label")
+
+
+def _provenance_digest(provenance: Mapping[str, Any]) -> str:
+    body = dict(provenance)
+    body.pop("provenance_digest", None)
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _canonical_oracle_row(
+    row: Mapping[str, Any], *, case: Mapping[str, Any], manifest: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Validate one source-bound compiler/LSP (or explicit adapter) result."""
+    if "label" in row:
+        raise ValueError("caller_supplied_label_forbidden")
+    case_id = str(row.get("id") or "")
+    if case_id != str(case["id"]):
+        raise ValueError("oracle_case_identity_invalid")
+    if str(row.get("case_digest") or "") != str(case["case_digest"]):
+        raise ValueError("oracle_case_digest_mismatch")
+    for field in ("source_hash", "fixture_hash"):
+        value = str(case.get(field) or "").lower()
+        if len(value) != 64 or set(value) - _SHA256:
+            raise ValueError(f"oracle_case_{field}_missing_or_invalid")
+    provenance = row.get("oracle_provenance")
+    if provenance is None:
+        provenance = row.get("oracle")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("oracle_provenance_missing")
+    required = (
+        "adapter",
+        "tool",
+        "version",
+        "config_hash",
+        "source_commit",
+        "command",
+        "exit_code",
+        "duration_ms",
+        "stderr_hash",
+        "normalized_label",
+    )
+    missing = [field for field in required if field not in provenance]
+    if missing:
+        raise ValueError(f"oracle_provenance_missing:{','.join(missing)}")
+    canonical = {field: provenance[field] for field in required}
+    for field in ("adapter", "tool", "version", "source_commit", "normalized_label"):
+        if not isinstance(canonical[field], str) or not canonical[field].strip():
+            raise ValueError(f"oracle_provenance_invalid:{field}")
+    if canonical["adapter"] not in {"compiler", "lsp", "source_bound"}:
+        raise ValueError("oracle_adapter_invalid")
+    if canonical["normalized_label"] not in NORMALIZED_LABELS:
+        raise ValueError("oracle_normalized_label_invalid")
+    if not isinstance(canonical["command"], str) or not canonical["command"].strip():
+        raise ValueError("oracle_command_invalid")
+    if not isinstance(canonical["exit_code"], int) or isinstance(canonical["exit_code"], bool):
+        raise ValueError("oracle_exit_code_invalid")
+    try:
+        duration = float(canonical["duration_ms"])
+    except (TypeError, ValueError):
+        raise ValueError("oracle_duration_invalid") from None
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError("oracle_duration_invalid")
+    canonical["duration_ms"] = int(duration) if duration.is_integer() else duration
+    for field in ("config_hash", "stderr_hash"):
+        value = str(canonical[field]).lower()
+        if len(value) != 64 or set(value) - _SHA256:
+            raise ValueError(f"oracle_{field}_invalid")
+        canonical[field] = value
+    if canonical["source_commit"] != str(manifest["source_revision"]):
+        raise ValueError("oracle_source_commit_mismatch")
+    supplied_digest = provenance.get("provenance_digest")
+    digest = _provenance_digest(canonical)
+    if supplied_digest is not None and str(supplied_digest) != digest:
+        raise ValueError("oracle_provenance_digest_mismatch")
+    canonical["provenance_digest"] = digest
+    result = dict(row)
+    result.pop("oracle", None)
+    result.pop("label", None)
+    result["id"] = case_id
+    result["case_digest"] = str(case["case_digest"])
+    result["stratum_id"] = str(case["stratum_id"])
+    result["source_hash"] = str(case["source_hash"]).lower()
+    result["fixture_hash"] = str(case["fixture_hash"]).lower()
+    result["oracle_provenance"] = canonical
+    return result
+
+
 def _validate_frozen_rows(rows: Sequence[Mapping[str, Any]], manifest: Mapping[str, Any]) -> None:
     expected = {str(item["id"]) for item in manifest["cases"]}
     actual = [str(row.get("id") or "") for row in rows]
@@ -156,7 +270,14 @@ def run_oracles(
     """Run the frozen complete case set and bind results to its manifest."""
     verify_manifest(manifest)
     _validate_frozen_rows(rows, manifest)
-    ordered = sorted((dict(row) for row in rows), key=lambda row: str(row["id"]))
+    by_id = {str(case["id"]): case for case in manifest["cases"]}
+    ordered = sorted(
+        (
+            _canonical_oracle_row(row, case=by_id[str(row["id"])], manifest=manifest)
+            for row in rows
+        ),
+        key=lambda row: str(row["id"]),
+    )
     partitions = _partition_rows(ordered, manifest)
     return {
         "schema": RESULT_SCHEMA,
@@ -270,7 +391,9 @@ def _reliability(rows: Sequence[Mapping[str, Any]], bins: int = 10) -> list[dict
                         float(row["confidence"]) for row in members
                     )
                     / len(members),
-                    "accuracy": sum(row.get("prediction") == row.get("label") for row in members)
+                    "accuracy": sum(
+                        row.get("prediction") == _effective_label(row) for row in members
+                    )
                     / len(members),
                 }
             )

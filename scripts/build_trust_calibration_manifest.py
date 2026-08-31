@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import tempfile
 from argparse import ArgumentParser
@@ -13,6 +12,13 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "gt.trust_calibration_manifest.v1"
+STRATUM_FIELDS = (
+    "language",
+    "provenance",
+    "candidate_count_bucket",
+    "receiver_form",
+    "export_state",
+)
 
 
 def _canonical_bytes(payload: Mapping[str, Any]) -> bytes:
@@ -27,6 +33,111 @@ def _digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical_bytes(body)).hexdigest()
 
 
+def _case_digest(case: Mapping[str, Any]) -> str:
+    """Bind a frozen case's identity before adding derived split metadata."""
+    source = dict(case)
+    for field in (*STRATUM_FIELDS, "case_digest", "stratum_id"):
+        source.pop(field, None)
+    return hashlib.sha256(_canonical_bytes(source)).hexdigest()
+
+
+def candidate_count_bucket(value: Any) -> str:
+    """Return the stable bucket used by the calibration sampling strata."""
+    if value is None or value == "":
+        return "unknown"
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return str(value).strip().lower() or "unknown"
+    if count < 0:
+        raise ValueError("candidate_count must be non-negative")
+    if count == 0:
+        return "0"
+    if count == 1:
+        return "1"
+    if count <= 3:
+        return "2-3"
+    return "4+"
+
+
+def _stratum_values(case: Mapping[str, Any]) -> dict[str, str]:
+    values = {
+        "language": str(case.get("language") or "unknown").strip().lower(),
+        "provenance": str(case.get("provenance") or "unknown").strip().lower(),
+        "candidate_count_bucket": candidate_count_bucket(
+            case.get("candidate_count_bucket", case.get("candidate_count"))
+        ),
+        "receiver_form": str(case.get("receiver_form") or "unknown").strip().lower(),
+        "export_state": str(case.get("export_state") or "unknown").strip().lower(),
+    }
+    return {key: value or "unknown" for key, value in values.items()}
+
+
+def _stratum_id(values: Mapping[str, str]) -> str:
+    return "|".join(f"{key}={values[key]}" for key in STRATUM_FIELDS)
+
+
+def _prepare_cases(cases: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    normalized = []
+    seen: set[str] = set()
+    for case in cases:
+        item = dict(case)
+        case_id = str(item.get("id") or "")
+        if not case_id or case_id in seen:
+            raise ValueError("case IDs must be non-empty and unique")
+        seen.add(case_id)
+        values = _stratum_values(item)
+        item["case_digest"] = _case_digest(item)
+        item.update(values)
+        item["stratum_id"] = _stratum_id(values)
+        normalized.append(item)
+    normalized.sort(key=lambda item: str(item["id"]))
+    return normalized
+
+
+def _split_cases(
+    cases: list[Mapping[str, Any]], *, seed: int
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for case in cases:
+        grouped.setdefault(str(case["stratum_id"]), []).append(case)
+    strata: list[dict[str, Any]] = []
+    holdout_ids: list[str] = []
+    calibration_ids: list[str] = []
+    for stratum_id in sorted(grouped):
+        members = grouped[stratum_id]
+        ranked = sorted(
+            members,
+            key=lambda item: hashlib.sha256(f"{seed}:{item['id']}".encode()).hexdigest(),
+        )
+        population = len(ranked)
+        holdout_count = population // 5 if population >= 5 else 0
+        selected = sorted(str(item["id"]) for item in ranked[:holdout_count])
+        selected_set = set(selected)
+        sample = sorted(str(item["id"]) for item in ranked)
+        calibration = [case_id for case_id in sample if case_id not in selected_set]
+        values = {key: str(ranked[0][key]) for key in STRATUM_FIELDS}
+        strata.append(
+            {
+                "stratum_id": stratum_id,
+                **values,
+                "population": population,
+                "sample_ids": sample,
+                "calibration_ids": calibration,
+                "holdout_ids": selected,
+                "holdout_count": holdout_count,
+                "holdout_rule": "floor(n/5)",
+                "no_holdout": population < 5,
+                "no_holdout_reason": (
+                    "stratum_population_below_five" if population < 5 else None
+                ),
+            }
+        )
+        holdout_ids.extend(selected)
+        calibration_ids.extend(calibration)
+    return strata, sorted(calibration_ids), sorted(holdout_ids)
+
+
 def build_manifest(
     cases: Iterable[Mapping[str, Any]],
     *,
@@ -38,34 +149,18 @@ def build_manifest(
         raise ValueError("source_revision is required")
     if not 0.0 < holdout_fraction < 1.0:
         raise ValueError("holdout_fraction must be between zero and one")
-    normalized = []
-    seen: set[str] = set()
-    for case in cases:
-        item = dict(case)
-        case_id = str(item.get("id") or "")
-        if not case_id or case_id in seen:
-            raise ValueError("case IDs must be non-empty and unique")
-        seen.add(case_id)
-        normalized.append(item)
-    normalized.sort(key=lambda item: str(item["id"]))
-    count = len(normalized)
-    holdout_count = max(1, math.ceil(count * holdout_fraction)) if count > 1 else 0
-    ranked = sorted(
-        normalized,
-        key=lambda item: hashlib.sha256(f"{seed}:{item['id']}".encode()).hexdigest(),
-    )
-    holdout_ids = tuple(sorted(str(item["id"]) for item in ranked[:holdout_count]))
-    holdout_set = set(holdout_ids)
+    normalized = _prepare_cases(cases)
+    strata, calibration_ids, holdout_ids = _split_cases(normalized, seed=seed)
     payload: dict[str, Any] = {
         "schema": SCHEMA,
         "source_revision": source_revision,
         "seed": int(seed),
         "holdout_fraction": float(holdout_fraction),
+        "holdout_rule": "floor(n/5) per stratum; no holdout when n < 5",
         "cases": normalized,
-        "calibration_ids": [
-            str(item["id"]) for item in normalized if item["id"] not in holdout_set
-        ],
-        "holdout_ids": list(holdout_ids),
+        "strata": strata,
+        "calibration_ids": calibration_ids,
+        "holdout_ids": holdout_ids,
     }
     payload["manifest_digest"] = _digest(payload)
     return payload
@@ -84,6 +179,19 @@ def verify_manifest(manifest: Mapping[str, Any]) -> None:
     holdout = set(str(value) for value in manifest.get("holdout_ids", ()))
     if calibration & holdout or calibration | holdout != set(ids):
         raise ValueError("manifest_split_invalid")
+    cases = manifest.get("cases", ())
+    if not isinstance(cases, list) or any(not isinstance(case, Mapping) for case in cases):
+        raise ValueError("manifest_cases_invalid")
+    expected_cases = _prepare_cases(cases)
+    if expected_cases != list(cases):
+        raise ValueError("manifest_case_metadata_invalid")
+    strata, expected_calibration, expected_holdout = _split_cases(
+        expected_cases, seed=int(manifest.get("seed"))
+    )
+    if expected_calibration != sorted(calibration) or expected_holdout != sorted(holdout):
+        raise ValueError("manifest_split_invalid")
+    if manifest.get("strata") != strata:
+        raise ValueError("manifest_strata_invalid")
 
 
 def read_cases(path: Path) -> list[dict[str, Any]]:
@@ -155,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "SCHEMA",
     "build_manifest",
+    "candidate_count_bucket",
     "load_manifest",
     "main",
     "read_cases",
