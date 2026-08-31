@@ -195,7 +195,7 @@ def _leiden_partition(
     seed: int,
     resolution: float,
 ) -> dict[str, str]:
-    """Deterministic single-level modularity local-moving optimization."""
+    """Deterministic local moving followed by Leiden-style refinement."""
     adjacency: dict[str, dict[str, float]] = {node: {} for node in nodes}
     for edge in edges:
         adjacency[edge.source][edge.target] = (
@@ -214,6 +214,11 @@ def _leiden_partition(
 
     degree = {node: sum(adjacency[node].values()) for node in nodes}
     community = {node: node for node in nodes}
+    community_totals = dict(degree)
+    node_community_weights = {
+        node: {neighbor: weight for neighbor, weight in adjacency[node].items()}
+        for node in nodes
+    }
     ordered_nodes = tuple(sorted(nodes))
     if len(ordered_nodes) > 1:
         pivot = seed % len(ordered_nodes)
@@ -223,9 +228,7 @@ def _leiden_partition(
         current_community = community[node]
         if current_community == target_community:
             return 0.0
-        # Keep the move decision tied to incremental community totals; the
-        # full score below remains the independent delta-Q oracle.
-        _incremental_delta_q(
+        return _incremental_delta_q(
             node,
             target_community,
             community=community,
@@ -233,24 +236,9 @@ def _leiden_partition(
             degree=degree,
             total_weight=total_weight,
             resolution=resolution,
+            community_totals=community_totals,
+            node_community_weights=node_community_weights,
         )
-
-        def score(mapping: dict[str, str]) -> float:
-            internal = sum(
-                1.0 for edge in edges if mapping[edge.source] == mapping[edge.target]
-            )
-            totals: dict[str, float] = {}
-            for member, label in mapping.items():
-                totals[label] = totals.get(label, 0.0) + degree[member]
-            expected = sum(
-                (community_degree / (2.0 * total_weight)) ** 2
-                for community_degree in totals.values()
-            )
-            return internal / total_weight - resolution * expected
-
-        candidate_mapping = dict(community)
-        candidate_mapping[node] = target_community
-        return score(candidate_mapping) - score(community)
 
     improved = True
     passes = 0
@@ -270,6 +258,18 @@ def _leiden_partition(
                     best_community = candidate
             if best_community != current_community:
                 community[node] = best_community
+                community_totals[current_community] -= degree[node]
+                community_totals[best_community] = (
+                    community_totals.get(best_community, 0.0) + degree[node]
+                )
+                for neighbor in adjacency[node]:
+                    weight = adjacency[node][neighbor]
+                    node_community_weights[neighbor][current_community] = (
+                        node_community_weights[neighbor].get(current_community, 0.0) - weight
+                    )
+                    node_community_weights[neighbor][best_community] = (
+                        node_community_weights[neighbor].get(best_community, 0.0) + weight
+                    )
                 improved = True
     community = _refine_partition(community, adjacency, seed=seed)
     groups: dict[str, list[str]] = {}
@@ -287,19 +287,39 @@ def _incremental_delta_q(
     degree: dict[str, float],
     total_weight: float,
     resolution: float,
+    community_totals: dict[str, float] | None = None,
+    node_community_weights: dict[str, dict[str, float]] | None = None,
 ) -> float:
-    """Incremental delta-Q estimate using maintained edge/community totals."""
+    """Incremental delta-Q using maintained community totals and edge weights."""
     current = community[node]
     if current == target_community or total_weight == 0:
         return 0.0
-    target_degree = sum(
-        degree[member] for member, label in community.items() if label == target_community
-    )
-    target_edges = sum(
-        weight for neighbor, weight in adjacency[node].items()
-        if community.get(neighbor) == target_community
-    )
-    return target_edges / total_weight - resolution * degree[node] * target_degree / (2.0 * total_weight * total_weight)
+    totals = community_totals or {}
+    if not totals:
+        for member, label in community.items():
+            totals[label] = totals.get(label, 0.0) + degree[member]
+    current_degree = totals.get(current, 0.0)
+    target_degree = totals.get(target_community, 0.0)
+    if node_community_weights is None:
+        target_edges = sum(
+            weight for neighbor, weight in adjacency[node].items()
+            if community.get(neighbor) == target_community
+        )
+        current_edges = sum(
+            weight for neighbor, weight in adjacency[node].items()
+            if community.get(neighbor) == current
+        )
+    else:
+        target_edges = node_community_weights[node].get(target_community, 0.0)
+        current_edges = node_community_weights[node].get(current, 0.0)
+    internal_delta = (target_edges - current_edges) / total_weight
+    expected_delta = -resolution * (
+        (target_degree + degree[node]) ** 2
+        + (current_degree - degree[node]) ** 2
+        - target_degree**2
+        - current_degree**2
+    ) / (4.0 * total_weight * total_weight)
+    return internal_delta + expected_delta
 
 
 def _refine_partition(
