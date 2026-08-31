@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-08-31T23:05:23.760916Z",
+  "detail":"Builder added a frozen substrate digest and replay/mutation test. The test mutates shipped resolution-substrate bytes and requires typed resolution_substrate_digest_mismatch abstention; valid substrate rows replay through store publication and certified query.",
+  "file":"tests/test_why_this_edge.py",
+  "head_sha":"d88b40fef046358f901b2d65fa0a3b98bd940d7b",
+  "kind":"finding",
+  "line":1,
+  "message":"RED substrate witness landed",
+  "packet_digest_sha256":"d00ab4c100905db5c6714aced49d744e1ec9366efbf36e44a9446ff351f07707",
+  "packet_id":"finder-f2-fixed",
+  "pr":25,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"directed-fix-landed",
+    "system":"cursor-finder"
+  },
+  "status":"fixed",
+  "supersedes":"finder-f2",
+  "ticket":"HAR-63"
+}
