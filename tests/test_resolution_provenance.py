@@ -14,7 +14,39 @@ from gt_engine.resolution_provenance import (
     normalize_symbol_kind,
     stable_callsite_id,
     stable_symbol_id,
+    ResolutionTier,
+    derive_resolution_tier,
 )
+
+
+def test_resolution_tier_uses_structural_provenance_not_confidence_scores():
+    exact = derive_resolution_tier(
+        provenance=ProvenanceMechanism.IMPORT_EXACT,
+        candidate_count=1,
+        declared_scope="pkg.mod",
+        receiver_type="",
+        parser_complete=True,
+        dynamic_dispatch=False,
+    )
+    ambiguous = derive_resolution_tier(
+        provenance=ProvenanceMechanism.NAME_MATCH,
+        candidate_count=2,
+        declared_scope="pkg.mod",
+        receiver_type="",
+        parser_complete=True,
+        dynamic_dispatch=False,
+    )
+    incomplete = derive_resolution_tier(
+        provenance=ProvenanceMechanism.IMPORT_EXACT,
+        candidate_count=1,
+        declared_scope="pkg.mod",
+        receiver_type="",
+        parser_complete=False,
+        dynamic_dispatch=False,
+    )
+    assert exact is ResolutionTier.EXACT
+    assert ambiguous is ResolutionTier.AMBIGUOUS
+    assert incomplete is ResolutionTier.INDETERMINATE
 
 
 def _symbol(name: str, *, native_kind: str = "Function") -> SymbolRecord:
