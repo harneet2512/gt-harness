@@ -74,6 +74,19 @@ class DispatchState(StrEnum):
     UNKNOWN_LEGACY = "unknown_legacy"
 
 
+class ResolutionTier(StrEnum):
+    """A score-free authority label derived from observable resolver evidence."""
+
+    EXACT = "exact"
+    AMBIGUOUS = "ambiguous"
+    DYNAMIC = "dynamic"
+    EXTERNAL = "external"
+    UNRESOLVED = "unresolved"
+    INDETERMINATE = "indeterminate"
+    HEURISTIC = "heuristic"
+    UNKNOWN_LEGACY = "unknown_legacy"
+
+
 _KIND_ALIASES = {
     "file": NormalizedSymbolKind.FILE,
     "module": NormalizedSymbolKind.MODULE,
@@ -107,6 +120,55 @@ def normalize_symbol_kind(native_kind: str) -> NormalizedSymbolKind:
     """Map a native parser label without erasing the original label."""
     key = "".join(char for char in str(native_kind).strip().lower() if char.isalnum())
     return _KIND_ALIASES.get(key, NormalizedSymbolKind.UNKNOWN)
+
+
+_EXACT_MECHANISMS = frozenset(
+    {
+        ProvenanceMechanism.SAME_FILE,
+        ProvenanceMechanism.IMPORT_EXACT,
+        ProvenanceMechanism.QUALIFIED_EXACT,
+        ProvenanceMechanism.RECEIVER_TYPE,
+        ProvenanceMechanism.FIELD_BASED,
+        ProvenanceMechanism.VTA,
+    }
+)
+
+
+def derive_resolution_tier(
+    *,
+    provenance: ProvenanceMechanism | str,
+    candidate_count: int,
+    declared_scope: str,
+    receiver_type: str,
+    parser_complete: bool | None,
+    dynamic_dispatch: bool,
+) -> ResolutionTier:
+    """Derive a conservative tier without consulting confidence scores.
+
+    Missing/failed parser or oracle state is indeterminate.  Candidate
+    cardinality is evaluated before structural evidence so an ambiguous call
+    can never be presented as an exact singleton.
+    """
+
+    mechanism = ProvenanceMechanism(str(provenance))
+    count = int(candidate_count)
+    if count < 0:
+        raise ValueError("candidate_count must be non-negative")
+    if parser_complete is not True:
+        return ResolutionTier.INDETERMINATE
+    if mechanism is ProvenanceMechanism.UNKNOWN_LEGACY:
+        return ResolutionTier.UNKNOWN_LEGACY
+    if dynamic_dispatch or mechanism is ProvenanceMechanism.DYNAMIC:
+        return ResolutionTier.DYNAMIC
+    if mechanism is ProvenanceMechanism.EXTERNAL:
+        return ResolutionTier.EXTERNAL
+    if count == 0:
+        return ResolutionTier.UNRESOLVED
+    if count > 1:
+        return ResolutionTier.AMBIGUOUS
+    if mechanism in _EXACT_MECHANISMS and (declared_scope or receiver_type):
+        return ResolutionTier.EXACT
+    return ResolutionTier.HEURISTIC
 
 
 def _stable_digest(schema: str, values: Iterable[Any]) -> str:
@@ -503,11 +565,13 @@ __all__ = [
     "CallCandidate",
     "CallsiteRecord",
     "DispatchState",
+    "ResolutionTier",
     "NormalizedSymbolKind",
     "ProvenanceMechanism",
     "SymbolRecord",
     "VerificationStatus",
     "legacy_callsite_from_edge",
+    "derive_resolution_tier",
     "normalize_symbol_kind",
     "stable_callsite_id",
     "stable_symbol_id",

@@ -49,6 +49,46 @@ def test_resolution_tier_uses_structural_provenance_not_confidence_scores():
     assert incomplete is ResolutionTier.INDETERMINATE
 
 
+@pytest.mark.parametrize(
+    ("provenance", "count", "complete", "dynamic", "expected"),
+    [
+        (ProvenanceMechanism.DYNAMIC, 1, True, False, ResolutionTier.DYNAMIC),
+        (ProvenanceMechanism.EXTERNAL, 1, True, False, ResolutionTier.EXTERNAL),
+        (ProvenanceMechanism.SAME_FILE, 0, True, False, ResolutionTier.UNRESOLVED),
+        (ProvenanceMechanism.NAME_MATCH, 1, True, False, ResolutionTier.HEURISTIC),
+        (ProvenanceMechanism.UNKNOWN_LEGACY, 1, True, False, ResolutionTier.UNKNOWN_LEGACY),
+        (ProvenanceMechanism.IMPORT_EXACT, 1, None, False, ResolutionTier.INDETERMINATE),
+        (ProvenanceMechanism.IMPORT_EXACT, 1, True, True, ResolutionTier.DYNAMIC),
+    ],
+)
+def test_resolution_tier_has_closed_conservative_outcomes(
+    provenance, count, complete, dynamic, expected
+):
+    assert (
+        derive_resolution_tier(
+            provenance=provenance,
+            candidate_count=count,
+            declared_scope="pkg.mod",
+            receiver_type="Runner",
+            parser_complete=complete,
+            dynamic_dispatch=dynamic,
+        )
+        is expected
+    )
+
+
+def test_resolution_tier_rejects_negative_candidate_count():
+    with pytest.raises(ValueError, match="candidate_count"):
+        derive_resolution_tier(
+            provenance=ProvenanceMechanism.SAME_FILE,
+            candidate_count=-1,
+            declared_scope="pkg.mod",
+            receiver_type="",
+            parser_complete=True,
+            dynamic_dispatch=False,
+        )
+
+
 def _symbol(name: str, *, native_kind: str = "Function") -> SymbolRecord:
     return SymbolRecord.build(
         native_id=f"native:{name}",
