@@ -135,3 +135,35 @@ def test_wrong_origin_is_a_lineage_refusal(tmp_path):
     )
     result = check_failure_ids.evaluate(root, manifest=manifest)
     assert result == check_failure_ids._refusal("LINEAGE_MISMATCH", "origin_repository")
+
+
+def test_common_hook_installation_and_post_commit_contract_are_tracked():
+    repository = Path(__file__).resolve().parents[1]
+    install = (repository / ".githooks" / "install").read_text(encoding="utf-8")
+    pre_commit = (repository / ".githooks" / "pre-commit").read_text(encoding="utf-8")
+    post_commit = (repository / ".githooks" / "post-commit").read_text(encoding="utf-8")
+    assert "--git-common-dir" in install
+    assert "core.hooksPath" in install
+    assert "post-commit" in install
+    assert "core.hooksPath" in pre_commit
+    assert "common repository .githooks" in pre_commit
+    assert "git push --porcelain" in post_commit
+    assert "GNX_PUSH_REMOTE" in post_commit
+    assert "gnx-autopush.failures.log" in post_commit
+    for hook in (".githooks/install", ".githooks/pre-commit", ".githooks/post-commit"):
+        index = subprocess.run(
+            ["git", "-C", str(repository), "ls-files", "--stage", "--", hook],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert index.startswith("100755 "), (hook, index)
+    receipt = json.loads(
+        (repository / ".githooks" / "hook-installation.receipt.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert receipt["schema"] == "gt.hook_installation_receipt.v1"
+    assert receipt["status"] == "PASS"
+    assert all(hook["mode"] == "100755" for hook in receipt["hooks"])
+    assert receipt["post_commit"]["behavior"] == "preserved-auto-push"

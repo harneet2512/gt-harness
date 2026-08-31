@@ -1,4 +1,40 @@
 #!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
 from scripts.check_failure_ids import main
+
+
+def _expected_common_hooks_path() -> tuple[str, str]:
+    common_git = subprocess.check_output(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        text=True,
+    ).strip()
+    common_root = os.path.dirname(common_git)
+    configured = subprocess.check_output(
+        ["git", "config", "--path", "--get", "core.hooksPath"],
+        text=True,
+    ).strip()
+    expected = os.path.join(common_root, ".githooks")
+    return os.path.normcase(os.path.normpath(configured)), os.path.normcase(
+        os.path.normpath(expected)
+    )
+
+
+try:
+    configured_path, expected_path = _expected_common_hooks_path()
+except (OSError, subprocess.CalledProcessError) as error:
+    print(f"construction gate refused: common hooksPath unavailable: {error}", file=sys.stderr)
+    raise SystemExit(1) from None
+if configured_path != expected_path:
+    print(
+        "construction gate refused: core.hooksPath is not the common repository .githooks",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if not os.access(os.path.join(expected_path, "pre-commit"), os.X_OK):
+    print("construction gate refused: common pre-commit hook is not executable", file=sys.stderr)
+    raise SystemExit(1)
 
 raise SystemExit(main([".", "--manifest", ".githooks/failure-gate.json", "--commit", "HEAD"]))
