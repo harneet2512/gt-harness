@@ -391,7 +391,7 @@ class EvidenceRouter:
         iteration_id: str,
         claims: list[dict[str, Any]],
         baseline_request: Any,
-        final_request: Any,
+        final_request: Any | None = None,
         framing_encoding_bytes: int = 0,
         prior_event_digest: str | None = None,
         provider_exception: str | None = None,
@@ -439,7 +439,7 @@ class EvidenceRouter:
         iteration_id: str,
         candidates: list[dict[str, Any]],
         baseline_request: Any,
-        final_request: Any,
+        final_request: Any | None = None,
         prior_event_digest: str | None = None,
     ) -> tuple[Any, dict[str, Any]]:
         """Model-facing admission boundary that always seals, including empty evidence."""
@@ -463,6 +463,16 @@ class EvidenceRouter:
                     "reason": reason,
                 }
             )
+        if final_request is None:
+            baseline_text = _logical_request_bytes(baseline_request).decode(
+                "utf-8", "surrogatepass"
+            )
+            admitted_text = "".join(
+                str(item["content"])
+                for item in claims
+                if item["disposition"] == "admitted"
+            )
+            final_request = {"messages": [{"content": baseline_text + admitted_text}]}
         transported, receipt = self.seal_eligibility_receipt(
             decision_id=decision_id,
             iteration_id=iteration_id,

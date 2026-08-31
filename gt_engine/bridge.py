@@ -1680,6 +1680,20 @@ class GTBridge:
             ensure_ascii=False,
             default=str,
         )
+        provider_reconciliation: dict[str, Any] = {}
+        if self._evidence_router is not None:
+            from gt_engine.evidence_router import reconcile_provider_bytes
+
+            try:
+                provider_reconciliation = reconcile_provider_bytes(
+                    self._evidence_router.last_eligibility_receipt,
+                    payload,
+                )
+            except Exception as exc:  # noqa: BLE001 - telemetry is correct-or-quiet
+                provider_reconciliation = {
+                    "provider_final_matches": False,
+                    "reconciliation_error": type(exc).__name__,
+                }
         self._trace_record(
             "provider.request",
             "provider",
@@ -1692,6 +1706,7 @@ class GTBridge:
                 "matches": matches,
                 "message_count": len(messages) if isinstance(messages, list) else 0,
                 **self._last_context_receipt,
+                **provider_reconciliation,
                 "payload_chars": len(canonical),
                 "payload_sha256": hashlib.sha256(
                     canonical.encode("utf-8", "surrogatepass")
@@ -4224,37 +4239,55 @@ class GTBridge:
         # 3. THE ONE CALL.
         envelopes = augment(ev, st)
         native = os.environ.get("GT_GATEWAY_NATIVE") == "1"
-        if self._evidence_router is not None and envelopes:
-            admitted: list[Any] = []
-            for envelope in envelopes:
-                candidate_text = render_envelope(envelope, native=native)
-                keep, reason = self._evidence_router.admit(
-                    str(getattr(envelope, "evidence_type", "") or ""),
-                    candidate_text,
-                    command=command,
-                    output=output,
-                    commit=False,
+        if self._evidence_router is not None:
+            candidates = [
+                {
+                    "claim_id": f"claim-{index:04d}",
+                    "evidence_type": str(getattr(envelope, "evidence_type", "") or ""),
+                    "rendered": render_envelope(envelope, native=native),
+                    "command": command,
+                    "output": output,
+                }
+                for index, envelope in enumerate(envelopes)
+            ]
+            _, eligibility_receipt = self._evidence_router.admit_decision(
+                decision_id=f"gateway:{self.action_index}",
+                iteration_id=f"action:{self.action_index}",
+                candidates=candidates,
+                baseline_request={"messages": [{"content": event_output}]},
+                final_request=None,
+                prior_event_digest=self._attribution.trace_id,
+            )
+            admitted_ids = {
+                claim["claim_id"]
+                for claim in eligibility_receipt.get("claims", ())
+                if claim.get("disposition") == "admitted"
+            }
+            admitted = [
+                envelope
+                for index, envelope in enumerate(envelopes)
+                if f"claim-{index:04d}" in admitted_ids
+            ]
+            for index, envelope in enumerate(envelopes):
+                claim = next(
+                    item
+                    for item in eligibility_receipt.get("claims", ())
+                    if item.get("claim_id") == f"claim-{index:04d}"
                 )
+                keep = claim.get("disposition") == "admitted"
+                reason = str(claim.get("reason") or "")
                 self._control_record(
                     "GT_ROLE_DRIVEN_COALITION",
                     "mini_seam.evidence_router",
                     "APPLIED" if keep else "SUPPRESSED",
                     reason=reason,
-                    evidence_type=str(
-                        getattr(envelope, "evidence_type", "") or ""
-                    ),
+                    evidence_type=str(getattr(envelope, "evidence_type", "") or ""),
                 )
-                if keep:
-                    admitted.append(envelope)
-                else:
+                if not keep:
                     from gt_engine.attribution import feature_for_evidence
 
                     canonical = feature_for_evidence(
-                        str(
-                            getattr(
-                                envelope, "evidence_type", ""
-                            ) or ""
-                        )
+                        str(getattr(envelope, "evidence_type", "") or "")
                     )
                     if canonical:
                         self._trace_record(
@@ -4264,9 +4297,7 @@ class GTBridge:
                                 "decision": "suppressed",
                                 "reason": reason,
                                 "evidence_type": str(
-                                    getattr(
-                                        envelope, "evidence_type", ""
-                                    ) or ""
+                                    getattr(envelope, "evidence_type", "") or ""
                                 ),
                                 "feature_id": canonical,
                             },
