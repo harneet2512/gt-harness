@@ -219,3 +219,11 @@ def test_final_readiness_rejects_nonterminal_or_duplicate_rows(tmp_path):
     assert result == check_failure_ids._refusal(
         "VERDICT_COVERAGE_INVALID", "registry_verdict"
     )
+
+
+def test_shipped_manifest_matches_gate_refusal_contract() -> None:
+    manifest, error = check_failure_ids._load_manifest(
+        Path(__file__).resolve().parents[1] / ".githooks" / "failure-gate.json"
+    )
+    assert error is None
+    assert manifest is not None
