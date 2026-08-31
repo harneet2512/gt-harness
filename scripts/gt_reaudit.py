@@ -21,7 +21,9 @@ REQUIRED_PATHS = ("README.md", "pyproject.toml", "gt_engine", "scripts", "tests"
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def _git(root: Path, *args: str) -> str:
@@ -60,6 +62,48 @@ def _run_provider_free(root: Path, command: list[str]) -> dict[str, Any]:
     }
 
 
+def _verify_shipped_receipts(root: Path) -> dict[str, Any]:
+    """Verify every shipped digest-bearing receipt against its Git blob bytes."""
+    checked = 0
+    errors: list[str] = []
+    receipt_root = root / "gt_finalstand" / "receipts"
+    for path in sorted(receipt_root.glob("*.json")) if receipt_root.is_dir() else ():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            errors.append(path.name + ":invalid_json")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(path.name + ":not_object")
+            continue
+        digest_field = next(
+            (
+                field
+                for field in (
+                    "receipt_sha256",
+                    "receipt_digest_sha256",
+                    "report_digest_sha256",
+                )
+                if field in payload
+            ),
+            None,
+        )
+        if digest_field is None:
+            continue
+        supplied = payload[digest_field]
+        body = dict(payload)
+        body.pop(digest_field, None)
+        actual = hashlib.sha256(_canonical(body)).hexdigest()
+        checked += 1
+        if supplied != actual:
+            errors.append(path.name + ":digest_mismatch")
+    return {
+        "checked": checked,
+        "errors": sorted(errors),
+        "status": "pass" if not errors else "fail",
+    }
+
+
 def run_reaudit(groundtruth_root: str | Path) -> dict[str, Any]:
     root = Path(groundtruth_root).resolve()
     failure_code = None
@@ -73,7 +117,24 @@ def run_reaudit(groundtruth_root: str | Path) -> dict[str, Any]:
             raise RuntimeError("SOURCE_MISSING")
         head = _git(root, "rev-parse", "HEAD")
         source_manifest, tracked_count = _source_manifest(root)
-        red_replay = _run_provider_free(root, ["python", "-m", "pytest", "-q", "tests/test_failure_ids.py"])
+        red_replay = _run_provider_free(
+            root,
+            [
+                "python",
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_failure_ids.py",
+                "tests/test_red_evidence.py",
+            ],
+        )
+        producer_check = _run_provider_free(
+            root,
+            ["python", "scripts/check_red_evidence_producers.py", "--root", str(root)],
+        )
+        red_replay["producer_manifest_check"] = producer_check
+        receipt_check = _verify_shipped_receipts(root)
+        red_replay["shipped_receipt_check"] = receipt_check
         mutation_check = {
             "command": ["git", "-C", str(root), "diff", "--exit-code"],
             "exit_code": subprocess.run(
@@ -82,8 +143,10 @@ def run_reaudit(groundtruth_root: str | Path) -> dict[str, Any]:
                 check=False,
             ).returncode,
         }
-        if red_replay["exit_code"] != 0:
+        if red_replay["exit_code"] != 0 or producer_check["exit_code"] != 0:
             raise RuntimeError("PRODUCER_REPLAY_FAILED")
+        if receipt_check["status"] != "pass":
+            raise RuntimeError("RECEIPT_CHAIN_MISMATCH")
         if mutation_check["exit_code"] != 0:
             raise RuntimeError("RECEIPT_CHAIN_MISMATCH")
     except RuntimeError as exc:
@@ -127,12 +190,21 @@ def write_receipt(path: Path, receipt: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--groundtruth-root", required=True, type=Path)
+    parser.add_argument("--groundtruth-root", type=Path, default=Path.cwd())
+    parser.add_argument("--harness-root", type=Path, dest="groundtruth_root")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     receipt = run_reaudit(args.groundtruth_root)
     write_receipt(args.output, receipt)
-    print(json.dumps({"schema": SCHEMA, "failure_code": receipt["failure_code"], "output": str(args.output)}))
+    print(
+        json.dumps(
+            {
+                "schema": SCHEMA,
+                "failure_code": receipt["failure_code"],
+                "output": str(args.output),
+            }
+        )
+    )
     return 0 if receipt["failure_code"] is None else 2
 
 
