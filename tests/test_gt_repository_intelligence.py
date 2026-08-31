@@ -114,7 +114,7 @@ _PROOF_SCHEMA = "gt.source_qa.proof.v1"
 _ARCHIVE_SOURCE_HEAD = "UNVERIFIED"
 # The source inputs used by this proof were last reviewed at this immutable
 # head.  Archive runners supply it explicitly because they have no .git.
-_ARCHIVE_REVIEWED_SOURCE_HEAD = "53490708adea9ebb1f0cdb87d3201cbf3c275b09"
+_ARCHIVE_REVIEWED_SOURCE_HEAD = "7bbbc9d0b7f02f8cdaab79ad82ee86884b738eb5"
 _ARCHIVE_SOURCE_BLOB_SHA256 = {
     "gt_engine/indexer.py": (
         "68e3b97f596af58bd014031ddb5d0312f7fc02b570a8c71f96e034a12f4bfae6"
@@ -123,7 +123,7 @@ _ARCHIVE_SOURCE_BLOB_SHA256 = {
         "ac04813d834e2704785beab2380663104cf217bc428454ce5c64609369efc91b"
     ),
     "gt_engine/bridge.py": (
-        "f01804c0ef775412224f100fd4f9beb1cc3f9a7538da6eead2042832f86a2886"
+        "3872832d3618dbaffcf6beba516303f5cb0644d6872f1b6bf32c02d427a40f47"
     ),
     "gt_engine/graph_lease.py": (
         "29ee14ae08e4c170c2dac4cc560616be60973bff446acc058a295d3fdfe6c1a9"
