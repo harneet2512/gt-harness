@@ -19,7 +19,9 @@
     "lineage_mismatch": "LINEAGE_MISMATCH",
     "fixture_mismatch": "FIXTURE_MISMATCH",
     "trailer_invalid": "TRAILER_BLOCK_INVALID",
-    "failure_ids_invalid": "FAILURE_IDS_INVALID"
+    "failure_ids_invalid": "FAILURE_IDS_INVALID",
+    "verdict_coverage_missing": "VERDICT_COVERAGE_MISSING",
+    "verdict_coverage_invalid": "VERDICT_COVERAGE_INVALID"
   },
   "spec_bindings": [
     {"comment": "90bb9618-dbd7-4a0c-bb5d-cfc87b1c043f", "body_sha256": "c68668f16a34d8da98bc34ee6de3ae21f73a9caf74e318b083ddb83e1393042c"},

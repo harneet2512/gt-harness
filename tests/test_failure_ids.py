@@ -227,3 +227,12 @@ def test_shipped_manifest_matches_gate_refusal_contract() -> None:
     )
     assert error is None
     assert manifest is not None
+
+
+def test_shipped_manifest_preserves_verdict_coverage_refusals() -> None:
+    payload = json.loads(
+        (Path(__file__).resolve().parents[1] / ".githooks" / "failure-gate.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["expected_refusals"] == check_failure_ids.EXPECTED_REFUSALS
