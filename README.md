@@ -358,3 +358,40 @@ ruff check .    # lint (line length 100, py312 target)
 ## License
 
 MIT — see [LICENSE](LICENSE).
+# GroundTruth benchmark product — current evidence boundary
+
+This README describes the current, provisional provider-free GroundTruth (GT)
+benchmark-product boundary; it does not claim that a shipped benchmark release
+exists. Claims are subordinate to the exact source heads and receipts recorded
+in HAR-56/HAR-57; issue status is not evidence. The current source tree contains
+graph-native repository intelligence, provenance-aware resolution, deterministic
+communities, hybrid retrieval, lifecycle accounting, and source-backed
+capability-matrix work, while construction and verdict coverage remain
+incomplete: 15 of 21 GT-related units are unmerged and HAR-29 F15 remains open.
+Every capability claim is provisional until its source revision, fixture,
+manifest, and terminal verdict are present and current; missing or stale inputs
+remain fail-closed.
+
+The benchmark release gate is currently **not authorized**. Final repository
+heads, terminal verdict coverage, and the assembled provider-free receipt must
+settle before a benchmark command can be proposed. No provider or paid benchmark
+run is implied by this repository. The eventual stop token is
+`BENCHMARK_READY_AWAITING_USER_RUN_APPROVAL`; explicit user approval of the
+frozen tasks, model/provider, limits, environment, account, duration, outputs,
+cost estimate, and hard ceiling is required before any run.
+
+## Evidence and runtime flow
+
+At task start, the runtime binds the repository and workspace revisions, leases
+the last complete graph, and exposes only graph-native facts with their source
+and evidence identities. Retrieval separates edit owners, inspection
+dependencies, public surface, affected tests, validation commands, and
+unresolved identities. Ambiguous or stale facts remain candidates or abstain;
+they never become verified singletons. Persisted receipts are content-addressed
+and replay verification recomputes their semantic digests and cited source
+bytes. Provider calls are recorded explicitly and must be zero for the
+provider-free baseline.
+
+The root README is descriptive only. Executable truth lives in the production
+modules and their receipts; the HAR-29 documentation boundary is satisfied only
+when every statement here resolves to those pinned bytes.
