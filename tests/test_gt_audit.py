@@ -228,7 +228,10 @@ def test_attribution_trace_is_loaded_and_projects_all_17_features(tmp_path):
 
     assert audit.attribution_present is True
     assert audit.attribution_issues == []
-    assert len(audit.feature_attribution) == 17
+    # HAR-11's catalog census has 18 direct features; only 17 are
+    # action-bound after bootstrap selection.  The audit projection must
+    # retain the complete catalog rather than dropping select_catalog.
+    assert len(audit.feature_attribution) == 18
     assert audit.feature_attribution["recovery"]["status"] == "TRIGGERED_DARK"
 
 
