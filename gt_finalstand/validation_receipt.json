@@ -7,7 +7,7 @@
     "todo_statuses": 26
   },
   "errors": [],
-  "harness_commit": "e0a3bf90c7ee93c307c6cb2a359fc3cc2c5c2089",
+  "harness_commit": "bf8dd8f0af3111059ec2b84508e4585622f2df7d",
   "ok": true,
   "schema": "gt.finalstand.validation.v1",
   "status_counts": {
