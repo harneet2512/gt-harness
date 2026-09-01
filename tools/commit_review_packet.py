@@ -48,10 +48,17 @@ def main() -> int:
     parser.add_argument("--file", default="")
     parser.add_argument("--line", type=int, default=0)
     parser.add_argument("--message", required=True)
-    parser.add_argument("--detail", required=True)
+    parser.add_argument("--detail", required=True, help="JSON object containing structured evidence")
     parser.add_argument("--supersedes")
     parser.add_argument("--commit-message", default="")
     args = parser.parse_args()
+
+    try:
+        detail = json.loads(args.detail)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"detail must be valid JSON: {exc}") from exc
+    if not isinstance(detail, dict):
+        raise SystemExit("detail must be a JSON object")
 
     body = {
         "schema": SCHEMA,
@@ -66,7 +73,7 @@ def main() -> int:
         "file": args.file,
         "line": args.line,
         "message": args.message,
-        "detail": args.detail,
+        "detail": detail,
         "supersedes": args.supersedes,
         "created_at": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
     }
@@ -76,6 +83,10 @@ def main() -> int:
     out = INBOX_ROOT / rel
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(body, sort_keys=True, separators=(",", ":"), indent=2) + "\n", encoding="utf-8")
+
+    stored = json.loads(out.read_text(encoding="utf-8"))
+    if stored.get("packet_digest_sha256") != digest_packet(stored):
+        raise SystemExit("packet digest verification failed after write")
 
     index = load_index()
     tickets = index.setdefault("tickets", {})
