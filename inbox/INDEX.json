@@ -4,6 +4,7 @@
     "finder-f1-fixed",
     "finder-f2",
     "finder-f2-fixed",
+    "rev-220-har74-interim",
     "rev-221-transport-rewind-fixed",
     "rev-222-har69-interim",
     "rev-222-reviewer-interim"
@@ -29,6 +30,9 @@
     ],
     "HAR-69":[
       "rev-222-har69-interim"
+    ],
+    "HAR-74":[
+      "rev-220-har74-interim"
     ],
     "HAR-75":[
       "rev-221-transport-rewind-fixed"

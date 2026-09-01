@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:19:45.756522Z",
+  "detail":"Coordinator verified gt.context_packet.v1 schema/fixture half at the exact reviewed ancestry, including canonical digest, deterministic packet IDs, confidence ordering, freshness pins, nine fixtures, and tamper rejection. Serving/eligibility wiring remains intentionally deferred to HAR-69.",
+  "file":"",
+  "head_sha":"af3892866b01e3fc549507df9d0aa7bce9ea00dd",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-74 design half interim review",
+  "packet_digest_sha256":"91abb95cd271d362b877ed11355f88b9c6fd6446f9550646ef82629fa048140a",
+  "packet_id":"rev-220-har74-interim",
+  "pr":32,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"REV-220",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-74"
+}
