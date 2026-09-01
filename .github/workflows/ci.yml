@@ -17,7 +17,7 @@ jobs:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     env:
-      GROUNDTRUTH_ROOT: ${{ github.workspace }}/../Groundtruth
+      GROUNDTRUTH_ROOT: ${{ runner.temp }}/Groundtruth
       GH_TOKEN: ${{ github.token }}
       GIT_AUTHOR_NAME: GroundTruth CI
       GIT_AUTHOR_EMAIL: groundtruth-ci@example.invalid
@@ -36,11 +36,13 @@ jobs:
         with:
           repository: harneet2512/groundtruth
           ref: f2863f8781edaeaef8787c515e36381cdbd692d5
-          path: ../Groundtruth
+          path: Groundtruth
+      - name: Relocate parity source outside harness scan
+        run: mv "$GITHUB_WORKSPACE/Groundtruth" "$GROUNDTRUTH_ROOT"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: ../Groundtruth/gt-index/go.mod
-          cache-dependency-path: ../Groundtruth/gt-index/go.sum
+          go-version-file: ${{ runner.temp }}/Groundtruth/gt-index/go.mod
+          cache-dependency-path: ${{ runner.temp }}/Groundtruth/gt-index/go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -48,16 +50,16 @@ jobs:
       - name: Install project dependencies
         run: >-
           python -m pip install --disable-pip-version-check
-          -e ../Groundtruth -e ".[dev,miniswe,eval]" litellm
+          -e "$GROUNDTRUTH_ROOT" -e ".[dev,miniswe,eval]" litellm
       - name: Install repository-local hooks and historical fixture object
         run: |
           .githooks/install
           git fetch --no-tags origin 7bbbc9d0b7f02f8cdaab79ad82ee86884b738eb5
       - name: Build pinned provider-free producer and configure git identity
-        working-directory: ../Groundtruth/gt-index
         env:
           CGO_ENABLED: "1"
         run: |
+          cd "$GROUNDTRUTH_ROOT/gt-index"
           git config --global user.name "$GIT_AUTHOR_NAME"
           git config --global user.email "$GIT_AUTHOR_EMAIL"
           go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index
