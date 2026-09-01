@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -593,6 +594,10 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
 
     def test_command(label: str) -> subprocess.CompletedProcess[str]:
         started = time.monotonic_ns()
+        # The three edits intentionally keep the same file size.  Remove the
+        # timestamp/size-based CPython cache so a fast runner cannot reuse the
+        # previous implementation between test subprocesses.
+        shutil.rmtree(task_root / "__pycache__", ignore_errors=True)
         process = subprocess.run(
             [
                 sys.executable,
