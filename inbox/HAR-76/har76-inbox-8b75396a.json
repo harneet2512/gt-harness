@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:27:34.520655Z",
+  "detail":"{inbox_commit:8b75396a13b9b768a67c3964aae6ba2f41f8d918,purpose:workflow final job can execute digest validation while checked out at gt-review-inbox}",
+  "file":"",
+  "head_sha":"e132a90bd00876764da6c1e0e0dcba3693340fcd",
+  "kind":"finding",
+  "line":0,
+  "message":"CI inbox publisher installed on inbox ref at 8b75396a",
+  "packet_digest_sha256":"4a5b4a5147a6e1d1970a0d0c3941a8e87c55defdc7ee2eb625c99398b48fe2f4",
+  "packet_id":"har76-inbox-8b75396a",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"mechanics",
+  "source":{
+    "check":"har76-review-fix",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
