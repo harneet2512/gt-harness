@@ -13,6 +13,7 @@ interpreter lives at the layout GTNanoAgent already relies on.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import tempfile
 from pathlib import Path
@@ -21,6 +22,7 @@ from harbor.agents.installed.base import (
     BaseInstalledAgent,
     CliFlag,
     EnvVar,
+    NonZeroAgentExitCodeError,
     with_prompt_template,
 )
 from harbor.environments.base import BaseEnvironment
@@ -48,6 +50,15 @@ _UV_INSTALLER_SHA256 = "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b5
 _PYTHON_ARCHIVE_SHA256 = "5854aa6ec71cad00334d5065633c210b2e7feb40956767a59a91791cadcf0b79"
 _GT_WHEEL_SHA256 = "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e"
 _GT_BINARY_SHA256 = "024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a"
+_PROVIDER_BILLING_FAILURE = re.compile(
+    r"(?:insufficient[ _-]*balance|(?:http(?: status)?|status(?: code)?)\s*[:=]?\s*402\b)",
+    re.IGNORECASE,
+)
+
+
+class ProviderBillingError(NonZeroAgentExitCodeError):
+    """The provider rejected a request because the account cannot fund it."""
+
 
 def _miniswe_agent_version() -> str:
     """Return the closed Mini-SWE treatment version for this execution."""
@@ -76,6 +87,25 @@ class MiniSweAgent(BaseInstalledAgent):
             default=100,
         ),
     ]
+
+    def _classify_exec_error(self, command: str, result):
+        """Keep monetary rejection distinct from transient rate limiting.
+
+        Harbor 0.20 classifies by scanning combined terminal output. A wrapper
+        can print ``ApiRateLimitError`` after DeepSeek's HTTP 402 payload and
+        thereby overwrite the provider's actual ``Insufficient Balance``
+        reason. Billing is terminal for an approved run and must never enter a
+        rate-limit retry policy.
+        """
+        output = f"{result.stdout or ''}\n{result.stderr or ''}"
+        if _PROVIDER_BILLING_FAILURE.search(output):
+            detail = (
+                f"Command failed (exit {result.return_code}): {command}\n"
+                f"stdout: {self._truncate_output(result.stdout)}\n"
+                f"stderr: {self._truncate_output(result.stderr)}"
+            )
+            return ProviderBillingError(detail)
+        return super()._classify_exec_error(command, result)
 
     async def exec_as_agent(
         self,

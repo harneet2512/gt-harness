@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: ""
+      approve_paid_run:
+        description: "Explicit approval for authenticated paid provider requests"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       code_ref:
@@ -43,6 +48,11 @@ on:
         required: false
         type: string
         default: ""
+      approve_paid_run:
+        description: "Explicit approval for authenticated paid provider requests"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -88,6 +98,7 @@ jobs:
           TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
           ALLOW_BASELINE_RERUN: ${{ inputs.allow_baseline_rerun || 'false' }}
           TASK_SELECTION: ${{ inputs.task_selection || '' }}
+          APPROVE_PAID_RUN: ${{ inputs.approve_paid_run || 'false' }}
         run: |
           set -euo pipefail
           if [[ "${TREATMENT}" == "bare" && "${ALLOW_BASELINE_RERUN}" != "true" ]]; then
@@ -177,6 +188,10 @@ jobs:
               "requested_model": "deepseek-v4-flash",
               "effective_model": "openai/deepseek-v4-flash",
               "provider": "deepseek:native:api.deepseek.com",
+              "paid_run_approval": {
+                  "approved": os.environ["APPROVE_PAID_RUN"].strip().lower() == "true",
+                  "input": "approve_paid_run",
+              },
               "baseline": manifest["baseline"],
               "matrix": matrix,
           }
@@ -198,11 +213,12 @@ jobs:
           if-no-files-found: error
 
   provider_gate:
+    if: ${{ inputs.approve_paid_run == true }}
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Verify the pinned native DeepSeek p0731 route
+      - name: Verify the DeepSeek account can fund the approved run
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
@@ -211,24 +227,24 @@ jobs:
           attempts=0
           success=false
           status_codes=""
-          while [ "$attempts" -lt 20 ]; do
+          while [ "$attempts" -lt 5 ]; do
             attempts=$((attempts + 1))
             status="$({
               curl --silent --show-error --max-time 30 \
-                --output "$RUNNER_TEMP/provider-gate-response.json" \
+                --output "$RUNNER_TEMP/provider-balance-response.json" \
                 --write-out '%{http_code}' \
-                https://api.deepseek.com/models \
+                https://api.deepseek.com/user/balance \
                 --header "Authorization: Bearer $DEEPSEEK_API_KEY" \
                 --header 'Accept: application/json'
             } 2>/dev/null || true)"
             status_codes="${status_codes}${status_codes:+,}${status:-000}"
             case "$status" in
               2??)
-                if python -c 'import json,os,pathlib; payload=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-gate-response.json").read_text(encoding="utf-8")); models={str(row.get("id")) for row in payload.get("data",[]) if isinstance(row,dict) and row.get("id")}; assert "deepseek-v4-flash" in models, "native DeepSeek catalog lacks deepseek-v4-flash"'; then
+                if python -c 'import json,os,pathlib; payload=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-balance-response.json").read_text(encoding="utf-8")); assert payload.get("is_available") is True, "DeepSeek account cannot fund provider requests"'; then
                   success=true
                 fi
                 break ;;
-              429|500|502|503|504|000) sleep 60 ;;
+              429|500|502|503|504|000) sleep 30 ;;
               *) break ;;
             esac
           done
@@ -244,11 +260,13 @@ jobs:
               "source_sha": os.environ["SOURCE_SHA"],
               "model": "deepseek-v4-flash",
               "provider": "deepseek:native:api.deepseek.com",
+              "paid_run_approved": True,
+              "balance_available": os.environ["SUCCESS"] == "true",
               "attempts": int(os.environ["ATTEMPTS"]),
               "http_statuses": [
                   int(value) for value in os.environ["STATUS_CODES"].split(",") if value
               ],
-              "catalog_requests_outside_task_metrics": int(os.environ["ATTEMPTS"]),
+              "balance_requests_outside_task_metrics": int(os.environ["ATTEMPTS"]),
               "provider_calls_outside_task_metrics": 0,
           }
           Path("provider-gate.json").write_text(
@@ -268,6 +286,7 @@ jobs:
           if-no-files-found: error
 
   task:
+    if: ${{ inputs.approve_paid_run == true }}
     needs: [plan, provider_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -479,7 +498,7 @@ jobs:
           if-no-files-found: error
 
   attest:
-    if: always()
+    if: ${{ always() && inputs.approve_paid_run == true }}
     needs: [plan, provider_gate, task]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -694,6 +713,7 @@ jobs:
               "agent_scaffold_version": plan["agent_scaffold_version"],
               "treatment": plan["treatment"],
               "provider_gate": provider_gate,
+              "paid_run_approval": plan["paid_run_approval"],
               "baseline": plan["baseline"],
               "graded": graded,
               "solved": solved,
