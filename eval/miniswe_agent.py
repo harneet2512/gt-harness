@@ -32,6 +32,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_BUNDLE_DIR = "/installed-agent/bundle"
 _REMOTE_GT_BINARY = "/installed-agent/gt-index"
 _REMOTE_UV_INSTALLER = "/installed-agent/uv-install.tar.gz"
+_REMOTE_PYTHON_ARCHIVE = "/installed-agent/python-3.12.13.tar.gz"
+_REMOTE_PYTHON_DIR = "/installed-agent/python"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _PRODUCT_MANIFEST = _REPO_ROOT / "config" / "deepswe_product_bundle_v1.json"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
@@ -41,6 +43,7 @@ _DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
 _ALLOWED_MINISWE_AGENT_VERSIONS = frozenset({"2.4.6"})
 _UV_INSTALL = f"https://astral.sh/uv/{_UV_VERSION}/install.sh"
 _UV_INSTALLER_SHA256 = "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967"
+_PYTHON_ARCHIVE_SHA256 = "5854aa6ec71cad00334d5065633c210b2e7feb40956767a59a91791cadcf0b79"
 _GT_WHEEL_SHA256 = "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e"
 _GT_BINARY_SHA256 = "024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a"
 
@@ -120,10 +123,22 @@ class MiniSweAgent(BaseInstalledAgent):
         MiniSweAgent._require_digest(path, _UV_INSTALLER_SHA256, "uv_installer")
         return path
 
+    @staticmethod
+    def _python_archive_host() -> Path:
+        path = Path(os.environ.get("GT_PYTHON_ARCHIVE_HOST", ""))
+        if not path.is_file():
+            raise FileNotFoundError(
+                "Mini-SWE treatment bundle requires the pre-downloaded Python "
+                "3.12.13 archive in GT_PYTHON_ARCHIVE_HOST"
+            )
+        MiniSweAgent._require_digest(path, _PYTHON_ARCHIVE_SHA256, "python_archive")
+        return path
+
     async def install(self, environment: BaseEnvironment) -> None:
         wheel = self._gt_wheel()
         binary = self._gt_binary_host()
         uv_installer = self._uv_installer_host()
+        python_archive = self._python_archive_host()
         miniswe_version = _miniswe_agent_version()
         remote_gt_wheel = f"{_REMOTE_BUNDLE_DIR}/{wheel.name}"
         # Harbor's task images do not guarantee that the treatment mount exists.
@@ -137,6 +152,7 @@ class MiniSweAgent(BaseInstalledAgent):
             await environment.upload_file(harness_wheel, remote_harness_wheel)
         await environment.upload_file(binary, _REMOTE_GT_BINARY)
         await environment.upload_file(uv_installer, _REMOTE_UV_INSTALLER)
+        await environment.upload_file(python_archive, _REMOTE_PYTHON_ARCHIVE)
         await self.exec_as_root(environment, f"chmod 755 {_REMOTE_GT_BINARY}")
         install = (
             "set -eu; "
@@ -145,7 +161,9 @@ class MiniSweAgent(BaseInstalledAgent):
             f"tar -xzf {_REMOTE_UV_INSTALLER} -C /tmp/uv-extract && "
             "cp /tmp/uv-extract/uv-x86_64-unknown-linux-gnu/uv \"$HOME/.local/bin/uv\" && "
             "chmod 755 \"$HOME/.local/bin/uv\" && "
-            f'"$HOME/.local/bin/uv" tool install --python {_PYTHON_VERSION} '
+            f"mkdir -p {_REMOTE_PYTHON_DIR} && tar -xzf {_REMOTE_PYTHON_ARCHIVE} "
+            f"-C {_REMOTE_PYTHON_DIR} --strip-components=1 && "
+            f'"$HOME/.local/bin/uv" tool install --python {_REMOTE_PYTHON_DIR}/bin/python3.12 '
             f'--with "mini-swe-agent=={miniswe_version}" '
             f"--with {shlex.quote(remote_gt_wheel)} --with 'numpy==2.5.1' "
             f"{shlex.quote(remote_harness_wheel)} && "

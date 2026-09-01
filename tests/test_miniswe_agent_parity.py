@@ -56,10 +56,12 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(
     harness_wheel = tmp_path / "nano_harness-0.0.1-py3-none-any.whl"
     binary = tmp_path / "gt-index-linux-amd64"
     uv_installer = tmp_path / "uv-install.sh"
+    python_archive = tmp_path / "python-3.12.13.tar.gz"
     wheel.write_bytes(b"wheel")
     harness_wheel.write_bytes(b"harness-wheel")
     binary.write_bytes(b"binary")
     uv_installer.write_bytes(b"installer")
+    python_archive.write_bytes(b"python-archive")
     monkeypatch.delenv("MINISWE_AGENT_VERSION", raising=False)
     monkeypatch.setattr(MiniSweAgent, "_gt_wheel", staticmethod(lambda: wheel))
     monkeypatch.setattr(
@@ -67,6 +69,7 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(
     )
     monkeypatch.setattr(MiniSweAgent, "_gt_binary_host", staticmethod(lambda: binary))
     monkeypatch.setattr(MiniSweAgent, "_uv_installer_host", staticmethod(lambda: uv_installer))
+    monkeypatch.setattr(MiniSweAgent, "_python_archive_host", staticmethod(lambda: python_archive))
 
     commands: list[str] = []
 
