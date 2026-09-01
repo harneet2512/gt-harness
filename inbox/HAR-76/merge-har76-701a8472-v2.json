@@ -1,0 +1,30 @@
+{
+  "created_at":"2026-09-01T04:12:04.209276Z",
+  "detail":{
+    "base":"aa6577a0284ded86579090983fdfaaf6d1cbcd26",
+    "benchmark_runs":0,
+    "candidate":"701a847293188f317b5e4307cbb0285d9415ff4e",
+    "event":"ff_merge",
+    "fast_forward":true,
+    "landed":"701a847293188f317b5e4307cbb0285d9415ff4e",
+    "parent_verified":true,
+    "provider_calls":0
+  },
+  "file":"",
+  "head_sha":"701a847293188f317b5e4307cbb0285d9415ff4e",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-76 FF merge corrected: JSON-object detail supersedes the quote-stripped packet.",
+  "packet_digest_sha256":"590e46fb5699649fc62170f12da6a9fcb8c34023c7f326578987dec184ac69b0",
+  "packet_id":"merge-har76-701a8472-v2",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ff-merge",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":"merge-har76-701a8472",
+  "ticket":"HAR-76"
+}
