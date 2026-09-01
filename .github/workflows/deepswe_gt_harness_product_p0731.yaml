@@ -405,7 +405,8 @@ jobs:
           python -m pip download --only-binary=:all: --dest "$wheelhouse" \
             "mini-swe-agent==2.4.6" "numpy==2.5.1" \
             "anthropic==0.120.2" "openai==2.50.0" \
-            "pydantic==2.13.4" "rich==15.0.0"
+            "pydantic==2.13.4" "rich==15.0.0" \
+            "mcp==1.27.1" "structlog==25.5.0"
           test -n "$(find "$wheelhouse" -type f -print -quit)"
           echo "GT_WHEELHOUSE_HOST=$wheelhouse" >> "$GITHUB_ENV"
 
