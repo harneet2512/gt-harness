@@ -1,0 +1,26 @@
+{
+  "created_at":"2026-09-01T23:18:22.868649Z",
+  "detail":{
+    "benchmark_runs":0,
+    "landed_sha":"da4e398867e1c4779f6177a7bc447ea039358fc2",
+    "parent_sha":"7935d90630c40ced944ba8838a83dc034ffc3b74",
+    "provider_calls":0
+  },
+  "file":"",
+  "head_sha":"da4e398867e1c4779f6177a7bc447ea039358fc2",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 OpenRouter canary and provider-gate evidence landed on main",
+  "packet_digest_sha256":"982463dbd805fa6c1b3ee63ad65c620d7dba1c9e24070f0c0e8275234ba98449",
+  "packet_id":"merge-har81-da4e3988",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}
