@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:48:50.309266Z",
+  "detail":"Workflow-only environment repair: inject GH_TOKEN for immutable FS-023 provenance API validation; fetch full harness history for archived-source checks; remove global core.hooksPath so temporary test repositories can commit without inheriting the harness hook path. Focused local tests pass; remote exact SHA verified.",
+  "file":"",
+  "head_sha":"bb941b30758aad09ae4d4645eb22663fbcfbd4d9",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 push bb941b30",
+  "packet_digest_sha256":"5ce1cf574f1a4c4184b4a6e31d1a10ca6c178b364570aedc04763f915d42177a",
+  "packet_id":"har76-harness-bb941b30",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"har76-push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
