@@ -83,7 +83,7 @@ jobs:
       - name: Emit CI outcome packet
         if: always()
         env:
-          CONCLUSION: ${{ steps.pytest.outputs.exit_status == '0' && 'success' || 'failure' }}
+          CONCLUSION: ${{ steps.pytest.outcome == 'success' && steps.pytest.outputs.exit_status == '0' && 'success' || 'failure' }}
         run: >-
           python scripts/ci_emit_review_packet.py
           --ticket HAR-76 --pr ${{ github.event.pull_request.number || 0 }}
@@ -101,7 +101,7 @@ jobs:
           path: ci-packets/ci-pytest-${{ github.run_id }}.json
           if-no-files-found: error
       - name: Fail on RED suite
-        if: steps.pytest.outputs.exit_status != '0'
+        if: steps.pytest.outcome != 'success' || steps.pytest.outputs.exit_status != '0'
         run: exit 1
 
   feature-matrix:
