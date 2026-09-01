@@ -209,7 +209,19 @@ class MiniSweAgent(BaseInstalledAgent):
         # T1.1: the requested model MUST reach the runner (it was silently
         # dropped before, so a non-default model fell back to deepseek-v4-flash).
         # The runner's --model + --metrics are the single source of truth.
+        # A short in-container probe makes provider failures diagnosable while
+        # preserving the model's normal request path.  It records only an HTTP
+        # status (never response bodies or credentials) and is bounded so a
+        # dead egress path cannot consume the task budget.
+        probe = (
+            f'"{_REMOTE_PY}" -c \'import os,urllib.request; '
+            "r=urllib.request.urlopen(urllib.request.Request("
+            "\"https://api.deepseek.com/models\","
+            "headers={\"Authorization\":\"Bearer \"+os.environ.get(\"OPENAI_API_KEY\",\"\")}),"
+            "timeout=15); print(\"GT_PROVIDER_PROBE_STATUS=\"+str(r.status))\'"
+        )
         return (
+            f"({probe}) || echo GT_PROVIDER_PROBE_FAILED; "
             f'"{_REMOTE_PY}" -m scripts.miniswe_gt_run '
             f"--task {shlex.quote(instruction)} --model {shlex.quote(model)} "
             f"--cwd \"$PWD\" "
