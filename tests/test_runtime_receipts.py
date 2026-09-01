@@ -162,7 +162,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "attempt": 1,
         "treatment": "groundtruth",
         "requested_model": "meta/muse-spark-1.2-contributor",
-        "effective_model": "meta/muse-spark-1.2-contributor",
+        "effective_model": "openai/meta/muse-spark-1.2-contributor",
         "agent_scaffold_version": "2.4.6",
         "product_source_sha": "f" * 40,
         "time_budget_seconds": 3600,

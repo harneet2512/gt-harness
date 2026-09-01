@@ -172,6 +172,7 @@ def issue_runtime_receipts(
         raise ValueError("provider_call_count_mismatch")
 
     reported_model = str(gt.get("provider_reported_model") or requested_model)
+    effective_model = str(gt.get("resolved_model") or requested_model)
     if reported_model != requested_model:
         raise ValueError("provider_model_mismatch")
     report_model = str(report.get("model") or requested_model)
@@ -231,7 +232,7 @@ def issue_runtime_receipts(
         "completion_state_event_journal": dict(gt.get("event_journal") or {}),
         "provider_identity": {
             "requested": requested_model,
-            "resolved": str(gt.get("resolved_model") or ""),
+            "resolved": effective_model,
             "reported": reported_model,
             "match": reported_model == requested_model,
         },
@@ -246,7 +247,7 @@ def issue_runtime_receipts(
         "stop_reason": str(info.get("exit_status") or terminal),
         "treatment": treatment,
         "requested_model": requested_model,
-        "effective_model": requested_model,
+        "effective_model": effective_model,
         "agent_scaffold_version": scaffold_version,
         "product_source_sha": product_source_sha,
         "time_budget_seconds": time_budget_seconds,
@@ -271,7 +272,7 @@ def issue_runtime_receipts(
         "attempt": 1,
         "treatment": treatment,
         "requested_model": requested_model,
-        "effective_model": requested_model,
+        "effective_model": effective_model,
         "agent_scaffold_version": scaffold_version,
         "product_source_sha": product_source_sha,
         "time_budget_seconds": time_budget_seconds,
@@ -295,8 +296,6 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         errors.append("product_not_completed")
     if receipt.get("treatment") != "groundtruth":
         errors.append("product_treatment_mismatch")
-    if receipt.get("requested_model") != receipt.get("effective_model"):
-        errors.append("product_model_route_mismatch")
     if receipt.get("agent_scaffold_version") != "2.4.6":
         errors.append("product_scaffold_version_mismatch")
 
@@ -348,6 +347,12 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     identity = treatment.get("provider_identity")
     if not isinstance(identity, dict) or identity.get("match") is not True:
         errors.append("treatment_provider_identity_mismatch")
+    elif (
+        identity.get("requested") != receipt.get("requested_model")
+        or identity.get("reported") != receipt.get("requested_model")
+        or identity.get("resolved") != receipt.get("effective_model")
+    ):
+        errors.append("treatment_provider_route_mismatch")
     reproduction = treatment.get("reproducibility_manifest")
     if not isinstance(reproduction, dict) or reproduction.get("research_valid") is not True:
         errors.append("treatment_reproducibility_invalid")
