@@ -19,6 +19,7 @@ from pathlib import Path
 
 from harbor.agents.installed.base import (
     BaseInstalledAgent,
+    CliFlag,
     EnvVar,
     with_prompt_template,
 )
@@ -63,6 +64,18 @@ def _miniswe_agent_version() -> str:
 
 class MiniSweAgent(BaseInstalledAgent):
     """Mini-SWE-Agent, GT-off, as a Terminal-Bench 2.0 agent."""
+
+    # Pier forwards workflow agent kwargs to the installed-agent constructor.
+    # Declare the runner limit here so Harbor retains it instead of silently
+    # dropping the unknown ``max_iterations`` kwarg at the base-class boundary.
+    CLI_FLAGS = [
+        CliFlag(
+            kwarg="max_iterations",
+            cli="--step-limit",
+            type="int",
+            default=100,
+        ),
+    ]
 
     async def exec_as_agent(
         self,
@@ -248,6 +261,7 @@ class MiniSweAgent(BaseInstalledAgent):
             f"--output /logs/agent/miniswe_trajectory.json "
             f"--temperature 1.0 "
             f"--metrics /logs/agent/miniswe_report.json "
+            f"{self.build_cli_flags()} "
             f"{extra_args}"
             "</dev/null 2>&1"
         )

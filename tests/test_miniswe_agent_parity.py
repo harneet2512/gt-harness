@@ -48,6 +48,14 @@ def test_miniswe_agent_version_rejects_every_other_value(monkeypatch):
         raise AssertionError("unsupported Mini-SWE version was accepted")
 
 
+def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
+    agent = MiniSweAgent(logs_dir=tmp_path / "logs", max_iterations=300)
+
+    command = agent._run_command("task", "deepseek-v4-flash")
+
+    assert "--step-limit 300" in command
+
+
 @pytest.mark.asyncio
 async def test_installer_uses_canonical_version_and_verified_uv_installer(
     monkeypatch, tmp_path
