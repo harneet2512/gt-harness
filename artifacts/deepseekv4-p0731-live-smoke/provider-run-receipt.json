@@ -11,57 +11,35 @@
   "parallelism": 20,
   "network_policy": "PUBLIC_WORKAROUND_DOCKER_DESKTOP_NFT_FIB_UNSUPPORTED",
   "credential_source": "cloud_access.md:deepseek_direct (value withheld)",
+  "provider_free_gate": {"status": "VERIFIED_PROVIDER_FREE", "workflow_run": "33488826300", "provider_calls": 0, "benchmark_runs": 0, "container_proof": "VERIFIED", "fake_provider_proof": "VERIFIED"},
+  "live_preflight": {"status": "HTTP_200", "requested_release_label": "deepseekv4-p0731", "provider_model_id": "deepseek-v4-flash", "literal_requested_id_exposed_by_provider": false, "response_sha256": "700212e18fb8f3fdca73dd7060515656247849de5de5ee4d42bf68083090e803"},
   "bare": {
-    "status": "COMPLETED_WITH_ONE_AGENT_ERROR",
-    "harbor_run": "2026-09-01__10-19-35",
-    "planned": 20,
-    "represented": 20,
-    "completed": 20,
-    "errors": 1,
-    "provider_calls": 1981,
-    "provider_calls_mean": 99.05,
-    "provider_calls_min": 81,
-    "provider_calls_max": 100,
-    "solved_tasks_reward_1": 1,
-    "reward_minus_one": 4,
-    "reward_zero": 15,
-    "f2p": 0.05,
-    "p2p": 0.7,
-    "partial": 0.5883732762680866,
-    "harbor_reward": -0.15,
-    "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/bare-rerun/2026-09-01__10-19-35"
+    "status": "INCOMPLETE_CONTROLLER_TERMINATED_AFTER_DOCKER_CLEANUP_DEADLOCK",
+    "harbor_run": "2026-09-01__13-38-54", "planned": 20, "represented": 20, "completed": 19, "errors": 3, "incomplete": 1, "graded_tasks": 15,
+    "provider_request_events": 1968, "provider_response_events": 1966, "provider_responses_missing": 2, "provider_calls_mean_per_event_stream": 98.4, "provider_calls_min": 87, "provider_calls_max": 101,
+    "usage": {"prompt_tokens": 191580401, "completion_tokens": 1347360, "prompt_cache_hit_tokens": 189547776, "prompt_cache_miss_tokens": 2032625},
+    "graded_reward_1": 3, "graded_reward_0": 12, "reward_minus_one": 4,
+    "task_metrics_from_15_grader_receipts": {"f2p_total": 802, "f2p_passed": 125, "p2p_total": 24034, "p2p_passed": 23462, "partial_sum": 11.812320749684167},
+    "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/bare-public-crlf-fixed/2026-09-01__13-38-54",
+    "missing_task": "clack-async-autocomplete-options",
+    "exception_tasks": ["aiomonitor-task-snapshots-diff", "claude-code-by-agents-recursive-delegation", "testem-per-launcher-reports"]
   },
   "groundtruth": {
-    "status": "INCOMPLETE_CONTROLLER_UNEXPECTED_EOF",
-    "harbor_run": "2026-09-01__10-54-08",
-    "planned": 20,
-    "trajectories_saved": 20,
-    "provider_calls": 1257,
-    "provider_calls_mean": 62.85,
-    "provider_calls_min": 26,
-    "provider_calls_max": 81,
-    "graded_tasks": 0,
-    "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/groundtruth/2026-09-01__10-54-08",
-    "controller_failure": "docker_unexpected_eof",
-    "grade_claim": false
+    "status": "COMPLETED_WITH_TWO_AGENT_ERRORS", "harbor_run": "2026-09-01__12-51-40", "planned": 20, "represented": 20, "completed": 20, "errors": 2,
+    "provider_request_events": 1850, "provider_response_events": 1840, "provider_responses_missing": 10, "provider_calls_mean_per_event_stream": 92.5, "provider_calls_min": 33, "provider_calls_max": 101,
+    "usage": {"prompt_tokens": 180946849, "completion_tokens": 1241383, "prompt_cache_hit_tokens": 178147584, "prompt_cache_miss_tokens": 2799265},
+    "harbor_metrics": {"f2p": 0.09669912366114898, "p2p": 0.7, "partial": 0.5853785533491763, "reward": -0.2, "f2p_passed_mean": 6.95, "f2p_total_mean": 44.2, "p2p_passed_mean": 1205.45, "p2p_total_mean": 1233.85},
+    "graded_task_receipts": 16, "reward_minus_one": 4, "reward_zero": 16,
+    "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/groundtruth-public-crlf-fixed/2026-09-01__12-51-40",
+    "exception_tasks": ["actionlint-action-pinning-lint", "claude-code-by-agents-recursive-delegation"]
   },
   "comparison": {
-    "status": "NOT_CLAIMED",
-    "reason": "Groundtruth reward files were not collected; a bare-vs-Groundtruth improvement cannot be inferred.",
-    "provider_calls_delta_groundtruth_minus_bare_mean": -36.2,
-    "historical_disk_reference": {
-      "location": "D:/GT_Benchmarking",
-      "provider_model_id": "deepseek-v4-flash",
-      "bare_solved_tasks": 11,
-      "groundtruth_solved_tasks": 13,
-      "status": "NON_COMPARABLE",
-      "reason": "historical run used different runner/budget/provenance and is not this accepted smoke"
-    }
+    "status": "WITHHELD", "paired_task_order": true, "paired_graded_task_count": 15,
+    "reason": "The bare controller was terminated after a Docker cleanup deadlock with one task unclosed; a GT-on improvement claim requires two complete arms with every planned task represented by a terminal result.",
+    "provider_call_delta_gt_minus_bare": -118, "provider_call_delta_mean_gt_minus_bare": -5.9,
+    "historical_disk_reference": {"location": "D:/GT_Benchmarking", "provider_model_id": "deepseek-v4-flash", "bare_solved_tasks": 11, "groundtruth_solved_tasks": 13, "status": "NON_COMPARABLE", "reason": "Historical run used different runner/budget/provenance and is not this accepted smoke."}
   },
+  "integrity": {"raw_credentials_in_receipts": false, "artifact_secret_scan": {"status": "PASS", "credential_canary_matches": 0, "scope": "live-smoke artifact files under 2 MiB"}, "groundtruth_grades_manufactured": false, "network_workaround_disclosed": true, "canonical_workflow_claim": false},
   "release_eligible": false,
-  "release_blockers": [
-    "docker_desktop_nftables_fib_rule_unsupported",
-    "groundtruth_controller_unexpected_eof",
-    "groundtruth_task_grades_missing"
-  ]
+  "release_blockers": ["docker_desktop_nftables_fib_rule_unsupported", "public_network_workaround_used", "bare_controller_cleanup_deadlock_left_one_task_incomplete", "groundtruth_provenance_unverified_source_to_bytes"]
 }
