@@ -216,13 +216,14 @@ def _snapshot(root: Path) -> FrozenSourceSnapshot:
 
 def _copy_frozen_sources(root: Path) -> None:
     checkout = Path(__file__).resolve().parents[1]
+    source_ref = os.environ.get("GT_SOURCE_HEAD") or "HEAD"
     for question in _QUESTIONS:
         source = checkout / question.source_path
         target = root / question.source_path
         target.parent.mkdir(parents=True, exist_ok=True)
         if (checkout / ".git").exists():
             result = subprocess.run(
-                ["git", "-C", str(checkout), "show", f"HEAD:{question.source_path}"],
+                ["git", "-C", str(checkout), "show", f"{source_ref}:{question.source_path}"],
                 check=True,
                 capture_output=True,
             )
@@ -788,8 +789,8 @@ def test_persisted_unverified_archive_head_is_rejected(tmp_path):
 
 def test_archive_reviewed_head_binds_copied_source_blobs(tmp_path, monkeypatch):
     root = tmp_path / "frozen-source"
-    _copy_frozen_sources(root)
     monkeypatch.setenv("GT_SOURCE_HEAD", _ARCHIVE_REVIEWED_SOURCE_HEAD)
+    _copy_frozen_sources(root)
     real_run = subprocess.run
 
     def archive_run(args, **kwargs):
