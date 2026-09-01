@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:36:52.651516Z",
+  "detail":"{base_sha:ff578719fef2a360af24d2076fe7ab3bc989c780,parent_sha:5925e0a552998cf31432c50b5160cce013d13c30,changed_paths:[.github/workflows/ci.yml],old_producer_pin:f2863f8781edaeaef8787c515e36381cdbd692d5,new_producer_pin:db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14,focused_tests:4 passed,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"74433d0bf9db182de6877a68cc8e64ad56959ea2",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-76 rebased onto merged HAR-70 and re-pinned CI producer checkout to certified Groundtruth db9daf9e.",
+  "packet_digest_sha256":"09c26705d1680b50700d39034ac2ed42efd48e6de6e59939e8858ed41fe33557",
+  "packet_id":"har76-harness-74433d0b",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"push",
+    "system":"coordinator"
+  },
+  "status":"pass",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
