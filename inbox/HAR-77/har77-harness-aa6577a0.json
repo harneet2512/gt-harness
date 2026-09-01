@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:36:01.376337Z",
+  "detail":"{base_sha:ff578719fef2a360af24d2076fe7ab3bc989c780,parent_sha:9083db0d756fcccebef07322bdbf49d975983643,changed_paths:[archdone.md],har70_harness:ff578719fef2a360af24d2076fe7ab3bc989c780,har70_groundtruth:db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"aa6577a0284ded86579090983fdfaaf6d1cbcd26",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-77 branch rebased onto landed HAR-70 main and archdone currency updated in the same commit.",
+  "packet_digest_sha256":"81bbbb1d8819f58a6cfddfacb2b525b0bf4dc62717bca979442ec8e4f17a5589",
+  "packet_id":"har77-harness-aa6577a0",
+  "pr":35,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"push",
+    "system":"coordinator"
+  },
+  "status":"pass",
+  "supersedes":null,
+  "ticket":"HAR-77"
+}
