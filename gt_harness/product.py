@@ -623,7 +623,10 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
     trace.append({"action": "edit_recovery", "source_sha256": _sha256_file(source)})
     final = test_command("test_final")
     if initial.returncode == 0 or recovery.returncode == 0 or final.returncode != 0:
-        raise RuntimeError(f"fixture_execution_contract:{arm}")
+        raise RuntimeError(
+            f"fixture_execution_contract:{arm}:"
+            f"initial={initial.returncode}:recovery={recovery.returncode}:final={final.returncode}"
+        )
     trace_path = root / arm / "trajectory.json"
     _atomic_json(trace_path, trace)
     evidence_count = 1 if arm == "groundtruth" else 0
