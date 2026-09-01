@@ -11,6 +11,7 @@ import pytest
 
 from gt_harness.product import (
     BundleError,
+    _assert_committed_source_closure,
     aggregate_results,
     build_product_bundle,
     project_task_environment,
@@ -67,6 +68,27 @@ def test_bundle_is_reproducible_and_tamper_evident(tmp_path: Path) -> None:
     altered["miniswe_agent_version"] = "2.3.0"
     with pytest.raises(BundleError, match="bundle_digest_mismatch"):
         validate_product_bundle(altered, root=ROOT)
+
+
+def test_bundle_source_closure_rejects_uncommitted_bytes(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "fixture@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Fixture"], cwd=tmp_path, check=True
+    )
+    source = tmp_path / "product.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "product.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=tmp_path, check=True)
+    _assert_committed_source_closure(tmp_path, ["product.py"])
+
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    with pytest.raises(BundleError, match="source_closure_differs_from_head"):
+        _assert_committed_source_closure(tmp_path, ["product.py"])
 
 
 def test_task_environment_is_closed_and_never_contains_credentials() -> None:

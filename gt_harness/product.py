@@ -79,6 +79,27 @@ def _git_identity(root: Path) -> tuple[str, str]:
     return run("rev-parse", "HEAD"), run("rev-parse", "HEAD^{tree}")
 
 
+def _assert_committed_source_closure(root: Path, paths: list[str]) -> None:
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", *paths],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if tracked.returncode != 0:
+        raise BundleError("source_closure_contains_untracked_path")
+    clean = subprocess.run(
+        ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", *paths],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if clean.returncode == 1:
+        raise BundleError("source_closure_differs_from_head")
+    if clean.returncode != 0:
+        raise BundleError("source_closure_git_validation_failed")
+
+
 def _normalize_wheel(source: Path, target: Path) -> None:
     """Rewrite a wheel with stable order, timestamps, permissions, and compression."""
     with zipfile.ZipFile(source) as incoming, zipfile.ZipFile(
@@ -176,8 +197,9 @@ def build_product_bundle(
     closure = source.get("source_closure")
     if not isinstance(closure, list) or not closure:
         raise BundleError("source_closure_missing")
+    relative_paths = sorted(set(closure))
     artifacts: list[dict[str, Any]] = []
-    for relative in sorted(set(closure)):
+    for relative in relative_paths:
         if not isinstance(relative, str) or not relative or ".." in Path(relative).parts:
             raise BundleError("source_closure_path_invalid")
         file_path = root / relative
@@ -190,6 +212,7 @@ def build_product_bundle(
                 "sha256": _sha256_file(file_path),
             }
         )
+    _assert_committed_source_closure(root, relative_paths)
     commit, tree = _git_identity(root)
     wheel_record: dict[str, Any] | None = None
     if output_dir is not None:
