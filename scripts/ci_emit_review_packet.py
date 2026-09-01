@@ -1,8 +1,8 @@
 """Emit one digest-bound gt.review_packet.v1 CI outcome packet.
 
 The packet is later copied byte-for-byte by the inbox job to
-``refs/heads/gt-review-inbox``.  CI is the emitting system; the packet never
-pretends to be a Bugbot observation.
+``refs/heads/gt-review-inbox``.  CI is the emitting system and is explicitly
+separate from local checker observations.
 """
 from __future__ import annotations
 
