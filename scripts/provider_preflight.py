@@ -26,6 +26,15 @@ _ALLOWED_KEYS = {
 }
 
 
+class ProviderPreflightError(RuntimeError):
+    """A closed provider failure carrying only non-sensitive progress metadata."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.checks: dict[str, bool] | None = None
+        self.provider_inference_attempts = 0
+
+
 def load_route(path: Path) -> tuple[dict[str, Any], str]:
     raw = path.read_bytes()
     route = json.loads(raw)
@@ -64,11 +73,13 @@ def _get_json(url: str, api_key: str) -> dict[str, Any]:
             402: "provider_billing_failure",
             429: "provider_rate_limited",
         }.get(exc.code, "provider_preflight_http_failed")
-        raise RuntimeError(code) from exc
+        if code == "provider_preflight_http_failed":
+            code = f"provider_preflight_http_{exc.code}"
+        raise ProviderPreflightError(code) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError("provider_preflight_transport_failed") from exc
+        raise ProviderPreflightError("provider_preflight_transport_failed") from exc
     if not isinstance(payload, dict):
-        raise RuntimeError("provider_preflight_response_invalid")
+        raise ProviderPreflightError("provider_preflight_response_invalid")
     return payload
 
 
@@ -92,54 +103,68 @@ def _post_json(url: str, api_key: str, body: dict[str, Any]) -> dict[str, Any]:
             402: "provider_billing_failure",
             429: "provider_rate_limited",
         }.get(exc.code, "provider_canary_http_failed")
-        raise RuntimeError(code) from exc
+        if code == "provider_canary_http_failed":
+            code = f"provider_canary_http_{exc.code}"
+        raise ProviderPreflightError(code) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError("provider_canary_transport_failed") from exc
+        raise ProviderPreflightError("provider_canary_transport_failed") from exc
     if not isinstance(payload, dict):
-        raise RuntimeError("provider_canary_response_invalid")
+        raise ProviderPreflightError("provider_canary_response_invalid")
     return payload
 
 
 def probe(route: dict[str, Any], api_key: str) -> dict[str, bool]:
+    checks = {
+        "credential_valid": False,
+        "key_limit_available": False,
+        "model_visible": False,
+        "model_canary_served": False,
+    }
     if not api_key:
-        raise RuntimeError("provider_credential_missing")
+        raise ProviderPreflightError("provider_credential_missing")
     base = str(route["base_url"]).rstrip("/")
     availability = route["availability"]
-    key_payload = _get_json(base + availability["key_path"], api_key)
-    key_data = key_payload.get("data")
-    if not isinstance(key_data, dict):
-        raise RuntimeError("provider_key_status_invalid")
-    remaining = key_data.get("limit_remaining")
-    if remaining is not None and (
-        isinstance(remaining, bool)
-        or not isinstance(remaining, (int, float))
-        or remaining <= 0
-    ):
-        raise RuntimeError("provider_key_cannot_fund_run")
-    models_payload = _get_json(base + availability["models_path"], api_key)
-    models = models_payload.get("data")
-    if not isinstance(models, list) or route["model"] not in {
-        row.get("id") for row in models if isinstance(row, dict)
-    }:
-        raise RuntimeError("provider_model_unavailable")
-    canary = _post_json(
-        base + availability["inference_path"],
-        api_key,
-        {
-            "model": route["model"],
-            "messages": [{"role": "user", "content": "Reply OK."}],
-            "max_tokens": 1,
-            "temperature": 0,
-        },
-    )
-    if not isinstance(canary.get("choices"), list) or not canary["choices"]:
-        raise RuntimeError("provider_canary_response_invalid")
-    return {
-        "credential_valid": True,
-        "key_limit_available": True,
-        "model_visible": True,
-        "model_canary_served": True,
-    }
+    attempts = 0
+    try:
+        key_payload = _get_json(base + availability["key_path"], api_key)
+        key_data = key_payload.get("data")
+        if not isinstance(key_data, dict):
+            raise ProviderPreflightError("provider_key_status_invalid")
+        checks["credential_valid"] = True
+        remaining = key_data.get("limit_remaining")
+        if remaining is not None and (
+            isinstance(remaining, bool)
+            or not isinstance(remaining, (int, float))
+            or remaining <= 0
+        ):
+            raise ProviderPreflightError("provider_key_cannot_fund_run")
+        checks["key_limit_available"] = True
+        models_payload = _get_json(base + availability["models_path"], api_key)
+        models = models_payload.get("data")
+        if not isinstance(models, list) or route["model"] not in {
+            row.get("id") for row in models if isinstance(row, dict)
+        }:
+            raise ProviderPreflightError("provider_model_unavailable")
+        checks["model_visible"] = True
+        attempts = 1
+        canary = _post_json(
+            base + availability["inference_path"],
+            api_key,
+            {
+                "model": route["model"],
+                "messages": [{"role": "user", "content": "Reply OK."}],
+                "max_completion_tokens": 16,
+                "temperature": 0,
+            },
+        )
+        if not isinstance(canary.get("choices"), list) or not canary["choices"]:
+            raise ProviderPreflightError("provider_canary_response_invalid")
+        checks["model_canary_served"] = True
+    except ProviderPreflightError as exc:
+        exc.checks = dict(checks)
+        exc.provider_inference_attempts = attempts
+        raise
+    return checks
 
 
 def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[str, Any]:
@@ -147,17 +172,20 @@ def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[st
         raise ValueError("provider_preflight_source_sha_invalid")
     route, digest = load_route(manifest)
     error_code = None
+    provider_inference_attempts = 0
     if live:
         try:
             checks = probe(route, os.environ.get(str(route["credential_env"]), ""))
-        except RuntimeError as exc:
+            provider_inference_attempts = 1
+        except ProviderPreflightError as exc:
             error_code = str(exc)
-            checks = {
+            checks = exc.checks or {
                 "credential_valid": False,
                 "key_limit_available": False,
                 "model_visible": False,
                 "model_canary_served": False,
             }
+            provider_inference_attempts = exc.provider_inference_attempts
     else:
         checks = {
             "credential_valid": False,
@@ -180,6 +208,7 @@ def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[st
         "provider_ready": live and error_code is None,
         "paid_run_approved": live,
         "account_amounts_recorded": False,
+        "provider_inference_attempts": provider_inference_attempts,
         "provider_inference_calls": int(live and error_code is None),
     }
     output.parent.mkdir(parents=True, exist_ok=True)

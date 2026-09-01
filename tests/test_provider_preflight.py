@@ -21,6 +21,7 @@ def test_provider_route_is_valid_without_network(tmp_path: Path) -> None:
     assert receipt["status"] == "PASS"
     assert receipt["model"] == "meta/muse-spark-1.2-contributor"
     assert receipt["provider_inference_calls"] == 0
+    assert receipt["provider_inference_attempts"] == 0
     assert receipt["provider_ready"] is False
     assert receipt["account_amounts_recorded"] is False
 
@@ -45,6 +46,8 @@ def test_live_preflight_checks_key_limit_and_exact_model(
             if url.endswith("/chat/completions")
             and key == "canary-not-a-real-key"
             and body["model"] == "meta/muse-spark-1.2-contributor"
+            and body["max_completion_tokens"] == 16
+            and "max_tokens" not in body
             else {}
         ),
     )
@@ -56,6 +59,7 @@ def test_live_preflight_checks_key_limit_and_exact_model(
     )
     assert all(receipt["checks"].values())
     assert receipt["provider_inference_calls"] == 1
+    assert receipt["provider_inference_attempts"] == 1
     assert receipt["provider_ready"] is True
     assert "canary-not-a-real-key" not in json.dumps(receipt)
 
@@ -92,4 +96,41 @@ def test_live_failure_is_written_as_redacted_receipt(
     assert receipt["status"] == "FAIL"
     assert receipt["error_code"] == "provider_key_cannot_fund_run"
     assert receipt["provider_inference_calls"] == 0
+    assert receipt["provider_inference_attempts"] == 0
     assert "canary-not-a-real-key" not in output.read_text(encoding="utf-8")
+
+
+def test_canary_http_failure_preserves_completed_checks_and_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "canary-not-a-real-key")
+
+    def fake_get(url: str, _api_key: str) -> dict[str, object]:
+        if url.endswith("/key"):
+            return {"data": {"limit_remaining": 1}}
+        return {"data": [{"id": "meta/muse-spark-1.2-contributor"}]}
+
+    monkeypatch.setattr(provider_preflight, "_get_json", fake_get)
+    monkeypatch.setattr(
+        provider_preflight,
+        "_post_json",
+        lambda _url, _key, _body: (_ for _ in ()).throw(
+            provider_preflight.ProviderPreflightError("provider_canary_http_400")
+        ),
+    )
+    receipt = provider_preflight.run(
+        manifest=MANIFEST,
+        output=tmp_path / "receipt.json",
+        source_sha="d" * 40,
+        live=True,
+    )
+    assert receipt["status"] == "FAIL"
+    assert receipt["error_code"] == "provider_canary_http_400"
+    assert receipt["checks"] == {
+        "credential_valid": True,
+        "key_limit_available": True,
+        "model_visible": True,
+        "model_canary_served": False,
+    }
+    assert receipt["provider_inference_attempts"] == 1
+    assert receipt["provider_inference_calls"] == 0
