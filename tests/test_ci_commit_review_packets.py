@@ -35,7 +35,8 @@ def test_ci_commit_copies_bytes_and_updates_index(tmp_path: Path) -> None:
 def test_ci_commit_rejects_tampering(tmp_path: Path) -> None:
     source = tmp_path / "source"
     inbox = tmp_path / "inbox"
-    source.mkdir(); (inbox / "HAR-76").mkdir(parents=True)
+    source.mkdir()
+    (inbox / "HAR-76").mkdir(parents=True)
     (inbox / "INDEX.json").write_text('{"schema":"gt.review_inbox.v1","live_packets":[],"tickets":{}}\n')
     (source / "ci-bad.json").write_text('{"schema":"gt.review_packet.v1","packet_digest_sha256":"bad"}\n')
     with pytest.raises(ValueError, match="invalid_packet"):

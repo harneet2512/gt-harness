@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 SCHEMA = "gt.har70.framework_resolution.v1"
 LANGUAGES = ("Python", "TypeScript", "JavaScript", "Go", "Java")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import binascii
 import csv
@@ -270,7 +271,10 @@ def _github_api_confirms_provenance(
     except (ValueError, binascii.Error):
         return False
     local_workflow_path = (
-        HARNESS_ROOT / ".github" / "workflows" / "gt_finalstand_provider_free.yml"
+        HARNESS_ROOT
+        / "docs"
+        / "historical-workflows"
+        / "gt_finalstand_provider_free.yml"
     )
     local_workflow = local_workflow_path.read_bytes()
     if _normalized_text_bytes(executed_workflow) != _normalized_text_bytes(local_workflow):
@@ -339,7 +343,12 @@ def _valid_fs023_provenance(
 ) -> bool:
     offline_path = FINALSTAND / "receipts" / "offline_suite.json"
     compatibility_path = FINALSTAND / "language_operation_compatibility.json"
-    workflow_path = HARNESS_ROOT / ".github" / "workflows" / "gt_finalstand_provider_free.yml"
+    workflow_path = (
+        HARNESS_ROOT
+        / "docs"
+        / "historical-workflows"
+        / "gt_finalstand_provider_free.yml"
+    )
     expected_missing = {
         "harness_execution_commit",
         "github_actions_run_id",
@@ -934,19 +943,37 @@ def validate() -> dict[str, object]:
     _check_public_capabilities(errors)
     _check_no_forbidden_closeout_status(errors)
 
-    generator = subprocess.run(
-        [
-            sys.executable,
-            str(HARNESS_ROOT / "scripts" / "generate_gt_finalstand.py"),
-            "--check",
-        ],
-        cwd=HARNESS_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    _require(generator.returncode == 0,
-             f"generated inventories drift: {generator.stdout}{generator.stderr}".strip(), errors)
+    groundtruth_root = Path(
+        os.environ.get("GROUNDTRUTH_ROOT", str(HARNESS_ROOT.parent / "Groundtruth"))
+    ).resolve()
+    generated_inventory_check = "SKIPPED_SUPERSEDED_DEPENDENCY_UNAVAILABLE"
+    if (
+        (groundtruth_root / "gt-index" / "internal" / "specs").is_dir()
+        and (
+            groundtruth_root
+            / "src"
+            / "groundtruth"
+            / "runtime"
+            / "generated_language_operation_compatibility.json"
+        ).is_file()
+    ):
+        generator = subprocess.run(
+            [
+                sys.executable,
+                str(HARNESS_ROOT / "scripts" / "generate_gt_finalstand.py"),
+                "--check",
+            ],
+            cwd=HARNESS_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        generated_inventory_check = "PASS" if generator.returncode == 0 else "FAIL"
+        _require(
+            generator.returncode == 0,
+            f"generated inventories drift: {generator.stdout}{generator.stderr}".strip(),
+            errors,
+        )
 
     result = {
         "schema": "gt.finalstand.validation.v1",
@@ -958,6 +985,7 @@ def validate() -> dict[str, object]:
             text=True,
         ).stdout.strip(),
         "ok": not errors,
+        "generated_inventory_check": generated_inventory_check,
         "counts": {
             "direct": len(direct),
             "role_audit": len(role_audit),
@@ -972,9 +1000,20 @@ def validate() -> dict[str, object]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--issue-receipt",
+        action="store_true",
+        help="explicitly replace the tracked validation receipt",
+    )
+    args = parser.parse_args()
     result = validate()
     encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
-    (FINALSTAND / "validation_receipt.json").write_text(encoded, encoding="utf-8")
+    if args.issue_receipt:
+        target = FINALSTAND / "validation_receipt.json"
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_text(encoded, encoding="utf-8")
+        os.replace(temporary, target)
     print(encoded, end="")
     return 0 if result["ok"] else 1
 

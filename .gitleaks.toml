@@ -1,0 +1,10 @@
+title = "GT Harness secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Receipt API-response content digests are hashes, not API credentials"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = ['''"api_sha256"\s*:\s*"[0-9a-f]{64}"''']

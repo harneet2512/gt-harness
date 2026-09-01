@@ -9,8 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 SCHEMA = "gt.context_packet.v1"
 BOUNDARIES = frozenset({"open", "view", "edit"})

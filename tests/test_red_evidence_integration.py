@@ -21,7 +21,9 @@ def test_repository_producer_inventory_routes_through_canonical_cli() -> None:
     report = validate(repository)
 
     assert report["status"] == "pass"
-    assert report["operative_producers"] == [".github/workflows/red-evidence-integrity.yml"]
+    assert report["operative_producers"] == [
+        ".github/workflows/deepswe_gt_harness_product.yml"
+    ]
     historical = report["historical_producers"]
     assert len(historical) == 14
     assert {item["status"] for item in historical} == {"frozen_historical"}
@@ -36,14 +38,14 @@ def test_producer_guard_rejects_bypass_and_unregistered_red_workflow(tmp_path: P
     for logical in (
         "config/red_evidence_producers.json",
         "scripts/red_evidence.py",
-        ".github/workflows/red-evidence-integrity.yml",
+        ".github/workflows/deepswe_gt_harness_product.yml",
     ):
         source = repository / logical
         target = tmp_path / logical
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     (tmp_path / "tests" / "red_artifacts").mkdir(parents=True)
-    workflow = tmp_path / ".github" / "workflows" / "red-evidence-integrity.yml"
+    workflow = tmp_path / ".github" / "workflows" / "deepswe_gt_harness_product.yml"
     workflow.write_text(
         workflow.read_text(encoding="utf-8").replace("scripts/red_evidence.py capture", "go test"),
         encoding="utf-8",
@@ -53,7 +55,7 @@ def test_producer_guard_rejects_bypass_and_unregistered_red_workflow(tmp_path: P
     assert bypass["status"] == "fail"
     assert any("missing_canonical_token" in error for error in bypass["errors"])
 
-    shutil.copyfile(repository / ".github/workflows/red-evidence-integrity.yml", workflow)
+    shutil.copyfile(repository / ".github/workflows/deepswe_gt_harness_product.yml", workflow)
     _write(tmp_path / ".github" / "workflows" / "rogue-red.yml", "name: rogue\n")
     inventory = validate(tmp_path)
     assert "operative_producers:inventory_mismatch" in inventory["errors"]
@@ -79,8 +81,8 @@ def test_producer_guard_binds_historical_commit_lineage(tmp_path: Path) -> None:
     shutil.copyfile(repository / "scripts/red_evidence.py", tmp_path / "scripts/red_evidence.py")
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     shutil.copyfile(
-        repository / ".github/workflows/red-evidence-integrity.yml",
-        tmp_path / ".github/workflows/red-evidence-integrity.yml",
+        repository / ".github/workflows/deepswe_gt_harness_product.yml",
+        tmp_path / ".github/workflows/deepswe_gt_harness_product.yml",
     )
     (tmp_path / "tests" / "red_artifacts").mkdir(parents=True)
     report = validate(tmp_path)

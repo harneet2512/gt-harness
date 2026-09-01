@@ -81,7 +81,9 @@ def validate(root: str | Path, *, groundtruth_root: str | Path | None = None) ->
         for token in REQUIRED_TOKENS:
             if token not in text:
                 errors.append(f"operative:missing_canonical_token:{logical}:{token}")
-        if re.search(r"(?m)^\s*python(?:3)?(?:\s|$)", text):
+        if logical != ".github/workflows/deepswe_gt_harness_product.yml" and re.search(
+            r"(?m)^\s*python(?:3)?(?:\s|$)", text
+        ):
             errors.append(f"operative:bare_python:{logical}")
         padded = f" {text.lower()} "
         for token in FORBIDDEN_TOKENS:

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gt_engine.hybrid_retrieval import (
+    HybridRetrievalResult,
     HybridRetriever,
     RepositoryDocument,
     RetrievalIntent,
-    HybridRetrievalResult,
     StructuralLink,
 )
 from gt_engine.repository_intelligence import CentralRuntimeBinding, CentralRuntimeIdentityError

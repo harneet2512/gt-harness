@@ -6,8 +6,9 @@ of it; unknown/legacy producers are surfaced as ``legacy_unknown``.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 HONESTY_SCHEMA = "gt.honesty_envelope.v1"
 COMPLETENESS = frozenset({"complete", "truncated", "incomplete", "legacy_unknown"})

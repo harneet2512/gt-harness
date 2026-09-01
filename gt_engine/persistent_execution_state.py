@@ -51,7 +51,7 @@ class ExecutionStateSnapshot:
     @classmethod
     def load(cls, path: str | Path, *, expected_repository_revision: str = "",
              expected_workspace_revision: str = "", expected_graph_revision: str = "",
-             expected_graph_path: str = "") -> "ExecutionStateSnapshot":
+             expected_graph_path: str = "") -> ExecutionStateSnapshot:
         """Read a complete snapshot and reject corruption or stale identity."""
         target = Path(path)
         raw = json.loads(target.read_text(encoding="utf-8"))
@@ -82,7 +82,7 @@ class ExecutionStateSnapshot:
 
     @classmethod
     def reopen(cls, path: str | Path, *, repository_revision: str,
-               workspace_revision: str, graph_revision: str, graph_path: str) -> "ExecutionStateSnapshot":
+               workspace_revision: str, graph_revision: str, graph_path: str) -> ExecutionStateSnapshot:
         return cls.load(path, expected_repository_revision=repository_revision,
                         expected_workspace_revision=workspace_revision,
                         expected_graph_revision=graph_revision, expected_graph_path=graph_path)

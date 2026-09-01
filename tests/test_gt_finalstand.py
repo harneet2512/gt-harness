@@ -36,6 +36,25 @@ def _load_phase2():
     return module
 
 
+def test_validation_is_read_only_unless_receipt_issuance_is_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    validator = _load_validator()
+    result = {"schema": "gt.finalstand.validation.v1", "ok": True, "errors": []}
+    monkeypatch.setattr(validator, "FINALSTAND", tmp_path)
+    monkeypatch.setattr(validator, "validate", lambda: result)
+    monkeypatch.setattr(sys, "argv", ["validate_gt_finalstand.py"])
+
+    assert validator.main() == 0
+    assert not (tmp_path / "validation_receipt.json").exists()
+
+    monkeypatch.setattr(
+        sys, "argv", ["validate_gt_finalstand.py", "--issue-receipt"]
+    )
+    assert validator.main() == 0
+    assert json.loads((tmp_path / "validation_receipt.json").read_text()) == result
+
+
 def test_har9_closeout_rejects_unbound_inputs_and_verifies_bundle() -> None:
     phase2 = _load_phase2()
     with pytest.raises(ValueError, match="full commit SHAs"):
@@ -530,7 +549,9 @@ def _zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
 
 
 def _mock_github_artifact(validator, provenance, workflow, *, extra_inner=()):
-    workflow_path = ROOT / ".github" / "workflows" / "gt_finalstand_provider_free.yml"
+    workflow_path = (
+        ROOT / "docs" / "historical-workflows" / "gt_finalstand_provider_free.yml"
+    )
     compatibility = ROOT / "gt_finalstand" / "language_operation_compatibility.json"
     receipt_entries = []
     for name in workflow["receipt_inputs"]:
@@ -687,9 +708,9 @@ def test_fs023_artifact_rejects_duplicate_traversal_and_stale_receipts(
     assert not rejected(workflow_receipt=stale)
 
 
-def test_provider_free_workflow_pins_actions_and_records_immutable_run_identity() -> None:
+def test_historical_provider_free_workflow_is_archived_with_immutable_identity() -> None:
     workflow = (
-        ROOT / ".github" / "workflows" / "gt_finalstand_provider_free.yml"
+        ROOT / "docs" / "historical-workflows" / "gt_finalstand_provider_free.yml"
     ).read_text(encoding="utf-8")
     action_uses = re.findall(r"^\s*uses:\s*([^\s#]+)", workflow, re.MULTILINE)
     assert action_uses

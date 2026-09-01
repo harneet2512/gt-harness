@@ -114,7 +114,7 @@ class GraphLease:
 
     @classmethod
     def current(cls, *, graph_repository_revision: str, workspace_revision: str,
-                graph_revision: str, graph_path: str) -> "GraphLease":
+                graph_revision: str, graph_path: str) -> GraphLease:
         if not graph_repository_revision or not graph_revision:
             raise ValueError("current graph requires repository and graph revisions")
         return cls(graph_repository_revision=graph_repository_revision,
@@ -122,7 +122,7 @@ class GraphLease:
                    graph_path=graph_path, freshness=GraphFreshness.CURRENT)
 
     @classmethod
-    def absent(cls, *, workspace_revision: str = "") -> "GraphLease":
+    def absent(cls, *, workspace_revision: str = "") -> GraphLease:
         return cls(workspace_revision=workspace_revision)
 
     def mark_edit(self, *, workspace_revision: str, dirty_paths: tuple[str, ...],

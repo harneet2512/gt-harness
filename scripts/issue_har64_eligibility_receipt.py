@@ -13,11 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from gt_engine.evidence_router import (
+from gt_engine.evidence_router import (  # noqa: E402 - direct-script path bootstrap
     build_eligibility_receipt,
     verify_eligibility_receipt,
 )
-
 
 DEFAULT_OUTPUT = ROOT / "gt_finalstand" / "receipts" / "har64_eligibility_receipt.json"
 

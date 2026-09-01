@@ -35,7 +35,7 @@ def main() -> int:
     validator_env = os.environ.copy()
     validator_env["GH_TOKEN"] = token.decode()
     validation_run = subprocess.run(
-        [sys.executable, "scripts/validate_gt_finalstand.py"],
+        [sys.executable, "scripts/validate_gt_finalstand.py", "--issue-receipt"],
         cwd=ROOT,
         env=validator_env,
         check=False,

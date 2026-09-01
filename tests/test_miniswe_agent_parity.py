@@ -26,14 +26,14 @@ def test_installer_runtime_versions_are_exact_not_floating():
 def test_miniswe_agent_version_defaults_to_current_release(monkeypatch):
     monkeypatch.delenv("MINISWE_AGENT_VERSION", raising=False)
 
-    assert _DEFAULT_MINISWE_AGENT_VERSION == "2.3.0"
-    assert _miniswe_agent_version() == "2.3.0"
+    assert _DEFAULT_MINISWE_AGENT_VERSION == "2.4.6"
+    assert _miniswe_agent_version() == "2.4.6"
 
 
-def test_miniswe_agent_version_allows_historical_matched_release(monkeypatch):
+def test_miniswe_agent_version_rejects_historical_matched_release(monkeypatch):
     monkeypatch.setenv("MINISWE_AGENT_VERSION", "2.2.8")
-
-    assert _miniswe_agent_version() == "2.2.8"
+    with pytest.raises(ValueError, match="2.4.6"):
+        _miniswe_agent_version()
 
 
 def test_miniswe_agent_version_rejects_every_other_value(monkeypatch):
@@ -43,23 +43,30 @@ def test_miniswe_agent_version_rejects_every_other_value(monkeypatch):
         _miniswe_agent_version()
     except ValueError as exc:
         assert "MINISWE_AGENT_VERSION" in str(exc)
-        assert "2.2.8" in str(exc)
-        assert "2.3.0" in str(exc)
+        assert "2.4.6" in str(exc)
     else:
         raise AssertionError("unsupported Mini-SWE version was accepted")
 
 
 @pytest.mark.asyncio
-async def test_installer_uses_historical_version_in_install_and_assertion(
+async def test_installer_uses_canonical_version_and_verified_uv_installer(
     monkeypatch, tmp_path
 ):
     wheel = tmp_path / "groundtruth_mcp-1.0.0-py3-none-any.whl"
+    harness_wheel = tmp_path / "nano_harness-0.0.1-py3-none-any.whl"
     binary = tmp_path / "gt-index-linux-amd64"
+    uv_installer = tmp_path / "uv-install.sh"
     wheel.write_bytes(b"wheel")
+    harness_wheel.write_bytes(b"harness-wheel")
     binary.write_bytes(b"binary")
-    monkeypatch.setenv("MINISWE_AGENT_VERSION", "2.2.8")
+    uv_installer.write_bytes(b"installer")
+    monkeypatch.delenv("MINISWE_AGENT_VERSION", raising=False)
     monkeypatch.setattr(MiniSweAgent, "_gt_wheel", staticmethod(lambda: wheel))
+    monkeypatch.setattr(
+        MiniSweAgent, "_harness_wheel", staticmethod(lambda _output: harness_wheel)
+    )
     monkeypatch.setattr(MiniSweAgent, "_gt_binary_host", staticmethod(lambda: binary))
+    monkeypatch.setattr(MiniSweAgent, "_uv_installer_host", staticmethod(lambda: uv_installer))
 
     commands: list[str] = []
 
@@ -83,5 +90,9 @@ async def test_installer_uses_historical_version_in_install_and_assertion(
     await agent.install(Environment())
 
     install = commands[-1]
-    assert '--with "mini-swe-agent==2.2.8"' in install
-    assert "m.version('mini-swe-agent') == '2.2.8'" in install
+    assert '--with "mini-swe-agent==2.4.6"' in install
+    assert "m.version('mini-swe-agent') == '2.4.6'" in install
+    assert "sha256sum -c -" in install
+    assert "curl -LsSf" not in install
+    assert str(harness_wheel.name) in install
+    assert "/installed-agent/miniswe" not in install

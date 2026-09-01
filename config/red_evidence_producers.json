@@ -109,7 +109,7 @@
     "tests/red_artifacts"
   ],
   "operative_producers": [
-    ".github/workflows/red-evidence-integrity.yml"
+    ".github/workflows/deepswe_gt_harness_product.yml"
   ],
   "schema": "gt.red_evidence_producers.v2"
 }

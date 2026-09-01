@@ -164,7 +164,11 @@ class HybridRetriever:
         ordered = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:limit]
         candidates = []
         for path, score in ordered:
-            links = [l for l in self.structural_links if l.target_path == path and l.certified and l.confidence >= 1.0]
+            links = [
+                link
+                for link in self.structural_links
+                if link.target_path == path and link.certified and link.confidence >= 1.0
+            ]
             candidates.append(RetrievalCandidate(
                 path=path, score=score,
                 channels=(RetrievalChannel.LEXICAL, RetrievalChannel.STRUCTURAL) if links else (RetrievalChannel.LEXICAL,),

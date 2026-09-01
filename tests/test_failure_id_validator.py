@@ -421,9 +421,9 @@ def test_repository_snapshot_and_ci_are_wired() -> None:
 
     assert report["status"] == "pass"
     assert report["next_unused_id"] == "FD-031"
-    workflow = (repository / ".github" / "workflows" / "failure-id-validation.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = (
+        repository / ".github" / "workflows" / "deepswe_gt_harness_product.yml"
+    ).read_text(encoding="utf-8")
     assert "scripts/validate_failure_ids.py" in workflow
     assert "config/failure_id_ledger_snapshot.json" in workflow
     assert (

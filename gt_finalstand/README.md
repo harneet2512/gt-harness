@@ -30,8 +30,8 @@ There are no open FS rows. Under the project owner's terminal override, FS-024 u
 16. [receipts/](receipts/) contains provider-free positive and negative machine receipts.
 17. [language_operation_compatibility.json](language_operation_compatibility.json) freezes the
     GroundTruth-produced compatibility authority used to generate the public typed-action schema.
-18. [gt_finalstand_provider_free.yml](../.github/workflows/gt_finalstand_provider_free.yml) is the
-    dispatch-only GitHub Actions implementation of the provider-free closeout gate.
+18. [gt_finalstand_provider_free.yml](../docs/historical-workflows/gt_finalstand_provider_free.yml)
+    is the immutable, superseded workflow definition used by the historical receipts.
 
 Within [receipts/](receipts/), `provider_free_workflow.json` binds successful run `30729901088`, both repository commits, the workflow identity, and every input-receipt hash; `fs023_provenance.json` remains the deliberately pre-artifact receipt whose declared missing post-run identities are supplied by the successful Actions run and artifact API record. `final_codespace_verification.json` binds the product, harness, smoke, Go, worktree, and clean-fixture evidence. `fs024_single_witness_baseline.json` freezes the local GT-off comparator and `fs024_single_witness_analysis.json` freezes the matched descriptive result. `experiment_execution_plan.json` and `experiment_dry_run.json` remain historical proof that the superseded 10-task × 6-arm plan was never executed (`executed=false`, `provider_calls=0`).
 
