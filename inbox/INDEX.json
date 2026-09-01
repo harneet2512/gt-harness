@@ -16,6 +16,7 @@
     "har70-groundtruth-7b4d7043",
     "har70-groundtruth-db9daf9e",
     "har70-harness-ff578719",
+    "har76-harness-09cee467",
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
     "merge-pr26-bd099b88",
@@ -88,6 +89,9 @@
     ],
     "HAR-75":[
       "rev-221-transport-rewind-fixed"
+    ],
+    "HAR-76":[
+      "har76-harness-09cee467"
     ]
   }
 }
