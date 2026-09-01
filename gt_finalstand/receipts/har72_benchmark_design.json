@@ -1,0 +1,82 @@
+{
+  "account_identity_reference": "USER_APPROVAL_RECEIPT_REQUIRED",
+  "approval_requirements": [
+    "design_hash",
+    "task_manifest_sha256",
+    "model_provider_config_hash",
+    "cost_ceiling_usd",
+    "account_identity_reference"
+  ],
+  "benchmark_ready": false,
+  "benchmark_runs": 0,
+  "calibration_tables": [
+    "overall",
+    "resolution",
+    "retrieval",
+    "community",
+    "per_mechanism"
+  ],
+  "cost_status": "requires_user_model_provider_and_ceiling",
+  "dataset": {
+    "manifest_sha256": "fbc7aa32e7d46e60029e6a1cd73a6b48e0978fc967276c11d525abeb781fdfb3",
+    "name": "gt_finalstand historical task manifest"
+  },
+  "design_sha256": "558614da789cbe86392a3dce5a12e099565801a2fb6e69dfc124b10f266c233a",
+  "environment": {
+    "platform": "approval-time-runner",
+    "seed": "approval-time-explicit",
+    "source_revision": "approval-time-main"
+  },
+  "estimated_cost_usd": null,
+  "expected_duration_minutes": null,
+  "hard_cost_ceiling_usd": null,
+  "limits": {
+    "arms": [
+      "stock_raw",
+      "prepend_only",
+      "action_bound_augmentation",
+      "certified_replacement",
+      "typed_interface",
+      "proactive_map_embedding_control"
+    ],
+    "provider_calls_per_trial": 1,
+    "tasks": 10,
+    "trials": 60
+  },
+  "model": {
+    "configuration": "USER_SELECTION_REQUIRED",
+    "model": "USER_SELECTION_REQUIRED",
+    "provider": "USER_SELECTION_REQUIRED"
+  },
+  "output_locations": [
+    "gt_finalstand/receipts/har72/",
+    "gt_finalstand/receipts/har72_calibration.json"
+  ],
+  "parity": {
+    "control": "fail_closed_gt_off",
+    "gt_off": true,
+    "gt_on": true,
+    "paired": true
+  },
+  "proposed_command": "USER_APPROVAL_REQUIRED: run the pinned HAR-72 executor only after approval receipt hashes match",
+  "provider_calls": 0,
+  "schema": "gt.har72.benchmark_design.v1",
+  "status": "BENCHMARK_READY_AWAITING_USER_RUN_APPROVAL",
+  "task_count": 10,
+  "tasks": [
+    "break-filter-js-from-html",
+    "cobol-modernization",
+    "fix-code-vulnerability",
+    "gpt2-codegolf",
+    "headless-terminal",
+    "llm-inference-batching-scheduler",
+    "modernize-scientific-stack",
+    "portfolio-optimization",
+    "schemelike-metacircular-eval",
+    "write-compressor"
+  ],
+  "versions": {
+    "harbor": "installed_dependency_pinned_at_approval",
+    "miniswe": "installed_dependency_pinned_at_approval"
+  }
+}
