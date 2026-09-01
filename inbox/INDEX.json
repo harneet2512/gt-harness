@@ -1,5 +1,6 @@
 {
   "live_packets":[
+    "bugbot-pr24-20260901",
     "finder-f1",
     "finder-f1-fixed",
     "finder-f2",
@@ -14,6 +15,9 @@
   "tickets":{
     "HAR-57":[
       "rev-222-reviewer-interim"
+    ],
+    "HAR-62":[
+      "bugbot-pr24-20260901"
     ],
     "HAR-63":[
       "finder-f1",
