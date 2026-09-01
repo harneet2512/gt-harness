@@ -48,6 +48,8 @@ jobs:
         with:
           go-version-file: Groundtruth/gt-index/go.mod
           cache-dependency-path: Groundtruth/gt-index/go.sum
+      - name: Start setup timer
+        run: date +%s.%N > "$RUNNER_TEMP/pytest-setup-start"
       - name: Relocate parity source outside harness scan
         run: |
           mv "$GITHUB_WORKSPACE/Groundtruth" "$RUNNER_TEMP/Groundtruth"
@@ -83,13 +85,20 @@ jobs:
           ln -sf "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
           chmod +x "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Record setup duration
+        run: |
+          python -c "import time; start=float(open('$RUNNER_TEMP/pytest-setup-start').read()); print(f'SETUP_DURATION_SECONDS={time.time()-start:.3f}')" >> "$GITHUB_ENV"
       - name: Run full pytest suite
         id: pytest
         continue-on-error: true
         run: |
           set +e
-          python -m pytest -q 2>&1 | tee "$RUNNER_TEMP/pytest-${{ matrix.python-version }}.log"
+          test_start=$(date +%s.%N)
+          python -m pytest -n auto -q -ra 2>&1 | tee "$RUNNER_TEMP/pytest-${{ matrix.python-version }}.log"
           status=${PIPESTATUS[0]}
+          test_end=$(date +%s.%N)
+          TEST_DURATION_SECONDS=$(python -c "print(f'{float('$test_end')-float('$test_start'):.3f}')")
+          echo "TEST_DURATION_SECONDS=$TEST_DURATION_SECONDS" >> "$GITHUB_ENV"
           echo "exit_status=$status" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Emit CI outcome packet
@@ -98,9 +107,11 @@ jobs:
           CONCLUSION: ${{ steps.pytest.outcome == 'success' && steps.pytest.outputs.exit_status == '0' && 'success' || 'failure' }}
         run: >-
           python scripts/ci_emit_review_packet.py
-          --ticket HAR-76 --pr ${{ github.event.pull_request.number || 0 }}
+          --ticket HAR-79 --pr ${{ github.event.pull_request.number || 0 }}
           --head-sha ${{ github.event.pull_request.head.sha || github.sha }}
           --check ci-pytest --conclusion "$CONCLUSION"
+          --setup-duration "$SETUP_DURATION_SECONDS" --test-duration "$TEST_DURATION_SECONDS"
+          --parallel --workers auto
           --variant py${{ matrix.python-version }}
           --diagnosis-file "$RUNNER_TEMP/pytest-${{ matrix.python-version }}.log"
           --run-id ${{ github.run_id }} --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -138,7 +149,7 @@ jobs:
           CONCLUSION: ${{ steps.matrix.outcome == 'success' && 'success' || 'failure' }}
         run: >-
           python scripts/ci_emit_review_packet.py
-          --ticket HAR-76 --pr ${{ github.event.pull_request.number || 0 }}
+          --ticket HAR-79 --pr ${{ github.event.pull_request.number || 0 }}
           --head-sha ${{ github.event.pull_request.head.sha || github.sha }}
           --check ci-feature-matrix --conclusion "$CONCLUSION"
           --run-id ${{ github.run_id }} --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

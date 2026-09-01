@@ -23,7 +23,13 @@ def canonical(payload: dict) -> bytes:
 
 
 def read_diagnosis(path: Path | None) -> dict[str, object] | None:
-    """Extract stable RED witnesses from a captured pytest transcript."""
+    """Extract stable RED witnesses from a captured pytest transcript.
+
+    The packet keeps node IDs and the first actionable error for compatibility, and
+    adds bounded per-test excerpts plus pytest's ``-ra`` summary.  The excerpts are
+    deliberately text-only and capped so a failure packet remains useful without
+    becoming an unbounded log transport.
+    """
     if path is None or not path.is_file():
         return None
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -38,9 +44,47 @@ def read_diagnosis(path: Path | None) -> dict[str, object] | None:
         ),
         "",
     )
-    if not failures and not first_error:
+    summary_match = re.search(
+        r"(?ms)^=+ short test summary info =+\s*\n(?P<body>.*?)(?=\n=+\s*$|\Z)",
+        text,
+    )
+    short_summary = summary_match.group("body").strip() if summary_match else ""
+    failure_sections = list(
+        re.finditer(r"(?m)^_{5,}[^\n]*_{5,}\s*$", text)
+    )
+    excerpts: list[dict[str, str]] = []
+    for node in failures:
+        test_name = node.rsplit("::", 1)[-1]
+        section = next(
+            (item for item in failure_sections if test_name in item.group(0)),
+            None,
+        )
+        if section is not None:
+            start = section.start()
+            following = [item.start() for item in failure_sections if item.start() > start]
+            summary_start = text.find("\n= short test summary", start + 1)
+            end_candidates = following + ([summary_start] if summary_start >= 0 else [])
+            end = min(end_candidates) if end_candidates else len(text)
+        else:
+            marker = text.find(node)
+            if marker < 0:
+                continue
+            start = max(0, text.rfind("\n", 0, marker) + 1)
+            end = text.find("\n= short test summary", marker + len(node))
+            if end < 0:
+                end = len(text)
+        excerpt = text[start:end].strip()
+        if len(excerpt) > 2400:
+            excerpt = excerpt[-2400:]
+        excerpts.append({"node_id": node, "traceback_excerpt": excerpt})
+    if not failures and not first_error and not short_summary:
         return None
-    return {"failures": failures, "first_error": first_error}
+    return {
+        "failures": failures,
+        "first_error": first_error,
+        "traceback_excerpts": excerpts,
+        "pytest_short_summary": short_summary[:4000],
+    }
 
 
 def emit(args: argparse.Namespace) -> dict:
@@ -72,6 +116,12 @@ def emit(args: argparse.Namespace) -> dict:
                 "its existing provider-free Go/runtime workflows, with no "
                 "provider or benchmark execution in this workflow."
             ),
+            "durations": {
+                "setup_seconds": getattr(args, "setup_duration", None),
+                "test_seconds": getattr(args, "test_duration", None),
+                "parallel": bool(getattr(args, "parallel", False)),
+                "workers": getattr(args, "workers", None),
+            },
         },
         "supersedes": None,
         "created_at": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
@@ -103,6 +153,10 @@ def main() -> int:
     )
     parser.add_argument("--variant", default="")
     parser.add_argument("--diagnosis-file", type=Path)
+    parser.add_argument("--setup-duration", type=float)
+    parser.add_argument("--test-duration", type=float)
+    parser.add_argument("--parallel", action="store_true")
+    parser.add_argument("--workers")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     packet = emit(args)

@@ -588,3 +588,25 @@ The README, code, workflows, fixtures, and receipts are one versioned contract. 
 change must update this README in the same commit so the narrative remains current with the
 implementation. No section above claims provider execution, benchmark execution, or a capability
 that is not represented by a checked-in module, workflow, fixture, or receipt at this commit.
+
+### CI parallelism and failure packets (HAR-79)
+
+The `pytest` job in `.github/workflows/ci.yml` runs the provider-free suite with
+`pytest -n auto -q -ra` on each Python version. `pytest-xdist==3.8.0` is part of the `dev`
+extra, so the command is reproducible from the normal project installation. The matrix jobs
+remain separate and `continue-on-error` is still paired with the recorded pytest exit status;
+the final `Fail on RED suite` step therefore keeps the dual outcome/exit gate.
+
+Before enabling xdist, the test tree was audited for shared-state hazards. Tests use pytest's
+per-test `tmp_path` and `monkeypatch` fixtures for files, environment, and working directories;
+the index and SQLite cases create paths below those temporary directories; no test reserves a
+fixed TCP port or a shared SQLite filename. The workflow's two Python jobs also run on separate
+fresh runners. No serial subset is required by this audit.
+
+Each CI packet still has schema `gt.review_packet.v1`, and now records measured
+`detail.durations.setup_seconds` and `detail.durations.test_seconds`, plus the `parallel` flag
+and worker setting. The pytest transcript is run with `-ra`; on RED,
+`scripts/ci_emit_review_packet.py` records node IDs and first errors as before, and additionally
+stores a capped traceback excerpt per failing node and the capped pytest short-summary block.
+The packet alone consequently identifies the failing test, error text, and relevant location
+without requiring an Actions-log lookup. Provider calls and benchmark runs remain zero.
