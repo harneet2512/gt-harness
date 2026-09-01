@@ -1,0 +1,15 @@
+{
+  "schema": "gt.provider_route.v1",
+  "route_id": "openrouter-muse-spark-1.2-contributor",
+  "provider": "openrouter",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "meta/muse-spark-1.2-contributor",
+  "credential_env": "OPENROUTER_API_KEY",
+  "credential_source_id": "final_openrouter_musecontributor",
+  "availability": {
+    "key_path": "/key",
+    "models_path": "/models",
+    "inference_path": "/chat/completions",
+    "require_positive_key_limit_when_present": true
+  }
+}

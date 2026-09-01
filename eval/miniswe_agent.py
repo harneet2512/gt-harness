@@ -265,7 +265,9 @@ class MiniSweAgent(BaseInstalledAgent):
         await self.exec_as_agent(environment, install, env=dict(UTF8_ENV))
 
     def _model_and_env(self) -> tuple[str, dict[str, str]]:
-        model = self.model_name or "deepseek-v4-flash"
+        model = str(self.model_name or "").strip()
+        if not model:
+            raise ValueError("model_name is required by the provider route")
         if not os.environ.get("OPENAI_BASE_URL"):
             model = model.split("/", 1)[-1]
         env = provider_env()
@@ -274,7 +276,7 @@ class MiniSweAgent(BaseInstalledAgent):
 
     def _run_command(self, instruction: str, model: str, extra_args: str = "") -> str:
         # T1.1: the requested model MUST reach the runner (it was silently
-        # dropped before, so a non-default model fell back to deepseek-v4-flash).
+        # dropped before, so a non-default model fell back to a stale default).
         # The runner's --model + --metrics are the single source of truth.
         # A short in-container probe makes provider failures diagnosable while
         # preserving the model's normal request path.  It records only an HTTP

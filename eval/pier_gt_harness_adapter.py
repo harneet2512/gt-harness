@@ -18,7 +18,7 @@ class PierGtHarnessMiniSwe246Agent(MiniSweGtAgent):
 
         # Installation inputs are staged and verified before task startup.
         # Only the configured model transport receives network access.
-        return NetworkAllowlist(domains=["api.deepseek.com"])
+        return NetworkAllowlist(domains=["openrouter.ai"])
 
     def to_agent_info(self):
         # Pier constructs and validates its own TrialResult.  Harbor's

@@ -14,7 +14,7 @@ from pier.environments.docker.docker import DockerEnvironment
 from pier.models.task.config import EnvironmentConfig
 
 
-class PierDeepSeekDockerEnvironment(DockerEnvironment):
+class PierFilteredDockerEnvironment(DockerEnvironment):
     """Docker runtime with allowlisted agent egress only."""
 
     def __init__(self, *, task_env_config: EnvironmentConfig, **kwargs):
@@ -27,4 +27,7 @@ class PierDeepSeekDockerEnvironment(DockerEnvironment):
         super().__init__(task_env_config=task_env_config, **kwargs)
 
 
-__all__ = ["PierDeepSeekDockerEnvironment"]
+# Historical import compatibility only; active workflows use the provider-neutral name.
+PierDeepSeekDockerEnvironment = PierFilteredDockerEnvironment
+
+__all__ = ["PierDeepSeekDockerEnvironment", "PierFilteredDockerEnvironment"]

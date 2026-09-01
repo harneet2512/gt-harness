@@ -11,7 +11,7 @@ The local `nano` CLI and historical benchmark workflows are development or compa
 - The only model authorized for future provider-backed smoke work is `meta/muse-spark-1.2-contributor` through OpenRouter.
 - Source its API credential from the `final_openrouter_musecontributor` entry in `C:\Users\Lenovo\Desktop\cloud_access.md` at runtime.
 - The credential identifier may appear in plans and internal instructions. The credential value must never be printed, committed, uploaded, copied into a receipt, passed to task shells, or exposed to the model-visible environment.
-- Existing DeepSeek provider workflows and receipts are historical evidence. Do not dispatch them. Convert and revalidate the canonical paid workflow before any future provider call.
+- Existing DeepSeek receipts are historical evidence and must not drive new dispatches. The paid workflow resolves its active OpenRouter route from `config/provider_route.v1.json`; do not duplicate provider/model/base-URL literals in YAML or runner defaults.
 - Every paid dispatch requires an explicit approval input recorded in the immutable run plan and final receipt. Provider availability and funding gates fail closed without logging monetary amounts.
 
 ## Current release gate

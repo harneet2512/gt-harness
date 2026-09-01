@@ -1,4 +1,4 @@
-name: "GT Harness: DeepSWE product smoke20 p0731"
+name: "GT Harness: DeepSWE paid smoke20"
 
 on:
   workflow_dispatch:
@@ -71,6 +71,8 @@ jobs:
       source_sha: ${{ steps.source.outputs.sha }}
       task_count: ${{ steps.cohort.outputs.task_count }}
       task_order_sha256: ${{ steps.cohort.outputs.task_order_sha256 }}
+      model: ${{ steps.cohort.outputs.model }}
+      provider_base_url: ${{ steps.cohort.outputs.provider_base_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,6 +118,7 @@ jobs:
               SUPERVISOR_GRACE_SECONDS,
               resolve_budget,
           )
+          from scripts.provider_preflight import load_route
 
           manifest_path = Path("eval/deepswe_smoke20_v1.json")
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -170,6 +173,9 @@ jobs:
           treatment = os.environ["TREATMENT"].strip().lower()
           if treatment not in {"bare", "groundtruth"}:
               raise SystemExit(f"unsupported treatment: {treatment!r}")
+          provider_route, provider_route_sha256 = load_route(
+              Path("config/provider_route.v1.json")
+          )
 
           receipt = {
               "schema": "gt.deepswe_gt_harness_plan.v1",
@@ -185,9 +191,12 @@ jobs:
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.4.6",
               "treatment": treatment,
-              "requested_model": "deepseek-v4-flash",
-              "effective_model": "openai/deepseek-v4-flash",
-              "provider": "deepseek:native:api.deepseek.com",
+              "provider_route_id": provider_route["route_id"],
+              "provider_route_sha256": provider_route_sha256,
+              "requested_model": provider_route["model"],
+              "effective_model": "openai/" + provider_route["model"],
+              "provider": provider_route["provider"],
+              "provider_base_url": provider_route["base_url"],
               "paid_run_approval": {
                   "approved": os.environ["APPROVE_PAID_RUN"].strip().lower() == "true",
                   "input": "approve_paid_run",
@@ -203,6 +212,8 @@ jobs:
               output.write("matrix=" + json.dumps({"include": matrix}, separators=(",", ":")) + "\n")
               output.write(f"task_count={len(selected_tasks)}\n")
               output.write(f"task_order_sha256={receipt['task_order_sha256']}\n")
+              output.write(f"model={provider_route['model']}\n")
+              output.write(f"provider_base_url={provider_route['base_url']}\n")
           PY
 
       - name: Upload the immutable DeepSWE plan
@@ -218,64 +229,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Verify the DeepSeek account can fund the approved run
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
-        run: |
-          set -uo pipefail
-          attempts=0
-          success=false
-          status_codes=""
-          while [ "$attempts" -lt 5 ]; do
-            attempts=$((attempts + 1))
-            status="$({
-              curl --silent --show-error --max-time 30 \
-                --output "$RUNNER_TEMP/provider-balance-response.json" \
-                --write-out '%{http_code}' \
-                https://api.deepseek.com/user/balance \
-                --header "Authorization: Bearer $DEEPSEEK_API_KEY" \
-                --header 'Accept: application/json'
-            } 2>/dev/null || true)"
-            status_codes="${status_codes}${status_codes:+,}${status:-000}"
-            case "$status" in
-              2??)
-                if python -c 'import json,os,pathlib; payload=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-balance-response.json").read_text(encoding="utf-8")); assert payload.get("is_available") is True, "DeepSeek account cannot fund provider requests"'; then
-                  success=true
-                fi
-                break ;;
-              429|500|502|503|504|000) sleep 30 ;;
-              *) break ;;
-            esac
-          done
-          export ATTEMPTS="$attempts" STATUS_CODES="$status_codes" SUCCESS="$success"
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
 
-          receipt = {
-              "schema": "gt.provider_availability_gate.v1",
-              "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
-              "source_sha": os.environ["SOURCE_SHA"],
-              "model": "deepseek-v4-flash",
-              "provider": "deepseek:native:api.deepseek.com",
-              "paid_run_approved": True,
-              "balance_available": os.environ["SUCCESS"] == "true",
-              "attempts": int(os.environ["ATTEMPTS"]),
-              "http_statuses": [
-                  int(value) for value in os.environ["STATUS_CODES"].split(",") if value
-              ],
-              "balance_requests_outside_task_metrics": int(os.environ["ATTEMPTS"]),
-              "provider_calls_outside_task_metrics": 0,
-          }
-          Path("provider-gate.json").write_text(
-              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
-              encoding="utf-8",
-          )
-          print(json.dumps(receipt, indent=2, sort_keys=True))
-          PY
-          test "$success" = true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify credential, account limit, and exact model before the matrix
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -m scripts.provider_preflight \
+            --manifest config/provider_route.v1.json \
+            --source-sha "${{ needs.plan.outputs.source_sha }}" \
+            --output provider-gate.json \
+            --live
 
       - name: Upload provider availability receipt
         if: always()
@@ -300,7 +271,7 @@ jobs:
     env:
       TASK: ${{ matrix.task }}
       ORDINAL: ${{ matrix.ordinal }}
-      MODEL: deepseek-v4-flash
+      MODEL: ${{ needs.plan.outputs.model }}
       GT_RETRIEVAL_MODE: hybrid_required
       GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
     steps:
@@ -457,8 +428,8 @@ jobs:
 
       - name: Run DeepSWE through the released gt-harness run boundary
         env:
-          OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENAI_BASE_URL: https://api.deepseek.com
+          OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_BASE_URL: ${{ needs.plan.outputs.provider_base_url }}
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
         run: |
@@ -468,7 +439,7 @@ jobs:
             --include-task-name "$TASK" \
             --agent-import-path eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent \
             -m "$MODEL" \
-            --environment-import-path eval.pier_filtered_docker:PierDeepSeekDockerEnvironment \
+            --environment-import-path eval.pier_filtered_docker:PierFilteredDockerEnvironment \
             -o results/deepswe \
             --job-name "deepswe-gt-harness-${GITHUB_RUN_ID}-${TASK}" \
             --agent-timeout-multiplier 1.0 \
@@ -580,9 +551,9 @@ jobs:
                   errors.append(f"adapter_contract_mismatch:{task}")
               if row.get("treatment") != plan.get("treatment"):
                   errors.append(f"adapter_treatment_mismatch:{task}")
-              if row.get("requested_model") != "deepseek-v4-flash":
+              if row.get("requested_model") != plan.get("requested_model"):
                   errors.append(f"requested_model_mismatch:{task}")
-              if row.get("effective_model") != "openai/deepseek-v4-flash":
+              if row.get("effective_model") != plan.get("effective_model"):
                   errors.append(f"effective_model_mismatch:{task}")
               if row.get("agent_scaffold_version") != "2.4.6":
                   errors.append(f"scaffold_version_mismatch:{task}")
