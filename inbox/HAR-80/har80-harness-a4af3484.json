@@ -1,0 +1,32 @@
+{
+  "created_at":"2026-09-01T04:28:36.657945Z",
+  "detail":{
+    "base":"b98ef05cf8a7ec9b78a37a0c0c42c94592f78e7f",
+    "benchmark_runs":0,
+    "branch":"codex/har80-source-parity",
+    "changes":[
+      "digest-bound HAR-80 route receipt"
+    ],
+    "event":"harness_push",
+    "head":"a4af34846cdb4c25f460f4bc8eecfd18de439311",
+    "provider_calls":0,
+    "repository":"github.com/harneet2512/gt-harness"
+  },
+  "file":"",
+  "head_sha":"a4af34846cdb4c25f460f4bc8eecfd18de439311",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-80 digest-bound route receipt follow-up pushed at a4af3484; fresh exact-head review required.",
+  "packet_digest_sha256":"bddb80ec0918920b2d0c114024727a0e510d4368a49a06aee1518e0e29eea214",
+  "packet_id":"har80-harness-a4af3484",
+  "pr":36,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"harness-push",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-80"
+}

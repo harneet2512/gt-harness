@@ -96,6 +96,7 @@
     "har77-harness-1bf89072",
     "har77-harness-aa6577a0",
     "har80-groundtruth-43c6d723",
+    "har80-harness-a4af3484",
     "har80-harness-b98ef05c",
     "har80-inbox-tool-bf088d22",
     "har80-route-b-701a8472",
@@ -269,6 +270,7 @@
     ],
     "HAR-80":[
       "har80-groundtruth-43c6d723",
+      "har80-harness-a4af3484",
       "har80-harness-b98ef05c",
       "har80-inbox-tool-bf088d22",
       "har80-route-b-701a8472"
