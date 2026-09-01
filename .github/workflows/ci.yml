@@ -18,7 +18,7 @@ jobs:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     env:
-      GROUNDTRUTH_ROOT: ${{ runner.temp }}/Groundtruth
+      GROUNDTRUTH_ROOT: ${{ github.workspace }}/Groundtruth
       GH_TOKEN: ${{ github.token }}
       GIT_AUTHOR_NAME: GroundTruth CI
       GIT_AUTHOR_EMAIL: groundtruth-ci@example.invalid
@@ -38,12 +38,14 @@ jobs:
           repository: harneet2512/groundtruth
           ref: f2863f8781edaeaef8787c515e36381cdbd692d5
           path: Groundtruth
-      - name: Relocate parity source outside harness scan
-        run: mv "$GITHUB_WORKSPACE/Groundtruth" "$GROUNDTRUTH_ROOT"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ runner.temp }}/Groundtruth/gt-index/go.mod
-          cache-dependency-path: ${{ runner.temp }}/Groundtruth/gt-index/go.sum
+          go-version-file: Groundtruth/gt-index/go.mod
+          cache-dependency-path: Groundtruth/gt-index/go.sum
+      - name: Relocate parity source outside harness scan
+        run: |
+          mv "$GITHUB_WORKSPACE/Groundtruth" "$RUNNER_TEMP/Groundtruth"
+          echo "GROUNDTRUTH_ROOT=$RUNNER_TEMP/Groundtruth" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
