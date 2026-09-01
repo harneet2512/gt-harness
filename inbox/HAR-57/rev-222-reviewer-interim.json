@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:17:32.617536Z",
+  "detail":"HAR-62 through HAR-67 exact remote heads were rechecked with focused suites: 6, 90, 30, 2, 5, and 2 passing respectively; no code findings. HAR-63/64/67 Finder fixes are present and adjudicated. V107 Bugbot outcomes remain absent, so this is INTERIM and no terminal PASS or FF request is minted.",
+  "file":"",
+  "head_sha":"16b92e8a035fcb2cee3f0e27cf218e5e94dcfc9b",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Independent exact-head review interim",
+  "packet_digest_sha256":"df194ba0bd289af2de5e27e5b09d35b7ff530dfcc504e6a234dae56f1360d110",
+  "packet_id":"rev-222-reviewer-interim",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"REV-222",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-57"
+}
