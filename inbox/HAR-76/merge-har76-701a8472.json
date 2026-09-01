@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T04:10:07.730057Z",
+  "detail":"{event:ff_merge,base:aa6577a0284ded86579090983fdfaaf6d1cbcd26,candidate:701a847293188f317b5e4307cbb0285d9415ff4e,landed:701a847293188f317b5e4307cbb0285d9415ff4e,fast_forward:true,parent_verified:true,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"701a847293188f317b5e4307cbb0285d9415ff4e",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-76 PR#34 fast-forward merged to main under explicit exact-head authorization; candidate and landed remote tip match.",
+  "packet_digest_sha256":"7f7d37706bfd9230825c9c8eca9f960799b5700772841a29d5dd52eb5c3f21de",
+  "packet_id":"merge-har76-701a8472",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ff-merge",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
