@@ -129,6 +129,7 @@
     "merge-har77-aa6577a0",
     "merge-har77-aa6577a0-v2",
     "merge-har78-5893a3ba",
+    "merge-har79-d599a084",
     "merge-har80-a4af3484",
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
@@ -317,7 +318,8 @@
       "ci-ci-pytest-33471965968-py3.13",
       "har79-harness-cc649b9d",
       "har79-harness-d599a084",
-      "har79-inbox-validator-65385991"
+      "har79-inbox-validator-65385991",
+      "merge-har79-d599a084"
     ],
     "HAR-80":[
       "har80-groundtruth-43c6d723",

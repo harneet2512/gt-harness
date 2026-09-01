@@ -1,0 +1,39 @@
+{
+  "created_at":"2026-09-01T05:03:56.356842Z",
+  "detail":{
+    "base_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+    "benchmark_ready":false,
+    "benchmark_runs":0,
+    "branch":"codex/har79-ci-parallelism",
+    "candidate_sha":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+    "fast_forward":true,
+    "grant":"949711da-074d-4388-8eaa-f0effc28246b",
+    "landed_sha":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+    "pr":38,
+    "provider_calls":0,
+    "repository":"harneet2512/gt-harness",
+    "review":"a9120a4f-e438-46a6-98d4-adc5e8cee1b7",
+    "verification":{
+      "candidate_ancestor":true,
+      "origin_main":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a"
+    },
+    "workflow_run":33471965968
+  },
+  "file":"",
+  "head_sha":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-79 PR#38 fast-forward merged: base 5893a3ba to landed SHA d599a084 under exact grant; origin/main verified exact.",
+  "packet_digest_sha256":"878546aabd773407da14da1708fb428e24488cf288c715264646f52a540cda31",
+  "packet_id":"merge-har79-d599a084",
+  "pr":38,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ff-merge",
+    "system":"codex-check"
+  },
+  "status":"closed",
+  "supersedes":null,
+  "ticket":"HAR-79"
+}
