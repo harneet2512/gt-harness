@@ -1,0 +1,25 @@
+{
+  "created_at": "2026-09-01T02:15:32.881566Z",
+  "detail": {
+    "conclusion": "success",
+    "run_id": "33461810532",
+    "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/33461810532"
+  },
+  "file": "",
+  "head_sha": "72b9180ef2095bb83b1265699280fc545e33824e",
+  "kind": "check_outcome",
+  "line": 0,
+  "message": "ci-feature-matrix CI outcome: success",
+  "packet_digest_sha256": "6bac9511e6cd6ef1998763d20646b3a7c8e1557a4cc7d5ce9e1ea1a43648d4db",
+  "packet_id": "ci-ci-feature-matrix-33461810532",
+  "pr": 34,
+  "schema": "gt.review_packet.v1",
+  "severity": "info",
+  "source": {
+    "check": "ci-feature-matrix",
+    "system": "codex-bugbot"
+  },
+  "status": "open",
+  "supersedes": null,
+  "ticket": "HAR-76"
+}
