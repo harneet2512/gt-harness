@@ -57,6 +57,7 @@
     "scripts/gt_product_acceptance.py",
     "scripts/__init__.py",
     "scripts/miniswe_gt_run.py",
+    "scripts/provider_probe.py",
     "scripts/validate_product_workflow.py",
     "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "vendor/gt-index-linux-amd64"

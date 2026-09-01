@@ -214,11 +214,7 @@ class MiniSweAgent(BaseInstalledAgent):
         # status (never response bodies or credentials) and is bounded so a
         # dead egress path cannot consume the task budget.
         probe = (
-            f'"{_REMOTE_PY}" -c \'import os,urllib.request; '
-            "u=urllib.request.Request(\"https://api.deepseek.com/models\","
-            "headers={\"Authorization\":\"Bearer \"+os.environ.get(\"OPENAI_API_KEY\",\"\")}); "
-            "try: r=urllib.request.urlopen(u,timeout=15); print(\"GT_PROVIDER_PROBE_STATUS=\"+str(r.status)) "
-            "except Exception as e: print(\"GT_PROVIDER_PROBE_ERROR=\"+type(e).__name__+\":\"+str(e)[:160])\'"
+            f'"{_REMOTE_PY}" -m scripts.provider_probe'
         )
         return (
             f"{probe}; "
