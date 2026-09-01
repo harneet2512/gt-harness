@@ -15,6 +15,18 @@ from typing import Any
 
 GENESIS_HASH = "0" * 64
 JOURNAL_SCHEMA = "gt.event.v1"
+# The journal is an envelope chain, but event producers preserve the typed
+# schema of their payload in the same row.  These are the schemas currently
+# emitted by the Mini-SWE integration.  Keeping the allow-list closed means a
+# misspelled or invented schema is still rejected rather than silently
+# treated as an auditable event.
+SUPPORTED_EVENT_SCHEMAS = frozenset(
+    {
+        JOURNAL_SCHEMA,
+        "gt_receipt.v1",
+        "gt.runtime_observation.v1",
+    }
+)
 
 
 def canonical_event_bytes(row: Mapping[str, Any]) -> bytes:
@@ -71,7 +83,7 @@ def verify_event_journal(
     rows, issues = _read_rows(path)
     expected_parent = GENESIS_HASH
     for index, row in enumerate(rows, start=1):
-        if row.get("schema") != JOURNAL_SCHEMA:
+        if row.get("schema") not in SUPPORTED_EVENT_SCHEMAS:
             issues.append(f"event {index}: unsupported or missing schema")
         if row.get("sequence") != index:
             issues.append(

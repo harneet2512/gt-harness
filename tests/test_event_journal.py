@@ -42,6 +42,31 @@ def test_event_journal_detects_payload_tampering(tmp_path):
     assert any("hash mismatch" in issue for issue in result.issues)
 
 
+def test_event_journal_accepts_typed_payload_schemas(tmp_path):
+    store = ExternalStateStore(tmp_path, "task")
+    store.append("receipt", schema="gt_receipt.v1", transition="delivered")
+    store.append(
+        "execution_evidence",
+        schema="gt.runtime_observation.v1",
+        outcome="pass",
+    )
+
+    result = verify_event_journal(store.path, **store.receipt())
+
+    assert result.valid is True
+    assert result.issues == ()
+
+
+def test_event_journal_rejects_unknown_schema(tmp_path):
+    store = ExternalStateStore(tmp_path, "task")
+    store.append("first", schema="gt.unknown.v1")
+
+    result = verify_event_journal(store.path)
+
+    assert result.valid is False
+    assert any("unsupported or missing schema" in issue for issue in result.issues)
+
+
 def test_event_journal_anchor_detects_tail_truncation(tmp_path):
     store = ExternalStateStore(tmp_path, "task")
     store.append("first")
