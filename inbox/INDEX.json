@@ -103,6 +103,7 @@
     "merge-har76-701a8472",
     "merge-har76-701a8472-v2",
     "merge-har77-aa6577a0",
+    "merge-har77-aa6577a0-v2",
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
     "merge-pr26-bd099b88",
@@ -262,7 +263,8 @@
     "HAR-77":[
       "har77-harness-1bf89072",
       "har77-harness-aa6577a0",
-      "merge-har77-aa6577a0"
+      "merge-har77-aa6577a0",
+      "merge-har77-aa6577a0-v2"
     ],
     "HAR-80":[
       "har80-groundtruth-43c6d723",
