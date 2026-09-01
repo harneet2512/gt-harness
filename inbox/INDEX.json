@@ -6,6 +6,8 @@
     "bugbot-pr27-20260901",
     "bugbot-pr28-20260901",
     "bugbot-pr29-20260901",
+    "bugbot-pr30-20260901",
+    "bugbot-pr31-20260901",
     "finder-f1",
     "finder-f1-fixed",
     "finder-f2",
@@ -48,9 +50,11 @@
       "finder-f2-fixed"
     ],
     "HAR-69":[
+      "bugbot-pr31-20260901",
       "rev-222-har69-interim"
     ],
     "HAR-73":[
+      "bugbot-pr30-20260901",
       "rev-219-har73-interim"
     ],
     "HAR-74":[
