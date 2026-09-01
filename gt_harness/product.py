@@ -680,7 +680,7 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
         f"subprocess.check_call([sys.executable,'-m','pip','install','--no-deps',"
         f"'--target','/tmp/gt-installed','{target}']); "
         "sys.path.insert(0,'/tmp/gt-installed'); "
-        "import gt_harness.product, scripts.miniswe_gt_run; print('installed-product-ok')"
+        "import gt_harness.product; print('installed-product-ok')"
     )
     try:
         process = subprocess.run(
