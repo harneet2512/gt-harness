@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T01:58:34.248441Z",
+  "detail":"Fresh branch codex/har70-framework-resolution pushed to groundtruth origin at exact SHA 7b4d70433d11b4792adf59e8fac09a063d9ada53. It adds the closed five-language manifest overlays, per-language RED fixture coverage, producer validation report/digest, and -framework-validation runtime output. Full go test ./... passed; runtime validation command passed. Harness re-pin and validation receipt are the next boundary.",
+  "file":"",
+  "head_sha":"7b4d70433d11b4792adf59e8fac09a063d9ada53",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Groundtruth framework overlay push",
+  "packet_digest_sha256":"832c84b5ce58b2b43c5646ff04418b0de11004f1fc243db237b0d6c1ab55ac6b",
+  "packet_id":"har70-groundtruth-7b4d7043",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"HAR-70-PUSH",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-70"
+}
