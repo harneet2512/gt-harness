@@ -1,6 +1,7 @@
 {
   "live_packets":[
     "bugbot-pr24-20260901",
+    "bugbot-pr25-20260901",
     "finder-f1",
     "finder-f1-fixed",
     "finder-f2",
@@ -20,6 +21,7 @@
       "bugbot-pr24-20260901"
     ],
     "HAR-63":[
+      "bugbot-pr25-20260901",
       "finder-f1",
       "finder-f1-fixed",
       "finder-f2",
