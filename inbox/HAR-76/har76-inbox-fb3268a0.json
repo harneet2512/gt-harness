@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:26:14.454227Z",
+  "detail":"{inbox_commit:fb3268a0a100a3c8f7191208f3673187be1a796f,change:replaced retired checker identities in helper and review-inbox documentation,source_rule:new packets use codex-check or gt-ci}",
+  "file":"",
+  "head_sha":"b99d8141a09c981ed33a01d308d600a4769cb577",
+  "kind":"finding",
+  "line":0,
+  "message":"Inbox helper identity vocabulary updated at fb3268a0",
+  "packet_digest_sha256":"7f1b11839a499cb21b1abb12c8ac2bd9b7a1773f026b2910b322cbfd2e3a832c",
+  "packet_id":"har76-inbox-fb3268a0",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"mechanics",
+  "source":{
+    "check":"har76-review-fix",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
