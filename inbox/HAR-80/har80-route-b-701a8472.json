@@ -1,0 +1,30 @@
+{
+  "created_at":"2026-09-01T04:17:38.006149Z",
+  "detail":{
+    "basis_main":"701a847293188f317b5e4307cbb0285d9415ff4e",
+    "benchmark_runs":0,
+    "binary_certifier":"Groundtruth source tree at db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14 lineage",
+    "framework_overlay_certifier":"Groundtruth source tree at db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14 lineage",
+    "harness_source_import_policy":"source-import parity is tested against the certified wheel surface; source checkout is not claimed to provide groundtruth.runtime Python modules",
+    "provider_calls":0,
+    "python_runtime_certifier":"vendor/groundtruth_mcp-*.whl",
+    "route":"B"
+  },
+  "file":"",
+  "head_sha":"701a847293188f317b5e4307cbb0285d9415ff4e",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-80 route declaration: route B selected. The vendored wheel certifies the Python runtime surface; the Groundtruth source tree certifies the binary and framework overlays. No code was changed before this packet.",
+  "packet_digest_sha256":"0254c169828cf85806fad04cdaad59c4010df1dd2970f1ba2c4f05bba00d70c3",
+  "packet_id":"har80-route-b-701a8472",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"route-declaration",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-80"
+}
