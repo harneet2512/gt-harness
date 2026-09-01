@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:26:41.500564Z",
+  "detail":"{parent:b99d8141a09c981ed33a01d308d600a4769cb577,change:removed the retired term from new CI emitter documentation,tests:python -m pytest -q tests/test_ci_emit_review_packet.py tests/test_ci_commit_review_packets.py}",
+  "file":"",
+  "head_sha":"e132a90bd00876764da6c1e0e0dcba3693340fcd",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 exact head e132a90b removes retired checker naming",
+  "packet_digest_sha256":"d0ccae0c444756ee1bfed6a231c8bf6160a87e8762339b5df21de2d42a77d7ab",
+  "packet_id":"har76-harness-e132a90b",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"mechanics",
+  "source":{
+    "check":"har76-review-fix",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
