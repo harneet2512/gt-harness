@@ -49,63 +49,6 @@ _LOCAL_BINARY_CANDIDATES = (
 
 _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 
-GRAPH_SCHEMA_VERSION = "gt.graph_certification.v1"
-
-
-def source_manifest_digest(root: str | Path) -> str:
-    """Hash sorted, length-delimited source path and file-byte identities."""
-    root_path = Path(root)
-    records: list[tuple[str, int, str]] = []
-    for directory, dirnames, filenames in os.walk(root_path):
-        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
-        for filename in sorted(filenames):
-            path = Path(directory) / filename
-            if path.suffix.lower() not in SOURCE_EXTS:
-                continue
-            relative = path.relative_to(root_path).as_posix()
-            payload = path.read_bytes()
-            records.append((relative, len(payload), hashlib.sha256(payload).hexdigest()))
-    encoded = bytearray()
-    for relative, size, byte_hash in sorted(records):
-        path_bytes = relative.encode("utf-8", "surrogatepass")
-        hash_bytes = byte_hash.encode("ascii")
-        encoded.extend(len(path_bytes).to_bytes(8, "big"))
-        encoded.extend(path_bytes)
-        encoded.extend(size.to_bytes(8, "big"))
-        encoded.extend(len(hash_bytes).to_bytes(8, "big"))
-        encoded.extend(hash_bytes)
-    return hashlib.sha256(bytes(encoded)).hexdigest()
-
-
-@dataclass(frozen=True, slots=True)
-class IndexReuseKey:
-    source_manifest_sha256: str
-    producer_binary_sha256: str
-    graph_schema_version: str = GRAPH_SCHEMA_VERSION
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            "source_manifest_sha256": self.source_manifest_sha256,
-            "producer_binary_sha256": self.producer_binary_sha256,
-            "graph_schema_version": self.graph_schema_version,
-        }
-
-    @property
-    def digest(self) -> str:
-        return hashlib.sha256(
-            json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
-
-
-def compute_index_reuse_key(
-    root: str | Path, *, graph_schema_version: str = GRAPH_SCHEMA_VERSION
-) -> IndexReuseKey:
-    return IndexReuseKey(
-        source_manifest_digest(root),
-        _binary_certification().get("binary_sha256", ""),
-        graph_schema_version,
-    )
-
 
 def is_code_repo(root: str) -> bool:
     """True iff ``root`` contains at least one source file (bounded scan)."""
@@ -200,23 +143,6 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
             if not ignore.exists():
                 ignore.write_text("*\n", encoding="utf-8")
         db = gt_dir / "graph.db"
-        reuse_key = compute_index_reuse_key(root)
-        existing_manifest = db.with_suffix(".manifest.json")
-        if db.is_file() and existing_manifest.is_file():
-            try:
-                manifest = json.loads(existing_manifest.read_text(encoding="utf-8"))
-                if (
-                    manifest.get("index_reuse_key") == reuse_key.as_dict()
-                    and manifest.get("index_reuse_key_sha256") == reuse_key.digest
-                ):
-                    valid, _reason = _certify_published_graph(
-                        db, existing_manifest, expected_root=Path(root),
-                        expected_binary_sha256=reuse_key.producer_binary_sha256,
-                    )
-                    if valid:
-                        return str(db)
-            except (OSError, ValueError, TypeError):
-                pass
         with tempfile.NamedTemporaryFile(
             dir=gt_dir, prefix=".graph.", suffix=".db", delete=False
         ) as handle:
@@ -244,10 +170,6 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
         graph_sha256 = hashlib.sha256(candidate.read_bytes()).hexdigest()
         manifest = {
             "schema": "gt.graph_certification.v1",
-            "graph_schema_version": GRAPH_SCHEMA_VERSION,
-            "index_reuse_key": reuse_key.as_dict(),
-            "index_reuse_key_sha256": reuse_key.digest,
-            "source_manifest_sha256": reuse_key.source_manifest_sha256,
             "repository_root_sha256": hashlib.sha256(
                 os.path.realpath(root).encode("utf-8", "surrogatepass")
             ).hexdigest(),
@@ -349,9 +271,7 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
         return False, "manifest_unreadable"
     if manifest.get("schema") != "gt.graph_certification.v1":
         return False, "manifest_schema_mismatch"
-    root_sha = hashlib.sha256(
-        os.path.realpath(expected_root).encode("utf-8", "surrogatepass")
-    ).hexdigest()
+    root_sha = hashlib.sha256(os.path.realpath(expected_root).encode("utf-8", "surrogatepass")).hexdigest()
     if manifest.get("repository_root_sha256") != root_sha:
         return False, "repository_root_mismatch"
     if expected_source_revision and manifest.get("source_revision") != expected_source_revision:
@@ -381,12 +301,8 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
                                  error_type=type(exc).__name__, error_diagnostic=str(exc)[:600])
     if not graph:
-        return IndexBuildReceipt(
-            IndexBuildStatus.BUILD_FAILED,
-            source_revision=source_revision,
-            error_type="run_index_false",
-            error_diagnostic="gt-index did not publish a graph",
-        )
+        return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
+                                 error_type="run_index_false", error_diagnostic="gt-index did not publish a graph")
     graph_path = Path(graph)
     valid, reason = _graph_schema_receipt(graph_path)
     if not valid:
