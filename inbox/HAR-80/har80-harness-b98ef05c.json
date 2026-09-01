@@ -1,0 +1,35 @@
+{
+  "created_at":"2026-09-01T04:26:42.338478Z",
+  "detail":{
+    "base":"701a847293188f317b5e4307cbb0285d9415ff4e",
+    "benchmark_runs":0,
+    "branch":"codex/har80-source-parity",
+    "changes":[
+      "route-B import parity",
+      "HAR-70/producer receipts re-pinned",
+      "CI producer pin",
+      "packet writer repair handled on inbox ref"
+    ],
+    "event":"harness_push",
+    "head":"b98ef05cf8a7ec9b78a37a0c0c42c94592f78e7f",
+    "provider_calls":0,
+    "repository":"github.com/harneet2512/gt-harness"
+  },
+  "file":"",
+  "head_sha":"b98ef05cf8a7ec9b78a37a0c0c42c94592f78e7f",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-80 harness implementation pushed at b98ef05c: route-B import parity, producer receipt re-pin, and CI producer pin are committed.",
+  "packet_digest_sha256":"fe9cf8d7ee64ea5e43f53c8ae7a643cf2bbc47cfde997925d1b286aa7d03c195",
+  "packet_id":"har80-harness-b98ef05c",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"harness-push",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-80"
+}
