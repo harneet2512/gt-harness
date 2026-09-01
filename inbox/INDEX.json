@@ -3,7 +3,8 @@
     "finder-f1",
     "finder-f1-fixed",
     "finder-f2",
-    "finder-f2-fixed"
+    "finder-f2-fixed",
+    "rev-221-transport-rewind-fixed"
   ],
   "schema":"gt.review_inbox.v1",
   "tickets":{
@@ -20,6 +21,9 @@
     "HAR-67":[
       "finder-f2",
       "finder-f2-fixed"
+    ],
+    "HAR-75":[
+      "rev-221-transport-rewind-fixed"
     ]
   }
 }

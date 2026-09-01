@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:15:50.426323Z",
+  "detail":"REV-221 detected the divergent orphan rewind from ede2588 to cd198b2. Directed fix was applied with exact force-with-lease, restoring ede2588 and its docs, helper, findings, and fixed adjudication packets. Future packets append only.",
+  "file":"refs/heads/gt-review-inbox",
+  "head_sha":"ede2588acb4894a18054613ff28b35d73bea2474",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Append-only inbox chain restored",
+  "packet_digest_sha256":"1017bd1d4698a97904eb44f306bef859c582589530fccc4fb12821f2fd4cef4d",
+  "packet_id":"rev-221-transport-rewind-fixed",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"REV-221",
+    "system":"coordinator"
+  },
+  "status":"adjudicated-directed-fix",
+  "supersedes":null,
+  "ticket":"HAR-75"
+}
