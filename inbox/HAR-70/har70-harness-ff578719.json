@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:07:37.431033Z",
+  "detail":"Fresh harness branch codex/har70-framework-resolution pushed at exact SHA ff578719fef2a360af24d2076fe7ab3bc989c780 from main 5295a5b6. It adds gt.har70.framework_resolution.v1 verification/issuer/tests, updates the producer artifact receipt to Groundtruth db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14 with framework_surface_resolution_v1, and binds the validation receipt to the producer source/tree. Focused harness tests pass.",
+  "file":"",
+  "head_sha":"ff578719fef2a360af24d2076fe7ab3bc989c780",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Harness HAR-70 validation push",
+  "packet_digest_sha256":"65fd36aee8390d1e915fa7dd2ac200711f32dc2f04cb0bf46177504e955cc028",
+  "packet_id":"har70-harness-ff578719",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"HAR-70-PUSH",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-70"
+}

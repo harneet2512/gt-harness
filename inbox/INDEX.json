@@ -15,6 +15,7 @@
     "finder-f2-fixed",
     "har70-groundtruth-7b4d7043",
     "har70-groundtruth-db9daf9e",
+    "har70-harness-ff578719",
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
     "merge-pr26-bd099b88",
@@ -73,7 +74,8 @@
     ],
     "HAR-70":[
       "har70-groundtruth-7b4d7043",
-      "har70-groundtruth-db9daf9e"
+      "har70-groundtruth-db9daf9e",
+      "har70-harness-ff578719"
     ],
     "HAR-73":[
       "bugbot-pr30-20260901",
