@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:03:54.437954Z",
+  "detail":"False-green correction: if setup/checkout skips pytest, the CI packet must be failure and the job must fail. Conclusion now requires steps.pytest.outcome == success AND explicit exit_status == 0; fail gate also catches skipped setup. This preserves actionable diagnosis and prevents accepting a packet that claims GREEN without suite execution.",
+  "file":"",
+  "head_sha":"d6b57e581559b9169743e62b7156f4e49b6fed7a",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 push d6b57e58",
+  "packet_digest_sha256":"09d55bb34e70d2591f684b50480e662aef3826a25cd91af92ae54dfbad79f30d",
+  "packet_id":"har76-harness-d6b57e58",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"har76-push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
