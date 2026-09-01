@@ -18,6 +18,34 @@
   "network_policy": "PUBLIC_WORKAROUND_DOCKER_DESKTOP_NFT_FIB_UNSUPPORTED",
   "credential_source": "cloud_access.md:deepseek_direct (value withheld)",
   "provider_free_gate": {"status": "VERIFIED_PROVIDER_FREE", "workflow_run": "33488826300", "provider_calls": 0, "benchmark_runs": 0, "container_proof": "VERIFIED", "fake_provider_proof": "VERIFIED"},
+  "github_actions_attempt": {
+    "workflow": ".github/workflows/deepswe_gt_harness_product_p0731.yaml",
+    "run_id": "33532628016",
+    "source_sha": "cd8e8af49427adfd6f051b2fdb94f07a411afece",
+    "status": "FAIL",
+    "requested_model": "deepseek-v4-p0731",
+    "effective_model": "openai/deepseek-v4-p0731",
+    "provider_gate": {
+      "status": "FAIL",
+      "http_statuses": [200],
+      "catalog_model_present": false,
+      "provider_calls_outside_task_metrics": 0
+    },
+    "task_matrix": {
+      "planned": 20,
+      "max_parallel": 20,
+      "started": 0,
+      "completed": 0,
+      "failed": 0,
+      "skipped": 20,
+      "provider_calls": 0
+    },
+    "attestation": {
+      "status": "FAIL",
+      "task_job_result": "skipped",
+      "error": "provider gate failed; attestation import failed because gt_harness.analysis is absent from the installed checkout"
+    }
+  },
   "live_preflight": {"status": "HTTP_200", "requested_release_label": "deepseekv4-p0731", "provider_model_id": "deepseek-v4-flash", "literal_requested_id_exposed_by_provider": false, "response_sha256": "700212e18fb8f3fdca73dd7060515656247849de5de5ee4d42bf68083090e803"},
   "bare": {
     "status": "INCOMPLETE_CONTROLLER_TERMINATED_AFTER_DOCKER_CLEANUP_DEADLOCK",
@@ -65,5 +93,5 @@
   },
   "integrity": {"raw_credentials_in_receipts": false, "artifact_secret_scan": {"status": "PASS", "credential_canary_matches": 0, "scope": "live-smoke artifact files under 2 MiB"}, "groundtruth_grades_manufactured": false, "network_workaround_disclosed": true, "canonical_workflow_claim": false},
   "release_eligible": false,
-  "release_blockers": ["docker_desktop_nftables_fib_rule_unsupported", "docker_desktop_engine_init_api_unavailable", "public_network_workaround_used", "bare_controller_cleanup_deadlock_left_one_task_incomplete", "groundtruth_provenance_unverified_source_to_bytes", "installed_bundle_omits_vendor_artifacts", "codespace_disk_exhaustion_before_task_trials", "codespace_smoke_not_terminal"]
+  "release_blockers": ["native_provider_catalog_missing_deepseek_v4_p0731", "github_actions_p0731_task_matrix_not_started", "docker_desktop_nftables_fib_rule_unsupported", "docker_desktop_engine_init_api_unavailable", "public_network_workaround_used", "bare_controller_cleanup_deadlock_left_one_task_incomplete", "groundtruth_provenance_unverified_source_to_bytes", "installed_bundle_omits_vendor_artifacts", "codespace_disk_exhaustion_before_task_trials", "codespace_smoke_not_terminal"]
 }
