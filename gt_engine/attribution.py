@@ -24,6 +24,15 @@ DIRECT_FEATURES: dict[str, dict[str, Any]] = {
         "trigger": "a viewed or signature-edited callable has verified callers",
         "intended_action": "update or inspect proven callers",
     },
+    "cochange_prior": {
+        "kind": "FACT", "boundaries": ("file_view", "edit_result"),
+        "producer": "curation",
+        "trigger": (
+            "the indexed revision contains a verified co-change companion "
+            "for the viewed or edited file"
+        ),
+        "intended_action": "inspect or update the proven companion file",
+    },
     "covering_red": {
         "kind": "FACT", "boundaries": ("edit_result", "submit"),
         "producer": "covering_runner",
@@ -153,6 +162,7 @@ _EVIDENCE_FEATURES = {
     "caller_contract_view": "caller_contract",
     "covering_red": "covering_red",
     "covering_verdict": "covering_red",
+    "cochange_partner": "cochange_prior",
     "def_partition": "def_partition",
     "def_ref_partition": "def_partition",
     "name_fold": "def_partition",

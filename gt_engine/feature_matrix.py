@@ -19,6 +19,9 @@ FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
     "caller_contract": (
         "tests/test_gt_engine.py::test_file_view_fires_verified_caller_contract",
     ),
+    "cochange_prior": (
+        "tests/test_gt_attribution.py::test_cochange_evidence_binds_to_dark_trigger_identity",
+    ),
     "covering_red": (
         "tests/test_gt_engine.py::test_covering_red_fires_at_post_edit",
     ),

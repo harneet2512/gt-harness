@@ -321,12 +321,16 @@ def _run_evidence(
 
         precedent = run_newfile_precedent(adapter, tuple(created_files))
         if precedent:
+            precedent = (
+                "[GT_EVIDENCE:new_file_destination]\n"
+                + cap_evidence(precedent, 600)
+            )
             adapter.store.append(
                 "evidence_delivery",
                 action_index=action_index,
                 iteration=adapter.iteration,
                 evidence_type="new_file_destination",
-                rendered_bytes=len(precedent),
+                rendered_bytes=len(precedent.encode("utf-8")),
                 semantics="advisory",
                 transaction_sha256=adapter._latest_transaction_sha256,
             )
@@ -338,7 +342,7 @@ def _run_evidence(
                 action_index=action_index,
                 iteration=adapter.iteration,
             )
-            return f"[GT_EVIDENCE:new_file_destination]\n{cap_evidence(precedent, 600)}"
+            return precedent
     covering = None
     if changed_files and allow_live_probes:
         from .miniswe_covering import run_covering_lane
@@ -390,6 +394,7 @@ def _run_evidence(
 
         syntax = run_syntax_probe(adapter, changed_files)
         if syntax:
+            syntax = "[GT_EVIDENCE:syntax_result]\n" + cap_evidence(syntax)
             # Explicit ASSISTIVE mode may run this bounded probe. Its result is
             # evidence for the model, never an automatic execution gate.
             fallback = changed_files[0] if changed_files else "the edited file"
@@ -403,7 +408,7 @@ def _run_evidence(
                 action_index=action_index,
                 iteration=adapter.iteration,
                 evidence_type="syntax_result",
-                rendered_bytes=len(syntax),
+                rendered_bytes=len(syntax.encode("utf-8")),
             )
             adapter.record_delivery_receipt(
                 evidence_type="syntax_result",
@@ -413,7 +418,7 @@ def _run_evidence(
                 action_index=action_index,
                 iteration=adapter.iteration,
             )
-            return f"[GT_EVIDENCE:syntax_result]\n{cap_evidence(syntax)}"
+            return syntax
     result = run_evidence_pipeline(
         adapter.gateway_state(),
         event,
@@ -422,6 +427,7 @@ def _run_evidence(
         episode_id=adapter.task_id,
         event_id=f"{adapter.task_id}:{adapter.iteration}:{action_index}",
         native=os.environ.get("GT_GATEWAY_NATIVE") == "1",
+        model_prefix=True,
     )
     if result.chain_head:
         adapter._chain_head = result.chain_head
@@ -447,7 +453,7 @@ def _run_evidence(
         )
         # Self-diagnosing splice: the trajectory tool messages carry the exact
         # evidence type so a post-run census is exact, not heuristic.
-        return f"[GT_EVIDENCE:{result.envelope.evidence_type}]\n{cap_evidence(result.rendered)}"
+        return result.rendered
     return cap_evidence(result.rendered)
 
 

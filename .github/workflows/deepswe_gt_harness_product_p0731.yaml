@@ -529,185 +529,36 @@ jobs:
           path: attestation/tasks
           merge-multiple: true
 
+      - name: Reject dark triggers, telemetry faults, and stale feature evidence
+        env:
+          EXPECTED_MODEL: ${{ needs.plan.outputs.model }}
+        run: |
+          set -euo pipefail
+          python scripts/gt_audit.py attestation/tasks \
+            --json attestation/gt-audit.json
+          TASK_COUNT="$(python -c "import json; print(json.load(open('attestation/deepswe20-plan.json'))['task_count'])")"
+          python scripts/gt_live_gate.py attestation/gt-audit.json \
+            --run-dir attestation/tasks \
+            --expected-tasks "$TASK_COUNT" \
+            --expected-model "$EXPECTED_MODEL" \
+            --min-witnessed 0 \
+            --min-exercised 0 \
+            --require-complete-census \
+            --json attestation/gt-live-gate.json
+          python scripts/verify_feature_matrix.py
+
       - name: Verify all DeepSWE outcomes and product receipts
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
           TASK_JOB_RESULT: ${{ needs.task.result }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          from gt_harness.runtime_receipts import verify_runtime_receipt
-          from scripts.standardize_benchmark_result import conservative_outcomes
-
-          root = Path("attestation")
-          plan = json.loads((root / "deepswe20-plan.json").read_text(encoding="utf-8"))
-          provider_gate = json.loads((root / "provider-gate.json").read_text(encoding="utf-8"))
-          expected = list(plan["task_ids"])
-          expected_set = set(expected)
-          expected_budgets = {
-              row["task"]: str(row["time_budget_seconds"]) for row in plan["matrix"]
-          }
-          errors = []
-          if provider_gate.get("status") != "PASS":
-              errors.append("provider_gate_failed")
-          if provider_gate.get("source_sha") != os.environ["SOURCE_SHA"]:
-              errors.append("provider_gate_source_sha_mismatch")
-
-          trial_rows = []
-          for path in (root / "tasks").rglob("result.json"):
-              try:
-                  row = json.loads(path.read_text(encoding="utf-8"))
-              except (OSError, json.JSONDecodeError) as exc:
-                  errors.append(f"invalid_result:{path}:{type(exc).__name__}")
-                  continue
-              if row.get("task_name") and row.get("trial_name"):
-                  trial_rows.append(row)
-          def normalized_task_name(value):
-              return str(value).split("__", 1)[0].rsplit("/", 1)[-1]
-
-          observed_trials = [normalized_task_name(row["task_name"]) for row in trial_rows]
-          if len(observed_trials) != len(expected) or set(observed_trials) != expected_set:
-              errors.append("trial_task_set_mismatch")
-          if len(observed_trials) != len(set(observed_trials)):
-              errors.append("duplicate_trial_task")
-
-          adapters = {}
-          for path in (root / "tasks").rglob("agent/benchmark-adapter.json"):
-              row = json.loads(path.read_text(encoding="utf-8"))
-              task = str(row.get("task_id") or "")
-              adapters[task] = row
-              if row.get("product_command") != "gt-miniswe-run" or row.get("attempt") != 1:
-                  errors.append(f"adapter_contract_mismatch:{task}")
-              if row.get("treatment") != plan.get("treatment"):
-                  errors.append(f"adapter_treatment_mismatch:{task}")
-              if row.get("requested_model") != plan.get("requested_model"):
-                  errors.append(f"requested_model_mismatch:{task}")
-              if row.get("effective_model") != plan.get("effective_model"):
-                  errors.append(f"effective_model_mismatch:{task}")
-              if row.get("agent_scaffold_version") != "2.4.6":
-                  errors.append(f"scaffold_version_mismatch:{task}")
-              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
-                  errors.append(f"adapter_source_sha_mismatch:{task}")
-              if str(row.get("time_budget_seconds")) != expected_budgets.get(task):
-                  errors.append(f"adapter_time_budget_mismatch:{task}")
-          if set(adapters) != expected_set:
-              errors.append("adapter_receipt_task_set_mismatch")
-
-          product_runs = {}
-          product_rows = []
-          for path in (root / "tasks").rglob("agent/gt-run.json"):
-              row = json.loads(path.read_text(encoding="utf-8"))
-              task = str(row.get("task_id") or "")
-              product_runs[task] = row
-              errors.extend(
-                  f"product_receipt:{task}:{reason}"
-                  for reason in verify_runtime_receipt(path)
-              )
-              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
-                  errors.append(f"product_source_sha_mismatch:{task}")
-              if row.get("requested_model") != plan.get("requested_model"):
-                  errors.append(f"product_requested_model_mismatch:{task}")
-              if row.get("effective_model") != plan.get("effective_model"):
-                  errors.append(f"product_effective_model_mismatch:{task}")
-              if str(row.get("time_budget_seconds")) != expected_budgets.get(task):
-                  errors.append(f"product_time_budget_mismatch:{task}")
-
-              treatment = row.get("treatment_receipt")
-              if not isinstance(treatment, dict):
-                  errors.append(f"missing_treatment_receipt:{task}")
-                  continue
-              graph = treatment.get("graph_certification") or {}
-              product_rows.append(
-                  {
-                      "task": task,
-                      "status": row.get("status"),
-                      "provider_calls": int(row.get("provider_calls") or 0),
-                      "input_tokens": int(row.get("input_tokens") or 0),
-                      "cached_tokens": int(row.get("cached_tokens") or 0),
-                      "output_tokens": int(row.get("output_tokens") or 0),
-                      "total_cost": float(row.get("total_cost") or 0),
-                      "treatment_status": treatment.get("treatment_status"),
-                      "graph_status": (
-                          "CERTIFIED"
-                          if graph.get("binary_certified") is True
-                          and graph.get("sqlite_quick_check") == "ok"
-                          else "INVALID"
-                      ),
-                      "delivery_count": int(treatment.get("delivery_count") or 0),
-                      "verified": bool(treatment.get("verified")),
-                      "unmet_predicate_count": len(treatment.get("unmet_predicates") or []),
-                  }
-              )
-          if set(product_runs) != expected_set:
-              errors.append("product_receipt_task_set_mismatch")
-
-          official_results = {}
-          for path in (root / "tasks").rglob("agent/official-verifier-result.json"):
-              row = json.loads(path.read_text(encoding="utf-8"))
-              task = str(row.get("task_id") or "")
-              official_results[task] = row
-              if row.get("status") != "GRADED":
-                  errors.append(f"official_verifier_ungraded:{task}")
-              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
-                  errors.append(f"official_verifier_source_mismatch:{task}")
-          if set(official_results) != expected_set:
-              errors.append("official_verifier_task_set_mismatch")
-
-          outcomes = conservative_outcomes(expected, official_results)
-
-          solved = sum(1 for row in outcomes.values() if row["solved"])
-          graded = sum(1 for row in outcomes.values() if row["graded"])
-          receipt = {
-              "schema": "gt.deepswe_gt_harness_attestation.v1",
-              "status": "PASS" if not errors else "FAIL",
-              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
-              "source_sha": os.environ["SOURCE_SHA"],
-              "benchmark_sha": plan["benchmark_sha"],
-              "task_job_result": os.environ["TASK_JOB_RESULT"],
-              "task_count": plan["task_count"],
-              "task_ids": expected,
-              "task_order_sha256": plan["task_order_sha256"],
-              "language_counts": plan["language_counts"],
-              "requested_model": plan["requested_model"],
-              "effective_model": plan["effective_model"],
-              "agent": plan["agent"],
-              "agent_scaffold_version": plan["agent_scaffold_version"],
-              "treatment": plan["treatment"],
-              "provider_gate": provider_gate,
-              "paid_run_approval": plan["paid_run_approval"],
-              "baseline": plan["baseline"],
-              "graded": graded,
-              "solved": solved,
-              "outcomes": outcomes,
-              "official_verifier_tasks": sorted(official_results),
-              "product_totals": {
-                  "provider_calls": sum(row["provider_calls"] for row in product_rows),
-                  "input_tokens": sum(row["input_tokens"] for row in product_rows),
-                  "cached_tokens": sum(row["cached_tokens"] for row in product_rows),
-                  "output_tokens": sum(row["output_tokens"] for row in product_rows),
-                  "total_cost": round(sum(row["total_cost"] for row in product_rows), 12),
-                  "deliveries": sum(row["delivery_count"] for row in product_rows),
-              },
-              "product_rows": sorted(product_rows, key=lambda row: row["task"]),
-              "observed_trial_tasks": sorted(observed_trials),
-              "adapter_receipt_tasks": sorted(adapters),
-              "product_receipt_tasks": sorted(product_runs),
-              "errors": errors,
-          }
-          if receipt["source_sha"] != plan.get("source_sha"):
-              errors.append("source_sha_mismatch")
-              receipt["status"] = "FAIL"
-          output = root / "deepswe20-attestation.json"
-          output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-          print(json.dumps(receipt, indent=2, sort_keys=True))
-          if errors:
-              raise SystemExit("DeepSWE GT Harness attestation failed")
-          PY
-
+          python -m scripts.attest_deepswe \
+            --root attestation \
+            --source-sha "$SOURCE_SHA" \
+            --task-job-result "$TASK_JOB_RESULT" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --output attestation/deepswe20-attestation.json
       - name: Upload final DeepSWE GT Harness attestation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

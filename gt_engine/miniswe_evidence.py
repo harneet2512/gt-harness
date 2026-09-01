@@ -183,6 +183,8 @@ def run_evidence_pipeline(
     episode_id: str,
     event_id: str,
     native: bool = False,
+    model_prefix: bool = False,
+    max_chars: int = 1200,
 ) -> EvidenceResult:
     """The one-dose evidence call: ``augment`` -> ``arbitrate`` -> render -> seal.
 
@@ -209,6 +211,9 @@ def run_evidence_pipeline(
     rendered = render_envelope(winner, native=native)
     if not fits_budget(rendered):
         return EvidenceResult()
+    rendered = cap_evidence(rendered, max_chars)
+    if model_prefix:
+        rendered = f"[GT_EVIDENCE:{winner.evidence_type}]\n{rendered}"
     sealed, new_head = seal_delivery(
         winner,
         episode_id=episode_id,

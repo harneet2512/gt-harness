@@ -929,6 +929,8 @@ class MiniSweAdapter(GroundtruthController):
                     episode_id=self.task_id,
                     event_id=f"{self.task_id}:task_start",
                     native=os.environ.get("GT_GATEWAY_NATIVE") == "1",
+                    model_prefix=True,
+                    max_chars=600,
                 )
                 if result.chain_head:
                     self._chain_head = result.chain_head
@@ -952,10 +954,7 @@ class MiniSweAdapter(GroundtruthController):
                         action_index=0,
                         iteration=0,
                     )
-                    from .miniswe_evidence import cap_evidence
-
-                    tagged = f"[GT_EVIDENCE:{result.envelope.evidence_type}]\n"
-                    return tagged + cap_evidence(result.rendered, 600)
+                    return result.rendered
             except Exception:  # noqa: BLE001 - deterministic lexical fallback follows
                 pass
         return self._lexical_task_localization()
@@ -1015,12 +1014,49 @@ class MiniSweAdapter(GroundtruthController):
                     "anchor": f"{relative}:{line}",
                     "score": score,
                     "reasons": reasons,
+                    "text": text[:4_000],
                 })
             if scanned > 5_000:
                 break
-        ranked = sorted(rows, key=lambda row: (-int(row["score"]), str(row["anchor"])))[:4]
-        if not ranked:
+        candidates = sorted(
+            rows, key=lambda row: (-int(row["score"]), str(row["anchor"]))
+        )[:20]
+        if not candidates:
             return ""
+        ranked = candidates[:4]
+        if os.environ.get("GT_RETRIEVAL_MODE") == "hybrid_required":
+            try:
+                from .dense_runtime import rank_documents
+
+                graph_revision = (
+                    hashlib.sha256(Path(self.graph_db).read_bytes()).hexdigest()
+                    if self.graph_db and Path(self.graph_db).is_file()
+                    else "graph-unavailable"
+                )
+                dense_order, dense_receipt = rank_documents(
+                    query_text=self.issue_text,
+                    documents={str(row["path"]): str(row["text"]) for row in candidates},
+                    lexical_scores={
+                        str(row["path"]): float(row["score"]) for row in candidates
+                    },
+                    model_dir=Path(os.environ["GT_DENSE_MODEL_DIR"]),
+                    index_path=self.store.root / "dense-index.sqlite",
+                    source_revision=self.repository_revision or "repository-start",
+                    graph_revision=graph_revision,
+                    limit=4,
+                )
+                by_path = {str(row["path"]): row for row in candidates}
+                ranked = [by_path[path] for path in dense_order if path in by_path]
+                self.store.append(
+                    "dense_index_ready",
+                    **{key: value for key, value in dense_receipt.items() if key != "schema"},
+                )
+            except Exception as exc:  # noqa: BLE001 - readiness fails closed in receipt
+                self.store.append(
+                    "dense_index_ready",
+                    query_ready=False,
+                    reason=f"{type(exc).__name__}:{str(exc)[:200]}",
+                )
         artifact = {
             "schema": "gt.localization_advisory.v1",
             "issue_sha256": hashlib.sha256(
@@ -1045,6 +1081,11 @@ class MiniSweAdapter(GroundtruthController):
         ).encode("utf-8")
         digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("localization_advisory", digest, encoded)
+        rendered = "\n".join(
+            f"{row['anchor']} score={row['score']} reasons={','.join(row['reasons'])}"
+            for row in ranked
+        )
+        rendered = "[GT_EVIDENCE:localization]\n" + rendered
         self.store.append(
             "evidence_delivery",
             action_index=0,
@@ -1052,13 +1093,9 @@ class MiniSweAdapter(GroundtruthController):
             evidence_type="localization",
             dedup_key=f"lexical-localization:{digest}",
             target=str(ranked[0]["path"]),
-            rendered_bytes=len(encoded),
+            rendered_bytes=len(rendered.encode("utf-8")),
             semantics="advisory",
             artifact_sha256=digest,
-        )
-        rendered = "\n".join(
-            f"{row['anchor']} score={row['score']} reasons={','.join(row['reasons'])}"
-            for row in ranked
         )
         self.record_delivery_receipt(
             evidence_type="localization",
@@ -1068,7 +1105,7 @@ class MiniSweAdapter(GroundtruthController):
             action_index=0,
             iteration=0,
         )
-        return "[GT_EVIDENCE:localization]\n" + rendered
+        return rendered
 
     def next_contract_delta(self, *, max_chars: int = 2400) -> str:
         """One full contract dose at task start, then obligation deltas only.

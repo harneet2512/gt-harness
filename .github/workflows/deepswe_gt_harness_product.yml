@@ -17,6 +17,8 @@ jobs:
   provider-free-product:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      GT_GITNEXUS_ROOT: ${{ github.workspace }}/.pinned/gitnexus
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -28,6 +30,14 @@ jobs:
         with:
           python-version: "3.12.13"
           cache: pip
+
+      - name: Checkout immutable GitNexus capability source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: abhigyanpatwari/GitNexus
+          ref: 7e993ab8972386294fb96bf14a8665d0b5325397
+          path: .pinned/gitnexus
+          persist-credentials: false
 
       - name: Install the frozen provider-free test surface
         run: |
@@ -84,18 +94,13 @@ jobs:
             --output artifacts/product-closeout
           python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/product-closeout.json').read_text()); assert p['provider_calls'] == 0; assert p['benchmark_runs'] == 0; assert p['status'] == 'VERIFIED_PROVIDER_FREE'; assert p['container_proof']['status'] == 'VERIFIED'; assert p['secret_canary_matches'] == []"
 
-      - name: Run canonical product regression tests serially
+      - name: Verify the complete feature proof matrix
+        run: python scripts/verify_feature_matrix.py
+
+      - name: Run the full Python suite serially
         run: |
           set -euo pipefail
-          python -m pytest -q -ra \
-            tests/test_product_acceptance.py \
-            tests/test_product_workflow.py \
-            tests/test_miniswe_agent_parity.py \
-            tests/test_miniswe_repro.py \
-            tests/test_result_envelope.py \
-            tests/test_why_this_edge.py \
-            tests/test_leiden_refinement.py \
-            tests/test_index_reuse.py
+          python -m pytest -q -ra tests
 
       - name: Upload provider-free closeout
         if: always()

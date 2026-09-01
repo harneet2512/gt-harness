@@ -19,8 +19,10 @@ product = [
   "harbor==0.20.0",
   "mini-swe-agent==2.4.6",
   "numpy==2.5.1",
+  "onnxruntime==1.20.1",
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
+  "tokenizers==0.23.1",
 ]
 # GroundTruth evidence engine (gt_engine/). The distribution is named
 # groundtruth-mcp (import name: groundtruth); it is not on PyPI - install from
@@ -46,7 +48,7 @@ packages = ["nano", "eval", "gt_engine", "gt_harness", "scripts"]
 testpaths = ["tests"]
 addopts = "-ra -q"
 markers = [
-  "gt_all17: deterministic ten-trigger campaign covering all 17 GT identities",
+  "gt_all17: historical marker name for the campaign covering all 19 GT identities",
 ]
 
 [tool.ruff]

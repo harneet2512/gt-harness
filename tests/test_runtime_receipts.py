@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from gt_harness.runtime_receipts import issue_runtime_receipts, verify_runtime_receipt
@@ -26,7 +27,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         {
             "messages": [{"role": "assistant", "content": "done"}],
             "info": {
-                "model_stats": {"api_calls": 2},
+                "model_stats": {"api_calls": 3},
                 "exit_status": "Submitted",
             },
         },
@@ -41,6 +42,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "research_valid": True,
             "gt": {
                 "contract_shipped": True,
+                "terminal_requests": 3,
                 "delivered_evidence": 1,
                 "requested_model": "meta/muse-spark-1.2-contributor",
                 "provider_reported_model": "meta/muse-spark-1.2-contributor",
@@ -81,10 +83,42 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         {
             "event": "evidence_delivery",
             "event_hash": "b" * 64,
+            "sequence": 3,
             "evidence_type": "localization",
+            "dedup_key": "localization-1",
             "artifact_sha256": "c" * 64,
             "action_index": 0,
+            "iteration": 0,
             "rendered_bytes": 123,
+        },
+        {
+            "event": "receipt",
+            "event_hash": "8" * 64,
+            "sequence": 4,
+            "transition": "delivered",
+            "dedup_key": "localization-1",
+            "evidence_type": "localization",
+            "iteration": 0,
+            "payload_hash": "9" * 64,
+        },
+        {
+            "event": "provider_delivery",
+            "event_hash": "7" * 64,
+            "sequence": 5,
+            "iteration": 1,
+            "request_id": "request-1",
+        },
+        {
+            "event": "dense_index_ready",
+            "event_hash": "6" * 64,
+            "sequence": 6,
+            "query_ready": True,
+            "model_sha256": "5" * 64,
+            "tokenizer_sha256": "4" * 64,
+            "dimension": 768,
+            "document_count": 4,
+            "query_result_count": 4,
+            "index_sha256": "3" * 64,
         },
         {
             "event": "session_closed",
@@ -101,10 +135,10 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         {
             "schema": "gt.repro.v1",
             "research_valid": True,
-            "provider_receipts": {"request_count": 2, "valid": True},
+            "provider_receipts": {"request_count": 3, "valid": True},
             "model": {"match": True},
             "event_journal": {
-                "event_count": 4,
+                "event_count": 7,
                 "event_head": "d" * 64,
                 "valid": True,
                 "issues": [],
@@ -142,7 +176,9 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert issued == product_row
     assert product_row["schema"] == "gt.run_receipt.v1"
     assert product_row["status"] == "COMPLETED"
-    assert product_row["provider_calls"] == 2
+    assert product_row["provider_calls"] == 3
+    assert product_row["provider_completed_calls"] == 2
+    assert product_row["provider_failed_calls"] == 1
     assert product_row["input_tokens"] == 40
     assert product_row["cached_tokens"] == 11
     assert product_row["output_tokens"] == 5
@@ -168,6 +204,26 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "time_budget_seconds": 3600,
     }
     assert verify_runtime_receipt(product) == []
+
+    mutations = {
+        "treatment_delivery_limit_exceeded": lambda row: row["treatment_receipt"][
+            "provider_delivery_receipts"
+        ].extend(deepcopy(row["treatment_receipt"]["provider_delivery_receipts"]) * 4),
+        "treatment_delivery_late": lambda row: row["treatment_receipt"][
+            "provider_delivery_receipts"
+        ][0].update(same_observation=False),
+        "treatment_delivery_context_budget_exceeded": lambda row: row[
+            "treatment_receipt"
+        ]["provider_delivery_receipts"][0].update(context_byte_count=2_001),
+        "treatment_dense_index_not_ready": lambda row: row["treatment_receipt"][
+            "dense_index_receipt"
+        ].update(query_ready=False),
+    }
+    for expected_error, mutate in mutations.items():
+        changed = deepcopy(product_row)
+        mutate(changed)
+        _write_json(product, changed)
+        assert expected_error in verify_runtime_receipt(product)
 
 
 def test_runtime_receipt_rejects_provider_count_disagreement(tmp_path: Path) -> None:

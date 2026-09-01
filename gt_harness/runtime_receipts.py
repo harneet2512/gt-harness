@@ -17,6 +17,8 @@ from typing import Any
 
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 _SHA64 = re.compile(r"[0-9a-f]{64}")
+_DELIVERY_BYTE_LIMITS = {"repository_start": 2_000, "repository_update": 1_400}
+_TOTAL_DELIVERY_BYTE_LIMIT = 4_800
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -107,12 +109,58 @@ def _delivery_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deliveries
 
 
+def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    evidence = {
+        (str(row.get("dedup_key") or ""), int(row.get("iteration") or 0)): row
+        for row in events
+        if row.get("event") == "evidence_delivery" and row.get("dedup_key")
+    }
+    provider_rows = [row for row in events if row.get("event") == "provider_delivery"]
+    receipts: list[dict[str, Any]] = []
+    for row in events:
+        if row.get("event") != "receipt" or row.get("transition") != "delivered":
+            continue
+        iteration = int(row.get("iteration") or 0)
+        match = evidence.get((str(row.get("dedup_key") or ""), iteration))
+        if match is None:
+            raise ValueError("delivery_receipt_evidence_join_failed")
+        provider = next(
+            (
+                candidate
+                for candidate in provider_rows
+                if int(candidate.get("sequence") or 0) > int(row.get("sequence") or 0)
+            ),
+            None,
+        )
+        index = len(receipts) + 1
+        kind = "repository_start" if index == 1 else "repository_update"
+        delivered_before_call = int(provider.get("iteration") or 0) if provider else 0
+        receipts.append(
+            {
+                "schema": "gt.provider_delivery.v2",
+                "delivery_index": index,
+                "kind": kind,
+                "evidence_type": str(row.get("evidence_type") or ""),
+                "dedup_key": str(row.get("dedup_key") or ""),
+                "context_sha256": str(row.get("payload_hash") or ""),
+                "context_byte_count": int(match.get("rendered_bytes") or 0),
+                "byte_limit": _DELIVERY_BYTE_LIMITS[kind],
+                "observed_iteration": iteration,
+                "delivered_before_call": delivered_before_call,
+                "same_observation": delivered_before_call == iteration + 1,
+                "provider_request_id": str(provider.get("request_id") or "") if provider else "",
+            }
+        )
+    return receipts
+
+
 def _provider_usage(
-    events: list[dict[str, Any]], *, expected_calls: int
+    events: list[dict[str, Any]], *, attempted_calls: int
 ) -> dict[str, int | float]:
     responses = [row for row in events if row.get("event") == "provider_response"]
-    if len(responses) != expected_calls:
-        raise ValueError("provider_response_count_mismatch")
+    completed_calls = len(responses)
+    if completed_calls > attempted_calls:
+        raise ValueError("provider_response_count_exceeds_attempts")
     prompt = completion = cached = 0
     cost = 0.0
     for row in responses:
@@ -126,6 +174,8 @@ def _provider_usage(
         cached += int(details.get("cached_tokens") or 0)
         cost += float(usage.get("cost") or 0)
     return {
+        "provider_completed_calls": completed_calls,
+        "provider_failed_calls": attempted_calls - completed_calls,
         "input_tokens": prompt,
         "output_tokens": completion,
         "cached_tokens": cached,
@@ -180,14 +230,33 @@ def issue_runtime_receipts(
         raise ValueError("runner_model_mismatch")
 
     events_path, event_rows = _events(state_dir)
-    deliveries = _delivery_rows(event_rows)
-    provider_usage = _provider_usage(event_rows, expected_calls=provider_calls)
+    evidence_events = _delivery_rows(event_rows)
+    deliveries = _provider_delivery_receipts(event_rows)
+    provider_usage = _provider_usage(event_rows, attempted_calls=provider_calls)
     repro_path, reproduction = _single_optional(
         state_dir, "reproducibility_manifest.json"
     )
     graph_path, graph = _single_optional(state_dir, "graph.manifest.json")
     reproduction = reproduction or {}
     graph = graph or {}
+    dense_rows = [row for row in event_rows if row.get("event") == "dense_index_ready"]
+    if len(dense_rows) > 1:
+        raise ValueError("duplicate_dense_index_receipt")
+    dense_index = ({
+        "schema": "gt.dense_index_receipt.v1",
+        "query_ready": dense_rows[0].get("query_ready") is True,
+        "model_sha256": dense_rows[0].get("model_sha256"),
+        "tokenizer_sha256": dense_rows[0].get("tokenizer_sha256"),
+        "dimension": dense_rows[0].get("dimension"),
+        "document_count": dense_rows[0].get("document_count"),
+        "query_result_count": dense_rows[0].get("query_result_count"),
+        "index_sha256": dense_rows[0].get("index_sha256"),
+        "reason": dense_rows[0].get("reason"),
+    } if dense_rows else {
+        "schema": "gt.dense_index_receipt.v1",
+        "query_ready": False,
+        "reason": "dense_index_receipt_missing",
+    })
     provider_receipts = reproduction.get("provider_receipts")
     provider_receipts = provider_receipts if isinstance(provider_receipts, dict) else {}
     manifest_count = provider_receipts.get("request_count")
@@ -227,7 +296,19 @@ def issue_runtime_receipts(
         "unverified_predicates": list(gt.get("unverified_predicates") or []),
         "delivery_count": len(deliveries),
         "evidence_items_delivered": int(gt.get("delivered_evidence") or 0),
-        "evidence_deliveries": deliveries,
+        "evidence_event_count": len(evidence_events),
+        "evidence_deliveries": evidence_events,
+        "provider_delivery_receipts": deliveries,
+        "delivery_budget": {
+            "unit": "utf8_bytes",
+            "conversion_from_legacy_tokens": "4_bytes_per_token",
+            "repository_start_limit": _DELIVERY_BYTE_LIMITS["repository_start"],
+            "repository_update_limit": _DELIVERY_BYTE_LIMITS["repository_update"],
+            "total_limit": _TOTAL_DELIVERY_BYTE_LIMIT,
+            "total_observed": sum(row["context_byte_count"] for row in deliveries),
+        },
+        "retrieval_mode": "hybrid_required",
+        "dense_index_receipt": dense_index,
         "event_journal": event_journal,
         "completion_state_event_journal": dict(gt.get("event_journal") or {}),
         "provider_identity": {
@@ -312,13 +393,65 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append("product_trajectory_digest_mismatch")
     if not report_path.is_file():
         errors.append("product_report_missing")
-    elif integrity.get("report_sha256") != _sha256(report_path):
-        errors.append("product_report_digest_mismatch")
+        report: dict[str, Any] = {}
+    else:
+        report = _read_object(report_path)
+        if integrity.get("report_sha256") != _sha256(report_path):
+            errors.append("product_report_digest_mismatch")
     calls = (((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls"))
     if calls is None:
         errors.append("product_provider_calls_missing")
     elif int(calls) != int(receipt.get("provider_calls") or 0):
         errors.append("product_provider_calls_mismatch")
+    attempted_calls = int(receipt.get("provider_calls") or 0)
+    completed_calls = int(receipt.get("provider_completed_calls") or 0)
+    failed_calls = int(receipt.get("provider_failed_calls") or 0)
+    if (
+        min(attempted_calls, completed_calls, failed_calls) < 0
+        or completed_calls + failed_calls != attempted_calls
+    ):
+        errors.append("product_provider_call_conservation_failed")
+    gt_report = report.get("gt") if isinstance(report, dict) else None
+    gt_report = gt_report if isinstance(gt_report, dict) else {}
+    report_usage = gt_report.get("usage")
+    report_usage = report_usage if isinstance(report_usage, dict) else {}
+    if int(report_usage.get("prompt_tokens") or 0) != int(receipt.get("input_tokens") or 0):
+        errors.append("product_input_token_conservation_failed")
+    if int(report_usage.get("completion_tokens") or 0) != int(receipt.get("output_tokens") or 0):
+        errors.append("product_output_token_conservation_failed")
+    if str(gt_report.get("resolved_model") or receipt.get("requested_model")) != receipt.get(
+        "effective_model"
+    ):
+        errors.append("product_effective_model_report_mismatch")
+    state_dir = receipt_path.parent / "gt-state"
+    try:
+        events_path, runtime_events = _events(state_dir)
+    except ValueError as exc:
+        errors.append(str(exc))
+        events_path, runtime_events = None, []
+    if events_path is None:
+        errors.append("product_event_journal_missing")
+    else:
+        if integrity.get("events_sha256") != _sha256(events_path):
+            errors.append("product_event_journal_digest_mismatch")
+        journal = (receipt.get("treatment_receipt") or {}).get("event_journal") or {}
+        if (
+            int(journal.get("event_count") or 0) != len(runtime_events)
+            or not runtime_events
+            or journal.get("event_head") != runtime_events[-1].get("event_hash")
+        ):
+            errors.append("product_event_journal_conservation_failed")
+        try:
+            observed_usage = _provider_usage(runtime_events, attempted_calls=attempted_calls)
+        except ValueError as exc:
+            errors.append(str(exc))
+        else:
+            for field in (
+                "provider_completed_calls", "provider_failed_calls", "input_tokens",
+                "output_tokens", "cached_tokens",
+            ):
+                if observed_usage[field] != receipt.get(field):
+                    errors.append(f"product_{field}_conservation_failed")
 
     treatment = receipt.get("treatment_receipt")
     if not isinstance(treatment, dict):
@@ -330,20 +463,48 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         errors.append("treatment_not_active")
     if treatment.get("contract_shipped") is not True:
         errors.append("treatment_contract_not_shipped")
-    deliveries = treatment.get("evidence_deliveries")
-    if not isinstance(deliveries, list):
+    evidence_events = treatment.get("evidence_deliveries")
+    if not isinstance(evidence_events, list):
         errors.append("treatment_deliveries_invalid")
+        evidence_events = []
+    deliveries = treatment.get("provider_delivery_receipts")
+    if not isinstance(deliveries, list):
+        errors.append("treatment_provider_deliveries_invalid")
         deliveries = []
     if int(treatment.get("delivery_count") or 0) != len(deliveries):
         errors.append("treatment_delivery_count_mismatch")
+    if len(deliveries) > 4:
+        errors.append("treatment_delivery_limit_exceeded")
     core_evidence = int(treatment.get("evidence_items_delivered") or 0)
-    if core_evidence < 0 or core_evidence > len(deliveries):
+    if core_evidence < 0 or core_evidence != len(deliveries):
         errors.append("treatment_evidence_count_invalid")
-    event_hashes = [str(row.get("event_hash") or "") for row in deliveries if isinstance(row, dict)]
-    if len(event_hashes) != len(deliveries) or len(event_hashes) != len(set(event_hashes)):
+    event_hashes = [str(row.get("event_hash") or "") for row in evidence_events if isinstance(row, dict)]
+    if len(event_hashes) != len(evidence_events) or len(event_hashes) != len(set(event_hashes)):
         errors.append("treatment_delivery_identity_invalid")
     elif any(not _SHA64.fullmatch(value) for value in event_hashes):
         errors.append("treatment_delivery_identity_invalid")
+    total_bytes = 0
+    for delivery in deliveries:
+        if not isinstance(delivery, dict):
+            errors.append("treatment_provider_delivery_invalid")
+            continue
+        kind = str(delivery.get("kind") or "")
+        observed = int(delivery.get("context_byte_count") or 0)
+        total_bytes += observed
+        if delivery.get("same_observation") is not True:
+            errors.append("treatment_delivery_late")
+        if kind not in _DELIVERY_BYTE_LIMITS or observed > _DELIVERY_BYTE_LIMITS.get(kind, 0):
+            errors.append("treatment_delivery_context_budget_exceeded")
+        if not _SHA64.fullmatch(str(delivery.get("context_sha256") or "")):
+            errors.append("treatment_delivery_context_digest_invalid")
+    if total_bytes > _TOTAL_DELIVERY_BYTE_LIMIT:
+        errors.append("treatment_total_context_budget_exceeded")
+    dense = treatment.get("dense_index_receipt")
+    if treatment.get("retrieval_mode") != "hybrid_required" or not isinstance(dense, dict) or (
+        dense.get("schema") != "gt.dense_index_receipt.v1"
+        or dense.get("query_ready") is not True
+    ):
+        errors.append("treatment_dense_index_not_ready")
     identity = treatment.get("provider_identity")
     if not isinstance(identity, dict) or identity.get("match") is not True:
         errors.append("treatment_provider_identity_mismatch")

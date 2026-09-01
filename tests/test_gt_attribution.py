@@ -21,6 +21,7 @@ def test_direct_feature_registry_is_exact_and_complete():
 
     assert facts == {
         "caller_contract",
+        "cochange_prior",
         "covering_red",
         "def_partition",
         "localization",
@@ -41,7 +42,7 @@ def test_direct_feature_registry_is_exact_and_complete():
         "GT_SS_SUBMIT_RED",
         "select_catalog",
     }
-    assert len(DIRECT_FEATURES) == 18
+    assert len(DIRECT_FEATURES) == 19
     assert all(spec["boundaries"] for spec in DIRECT_FEATURES.values())
     assert all(spec["trigger"] for spec in DIRECT_FEATURES.values())
     assert all(spec["intended_action"] for spec in DIRECT_FEATURES.values())
@@ -54,6 +55,10 @@ def test_direct_feature_registry_is_exact_and_complete():
         "GT_HYPOTHESIS": "recovery",
         "GT_CERT_DELIVERY": "submit_refusal",
     }
+
+
+def test_cochange_evidence_binds_to_dark_trigger_identity():
+    assert feature_for_evidence("cochange_partner") == "cochange_prior"
 
 
 def test_attribution_trace_is_append_only_hash_chained(tmp_path):

@@ -123,7 +123,7 @@ def _required(row: Mapping[str, Any], key: str, index: int) -> Any:
 
 
 def audit_attribution(rows: Iterable[Mapping[str, Any]]) -> AttributionAudit:
-    """Audit structural provider/action/receipt joins for all 17 identities."""
+    """Audit structural provider/action/receipt joins for every registered identity."""
     rows = list(rows)
     issues: list[str] = []
     by_feature: dict[str, Mapping[str, Any]] = {}

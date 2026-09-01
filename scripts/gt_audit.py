@@ -1752,7 +1752,7 @@ def render_report(audits: list[TaskAudit], run_dir: Path) -> str:
         for feature_id in audit.feature_attribution
     })
     if feature_ids:
-        out.append("\n17-FEATURE ATTRIBUTION")
+        out.append(f"\n{len(feature_ids)}-FEATURE ATTRIBUTION")
         out.append("=" * 104)
         out.append(
             _fmt("feature", 25) + _fmt("kind", 7) + _fmt("W", 5)

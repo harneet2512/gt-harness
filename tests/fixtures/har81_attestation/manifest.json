@@ -1,0 +1,40 @@
+{
+  "schema": "gt.har81.offline_attestation_fixtures.v1",
+  "cases": [
+    {
+      "name": "run19_missing_runtime_receipts",
+      "workflow_run_id": "33563173631",
+      "source_sha": "529d835000000000000000000000000000000000",
+      "expected_errors": [
+        "adapter_receipt_task_set_mismatch",
+        "product_receipt_task_set_mismatch"
+      ]
+    },
+    {
+      "name": "run20_model_route_mismatch",
+      "workflow_run_id": "33565965241",
+      "source_sha": "3576667000000000000000000000000000000000",
+      "expected_errors": [
+        "effective_model_mismatch:abs-module-cache-flags",
+        "product_effective_model_mismatch:abs-module-cache-flags"
+      ]
+    },
+    {
+      "name": "run21_provider_attempt_without_response",
+      "workflow_run_id": "33567358689",
+      "source_sha": "ca744e7000000000000000000000000000000000",
+      "historical_errors": [
+        "adapter_receipt_task_set_mismatch",
+        "product_receipt_task_set_mismatch",
+        "official_verifier_ungraded:abs-module-cache-flags"
+      ],
+      "corrected_expectation": "typed_receipts_preserved_with_provider_failed_calls_equal_one"
+    },
+    {
+      "name": "corrected_positive",
+      "workflow_run_id": "offline",
+      "source_sha": "ffffffffffffffffffffffffffffffffffffffff",
+      "expected_errors": []
+    }
+  ]
+}
