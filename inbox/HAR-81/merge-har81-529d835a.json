@@ -1,0 +1,26 @@
+{
+  "created_at":"2026-09-01T23:19:07.600294Z",
+  "detail":{
+    "benchmark_runs":0,
+    "landed_sha":"529d835a2b3e1c6c3e3752cd8bfa477b27b591a0",
+    "parent_sha":"da4e398867e1c4779f6177a7bc447ea039358fc2",
+    "provider_calls":0
+  },
+  "file":"",
+  "head_sha":"529d835a2b3e1c6c3e3752cd8bfa477b27b591a0",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 exact installed treatment bundle landed on main",
+  "packet_digest_sha256":"1d6c5acb1d4bde99c5a6a4a2f9951c011dad6f03d85cd3b0849d0f000b30ef6b",
+  "packet_id":"merge-har81-529d835a",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}
