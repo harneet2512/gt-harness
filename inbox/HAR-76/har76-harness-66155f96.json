@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:40:34.072469Z",
+  "detail":"{base_sha:ff578719fef2a360af24d2076fe7ab3bc989c780,parent_sha:74433d0bf9db182de6877a68cc8e64ad56959ea2,changed_paths:[.github/workflows/ci.yml],diagnosis:{failures:[tests/test_capability_preservation.py::ModuleNotFoundError groundtruth.runtime.adapters,tests/test_miniswe_evidence.py::ModuleNotFoundError groundtruth.runtime.evidence_envelope,tests/test_miniswe_runtime.py::ModuleNotFoundError groundtruth.runtime.adapters,tests/test_miniswe_smoke.py::ModuleNotFoundError groundtruth.runtime.adapters],first_error:ModuleNotFoundError: No module named groundtruth.runtime.adapters},fix:install vendor/groundtruth_mcp-*.whl,focused_tests:4 passed; YAML parse pass,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"66155f96086b14597eae53c409c9fdb2ace4b4b2",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Directed CI RED fix: install the vendored Groundtruth Python wheel alongside the certified db9 producer checkout so full harness imports remain available while the tested binary stays certified.",
+  "packet_digest_sha256":"83a77be752de774014b890e245dab2c83dc34e24be1cdd1d1ad286934c8b8b94",
+  "packet_id":"har76-harness-66155f96",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"push",
+    "system":"coordinator"
+  },
+  "status":"pass",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
