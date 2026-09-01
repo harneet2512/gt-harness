@@ -22,7 +22,7 @@ tools/
 | ticket | string | Linear ticket (e.g. `HAR-63`) |
 | pr | int | GitHub PR number |
 | head_sha | string | Exact candidate SHA reviewed |
-| source.system | string | `cursor-finder` \| `cursor-bugbot` \| `coordinator` |
+| source.system | string | `codex-check` \| `gt-ci` \| `coordinator` |
 | source.check | string | Check or review pass name |
 | kind | string | `finding` \| `check_outcome` |
 | severity | string | e.g. `substance`, `mechanics` |
@@ -58,6 +58,6 @@ On ref movement: read new/changed packets, verify digests, adjudicate, mint verd
 ```bash
 python tools/commit_review_packet.py \
   --ticket HAR-63 --packet-id finder-f1 --pr 25 \
-  --head-sha <sha> --system cursor-finder --check phase-a-re-review \
+  --head-sha <sha> --system codex-check --check phase-a-re-review \
   --kind finding --message "..." --detail "..."
 ```

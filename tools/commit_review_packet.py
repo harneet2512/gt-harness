@@ -40,7 +40,7 @@ def main() -> int:
     parser.add_argument("--packet-id", required=True)
     parser.add_argument("--pr", type=int, required=True)
     parser.add_argument("--head-sha", required=True)
-    parser.add_argument("--system", required=True, choices=["cursor-finder", "cursor-bugbot", "coordinator"])
+    parser.add_argument("--system", required=True, choices=["codex-check", "gt-ci", "coordinator"])
     parser.add_argument("--check", required=True)
     parser.add_argument("--kind", required=True, choices=["finding", "check_outcome"])
     parser.add_argument("--severity", default="substance")
