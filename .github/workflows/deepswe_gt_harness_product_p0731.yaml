@@ -362,13 +362,12 @@ jobs:
       - name: Stage the verified uv installer for the task container
         run: |
           set -euo pipefail
-          installer="$RUNNER_TEMP/uv-install-0.11.32.sh"
+          installer="$RUNNER_TEMP/uv-install-0.11.32.tar.gz"
           curl --fail --silent --show-error --location \
             --output "$installer" \
-            https://astral.sh/uv/0.11.32/install.sh
-          echo "43aff33a967fe40e8c17949d8c85c65bc43f3b5c94742393c957f56ab5ba80f4  $installer" \
+            https://releases.astral.sh/github/uv/releases/download/0.11.32/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967  $installer" \
             | sha256sum -c -
-          chmod 755 "$installer"
           echo "GT_UV_INSTALLER_HOST=$installer" >> "$GITHUB_ENV"
 
       - name: Install Pier and the canonical product source

@@ -31,7 +31,7 @@ from gt_harness.product import build_product_bundle, project_task_environment
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_BUNDLE_DIR = "/installed-agent/bundle"
 _REMOTE_GT_BINARY = "/installed-agent/gt-index"
-_REMOTE_UV_INSTALLER = "/installed-agent/uv-install.sh"
+_REMOTE_UV_INSTALLER = "/installed-agent/uv-install.tar.gz"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _PRODUCT_MANIFEST = _REPO_ROOT / "config" / "deepswe_product_bundle_v1.json"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
@@ -40,7 +40,7 @@ _PYTHON_VERSION = "3.12.13"
 _DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
 _ALLOWED_MINISWE_AGENT_VERSIONS = frozenset({"2.4.6"})
 _UV_INSTALL = f"https://astral.sh/uv/{_UV_VERSION}/install.sh"
-_UV_INSTALLER_SHA256 = "43aff33a967fe40e8c17949d8c85c65bc43f3b5c94742393c957f56ab5ba80f4"
+_UV_INSTALLER_SHA256 = "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967"
 _GT_WHEEL_SHA256 = "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e"
 _GT_BINARY_SHA256 = "024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a"
 
@@ -115,7 +115,7 @@ class MiniSweAgent(BaseInstalledAgent):
         if not path.is_file():
             raise FileNotFoundError(
                 "Mini-SWE treatment bundle requires the pre-downloaded uv 0.11.32 "
-                "installer in GT_UV_INSTALLER_HOST"
+                "archive in GT_UV_INSTALLER_HOST"
             )
         MiniSweAgent._require_digest(path, _UV_INSTALLER_SHA256, "uv_installer")
         return path
@@ -141,7 +141,10 @@ class MiniSweAgent(BaseInstalledAgent):
         install = (
             "set -eu; "
             f"echo '{_UV_INSTALLER_SHA256}  {_REMOTE_UV_INSTALLER}' | sha256sum -c - && "
-            f"sh {_REMOTE_UV_INSTALLER} && "
+            "mkdir -p /tmp/uv-extract \"$HOME/.local/bin\" && "
+            f"tar -xzf {_REMOTE_UV_INSTALLER} -C /tmp/uv-extract && "
+            "cp /tmp/uv-extract/uv-x86_64-unknown-linux-gnu/uv \"$HOME/.local/bin/uv\" && "
+            "chmod 755 \"$HOME/.local/bin/uv\" && "
             f'"$HOME/.local/bin/uv" tool install --python {_PYTHON_VERSION} '
             f'--with "mini-swe-agent=={miniswe_version}" '
             f"--with {shlex.quote(remote_gt_wheel)} --with 'numpy==2.5.1' "
@@ -157,7 +160,7 @@ class MiniSweAgent(BaseInstalledAgent):
             f'"{_REMOTE_GT_BINARY}" -root /tmp/gt-install-smoke-src '
             "-output /tmp/gt-install-smoke.db >/dev/null && "
             "test -s /tmp/gt-install-smoke.db && rm -f /tmp/gt-install-smoke.db && "
-            'rm -rf "$HOME/.cache/uv/archive-v0" && '
+            'rm -rf "$HOME/.cache/uv/archive-v0" /tmp/uv-extract && '
             f"rm -rf -- {_REMOTE_BUNDLE_DIR} /tmp/gt-install-smoke-src"
         )
         await self.exec_as_agent(environment, install, env=dict(UTF8_ENV))
