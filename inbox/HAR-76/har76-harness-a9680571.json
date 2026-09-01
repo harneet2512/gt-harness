@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:36:06.742915Z",
+  "detail":"{parent:b1bd98f3f097ef6afd2299b3786c8c2aa9205e22,change:editable pinned Groundtruth source is installed without conflicting vendored wheel in pytest jobs,prior_failure:pip ResolutionImpossible for two groundtruth-mcp 1.0.0 distributions}",
+  "file":"",
+  "head_sha":"a96805715832adabcd4fcaa09a2c13b8cc8a45e4",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 removes duplicate Groundtruth package install from CI",
+  "packet_digest_sha256":"b68bcea1436f72710775e8f9e1c865a09c3265f8dc6138d80931ec26ee3bab73",
+  "packet_id":"har76-harness-a9680571",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"mechanics",
+  "source":{
+    "check":"har76-review-fix",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
