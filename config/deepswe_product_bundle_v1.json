@@ -49,6 +49,7 @@
     ".github/workflows/deepswe_gt_harness_product.yml",
     "eval/miniswe_agent.py",
     "eval/pier_gt_harness_adapter.py",
+    "eval/pier_filtered_docker.py",
     "gt_engine/result_envelope.py",
     "gt_harness/__init__.py",
     "gt_harness/product.py",

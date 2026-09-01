@@ -447,7 +447,7 @@ jobs:
             --include-task-name "$TASK" \
             --agent-import-path eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent \
             -m "$MODEL" \
-            --allow-agent-host api.deepseek.com \
+            --environment-import-path eval.pier_filtered_docker:PierDeepSeekDockerEnvironment \
             -o results/deepswe \
             --job-name "deepswe-gt-harness-${GITHUB_RUN_ID}-${TASK}" \
             --agent-timeout-multiplier 1.0 \
