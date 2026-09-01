@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:37:51.203865Z",
+  "detail":"After rebasing onto main bd099b8815924c7aed408aafafdc27eaf9daa1c8, PR #27 fast-forwarded main to 990a82816bac58378e15af58a89765e649ded79b. Remote main verifies the exact candidate and no merge commit was created.",
+  "file":"",
+  "head_sha":"990a82816bac58378e15af58a89765e649ded79b",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"PR #27 fast-forward merged",
+  "packet_digest_sha256":"762e092a5c7636b54b7b5bd320899fa9ddc00bcc97872afb7f01d4d3a4f3863c",
+  "packet_id":"merge-pr27-990a8281",
+  "pr":27,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"FF-MERGE",
+    "system":"coordinator"
+  },
+  "status":"fixed",
+  "supersedes":null,
+  "ticket":"HAR-65"
+}

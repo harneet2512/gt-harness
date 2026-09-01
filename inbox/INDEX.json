@@ -16,6 +16,7 @@
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
     "merge-pr26-bd099b88",
+    "merge-pr27-990a8281",
     "rev-219-har73-interim",
     "rev-220-har74-interim",
     "rev-221-transport-rewind-fixed",
@@ -46,7 +47,8 @@
       "merge-pr26-bd099b88"
     ],
     "HAR-65":[
-      "bugbot-pr27-20260901"
+      "bugbot-pr27-20260901",
+      "merge-pr27-990a8281"
     ],
     "HAR-66":[
       "bugbot-pr28-20260901"
