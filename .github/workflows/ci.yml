@@ -53,8 +53,7 @@ jobs:
       - name: Install project dependencies
         run: >-
           python -m pip install --disable-pip-version-check
-          -e "$GROUNDTRUTH_ROOT" -e ".[dev,miniswe,eval]" litellm
-          vendor/groundtruth_mcp-*.whl
+          -e ".[dev,miniswe,eval]" litellm vendor/groundtruth_mcp-*.whl
       - name: Install repository-local hooks and historical fixture object
         run: |
           .githooks/install
