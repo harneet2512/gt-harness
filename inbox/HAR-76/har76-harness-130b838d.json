@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:00:17.392583Z",
+  "detail":"Adds a workflow_dispatch trigger so the exact branch head can be executed when GitHub does not schedule a pull_request run after workflow-file plumbing changes. No test selection or provider/benchmark reachability changes; packetized for exact-head review.",
+  "file":"",
+  "head_sha":"130b838dbb89a24852be1bb8224ff92dc0b40a50",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 push 130b838d",
+  "packet_digest_sha256":"9bb4afd2142fc5a1a92ed132b202966a847878d7d93e98fc9d974587a705aa94",
+  "packet_id":"har76-harness-130b838d",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"har76-push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
