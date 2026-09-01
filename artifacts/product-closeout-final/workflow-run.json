@@ -1,0 +1,19 @@
+{
+  "schema": "gt.workflow_run_receipt.v1",
+  "workflow_id": 344675939,
+  "run_id": 33488826300,
+  "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/33488826300",
+  "head_sha": "85435ae285efdf15cf05dc36968cf10f775265d6",
+  "status": "success",
+  "runner": "ubuntu-24.04",
+  "provider_calls": 0,
+  "benchmark_runs": 0,
+  "steps": {
+    "dependency_install": "success",
+    "workflow_reachability": "success",
+    "red_evidence": "success",
+    "provider_free_acceptance": "success",
+    "regression_suite": "success",
+    "artifact_upload": "success"
+  }
+}
