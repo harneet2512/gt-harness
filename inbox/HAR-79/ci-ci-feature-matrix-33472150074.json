@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-09-01T05:04:36.500459Z",
+  "detail": {
+    "conclusion": "success",
+    "durations": {
+      "parallel": false,
+      "setup_seconds": null,
+      "test_seconds": null,
+      "workers": null
+    },
+    "groundtruth_parity": "Harness CI runs the provider-free control-plane suite and the 18/18 feature matrix; Groundtruth parity remains covered by its existing provider-free Go/runtime workflows, with no provider or benchmark execution in this workflow.",
+    "run_id": "33472150074",
+    "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/33472150074"
+  },
+  "file": "",
+  "head_sha": "d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+  "kind": "check_outcome",
+  "line": 0,
+  "message": "ci-feature-matrix CI outcome: success",
+  "packet_digest_sha256": "17e27fcf20a428f5e3a1159152ef2b0077fcdd870719fb1e3db12130cf2d08f6",
+  "packet_id": "ci-ci-feature-matrix-33472150074",
+  "pr": 0,
+  "schema": "gt.review_packet.v1",
+  "severity": "info",
+  "source": {
+    "check": "ci-feature-matrix",
+    "system": "gt-ci"
+  },
+  "status": "open",
+  "supersedes": null,
+  "ticket": "HAR-79"
+}
