@@ -9,6 +9,12 @@
   "task_order_sha256": "87468ba299eced3f93b8bec159024281b8151de186733e548bef730a4e1cfa25",
   "task_count": 20,
   "parallelism": 20,
+  "execution_host": {
+    "mode": "github_codespaces",
+    "codespace": "special-fortnight-95p9q5wrpqp2qww",
+    "docker_server": "29.3.0-1",
+    "github_actions_used": false
+  },
   "network_policy": "PUBLIC_WORKAROUND_DOCKER_DESKTOP_NFT_FIB_UNSUPPORTED",
   "credential_source": "cloud_access.md:deepseek_direct (value withheld)",
   "provider_free_gate": {"status": "VERIFIED_PROVIDER_FREE", "workflow_run": "33488826300", "provider_calls": 0, "benchmark_runs": 0, "container_proof": "VERIFIED", "fake_provider_proof": "VERIFIED"},
@@ -33,6 +39,24 @@
     "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/groundtruth-public-crlf-fixed/2026-09-01__12-51-40",
     "exception_tasks": ["actionlint-action-pinning-lint", "claude-code-by-agents-recursive-delegation"]
   },
+  "codespace_attempt": {
+    "provider_free_receipt": "/workspaces/live-run/pf.receipt.json/product-closeout.json",
+    "provider_free_status": "VERIFIED_PROVIDER_FREE",
+    "invalid_first_smoke": {
+      "status": "TERMINATED",
+      "reason": "installed_agent_could_not_find_vendored_groundtruth_wheel",
+      "provider_requests": 0
+    },
+    "rerun": {
+      "status": "TERMINATED_BEFORE_TASK_TRIALS",
+      "arms": ["bare", "groundtruth"],
+      "planned_per_arm": 20,
+      "terminal_task_results_per_arm": 0,
+      "reason": "codespace_32gb_disk_exhaustion_during_concurrent_image_pull",
+      "free_space_before_stop": "2.6GB",
+      "provider_requests": 0
+    }
+  },
   "comparison": {
     "status": "WITHHELD", "paired_task_order": true, "paired_graded_task_count": 15,
     "reason": "The bare controller was terminated after a Docker cleanup deadlock with one task unclosed; a GT-on improvement claim requires two complete arms with every planned task represented by a terminal result.",
@@ -41,5 +65,5 @@
   },
   "integrity": {"raw_credentials_in_receipts": false, "artifact_secret_scan": {"status": "PASS", "credential_canary_matches": 0, "scope": "live-smoke artifact files under 2 MiB"}, "groundtruth_grades_manufactured": false, "network_workaround_disclosed": true, "canonical_workflow_claim": false},
   "release_eligible": false,
-  "release_blockers": ["docker_desktop_nftables_fib_rule_unsupported", "docker_desktop_engine_init_api_unavailable", "public_network_workaround_used", "bare_controller_cleanup_deadlock_left_one_task_incomplete", "groundtruth_provenance_unverified_source_to_bytes"]
+  "release_blockers": ["docker_desktop_nftables_fib_rule_unsupported", "docker_desktop_engine_init_api_unavailable", "public_network_workaround_used", "bare_controller_cleanup_deadlock_left_one_task_incomplete", "groundtruth_provenance_unverified_source_to_bytes", "installed_bundle_omits_vendor_artifacts", "codespace_disk_exhaustion_before_task_trials", "codespace_smoke_not_terminal"]
 }
