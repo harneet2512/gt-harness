@@ -215,13 +215,13 @@ class MiniSweAgent(BaseInstalledAgent):
         # dead egress path cannot consume the task budget.
         probe = (
             f'"{_REMOTE_PY}" -c \'import os,urllib.request; '
-            "r=urllib.request.urlopen(urllib.request.Request("
-            "\"https://api.deepseek.com/models\","
-            "headers={\"Authorization\":\"Bearer \"+os.environ.get(\"OPENAI_API_KEY\",\"\")}),"
-            "timeout=15); print(\"GT_PROVIDER_PROBE_STATUS=\"+str(r.status))\'"
+            "u=urllib.request.Request(\"https://api.deepseek.com/models\","
+            "headers={\"Authorization\":\"Bearer \"+os.environ.get(\"OPENAI_API_KEY\",\"\")}); "
+            "try: r=urllib.request.urlopen(u,timeout=15); print(\"GT_PROVIDER_PROBE_STATUS=\"+str(r.status)) "
+            "except Exception as e: print(\"GT_PROVIDER_PROBE_ERROR=\"+type(e).__name__+\":\"+str(e)[:160])\'"
         )
         return (
-            f"({probe}) || echo GT_PROVIDER_PROBE_FAILED; "
+            f"{probe}; "
             f'"{_REMOTE_PY}" -m scripts.miniswe_gt_run '
             f"--task {shlex.quote(instruction)} --model {shlex.quote(model)} "
             f"--cwd \"$PWD\" "
