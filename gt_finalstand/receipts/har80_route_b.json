@@ -36,6 +36,7 @@
     "groundtruth.runtime.terminal_evidence",
     "groundtruth.runtime.verification_plan"
   ],
+  "receipt_sha256": "001424f11dcc1cb464264258eeabf2d26d6b1fb2334dffe8d8d60805e3c1792b",
   "provider_calls": 0,
   "benchmark_runs": 0,
   "benchmark_ready": false
