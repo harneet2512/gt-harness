@@ -1,0 +1,30 @@
+{
+  "created_at":"2026-09-01T04:25:12.307713Z",
+  "detail":{
+    "benchmark_runs":0,
+    "event":"packet_writer_repair",
+    "inbox_commit":"bf088d223affad9caaca905e2d65bfd208ab2dc0",
+    "provider_calls":0,
+    "validation":[
+      "detail JSON object",
+      "post-write digest recomputation"
+    ]
+  },
+  "file":"",
+  "head_sha":"701a847293188f317b5e4307cbb0285d9415ff4e",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-80 packet writer repaired: structured details are parsed as JSON objects and the stored packet digest is recomputed before commit.",
+  "packet_digest_sha256":"bbd0552f4e0b4b279093700c512498516fba9c7ab557a57ac41b6290bde0455a",
+  "packet_id":"har80-inbox-tool-bf088d22",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"packet-writer",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-80"
+}
