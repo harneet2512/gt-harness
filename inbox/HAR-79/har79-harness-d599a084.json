@@ -1,0 +1,46 @@
+{
+  "created_at":"2026-09-01T04:57:27.546382Z",
+  "detail":{
+    "base_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+    "benchmark_ready":false,
+    "benchmark_runs":0,
+    "branch":"codex/har79-ci-parallelism",
+    "changed_paths":[
+      "scripts/ci_commit_review_packets.py",
+      "tests/test_ci_commit_review_packets.py"
+    ],
+    "directed_fix":"accept HAR-79 gt-ci packets while retaining HAR-76 compatibility and route each packet to its ticket directory; resolves CI run 33471541450 invalid_packet_provenance",
+    "head_sha":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+    "parent_sha":"cc649b9d5a9dce088363e647075fa73f49d3cb7d",
+    "provider_calls":0,
+    "repository":"harneet2512/gt-harness",
+    "tests":[
+      {
+        "command":"python -m pytest tests/test_ci_emit_review_packet.py tests/test_ci_commit_review_packets.py -q",
+        "exit_code":0,
+        "observed":"6 passed"
+      },
+      {
+        "command":"python -m ruff check scripts/ci_emit_review_packet.py scripts/ci_commit_review_packets.py",
+        "exit_code":0
+      }
+    ]
+  },
+  "file":"",
+  "head_sha":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-79 directed fix pushed at exact SHA d599a084: CI inbox bridge now accepts HAR-79 packets and routes them correctly; prior run 33471541450 failure addressed.",
+  "packet_digest_sha256":"e0859ccbceb982fc7a7d4c1bcd6ce6f47a70c1735bea11ef423f672ff508388a",
+  "packet_id":"har79-harness-d599a084",
+  "pr":38,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ci-parallelism",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":"har79-harness-cc649b9d",
+  "ticket":"HAR-79"
+}
