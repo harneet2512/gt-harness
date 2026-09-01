@@ -118,12 +118,14 @@ hard failure.
 ## Framework resolution status
 
 The current main commit's shipped producer artifact is pinned by
-`gt_finalstand/receipts/producer_artifact.json`. HAR-70's replacement producer
-branch adds the coordinator-minted Python, TypeScript, JavaScript, Go, and Java
-framework overlays and the `gt.framework_resolution_validation.v1` receipt;
-that branch is not described as landed here until its exact reviewed commit is
-merged into the relevant default branches. The currency rule requires this
-section and the producer receipt to change in the same landing commit.
+`gt_finalstand/receipts/producer_artifact.json`. HAR-70 is landed at harness
+commit `ff578719fef2a360af24d2076fe7ab3bc989c780`, with the Groundtruth
+producer capability at `db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14`. The shipped
+producer now includes the coordinator-minted Python, TypeScript, JavaScript,
+Go, and Java framework overlays, and the digest-bound
+`gt.har70.framework_resolution.v1` receipt records a certified-pair increase
+and a RED witness for each language. The currency rule requires this section
+and the producer receipt to change in the same landing commit.
 
 ## Review transport
 
