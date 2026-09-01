@@ -419,3 +419,172 @@ The command inspects immutable Git identities, source manifests, shipped test
 and producer surfaces, and emits a deterministic `gt.public_reaudit.v1` receipt.
 It never changes a default branch and returns a nonzero status with a stable
 failure code when an identity or receipt-chain check cannot be completed.
+
+## Deep pipeline architecture (as built)
+
+This section is the operational description of the tree at the commit that contains it. It is
+limited to checked-in code, receipts, and workflows; it does not describe a planned service or a
+benchmark result.
+
+### 1. Request intake and persistent state
+
+`nano/cli.py` parses a task and constructs the provider and `nano/agent.py` `Agent`. The agent
+owns the iteration loop, history truncation, tool dispatch, token/iteration limits, and the
+evidence-backed completion gate. `gt_engine/task_contract.py` turns task text into the task and
+obligation contract used by planning and verification. `gt_engine/persistent_execution_state.py`
+persists decision and iteration lineage. Its records are `gt.execution_state.v1`,
+`gt.execution_state.witnessed_process.v1`, `gt.select_catalog.v1`,
+`gt.select_catalog_lifecycle.v1`, `gt.witnessed_process.v1`, and `gt.planning_process.v1`.
+
+`gt_engine/gt_session.py` is the control plane for off, shadow, advisory, assistive, and enforced
+modes. `gt_engine/miniswe_controller.py`, `gt_engine/miniswe_runtime.py`, and
+`gt_engine/miniswe_integration.py` connect that session to the normal Mini-SWE loop. A disabled
+session leaves the stock path intact; enabling GT does not create a second agent loop.
+
+### 2. Index build, reuse, and publication
+
+`gt_engine/indexer.py` computes an `IndexReuseKey` from the sorted, length-delimited source
+manifest (path plus Git-blob byte hash), the verified producer binary SHA-256, and the graph
+schema version. The key is serialized as `index_reuse_key` and bound by
+`index_reuse_key_sha256`; it is not inferred from a filename. A matching key is accepted only
+after source-manifest validation, graph digest validation, producer-artifact validation, and
+SQLite `PRAGMA quick_check`. A miss or invalid hit runs the producer into a temporary database,
+checks it, and uses `os.replace` to publish atomically. An interrupted build therefore leaves
+the previous complete graph available.
+
+The graph receipt is `gt.graph_certification.v1`. The accepted external producer is described by
+`gt.producer_artifact.v2` in `gt_finalstand/receipts/producer_artifact.json`; its source commit,
+source tree, binary digest, build ID, toolchain, graph schema (`v15.2-trust-tier`), and capability
+set are verified before discovery. `gt_engine/har80_import_parity.py` verifies the route-B
+Python import surface using `gt.har80.import_parity.v1`, while
+`gt_finalstand/receipts/har80_route_b.json` (`gt.har80.route_b.v1`) states that the wheel
+certifies the Python runtime and the pinned source certifies the binary and framework overlays.
+The producer source and harness are separate repositories; a changed producer commit or tree
+requires a new artifact and a new harness pin.
+
+### 3. Evidence production and graph projections
+
+The verified graph is read through `gt_engine/bridge.py` and `gt_engine/graph_context.py`.
+`gt_engine/repository_intelligence.py` supplies repository facts and community projections;
+`gt_engine/hybrid_repository.py` supplies repository-level composition. The capability matrix is
+`gt.capability_matrix.v2`, and the shipped feature matrix is `gt.feature_matrix.v1` (its rendered
+table is `gt.feature_matrix.md.v1`). Community certificates use `gt.community_certificate.v2`
+and are independently checked before they can influence retrieval.
+
+`gt_engine/resolution_provenance.py` represents a callsite, dispatch state, retained candidates,
+and flow witnesses. `gt_engine/why_this_edge.py` is the certified explanation path for
+`HAS_CALLSITE`, `CANDIDATE_TARGET`, and `SELECTED_TARGET`; its records use
+`gt.why_this_edge.v1`, `gt.resolution_substrate.v1`, `gt.why_this_edge_store.v1`, and the
+receipt `gt.why_this_edge_receipt.v1`. Candidate-to-witness conservation is checked before an
+explanation is returned. Unsupported edge kinds, ambiguous dispatch, stale graphs, incomplete
+builds, or missing witnesses produce typed abstention rather than a guessed target.
+
+`gt_engine/trust_calibration_report.py` emits `gt.trust_calibration_report.v2`. Calibration is
+partitioned into the closed capability classes `resolution`, `retrieval`, and `community`; an
+observation without a legitimate probability has null probabilistic metrics and cannot upgrade
+authority. The manifest generator uses `gt.trust_calibration_manifest.v1`. Calibration is a
+measurement report, never an authority override.
+
+`gt_engine/hybrid_retrieval.py` performs vector-accelerated candidate discovery followed by exact
+rescoring. Policy `gt.hybrid.intent-exact-rescore.v1` selects weights for `INSPECT`, `EDIT`, or
+`VALIDATE`; the vector result is unioned with every positive lexical and graph candidate before
+rows are fetched and scored. A named full-scan fallback is used only when vec0 is unavailable or
+fails. Stored metadata identity, finite/non-negative channel scores, candidate-set digest, and
+deterministic ID tie-breaking are checked in the result. Intent changes ranking only; it does not
+change candidate membership or evidence authority.
+
+### 4. Observation, packet assembly, and eligibility
+
+`gt_engine/runtime_observation.py` captures action-boundary snapshots, revisions, transactions,
+postimages, syntax artifacts, and execution outcomes. Its records use
+`gt.runtime_observation.v1`, `gt.transaction_artifacts.v1`, and
+`gt.observation_equivalence.v1`. `gt_engine/miniswe_typed_actions.py` validates the public
+typed-action schema `gt.action_request.v1`, produces `gt.evidence_artifact.v1` and
+`gt.interception_decision.v1`, and renders the single model-visible
+`gt.compiled_observation.v1` path. Legacy or manually fabricated removed actions are rejected by
+the generated certification surface `gt.typed_capability_certification.v1`.
+
+`gt_engine/context_packet.py` assembles the context dose as `gt.context_packet.v1`. The packet
+contains ordered evidence, source identities, graph/revision identity, and the delivery hash
+chain; it is the only content handed to the model after normalization. `gt_engine/evidence_router.py`
+implements the HAR-64 boundary admission decision as `gt.eligibility_receipt.v1`. It measures the
+complete logical request immediately before transport, records every proposed claim as admitted
+or refused with a closed reason, binds baseline and final request digests and sizes, and includes
+prior-event and receipt digests. Refused bytes cannot appear in the final payload. Zero-evidence
+decisions and provider exceptions still get a receipt; if sealing fails, only the native baseline
+request is allowed and the run is degraded/unverified.
+
+The HAR-74 `serve_context_packet` wiring calls the same router and verifies/seals the packet before
+returning it. No sidecar ledger is authoritative. `gt_engine/miniswe_receipt.py` records the
+provider-bound receipt `gt_receipt.v1`; `gt_engine/event_journal.py` records hash-chain rows
+`gt.event.v1`. `gt_engine/attribution.py` records capability eligibility and exposure without
+claiming that exposure caused a model action.
+
+### 5. Model boundary, execution, and verification
+
+`nano/providers.py` normalizes Anthropic and OpenAI-compatible responses into the provider-neutral
+message shape. `nano/tools.py` exposes the three native tools (`bash`, `read_file`, and
+`edit_file`); a tool error is returned as an explicit `ERROR:` observation. The runtime retains
+tool-call IDs and names but does not persist raw model text or tool arguments.
+
+`gt_engine/miniswe_runtime.py` and `gt_engine/miniswe_integration.py` execute actions through the
+gateway. `gt_engine/verification_contract.py`, `gt_engine/verify.py`, `gt_engine/decision_point_eval.py`,
+and `gt_engine/miniswe_audit.py` check syntax, covering tests, observed RED evidence, and
+completion criteria. The submit gate is wired in `gt_engine/miniswe_integration.py`: positive failing
+evidence can refuse one submit, while the second attempt cannot deadlock. A failing command
+remains a failing observation; there is no success conversion on exception.
+
+Resolution remains fail-closed: `AMBIGUOUS` dispatch, unresolved candidates, incomplete builds,
+or stale graph identity are surfaced as typed abstention. Retrieval and community membership can
+shape context, but neither can promote an unverified fact to authority.
+
+### 6. Receipts, replay, and integrity
+
+`gt_engine/replay.py` and `gt_engine/replay_bundle.py` consume sealed event and delivery records;
+the replay bundle uses `gt.bundle-replay.v1`, and the reproducibility manifest is `gt.repro.v1`.
+The checked-in `gt_finalstand/receipts/` directory contains the terminal classes used by the
+provider-free audit: `gt.baseline_receipt.v2`, `gt.har9.closeout_receipt.v1`,
+`gt.no_smoke.gh_authed.v1`, `gt.finalstand.offline_suite.v2`,
+`gt.provider_free_workflow_receipt.v1`, `gt.public_reaudit.v1`,
+`gt.trust_calibration_report.v2`, `gt.why_this_edge_receipt.v1`,
+`gt.eligibility_receipt.v1`, `gt.community_certificate.v2`,
+`gt.har70.framework_resolution.v1`, and `gt.har72.benchmark_design.v1`.
+The exact schema names are carried in each JSON receipt; the receipt digest is calculated over
+the canonical unsigned body and the shipped Git-blob bytes are the binding source.
+
+`scripts/gt_reaudit.py` is the public replay entry point. It verifies the manifest, source and
+fixture digests, producer identity, Git-blob receipt digests, canonical RED producers, mutation
+checks, and output digest, then emits `gt.public_reaudit.v1` with a stable failure code. The
+provider-free workflows under `.github/workflows/` run these checks without provider calls.
+
+### 7. Review transport and merge
+
+`scripts/ci_emit_review_packet.py` creates `gt.review_packet.v1` outcome packets. The
+digest-validating inbox writer on `refs/heads/gt-review-inbox` writes one packet and updates
+`inbox/INDEX.json` atomically; `scripts/ci_commit_review_packets.py` validates
+CI packets before they enter that ref. Packet identities bind repository, branch, base, head,
+parent, changed paths, commands, exit statuses, and observed failure or pass detail. Historical
+packets remain immutable; corrections are new packets with an explicit `supersedes` link.
+
+The review loop reads the inbox and posts exact-head decisions on HAR-57. A terminal pass names
+one immutable candidate SHA. A fast-forward grant names that same candidate and the current
+default tip. Before landing, the builder fetches both refs, verifies ancestry and that neither ref
+moved, then uses `git merge --ff-only` and verifies the remote default resolves to the candidate.
+The merge outcome is itself a `gt.review_packet.v1` packet. A RED CI packet or stale review blocks
+the merge; no merge commit, force push, or mutable historical packet is accepted.
+
+### 8. Cross-repository pins and currency
+
+`gt-harness` owns the Python control plane, schemas, receipts, workflows, and Mini-SWE wiring.
+`groundtruth` owns the Go `gt-index` producer, graph construction, and framework overlays. The
+harness records the producer source commit/tree, binary digest, toolchain, platform, graph schema,
+and capabilities in `gt.producer_artifact.v2`; `.github/workflows/ci.yml` checks out that exact
+source commit. The route-B receipt records the deliberate split between the certified Python wheel
+and the certified source-built binary/overlay surface. Any producer source, tree, binary, schema,
+or capability change invalidates the pin and requires a new producer receipt, a new harness
+commit, and fresh exact-SHA review.
+
+The README, code, workflows, fixtures, and receipts are one versioned contract. Any pipeline
+change must update this README in the same commit so the narrative remains current with the
+implementation. No section above claims provider execution, benchmark execution, or a capability
+that is not represented by a checked-in module, workflow, fixture, or receipt at this commit.
