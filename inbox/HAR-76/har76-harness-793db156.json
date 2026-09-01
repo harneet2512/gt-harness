@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:40:52.950582Z",
+  "detail":"{parent:a96805715832adabcd4fcaa09a2c13b8cc8a45e4,change:symlink gt-index into PATH and set global core.hooksPath in ephemeral CI runner,goal:exercise full provider-free suite against built producer and satisfy hook-lineage precondition}",
+  "file":"",
+  "head_sha":"793db15604339a7995608be0133ee53a71c97042",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 exposes built producer on PATH and configures hooks for CI tests",
+  "packet_digest_sha256":"c298e6c1ee159c3bfab9600347af8f77cf008ac38890ad9f8f23a8958e50e73f",
+  "packet_id":"har76-harness-793db156",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"mechanics",
+  "source":{
+    "check":"har76-review-fix",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
