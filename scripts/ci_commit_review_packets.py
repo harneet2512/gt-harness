@@ -29,7 +29,10 @@ def commit_packets(source_root: Path, inbox_root: Path) -> list[str]:
         packet = json.loads(raw)
         if packet.get("schema") != "gt.review_packet.v1" or packet.get("kind") != "check_outcome":
             raise ValueError(f"invalid_packet:{path.name}")
-        if packet.get("ticket") != "HAR-76" or packet.get("source", {}).get("system") != "gt-ci":
+        if (
+            packet.get("ticket") not in {"HAR-76", "HAR-79"}
+            or packet.get("source", {}).get("system") != "gt-ci"
+        ):
             raise ValueError(f"invalid_packet_provenance:{path.name}")
         if packet.get("packet_digest_sha256") != _digest(packet):
             raise ValueError(f"packet_digest_mismatch:{path.name}")
@@ -42,15 +45,16 @@ def commit_packets(source_root: Path, inbox_root: Path) -> list[str]:
     index = json.loads(index_path.read_text(encoding="utf-8"))
     live = set(index.get("live_packets") or [])
     tickets = index.setdefault("tickets", {})
-    ticket_packets = set(tickets.setdefault("HAR-76", []))
-    for packet_id, raw, _packet in accepted:
-        out = inbox_root / "HAR-76" / f"{packet_id}.json"
+    for packet_id, raw, packet in accepted:
+        ticket = packet["ticket"]
+        ticket_packets = set(tickets.setdefault(ticket, []))
+        out = inbox_root / ticket / f"{packet_id}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(raw)
         live.add(packet_id)
         ticket_packets.add(packet_id)
+        tickets[ticket] = sorted(ticket_packets)
     index["live_packets"] = sorted(live)
-    tickets["HAR-76"] = sorted(ticket_packets)
     index_path.write_text(
         json.dumps(index, sort_keys=True, separators=(",", ":"), indent=2) + "\n",
         encoding="utf-8",
