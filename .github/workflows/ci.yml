@@ -6,7 +6,11 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: har76-review-inbox
+  cancel-in-progress: false
 
 jobs:
   pytest:
@@ -15,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +43,7 @@ jobs:
           --ticket HAR-76 --pr ${{ github.event.pull_request.number || 0 }}
           --head-sha ${{ github.event.pull_request.head.sha || github.sha }}
           --check ci-pytest --conclusion "$CONCLUSION"
+          --variant py${{ matrix.python-version }}
           --run-id ${{ github.run_id }} --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           --output ci-packets/ci-pytest-${{ github.run_id }}.json
       - name: Upload CI outcome packet
@@ -89,3 +94,39 @@ jobs:
       - name: Fail on RED matrix verification
         if: steps.matrix.outcome != 'success'
         run: exit 1
+
+  commit-review-packets:
+    name: commit CI packets to review inbox
+    if: always()
+    needs: [pytest, feature-matrix]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review inbox
+        uses: actions/checkout@v4
+        with:
+          ref: gt-review-inbox
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Download pytest packet
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-review-packets-${{ github.run_id }}-pytest
+          path: ci-artifacts/pytest
+      - name: Download feature-matrix packet
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-review-packets-${{ github.run_id }}-feature-matrix
+          path: ci-artifacts/feature-matrix
+      - name: Validate and install packets in inbox
+        run: python scripts/ci_commit_review_packets.py ci-artifacts inbox
+      - name: Commit and push inbox packets
+        run: |
+          git config user.name "GroundTruth CI"
+          git config user.email "groundtruth-ci@example.invalid"
+          git add inbox/
+          if git diff --cached --quiet; then
+            echo "No new CI packets to commit"
+            exit 0
+          fi
+          git commit -m "inbox: CI outcomes for run ${{ github.run_id }}"
+          git push origin HEAD:refs/heads/gt-review-inbox
