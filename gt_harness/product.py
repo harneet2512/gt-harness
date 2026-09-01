@@ -690,6 +690,49 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
     digest = str(tasks[0].get("container_digest") or "")
     if not wheel.is_file() or not image or not digest:
         return {"status": "FAILED", "reason": "container_fixture_artifact_missing"}
+    image_ref = f"{image}@{digest}"
+    pull_output = ""
+    pull_return_code = 1
+    pull_attempts = 0
+    for delay in (0, 15, 30, 60):
+        pull_attempts += 1
+        if delay:
+            time.sleep(delay)
+        try:
+            pull = subprocess.run(
+                ["docker", "pull", image_ref],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=180,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "status": "FAILED",
+                "reason": f"container_image_pull_{type(exc).__name__}",
+                "image": image,
+                "digest": digest,
+                "pull_attempts": pull_attempts,
+            }
+        pull_output += pull.stdout + pull.stderr
+        pull_return_code = pull.returncode
+        if pull.returncode == 0:
+            break
+    if pull_return_code != 0:
+        lowered = pull_output.casefold()
+        reason = (
+            "container_image_pull_rate_limited"
+            if "toomanyrequests" in lowered or "rate exceeded" in lowered
+            else "container_image_pull_failed"
+        )
+        return {
+            "status": "FAILED",
+            "reason": reason,
+            "image": image,
+            "digest": digest,
+            "pull_attempts": pull_attempts,
+            "output_sha256": hashlib.sha256(pull_output.encode("utf-8")).hexdigest(),
+        }
     target = f"/tmp/{wheel.name}"
     mount = f"{wheel.resolve()}:{target}:ro"
     probe = (
@@ -701,7 +744,21 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
     )
     try:
         process = subprocess.run(
-            ["docker", "run", "--rm", "--network", "none", "-v", mount, image, "python", "-c", probe],
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "--network",
+                "none",
+                "-v",
+                mount,
+                image_ref,
+                "python",
+                "-c",
+                probe,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -714,6 +771,7 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
         "status": "VERIFIED" if process.returncode == 0 and "installed-product-ok" in output else "FAILED",
         "image": image,
         "digest": digest,
+        "pull_attempts": pull_attempts,
         "wheel_sha256": wheel_record.get("sha256"),
         "return_code": process.returncode,
         "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
