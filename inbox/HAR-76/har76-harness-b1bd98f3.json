@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:34:32.260376Z",
+  "detail":"{parent:25415ca7c47f406777fba9fd5ace66e602df19b0,change:checkout Groundtruth f2863f87, install editable package, build sqlite_fts5 gt-index, set GT_INDEX_BINARY and GROUNDTRUTH_ROOT, configure git identity,goal:remove environment-only RED while preserving full pytest requirement}",
+  "file":"",
+  "head_sha":"b1bd98f3f097ef6afd2299b3786c8c2aa9205e22",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 provisions the pinned Groundtruth source and producer for full pytest",
+  "packet_digest_sha256":"1917fb759d4706d7d848ca89db74c8c28eaee4d22886aed540b720fbaa60c5c2",
+  "packet_id":"har76-harness-b1bd98f3",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"har76-review-fix",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
