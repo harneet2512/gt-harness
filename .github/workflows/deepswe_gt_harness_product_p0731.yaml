@@ -369,9 +369,11 @@ jobs:
       - name: Stagger Docker task-image pulls
         run: |
           set -euo pipefail
-          # GitHub-hosted runners have isolated Docker daemons. Keep all 20
-          # jobs parallel, but avoid a synchronized Docker Hub pull burst.
-          delay=$(( (ORDINAL - 1) * 30 ))
+          # GitHub-hosted runners have isolated Docker daemons, while public
+          # ECR applies a shared anonymous-pull quota. Keep all task jobs
+          # parallel after setup, but serialize the initial image pulls enough
+          # to avoid turning quota exhaustion into missing-task failures.
+          delay=$(( (ORDINAL - 1) * 240 ))
           echo "Waiting ${delay}s before the task image pull"
           sleep "$delay"
 
