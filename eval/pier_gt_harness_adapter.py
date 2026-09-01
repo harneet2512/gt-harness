@@ -21,13 +21,15 @@ class PierGtHarnessMiniSwe246Agent(MiniSweGtAgent):
         return NetworkAllowlist(domains=["api.deepseek.com"])
 
     def to_agent_info(self):
-        # Harbor 0.20 validates TrialResult against its own result models.
-        # The old Pier result classes are structurally similar but are a
-        # different Pydantic type and fail validation at live job startup.
-        from harbor.models.trial.result import AgentInfo, ModelInfo
+        # Pier constructs and validates its own TrialResult.  Harbor's
+        # structurally similar Pydantic classes are a different type and are
+        # rejected by Pier before the first task/model call.
+        from pier.models.trial.result import AgentInfo, ModelInfo
 
         requested = str(getattr(self, "model_name", "") or "").strip()
-        model_info = ModelInfo(name=requested, provider="deepseek") if requested else None
+        provider = getattr(self, "_parsed_model_provider", None)
+        model = getattr(self, "_parsed_model_name", None) or requested
+        model_info = ModelInfo(name=model, provider=provider) if model else None
         return AgentInfo(
             name=self.name(),
             version=self.version() or "1.0.0/miniswe-2.4.6",
