@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GROUNDTRUTH_ROOT: ${{ github.workspace }}/Groundtruth
+      GH_TOKEN: ${{ github.token }}
       GIT_AUTHOR_NAME: GroundTruth CI
       GIT_AUTHOR_EMAIL: groundtruth-ci@example.invalid
       GIT_COMMITTER_NAME: GroundTruth CI
@@ -28,6 +29,8 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Checkout pinned Groundtruth parity source
         uses: actions/checkout@v4
         with:
@@ -59,7 +62,6 @@ jobs:
           ln -sf "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
           chmod +x "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          git config --global core.hooksPath "$GITHUB_WORKSPACE/.githooks"
       - name: Run full pytest suite
         id: pytest
         continue-on-error: true
