@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,27 @@ def canonical(payload: dict) -> bytes:
     body = dict(payload)
     body.pop("packet_digest_sha256", None)
     return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def read_diagnosis(path: Path | None) -> dict[str, object] | None:
+    """Extract stable RED witnesses from a captured pytest transcript."""
+    if path is None or not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    failures = sorted(
+        set(re.findall(r"^FAILED\s+([^\s]+)", text, flags=re.MULTILINE))
+    )
+    first_error = next(
+        (
+            line.strip()
+            for line in text.splitlines()
+            if re.match(r"^E\s+", line) or "Traceback (most recent call last)" in line
+        ),
+        "",
+    )
+    if not failures and not first_error:
+        return None
+    return {"failures": failures, "first_error": first_error}
 
 
 def emit(args: argparse.Namespace) -> dict:
@@ -54,6 +76,9 @@ def emit(args: argparse.Namespace) -> dict:
         "supersedes": None,
         "created_at": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
     }
+    diagnosis = read_diagnosis(getattr(args, "diagnosis_file", None))
+    if diagnosis is not None:
+        packet["detail"]["diagnosis"] = diagnosis
     packet["packet_digest_sha256"] = hashlib.sha256(canonical(packet)).hexdigest()
     return packet
 
@@ -77,6 +102,7 @@ def main() -> int:
         ),
     )
     parser.add_argument("--variant", default="")
+    parser.add_argument("--diagnosis-file", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     packet = emit(args)
