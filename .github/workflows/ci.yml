@@ -38,6 +38,12 @@ jobs:
           repository: harneet2512/groundtruth
           ref: db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14
           path: Groundtruth
+      - name: Checkout legacy Python metadata compatibility source
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/groundtruth
+          ref: f2863f8781edaeaef8787c515e36381cdbd692d5
+          path: GroundtruthCompat
       - uses: actions/setup-go@v5
         with:
           go-version-file: Groundtruth/gt-index/go.mod
@@ -45,7 +51,9 @@ jobs:
       - name: Relocate parity source outside harness scan
         run: |
           mv "$GITHUB_WORKSPACE/Groundtruth" "$RUNNER_TEMP/Groundtruth"
+          mv "$GITHUB_WORKSPACE/GroundtruthCompat" "$RUNNER_TEMP/GroundtruthCompat"
           echo "GROUNDTRUTH_ROOT=$RUNNER_TEMP/Groundtruth" >> "$GITHUB_ENV"
+          echo "GROUNDTRUTH_COMPAT_ROOT=$RUNNER_TEMP/GroundtruthCompat" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -70,6 +78,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/vendor/gt-index-linux-amd64" "$RUNNER_TEMP/gt-index"
           echo "GT_CERTIFIED_INDEX_BINARY=$RUNNER_TEMP/gt-index-certified" >> "$GITHUB_ENV"
           echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+          echo "GROUNDTRUTH_ROOT=$GROUNDTRUTH_COMPAT_ROOT" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/bin"
           ln -sf "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
           chmod +x "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
