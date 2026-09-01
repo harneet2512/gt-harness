@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: harneet2512/groundtruth
-          ref: f2863f8781edaeaef8787c515e36381cdbd692d5
+          ref: db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14
           path: Groundtruth
       - uses: actions/setup-go@v5
         with:
