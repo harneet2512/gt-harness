@@ -1,0 +1,87 @@
+name: GroundTruth evidence CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install project dependencies
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+      - name: Run full pytest suite
+        id: pytest
+        continue-on-error: true
+        run: python -m pytest -q
+      - name: Emit CI outcome packet
+        if: always()
+        env:
+          CONCLUSION: ${{ steps.pytest.outcome == 'success' && 'success' || 'failure' }}
+        run: >-
+          python scripts/ci_emit_review_packet.py
+          --ticket HAR-76 --pr ${{ github.event.pull_request.number || 0 }}
+          --head-sha ${{ github.event.pull_request.head.sha || github.sha }}
+          --check ci-pytest --conclusion "$CONCLUSION"
+          --run-id ${{ github.run_id }} --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          --output ci-packets/ci-pytest-${{ github.run_id }}.json
+      - name: Upload CI outcome packet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-review-packets-${{ github.run_id }}-pytest
+          path: ci-packets/ci-pytest-${{ github.run_id }}.json
+          if-no-files-found: error
+      - name: Fail on RED suite
+        if: steps.pytest.outcome != 'success'
+        run: exit 1
+
+  feature-matrix:
+    name: feature matrix verifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project dependencies
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+      - name: Verify 18x18 feature matrix
+        id: matrix
+        continue-on-error: true
+        run: python scripts/verify_feature_matrix.py
+      - name: Emit CI outcome packet
+        if: always()
+        env:
+          CONCLUSION: ${{ steps.matrix.outcome == 'success' && 'success' || 'failure' }}
+        run: >-
+          python scripts/ci_emit_review_packet.py
+          --ticket HAR-76 --pr ${{ github.event.pull_request.number || 0 }}
+          --head-sha ${{ github.event.pull_request.head.sha || github.sha }}
+          --check ci-feature-matrix --conclusion "$CONCLUSION"
+          --run-id ${{ github.run_id }} --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          --output ci-packets/ci-feature-matrix-${{ github.run_id }}.json
+      - name: Upload CI outcome packet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-review-packets-${{ github.run_id }}-feature-matrix
+          path: ci-packets/ci-feature-matrix-${{ github.run_id }}.json
+          if-no-files-found: error
+      - name: Fail on RED matrix verification
+        if: steps.matrix.outcome != 'success'
+        run: exit 1
