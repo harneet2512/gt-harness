@@ -8,8 +8,11 @@ from gt_engine.context_packet import (
     ContextPacketAbstention,
     build_context_packet,
     build_fixture_matrix,
+    serve_context_packet,
     verify_context_packet,
 )
+from gt_engine.evidence_router import EvidenceRouter, verify_eligibility_receipt
+from gt_engine.task_contract import TaskContract
 
 
 def test_fixture_matrix_covers_three_files_and_boundaries() -> None:
@@ -53,4 +56,21 @@ def test_tamper_and_stale_revision_are_rejected() -> None:
             boundary="open",
             claims=({"claim_id": "a", "kind": "definition", "confidence": 0.9, "graph_revision": "graph-old"},),
         )
+
+
+def test_serving_seals_packet_through_eligibility_router() -> None:
+    router = EvidenceRouter(TaskContract(role="content_scan", obligations=()))
+    packet, receipt = serve_context_packet(
+        source_revision="src-1",
+        graph_revision="graph-1",
+        file_path="src/a.py",
+        boundary="view",
+        claims=({"claim_id": "definition", "kind": "definition", "confidence": 0.9},),
+        eligibility_router=router,
+        decision_id="decision-1",
+        iteration_id="iteration-1",
+    )
+    assert verify_context_packet(packet)
+    assert verify_eligibility_receipt(receipt)
+    assert receipt["claims"][0]["claim_id"] == packet["packet_id"]
 

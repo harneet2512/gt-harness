@@ -1,7 +1,8 @@
-"""Deterministic, receipt-bound context packets for HAR-74 design prep.
+"""Deterministic, receipt-bound context packets for HAR-74.
 
-This module deliberately stops at the fixture/builder boundary.  Serving and
-eligibility wiring are deferred until the HAR-69 index-reuse boundary lands.
+Packets are built from certified rows and may be served at an open/view/edit
+boundary only through the existing eligibility router.  The router seals the
+delivered bytes before they can enter a model request.
 """
 from __future__ import annotations
 
@@ -148,6 +149,53 @@ class ContextPacketFixture:
     file_path: str
     boundary: str
     packet: dict[str, Any]
+
+
+def serve_context_packet(
+    *,
+    source_revision: str,
+    graph_revision: str,
+    file_path: str,
+    boundary: str,
+    claims: Iterable[Mapping[str, Any]],
+    edges: Iterable[Mapping[str, Any]] = (),
+    byte_budget: int = 8192,
+    eligibility_router: Any,
+    decision_id: str,
+    iteration_id: str,
+    baseline_request: Any | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build and seal one packet through the existing admission boundary.
+
+    No sidecar transport is allowed: the canonical packet bytes are the sole
+    admitted claim and the returned receipt is the authority for delivery.
+    """
+    packet = build_context_packet(
+        source_revision=source_revision,
+        graph_revision=graph_revision,
+        file_path=file_path,
+        boundary=boundary,
+        claims=claims,
+        edges=edges,
+        byte_budget=byte_budget,
+    )
+    if not verify_context_packet(packet):
+        raise ContextPacketAbstention("packet_verification_failed")
+    baseline = baseline_request if baseline_request is not None else {"messages": [{"content": ""}]}
+    rendered = _canonical(packet).decode("utf-8")
+    _transported, receipt = eligibility_router.admit_decision(
+        decision_id=decision_id,
+        iteration_id=iteration_id,
+        candidates=[
+            {
+                "claim_id": packet["packet_id"],
+                "evidence_type": "context_packet",
+                "rendered": rendered,
+            }
+        ],
+        baseline_request=baseline,
+    )
+    return packet, receipt
 
 
 def build_fixture_matrix(*, source_revision: str, graph_revision: str) -> tuple[ContextPacketFixture, ...]:
