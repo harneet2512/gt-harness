@@ -35,7 +35,10 @@ jobs:
           python -m pip install --disable-pip-version-check \
             --require-hashes -r config/product-requirements.lock
           python -m pip install --disable-pip-version-check --no-deps .
+          python -m pip install --disable-pip-version-check --no-deps \
+            vendor/groundtruth_mcp-1.0.0-py3-none-any.whl
           python -c "import importlib.metadata as m; assert m.version('mini-swe-agent') == '2.4.6'; assert m.version('harbor') == '0.20.0'; assert m.version('datacurve-pier') == '0.3.1'"
+          python -c "import groundtruth; print(groundtruth.__file__)"
 
       - name: Prove static workflow reachability and closed secret boundary
         run: |
