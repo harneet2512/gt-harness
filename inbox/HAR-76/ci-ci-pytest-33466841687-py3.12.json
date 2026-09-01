@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-09-01T03:38:51.911734Z",
+  "detail": {
+    "conclusion": "failure",
+    "diagnosis": {
+      "failures": [],
+      "first_error": "E   ModuleNotFoundError: No module named 'groundtruth.runtime.adapters'"
+    },
+    "groundtruth_parity": "Harness CI runs the provider-free control-plane suite and the 18/18 feature matrix; Groundtruth parity remains covered by its existing provider-free Go/runtime workflows, with no provider or benchmark execution in this workflow.",
+    "run_id": "33466841687",
+    "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/33466841687"
+  },
+  "file": "",
+  "head_sha": "74433d0bf9db182de6877a68cc8e64ad56959ea2",
+  "kind": "check_outcome",
+  "line": 0,
+  "message": "ci-pytest CI outcome: failure",
+  "packet_digest_sha256": "bea2638f2ea1cbf61319f1b48df0bb197e3ea3c76df53c5652dca072f781d086",
+  "packet_id": "ci-ci-pytest-33466841687-py3.12",
+  "pr": 34,
+  "schema": "gt.review_packet.v1",
+  "severity": "error",
+  "source": {
+    "check": "ci-pytest",
+    "system": "gt-ci"
+  },
+  "status": "open",
+  "supersedes": null,
+  "ticket": "HAR-76"
+}
