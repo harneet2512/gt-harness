@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:19:23.485331Z",
+  "detail":"Independent coordinator review verified the clean main-based head, content-addressed source manifest plus producer binary and schema key, exact-key reuse gate, quick_check, atomic publication, and focused tests. INTERIM remains due V107 Bugbot and terminal review gates.",
+  "file":"",
+  "head_sha":"6e66d9bb5a369b0ab95408fb1a101b0aeac50ac5",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-69 exact-head interim review",
+  "packet_digest_sha256":"fcafc27729a94957ffad7f16efc43c6a458b9a3df8ee56e31869c7d1b413f281",
+  "packet_id":"rev-222-har69-interim",
+  "pr":31,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"REV-222",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-69"
+}
