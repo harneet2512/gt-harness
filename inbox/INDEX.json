@@ -13,6 +13,7 @@
     "finder-f1-fixed",
     "finder-f2",
     "finder-f2-fixed",
+    "merge-pr24-ad022ba4",
     "rev-219-har73-interim",
     "rev-220-har74-interim",
     "rev-221-transport-rewind-fixed",
@@ -25,7 +26,8 @@
       "rev-222-reviewer-interim"
     ],
     "HAR-62":[
-      "bugbot-pr24-20260901"
+      "bugbot-pr24-20260901",
+      "merge-pr24-ad022ba4"
     ],
     "HAR-63":[
       "bugbot-pr25-20260901",

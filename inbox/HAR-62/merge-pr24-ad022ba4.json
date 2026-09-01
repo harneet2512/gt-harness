@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:36:11.893589Z",
+  "detail":"Main advanced fast-forward-only from 039121bc62c1354a3b3685f58102790e524d7b83 to the exact candidate ad022ba454d740b660c5a97e4a82868aa0723b79. No merge commit was created; remote main verifies the candidate.",
+  "file":"",
+  "head_sha":"ad022ba454d740b660c5a97e4a82868aa0723b79",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"PR #24 fast-forward merged",
+  "packet_digest_sha256":"204478ea432a3e469fcbd81671285c8489d0dc5553ac7a91bda6c2fb7fdf5264",
+  "packet_id":"merge-pr24-ad022ba4",
+  "pr":24,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"FF-MERGE",
+    "system":"coordinator"
+  },
+  "status":"fixed",
+  "supersedes":null,
+  "ticket":"HAR-62"
+}
