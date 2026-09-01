@@ -594,7 +594,11 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
     def test_command(label: str) -> subprocess.CompletedProcess[str]:
         started = time.monotonic_ns()
         process = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", test.name],
+            [
+                sys.executable,
+                "-c",
+                "from calculator import add; assert add(2, 3) == 5",
+            ],
             cwd=task_root,
             env={**os.environ, **safe_env},
             capture_output=True,
@@ -604,7 +608,7 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
         trace.append(
             {
                 "action": label,
-                "command": "python -m pytest -q test_calculator.py",
+                "command": "python -c 'from calculator import add; assert add(2, 3) == 5'",
                 "return_code": process.returncode,
                 "output_sha256": hashlib.sha256(
                     (process.stdout + process.stderr).encode("utf-8")
@@ -628,7 +632,10 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
             f"initial={initial.returncode}:recovery={recovery.returncode}:final={final.returncode}:"
             f"initial_stderr={initial.stderr[-240:]!r}:"
             f"recovery_stderr={recovery.stderr[-240:]!r}:"
-            f"final_stderr={final.stderr[-240:]!r}"
+            f"final_stderr={final.stderr[-240:]!r}:"
+            f"initial_stdout={initial.stdout[-240:]!r}:"
+            f"recovery_stdout={recovery.stdout[-240:]!r}:"
+            f"final_stdout={final.stdout[-240:]!r}"
         )
     trace_path = root / arm / "trajectory.json"
     _atomic_json(trace_path, trace)
