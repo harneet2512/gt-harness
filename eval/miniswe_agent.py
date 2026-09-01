@@ -64,6 +64,30 @@ def _miniswe_agent_version() -> str:
 class MiniSweAgent(BaseInstalledAgent):
     """Mini-SWE-Agent, GT-off, as a Terminal-Bench 2.0 agent."""
 
+    async def exec_as_agent(
+        self,
+        environment: BaseEnvironment,
+        command: str,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        timeout_sec: int | None = None,
+    ):
+        """Apply Pier's filtered-egress proxy at the Harbor execution seam.
+
+        Harbor 0.20's ``BaseInstalledAgent`` calls ``environment.exec``
+        directly and does not invoke Pier's ``agent_process_env`` hook.  Without
+        this bridge, the task container has the proxy sidecar but the model
+        process attempts direct DNS and fails closed.
+        """
+        process_env = environment.agent_process_env(env)
+        return await super().exec_as_agent(
+            environment,
+            command,
+            env=process_env,
+            cwd=cwd,
+            timeout_sec=timeout_sec,
+        )
+
     @staticmethod
     def name() -> str:
         return "miniswe"
