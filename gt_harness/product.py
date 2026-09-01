@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from collections.abc import Iterable, Mapping
@@ -655,6 +656,106 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
     return result
 
 
+def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> dict[str, Any]:
+    """Install the built wheel in one pinned task image and smoke its entrypoints.
+
+    This is intentionally a small provider-free proof: it does not run a benchmark
+    task, but it exercises the same image/runtime boundary used by the Harbor
+    adapter.  Missing Docker or a failed install is recorded, never converted into
+    a passing receipt.
+    """
+    wheel_record = bundle.get("python_wheel")
+    tasks = bundle.get("tasks")
+    if not isinstance(wheel_record, Mapping) or not isinstance(tasks, list) or not tasks:
+        return {"status": "FAILED", "reason": "container_fixture_identity_missing"}
+    wheel = bundle_dir / "dist" / str(wheel_record.get("filename"))
+    image = str(tasks[0].get("container_image") or "")
+    digest = str(tasks[0].get("container_digest") or "")
+    if not wheel.is_file() or not image or not digest:
+        return {"status": "FAILED", "reason": "container_fixture_artifact_missing"}
+    target = f"/tmp/{wheel.name}"
+    mount = f"{wheel.resolve()}:{target}:ro"
+    probe = (
+        "import subprocess,sys; "
+        f"subprocess.check_call([sys.executable,'-m','pip','install','--no-deps',"
+        f"'--target','/tmp/gt-installed','{target}']); "
+        "sys.path.insert(0,'/tmp/gt-installed'); "
+        "import gt_harness.product, scripts.miniswe_gt_run; print('installed-product-ok')"
+    )
+    try:
+        process = subprocess.run(
+            ["docker", "run", "--rm", "--network", "none", "-v", mount, image, "python", "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"status": "FAILED", "reason": f"container_probe_{type(exc).__name__}"}
+    output = process.stdout + process.stderr
+    return {
+        "status": "VERIFIED" if process.returncode == 0 and "installed-product-ok" in output else "FAILED",
+        "image": image,
+        "digest": digest,
+        "wheel_sha256": wheel_record.get("sha256"),
+        "return_code": process.returncode,
+        "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
+    }
+
+
+def _prove_fake_openai_transport() -> dict[str, Any]:
+    """Exercise a deterministic OpenAI-compatible chat-completions transport."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.request import Request, urlopen
+
+    class Handler(BaseHTTPRequestHandler):
+        calls = 0
+
+        def do_POST(self):  # noqa: N802 - stdlib handler API
+            Handler.calls += 1
+            length = int(self.headers.get("content-length", "0"))
+            self.rfile.read(length)
+            body = canonical_json_bytes(
+                {
+                    "id": "fake-provider-1",
+                    "object": "chat.completion",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            )
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        payload = canonical_json_bytes(
+            {"model": "provider-free-fixture", "messages": [{"role": "user", "content": "ping"}]}
+        )
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/v1/chat/completions",
+            data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=10) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        valid = body.get("choices", [{}])[0].get("message", {}).get("content") == "ok"
+        return {"status": "VERIFIED" if valid and Handler.calls == 1 else "FAILED", "calls": Handler.calls}
+    except Exception as exc:  # noqa: BLE001 - receipt must retain typed failure
+        return {"status": "FAILED", "calls": Handler.calls, "reason": type(exc).__name__}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def run_provider_free_acceptance(
     manifest_path: str | Path, *, output_dir: str | Path
 ) -> dict[str, Any]:
@@ -671,6 +772,8 @@ def run_provider_free_acceptance(
     bundle_dir = output / "bundle"
     bundle = build_product_bundle(manifest_path, output_dir=bundle_dir)
     installation = _install_and_attest_wheel(bundle, bundle_dir=bundle_dir, output=output)
+    container_proof = _prove_container_install(bundle, bundle_dir=bundle_dir)
+    fake_provider_proof = _prove_fake_openai_transport()
     arms: list[dict[str, Any]] = []
     plans: list[dict[str, Any]] = []
     for arm in ("bare", "groundtruth"):
@@ -715,10 +818,8 @@ def run_provider_free_acceptance(
                 f"dependency_identity_mismatch:{name}"
                 for name in installation["dependency_mismatches"]
             }
-            | {
-                "container_install_not_executed",
-                "openai_compatible_fake_provider_not_executed",
-            }
+            | ({"container_install_not_executed"} if container_proof["status"] != "VERIFIED" else set())
+            | ({"openai_compatible_fake_provider_not_executed"} if fake_provider_proof["status"] != "VERIFIED" else set())
         ),
         "install_attestation_sha256": installation["attestation_digest_sha256"],
         "provider_calls": 0,
@@ -732,10 +833,8 @@ def run_provider_free_acceptance(
         "secret_canary_matches": sorted(set(matches)),
         "live_smoke": {"status": "NOT_EXECUTED", "approved": False},
         "full_benchmark": {"status": "APPROVAL_GATED", "executed": False},
-        "container_proof": {
-            "status": "NOT_EXECUTED",
-            "reason": "provider_free_core_does_not_assume_a_local_container_daemon",
-        },
+        "container_proof": container_proof,
+        "fake_provider_proof": fake_provider_proof,
     }
     receipt["closeout_digest_sha256"] = _digest(receipt)
     _atomic_json(output / "product-closeout.json", receipt)
