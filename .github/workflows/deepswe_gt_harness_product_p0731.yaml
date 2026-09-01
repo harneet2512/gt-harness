@@ -158,8 +158,8 @@ jobs:
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.4.6",
               "treatment": treatment,
-              "requested_model": "deepseek-v4-p0731",
-              "effective_model": "openai/deepseek-v4-p0731",
+              "requested_model": "deepseek-v4-flash",
+              "effective_model": "openai/deepseek-v4-flash",
               "provider": "deepseek:native:api.deepseek.com",
               "baseline": manifest["baseline"],
               "matrix": matrix,
@@ -208,7 +208,7 @@ jobs:
             status_codes="${status_codes}${status_codes:+,}${status:-000}"
             case "$status" in
               2??)
-                if python -c 'import json,os,pathlib; payload=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-gate-response.json").read_text(encoding="utf-8")); models={str(row.get("id")) for row in payload.get("data",[]) if isinstance(row,dict) and row.get("id")}; assert "deepseek-v4-p0731" in models, "native DeepSeek catalog lacks deepseek-v4-p0731"'; then
+                if python -c 'import json,os,pathlib; payload=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-gate-response.json").read_text(encoding="utf-8")); models={str(row.get("id")) for row in payload.get("data",[]) if isinstance(row,dict) and row.get("id")}; assert "deepseek-v4-flash" in models, "native DeepSeek catalog lacks deepseek-v4-flash"'; then
                   success=true
                 fi
                 break ;;
@@ -226,7 +226,7 @@ jobs:
               "schema": "gt.provider_availability_gate.v1",
               "status": "PASS" if os.environ["SUCCESS"] == "true" else "FAIL",
               "source_sha": os.environ["SOURCE_SHA"],
-              "model": "deepseek-v4-p0731",
+              "model": "deepseek-v4-flash",
               "provider": "deepseek:native:api.deepseek.com",
               "attempts": int(os.environ["ATTEMPTS"]),
               "http_statuses": [
@@ -265,7 +265,7 @@ jobs:
     env:
       TASK: ${{ matrix.task }}
       ORDINAL: ${{ matrix.ordinal }}
-      MODEL: deepseek-v4-p0731
+      MODEL: deepseek-v4-flash
       GT_RETRIEVAL_MODE: hybrid_required
       GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
     steps:
@@ -505,9 +505,9 @@ jobs:
                   errors.append(f"adapter_contract_mismatch:{task}")
               if row.get("treatment") != plan.get("treatment"):
                   errors.append(f"adapter_treatment_mismatch:{task}")
-              if row.get("requested_model") != "deepseek-v4-p0731":
+              if row.get("requested_model") != "deepseek-v4-flash":
                   errors.append(f"requested_model_mismatch:{task}")
-              if row.get("effective_model") != "openai/deepseek-v4-p0731":
+              if row.get("effective_model") != "openai/deepseek-v4-flash":
                   errors.append(f"effective_model_mismatch:{task}")
               if row.get("agent_scaffold_version") != "2.4.6":
                   errors.append(f"scaffold_version_mismatch:{task}")
@@ -673,6 +673,5 @@ jobs:
           name: gt-harness-deepswe20-attestation-${{ github.run_id }}
           path: attestation/deepswe20-attestation.json
           if-no-files-found: error
-
 
 
