@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:35:16.522458Z",
+  "detail":"The PR head and standard checks are observed, but no Cursor Bugbot outcome is exposed yet. This packet records the immediate watch state; terminal PASS and FF remain pending until the named ticket comment arrives.",
+  "file":"",
+  "head_sha":"af3892866b01e3fc549507df9d0aa7bce9ea00dd",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"V107 Bugbot outcome pending",
+  "packet_digest_sha256":"babe2d06cad0b924ae98a3f8b52aa0673df9792e8330513aec556e91c5bd9bbe",
+  "packet_id":"bugbot-pr32-20260901",
+  "pr":32,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"V107",
+    "system":"cursor-bugbot"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-74"
+}
