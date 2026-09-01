@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T04:06:47.001517Z",
+  "detail":"{event:force_with_lease_push,old_head:b521c1c1a99cc320d71418559959d586e3c189e2,new_head:701a847293188f317b5e4307cbb0285d9415ff4e,base:aa6577a0284ded86579090983fdfaaf6d1cbcd26,content_tree_preserved:true,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"701a847293188f317b5e4307cbb0285d9415ff4e",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-76 rebase push: unchanged CI boundary rebased onto current main after HAR-77 landed; prior b521c1c1 grant was not FF-compatible with aa6577a0. Fresh exact-head review and FF grant required.",
+  "packet_digest_sha256":"4ec8050a910fc8d744668f31d39e9d5620ded60dddab925aefb9ac2ce8e582ed",
+  "packet_id":"har76-harness-701a8472",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
