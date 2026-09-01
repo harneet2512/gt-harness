@@ -1,0 +1,29 @@
+{
+  "created_at":"2026-09-01T04:11:50.017941Z",
+  "detail":{
+    "base":"aa6577a0284ded86579090983fdfaaf6d1cbcd26",
+    "benchmark_runs":0,
+    "content_tree_preserved":true,
+    "event":"force_with_lease_push",
+    "new_head":"701a847293188f317b5e4307cbb0285d9415ff4e",
+    "old_head":"b521c1c1a99cc320d71418559959d586e3c189e2",
+    "provider_calls":0
+  },
+  "file":"",
+  "head_sha":"701a847293188f317b5e4307cbb0285d9415ff4e",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-76 rebase push corrected: JSON-object detail supersedes the quote-stripped packet.",
+  "packet_digest_sha256":"0c8c987e962254b938eed8050721f3c8b0d7025cadecac75052b866f915cf16e",
+  "packet_id":"har76-harness-701a8472-v2",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":"har76-harness-701a8472",
+  "ticket":"HAR-76"
+}
