@@ -23,7 +23,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install project dependencies
-        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+        run: >-
+          python -m pip install --disable-pip-version-check
+          -e ".[dev,miniswe,eval]" litellm vendor/groundtruth_mcp-*.whl
       - name: Run full pytest suite
         id: pytest
         continue-on-error: true
@@ -59,7 +61,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install project dependencies
-        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+        run: >-
+          python -m pip install --disable-pip-version-check
+          -e ".[dev,miniswe,eval]" litellm vendor/groundtruth_mcp-*.whl
       - name: Verify 18x18 feature matrix
         id: matrix
         continue-on-error: true
