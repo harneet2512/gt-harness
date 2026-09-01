@@ -180,7 +180,9 @@ def test_provider_free_acceptance_executes_both_parity_arms(tmp_path: Path) -> N
     assert receipt["status"] == "VERIFIED_PROVIDER_FREE"
     assert receipt["provider_calls"] == 0
     assert receipt["release_eligible"] is False
-    assert "container_install_not_executed" in receipt["release_blockers"]
+    assert receipt["container_proof"]["status"] == "VERIFIED"
+    assert receipt["fake_provider_proof"]["status"] == "VERIFIED"
+    assert "groundtruth_source_not_accepted_default_ancestor" in receipt["release_blockers"]
     assert [row["arm"] for row in receipt["arms"]] == ["bare", "groundtruth"]
     assert receipt["parity"]["structural_identity_equal"] is True
     assert receipt["secret_canary_matches"] == []
