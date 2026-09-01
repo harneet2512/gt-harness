@@ -1,0 +1,26 @@
+{
+  "created_at": "2026-09-01T04:29:23.051225Z",
+  "detail": {
+    "conclusion": "success",
+    "groundtruth_parity": "Harness CI runs the provider-free control-plane suite and the 18/18 feature matrix; Groundtruth parity remains covered by its existing provider-free Go/runtime workflows, with no provider or benchmark execution in this workflow.",
+    "run_id": "33469878118",
+    "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/33469878118"
+  },
+  "file": "",
+  "head_sha": "b98ef05cf8a7ec9b78a37a0c0c42c94592f78e7f",
+  "kind": "check_outcome",
+  "line": 0,
+  "message": "ci-pytest CI outcome: success",
+  "packet_digest_sha256": "e20bc4837a299dd01a7bb2d05332b4c920723ae808d8afe8bbea980fda980f9f",
+  "packet_id": "ci-ci-pytest-33469878118-py3.12",
+  "pr": 36,
+  "schema": "gt.review_packet.v1",
+  "severity": "info",
+  "source": {
+    "check": "ci-pytest",
+    "system": "gt-ci"
+  },
+  "status": "open",
+  "supersedes": null,
+  "ticket": "HAR-76"
+}
