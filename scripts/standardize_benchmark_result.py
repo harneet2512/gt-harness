@@ -24,6 +24,41 @@ _PROVIDER_EXCEPTIONS = frozenset(
 )
 
 
+def conservative_outcomes(
+    task_ids: list[str], official_results: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, object]]:
+    """Represent every planned task exactly once without inventing a grade."""
+    if len(task_ids) != len(set(task_ids)):
+        raise ValueError("duplicate_planned_task")
+    unexpected = sorted(set(official_results) - set(task_ids))
+    if unexpected:
+        raise ValueError(f"unexpected_official_result:{unexpected[0]}")
+    outcomes: dict[str, dict[str, object]] = {}
+    for task_id in task_ids:
+        result = official_results.get(task_id)
+        if result is None:
+            outcomes[task_id] = {
+                "status": "ERROR",
+                "graded": False,
+                "reward": None,
+                "solved": False,
+                "failure_class": "missing_result",
+                "error_code": "official_verifier_result_missing",
+            }
+            continue
+        reward = result.get("reward")
+        graded = result.get("status") == "GRADED" and reward in (0, 0.0, 1, 1.0)
+        outcomes[task_id] = {
+            "status": "GRADED" if graded else "ERROR",
+            "graded": graded,
+            "reward": int(reward) if graded else None,
+            "solved": bool(graded and reward in (1, 1.0)),
+            "failure_class": "graded" if graded else str(result.get("failure_class") or "malformed_result"),
+            "error_code": "" if graded else str(result.get("error_code") or "official_verifier_result_malformed"),
+        }
+    return outcomes
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))

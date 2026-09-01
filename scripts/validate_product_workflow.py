@@ -18,11 +18,24 @@ _PATH = re.compile(r"(?:--manifest|--workflow)\s+([^\s\\]+)")
 def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
     text = workflow.read_text(encoding="utf-8")
     failures: list[str] = []
-    if "${{ secrets." in text:
+    paid = "approve_paid_run" in text
+    if "${{ secrets." in text and not paid:
         failures.append("workflow_secret_reference")
+    if paid:
+        required_paid_controls = (
+            "inputs.approve_paid_run == true",
+            "python -m scripts.provider_preflight",
+            "config/provider_route.v1.json",
+            "needs: [plan, provider_gate]",
+            "secrets.OPENROUTER_API_KEY",
+        )
+        if any(control not in text for control in required_paid_controls):
+            failures.append("paid_provider_gate_incomplete")
     if "|| true" in text:
         failures.append("unobservable_failure_suppression")
-    if "scripts/gt_product_acceptance.py" not in text or "--fake-provider" not in text:
+    if not paid and (
+        "scripts/gt_product_acceptance.py" not in text or "--fake-provider" not in text
+    ):
         failures.append("product_acceptance_unreachable")
     for revision in _ACTION.findall(text):
         if not re.fullmatch(r"[0-9a-f]{40}", revision):
@@ -51,7 +64,7 @@ def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
         or f'mini-swe-agent=={manifest["miniswe_agent_version"]}' not in lock_text
     ):
         failures.append("miniswe_version_not_reached")
-    if "provider_calls" not in text or "benchmark_runs" not in text:
+    if not paid and ("provider_calls" not in text or "benchmark_runs" not in text):
         failures.append("zero_spend_assertion_missing")
     return sorted(set(failures))
 

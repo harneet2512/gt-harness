@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.standardize_benchmark_result import standardize_result
+from scripts.standardize_benchmark_result import conservative_outcomes, standardize_result
 
 
 def _write_case(
@@ -110,3 +110,28 @@ def test_standardize_missing_verifier_never_manufactures_reward(tmp_path: Path) 
     assert receipt["solved"] is None
     assert receipt["failure_class"] == "missing_verifier"
     assert receipt["error_code"] == "official_verifier_missing"
+
+
+def test_conservative_outcomes_represents_missing_task_once() -> None:
+    outcomes = conservative_outcomes(
+        ["task-a", "task-b"],
+        {
+            "task-a": {
+                "status": "GRADED",
+                "reward": 1,
+                "failure_class": "graded",
+                "error_code": "",
+            }
+        },
+    )
+
+    assert list(outcomes) == ["task-a", "task-b"]
+    assert outcomes["task-a"]["solved"] is True
+    assert outcomes["task-b"] == {
+        "status": "ERROR",
+        "graded": False,
+        "reward": None,
+        "solved": False,
+        "failure_class": "missing_result",
+        "error_code": "official_verifier_result_missing",
+    }

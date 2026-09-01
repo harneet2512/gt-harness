@@ -74,7 +74,7 @@ jobs:
       model: ${{ steps.cohort.outputs.model }}
       provider_base_url: ${{ steps.cohort.outputs.provider_base_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.code_ref || github.sha }}
 
@@ -82,12 +82,12 @@ jobs:
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
       - name: Checkout the immutable DeepSWE snapshot
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: datacurve-ai/deep-swe
           ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
@@ -217,7 +217,7 @@ jobs:
           PY
 
       - name: Upload the immutable DeepSWE plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gt-harness-deepswe20-plan-${{ github.run_id }}
           path: deepswe20-plan.json
@@ -229,11 +229,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.plan.outputs.source_sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
@@ -250,7 +250,7 @@ jobs:
 
       - name: Upload provider availability receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gt-harness-deepswe20-provider-gate-${{ github.run_id }}
           path: provider-gate.json
@@ -275,22 +275,22 @@ jobs:
       GT_RETRIEVAL_MODE: hybrid_required
       GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.plan.outputs.source_sha }}
 
       - name: Checkout the immutable DeepSWE snapshot
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: datacurve-ai/deep-swe
           ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
           path: deepswe-bench
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: vendor/gt-index-src/go.mod
           cache-dependency-path: vendor/gt-index-src/go.sum
@@ -347,10 +347,13 @@ jobs:
           # 400 on GitHub-hosted runners.  Anonymous pulls are supported, so
           # do not turn an optional optimization into a task failure.  The
           # stagger below prevents the 20-job matrix from creating a burst.
+          set +e
           token="$(curl --fail --silent --show-error \
             'https://public.ecr.aws/token/?scope=repository:d3j8x8q7/swe-bench-202605:pull&service=public.ecr.aws' \
-            | python -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)"
-          if [ -n "$token" ] && printf '%s' "$token" | docker login public.ecr.aws --username AWS --password-stdin; then
+            | python -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null)"
+          token_status=$?
+          set -e
+          if [ "$token_status" -eq 0 ] && [ -n "$token" ] && printf '%s' "$token" | docker login public.ecr.aws --username AWS --password-stdin; then
             echo "Public ECR authentication configured"
           else
             echo "Public ECR authenticated pull unavailable; using staggered anonymous pull"
@@ -405,9 +408,9 @@ jobs:
       - name: Install Pier and the canonical product source
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[retrieval,eval]' \
-            "mini-swe-agent==2.4.6" "harbor==0.20.0" "datacurve-pier==0.3.1"
+          python -m pip install --disable-pip-version-check \
+            --require-hashes -r config/product-requirements.lock
+          python -m pip install --disable-pip-version-check --no-deps .
           test "$(python -c 'import importlib.metadata as m; print(m.version("mini-swe-agent"))')" = "2.4.6"
           test "$(python -c 'import importlib.metadata as m; print(m.version("datacurve-pier"))')" = "0.3.1"
 
@@ -462,7 +465,7 @@ jobs:
 
       - name: Upload DeepSWE verifier and GT Harness product evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gt-harness-deepswe20-task-${{ matrix.ordinal }}-${{ github.run_id }}
           path: results/deepswe/
@@ -474,24 +477,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.plan.outputs.source_sha }}
 
       - name: Download immutable plan
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gt-harness-deepswe20-plan-${{ github.run_id }}
           path: attestation
 
       - name: Download provider gate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gt-harness-deepswe20-provider-gate-${{ github.run_id }}
           path: attestation
 
       - name: Download all task artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: gt-harness-deepswe20-task-*-${{ github.run_id }}
           path: attestation/tasks
@@ -509,6 +512,7 @@ jobs:
           from pathlib import Path
 
           from gt_harness.analysis.delivery import audit_treatment_delivery
+          from scripts.standardize_benchmark_result import conservative_outcomes
 
           root = Path("attestation")
           plan = json.loads((root / "deepswe20-plan.json").read_text(encoding="utf-8"))
@@ -652,18 +656,7 @@ jobs:
           if set(official_results) != expected_set:
               errors.append("official_verifier_task_set_mismatch")
 
-          outcomes = {}
-          for row in trial_rows:
-              task = normalized_task_name(row["task_name"])
-              verifier = row.get("verifier_result") or {}
-              rewards = verifier.get("rewards") or {}
-              reward = rewards.get("reward")
-              outcomes[task] = {
-                  "graded": reward is not None,
-                  "reward": reward,
-                  "solved": reward == 1 or reward == 1.0,
-                  "exception": (row.get("exception_info") or {}).get("exception_type"),
-              }
+          outcomes = conservative_outcomes(expected, official_results)
 
           solved = sum(1 for row in outcomes.values() if row["solved"])
           graded = sum(1 for row in outcomes.values() if row["graded"])
@@ -715,7 +708,7 @@ jobs:
 
       - name: Upload final DeepSWE GT Harness attestation
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gt-harness-deepswe20-attestation-${{ github.run_id }}
           path: attestation/deepswe20-attestation.json
