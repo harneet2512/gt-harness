@@ -1,0 +1,42 @@
+{
+  "schema": "gt.har80.route_b.v1",
+  "status": "PASS",
+  "route": "B",
+  "python_runtime": {
+    "certifier": "vendor/groundtruth_mcp-*.whl",
+    "wheel_sha256": "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e",
+    "import_parity_schema": "gt.har80.import_parity.v1"
+  },
+  "source_runtime_policy": "The Groundtruth source checkout is not a Python runtime certifier; harness source-import parity is verified against the pinned wheel.",
+  "producer": {
+    "repository": "github.com/harneet2512/groundtruth",
+    "commit": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
+    "tree": "1028a3b8f6be7c585393ce07b2e9ba87bd052084",
+    "certified_surfaces": ["gt-index binary", "framework overlays"]
+  },
+  "modules": [
+    "groundtruth._binary",
+    "groundtruth.pretask.spec",
+    "groundtruth.runtime",
+    "groundtruth.runtime.adapters.miniswe",
+    "groundtruth.runtime.covering_runner",
+    "groundtruth.runtime.deterministic_queries",
+    "groundtruth.runtime.edit_check",
+    "groundtruth.runtime.episode_state",
+    "groundtruth.runtime.evidence_envelope",
+    "groundtruth.runtime.gateway",
+    "groundtruth.runtime.hypothesis_ledger",
+    "groundtruth.runtime.miniswe_provider_boundary",
+    "groundtruth.runtime.native_render",
+    "groundtruth.runtime.patch_auditor",
+    "groundtruth.runtime.patterns",
+    "groundtruth.runtime.reasoning_runtime",
+    "groundtruth.runtime.rl_profile",
+    "groundtruth.runtime.submit_gate",
+    "groundtruth.runtime.terminal_evidence",
+    "groundtruth.runtime.verification_plan"
+  ],
+  "provider_calls": 0,
+  "benchmark_runs": 0,
+  "benchmark_ready": false
+}

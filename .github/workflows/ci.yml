@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: harneet2512/groundtruth
-          ref: db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14
+          ref: 43c6d723840f784d5eb939418dc2df57a6ff0a37
           path: Groundtruth
       - name: Checkout legacy Python metadata compatibility source
         uses: actions/checkout@v4
