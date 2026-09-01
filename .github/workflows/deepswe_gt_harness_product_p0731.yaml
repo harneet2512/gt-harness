@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      task_selection:
+        description: "Optional comma-separated subset of the pinned smoke20 task IDs"
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       code_ref:
@@ -33,6 +38,11 @@ on:
         required: false
         type: boolean
         default: false
+      task_selection:
+        description: "Optional comma-separated subset of the pinned smoke20 task IDs"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -77,6 +87,7 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
           ALLOW_BASELINE_RERUN: ${{ inputs.allow_baseline_rerun || 'false' }}
+          TASK_SELECTION: ${{ inputs.task_selection || '' }}
         run: |
           set -euo pipefail
           if [[ "${TREATMENT}" == "bare" && "${ALLOW_BASELINE_RERUN}" != "true" ]]; then
@@ -112,9 +123,14 @@ jobs:
           if order_hash != manifest.get("task_order_sha256"):
               raise SystemExit("DeepSWE smoke20 order hash mismatch")
 
+          selection = [item.strip() for item in os.environ["TASK_SELECTION"].split(",") if item.strip()]
+          if selection and (len(selection) != len(set(selection)) or not set(selection).issubset(tasks)):
+              raise SystemExit("task_selection must contain unique IDs from the pinned smoke20 cohort")
+          selected_tasks = selection or tasks
+
           language_counts = {}
           matrix = []
-          for ordinal, task in enumerate(tasks, start=1):
+          for ordinal, task in enumerate(selected_tasks, start=1):
               config = bench / "tasks" / task / "task.toml"
               if not config.is_file():
                   raise SystemExit(f"missing DeepSWE task: {task}")
@@ -136,7 +152,7 @@ jobs:
                       "task_config_sha256": budget["task_config_sha256"],
                   }
               )
-          if language_counts != manifest.get("language_counts"):
+          if not selection and language_counts != manifest.get("language_counts"):
               raise SystemExit(
                   f"DeepSWE language balance mismatch: {language_counts!r}"
               )
@@ -148,12 +164,12 @@ jobs:
               "schema": "gt.deepswe_gt_harness_plan.v1",
               "source_sha": os.environ["SOURCE_SHA"],
               "benchmark_sha": manifest["benchmark_sha"],
-              "task_ids": tasks,
-              "task_count": len(tasks),
-              "task_order_sha256": order_hash,
+              "task_ids": selected_tasks,
+              "task_count": len(selected_tasks),
+              "task_order_sha256": hashlib.sha256(("\n".join(selected_tasks) + "\n").encode()).hexdigest(),
               "language_counts": language_counts,
               "attempts_per_task": 1,
-              "max_parallel": 20,
+              "max_parallel": min(20, len(selected_tasks)),
               "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent",
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.4.6",
@@ -170,8 +186,8 @@ jobs:
           )
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("matrix=" + json.dumps({"include": matrix}, separators=(",", ":")) + "\n")
-              output.write(f"task_count={len(tasks)}\n")
-              output.write(f"task_order_sha256={order_hash}\n")
+              output.write(f"task_count={len(selected_tasks)}\n")
+              output.write(f"task_order_sha256={receipt['task_order_sha256']}\n")
           PY
 
       - name: Upload the immutable DeepSWE plan
@@ -527,7 +543,7 @@ jobs:
               return str(value).split("__", 1)[0].rsplit("/", 1)[-1]
 
           observed_trials = [normalized_task_name(row["task_name"]) for row in trial_rows]
-          if len(observed_trials) != 20 or set(observed_trials) != expected_set:
+          if len(observed_trials) != len(expected) or set(observed_trials) != expected_set:
               errors.append("trial_task_set_mismatch")
           if len(observed_trials) != len(set(observed_trials)):
               errors.append("duplicate_trial_task")
