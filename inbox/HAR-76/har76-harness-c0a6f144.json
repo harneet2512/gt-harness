@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:55:09.876066Z",
+  "detail":"Directed adjudication fix: next CI pytest packet captures and publishes diagnosis.failures (stable FAILED node IDs) and diagnosis.first_error from the transcript. Root causes established from run 33463923780: nested Groundtruth checkout contaminated failure-ID scan; local hook path was not installed; reviewed archive commit 7bbbc9d was absent from CI object store. This commit moves Groundtruth outside harness scan, runs .githooks/install locally, fetches the immutable fixture object, preserves full pytest and explicit exit status.",
+  "file":"",
+  "head_sha":"c0a6f14489121dba6e4232e6b278a9aa37f4879a",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 push c0a6f144",
+  "packet_digest_sha256":"2bd30736092882656dd11fe010855a9d6fefe720216fb935cf19092a33bb06e9",
+  "packet_id":"har76-harness-c0a6f144",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"har76-push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
