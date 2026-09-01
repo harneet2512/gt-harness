@@ -1,0 +1,45 @@
+{
+  "schema": "gt.provider_smoke_audit.v1",
+  "receipt": "artifacts/deepseekv4-p0731-live-smoke/provider-run-receipt.json",
+  "provider_free_acceptance": {
+    "status": "VERIFIED_PROVIDER_FREE",
+    "workflow_run": "33488826300",
+    "provider_calls": 0,
+    "benchmark_runs": 0,
+    "container_proof": "VERIFIED",
+    "fake_provider_proof": "VERIFIED"
+  },
+  "live_preflight": {
+    "status": "HTTP_200",
+    "provider_model_id": "deepseek-v4-flash",
+    "requested_release_label": "deepseekv4-p0731",
+    "literal_requested_id_exposed_by_provider": false,
+    "response_sha256": "700212e18fb8f3fdca73dd7060515656247849de5de5ee4d42bf68083090e803"
+  },
+  "smoke": {
+    "status": "PARTIAL_FAILURE",
+    "bare_metrics": "RECORDED",
+    "groundtruth_metrics": "TRAJECTORIES_ONLY",
+    "comparison": "WITHHELD"
+  },
+  "integrity": {
+    "raw_credentials_in_receipts": false,
+    "artifact_secret_scan": {
+      "status": "PASS",
+      "credential_canary_matches": 0,
+      "scope": "live-smoke artifact files under 2 MiB"
+    },
+    "provider_calls_claimed_as_benchmark_improvement": false,
+    "groundtruth_grades_manufactured": false,
+    "network_workaround_disclosed": true
+  },
+  "closeout": {
+    "status": "NOT_READY",
+    "groundtruth_provenance": "UNVERIFIED_SOURCE_TO_BYTES",
+    "next_recovery": [
+      "rerun Harbor on a Linux host/kernel supporting the pinned egress policy",
+      "collect all Groundtruth verifier reward files",
+      "recompute the paired comparison from complete task results"
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "schema": "gt.provider_smoke_receipt.v1",
+  "status": "PARTIAL_FAILURE",
+  "requested_release_label": "deepseekv4-p0731",
+  "provider_model_id": "deepseek-v4-flash",
+  "provider_model_release": "DeepSeek-V4-Flash-0731",
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "dataset_commit": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+  "task_order_sha256": "87468ba299eced3f93b8bec159024281b8151de186733e548bef730a4e1cfa25",
+  "task_count": 20,
+  "parallelism": 20,
+  "network_policy": "PUBLIC_WORKAROUND_DOCKER_DESKTOP_NFT_FIB_UNSUPPORTED",
+  "credential_source": "cloud_access.md:deepseek_direct (value withheld)",
+  "bare": {
+    "status": "COMPLETED_WITH_ONE_AGENT_ERROR",
+    "harbor_run": "2026-09-01__10-19-35",
+    "planned": 20,
+    "represented": 20,
+    "completed": 20,
+    "errors": 1,
+    "provider_calls": 1981,
+    "provider_calls_mean": 99.05,
+    "provider_calls_min": 81,
+    "provider_calls_max": 100,
+    "solved_tasks_reward_1": 1,
+    "reward_minus_one": 4,
+    "reward_zero": 15,
+    "f2p": 0.05,
+    "p2p": 0.7,
+    "partial": 0.5883732762680866,
+    "harbor_reward": -0.15,
+    "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/bare-rerun/2026-09-01__10-19-35"
+  },
+  "groundtruth": {
+    "status": "INCOMPLETE_CONTROLLER_UNEXPECTED_EOF",
+    "harbor_run": "2026-09-01__10-54-08",
+    "planned": 20,
+    "trajectories_saved": 20,
+    "provider_calls": 1257,
+    "provider_calls_mean": 62.85,
+    "provider_calls_min": 26,
+    "provider_calls_max": 81,
+    "graded_tasks": 0,
+    "artifact_root": "artifacts/deepseekv4-p0731-live-smoke/groundtruth/2026-09-01__10-54-08",
+    "controller_failure": "docker_unexpected_eof",
+    "grade_claim": false
+  },
+  "comparison": {
+    "status": "NOT_CLAIMED",
+    "reason": "Groundtruth reward files were not collected; a bare-vs-Groundtruth improvement cannot be inferred.",
+    "provider_calls_delta_groundtruth_minus_bare_mean": -36.2
+  },
+  "release_eligible": false,
+  "release_blockers": [
+    "docker_desktop_nftables_fib_rule_unsupported",
+    "groundtruth_controller_unexpected_eof",
+    "groundtruth_task_grades_missing"
+  ]
+}
