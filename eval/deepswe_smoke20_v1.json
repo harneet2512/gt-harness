@@ -1,0 +1,57 @@
+{
+  "schema": "gt.deepswe_smoke20.v1",
+  "benchmark": "DeepSWE v1.1 catalog-compatible snapshot",
+  "benchmark_sha": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+  "selection": "first four lexicographic tasks from each published language family, interleaved go/python/typescript/javascript/rust",
+  "task_ids": [
+    "abs-module-cache-flags",
+    "adaptix-name-mapping-aliases",
+    "arktype-json-schema-refs-dependencies",
+    "csstree-shorthand-expansion-compression",
+    "boa-hierarchical-evaluation-cancellation",
+    "abs-stepped-slices",
+    "aiomonitor-task-snapshots-diff",
+    "awilix-async-container-initialization",
+    "katex-multicolumn-array-spans",
+    "fd-deterministic-multi-key-sorting",
+    "actionlint-action-pinning-lint",
+    "bandit-incremental-cache-control",
+    "clack-async-autocomplete-options",
+    "testem-bail-on-test-failure",
+    "oxvg-structural-selector-preservation",
+    "anko-default-function-arguments",
+    "bandit-interprocedural-taint-checks",
+    "claude-code-by-agents-recursive-delegation",
+    "testem-per-launcher-reports",
+    "pest-character-class-coalescing"
+  ],
+  "task_order_sha256": "87468ba299eced3f93b8bec159024281b8151de186733e548bef730a4e1cfa25",
+  "language_counts": {
+    "go": 4,
+    "javascript": 4,
+    "python": 4,
+    "rust": 4,
+    "typescript": 4
+  },
+  "baseline": {
+    "comparison_protocol": "paired_same_workflow_v1",
+    "model": "deepseek-v4-flash",
+    "provider": "deepseek:native:api.deepseek.com",
+    "mini_swe_agent_version": "2.4.6",
+    "tasks": 20,
+    "attempts_per_task": 1,
+    "required_treatment": "bare",
+    "required_comparison_fields": [
+      "benchmark_sha",
+      "task_order_sha256",
+      "model",
+      "provider",
+      "mini_swe_agent_version",
+      "temperature",
+      "max_iterations",
+      "time_budget_seconds",
+      "official_verifier"
+    ],
+    "comparison_limit": "A regression claim is valid only against a bare run from this exact workflow and source SHA with the required comparison fields equal. Historical Ox Alpha and public DataCurve aggregates are directional evidence only."
+  }
+}
