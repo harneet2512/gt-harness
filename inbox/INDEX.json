@@ -113,6 +113,7 @@
     "har78-harness-5893a3ba",
     "har79-harness-cc649b9d",
     "har79-harness-d599a084",
+    "har79-inbox-validator-65385991",
     "har80-groundtruth-43c6d723",
     "har80-harness-a4af3484",
     "har80-harness-b98ef05c",
@@ -309,7 +310,8 @@
     ],
     "HAR-79":[
       "har79-harness-cc649b9d",
-      "har79-harness-d599a084"
+      "har79-harness-d599a084",
+      "har79-inbox-validator-65385991"
     ],
     "HAR-80":[
       "har80-groundtruth-43c6d723",

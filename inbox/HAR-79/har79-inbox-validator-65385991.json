@@ -1,0 +1,31 @@
+{
+  "created_at":"2026-09-01T05:00:37.981555Z",
+  "detail":{
+    "benchmark_ready":false,
+    "benchmark_runs":0,
+    "fix":"validator accepts HAR-76 legacy and HAR-79 current gt-ci packets and routes by packet.ticket",
+    "inbox_commit":"65385991bc696a6cdb65f56ce0cbd544e054f661",
+    "provider_calls":0,
+    "ref":"refs/heads/gt-review-inbox",
+    "repository":"harneet2512/gt-harness",
+    "source_head":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+    "trigger":"CI run 33471756292 rejected HAR-79 feature-matrix packet before this ref was updated"
+  },
+  "file":"",
+  "head_sha":"d599a0847d10ef2ee4b256bce39dd00a6c42b37a",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Inbox validator synchronized at 65385991 to accept and route HAR-79 CI packets; this push is itself recorded through the validating writer.",
+  "packet_digest_sha256":"31b8297dfedf65c50a790a256c8a4f41c35c92bca41d7c3ea6d1e3f3120cc014",
+  "packet_id":"har79-inbox-validator-65385991",
+  "pr":38,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"inbox-validator",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-79"
+}
