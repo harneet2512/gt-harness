@@ -95,6 +95,7 @@
     "har76-inbox-fb3268a0",
     "har77-harness-1bf89072",
     "har77-harness-aa6577a0",
+    "har80-groundtruth-43c6d723",
     "har80-route-b-701a8472",
     "merge-har70-ff578719",
     "merge-har76-701a8472",
@@ -261,6 +262,7 @@
       "merge-har77-aa6577a0"
     ],
     "HAR-80":[
+      "har80-groundtruth-43c6d723",
       "har80-route-b-701a8472"
     ]
   }
