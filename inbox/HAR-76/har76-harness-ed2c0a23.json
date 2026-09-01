@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:57:35.179758Z",
+  "detail":"Directed fix for run 33464309221: actions/checkout rejects paths outside GITHUB_WORKSPACE. The workflow now checks out pinned Groundtruth at the supported workspace path, relocates it to RUNNER_TEMP before setup/install/pytest, and uses the relocated absolute source path for Go/Python. This keeps the nested source out of failure-ID scanning while retaining immutable producer provenance. Prior RED diagnosis remains packeted; focused emitter/bridge tests and YAML parse pass.",
+  "file":"",
+  "head_sha":"ed2c0a23eae4cb9874f14d8f22ae6f3e15c0a6bc",
+  "kind":"finding",
+  "line":0,
+  "message":"HAR-76 push ed2c0a23",
+  "packet_digest_sha256":"40c1e779ee4f915644f02a17bcbc3fcda41a0b0c51f4560de611cf5002ccf80c",
+  "packet_id":"har76-harness-ed2c0a23",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"har76-push",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
