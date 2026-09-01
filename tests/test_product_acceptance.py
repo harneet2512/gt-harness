@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,20 @@ from gt_harness.product import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "deepswe_product_bundle_v1.json"
+
+
+def test_operator_entrypoint_is_direct_script_reachable_outside_checkout(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "gt_product_acceptance.py"), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert process.returncode == 0, process.stderr
+    assert "--fake-provider" in process.stdout
 
 
 def test_shipping_adapter_and_every_manifest_task_are_reachable() -> None:
