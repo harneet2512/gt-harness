@@ -60,7 +60,7 @@ def issue(*, source: Path, binary: Path, output: Path, goos: str, goarch: str,
         "build_tags": tags,
         "graph_schema_version": "v15.2-trust-tier",
         "capabilities": [
-            "atomic_graph_publication", "call_resolution_v2",
+            "atomic_graph_publication", "call_resolution_v2", "framework_surface_resolution_v1",
             "incremental_stale_suppression", "parse_failure_accounting",
             "retained_call_candidates", "versioned_query_policy",
         ],
