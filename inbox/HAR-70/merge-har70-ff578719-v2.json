@@ -1,0 +1,31 @@
+{
+  "created_at":"2026-09-01T04:25:31.405193Z",
+  "detail":{
+    "base":"5295a5b6ade1eaa6c93fb3c6115fa80746d4bfd4",
+    "benchmark_runs":0,
+    "candidate":"ff578719fef2a360af24d2076fe7ab3bc989c780",
+    "event":"ff_merge",
+    "fast_forward":true,
+    "landed":"ff578719fef2a360af24d2076fe7ab3bc989c780",
+    "parent_verified":true,
+    "provider_calls":0,
+    "supersedes_reason":"historical packet digest repair"
+  },
+  "file":"",
+  "head_sha":"ff578719fef2a360af24d2076fe7ab3bc989c780",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-70 historical merge packet re-issued with digest-validating writer; supersedes merge-har70-ff578719.",
+  "packet_digest_sha256":"44e6fd6def6d6aa12da9e93801a5adc3b0e3f4c6ce1e9ec61f45e3acb008a6f7",
+  "packet_id":"merge-har70-ff578719-v2",
+  "pr":33,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ff-merge",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":"merge-har70-ff578719",
+  "ticket":"HAR-70"
+}

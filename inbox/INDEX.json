@@ -99,6 +99,7 @@
     "har80-inbox-tool-bf088d22",
     "har80-route-b-701a8472",
     "merge-har70-ff578719",
+    "merge-har70-ff578719-v2",
     "merge-har76-701a8472",
     "merge-har76-701a8472-v2",
     "merge-har77-aa6577a0",
@@ -162,7 +163,8 @@
       "har70-groundtruth-7b4d7043",
       "har70-groundtruth-db9daf9e",
       "har70-harness-ff578719",
-      "merge-har70-ff578719"
+      "merge-har70-ff578719",
+      "merge-har70-ff578719-v2"
     ],
     "HAR-73":[
       "bugbot-pr30-20260901",
