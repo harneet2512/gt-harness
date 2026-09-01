@@ -36,6 +36,7 @@ from gt_engine.generated_typed_capabilities import (
     LANGUAGE_MANIFEST_SHA256,
     REMOVED_TYPED_KINDS,
 )
+from gt_engine.result_envelope import envelope_for_result
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -538,6 +539,7 @@ def execute_typed_action(
     core = _core_compiler()
     query_api = _deterministic_query_api()
     certification_omission = ""
+    reason = ""
     if kind == "why_this_edge":
         # HAR-63 private compatibility path: an old wheel cannot expose the
         # producer-owned query kind, but the harness may consume a complete
@@ -728,6 +730,66 @@ def execute_typed_action(
             "mode": decision,
             "reason_codes": [reason],
         }
+    # Every public typed result carries the same conservative honesty envelope.
+    # Legacy/incomplete producers never become ``complete`` merely because a
+    # payload happens to be present.
+    freshness = evidence.get("freshness", {}) if isinstance(evidence, Mapping) else {}
+    if not isinstance(freshness, Mapping):
+        freshness = {}
+    source_revision = str(
+        freshness.get("source_revision")
+        or wire.get("repository_snapshot")
+        or ""
+    )
+    workspace_revision = _file_snapshot(root)
+    if isinstance(direct_answer, list):
+        returned_count = len(direct_answer)
+    elif isinstance(direct_answer, Mapping):
+        sequence = next(
+            (direct_answer.get(key) for key in ("matches", "results", "candidates", "items")
+             if isinstance(direct_answer.get(key), list)),
+            None,
+        )
+        returned_count = len(sequence) if isinstance(sequence, list) else (0 if direct_answer is None else 1)
+    elif direct_answer is None:
+        returned_count = 0
+    else:
+        returned_count = 1
+    true_total_value = None
+    if isinstance(evidence, Mapping):
+        for key in ("true_total", "total_count", "known_total"):
+            candidate = evidence.get(key)
+            if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+                true_total_value = candidate
+                break
+        coverage = evidence.get("coverage")
+        if true_total_value is None and isinstance(coverage, Mapping):
+            candidate = coverage.get("true_total")
+            if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+                true_total_value = candidate
+    if true_total_value is None and returncode == 0 and not evidence.get("omissions"):
+        true_total_value = returned_count
+    ambiguity_values = []
+    unresolved_values = []
+    if isinstance(evidence, Mapping):
+        for key in ("ambiguity", "ambiguities"):
+            value = evidence.get(key)
+            if isinstance(value, list):
+                ambiguity_values.extend(str(item) for item in value)
+        value = evidence.get("unresolved_identities")
+        if isinstance(value, list):
+            unresolved_values.extend(str(item) for item in value)
+    honesty = envelope_for_result(
+        source_revision=source_revision,
+        workspace_revision=workspace_revision,
+        payload=direct_answer,
+        returned_count=returned_count,
+        true_total=true_total_value,
+        ambiguities=tuple(ambiguity_values),
+        unresolved_identities=tuple(unresolved_values),
+        abstention_reason=(reason if returncode else None),
+        incomplete=returncode != 0 or bool(evidence.get("omissions")) if isinstance(evidence, Mapping) else returncode != 0,
+    )
     result = {
         "schema": "gt.compiled_observation.v1",
         "action_request": wire,
@@ -737,6 +799,7 @@ def execute_typed_action(
         # JSON nested inside ``direct_answer_json``.
         "direct_answer": direct_answer,
         "decision": decision_payload,
+        "honesty": honesty,
     }
     output = _canonical_bytes(result).decode("utf-8")
     return {
