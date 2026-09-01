@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:42:33.761059Z",
+  "detail":"{base_sha:ff578719fef2a360af24d2076fe7ab3bc989c780,parent_sha:66155f96086b14597eae53c409c9fdb2ace4b4b2,changed_paths:[.github/workflows/ci.yml],diagnosis:{failures:[pip ResolutionImpossible: duplicate groundtruth-mcp 1.0.0 editable+wheel],first_error:Cannot install groundtruth-mcp 1.0.0 from wheel and editable Groundtruth because conflicting dependencies},fix:remove -e $GROUNDTRUTH_ROOT; retain vendor/groundtruth_mcp-*.whl and build db9 only with Go,focused_tests:4 passed; YAML parse pass,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"8ba04db4be1ee315c519380767d81adbc3aa1048",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Directed pip-conflict fix: install the vendored Python control-plane wheel without installing the db9 producer tree as an editable Python package; db9 remains the Go build source.",
+  "packet_digest_sha256":"11656caa343a380228b6a116b2b1eaccadbe58e25d8feea974c68b77868be7cb",
+  "packet_id":"har76-harness-8ba04db4",
+  "pr":34,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"push",
+    "system":"coordinator"
+  },
+  "status":"pass",
+  "supersedes":null,
+  "ticket":"HAR-76"
+}
