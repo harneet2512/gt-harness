@@ -60,6 +60,7 @@ jobs:
             --command-json '["go","test","-count=1","-p=1","./..."]' \
             --toolchain-command-json '["go","version"]' \
             --expected-source-path proof_red_test.go \
+            --expected-diagnostic 'undefined: VTAFlowProof' \
             --runner-image ubuntu-24.04 \
             --runner-image-version "${ImageVersion}" \
             --runner-architecture "${RUNNER_ARCH}" \
