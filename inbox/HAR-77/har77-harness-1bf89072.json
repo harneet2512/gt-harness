@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:13:14.045260Z",
+  "detail":"Fresh branch codex/har77-archdone pushed from main 5295a5b6 at exact SHA 1bf89072b4b5b3261913669f1604e93077d880a3. Adds root archdone.md with exact as-built pipeline/data-flow/on-disk state, all 18 feature identities and proof modules, receipt schemas, HAR-75 review transport, cross-repository pin model, HAR-70 pending status, and HAR-72 approval boundary. git diff --check passed; no provider or benchmark calls.",
+  "file":"",
+  "head_sha":"1bf89072b4b5b3261913669f1604e93077d880a3",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-77 archdone push",
+  "packet_digest_sha256":"91486735422930b697d5baed0b6b0993e4002d1b3bad9abbf887f9247cc38269",
+  "packet_id":"har77-harness-1bf89072",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"HAR-77-PUSH",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-77"
+}
