@@ -128,7 +128,6 @@ def _build_deterministic_wheel(root: Path, output_dir: Path) -> Path:
                 "wheel",
                 "--disable-pip-version-check",
                 "--no-deps",
-                "--no-build-isolation",
                 "--wheel-dir",
                 str(raw_dir),
                 str(root),
