@@ -50,7 +50,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-review-packets-${{ github.run_id }}-pytest
+          name: ci-review-packets-${{ github.run_id }}-pytest-py${{ matrix.python-version }}
           path: ci-packets/ci-pytest-${{ github.run_id }}.json
           if-no-files-found: error
       - name: Fail on RED suite
@@ -107,11 +107,16 @@ jobs:
           ref: gt-review-inbox
           fetch-depth: 1
           persist-credentials: true
-      - name: Download pytest packet
+      - name: Download pytest 3.12 packet
         uses: actions/download-artifact@v4
         with:
-          name: ci-review-packets-${{ github.run_id }}-pytest
-          path: ci-artifacts/pytest
+          name: ci-review-packets-${{ github.run_id }}-pytest-py3.12
+          path: ci-artifacts/pytest-py3.12
+      - name: Download pytest 3.13 packet
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-review-packets-${{ github.run_id }}-pytest-py3.13
+          path: ci-artifacts/pytest-py3.13
       - name: Download feature-matrix packet
         uses: actions/download-artifact@v4
         with:
