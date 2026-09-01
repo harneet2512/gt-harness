@@ -535,6 +535,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=30,
                         help="per-command execution timeout in seconds")
     parser.add_argument("--metrics", help="write per-run metrics JSON to this path")
+    parser.add_argument("--product-receipt")
+    parser.add_argument("--adapter-receipt")
+    parser.add_argument("--task-id", default="")
+    parser.add_argument("--product-source-sha", default="")
+    parser.add_argument("--time-budget-seconds", type=int, default=1)
     parser.add_argument("--manifest", help="write reproducibility manifest here")
     parser.add_argument("--gt-off", action="store_true")
     parser.add_argument(
@@ -738,6 +743,24 @@ def main() -> int:
     if args.metrics:
         Path(args.metrics).parent.mkdir(parents=True, exist_ok=True)
         Path(args.metrics).write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    if bool(args.product_receipt) != bool(args.adapter_receipt):
+        raise ValueError("product and adapter receipt paths must be configured together")
+    if args.product_receipt:
+        from gt_harness.runtime_receipts import issue_runtime_receipts
+
+        issue_runtime_receipts(
+            report_path=Path(args.metrics),
+            trajectory_path=Path(args.output),
+            state_dir=Path(args.state_dir),
+            product_receipt_path=Path(args.product_receipt),
+            adapter_receipt_path=Path(args.adapter_receipt),
+            task_id=args.task_id,
+            product_source_sha=args.product_source_sha,
+            treatment="bare" if not gt_active else "groundtruth",
+            requested_model=args.model,
+            scaffold_version="2.4.6",
+            time_budget_seconds=args.time_budget_seconds,
+        )
     print(json.dumps(report, sort_keys=True))
     return TERMINAL_EXIT_CODES.get(terminal, TERMINAL_EXIT_CODES["internal_error"])
 

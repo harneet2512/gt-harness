@@ -540,7 +540,7 @@ jobs:
           import os
           from pathlib import Path
 
-          from gt_harness.analysis.delivery import audit_treatment_delivery
+          from gt_harness.runtime_receipts import verify_runtime_receipt
           from scripts.standardize_benchmark_result import conservative_outcomes
 
           root = Path("attestation")
@@ -580,7 +580,7 @@ jobs:
               row = json.loads(path.read_text(encoding="utf-8"))
               task = str(row.get("task_id") or "")
               adapters[task] = row
-              if row.get("product_command") != "gt-harness run" or row.get("attempt") != 1:
+              if row.get("product_command") != "gt-miniswe-run" or row.get("attempt") != 1:
                   errors.append(f"adapter_contract_mismatch:{task}")
               if row.get("treatment") != plan.get("treatment"):
                   errors.append(f"adapter_treatment_mismatch:{task}")
@@ -603,60 +603,24 @@ jobs:
               row = json.loads(path.read_text(encoding="utf-8"))
               task = str(row.get("task_id") or "")
               product_runs[task] = row
-              if row.get("status") != "COMPLETED":
-                  errors.append(f"product_error:{task}:{row.get('error_type') or row.get('status') or 'unknown'}")
-              trajectory_path = path.with_name("gt-run.trajectory.json")
-              if not trajectory_path.is_file():
-                  errors.append(f"missing_full_trajectory:{task}")
-              else:
-                  trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
-                  if not isinstance(trajectory.get("messages"), list):
-                      errors.append(f"invalid_full_trajectory:{task}")
-                  calls = ((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls")
-                  if calls is None:
-                      errors.append(f"missing_trajectory_provider_calls:{task}")
-                  elif int(row.get("provider_calls") or 0) != int(calls):
-                      errors.append(f"provider_call_receipt_mismatch:{task}")
+              errors.extend(
+                  f"product_receipt:{task}:{reason}"
+                  for reason in verify_runtime_receipt(path)
+              )
+              if row.get("product_source_sha") != os.environ["SOURCE_SHA"]:
+                  errors.append(f"product_source_sha_mismatch:{task}")
+              if row.get("requested_model") != plan.get("requested_model"):
+                  errors.append(f"product_requested_model_mismatch:{task}")
+              if row.get("effective_model") != plan.get("effective_model"):
+                  errors.append(f"product_effective_model_mismatch:{task}")
+              if str(row.get("time_budget_seconds")) != expected_budgets.get(task):
+                  errors.append(f"product_time_budget_mismatch:{task}")
 
               treatment = row.get("treatment_receipt")
               if not isinstance(treatment, dict):
                   errors.append(f"missing_treatment_receipt:{task}")
                   continue
-              if treatment.get("treatment_status") == "FAILED":
-                  errors.append(f"treatment_failed:{task}")
-              if int(treatment.get("delivery_count") or 0) > 4:
-                  errors.append(f"delivery_limit_exceeded:{task}")
-              for delivery in treatment.get("delivery_receipts") or []:
-                  if not delivery.get("same_observation"):
-                      errors.append(f"late_delivery:{task}")
-              deliveries = treatment.get("provider_delivery_receipts") or []
-              for delivery in deliveries:
-                  token_limit = 500 if delivery.get("kind") == "repository_start" else 350
-                  if int(delivery.get("context_token_count") or 0) > token_limit:
-                      errors.append(f"delivery_context_budget_exceeded:{task}")
-              if sum(
-                  int(delivery.get("context_token_count") or 0)
-                  for delivery in deliveries
-              ) > 1200:
-                  errors.append(f"total_context_budget_exceeded:{task}")
-              if treatment.get("treatment_status") == "ACTIVE":
-                  delivery_audit = audit_treatment_delivery(
-                      treatment,
-                      initial_context=str(row.get("initial_context") or ""),
-                      repository_end=row.get("repository_end") or {},
-                  )
-                  errors.extend(
-                      f"delivery_audit:{task}:{reason}"
-                      for reason in delivery_audit["failures"]
-                  )
-                  if not treatment.get("graph_available") or treatment.get("graph_status") not in {
-                      "READY",
-                      "READY_WITH_DECLARED_LIMITATIONS",
-                  }:
-                      errors.append(f"active_graph_not_ready:{task}")
-                  dense = treatment.get("dense_index_receipt") or {}
-                  if treatment.get("retrieval_mode") != "hybrid_required" or not dense.get("query_ready"):
-                      errors.append(f"active_dense_not_ready:{task}")
+              graph = treatment.get("graph_certification") or {}
               product_rows.append(
                   {
                       "task": task,
@@ -665,9 +629,17 @@ jobs:
                       "input_tokens": int(row.get("input_tokens") or 0),
                       "cached_tokens": int(row.get("cached_tokens") or 0),
                       "output_tokens": int(row.get("output_tokens") or 0),
+                      "total_cost": float(row.get("total_cost") or 0),
                       "treatment_status": treatment.get("treatment_status"),
-                      "graph_status": treatment.get("graph_status"),
+                      "graph_status": (
+                          "CERTIFIED"
+                          if graph.get("binary_certified") is True
+                          and graph.get("sqlite_quick_check") == "ok"
+                          else "INVALID"
+                      ),
                       "delivery_count": int(treatment.get("delivery_count") or 0),
+                      "verified": bool(treatment.get("verified")),
+                      "unmet_predicate_count": len(treatment.get("unmet_predicates") or []),
                   }
               )
           if set(product_runs) != expected_set:
@@ -717,6 +689,7 @@ jobs:
                   "input_tokens": sum(row["input_tokens"] for row in product_rows),
                   "cached_tokens": sum(row["cached_tokens"] for row in product_rows),
                   "output_tokens": sum(row["output_tokens"] for row in product_rows),
+                  "total_cost": round(sum(row["total_cost"] for row in product_rows), 12),
                   "deliveries": sum(row["delivery_count"] for row in product_rows),
               },
               "product_rows": sorted(product_rows, key=lambda row: row["task"]),

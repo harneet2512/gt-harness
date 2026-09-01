@@ -84,6 +84,19 @@ class MiniSweAgent(BaseInstalledAgent):
             type="int",
             default=100,
         ),
+        CliFlag(kwarg="task_id", cli="--task-id", type="str", default=""),
+        CliFlag(
+            kwarg="product_source_sha",
+            cli="--product-source-sha",
+            type="str",
+            default="",
+        ),
+        CliFlag(
+            kwarg="time_budget_seconds",
+            cli="--time-budget-seconds",
+            type="int",
+            default=1,
+        ),
     ]
 
     def _classify_exec_error(self, command: str, result):
@@ -297,6 +310,8 @@ class MiniSweAgent(BaseInstalledAgent):
             f"--output /logs/agent/miniswe_trajectory.json "
             f"--temperature 1.0 "
             f"--metrics /logs/agent/miniswe_report.json "
+            f"--product-receipt /logs/agent/gt-run.json "
+            f"--adapter-receipt /logs/agent/benchmark-adapter.json "
             f"{self.build_cli_flags()} "
             f"{extra_args}"
             "</dev/null 2>&1"

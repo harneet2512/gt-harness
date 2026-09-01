@@ -51,11 +51,22 @@ def test_miniswe_agent_version_rejects_every_other_value(monkeypatch):
 
 
 def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
-    agent = MiniSweAgent(logs_dir=tmp_path / "logs", max_iterations=300)
+    agent = MiniSweAgent(
+        logs_dir=tmp_path / "logs",
+        max_iterations=300,
+        task_id="task-a",
+        product_source_sha="a" * 40,
+        time_budget_seconds=3600,
+    )
 
     command = agent._run_command("task", "deepseek-v4-flash")
 
     assert "--step-limit 300" in command
+    assert "--task-id task-a" in command
+    assert f"--product-source-sha {'a' * 40}" in command
+    assert "--time-budget-seconds 3600" in command
+    assert "--product-receipt /logs/agent/gt-run.json" in command
+    assert "--adapter-receipt /logs/agent/benchmark-adapter.json" in command
 
 
 def test_installed_agent_resolves_explicit_verified_bundle_artifacts(
