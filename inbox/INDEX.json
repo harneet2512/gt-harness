@@ -136,6 +136,7 @@
     "merge-har80-a4af3484",
     "merge-har81-35766673",
     "merge-har81-529d835a",
+    "merge-har81-ca744e7e",
     "merge-har81-consolidation-9b1393c5",
     "merge-har81-da4e3988",
     "merge-pr24-ad022ba4",
@@ -342,6 +343,7 @@
     "HAR-81":[
       "merge-har81-35766673",
       "merge-har81-529d835a",
+      "merge-har81-ca744e7e",
       "merge-har81-consolidation-9b1393c5",
       "merge-har81-da4e3988"
     ]
