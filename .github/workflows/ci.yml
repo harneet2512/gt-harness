@@ -55,6 +55,11 @@ jobs:
           git config --global user.email "$GIT_AUTHOR_EMAIL"
           go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index
           echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -sf "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
+          chmod +x "$RUNNER_TEMP/gt-index" "$RUNNER_TEMP/bin/gt-index"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          git config --global core.hooksPath "$GITHUB_WORKSPACE/.githooks"
       - name: Run full pytest suite
         id: pytest
         continue-on-error: true
