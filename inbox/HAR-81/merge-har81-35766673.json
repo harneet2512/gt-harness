@@ -1,0 +1,26 @@
+{
+  "created_at":"2026-09-01T23:19:23.145545Z",
+  "detail":{
+    "benchmark_runs":0,
+    "landed_sha":"357666739cfe778b71508c68341948087f639b89",
+    "parent_sha":"529d835a2b3e1c6c3e3752cd8bfa477b27b591a0",
+    "provider_calls":0
+  },
+  "file":"",
+  "head_sha":"357666739cfe778b71508c68341948087f639b89",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 live Mini-SWE runtime receipt binder landed on main",
+  "packet_digest_sha256":"7eab2d7e61eb42a79ce57c1dba94fa7fcd5787cd77ede0410e5533b6aa8424da",
+  "packet_id":"merge-har81-35766673",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}
