@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:19:59.535516Z",
+  "detail":"Coordinator verified 18/18 attribution identities with digest-bound executed evidence, generated matrix and renderer, issuer/verifier, tamper and coverage rejection. V107 Bugbot gate remains pending; no terminal verdict.",
+  "file":"",
+  "head_sha":"5212a1c0fddc582267009c8ae40b209c38933e01",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-73 exact-head interim review",
+  "packet_digest_sha256":"18c1c0d915d0d656f02943810e88708f2b14ec315497276270e2833dc62b9b30",
+  "packet_id":"rev-219-har73-interim",
+  "pr":30,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"REV-219",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-73"
+}
