@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T02:06:51.023266Z",
+  "detail":"Follow-up push on codex/har70-framework-resolution at exact SHA db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14. Build identity now advertises framework_surface_resolution_v1; stamped Windows producer binary rebuilt from this SHA and build-info is complete. go test ./cmd/gt-index -run TestBuildInfo passed. Harness artifact receipt must be refreshed to this exact producer.",
+  "file":"",
+  "head_sha":"db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Groundtruth framework producer capability push",
+  "packet_digest_sha256":"6d22f4fa95321d93b93780afab4f00c7e635bc847b7c751086ef6cb5fac17296",
+  "packet_id":"har70-groundtruth-db9daf9e",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"HAR-70-PUSH",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-70"
+}
