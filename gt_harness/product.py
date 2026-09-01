@@ -659,7 +659,12 @@ def run_provider_free_acceptance(
     manifest_path: str | Path, *, output_dir: str | Path
 ) -> dict[str, Any]:
     """Run both deterministic fake-provider arms and emit a closeout receipt."""
-    output = Path(output_dir)
+    # Resolve once before passing paths to subprocesses.  The operator normally
+    # supplies a relative output path (for example ``artifacts/closeout``),
+    # while the wheel installer runs with ``cwd=output``.  Leaving the path
+    # relative makes pip resolve it a second time under that cwd and produces
+    # ``output/output/...`` instead of the staged wheel path.
+    output = Path(output_dir).resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError("acceptance_output_must_be_empty")
     output.mkdir(parents=True, exist_ok=True)
