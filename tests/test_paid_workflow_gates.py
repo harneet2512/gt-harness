@@ -29,3 +29,14 @@ def test_provider_route_is_loaded_once_and_preflight_precedes_matrix() -> None:
     assert "secrets.OPENROUTER_API_KEY" in source
     assert "total_credits" not in source
     assert "total_usage" not in source
+
+
+def test_paid_workflow_stages_and_installs_the_exact_treatment_bundle() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert '"GT_GROUNDTRUTH_WHEEL_HOST":' in source
+    assert '"GT_INDEX_BINARY_HOST":' in source
+    assert '"GT_HARNESS_WHEEL_HOST":' in source
+    assert '"GT_HARNESS_WHEEL_SHA256":' in source
+    assert 'Path(os.environ["GITHUB_ENV"]).open' in source
+    assert 'python -m pip install --disable-pip-version-check --no-deps "$GT_HARNESS_WHEEL_HOST"' in source

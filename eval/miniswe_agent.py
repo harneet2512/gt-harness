@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import tempfile
 from pathlib import Path
 
 from harbor.agents.installed.base import (
@@ -29,7 +28,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from eval._env import UTF8_ENV, provider_env
-from gt_harness.product import build_product_bundle, project_task_environment
+from gt_harness.product import project_task_environment
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_BUNDLE_DIR = "/installed-agent/bundle"
@@ -39,7 +38,6 @@ _REMOTE_PYTHON_ARCHIVE = "/installed-agent/python-3.12.13.tar.gz"
 _REMOTE_PYTHON_DIR = "/installed-agent/python"
 _REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
-_PRODUCT_MANIFEST = _REPO_ROOT / "config" / "deepswe_product_bundle_v1.json"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
@@ -140,14 +138,19 @@ class MiniSweAgent(BaseInstalledAgent):
 
     @staticmethod
     def _gt_wheel() -> Path:
-        wheels = sorted(_VENDOR_DIR.glob("groundtruth_mcp-*.whl"))
+        configured = os.environ.get("GT_GROUNDTRUTH_WHEEL_HOST", "")
+        if configured:
+            wheels = [Path(configured)]
+        else:
+            wheels = sorted(_VENDOR_DIR.glob("groundtruth_mcp-*.whl"))
         if not wheels:
             raise FileNotFoundError(
-                f"Mini-SWE treatment bundle needs the vendored GroundTruth "
-                f"wheel in {_VENDOR_DIR} (build with: pip wheel --no-deps "
-                "-w vendor D:\\Groundtruth)"
+                "Mini-SWE treatment bundle needs GT_GROUNDTRUTH_WHEEL_HOST "
+                f"or a vendored GroundTruth wheel in {_VENDOR_DIR}"
             )
         wheel = wheels[-1]
+        if not wheel.is_file():
+            raise FileNotFoundError(f"GroundTruth wheel is missing: {wheel}")
         MiniSweAgent._require_digest(wheel, _GT_WHEEL_SHA256, "groundtruth_wheel")
         return wheel
 
@@ -159,13 +162,15 @@ class MiniSweAgent(BaseInstalledAgent):
             raise ValueError(f"{label} digest mismatch")
 
     @staticmethod
-    def _harness_wheel(output: Path) -> Path:
-        bundle = build_product_bundle(_PRODUCT_MANIFEST, output_dir=output)
-        record = bundle["python_wheel"]
-        if not isinstance(record, dict):
-            raise ValueError("product bundle did not build a harness wheel")
-        wheel = output / "dist" / str(record["filename"])
-        MiniSweAgent._require_digest(wheel, str(record["sha256"]), "harness_wheel")
+    def _harness_wheel() -> Path:
+        wheel = Path(os.environ.get("GT_HARNESS_WHEEL_HOST", ""))
+        expected = os.environ.get("GT_HARNESS_WHEEL_SHA256", "")
+        if not wheel.is_file() or not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise FileNotFoundError(
+                "Mini-SWE treatment bundle needs GT_HARNESS_WHEEL_HOST and "
+                "GT_HARNESS_WHEEL_SHA256 from the verified product bundle"
+            )
+        MiniSweAgent._require_digest(wheel, expected, "harness_wheel")
         return wheel
 
     @staticmethod
@@ -225,10 +230,9 @@ class MiniSweAgent(BaseInstalledAgent):
         # runtime error, not because the destination directory is absent.
         await self.exec_as_root(environment, f"mkdir -p {_REMOTE_BUNDLE_DIR}")
         await environment.upload_file(wheel, remote_gt_wheel)
-        with tempfile.TemporaryDirectory(prefix="gt-product-bundle-") as temporary:
-            harness_wheel = self._harness_wheel(Path(temporary))
-            remote_harness_wheel = f"{_REMOTE_BUNDLE_DIR}/{harness_wheel.name}"
-            await environment.upload_file(harness_wheel, remote_harness_wheel)
+        harness_wheel = self._harness_wheel()
+        remote_harness_wheel = f"{_REMOTE_BUNDLE_DIR}/{harness_wheel.name}"
+        await environment.upload_file(harness_wheel, remote_harness_wheel)
         await environment.upload_file(binary, _REMOTE_GT_BINARY)
         await environment.upload_file(uv_installer, _REMOTE_UV_INSTALLER)
         await environment.upload_file(python_archive, _REMOTE_PYTHON_ARCHIVE)

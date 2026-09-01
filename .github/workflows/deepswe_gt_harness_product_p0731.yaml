@@ -405,12 +405,41 @@ jobs:
           test -n "$(find "$wheelhouse" -type f -print -quit)"
           echo "GT_WHEELHOUSE_HOST=$wheelhouse" >> "$GITHUB_ENV"
 
+      - name: Build and stage the exact treatment bundle
+        env:
+          BUNDLE_DIR: ${{ runner.temp }}/gt-treatment-bundle
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from gt_harness.product import build_product_bundle
+
+          root = Path.cwd()
+          output = Path(os.environ["BUNDLE_DIR"])
+          bundle = build_product_bundle(
+              root / "config/deepswe_product_bundle_v1.json", output_dir=output
+          )
+          wheel = output / "dist" / bundle["python_wheel"]["filename"]
+          records = {
+              "GT_GROUNDTRUTH_WHEEL_HOST": root / bundle["groundtruth"]["wheel_path"],
+              "GT_INDEX_BINARY_HOST": root / bundle["groundtruth"]["producer_path"],
+              "GT_HARNESS_WHEEL_HOST": wheel,
+              "GT_HARNESS_WHEEL_SHA256": bundle["python_wheel"]["sha256"],
+          }
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:
+              for name, value in records.items():
+                  handle.write(f"{name}={value}\n")
+          PY
+          test -s "$BUNDLE_DIR/product-bundle.json"
+
       - name: Install Pier and the canonical product source
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check \
             --require-hashes -r config/product-requirements.lock
-          python -m pip install --disable-pip-version-check --no-deps .
+          python -m pip install --disable-pip-version-check --no-deps "$GT_HARNESS_WHEEL_HOST"
           test "$(python -c 'import importlib.metadata as m; print(m.version("mini-swe-agent"))')" = "2.4.6"
           test "$(python -c 'import importlib.metadata as m; print(m.version("datacurve-pier"))')" = "0.3.1"
 

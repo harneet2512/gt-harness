@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from eval.miniswe_agent import (
@@ -56,6 +58,27 @@ def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
     assert "--step-limit 300" in command
 
 
+def test_installed_agent_resolves_explicit_verified_bundle_artifacts(
+    monkeypatch, tmp_path
+):
+    gt_wheel = tmp_path / "groundtruth_mcp-1.0.0-py3-none-any.whl"
+    harness_wheel = tmp_path / "nano_harness-0.0.1-py3-none-any.whl"
+    gt_wheel.write_bytes(b"groundtruth")
+    harness_wheel.write_bytes(b"harness")
+    monkeypatch.setenv("GT_GROUNDTRUTH_WHEEL_HOST", str(gt_wheel))
+    monkeypatch.setenv("GT_HARNESS_WHEEL_HOST", str(harness_wheel))
+    monkeypatch.setenv(
+        "GT_HARNESS_WHEEL_SHA256", hashlib.sha256(b"harness").hexdigest()
+    )
+    monkeypatch.setattr(
+        "eval.miniswe_agent._GT_WHEEL_SHA256",
+        hashlib.sha256(b"groundtruth").hexdigest(),
+    )
+
+    assert MiniSweAgent._gt_wheel() == gt_wheel
+    assert MiniSweAgent._harness_wheel() == harness_wheel
+
+
 @pytest.mark.asyncio
 async def test_installer_uses_canonical_version_and_verified_uv_installer(
     monkeypatch, tmp_path
@@ -76,7 +99,7 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(
     monkeypatch.delenv("MINISWE_AGENT_VERSION", raising=False)
     monkeypatch.setattr(MiniSweAgent, "_gt_wheel", staticmethod(lambda: wheel))
     monkeypatch.setattr(
-        MiniSweAgent, "_harness_wheel", staticmethod(lambda _output: harness_wheel)
+        MiniSweAgent, "_harness_wheel", staticmethod(lambda: harness_wheel)
     )
     monkeypatch.setattr(MiniSweAgent, "_gt_binary_host", staticmethod(lambda: binary))
     monkeypatch.setattr(MiniSweAgent, "_uv_installer_host", staticmethod(lambda: uv_installer))
