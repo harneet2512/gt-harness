@@ -1,0 +1,57 @@
+{
+  "created_at":"2026-09-01T04:53:53.768227Z",
+  "detail":{
+    "base_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+    "benchmark_ready":false,
+    "benchmark_runs":0,
+    "branch":"codex/har79-ci-parallelism",
+    "changed_paths":[
+      ".github/workflows/ci.yml",
+      "README.md",
+      "pyproject.toml",
+      "scripts/ci_emit_review_packet.py",
+      "tests/test_ci_emit_review_packet.py"
+    ],
+    "head_sha":"cc649b9d5a9dce088363e647075fa73f49d3cb7d",
+    "parallelism":{
+      "command":"python -m pytest -n auto -q -ra",
+      "shared_state_audit":"tmp_path and monkeypatch isolation; no fixed ports or shared SQLite filenames; matrix jobs use fresh runners",
+      "workers":"auto"
+    },
+    "provider_calls":0,
+    "repository":"harneet2512/gt-harness",
+    "tests":[
+      {
+        "command":"python -m pytest tests/test_ci_emit_review_packet.py -q",
+        "exit_code":0,
+        "observed":"3 passed"
+      },
+      {
+        "command":"python -m pytest -n auto -q -ra",
+        "exit_code":0,
+        "observed":"full xdist suite passed with declared skips"
+      },
+      {
+        "command":"python -m ruff check scripts/ci_emit_review_packet.py tests/test_ci_emit_review_packet.py",
+        "exit_code":0
+      }
+    ]
+  },
+  "file":"",
+  "head_sha":"cc649b9d5a9dce088363e647075fa73f49d3cb7d",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-79 CI parallelism and richer failure packet implementation pushed at exact SHA cc649b9d; focused tests, full xdist suite, ruff, and YAML validation pass.",
+  "packet_digest_sha256":"898d8d20698a4809d877b2c9e87c7dc47cec68a16cb156fb09102f478aecf5bd",
+  "packet_id":"har79-harness-cc649b9d",
+  "pr":38,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ci-parallelism",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-79"
+}

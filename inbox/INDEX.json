@@ -111,6 +111,7 @@
     "har77-harness-1bf89072",
     "har77-harness-aa6577a0",
     "har78-harness-5893a3ba",
+    "har79-harness-cc649b9d",
     "har80-groundtruth-43c6d723",
     "har80-harness-a4af3484",
     "har80-harness-b98ef05c",
@@ -304,6 +305,9 @@
     "HAR-78":[
       "har78-harness-5893a3ba",
       "merge-har78-5893a3ba"
+    ],
+    "HAR-79":[
+      "har79-harness-cc649b9d"
     ],
     "HAR-80":[
       "har80-groundtruth-43c6d723",
