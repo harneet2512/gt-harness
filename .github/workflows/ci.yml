@@ -16,12 +16,28 @@ jobs:
   pytest:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    env:
+      GROUNDTRUTH_ROOT: ${{ github.workspace }}/Groundtruth
+      GIT_AUTHOR_NAME: GroundTruth CI
+      GIT_AUTHOR_EMAIL: groundtruth-ci@example.invalid
+      GIT_COMMITTER_NAME: GroundTruth CI
+      GIT_COMMITTER_EMAIL: groundtruth-ci@example.invalid
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout pinned Groundtruth parity source
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/groundtruth
+          ref: f2863f8781edaeaef8787c515e36381cdbd692d5
+          path: Groundtruth
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: Groundtruth/gt-index/go.mod
+          cache-dependency-path: Groundtruth/gt-index/go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -29,7 +45,16 @@ jobs:
       - name: Install project dependencies
         run: >-
           python -m pip install --disable-pip-version-check
-          -e ".[dev,miniswe,eval]" litellm vendor/groundtruth_mcp-*.whl
+          -e ./Groundtruth -e ".[dev,miniswe,eval]" litellm vendor/groundtruth_mcp-*.whl
+      - name: Build pinned provider-free producer and configure git identity
+        working-directory: Groundtruth/gt-index
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          git config --global user.name "$GIT_AUTHOR_NAME"
+          git config --global user.email "$GIT_AUTHOR_EMAIL"
+          go build -tags sqlite_fts5 -o "$RUNNER_TEMP/gt-index" ./cmd/gt-index
+          echo "GT_INDEX_BINARY=$RUNNER_TEMP/gt-index" >> "$GITHUB_ENV"
       - name: Run full pytest suite
         id: pytest
         continue-on-error: true
