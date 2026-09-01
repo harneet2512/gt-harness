@@ -1,0 +1,25 @@
+{
+  "created_at": "2026-09-01T02:11:50.548153Z",
+  "detail": {
+    "conclusion": "failure",
+    "run_id": "33461611679",
+    "run_url": "https://github.com/harneet2512/gt-harness/actions/runs/33461611679"
+  },
+  "file": "",
+  "head_sha": "09cee467e6a6ff9eb45eed8d2069f53a62522b15",
+  "kind": "check_outcome",
+  "line": 0,
+  "message": "ci-pytest CI outcome: failure",
+  "packet_digest_sha256": "bfbb6f1a059ee9a46ce31ac3f1e50bb500b117c1bf27336cf693d7cee2e0e49d",
+  "packet_id": "ci-ci-pytest-33461611679",
+  "pr": 34,
+  "schema": "gt.review_packet.v1",
+  "severity": "error",
+  "source": {
+    "check": "ci-pytest",
+    "system": "codex-bugbot"
+  },
+  "status": "open",
+  "supersedes": null,
+  "ticket": "HAR-76"
+}

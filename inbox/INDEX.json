@@ -9,6 +9,8 @@
     "bugbot-pr30-20260901",
     "bugbot-pr31-20260901",
     "bugbot-pr32-20260901",
+    "ci-ci-feature-matrix-33461611679",
+    "ci-ci-pytest-33461611679",
     "finder-f1",
     "finder-f1-fixed",
     "finder-f2",
@@ -93,6 +95,8 @@
       "rev-221-transport-rewind-fixed"
     ],
     "HAR-76":[
+      "ci-ci-feature-matrix-33461611679",
+      "ci-ci-pytest-33461611679",
       "har76-harness-09cee467",
       "har76-harness-72b9180e"
     ],
