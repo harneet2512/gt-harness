@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T00:41:23.657234Z",
+  "detail":"Fast-forward only: origin/main advanced from 326d004555ab836529de7a2ddfbb79f0a1dcf924 to 65194707b636ee896268ad41bfb956e0f2f4ebb1; candidate branch codex/har69-index-reuse-prep matched exact SHA after rebase; no merge commit.",
+  "file":"",
+  "head_sha":"65194707b636ee896268ad41bfb956e0f2f4ebb1",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"PR #31 HAR-69 fast-forward merged",
+  "packet_digest_sha256":"9b1586c0c9d65e8d7c76e198b3de97463c9e1c5d5b9c3a7c3a8d183cd6eaa041",
+  "packet_id":"merge-pr31-65194707",
+  "pr":31,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"FF-MERGE",
+    "system":"coordinator"
+  },
+  "status":"fixed",
+  "supersedes":null,
+  "ticket":"HAR-69"
+}
