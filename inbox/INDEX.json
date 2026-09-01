@@ -33,6 +33,7 @@
     "ci-ci-feature-matrix-33470449304",
     "ci-ci-feature-matrix-33470849874",
     "ci-ci-feature-matrix-33471057334",
+    "ci-ci-feature-matrix-33471965968",
     "ci-ci-pytest-33461611679",
     "ci-ci-pytest-33461810532",
     "ci-ci-pytest-33462550650-py3.13",
@@ -78,6 +79,8 @@
     "ci-ci-pytest-33470849874-py3.13",
     "ci-ci-pytest-33471057334-py3.12",
     "ci-ci-pytest-33471057334-py3.13",
+    "ci-ci-pytest-33471965968-py3.12",
+    "ci-ci-pytest-33471965968-py3.13",
     "finder-f1",
     "finder-f1-fixed",
     "finder-f2",
@@ -309,6 +312,9 @@
       "merge-har78-5893a3ba"
     ],
     "HAR-79":[
+      "ci-ci-feature-matrix-33471965968",
+      "ci-ci-pytest-33471965968-py3.12",
+      "ci-ci-pytest-33471965968-py3.13",
       "har79-harness-cc649b9d",
       "har79-harness-d599a084",
       "har79-inbox-validator-65385991"
