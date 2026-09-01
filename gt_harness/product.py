@@ -625,7 +625,10 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
     if initial.returncode == 0 or recovery.returncode == 0 or final.returncode != 0:
         raise RuntimeError(
             f"fixture_execution_contract:{arm}:"
-            f"initial={initial.returncode}:recovery={recovery.returncode}:final={final.returncode}"
+            f"initial={initial.returncode}:recovery={recovery.returncode}:final={final.returncode}:"
+            f"initial_stderr={initial.stderr[-240:]!r}:"
+            f"recovery_stderr={recovery.stderr[-240:]!r}:"
+            f"final_stderr={final.stderr[-240:]!r}"
         )
     trace_path = root / arm / "trajectory.json"
     _atomic_json(trace_path, trace)
