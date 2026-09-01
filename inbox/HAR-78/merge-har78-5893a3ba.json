@@ -1,0 +1,36 @@
+{
+  "created_at":"2026-09-01T04:45:54.409666Z",
+  "detail":{
+    "base_sha":"a4af34846cdb4c25f460f4bc8eecfd18de439311",
+    "benchmark_ready":false,
+    "benchmark_runs":0,
+    "branch":"codex/har78-deep-architecture",
+    "candidate_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+    "fast_forward":true,
+    "landed_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+    "pr":37,
+    "provider_calls":0,
+    "repository":"harneet2512/gt-harness",
+    "verification":{
+      "candidate_ancestor":true,
+      "origin_main":"5893a3ba0267f51666a76a33ab03b2df13440828"
+    }
+  },
+  "file":"",
+  "head_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-78 PR#37 fast-forward merged: base a4af3484 to landed SHA 5893a3ba; origin/main verified exact.",
+  "packet_digest_sha256":"d6490ade29bed2eb1a3081c79235080ea23a85c104aefb4cfe0a0e7ebee4c517",
+  "packet_id":"merge-har78-5893a3ba",
+  "pr":37,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"ff-merge",
+    "system":"codex-check"
+  },
+  "status":"closed",
+  "supersedes":null,
+  "ticket":"HAR-78"
+}
