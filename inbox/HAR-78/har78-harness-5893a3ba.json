@@ -1,0 +1,38 @@
+{
+  "created_at":"2026-09-01T04:42:39.949096Z",
+  "detail":{
+    "base_sha":"a4af34846cdb4c25f460f4bc8eecfd18de439311",
+    "benchmark_ready":false,
+    "benchmark_runs":0,
+    "branch":"codex/har78-deep-architecture",
+    "changed_paths":[
+      "README.md"
+    ],
+    "head_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+    "provider_calls":0,
+    "repository":"harneet2512/gt-harness",
+    "tests":[
+      {
+        "command":"python -m pytest tests/test_public_reaudit.py -q",
+        "exit_code":0
+      }
+    ]
+  },
+  "file":"",
+  "head_sha":"5893a3ba0267f51666a76a33ab03b2df13440828",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-78 README architecture document pushed at exact SHA 5893a3ba; focused public re-audit tests pass.",
+  "packet_digest_sha256":"2eeb3fd8cb2a89403c828482a09501b89d71694a6c6fdf1d5e729aeda08dc7f4",
+  "packet_id":"har78-harness-5893a3ba",
+  "pr":37,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"architecture-doc",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-78"
+}
