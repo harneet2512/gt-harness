@@ -52,6 +52,26 @@ _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 GRAPH_SCHEMA_VERSION = "gt.graph_certification.v1"
 
 
+def verify_configured_producer_artifact(
+    *, binary_path: str | Path | None = None,
+    receipt_path: str | Path | None = None,
+) -> tuple[bool, str]:
+    """Fail closed when an explicitly pinned producer receipt is invalid."""
+    configured = os.environ.get("GT_PRODUCER_ARTIFACT")
+    if receipt_path is None:
+        receipt_path = configured
+    if not receipt_path:
+        return True, "unconfigured"
+    try:
+        from gt_engine.producer_artifact import verify_producer_artifact
+
+        receipt_file = Path(receipt_path)
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+        return verify_producer_artifact(receipt, binary=binary_path)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False, "receipt_unreadable"
+
+
 def source_manifest_digest(root: str | Path) -> str:
     """Hash sorted, length-delimited source path and file-byte identities."""
     root_path = Path(root)
@@ -148,6 +168,10 @@ def _binary_certification() -> dict[str, str]:
     path = Path(candidate).resolve() if candidate else None
     if path is None or not path.is_file():
         return {"path_sha256": "", "binary_sha256": ""}
+    if os.environ.get("GT_PRODUCER_ARTIFACT"):
+        valid, _reason = verify_configured_producer_artifact(binary_path=path)
+        if not valid:
+            return {"path_sha256": "", "binary_sha256": ""}
     return {
         "path_sha256": hashlib.sha256(str(path).encode("utf-8")).hexdigest(),
         "binary_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
