@@ -126,6 +126,10 @@ class MiniSweAgent(BaseInstalledAgent):
         uv_installer = self._uv_installer_host()
         miniswe_version = _miniswe_agent_version()
         remote_gt_wheel = f"{_REMOTE_BUNDLE_DIR}/{wheel.name}"
+        # Harbor's task images do not guarantee that the treatment mount exists.
+        # Create it before any upload so setup fails only on a real artifact or
+        # runtime error, not because the destination directory is absent.
+        await self.exec_as_root(environment, f"mkdir -p {_REMOTE_BUNDLE_DIR}")
         await environment.upload_file(wheel, remote_gt_wheel)
         with tempfile.TemporaryDirectory(prefix="gt-product-bundle-") as temporary:
             harness_wheel = self._harness_wheel(Path(temporary))
