@@ -112,6 +112,7 @@
     "merge-har76-701a8472-v2",
     "merge-har77-aa6577a0",
     "merge-har77-aa6577a0-v2",
+    "merge-har80-a4af3484",
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
     "merge-pr26-bd099b88",
@@ -285,7 +286,8 @@
       "har80-harness-a4af3484",
       "har80-harness-b98ef05c",
       "har80-inbox-tool-bf088d22",
-      "har80-route-b-701a8472"
+      "har80-route-b-701a8472",
+      "merge-har80-a4af3484"
     ]
   }
 }
