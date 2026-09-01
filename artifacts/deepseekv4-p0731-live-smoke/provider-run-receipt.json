@@ -48,7 +48,15 @@
   "comparison": {
     "status": "NOT_CLAIMED",
     "reason": "Groundtruth reward files were not collected; a bare-vs-Groundtruth improvement cannot be inferred.",
-    "provider_calls_delta_groundtruth_minus_bare_mean": -36.2
+    "provider_calls_delta_groundtruth_minus_bare_mean": -36.2,
+    "historical_disk_reference": {
+      "location": "D:/GT_Benchmarking",
+      "provider_model_id": "deepseek-v4-flash",
+      "bare_solved_tasks": 11,
+      "groundtruth_solved_tasks": 13,
+      "status": "NON_COMPARABLE",
+      "reason": "historical run used different runner/budget/provenance and is not this accepted smoke"
+    }
   },
   "release_eligible": false,
   "release_blockers": [
