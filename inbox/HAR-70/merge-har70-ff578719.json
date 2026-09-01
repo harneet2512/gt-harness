@@ -1,0 +1,21 @@
+{
+  "created_at":"2026-09-01T03:34:52.050500Z",
+  "detail":"{grant:FF GRANT \u2014 PR#33 ... ff578719fef2a360af24d2076fe7ab3bc989c780,base_sha:5295a5b6ade1eaa6c93fb3c6115fa80746d4bfd4,landed_sha:ff578719fef2a360af24d2076fe7ab3bc989c780,fast_forward:true,provider_calls:0,benchmark_runs:0}",
+  "file":"",
+  "head_sha":"ff578719fef2a360af24d2076fe7ab3bc989c780",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Fast-forward merge of PR#33 authorized by exact coordinator grant and landed on origin/main.",
+  "packet_digest_sha256":"10ecfac7395fca7e0de7565101802e1d6e063442091f1b1d647c37ed3087ee49",
+  "packet_id":"merge-har70-ff578719",
+  "pr":33,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"ff-merge",
+    "system":"coordinator"
+  },
+  "status":"pass",
+  "supersedes":null,
+  "ticket":"HAR-70"
+}
