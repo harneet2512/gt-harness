@@ -381,6 +381,18 @@ jobs:
             | sha256sum -c -
           echo "GT_PYTHON_ARCHIVE_HOST=$archive" >> "$GITHUB_ENV"
 
+      - name: Stage the pinned Python dependency wheelhouse
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/gt-wheelhouse"
+          mkdir -p "$wheelhouse"
+          python -m pip download --only-binary=:all: --dest "$wheelhouse" \
+            "mini-swe-agent==2.4.6" "numpy==2.5.1" \
+            "anthropic==0.120.2" "openai==2.50.0" \
+            "pydantic==2.13.4" "rich==15.0.0"
+          test -n "$(find "$wheelhouse" -type f -print -quit)"
+          echo "GT_WHEELHOUSE_HOST=$wheelhouse" >> "$GITHUB_ENV"
+
       - name: Install Pier and the canonical product source
         run: |
           set -euo pipefail

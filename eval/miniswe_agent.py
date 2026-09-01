@@ -34,6 +34,7 @@ _REMOTE_GT_BINARY = "/installed-agent/gt-index"
 _REMOTE_UV_INSTALLER = "/installed-agent/uv-install.tar.gz"
 _REMOTE_PYTHON_ARCHIVE = "/installed-agent/python-3.12.13.tar.gz"
 _REMOTE_PYTHON_DIR = "/installed-agent/python"
+_REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _PRODUCT_MANIFEST = _REPO_ROOT / "config" / "deepswe_product_bundle_v1.json"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
@@ -134,11 +135,22 @@ class MiniSweAgent(BaseInstalledAgent):
         MiniSweAgent._require_digest(path, _PYTHON_ARCHIVE_SHA256, "python_archive")
         return path
 
+    @staticmethod
+    def _wheelhouse_host() -> Path:
+        path = Path(os.environ.get("GT_WHEELHOUSE_HOST", ""))
+        if not path.is_dir() or not any(path.iterdir()):
+            raise FileNotFoundError(
+                "Mini-SWE treatment bundle requires the pre-downloaded dependency "
+                "wheelhouse in GT_WHEELHOUSE_HOST"
+            )
+        return path
+
     async def install(self, environment: BaseEnvironment) -> None:
         wheel = self._gt_wheel()
         binary = self._gt_binary_host()
         uv_installer = self._uv_installer_host()
         python_archive = self._python_archive_host()
+        wheelhouse = self._wheelhouse_host()
         miniswe_version = _miniswe_agent_version()
         remote_gt_wheel = f"{_REMOTE_BUNDLE_DIR}/{wheel.name}"
         # Harbor's task images do not guarantee that the treatment mount exists.
@@ -153,6 +165,7 @@ class MiniSweAgent(BaseInstalledAgent):
         await environment.upload_file(binary, _REMOTE_GT_BINARY)
         await environment.upload_file(uv_installer, _REMOTE_UV_INSTALLER)
         await environment.upload_file(python_archive, _REMOTE_PYTHON_ARCHIVE)
+        await environment.upload_dir(wheelhouse, _REMOTE_WHEELHOUSE)
         await self.exec_as_root(environment, f"chmod 755 {_REMOTE_GT_BINARY}")
         install = (
             "set -eu; "
@@ -163,7 +176,8 @@ class MiniSweAgent(BaseInstalledAgent):
             "chmod 755 \"$HOME/.local/bin/uv\" && "
             f"mkdir -p {_REMOTE_PYTHON_DIR} && tar -xzf {_REMOTE_PYTHON_ARCHIVE} "
             f"-C {_REMOTE_PYTHON_DIR} --strip-components=1 && "
-            f'"$HOME/.local/bin/uv" tool install --python {_REMOTE_PYTHON_DIR}/bin/python3.12 '
+            f'"$HOME/.local/bin/uv" tool install --offline --no-index '
+            f'--find-links {_REMOTE_WHEELHOUSE} --python {_REMOTE_PYTHON_DIR}/bin/python3.12 '
             f'--with "mini-swe-agent=={miniswe_version}" '
             f"--with {shlex.quote(remote_gt_wheel)} --with 'numpy==2.5.1' "
             f"{shlex.quote(remote_harness_wheel)} && "
