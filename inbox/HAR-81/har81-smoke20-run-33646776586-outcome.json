@@ -1,0 +1,292 @@
+{
+  "created_at":"2026-09-02T19:34:08.793867Z",
+  "detail":{
+    "attestation_failure_evidence":{
+      "conclusion":"failure",
+      "evidence":[
+        "All 20 task artifacts were downloaded with merge-multiple into one directory.",
+        "The public audit invoked scripts/gt_audit.py, which requires agent/nano.txt and discovered only abs-module-cache-flags.",
+        "That single discovered task was RED because agent/nano.txt was absent.",
+        "The canonical verifier step was skipped.",
+        "The expected attestation/deepswe20-attestation.json was never created, so upload failed with no files found."
+      ],
+      "impact":"No valid run-level attestation exists; the 17 task passes cannot be promoted to an attested 17/20 run outcome.",
+      "job_id":100323570017,
+      "primary_classification":"HARNESS_AUDIT_DISCOVERY_INCOMPATIBILITY"
+    },
+    "confidence":"high except where explicitly qualified",
+    "dispatch_control":{
+      "fresh_owner_go_required":true,
+      "new_paid_dispatch_authorized":false
+    },
+    "model_identity":{
+      "effective_route":"openai/meta/muse-spark-1.2-contributor",
+      "model_mismatch":false,
+      "requested_and_provider_reported":"meta/muse-spark-1.2-contributor"
+    },
+    "provider_receipt_summary":{
+      "invalid_manifests":5,
+      "invalid_pass_task_indexes":[
+        2,
+        5,
+        11
+      ],
+      "missing_manifests":1,
+      "note":"A PASS verdict does not repair an invalid provider receipt. Task 3 was SIGKILLed before its reproducibility manifest was sealed.",
+      "total_requests_declared":1348,
+      "valid_manifests":14
+    },
+    "run_conclusion":"failure",
+    "run_id":33646776586,
+    "source_sha":"befe2f3934beabdb22549a9042058114248a5f63",
+    "summary":{
+      "attestation":"ERROR",
+      "errored":3,
+      "passed":17,
+      "planned":20
+    },
+    "tasks":[
+      {
+        "index":1,
+        "job_id":100305815568,
+        "provider_events_sha256":"18580ad193dad52890cfd1ea3e562527941a2aed0fa000ce860cc5f960c9d715",
+        "provider_receipt":"VALID",
+        "provider_request_count":46,
+        "task_id":"abs-module-cache-flags",
+        "verdict":"PASS"
+      },
+      {
+        "index":2,
+        "job_id":100305815396,
+        "provider_events_sha256":"1eae0c7b224e5a753e745178869c29bddd2f2e1fd54ac2fb31e9257ad423335b",
+        "provider_receipt":"INVALID_MISSING_TERMINAL_RECEIPT",
+        "provider_request_count":157,
+        "task_id":"adaptix-name-mapping-aliases",
+        "verdict":"PASS"
+      },
+      {
+        "index":3,
+        "job_id":100305815350,
+        "provider_events_sha256":"f28a1015548cf80dca873da872b427164070a3076447bedc6f550a306ba996d3",
+        "provider_receipt":"UNSEALED_MANIFEST_MISSING",
+        "provider_request_count":6,
+        "task_id":"arktype-json-schema-refs-dependencies",
+        "verdict":"ERROR"
+      },
+      {
+        "index":4,
+        "job_id":100305815378,
+        "provider_events_sha256":"ffc4a2ab5a3637f7f563bbcb70567981b325038e3966b10b90ed43b43a2e2ebe",
+        "provider_receipt":"VALID",
+        "provider_request_count":62,
+        "task_id":"csstree-shorthand-expansion-compression",
+        "verdict":"PASS"
+      },
+      {
+        "index":5,
+        "job_id":100305815323,
+        "provider_events_sha256":"540a4b9e9b0b2caed87c4eb1b49965d01e7955d353ac55a9fbfdf38663cd00bb",
+        "provider_receipt":"INVALID_MISSING_TERMINAL_RECEIPT",
+        "provider_request_count":142,
+        "task_id":"boa-hierarchical-evaluation-cancellation",
+        "verdict":"PASS"
+      },
+      {
+        "index":6,
+        "job_id":100305815484,
+        "provider_events_sha256":"21a94b5c04872fc9a7b417dd6ead692be751319271a7a7bebe33965351019004",
+        "provider_receipt":"VALID",
+        "provider_request_count":41,
+        "task_id":"abs-stepped-slices",
+        "verdict":"PASS"
+      },
+      {
+        "index":7,
+        "job_id":100305815504,
+        "provider_events_sha256":"6410ba039add0ad58c62dc8a74c499b8436da80732884c0f6f46368275cee1db",
+        "provider_receipt":"VALID",
+        "provider_request_count":40,
+        "task_id":"aiomonitor-task-snapshots-diff",
+        "verdict":"PASS"
+      },
+      {
+        "index":8,
+        "job_id":100305815608,
+        "provider_events_sha256":"4161e099406e5eae6a3f1cbec710e390279f0c7b7dca032b8fda1ed20a06deb7",
+        "provider_receipt":"VALID",
+        "provider_request_count":78,
+        "task_id":"awilix-async-container-initialization",
+        "verdict":"PASS"
+      },
+      {
+        "index":9,
+        "job_id":100305815476,
+        "provider_events_sha256":"da1a7ca0b1a6a1e83a41d18c4d70aa7a4d63ba13a18a87b7f35011a7dc7aeb1e",
+        "provider_receipt":"VALID",
+        "provider_request_count":90,
+        "task_id":"katex-multicolumn-array-spans",
+        "verdict":"PASS"
+      },
+      {
+        "index":10,
+        "job_id":100305815536,
+        "provider_events_sha256":"af3f8b6bccede12fa15d414e57904d55e72a0737b07a7036b92d2cdf33fbb07a",
+        "provider_receipt":"VALID",
+        "provider_request_count":43,
+        "task_id":"fd-deterministic-multi-key-sorting",
+        "verdict":"PASS"
+      },
+      {
+        "index":11,
+        "job_id":100305815447,
+        "provider_events_sha256":"5658970f362ad0d33fcafddcd31a6d6e09626747232f7f6adad442480dc72812",
+        "provider_receipt":"INVALID_MISSING_TERMINAL_RECEIPT",
+        "provider_request_count":62,
+        "task_id":"actionlint-action-pinning-lint",
+        "verdict":"PASS"
+      },
+      {
+        "index":12,
+        "job_id":100305815371,
+        "provider_events_sha256":"8a62aac4966a248c72150d743655343ebb61513dc798da9ae4a1d3089aaa4ee8",
+        "provider_receipt":"VALID",
+        "provider_request_count":58,
+        "task_id":"bandit-incremental-cache-control",
+        "verdict":"PASS"
+      },
+      {
+        "index":13,
+        "job_id":100305815491,
+        "provider_events_sha256":"0e4b5536337c9a984dd27931f92a268095e7328c7f0f250eba6e34bbcd8a2a82",
+        "provider_receipt":"VALID",
+        "provider_request_count":33,
+        "task_id":"clack-async-autocomplete-options",
+        "verdict":"PASS"
+      },
+      {
+        "index":14,
+        "job_id":100305815360,
+        "provider_events_sha256":"8b0ba55711949719632f21fb5b9e14d01962bdf2411f0a9edda96ebf18a5811f",
+        "provider_receipt":"INVALID_MISSING_9_TERMINAL_RECEIPTS",
+        "provider_request_count":32,
+        "task_id":"testem-bail-on-test-failure",
+        "verdict":"ERROR"
+      },
+      {
+        "index":15,
+        "job_id":100305815558,
+        "provider_events_sha256":"c9f42869ef874aca923efdd2e2b4b0d3a212b84b92752ad9d991007431bfcaf8",
+        "provider_receipt":"VALID",
+        "provider_request_count":100,
+        "task_id":"oxvg-structural-selector-preservation",
+        "verdict":"PASS"
+      },
+      {
+        "index":16,
+        "job_id":100305815430,
+        "provider_events_sha256":"73fda77098aa794d447b8967a1e427baad94e09adc9d45654e00448d78c24fe6",
+        "provider_receipt":"VALID",
+        "provider_request_count":99,
+        "task_id":"anko-default-function-arguments",
+        "verdict":"PASS"
+      },
+      {
+        "index":17,
+        "job_id":100305815391,
+        "provider_events_sha256":"a6b27d85ce15a05adb1acc5b3d1636722749f79727f1845ca17310fcbf9520e6",
+        "provider_receipt":"VALID",
+        "provider_request_count":117,
+        "task_id":"bandit-interprocedural-taint-checks",
+        "verdict":"PASS"
+      },
+      {
+        "index":18,
+        "job_id":100305815570,
+        "provider_events_sha256":"2bf809ddf900676c259a2a9a2d1f0ef0057f6ab471c4f79ee4852a9a68f2b9a3",
+        "provider_receipt":"INVALID_MISSING_9_TERMINAL_RECEIPTS",
+        "provider_request_count":32,
+        "task_id":"claude-code-by-agents-recursive-delegation",
+        "verdict":"ERROR"
+      },
+      {
+        "index":19,
+        "job_id":100305815776,
+        "provider_events_sha256":"522837b21bdc46c7edb1f0f65f5ec437c4334811298f2a8eb34ecd137f2a6b1f",
+        "provider_receipt":"VALID",
+        "provider_request_count":52,
+        "task_id":"testem-per-launcher-reports",
+        "verdict":"PASS"
+      },
+      {
+        "index":20,
+        "job_id":100305815743,
+        "provider_events_sha256":"0b6d7b27f91d381054be9f19e171c2227ca3b19599372bd19b52bb353d55d957",
+        "provider_receipt":"VALID",
+        "provider_request_count":58,
+        "task_id":"pest-character-class-coalescing",
+        "verdict":"PASS"
+      }
+    ],
+    "triage":{
+      "arktype-json-schema-refs-dependencies":{
+        "classification":"HARNESS_RUNTIME_RESOURCE_EXHAUSTION",
+        "confidence":"high for harness/runtime termination; moderate for OOM specifically",
+        "not_classified_as":[
+          "task defect",
+          "model capability failure"
+        ],
+        "primary_evidence":"Mini-SWE process exited 137 (SIGKILL) while gt-index was parsing the repository; no model patch, Mini-SWE report, or sealed reproducibility manifest was produced. The binder emitted an ERROR record, but official verifier tests did not execute.",
+        "verifier":"NOT_RUN"
+      },
+      "claude-code-by-agents-recursive-delegation":{
+        "classification":"HARNESS_UNBOUNDED_MODEL_VISIBLE_CONTEXT",
+        "confidence":"high",
+        "consequences":[
+          "nine missing terminal provider receipts",
+          "provider_manifest_count_mismatch",
+          "false FULL assurance despite terminal provider failure",
+          "generic runner_setup_or_execution_failed classification"
+        ],
+        "not_classified_as":[
+          "task defect",
+          "model capability failure"
+        ],
+        "primary_evidence":"Deterministic BadRequestError: provider context limit 1,048,576 tokens, request approximately 4,160,997 tokens; transport retried requests 23-31; provider_failed exit 4; official verifier did not run.",
+        "verifier":"NOT_RUN"
+      },
+      "testem-bail-on-test-failure":{
+        "classification":"HARNESS_UNBOUNDED_PROVIDER_REQUEST",
+        "confidence":"high",
+        "consequences":[
+          "nine missing terminal provider receipts",
+          "runtime receipt issuance failed with provider_manifest_count_mismatch",
+          "generic runner_setup_or_execution_failed classification"
+        ],
+        "not_classified_as":[
+          "task defect",
+          "model capability failure"
+        ],
+        "primary_evidence":"Deterministic BadRequestError: total text input size exceeds 8 MB; transport retried the same oversized request through requests 23-31; provider_failed exit 4; official verifier did not run.",
+        "verifier":"NOT_RUN"
+      }
+    },
+    "workflow":"GT Harness: DeepSWE paid smoke20"
+  },
+  "file":"",
+  "head_sha":"befe2f3934beabdb22549a9042058114248a5f63",
+  "kind":"measurement",
+  "line":0,
+  "message":"Run 33646776586: 17 pass, 3 harness errors, attestation invalid",
+  "packet_digest_sha256":"c2cc9db7f248cc22f47a502bdef4fee53ef5a409a60341863623beac0d2cdf85",
+  "packet_id":"har81-smoke20-run-33646776586-outcome",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"deepswe-paid-smoke20-outcome-triage",
+    "system":"coordinator"
+  },
+  "status":"FAIL",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}
