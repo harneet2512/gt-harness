@@ -10,9 +10,9 @@ BASELINE = ROOT / "eval" / "muse_spark_1_2_smoke20_baseline.json"
 
 
 def _canonical_sha256(value: object) -> str:
-    encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
     return hashlib.sha256(encoded).hexdigest()
 
 

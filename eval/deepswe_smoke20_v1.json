@@ -34,12 +34,16 @@
     "typescript": 4
   },
   "baseline": {
-    "comparison_protocol": "paired_same_workflow_v1",
-    "model": "deepseek-v4-flash",
-    "provider": "deepseek:native:api.deepseek.com",
+    "comparison_protocol": "retained_official_four_trial_slice_v1",
+    "model": "meta/muse-spark-1.2-contributor",
+    "effective_route": "openai/meta/muse-spark-1.2-contributor",
+    "provider": "openrouter",
+    "source": "HAR-82",
+    "receipt": "muse_spark_1_2_smoke20_baseline.json",
+    "receipt_sha256": "19cddf27458d216cd43668eddf97b88c2f9fda337bbce92e7de0a17d43303d6d",
     "mini_swe_agent_version": "2.4.6",
     "tasks": 20,
-    "attempts_per_task": 1,
+    "attempts_per_task": 4,
     "required_treatment": "bare",
     "required_comparison_fields": [
       "benchmark_sha",
@@ -52,6 +56,6 @@
       "time_budget_seconds",
       "official_verifier"
     ],
-    "comparison_limit": "A regression claim is valid only against a bare run from this exact workflow and source SHA with the required comparison fields equal. Historical Ox Alpha and public DataCurve aggregates are directional evidence only."
+    "comparison_limit": "The retained HAR-82 Muse slice is the only GT-off comparison input. Join by task_name and preserve all four official trials; do not dispatch another GT-off run."
   }
 }
