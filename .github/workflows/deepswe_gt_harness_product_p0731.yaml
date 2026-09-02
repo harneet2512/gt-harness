@@ -3,20 +3,6 @@ name: "GT Harness: DeepSWE paid smoke20"
 on:
   workflow_dispatch:
     inputs:
-      code_ref:
-        description: "Immutable GT Harness commit or branch to evaluate"
-        required: false
-        type: string
-      treatment:
-        description: "Treatment arm: bare control or groundtruth"
-        required: false
-        type: string
-        default: groundtruth
-      allow_baseline_rerun:
-        description: "Explicitly authorize rerunning the already-recorded bare baseline"
-        required: false
-        type: boolean
-        default: false
       task_selection:
         description: "Optional comma-separated subset of the pinned smoke20 task IDs"
         required: false
@@ -29,20 +15,6 @@ on:
         default: false
   workflow_call:
     inputs:
-      code_ref:
-        description: "Immutable GT Harness commit or branch to evaluate"
-        required: false
-        type: string
-      treatment:
-        description: "Treatment arm: bare control or groundtruth"
-        required: false
-        type: string
-        default: groundtruth
-      allow_baseline_rerun:
-        description: "Explicitly authorize rerunning the already-recorded bare baseline"
-        required: false
-        type: boolean
-        default: false
       task_selection:
         description: "Optional comma-separated subset of the pinned smoke20 task IDs"
         required: false
@@ -75,8 +47,6 @@ jobs:
       provider_base_url: ${{ steps.cohort.outputs.provider_base_url }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ inputs.code_ref || github.sha }}
 
       - name: Resolve the immutable GT Harness source
         id: source
@@ -97,16 +67,11 @@ jobs:
         id: cohort
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
-          TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
-          ALLOW_BASELINE_RERUN: ${{ inputs.allow_baseline_rerun || 'false' }}
+          TREATMENT: groundtruth
           TASK_SELECTION: ${{ inputs.task_selection || '' }}
           APPROVE_PAID_RUN: ${{ inputs.approve_paid_run || 'false' }}
         run: |
           set -euo pipefail
-          if [[ "${TREATMENT}" == "bare" && "${ALLOW_BASELINE_RERUN}" != "true" ]]; then
-            echo "Bare baseline already exists; set allow_baseline_rerun=true explicitly to rerun it." >&2
-            exit 1
-          fi
           python - <<'PY'
           import hashlib
           import json
@@ -184,8 +149,8 @@ jobs:
                   f"DeepSWE language balance mismatch: {language_counts!r}"
               )
           treatment = os.environ["TREATMENT"].strip().lower()
-          if treatment not in {"bare", "groundtruth"}:
-              raise SystemExit(f"unsupported treatment: {treatment!r}")
+          if treatment != "groundtruth":
+              raise SystemExit("paid smoke20 is GT-only; retained HAR-82 data is the baseline")
           provider_route, provider_route_sha256 = load_route(
               Path("config/provider_route.v1.json")
           )
@@ -236,8 +201,12 @@ jobs:
           path: deepswe20-plan.json
           if-no-files-found: error
 
-  image_digest_gate:
+  readiness:
     needs: plan
+    uses: ./.github/workflows/deepswe_gt_harness_product.yml
+
+  image_digest_gate:
+    needs: [plan, readiness]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -264,7 +233,7 @@ jobs:
 
   provider_gate:
     if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, image_digest_gate]
+    needs: [plan, readiness, image_digest_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -297,7 +266,7 @@ jobs:
 
   task:
     if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, image_digest_gate, provider_gate]
+    needs: [plan, readiness, image_digest_gate, provider_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -312,7 +281,7 @@ jobs:
       ORDINAL: ${{ matrix.ordinal }}
       MODEL: ${{ needs.plan.outputs.model }}
       GT_RETRIEVAL_MODE: hybrid_required
-      GT_TREATMENT: ${{ inputs.treatment || 'groundtruth' }}
+      GT_TREATMENT: groundtruth
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

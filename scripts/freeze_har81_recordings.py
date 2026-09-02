@@ -87,17 +87,25 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
         )
         events_bytes = events_path.read_bytes()
         event_rows = [json.loads(line) for line in events_bytes.splitlines() if line]
-        run_output = output / "recorded_runs" / run_id
-        _atomic_bytes(run_output / "events.jsonl", events_bytes)
-        _atomic_bytes(run_output / "provider_events.jsonl", provider_events.read_bytes())
-        _atomic_bytes(run_output / "graph.db.gz", gzip.compress(graph_db.read_bytes(), mtime=0))
-        _atomic_bytes(run_output / "graph.manifest.json", graph_manifest.read_bytes())
-        deliveries: list[dict[str, Any]] = []
         receipts = [
             row
             for row in event_rows
             if row.get("event") == "receipt" and row.get("transition") == "delivered"
         ]
+        has_trace = any(row.get("evidence_type") == "trace_frame" for row in receipts)
+        trajectory_source = state.parents[1] / "miniswe_trajectory.json"
+        trajectory_bytes = trajectory_source.read_bytes() if has_trace else b""
+        run_output = output / "recorded_runs" / run_id
+        _atomic_bytes(run_output / "events.jsonl", events_bytes)
+        _atomic_bytes(run_output / "provider_events.jsonl", provider_events.read_bytes())
+        _atomic_bytes(run_output / "graph.db.gz", gzip.compress(graph_db.read_bytes(), mtime=0))
+        _atomic_bytes(run_output / "graph.manifest.json", graph_manifest.read_bytes())
+        trajectory_target = run_output / "miniswe_trajectory.json"
+        if has_trace:
+            _atomic_bytes(trajectory_target, trajectory_bytes)
+        else:
+            trajectory_target.unlink(missing_ok=True)
+        deliveries: list[dict[str, Any]] = []
         for ordinal, receipt in enumerate(receipts):
             kind = str(receipt["evidence_type"])
             delivery = next(
@@ -122,12 +130,52 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
             request_target = run_output / "provider_requests" / request_source.name
             _atomic_bytes(request_target, request_bytes)
             artifact_path = ""
+            derivation_path = ""
+            derivation_sha256 = ""
             if kind == "localization":
                 artifact_sha = str(delivery["artifact_sha256"])
                 artifact_source = state / "localization_advisory" / f"{artifact_sha}.json"
                 artifact_target = run_output / "localization_advisory" / artifact_source.name
                 _atomic_bytes(artifact_target, artifact_source.read_bytes())
                 artifact_path = artifact_target.relative_to(output).as_posix()
+            elif kind == "new_file_destination":
+                transaction_sha = str(
+                    receipt.get("transaction_sha256")
+                    or delivery.get("transaction_sha256")
+                    or ""
+                )
+                edit = next(
+                    row
+                    for row in event_rows
+                    if row.get("event") == "edit_transaction"
+                    and row.get("transaction_sha256") == transaction_sha
+                )
+                snapshot = max(
+                    (
+                        row
+                        for row in event_rows
+                        if row.get("event") == "repository_snapshot"
+                        and row.get("boundary") == "after_action"
+                        and row.get("repository_revision") == edit.get("post_revision")
+                        and int(row["sequence"]) < int(edit["sequence"])
+                    ),
+                    key=lambda row: int(row["sequence"]),
+                )
+                snapshot_source = (
+                    state
+                    / "repository_snapshots"
+                    / f"{snapshot['snapshot_sha256']}.json"
+                )
+                snapshot_bytes = snapshot_source.read_bytes()
+                snapshot_target = run_output / "repository_snapshots" / snapshot_source.name
+                _atomic_bytes(snapshot_target, snapshot_bytes)
+                derivation_path = snapshot_target.relative_to(output).as_posix()
+                derivation_sha256 = _sha256(snapshot_bytes)
+            elif kind == "trace_frame":
+                derivation_path = (
+                    run_output / "miniswe_trajectory.json"
+                ).relative_to(output).as_posix()
+                derivation_sha256 = _sha256(trajectory_bytes)
             target = str(receipt.get("target") or delivery.get("target") or "")
             deliveries.append(
                 {
@@ -148,6 +196,8 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
                     "shipped_payload_sha256": _sha256(body.encode("utf-8")),
                     "shipped_payload_bytes": len(body.encode("utf-8")),
                     "artifact_path": artifact_path,
+                    "derivation_path": derivation_path,
+                    "derivation_sha256": derivation_sha256,
                     "trigger_class": TRIGGERS[kind],
                     "canonical_claim": _claim(kind, target, body),
                     "consequence": CONSEQUENCES[kind],

@@ -58,8 +58,8 @@ def test_paid_smoke_requires_all_exact_task_image_digests_before_provider_gate()
     assert '"container_image": bundle_task["container_image"]' in paid
     assert '"container_digest": bundle_task["container_digest"]' in paid
     assert "image_digest_gate:" in paid
-    assert "needs: [plan, image_digest_gate]" in paid
-    assert "needs: [plan, image_digest_gate, provider_gate]" in paid
+    assert "needs: [plan, readiness, image_digest_gate]" in paid
+    assert "needs: [plan, readiness, image_digest_gate, provider_gate]" in paid
     assert "Verify all exact task-image manifests without provider access" in paid
     assert 'docker buildx imagetools inspect --raw "$IMAGE_REF"' in paid
     assert 'test "sha256:${OBSERVED}" = "${DIGEST}"' in paid

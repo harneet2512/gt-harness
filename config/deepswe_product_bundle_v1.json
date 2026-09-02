@@ -44,6 +44,7 @@
     "versioned_query_policy"
   ],
   "source_closure": [
+    ".gitattributes",
     "config/deepswe_product_bundle_v1.json",
     ".gitleaks.toml",
     "config/product-requirements.lock",
@@ -75,6 +76,7 @@
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/graph.db.gz",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/graph.manifest.json",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/localization_advisory/1f00cc19db977479ca4b2a467dc2c8a709d8ea1c02c52b78d2643df8945740fb.json",
+    "tests/fixtures/har81_attestation/recorded_runs/33563173631/miniswe_trajectory.json",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/provider_events.jsonl",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/provider_requests/2e41e8937645ce2ad62cf83df9573e6f8e40bb770101b1cec21f7de13ddd9521.json",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/provider_requests/43756bfa870e9ad08c0e787f93961dcb4db65aeb82d204c84c47530d5d84bc61.json",
@@ -82,6 +84,7 @@
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/provider_requests/7f315399eac26272781407a1e6f85b458c176cab6796ffcb9efb63470c7cb7f8.json",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/provider_requests/8e224f36de210f2f47097f65e3258443df1c451c98d25e949ab0ae1e48302c4b.json",
     "tests/fixtures/har81_attestation/recorded_runs/33563173631/provider_requests/fb72e686037a767c82c32a4f2057c56ff3162fbe9f42906bcd44c67e44aa68f1.json",
+    "tests/fixtures/har81_attestation/recorded_runs/33563173631/repository_snapshots/f5f02dea993aaa72a4b88ff5eab9673e8b313217e532a228c6f6945a1e7f4fe5.json",
     "tests/fixtures/har81_attestation/recorded_runs/33565965241/events.jsonl",
     "tests/fixtures/har81_attestation/recorded_runs/33565965241/graph.db.gz",
     "tests/fixtures/har81_attestation/recorded_runs/33565965241/graph.manifest.json",
@@ -91,6 +94,7 @@
     "tests/fixtures/har81_attestation/recorded_runs/33565965241/provider_requests/5f5446b25956d5b1d6f00946b35a566ed7bb07bab1caa66934b9ba76bf2049bb.json",
     "tests/fixtures/har81_attestation/recorded_runs/33565965241/provider_requests/8e224f36de210f2f47097f65e3258443df1c451c98d25e949ab0ae1e48302c4b.json",
     "tests/fixtures/har81_attestation/recorded_runs/33565965241/provider_requests/b590270e237f3cc22ab10abecdd3580d9dcdc058666f31985e96a792cc176d70.json",
+    "tests/fixtures/har81_attestation/recorded_runs/33565965241/repository_snapshots/50376fc026a2cbeb3165fa152c9f3d6cabf36e75ab0974734acc494efd30fa74.json",
     "tests/fixtures/har81_attestation/recorded_runs/33567358689/events.jsonl",
     "tests/fixtures/har81_attestation/recorded_runs/33567358689/graph.db.gz",
     "tests/fixtures/har81_attestation/recorded_runs/33567358689/graph.manifest.json",

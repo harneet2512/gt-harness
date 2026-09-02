@@ -16,13 +16,23 @@ def test_paid_workflow_requires_explicit_approval_before_provider_or_tasks() -> 
     assert '"paid_run_approval"' in source
 
 
+def test_paid_workflow_cannot_dispatch_a_new_gt_off_baseline() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "allow_baseline_rerun" not in source
+    assert "inputs.treatment" not in source
+    assert "GT_TREATMENT: groundtruth" in source
+    assert "paid smoke20 is GT-only; retained HAR-82 data is the baseline" in source
+
+
 def test_provider_route_is_loaded_once_and_preflight_precedes_matrix() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
     route = json.loads((ROOT / "config" / "provider_route.v1.json").read_text())
 
     assert "scripts.provider_preflight" in source
     assert "config/provider_route.v1.json" in source
-    assert "needs: [plan, image_digest_gate, provider_gate]" in source
+    assert "needs: [plan, readiness, image_digest_gate, provider_gate]" in source
+    assert "uses: ./.github/workflows/deepswe_gt_harness_product.yml" in source
     assert route["model"] not in source
     assert route["base_url"] not in source
     assert "DEEPSEEK_API_KEY" not in source

@@ -5,6 +5,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -113,25 +115,51 @@ def _caller_body(connection: sqlite3.Connection, subject: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _structured_passthrough_body(kind: str, shipped: str) -> str:
-    lines = shipped.splitlines()
-    if kind == "trace_frame":
-        if len(lines) != 1:
-            raise ValueError("trace_frame_malformed")
-        path, line = lines[0].rsplit(":", 1)
-        int(line)
-        return f"{path}:{line}\n"
-    if kind == "new_file_destination":
-        precedent_lines = [line for line in lines if line != "...(truncated by GT)"]
-        if not precedent_lines or any(
-            ": advisory precedent revision=" not in line
-            or "; reason=" not in line
-            or "; inspect=" not in line
-            for line in precedent_lines
-        ):
-            raise ValueError("new_file_destination_malformed")
-        return "\n".join(lines)
-    raise ValueError(f"unsupported passthrough kind: {kind}")
+def _cap_evidence(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n...(truncated by GT)"
+
+
+def _new_file_body(
+    snapshot: dict[str, Any], created_files: list[str], revision: str
+) -> str:
+    paths = [str(row.get("path") or "") for row in snapshot.get("files", [])]
+    lines: list[str] = []
+    for relative in created_files[:3]:
+        suffix = os.path.splitext(relative)[1]
+        if not relative or not suffix:
+            continue
+        directory = os.path.dirname(relative).replace("\\", "/")
+        name = os.path.basename(relative)
+        siblings = sorted(
+            os.path.basename(path)
+            for path in paths
+            if os.path.dirname(path).replace("\\", "/") == directory
+            and os.path.splitext(path)[1] == suffix
+            and os.path.basename(path) != name
+        )[:4]
+        if siblings:
+            lines.append(
+                f"{relative}: advisory precedent revision={revision}; "
+                "reason=same_directory,same_extension; inspect="
+                + ", ".join(f"{directory}/{item}".lstrip("/") for item in siblings)
+            )
+    return _cap_evidence("\n".join(lines), 600)
+
+
+def _trace_body(trajectory: dict[str, Any], message_index: int, target: str) -> str:
+    messages = trajectory.get("messages")
+    if not isinstance(messages, list) or not 0 <= message_index < len(messages):
+        raise ValueError("trajectory_message_index_invalid")
+    content = messages[message_index].get("content")
+    if not isinstance(content, str) or messages[message_index].get("role") != "tool":
+        raise ValueError("trajectory_tool_observation_invalid")
+    native_output = content.split("</gt-facts>", 1)[-1]
+    match = re.search(rf"(?m){re.escape(target)}:(\d+)(?::\d+)?", native_output)
+    if match is None:
+        raise ValueError("trace_target_absent_from_tool_observation")
+    return f"{target}:{match.group(1)}\n"
 
 
 def _claim(kind: str, target: str, body: str) -> str:
@@ -300,8 +328,49 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
                         elif kind == "caller_contract_view":
                             subject = shipped.split("() has ", 1)[0]
                             rederived = _caller_body(connection, subject)
+                        elif kind == "new_file_destination":
+                            derivation_bytes = _safe_path(
+                                root, delivery["derivation_path"]
+                            ).read_bytes()
+                            if _sha256(derivation_bytes) != delivery.get(
+                                "derivation_sha256"
+                            ):
+                                reasons.append("derivation_artifact_digest_mismatch")
+                            snapshot = json.loads(derivation_bytes)
+                            transaction_sha = str(
+                                receipt.get("transaction_sha256")
+                                or event.get("transaction_sha256")
+                                or ""
+                            )
+                            edit = next(
+                                row
+                                for row in events
+                                if row.get("event") == "edit_transaction"
+                                and row.get("transaction_sha256") == transaction_sha
+                            )
+                            if snapshot.get("revision") != edit.get("post_revision"):
+                                reasons.append("snapshot_revision_mismatch")
+                            rederived = _new_file_body(
+                                snapshot,
+                                [str(path) for path in edit.get("changed_paths", [])],
+                                str(edit.get("post_revision") or "unknown"),
+                            )
+                        elif kind == "trace_frame":
+                            derivation_bytes = _safe_path(
+                                root, delivery["derivation_path"]
+                            ).read_bytes()
+                            if _sha256(derivation_bytes) != delivery.get(
+                                "derivation_sha256"
+                            ):
+                                reasons.append("derivation_artifact_digest_mismatch")
+                            trajectory = json.loads(derivation_bytes)
+                            rederived = _trace_body(
+                                trajectory,
+                                int(delivery["provider_message_index"]),
+                                target,
+                            )
                         else:
-                            rederived = _structured_passthrough_body(kind, shipped)
+                            raise ValueError(f"unsupported delivery kind: {kind}")
                         counts["rederived_count"] += 1
                     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
                         reasons.append("payload_rederivation_failed")

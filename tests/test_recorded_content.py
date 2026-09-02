@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from gt_harness.recorded_content import measure_recorded_content, verify_recorded_content
@@ -52,6 +53,35 @@ def test_measurement_reproduces_all_four_mutation_surfaces() -> None:
         "provider_request": "FAIL_AS_DESIGNED",
     }
     assert _digest_is_sealed(result)
+
+
+def test_independent_derivation_artifact_tampering_fails_closed(tmp_path: Path) -> None:
+    copied = tmp_path / "attestation"
+    shutil.copytree(FIXTURE.parent, copied)
+    copied_fixture = copied / FIXTURE.name
+    fixture = json.loads(copied_fixture.read_text(encoding="utf-8"))
+    trace = next(
+        delivery
+        for run in fixture["runs"]
+        for delivery in run["deliveries"]
+        if delivery["kind"] == "trace_frame"
+    )
+    trajectory = copied / trace["derivation_path"]
+    payload = json.loads(trajectory.read_text(encoding="utf-8"))
+    message = payload["messages"][trace["provider_message_index"]]
+    native = message["content"].split("</gt-facts>", 1)[1]
+    assert "evaluator/functions.go:2346" in native
+    message["content"] = message["content"].replace(
+        "evaluator/functions.go:2346", "evaluator/functions.go:9999"
+    )
+    trajectory.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = verify_recorded_content(copied_fixture)
+    reasons = {reason for failure in result["failures"] for reason in failure["reason_codes"]}
+
+    assert result["status"] == "FAIL"
+    assert "derivation_artifact_digest_mismatch" in reasons
+    assert "shipped_payload_mismatch" in reasons
 
 
 def test_a15_manifest_routes_to_real_retained_recordings() -> None:

@@ -24,3 +24,6 @@ tests/fixtures/red_evidence_go/go.mod text eol=lf
 tests/fixtures/red_evidence_go/proof_red_test.go text eol=lf
 config/red_evidence_producers.json text eol=lf
 .github/workflows/red-evidence-integrity.yml text eol=lf
+tests/fixtures/har81_attestation/**/*.json text eol=lf
+tests/fixtures/har81_attestation/**/*.jsonl text eol=lf
+tests/fixtures/har81_attestation/**/*.gz binary
