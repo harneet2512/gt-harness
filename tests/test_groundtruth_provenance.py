@@ -93,6 +93,13 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
         manifest, groundtruth_checkout=source, review_checkout=review
     )["status"] == "PASS"
 
+    (source / "producer.go").write_text("package forged\n", encoding="utf-8")
+    dirty = verify_groundtruth_lineage(
+        manifest, groundtruth_checkout=source, review_checkout=review
+    )
+    assert "source_checkout_dirty" in dirty["failures"]
+    (source / "producer.go").write_text("package main\n", encoding="utf-8")
+
     successor_id = "har81-source-proof-v2"
     _write_json(
         review / "inbox" / "HAR-81" / f"{successor_id}.json",
