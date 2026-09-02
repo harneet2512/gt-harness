@@ -119,6 +119,34 @@ def test_groundtruth_route_b_provenance_and_lineage_exception_fail_closed() -> N
         assert _groundtruth_release_blockers(altered, root=ROOT)
 
 
+def test_producer_build_info_is_checkout_byte_stable() -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    build = manifest["groundtruth"]["producer_build"]
+    relative_path = build["build_info_path"]
+    expected_sha256 = build["build_info_sha256"]
+
+    attribute = subprocess.run(
+        ["git", "check-attr", "text", "--", relative_path],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    assert attribute == f"{relative_path}: text: unset"
+
+    committed = subprocess.run(
+        ["git", "show", f"HEAD:{relative_path}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    checked_out = (ROOT / relative_path).read_bytes()
+    assert hashlib.sha256(committed).hexdigest() == expected_sha256
+    assert hashlib.sha256(checked_out).hexdigest() == expected_sha256
+    assert checked_out == committed
+
+
 def test_bundle_is_reproducible_and_tamper_evident(tmp_path: Path) -> None:
     first = build_product_bundle(MANIFEST, output_dir=tmp_path / "first")
     second = build_product_bundle(MANIFEST, output_dir=tmp_path / "second")

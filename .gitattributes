@@ -28,3 +28,4 @@ tests/fixtures/har81_attestation/**/*.json text eol=lf
 tests/fixtures/har81_attestation/**/*.jsonl text eol=lf
 tests/fixtures/har81_attestation/**/*.gz binary
 tests/fixtures/har81_attestation/**/renderer_sources/** -text
+vendor/gt-index-linux-amd64.build-info.json -text
