@@ -13,11 +13,14 @@ recorded) instead of being silently approximated.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from .delivery_budget import PROMPT_CONTEXT_BYTE_LIMIT, truncate_utf8
 
 # Capabilities a host can declare (see the verdict's negotiation list).
 HOST_CAPABILITIES = (
@@ -65,7 +68,7 @@ class GTSessionConfig:
     issue_text: str = ""
     mode: GTMode | str = GTMode.ADVISORY
     fail_open: bool = True
-    context_budget_bytes: int = 2400
+    context_budget_bytes: int = PROMPT_CONTEXT_BYTE_LIMIT
     capability_modes: Mapping[str, GTMode | str] = field(default_factory=dict)
     disabled_capabilities: tuple[str, ...] = ()
     delivery_path: str = "compiled"
@@ -236,14 +239,30 @@ class GTSession:
         if self._engine is None or self.disabled:
             return GTDecisionBatch()
         additions: list[str] = []
+        contract_was_shipped = bool(self._engine.contract_shipped)
         delta = self._engine.next_contract_delta(
-            max_chars=self.config.context_budget_bytes
+            max_chars=min(
+                self.config.context_budget_bytes, PROMPT_CONTEXT_BYTE_LIMIT
+            )
         )
         if delta:
             tag = "GT_TASK_CONTRACT" if iteration == 0 else "GT_OBLIGATION_DELTA"
-            rendered = f"[{tag}]\n{delta}"
+            rendered = truncate_utf8(
+                f"[{tag}]\n{delta}", PROMPT_CONTEXT_BYTE_LIMIT
+            )
             if self.model_visible:
-                additions.append(rendered)
+                kind = "context_delta" if contract_was_shipped else "context_contract"
+                payload_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+                if self._engine.admit_model_visible_delivery(
+                    lane="prompt",
+                    kind=kind,
+                    rendered=rendered,
+                    action_index=0,
+                    iteration=iteration,
+                    dedup_key=f"prompt:{kind}:{iteration}:{payload_hash}",
+                    target="provider_prompt",
+                ):
+                    additions.append(rendered)
             else:
                 self._engine.store.append(
                     "shadow_context_computed",

@@ -61,8 +61,40 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     )
     events = [
         {
-            "event": "provider_response",
+            "event": "context_addition_delivery",
             "event_hash": "1" * 64,
+            "sequence": 1,
+            "lane": "prompt",
+            "kind": "context_contract",
+            "evidence_type": "context_contract",
+            "dedup_key": "prompt-contract-1",
+            "target": "provider_prompt",
+            "payload_sha256": "a" * 64,
+            "action_index": 0,
+            "iteration": 0,
+            "rendered_bytes": 100,
+        },
+        {
+            "event": "receipt",
+            "event_hash": "2" * 64,
+            "sequence": 2,
+            "transition": "delivered",
+            "dedup_key": "prompt-contract-1",
+            "evidence_type": "context_contract",
+            "iteration": 0,
+            "payload_hash": "a" * 64,
+        },
+        {
+            "event": "provider_delivery",
+            "event_hash": "3" * 64,
+            "sequence": 3,
+            "iteration": 1,
+            "request_id": "request-1",
+        },
+        {
+            "event": "provider_response",
+            "event_hash": "4" * 64,
+            "sequence": 4,
             "usage": {
                 "prompt_tokens": 17,
                 "completion_tokens": 2,
@@ -71,8 +103,40 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             },
         },
         {
+            "event": "evidence_delivery",
+            "event_hash": "5" * 64,
+            "sequence": 5,
+            "lane": "sealed",
+            "kind": "localization",
+            "evidence_type": "localization",
+            "dedup_key": "localization-1",
+            "artifact_sha256": "c" * 64,
+            "payload_sha256": "9" * 64,
+            "action_index": 0,
+            "iteration": 1,
+            "rendered_bytes": 123,
+        },
+        {
+            "event": "receipt",
+            "event_hash": "6" * 64,
+            "sequence": 6,
+            "transition": "delivered",
+            "dedup_key": "localization-1",
+            "evidence_type": "localization",
+            "iteration": 1,
+            "payload_hash": "9" * 64,
+        },
+        {
+            "event": "provider_delivery",
+            "event_hash": "7" * 64,
+            "sequence": 7,
+            "iteration": 2,
+            "request_id": "request-2",
+        },
+        {
             "event": "provider_response",
-            "event_hash": "2" * 64,
+            "event_hash": "8" * 64,
+            "sequence": 8,
             "usage": {
                 "prompt_tokens": 23,
                 "completion_tokens": 3,
@@ -81,37 +145,23 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             },
         },
         {
-            "event": "evidence_delivery",
-            "event_hash": "b" * 64,
-            "sequence": 3,
-            "evidence_type": "localization",
-            "dedup_key": "localization-1",
-            "artifact_sha256": "c" * 64,
-            "action_index": 0,
-            "iteration": 0,
-            "rendered_bytes": 123,
-        },
-        {
-            "event": "receipt",
-            "event_hash": "8" * 64,
-            "sequence": 4,
-            "transition": "delivered",
-            "dedup_key": "localization-1",
-            "evidence_type": "localization",
-            "iteration": 0,
-            "payload_hash": "9" * 64,
-        },
-        {
-            "event": "provider_delivery",
-            "event_hash": "7" * 64,
-            "sequence": 5,
-            "iteration": 1,
-            "request_id": "request-1",
+            "event": "delivery_refused",
+            "event_hash": "0" * 64,
+            "sequence": 9,
+            "lane": "prompt",
+            "kind": "context_delta",
+            "dedup_key": "prompt-delta-refused",
+            "reason": "delivery_byte_ceiling",
+            "candidate_ordinal": 3,
+            "rendered_bytes": 1_401,
+            "payload_sha256": "f" * 64,
+            "admitted_count": 2,
+            "admitted_bytes": 223,
         },
         {
             "event": "dense_index_ready",
-            "event_hash": "6" * 64,
-            "sequence": 6,
+            "event_hash": "b" * 64,
+            "sequence": 10,
             "query_ready": True,
             "model_sha256": "5" * 64,
             "tokenizer_sha256": "4" * 64,
@@ -123,6 +173,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         {
             "event": "session_closed",
             "event_hash": "d" * 64,
+            "sequence": 11,
             "terminal": "submitted_unverified",
         },
     ]
@@ -138,7 +189,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "provider_receipts": {"request_count": 3, "valid": True},
             "model": {"match": True},
             "event_journal": {
-                "event_count": 7,
+                "event_count": 11,
                 "event_head": "d" * 64,
                 "valid": True,
                 "issues": [],
@@ -184,8 +235,24 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert product_row["output_tokens"] == 5
     assert product_row["total_cost"] == 0.03
     assert product_row["treatment_receipt"]["schema"] == "gt.miniswe_treatment_receipt.v1"
-    assert product_row["treatment_receipt"]["delivery_count"] == 1
-    assert product_row["treatment_receipt"]["evidence_deliveries"][0]["event_hash"] == "b" * 64
+    treatment = product_row["treatment_receipt"]
+    assert treatment["delivery_count"] == 2
+    assert treatment["prompt_delivery_count"] == 1
+    assert treatment["sealed_delivery_count"] == 1
+    assert treatment["prompt_context_deliveries"][0]["kind"] == "context_contract"
+    assert treatment["evidence_deliveries"][0]["event_hash"] == "5" * 64
+    assert treatment["refused_deliveries"][0]["reason"] == "delivery_byte_ceiling"
+    assert treatment["delivery_budget"] == {
+        "unit": "utf8_bytes",
+        "conversion_from_legacy_tokens": "4_bytes_per_token",
+        "repository_start_limit": 2_000,
+        "repository_update_limit": 1_400,
+        "total_limit": 4_800,
+        "total_observed": 223,
+        "task_delivery_limit": 4,
+        "admitted_count": 2,
+        "refused_count": 1,
+    }
     assert product_row["treatment_receipt"]["graph_certification"]["graph_sha256"] == "e" * 64
     assert product_row["integrity"]["trajectory_sha256"] == hashlib.sha256(
         trajectory.read_bytes()
@@ -215,6 +282,12 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "treatment_delivery_context_budget_exceeded": lambda row: row[
             "treatment_receipt"
         ]["provider_delivery_receipts"][0].update(context_byte_count=2_001),
+        "treatment_prompt_context_budget_exceeded": lambda row: row[
+            "treatment_receipt"
+        ]["provider_delivery_receipts"][0].update(context_byte_count=1_401),
+        "treatment_delivery_refusal_invalid": lambda row: row[
+            "treatment_receipt"
+        ]["refused_deliveries"][0].update(dedup_key="prompt-contract-1"),
         "treatment_dense_index_not_ready": lambda row: row["treatment_receipt"][
             "dense_index_receipt"
         ].update(query_ready=False),

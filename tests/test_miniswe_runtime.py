@@ -522,6 +522,48 @@ def test_evidence_capsule_splices_into_observation(monkeypatch, tmp_path):
     assert "<returncode>" in spliced[0]
 
 
+def test_sealed_evidence_is_refused_after_shared_prompt_lane_dose_ceiling(
+    monkeypatch, tmp_path
+):
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t",
+        state_dir=tmp_path,
+        predicates=[Predicate("p", "p")],
+        contract=extract_task_contract("Fix compute() to handle empty lists."),
+        repo_root=str(tmp_path),
+    )
+    monkeypatch.setattr(
+        rt, "run_evidence_pipeline",
+        lambda *a, **k: EvidenceResult(rendered="[GT] fifth evidence", sealed=True),
+    )
+    install_runtime_hooks(agent, adapter)
+    agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
+    for ordinal in range(2, 5):
+        assert adapter.admit_model_visible_delivery(
+            lane="prompt",
+            kind="context_delta",
+            rendered=f"delta-{ordinal}",
+            action_index=0,
+            iteration=ordinal,
+            dedup_key=f"delta-{ordinal}",
+        )
+
+    msgs = agent.execute_actions({"extra": {"actions": [
+        {"cmd": "pytest tests/ -q", "tool_call_id": "call-1"},
+    ]}})
+
+    assert not any("<gt-facts>" in str(message.get("content")) for message in msgs)
+    rows = [
+        __import__("json").loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    refused = [row for row in rows if row["event"] == "delivery_refused"]
+    assert refused[-1]["lane"] == "sealed"
+    assert refused[-1]["candidate_ordinal"] == 5
+    assert refused[-1]["reason"] == "task_delivery_dose_ceiling"
+
+
 def test_newfile_precedent_delivered_on_file_create(tmp_path, monkeypatch):
     import subprocess
 

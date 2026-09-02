@@ -13,6 +13,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .delivery_budget import (
+    DELIVERY_BYTE_LIMITS,
+    MAX_TASK_DELIVERIES,
+    PROMPT_CONTEXT_BYTE_LIMIT,
+    TOTAL_DELIVERY_BYTE_LIMIT,
+)
 from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
 from .task_contract import (
@@ -175,6 +181,10 @@ class MiniSweAdapter(GroundtruthController):
         self._failure_first_epoch: dict[str, int] = {}
         self._failure_recurrences: dict[str, int] = {}
         self._recovery_delivered = 0
+        self._model_visible_delivery_count = 0
+        self._model_visible_delivery_bytes = 0
+        self._accepted_sealed_delivery_count = 0
+        self._pending_delivery_metadata: dict[str, str] = {}
         self.pending_transient = ""
         self.pending_directives: list[str] = []
         self._refusal_count = 0
@@ -852,6 +862,119 @@ class MiniSweAdapter(GroundtruthController):
             transaction_sha256=self._latest_transaction_sha256,
         )
 
+    def admit_model_visible_delivery(
+        self,
+        *,
+        lane: str,
+        kind: str,
+        rendered: str,
+        action_index: int,
+        iteration: int,
+        dedup_key: str,
+        target: str = "",
+        semantics: str = "advisory",
+        artifact_sha256: str = "",
+    ) -> bool:
+        """Admit one model-visible dose or record a typed refusal.
+
+        Prompt context and sealed evidence share one task-level ceiling. A
+        refusal is durable journal evidence and never a process exception.
+        """
+
+        if lane not in {"prompt", "sealed"}:
+            raise ValueError(f"unsupported delivery lane: {lane}")
+        encoded = rendered.encode("utf-8")
+        rendered_bytes = len(encoded)
+        payload_sha256 = hashlib.sha256(encoded).hexdigest()
+        candidate_ordinal = self._model_visible_delivery_count + 1
+        budget_kind = (
+            "repository_start" if candidate_ordinal == 1 else "repository_update"
+        )
+        per_delivery_limit = DELIVERY_BYTE_LIMITS[budget_kind]
+        if lane == "prompt":
+            per_delivery_limit = min(per_delivery_limit, PROMPT_CONTEXT_BYTE_LIMIT)
+
+        reason = ""
+        if candidate_ordinal > MAX_TASK_DELIVERIES:
+            reason = "task_delivery_dose_ceiling"
+        elif rendered_bytes > per_delivery_limit:
+            reason = "delivery_byte_ceiling"
+        elif self._model_visible_delivery_bytes + rendered_bytes > TOTAL_DELIVERY_BYTE_LIMIT:
+            reason = "task_delivery_byte_ceiling"
+        if reason:
+            self.store.append(
+                "delivery_refused",
+                lane=lane,
+                kind=kind,
+                dedup_key=dedup_key,
+                reason=reason,
+                candidate_ordinal=candidate_ordinal,
+                rendered_bytes=rendered_bytes,
+                payload_sha256=payload_sha256,
+                per_delivery_limit=per_delivery_limit,
+                admitted_count=self._model_visible_delivery_count,
+                admitted_bytes=self._model_visible_delivery_bytes,
+                task_delivery_limit=MAX_TASK_DELIVERIES,
+                task_byte_limit=TOTAL_DELIVERY_BYTE_LIMIT,
+                action_index=action_index,
+                iteration=iteration,
+            )
+            return False
+
+        self._model_visible_delivery_count = candidate_ordinal
+        self._model_visible_delivery_bytes += rendered_bytes
+        if lane == "sealed":
+            self._accepted_sealed_delivery_count += 1
+        event = "context_addition_delivery" if lane == "prompt" else "evidence_delivery"
+        self.store.append(
+            event,
+            lane=lane,
+            kind=kind,
+            action_index=action_index,
+            iteration=iteration,
+            evidence_type=kind,
+            dedup_key=dedup_key,
+            target=target,
+            rendered_bytes=rendered_bytes,
+            payload_sha256=payload_sha256,
+            semantics=semantics,
+            artifact_sha256=artifact_sha256,
+            delivery_ordinal=candidate_ordinal,
+        )
+        self.record_delivery_receipt(
+            evidence_type=kind,
+            dedup_key=dedup_key,
+            target=target,
+            payload_hash=payload_sha256,
+            action_index=action_index,
+            iteration=iteration,
+        )
+        return True
+
+    def stage_model_visible_delivery(
+        self,
+        *,
+        kind: str,
+        dedup_key: str,
+        target: str = "",
+        semantics: str = "advisory",
+        artifact_sha256: str = "",
+    ) -> None:
+        """Stage classification until the exact action-lane bytes are final."""
+
+        self._pending_delivery_metadata = {
+            "kind": kind,
+            "dedup_key": dedup_key,
+            "target": target,
+            "semantics": semantics,
+            "artifact_sha256": artifact_sha256,
+        }
+
+    def consume_model_visible_delivery_metadata(self) -> dict[str, str]:
+        metadata = self._pending_delivery_metadata
+        self._pending_delivery_metadata = {}
+        return metadata
+
     def unmet_obligation_texts(self) -> tuple[str, ...]:
         """The actual requirement text for every unmet predicate.
 
@@ -935,25 +1058,16 @@ class MiniSweAdapter(GroundtruthController):
                 if result.chain_head:
                     self._chain_head = result.chain_head
                 if result.sealed and result.envelope is not None:
-                    self.store.append(
-                        "evidence_delivery",
+                    if not self.admit_model_visible_delivery(
+                        lane="sealed",
+                        kind=str(result.envelope.evidence_type or ""),
+                        rendered=result.rendered,
                         action_index=0,
                         iteration=0,
-                        evidence_type=str(result.envelope.evidence_type or ""),
                         dedup_key=str(result.envelope.dedup_key or ""),
                         target=str(getattr(result.envelope, "target", "") or ""),
-                        rendered_bytes=len(result.rendered),
-                    )
-                    self.record_delivery_receipt(
-                        evidence_type=str(result.envelope.evidence_type or ""),
-                        dedup_key=str(result.envelope.dedup_key or ""),
-                        target=str(getattr(result.envelope, "target", "") or ""),
-                        payload_hash=hashlib.sha256(
-                            result.rendered.encode("utf-8")
-                        ).hexdigest(),
-                        action_index=0,
-                        iteration=0,
-                    )
+                    ):
+                        return ""
                     return result.rendered
             except Exception:  # noqa: BLE001 - deterministic lexical fallback follows
                 pass
@@ -1086,25 +1200,18 @@ class MiniSweAdapter(GroundtruthController):
             for row in ranked
         )
         rendered = "[GT_EVIDENCE:localization]\n" + rendered
-        self.store.append(
-            "evidence_delivery",
+        if not self.admit_model_visible_delivery(
+            lane="sealed",
+            kind="localization",
+            rendered=rendered,
             action_index=0,
             iteration=0,
-            evidence_type="localization",
             dedup_key=f"lexical-localization:{digest}",
             target=str(ranked[0]["path"]),
-            rendered_bytes=len(rendered.encode("utf-8")),
             semantics="advisory",
             artifact_sha256=digest,
-        )
-        self.record_delivery_receipt(
-            evidence_type="localization",
-            dedup_key=f"lexical-localization:{digest}",
-            target=str(ranked[0]["path"]),
-            payload_hash=hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
-            action_index=0,
-            iteration=0,
-        )
+        ):
+            return ""
         return rendered
 
     def next_contract_delta(self, *, max_chars: int = 2400) -> str:
@@ -1368,7 +1475,7 @@ class MiniSweAdapter(GroundtruthController):
         state = {"phase": self.phase, "epoch": self.workspace_epoch,
                  "unmet_predicates": list(self.unmet_predicates),
                  "iterations": self.iteration,
-                 "delivered_evidence": len(self._dedup_chain),
+                 "delivered_evidence": self._accepted_sealed_delivery_count,
                  "terminal_requests": len(self._terminal_request_ids),
                  "contract_shipped": self._contract_shipped,
                  "requested_model": self.requested_model,

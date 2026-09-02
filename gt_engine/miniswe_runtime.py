@@ -325,22 +325,11 @@ def _run_evidence(
                 "[GT_EVIDENCE:new_file_destination]\n"
                 + cap_evidence(precedent, 600)
             )
-            adapter.store.append(
-                "evidence_delivery",
-                action_index=action_index,
-                iteration=adapter.iteration,
-                evidence_type="new_file_destination",
-                rendered_bytes=len(precedent.encode("utf-8")),
-                semantics="advisory",
-                transaction_sha256=adapter._latest_transaction_sha256,
-            )
-            adapter.record_delivery_receipt(
-                evidence_type="new_file_destination",
+            adapter.stage_model_visible_delivery(
+                kind="new_file_destination",
                 dedup_key=f"newfile-{adapter._latest_transaction_sha256}",
                 target=created_files[0],
-                payload_hash=hashlib.sha256(precedent.encode("utf-8")).hexdigest(),
-                action_index=action_index,
-                iteration=adapter.iteration,
+                semantics="advisory",
             )
             return precedent
     covering = None
@@ -403,20 +392,10 @@ def _run_evidence(
                  if ": syntax error" in line),
                 fallback,
             )
-            adapter.store.append(
-                "evidence_delivery",
-                action_index=action_index,
-                iteration=adapter.iteration,
-                evidence_type="syntax_result",
-                rendered_bytes=len(syntax.encode("utf-8")),
-            )
-            adapter.record_delivery_receipt(
-                evidence_type="syntax_result",
+            adapter.stage_model_visible_delivery(
+                kind="syntax_result",
                 dedup_key=f"syntax-{adapter.iteration}",
                 target=first_file,
-                payload_hash=hashlib.sha256(syntax.encode("utf-8")).hexdigest(),
-                action_index=action_index,
-                iteration=adapter.iteration,
             )
             return syntax
     result = run_evidence_pipeline(
@@ -432,24 +411,10 @@ def _run_evidence(
     if result.chain_head:
         adapter._chain_head = result.chain_head
     if result.sealed and result.envelope is not None:
-        adapter.store.append(
-            "evidence_delivery",
-            action_index=action_index,
-            iteration=adapter.iteration,
-            evidence_type=str(result.envelope.evidence_type or ""),
+        adapter.stage_model_visible_delivery(
+            kind=str(result.envelope.evidence_type or ""),
             dedup_key=str(result.envelope.dedup_key or ""),
             target=str(getattr(result.envelope, "target", "") or ""),
-            rendered_bytes=len(result.rendered),
-        )
-        adapter.record_delivery_receipt(
-            evidence_type=str(result.envelope.evidence_type or ""),
-            dedup_key=str(result.envelope.dedup_key or ""),
-            target=str(getattr(result.envelope, "target", "") or ""),
-            payload_hash=hashlib.sha256(
-                result.rendered.encode("utf-8")
-            ).hexdigest(),
-            action_index=action_index,
-            iteration=adapter.iteration,
         )
         # Self-diagnosing splice: the trajectory tool messages carry the exact
         # evidence type so a post-run census is exact, not heuristic.
@@ -820,7 +785,22 @@ def install_runtime_hooks(
                             part for part in (structured, rendered) if part
                         )
                 if rendered and session.model_visible:
-                    rendered_by_index[action_index] = rendered
+                    metadata = adapter.consume_model_visible_delivery_metadata()
+                    kind = metadata.pop("kind", "execution_evidence")
+                    dedup_key = metadata.pop(
+                        "dedup_key",
+                        f"action:{adapter.iteration}:{action_index}:{kind}",
+                    )
+                    if adapter.admit_model_visible_delivery(
+                        lane="sealed",
+                        kind=kind,
+                        rendered=rendered,
+                        action_index=action_index,
+                        iteration=adapter.iteration,
+                        dedup_key=dedup_key,
+                        **metadata,
+                    ):
+                        rendered_by_index[action_index] = rendered
                 if adapter.pending_transient and session.model_visible:
                     directives.append({
                         "role": "user", "content": adapter.pending_transient,

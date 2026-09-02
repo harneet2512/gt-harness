@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from gt_engine.gt_session import Assurance, GTMode, GTSession, GTSessionConfig
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter
@@ -151,3 +154,54 @@ def test_legacy_delivery_switch_does_not_emit_duplicate_runtime_localization(
         GTSessionConfig(task_id="t", delivery_path="legacy"), engine=a
     )
     assert s.before_model([], iteration=0).context_additions == []
+
+
+def test_prompt_context_addition_is_bounded_and_receipt_visible(
+    tmp_path, monkeypatch
+):
+    a = _adapter(tmp_path)
+    monkeypatch.setattr(a, "next_contract_delta", lambda **_kwargs: "x" * 2_400)
+    s = GTSession(GTSessionConfig(task_id="t"), engine=a)
+
+    batch = s.before_model([{"role": "user", "content": "x"}], iteration=0)
+
+    assert len(batch.context_additions) == 1
+    rendered = batch.context_additions[0]
+    encoded = rendered.encode("utf-8")
+    assert len(encoded) <= 1_400
+    rows = [
+        json.loads(line)
+        for line in a.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    census = [row for row in rows if row["event"] == "context_addition_delivery"]
+    assert len(census) == 1
+    assert census[0]["kind"] == "context_contract"
+    assert census[0]["lane"] == "prompt"
+    assert census[0]["rendered_bytes"] == len(encoded)
+    assert census[0]["payload_sha256"] == hashlib.sha256(encoded).hexdigest()
+
+
+def test_runtime_delivery_ceiling_refuses_fifth_prompt_dose_without_raising(
+    tmp_path, monkeypatch
+):
+    a = _adapter(tmp_path)
+    deltas = iter(f"delta-{index}" for index in range(5))
+    monkeypatch.setattr(a, "next_contract_delta", lambda **_kwargs: next(deltas))
+    s = GTSession(GTSessionConfig(task_id="t"), engine=a)
+
+    delivered = [
+        s.before_model([], iteration=index).context_additions
+        for index in range(5)
+    ]
+
+    assert all(delivered[index] for index in range(4))
+    assert delivered[4] == []
+    rows = [
+        json.loads(line)
+        for line in a.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len([row for row in rows if row["event"] == "context_addition_delivery"]) == 4
+    refused = [row for row in rows if row["event"] == "delivery_refused"]
+    assert len(refused) == 1
+    assert refused[0]["reason"] == "task_delivery_dose_ceiling"
+    assert refused[0]["candidate_ordinal"] == 5
