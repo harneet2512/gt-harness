@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -158,6 +159,24 @@ def _git_blob_sha1(payload: bytes) -> str:
     return hashlib.sha1(header + payload).hexdigest()  # noqa: S324 - Git identity
 
 
+def _git(repository: Path, *arguments: str) -> bytes:
+    process = subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise ValueError(f"git_command_failed:{arguments[0]}")
+    return process.stdout
+
+
+def _source_repository() -> Path:
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / ".git").exists():
+            return candidate
+    raise ValueError("renderer_source_repository_unavailable")
+
+
 def _verify_renderer_provenance(
     root: Path, run: dict[str, Any]
 ) -> tuple[bool, list[str]]:
@@ -181,6 +200,12 @@ def _verify_renderer_provenance(
         run_receipt = json.loads(run_bytes)
         repro = json.loads(repro_bytes)
         source_commit = provenance["source_commit"]
+        source_repository = _source_repository()
+        observed_tree = _git(
+            source_repository, "rev-parse", f"{source_commit}^{{tree}}"
+        ).decode("ascii").strip()
+        if observed_tree != provenance["source_tree"]:
+            reasons.append("renderer_source_tree_mismatch")
         configured_commit = config["agent"]["kwargs"]["product_source_sha"]
         if configured_commit != source_commit or run_receipt.get("product_source_sha") != source_commit:
             reasons.append("renderer_source_revision_mismatch")
@@ -200,7 +225,19 @@ def _verify_renderer_provenance(
                 or _git_blob_sha1(source_bytes) != record["git_blob_sha1"]
             ):
                 reasons.append("renderer_source_digest_mismatch")
-            by_repository_path[str(record["repository_path"])] = record
+            repository_path = str(record["repository_path"])
+            committed_blob = _git(
+                source_repository, "rev-parse", f"{source_commit}:{repository_path}"
+            ).decode("ascii").strip()
+            committed_bytes = _git(
+                source_repository, "cat-file", "blob", committed_blob
+            )
+            if (
+                committed_blob != record["git_blob_sha1"]
+                or committed_bytes != source_bytes
+            ):
+                reasons.append("renderer_source_git_blob_mismatch")
+            by_repository_path[repository_path] = record
         runner_record = by_repository_path.get("scripts/miniswe_gt_run.py")
         installed_runner = next(
             (

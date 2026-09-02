@@ -63,6 +63,8 @@ def verify_groundtruth_lineage(
         failures.append("source_commit_mismatch")
     if _git(source, "rev-parse", "HEAD^{tree}") != source_tree:
         failures.append("source_tree_mismatch")
+    if _git(source, "status", "--porcelain=v1", "--untracked-files=all"):
+        failures.append("source_checkout_dirty")
     ancestor = subprocess.run(
         ["git", "-C", str(source), "merge-base", "--is-ancestor", accepted, source_commit],
         capture_output=True,
@@ -74,20 +76,61 @@ def verify_groundtruth_lineage(
     if observed_changes != expected_changes:
         failures.append("post_certification_diff_mismatch")
 
+    review_commit = str(lineage["review_inbox_commit"])
+    if _git(review, "rev-parse", "HEAD") != review_commit:
+        failures.append("review_checkout_commit_mismatch")
+    if _git(review, "status", "--porcelain=v1", "--untracked-files=all"):
+        failures.append("review_checkout_dirty")
+    try:
+        index = json.loads((review / "inbox" / "INDEX.json").read_text(encoding="utf-8"))
+        if index.get("schema") != "gt.review_inbox.v1":
+            failures.append("review_index_schema_mismatch")
+        live_packets = list(index.get("live_packets") or [])
+        tickets = index.get("tickets") or {}
+        if not isinstance(tickets, Mapping):
+            raise ValueError("review_index_tickets_invalid")
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        failures.append("review_index_invalid")
+        live_packets = []
+        tickets = {}
+
     verified_packets = 0
     for expected in lineage["review_packets"]:
-        candidates = list(review.rglob(f"{expected['packet_id']}.json"))
+        packet_id = str(expected["packet_id"])
+        candidates = list((review / "inbox").rglob(f"{packet_id}.json"))
         if len(candidates) != 1:
-            failures.append(f"review_packet_count:{expected['packet_id']}")
+            failures.append(f"review_packet_count:{packet_id}")
             continue
         packet = json.loads(candidates[0].read_text(encoding="utf-8"))
+        ticket = str(packet.get("ticket") or "")
+        ticket_memberships = sum(
+            packet_id in list(packet_ids or []) for packet_ids in tickets.values()
+        )
         if (
-            packet.get("packet_id") != expected["packet_id"]
+            packet.get("packet_id") != packet_id
             or packet.get("head_sha") != expected["head_sha"]
             or packet.get("packet_digest_sha256") != expected["packet_digest_sha256"]
             or _packet_digest(packet) != expected["packet_digest_sha256"]
+            or packet.get("schema") != "gt.review_packet.v1"
+            or packet.get("kind") != "check_outcome"
+            or packet.get("status") != "open"
+            or live_packets.count(packet_id) != 1
+            or ticket_memberships != 1
+            or packet_id not in list(tickets.get(ticket) or [])
         ):
-            failures.append(f"review_packet_mismatch:{expected['packet_id']}")
+            failures.append(f"review_packet_mismatch:{packet_id}")
+            continue
+        superseding_live = []
+        for live_id in live_packets:
+            live_candidates = list((review / "inbox").rglob(f"{live_id}.json"))
+            if len(live_candidates) != 1:
+                superseding_live.append(live_id)
+                continue
+            live_packet = json.loads(live_candidates[0].read_text(encoding="utf-8"))
+            if live_packet.get("supersedes") == packet_id:
+                superseding_live.append(live_id)
+        if superseding_live:
+            failures.append(f"review_packet_superseded_live:{packet_id}")
             continue
         verified_packets += 1
 
@@ -102,6 +145,7 @@ def verify_groundtruth_lineage(
         "ancestry_path_match": observed_path == expected_path,
         "post_certification_diff_match": observed_changes == expected_changes,
         "review_packet_match_count": verified_packets,
+        "review_inbox_commit": review_commit,
         "failures": failures,
     }
     result["measurement_digest_sha256"] = hashlib.sha256(canonical_json_bytes(result)).hexdigest()

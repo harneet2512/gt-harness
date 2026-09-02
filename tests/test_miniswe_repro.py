@@ -215,9 +215,9 @@ def test_model_shell_cannot_read_provider_key_from_parent_procfs(tmp_path):
 import os
 import subprocess
 import sys
-from scripts.miniswe_gt_run import _harden_process_secret_boundary
+from gt_harness.process_boundary import harden_process_secret_boundary
 
-_harden_process_secret_boundary()
+harden_process_secret_boundary()
 child_env = {key: value for key, value in os.environ.items() if key != "OPENAI_API_KEY"}
 child_code = r"""
 import os

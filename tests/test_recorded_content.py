@@ -105,6 +105,33 @@ def test_renderer_source_or_product_revision_mutation_fails_closed(tmp_path: Pat
     assert "renderer_source_digest_mismatch" in reasons
 
 
+def test_renderer_source_cannot_self_certify_against_mutated_fixture_hashes(
+    tmp_path: Path,
+) -> None:
+    copied = tmp_path / "attestation"
+    shutil.copytree(FIXTURE.parent, copied)
+    copied_fixture = copied / FIXTURE.name
+    fixture = json.loads(copied_fixture.read_text(encoding="utf-8"))
+    record = fixture["runs"][0]["renderer_provenance"]["source_files"][0]
+    source = copied / record["path"]
+    tampered = source.read_bytes() + b"\n# forged fixture source\n"
+    source.write_bytes(tampered)
+    record["bytes"] = len(tampered)
+    record["sha256"] = hashlib.sha256(tampered).hexdigest()
+    record["git_blob_sha1"] = hashlib.sha1(
+        b"blob " + str(len(tampered)).encode("ascii") + b"\0" + tampered
+    ).hexdigest()
+    copied_fixture.write_text(json.dumps(fixture), encoding="utf-8")
+
+    result = verify_recorded_content(copied_fixture)
+    reasons = {
+        reason for failure in result["failures"] for reason in failure["reason_codes"]
+    }
+
+    assert result["status"] == "FAIL"
+    assert "renderer_source_git_blob_mismatch" in reasons
+
+
 def test_new_file_adjudication_requires_delivery_time_snapshot_target(
     tmp_path: Path,
 ) -> None:
