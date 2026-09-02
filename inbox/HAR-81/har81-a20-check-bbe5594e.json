@@ -1,0 +1,38 @@
+{
+  "created_at":"2026-09-02T02:43:08.034652Z",
+  "detail":{
+    "base_sha":"0ad5c41c24234dd25deec402e9d1c60dd1cf643c",
+    "biting_perturbation":"24_to_25_turned_three_boundary_tests_red",
+    "content_only_prompt_dedup":true,
+    "duplicate_identity_attestation":"fail_closed",
+    "focused_tests_passed":54,
+    "implementation_sha":"bbe5594e265beefd33d33385e53a30ce14ea705a",
+    "paid_dispatch":false,
+    "prompt_context_limit":1400,
+    "provider_calls":0,
+    "provider_free_ci_conclusion":"success",
+    "provider_free_ci_run":33583982475,
+    "provider_free_workflow_id":344675939,
+    "repository_start_limit":2000,
+    "repository_update_limit":1400,
+    "storm_backstop":24,
+    "total_byte_limit":9600
+  },
+  "file":"",
+  "head_sha":"bbe5594e265beefd33d33385e53a30ce14ea705a",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"A20 content-first delivery policy verified provider-free at exact SHA",
+  "packet_digest_sha256":"39b342b92daf169103a30f529da05431cfb0108c0f8ce14187e297ec69d04fa6",
+  "packet_id":"har81-a20-check-bbe5594e",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"A20-content-first-delivery-policy",
+    "system":"gt-ci"
+  },
+  "status":"PASS",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}
