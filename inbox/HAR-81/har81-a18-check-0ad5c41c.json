@@ -1,0 +1,32 @@
+{
+  "created_at":"2026-09-02T02:23:57.348578Z",
+  "detail":{
+    "foreign_revision_regression":"pass",
+    "generated_artifact_sha":"0ad5c41c24234dd25deec402e9d1c60dd1cf643c",
+    "implementation_sha":"4d805cb5ad9dbdeb7c660277df473be7443a6765",
+    "matrix_identities":19,
+    "matrix_witnessed":19,
+    "paid_dispatch":false,
+    "provider_calls":0,
+    "provider_free_ci_conclusion":"success",
+    "provider_free_ci_run":33582775943,
+    "workflow_regenerates_at_checkout_head":true
+  },
+  "file":"",
+  "head_sha":"0ad5c41c24234dd25deec402e9d1c60dd1cf643c",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"A18 validating writer and checkout-HEAD matrix binding verified provider-free",
+  "packet_digest_sha256":"0273db100af584de0fb02d2c1e412b3a6d3acee680efc7e94c083c6b74778cc4",
+  "packet_id":"har81-a18-check-0ad5c41c",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"A18-feature-matrix-source-binding",
+    "system":"gt-ci"
+  },
+  "status":"PASS",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}
