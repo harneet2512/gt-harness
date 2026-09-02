@@ -236,65 +236,35 @@ jobs:
           path: deepswe20-plan.json
           if-no-files-found: error
 
-  image_cache:
+  image_digest_gate:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      # The public ECR source is used only to seed a missing immutable mirror.
-      # Keep that provider-free first fill bounded; later smoke jobs use GHCR.
-      max-parallel: 2
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    timeout-minutes: 60
     env:
-      SOURCE_IMAGE: ${{ matrix.container_image }}
-      SOURCE_DIGEST: ${{ matrix.container_digest }}
+      TASK_MATRIX: ${{ needs.plan.outputs.matrix }}
     steps:
-      - name: Authenticate the repository-owned immutable image mirror
-        env:
-          GHCR_TOKEN: ${{ github.token }}
+      - name: Verify all exact task-image manifests without provider access
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io \
-            --username "${GITHUB_ACTOR}" --password-stdin
-
-      - name: Populate the exact task image cache without provider access
-        run: |
-          set -euo pipefail
-          CACHE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/deepswe-task-cache"
-          CACHE_TAG="${CACHE_REPOSITORY}:${SOURCE_DIGEST#sha256:}"
-          CACHE_DIGEST_REF="${CACHE_REPOSITORY}@${SOURCE_DIGEST}"
-          if docker pull "$CACHE_DIGEST_REF"; then
-            docker image inspect "$CACHE_DIGEST_REF" >/dev/null
-            echo "cache_source=existing_ghcr_digest"
-            exit 0
-          fi
-          SOURCE_DIGEST_REF="${SOURCE_IMAGE}@${SOURCE_DIGEST}"
-          for attempt in 1 2 3 4 5; do
-            if docker pull "$SOURCE_DIGEST_REF"; then
-              break
-            fi
-            if [ "$attempt" -eq 5 ]; then
-              echo "Unable to seed exact DeepSWE image after five bounded attempts" >&2
-              exit 1
-            fi
-            sleep $(( attempt * 30 ))
+          printf '%s' "$TASK_MATRIX" | jq -c '.include[]' | while read -r TASK_ROW; do
+            TASK="$(printf '%s' "$TASK_ROW" | jq -r '.task')"
+            IMAGE="$(printf '%s' "$TASK_ROW" | jq -r '.container_image')"
+            DIGEST="$(printf '%s' "$TASK_ROW" | jq -r '.container_digest')"
+            test -n "$TASK" && test -n "$IMAGE"
+            printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+            IMAGE_REF="${IMAGE}@${DIGEST}"
+            RAW_MANIFEST="$(mktemp)"
+            docker buildx imagetools inspect --raw "$IMAGE_REF" > "$RAW_MANIFEST"
+            test -s "$RAW_MANIFEST"
+            OBSERVED="$(sha256sum "$RAW_MANIFEST" | awk '{print $1}')"
+            test "sha256:${OBSERVED}" = "${DIGEST}"
+            printf '%s %s\n' "$TASK" "$IMAGE_REF"
+            rm -f "$RAW_MANIFEST"
           done
-          docker image inspect "$SOURCE_DIGEST_REF" >/dev/null
-          docker tag "$SOURCE_DIGEST_REF" "$CACHE_TAG"
-          docker push "$CACHE_TAG"
-          # Fail closed if the mirror rewrote the source manifest. The paid
-          # gate remains unreachable unless the original digest resolves.
-          docker pull "$CACHE_DIGEST_REF"
-          docker image inspect "$CACHE_DIGEST_REF" >/dev/null
-          echo "cache_source=seeded_from_exact_public_ecr_digest"
 
   provider_gate:
     if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, image_cache]
+    needs: [plan, image_digest_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -327,7 +297,7 @@ jobs:
 
   task:
     if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, image_cache, provider_gate]
+    needs: [plan, image_digest_gate, provider_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -387,30 +357,15 @@ jobs:
           # clean build above is a source/toolchain verification only; do not
           # silently execute a different binary with a different digest.
 
-      - name: Restore the exact task image cache
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-          SOURCE_IMAGE: ${{ matrix.container_image }}
-          SOURCE_DIGEST: ${{ matrix.container_digest }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io \
-            --username "${GITHUB_ACTOR}" --password-stdin
-          CACHE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/deepswe-task-cache"
-          CACHE_DIGEST_REF="${CACHE_REPOSITORY}@${SOURCE_DIGEST}"
-          docker pull "$CACHE_DIGEST_REF"
-          docker image inspect "$CACHE_DIGEST_REF" >/dev/null
-          docker tag "$CACHE_DIGEST_REF" "$SOURCE_IMAGE"
-          docker image inspect "$SOURCE_IMAGE" >/dev/null
-
-      - name: Load and verify the exact cached task image
+      - name: Pull and verify the exact task image
         env:
           SOURCE_IMAGE: ${{ matrix.container_image }}
           SOURCE_DIGEST: ${{ matrix.container_digest }}
         run: |
           set -euo pipefail
-          CACHE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/deepswe-task-cache"
-          docker image inspect "${CACHE_REPOSITORY}@${SOURCE_DIGEST}" >/dev/null
+          docker pull "${SOURCE_IMAGE}@${SOURCE_DIGEST}"
+          docker image inspect "${SOURCE_IMAGE}@${SOURCE_DIGEST}" >/dev/null
+          docker tag "${SOURCE_IMAGE}@${SOURCE_DIGEST}" "$SOURCE_IMAGE"
           docker image inspect "$SOURCE_IMAGE" >/dev/null
 
       - name: Stage the verified uv installer for the task container

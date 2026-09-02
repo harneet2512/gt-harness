@@ -26,7 +26,7 @@ def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
             "inputs.approve_paid_run == true",
             "python -m scripts.provider_preflight",
             "config/provider_route.v1.json",
-            "needs: [plan, image_cache, provider_gate]",
+            "needs: [plan, image_digest_gate, provider_gate]",
             "secrets.OPENROUTER_API_KEY",
         )
         if any(control not in text for control in required_paid_controls):
