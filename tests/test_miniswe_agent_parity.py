@@ -95,7 +95,11 @@ def test_installed_agent_resolves_explicit_verified_bundle_artifacts(
 
 @pytest.mark.asyncio
 async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_path):
-    agent = MiniSweGtAgent(logs_dir=tmp_path / "logs", task_id="arktype-task")
+    agent = MiniSweGtAgent(
+        logs_dir=tmp_path / "logs",
+        task_id="arktype-task",
+        product_source_sha="a" * 40,
+    )
     captured: dict[str, str] = {}
 
     monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
@@ -110,6 +114,7 @@ async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_p
     await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
 
     assert captured["GT_TASK_ID"] == "arktype-task"
+    assert captured["GT_PRODUCT_SOURCE_SHA"] == "a" * 40
 
 
 @pytest.mark.asyncio

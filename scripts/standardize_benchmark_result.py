@@ -26,8 +26,26 @@ _PROVIDER_EXCEPTIONS = frozenset(
 )
 _EXIT_137 = re.compile(r"(?:exit(?: code)?|return(?: code)?)\s*[:=]?\s*137\b", re.I)
 _MEMORY_EVIDENCE_CODES = frozenset(
-    {"GT_INDEX_MEMORY_GUARD_TRIGGERED", "GT_INDEX_CGROUP_OOM"}
+    {
+        "GT_INDEX_MEMORY_GUARD_TRIGGERED",
+        "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
+        "GT_INDEX_CGROUP_OOM",
+    }
 )
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
+def _valid_self_digest(payload: dict[str, Any], field: str) -> bool:
+    supplied = payload.get(field)
+    unsigned = dict(payload)
+    unsigned.pop(field, None)
+    calculated = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return isinstance(supplied, str) and hmac.compare_digest(supplied, calculated)
 
 
 def conservative_outcomes(
@@ -165,7 +183,11 @@ def _failure_class(
             suffix = (
                 "memory_guard_triggered"
                 if code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
-                else "cgroup_oom"
+                else (
+                    "memory_headroom_insufficient"
+                    if code == "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT"
+                    else "cgroup_oom"
+                )
             )
             return "resource_exhaustion", f"gt_index_{suffix}"
         return "process_signal_failure", "process_exit_137_unattributed"
@@ -175,40 +197,63 @@ def _failure_class(
 
 
 def _resource_evidence(
-    root: Path, *, task_id: str
+    root: Path, *, task_id: str, product_source_sha: str
 ) -> tuple[Path | None, dict[str, Any] | None]:
     valid: list[tuple[Path, dict[str, Any]]] = []
     for path in sorted(root.rglob("index-resource.json")):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != "gt.index_resource.v1":
             continue
-        supplied = payload.get("evidence_sha256")
-        unsigned = dict(payload)
-        unsigned.pop("evidence_sha256", None)
-        calculated = hashlib.sha256(
-            json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
-        evidence_task = str(payload.get("task_id") or "")
         code = str(payload.get("error_code") or "")
         memory_semantics_valid = (
             code == "GT_INDEX_CGROUP_OOM"
             and (
-                isinstance(payload.get("cgroup_oom_delta"), int)
+                type(payload.get("cgroup_oom_delta")) is int
                 and payload["cgroup_oom_delta"] > 0
-                or isinstance(payload.get("cgroup_oom_kill_delta"), int)
+                or type(payload.get("cgroup_oom_kill_delta")) is int
                 and payload["cgroup_oom_kill_delta"] > 0
             )
         ) or (
             code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
-            and isinstance(payload.get("peak_rss_bytes"), int)
-            and isinstance(payload.get("memory_limit_bytes"), int)
+            and type(payload.get("peak_rss_bytes")) is int
+            and type(payload.get("memory_limit_bytes")) is int
             and payload["peak_rss_bytes"] > payload["memory_limit_bytes"] > 0
+        ) or (
+            code == "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT"
+            and type(payload.get("cgroup_memory_current_before")) is int
+            and type(payload.get("cgroup_memory_max")) is int
+            and payload["cgroup_memory_max"] - payload["cgroup_memory_current_before"]
+            < 192 * 1024 * 1024
+        )
+        failure_path = path.with_name("graph.failure.json")
+        failure = _read_json(failure_path)
+        identities = (
+            "repository_root_sha256",
+            "source_manifest_sha256",
+            "producer_binary_sha256",
+        )
+        bound_failure = bool(
+            failure is not None
+            and failure.get("schema") == "gt.graph_failure.v1"
+            and _valid_self_digest(failure, "manifest_sha256")
+            and failure.get("task_id") == task_id
+            and failure.get("product_source_sha") == product_source_sha
+            and failure.get("error_code") == code
+            and failure.get("resource_evidence_path") == path.name
+            and failure.get("resource_evidence_sha256")
+            == hashlib.sha256(path.read_bytes()).hexdigest()
+            and all(
+                _is_sha256(payload.get(field))
+                and failure.get(field) == payload.get(field)
+                for field in identities
+            )
         )
         if (
-            isinstance(supplied, str)
-            and hmac.compare_digest(supplied, calculated)
-            and evidence_task in {"", task_id}
+            _valid_self_digest(payload, "evidence_sha256")
+            and payload.get("task_id") == task_id
+            and payload.get("product_source_sha") == product_source_sha
             and payload.get("memory_evidence") is memory_semantics_valid
+            and bound_failure
         ):
             valid.append((path, payload))
     return valid[0] if len(valid) == 1 else (None, None)
@@ -247,7 +292,9 @@ def standardize_result(
         raise ValueError("GT product receipt task does not match runner task")
 
     result_path, runner_result, trial = _runner_results(root)
-    resource_path, resource_evidence = _resource_evidence(root, task_id=task_id)
+    resource_path, resource_evidence = _resource_evidence(
+        root, task_id=task_id, product_source_sha=source_sha
+    )
     result_bytes = result_path.read_bytes() if result_path is not None else None
     aggregate_reward = _reward(runner_result)
     trial_reward = _reward(trial or {})

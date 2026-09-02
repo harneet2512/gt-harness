@@ -99,6 +99,10 @@ def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
         "memory_evidence": True,
         "cgroup_oom_kill_delta": 1,
         "task_id": "task-a",
+        "product_source_sha": "a" * 40,
+        "repository_root_sha256": "b" * 64,
+        "source_manifest_sha256": "c" * 64,
+        "producer_binary_sha256": "d" * 64,
     }
     payload.update(overrides)
     payload["evidence_sha256"] = hashlib.sha256(
@@ -107,6 +111,21 @@ def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
     path = agent / "gt-state" / "index-resource.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+    failure = {
+        "schema": "gt.graph_failure.v1",
+        "task_id": payload["task_id"],
+        "product_source_sha": payload["product_source_sha"],
+        "error_code": payload["error_code"],
+        "repository_root_sha256": payload["repository_root_sha256"],
+        "source_manifest_sha256": payload["source_manifest_sha256"],
+        "producer_binary_sha256": payload["producer_binary_sha256"],
+        "resource_evidence_path": path.name,
+        "resource_evidence_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    failure["manifest_sha256"] = hashlib.sha256(
+        json.dumps(failure, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    (path.parent / "graph.failure.json").write_text(json.dumps(failure), encoding="utf-8")
     return path
 
 
@@ -173,6 +192,30 @@ def test_tampered_memory_evidence_does_not_authorize_oom_classification(tmp_path
     payload = json.loads(evidence.read_text(encoding="utf-8"))
     payload["cgroup_oom_kill_delta"] = 99
     evidence.write_text(json.dumps(payload), encoding="utf-8")
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "process_signal_failure"
+    assert receipt["error_code"] == "process_exit_137_unattributed"
+    assert receipt["resource_evidence_path"] is None
+
+
+def test_foreign_or_unbound_memory_evidence_cannot_classify_exit_137(tmp_path: Path) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+    evidence = _write_resource_evidence(agent, task_id="", repository_root_sha256="e" * 64)
+    (evidence.parent / "graph.failure.json").unlink()
 
     receipt = _standardize(tmp_path)
 

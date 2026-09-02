@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from gt_engine import indexer
@@ -149,8 +150,9 @@ def test_bounded_indexer_kills_only_child_when_rss_guard_is_crossed(
         "_index_command",
         lambda binary, root, output: [binary, str(sleeper)],
     )
-    monkeypatch.setattr(indexer, "_effective_index_memory_limit", lambda _snapshot: 1)
-    monkeypatch.setattr(indexer, "_process_rss_bytes", lambda _pid: 2)
+    limit = 64 * 1024 * 1024
+    monkeypatch.setattr(indexer, "_effective_index_memory_limit", lambda _snapshot: limit)
+    monkeypatch.setattr(indexer, "_process_rss_bytes", lambda _pid: limit + 1)
 
     started = time.monotonic()
     result = indexer._run_index_bounded(
@@ -162,3 +164,83 @@ def test_bounded_indexer_kills_only_child_when_rss_guard_is_crossed(
     assert result.status == "memory_guard_triggered"
     assert result.error_code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
     assert result.memory_evidence is True
+
+
+def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
+    mib = 1024 * 1024
+    limit = indexer._effective_index_memory_limit(
+        {"max": 1024 * mib, "current": 800 * mib}
+    )
+
+    assert 0 < limit <= 96 * mib
+
+
+def test_successful_process_with_corrupt_database_emits_sealed_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    state = tmp_path / "state"
+    repo.mkdir()
+    (repo / "main.py").write_text("pass\n", encoding="utf-8")
+
+    def corrupt(_root: str, output: Path, _log_dir: Path):
+        output.write_bytes(b"not sqlite")
+        return indexer.IndexProcessResult(True, "completed", "", exit_code=0)
+
+    monkeypatch.setattr(indexer, "_run_index_bounded", corrupt)
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+
+    receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
+
+    assert receipt.success is False
+    assert receipt.error_type == "GT_INDEX_OUTPUT_INVALID"
+    assert receipt.resource_evidence_sha256
+
+
+def test_concurrent_index_builds_are_serialized_and_publish_one_pair(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    state = tmp_path / "state"
+    repo.mkdir()
+    (repo / "main.py").write_text("pass\n", encoding="utf-8")
+    active = 0
+    maximum = 0
+    calls = 0
+
+    def build(_root: str, output: Path, _log_dir: Path):
+        nonlocal active, maximum, calls
+        active += 1
+        maximum = max(maximum, active)
+        calls += 1
+        time.sleep(0.2)
+        connection = indexer.sqlite3.connect(output)
+        try:
+            connection.execute("create table project_meta (key text)")
+            connection.commit()
+        finally:
+            connection.close()
+        active -= 1
+        return indexer.IndexProcessResult(True, "completed", "", exit_code=0)
+
+    monkeypatch.setattr(indexer, "_run_index_bounded", build)
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(lambda _item: indexer.ensure_index(str(repo), state_dir=str(state)), range(2))
+        )
+
+    assert results[0] == results[1]
+    assert maximum == 1
+    assert calls in {1, 2}
+    graph = Path(results[0])
+    manifest = json.loads(graph.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+    assert manifest["graph_sha256"] == hashlib.sha256(graph.read_bytes()).hexdigest()

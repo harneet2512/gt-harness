@@ -361,44 +361,32 @@ def _observe_gt_index() -> list[dict[str, object]]:
     import gt_engine.indexer as indexer
 
     observed: list[dict[str, object]] = []
-    original_popen = indexer.subprocess.Popen
+    original_run = indexer._run_index_bounded
 
-    class ObservedProcess:
-        def __init__(self, command, *args, **kwargs):
-            self._command = command
-            self._stdout_path = Path(kwargs["stdout"].name)
-            self._stderr_path = Path(kwargs["stderr"].name)
-            self._process = original_popen(command, *args, **kwargs)
-            self._recorded = False
+    def run_and_record(root, output, log_dir):
+        result = original_run(root, output, log_dir)
+        observed.append(
+            {
+                "command": tuple(
+                    map(
+                        str,
+                        indexer._index_command(
+                            indexer._resolved_binary_path(), root, str(output)
+                        ),
+                    )
+                ),
+                "exit_code": result.exit_code,
+                "stdout_sha256": result.stdout_sha256,
+                "stderr_sha256": result.stderr_sha256,
+            }
+        )
+        return result
 
-        def __getattr__(self, name):
-            return getattr(self._process, name)
-
-        def poll(self):
-            return self._process.poll()
-
-        def kill(self):
-            return self._process.kill()
-
-        def wait(self, *args, **kwargs):
-            return_code = self._process.wait(*args, **kwargs)
-            if not self._recorded:
-                observed.append(
-                    {
-                        "command": tuple(map(str, self._command)),
-                        "exit_code": int(return_code),
-                        "stdout_sha256": _sha256(self._stdout_path.read_bytes()),
-                        "stderr_sha256": _sha256(self._stderr_path.read_bytes()),
-                    }
-                )
-                self._recorded = True
-            return return_code
-
-    indexer.subprocess.Popen = ObservedProcess
+    indexer._run_index_bounded = run_and_record
     try:
         yield observed
     finally:
-        indexer.subprocess.Popen = original_popen
+        indexer._run_index_bounded = original_run
 
 
 def _verify_producer_environment(producer: dict[str, object]) -> None:
