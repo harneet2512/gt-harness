@@ -19,6 +19,22 @@ from typing import Any
 # Harbor owns the real task ceiling. GT stops new work this much earlier so
 # trajectory/receipt finalization can complete without stealing material solve time.
 SUPERVISOR_GRACE_SECONDS = 90
+TASK_CONFIG_IDENTITY = "sha256_canonical_lf_v1"
+
+
+def canonical_task_config_bytes(raw: bytes) -> bytes:
+    """Return the Git-blob newline form used by the pinned task manifest.
+
+    Git may materialize text files with CRLF in a Windows checkout even though
+    the immutable dataset blob uses LF.  Task configuration identity must not
+    depend on the checkout platform.  Bare CR bytes are rejected because they
+    are neither the canonical Git representation nor an unambiguous CRLF
+    checkout transformation.
+    """
+    without_crlf = raw.replace(b"\r\n", b"\n")
+    if b"\r" in without_crlf:
+        raise ValueError("task.toml contains non-canonical bare CR bytes")
+    return without_crlf
 
 
 def resolve_budget(
@@ -43,8 +59,11 @@ def resolve_budget(
     return {
         "schema": "harbor-agent-budget-v1",
         "source": "task.toml:[agent].timeout_sec",
+        "task_config_identity": TASK_CONFIG_IDENTITY,
         "task_config": task_config.as_posix(),
-        "task_config_sha256": hashlib.sha256(raw).hexdigest(),
+        "task_config_sha256": hashlib.sha256(
+            canonical_task_config_bytes(raw)
+        ).hexdigest(),
         "base_timeout_sec": float(base),
         "timeout_multiplier": float(multiplier),
         "max_timeout_sec": (

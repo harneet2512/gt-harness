@@ -85,6 +85,7 @@ def test_shipping_adapter_and_every_manifest_task_are_reachable() -> None:
     installer = importlib.import_module("eval.miniswe_agent")
     assert manifest["schema"] == "gt.product_bundle_source.v1"
     assert manifest["miniswe_agent_version"] == "2.4.6"
+    assert manifest["dataset"]["task_config_identity"] == "sha256_canonical_lf_v1"
     assert installer._GT_WHEEL_SHA256 == manifest["groundtruth"]["wheel_sha256"]
     assert installer._GT_BINARY_SHA256 == manifest["groundtruth"]["producer_sha256"]
     assert installer._UV_INSTALLER_SHA256 == manifest["uv"]["installer_sha256"]
