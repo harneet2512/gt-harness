@@ -242,6 +242,9 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert treatment["prompt_context_deliveries"][0]["kind"] == "context_contract"
     assert treatment["evidence_deliveries"][0]["event_hash"] == "5" * 64
     assert treatment["refused_deliveries"][0]["reason"] == "delivery_byte_ceiling"
+    assert treatment["refused_deliveries"][0]["event_sequence"] == 9
+    assert treatment["provider_delivery_receipts"][0]["event_sequence"] == 1
+    assert treatment["provider_delivery_receipts"][1]["event_sequence"] == 5
     assert treatment["delivery_budget"] == {
         "unit": "utf8_bytes",
         "conversion_from_legacy_tokens": "4_bytes_per_token",
@@ -255,9 +258,10 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "refused_count": 1,
     }
     assert product_row["treatment_receipt"]["graph_certification"]["graph_sha256"] == "e" * 64
-    assert product_row["integrity"]["trajectory_sha256"] == hashlib.sha256(
-        trajectory.read_bytes()
-    ).hexdigest()
+    assert (
+        product_row["integrity"]["trajectory_sha256"]
+        == hashlib.sha256(trajectory.read_bytes()).hexdigest()
+    )
     assert copied.read_bytes() == trajectory.read_bytes()
     assert adapter_row == {
         "schema": "gt.benchmark_adapter_receipt.v1",
@@ -273,38 +277,74 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     }
     assert verify_runtime_receipt(product) == []
 
-    mutations = {
-        "treatment_delivery_limit_exceeded": lambda row: row["treatment_receipt"][
-            "provider_delivery_receipts"
-        ].extend(deepcopy(row["treatment_receipt"]["provider_delivery_receipts"]) * 12),
-        "treatment_delivery_late": lambda row: row["treatment_receipt"][
-            "provider_delivery_receipts"
-        ][0].update(same_observation=False),
-        "treatment_delivery_context_budget_exceeded": lambda row: row[
-            "treatment_receipt"
-        ]["provider_delivery_receipts"][1].update(context_byte_count=1_401),
-        "treatment_prompt_context_budget_exceeded": lambda row: row[
-            "treatment_receipt"
-        ]["provider_delivery_receipts"][0].update(delivery_kind="localization"),
-        "treatment_duplicate_delivery_identity": lambda row: row[
-            "treatment_receipt"
-        ]["provider_delivery_receipts"][1].update(
-            context_sha256=row["treatment_receipt"]["provider_delivery_receipts"][0][
-                "context_sha256"
-            ],
-            delivery_identity=row["treatment_receipt"]["provider_delivery_receipts"][0][
-                "delivery_identity"
-            ],
+    mutations = [
+        (
+            "treatment_delivery_limit_exceeded",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"].extend(
+                deepcopy(row["treatment_receipt"]["provider_delivery_receipts"]) * 12
+            ),
         ),
-        "treatment_delivery_refusal_invalid": lambda row: row[
-            "treatment_receipt"
-        ]["refused_deliveries"][0].update(dedup_key="prompt-contract-1"),
-        "treatment_dense_index_not_ready": lambda row: row["treatment_receipt"][
-            "dense_index_receipt"
-        ].update(query_ready=False),
-    }
-    for expected_error, mutate in mutations.items():
+        (
+            "treatment_delivery_late",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"][0].update(
+                same_observation=False
+            ),
+        ),
+        (
+            "treatment_delivery_context_budget_exceeded",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"][1].update(
+                context_byte_count=1_401
+            ),
+        ),
+        (
+            "treatment_prompt_context_budget_exceeded",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"][0].update(
+                delivery_kind="localization"
+            ),
+        ),
+        (
+            "treatment_delivery_context_budget_exceeded",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"][0].update(
+                context_byte_count=2_001,
+                byte_limit=2_000,
+            ),
+        ),
+        (
+            "treatment_duplicate_delivery_identity",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"][1].update(
+                context_sha256=row["treatment_receipt"]["provider_delivery_receipts"][0][
+                    "context_sha256"
+                ],
+                delivery_identity=row["treatment_receipt"]["provider_delivery_receipts"][0][
+                    "delivery_identity"
+                ],
+            ),
+        ),
+        (
+            "treatment_delivery_refusal_invalid",
+            lambda row: row["treatment_receipt"]["refused_deliveries"][0].update(
+                dedup_key="prompt-contract-1"
+            ),
+        ),
+        (
+            "treatment_refused_then_delivered",
+            lambda row: row["treatment_receipt"]["refused_deliveries"][0].update(
+                dedup_key="prompt-contract-1",
+                delivery_identity=row["treatment_receipt"]["provider_delivery_receipts"][0][
+                    "delivery_identity"
+                ],
+                event_sequence=9,
+            ),
+        ),
+        (
+            "treatment_dense_index_not_ready",
+            lambda row: row["treatment_receipt"]["dense_index_receipt"].update(query_ready=False),
+        ),
+    ]
+    for expected_error, mutate in mutations:
         changed = deepcopy(product_row)
+        if expected_error == "treatment_refused_then_delivered":
+            changed["treatment_receipt"]["provider_delivery_receipts"][0]["event_sequence"] = 10
         mutate(changed)
         _write_json(product, changed)
         assert expected_error in verify_runtime_receipt(product)

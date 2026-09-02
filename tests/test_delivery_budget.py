@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
     MAX_TASK_DELIVERIES,
@@ -24,8 +26,7 @@ def _adapter(tmp_path) -> MiniSweAdapter:
 
 def _events(adapter: MiniSweAdapter) -> list[dict]:
     return [
-        json.loads(line)
-        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
     ]
 
 
@@ -70,6 +71,36 @@ def test_contract_can_use_full_two_thousand_byte_budget(tmp_path) -> None:
         iteration=0,
         dedup_key="contract",
     )
+
+
+@pytest.mark.parametrize(
+    ("lane", "kind", "limit"),
+    (
+        ("sealed", "localization", 1_400),
+        ("prompt", "context_contract", 2_000),
+        ("prompt", "context_delta", 1_400),
+    ),
+)
+def test_one_byte_over_each_lane_type_cap_is_refused_and_journaled(
+    tmp_path, lane: str, kind: str, limit: int
+) -> None:
+    adapter = _adapter(tmp_path)
+
+    assert not adapter.admit_model_visible_delivery(
+        lane=lane,
+        kind=kind,
+        rendered="x" * (limit + 1),
+        action_index=0,
+        iteration=0,
+        dedup_key=f"over-{lane}-{kind}",
+    )
+
+    refusal = [row for row in _events(adapter) if row["event"] == "delivery_refused"][0]
+    assert refusal["reason"] == "delivery_byte_ceiling"
+    assert refusal["rendered_bytes"] == limit + 1
+    assert refusal["per_delivery_limit"] == limit
+    assert refusal["admitted_count"] == 0
+    assert refusal["admitted_bytes"] == 0
 
 
 def test_five_distinct_legitimate_deliveries_are_admitted(tmp_path) -> None:
@@ -160,9 +191,7 @@ def test_total_budget_refusal_is_journaled_with_conservation_fields(tmp_path) ->
     ]
 
     assert admitted == ([True] * 7) + [False]
-    refusal = [
-        row for row in _events(adapter) if row["event"] == "delivery_refused"
-    ][0]
+    refusal = [row for row in _events(adapter) if row["event"] == "delivery_refused"][0]
     assert refusal["reason"] == "task_delivery_byte_ceiling"
     assert refusal["admitted_count"] == 7
     assert refusal["admitted_bytes"] == 9_100
