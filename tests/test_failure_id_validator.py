@@ -122,6 +122,20 @@ def test_directory_scan_includes_receipt_evidence(tmp_path: Path) -> None:
     }
 
 
+def test_directory_scan_excludes_pinned_external_checkouts(tmp_path: Path) -> None:
+    _write(tmp_path / "README.md", "Reference FD-030.\n")
+    _write(
+        tmp_path / ".pinned" / "external" / "devcontainer.json",
+        '{"failure_id": "not-a-harness-failure-id"}\n',
+    )
+
+    report = validate_failure_ids.validate([tmp_path])
+
+    assert report["status"] == "pass"
+    assert report["files_scanned"] == 1
+    assert report["malformed_definitions"] == []
+
+
 def test_machine_fields_are_found_at_any_supported_position(tmp_path: Path) -> None:
     _write(
         tmp_path / "ledger.json",
