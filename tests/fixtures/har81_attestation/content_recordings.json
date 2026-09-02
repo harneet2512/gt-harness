@@ -1,0 +1,642 @@
+{
+  "description": "Provider-bound delivery bytes and structured recorded facts from HAR-81 runs 19, 20, and 21.",
+  "expected_run_ids": [
+    "33563173631",
+    "33565965241",
+    "33567358689"
+  ],
+  "graph_states": [
+    {
+      "facts": [
+        {
+          "fact_id": "localization:7e39e6b6470c336a",
+          "kind": "localization",
+          "ranked_targets": [
+            {
+              "line": 44,
+              "path": "evaluator/functions.go",
+              "reasons": [
+                "path_token:function",
+                "content_token:abs",
+                "content_token:active",
+                "content_token:apply",
+                "content_token:args",
+                "content_token:arguments",
+                "content_token:base",
+                "content_token:cache",
+                "content_token:command",
+                "content_token:contain",
+                "content_token:directory",
+                "content_token:does",
+                "content_token:done",
+                "content_token:environment",
+                "content_token:error",
+                "content_token:example",
+                "content_token:executing",
+                "content_token:existing",
+                "content_token:fail",
+                "content_token:fields",
+                "content_token:file",
+                "content_token:first",
+                "content_token:format",
+                "content_token:full",
+                "content_token:function",
+                "content_token:global",
+                "content_token:handling",
+                "content_token:import",
+                "content_token:index",
+                "content_token:keys",
+                "content_token:load",
+                "content_token:loaded",
+                "content_token:may",
+                "content_token:means",
+                "content_token:message",
+                "content_token:module",
+                "content_token:name",
+                "content_token:new",
+                "content_token:not",
+                "content_token:option",
+                "content_token:order",
+                "content_token:output",
+                "content_token:parsing",
+                "content_token:path",
+                "content_token:paths",
+                "content_token:preserve",
+                "content_token:process",
+                "content_token:program",
+                "content_token:provided",
+                "content_token:repl",
+                "content_token:require",
+                "content_token:required",
+                "content_token:reset",
+                "content_token:runtime",
+                "content_token:same",
+                "content_token:script",
+                "content_token:separator",
+                "content_token:signature",
+                "content_token:signatures",
+                "content_token:size",
+                "content_token:sorted",
+                "content_token:starts",
+                "content_token:stderr",
+                "content_token:string",
+                "content_token:text",
+                "content_token:then",
+                "content_token:through",
+                "content_token:truthy",
+                "content_token:used",
+                "content_token:values",
+                "content_token:version",
+                "content_token:when",
+                "content_token:while",
+                "content_token:work",
+                "content_token:you"
+              ],
+              "score": 77
+            },
+            {
+              "line": 14,
+              "path": "evaluator/evaluator.go",
+              "reasons": [
+                "content_token:abs",
+                "content_token:apply",
+                "content_token:args",
+                "content_token:arguments",
+                "content_token:before",
+                "content_token:command",
+                "content_token:contain",
+                "content_token:currently",
+                "content_token:defined",
+                "content_token:does",
+                "content_token:done",
+                "content_token:environment",
+                "content_token:error",
+                "content_token:everything",
+                "content_token:existing",
+                "content_token:expected",
+                "content_token:file",
+                "content_token:first",
+                "content_token:format",
+                "content_token:function",
+                "content_token:global",
+                "content_token:import",
+                "content_token:index",
+                "content_token:keep",
+                "content_token:means",
+                "content_token:message",
+                "content_token:module",
+                "content_token:modules",
+                "content_token:name",
+                "content_token:names",
+                "content_token:new",
+                "content_token:not",
+                "content_token:numeric",
+                "content_token:option",
+                "content_token:point",
+                "content_token:process",
+                "content_token:program",
+                "content_token:repl",
+                "content_token:require",
+                "content_token:reset",
+                "content_token:reuse",
+                "content_token:running",
+                "content_token:runtime",
+                "content_token:same",
+                "content_token:single",
+                "content_token:state",
+                "content_token:stderr",
+                "content_token:string",
+                "content_token:then",
+                "content_token:truthy",
+                "content_token:unknown",
+                "content_token:used",
+                "content_token:values",
+                "content_token:version",
+                "content_token:when",
+                "content_token:while",
+                "content_token:work",
+                "content_token:you"
+              ],
+              "score": 58
+            },
+            {
+              "line": 1,
+              "path": "docs/src/.vuepress/public/wasm_exec.js",
+              "reasons": [
+                "path_token:public",
+                "content_token:above",
+                "content_token:apply",
+                "content_token:args",
+                "content_token:arguments",
+                "content_token:argv",
+                "content_token:clear",
+                "content_token:command",
+                "content_token:currently",
+                "content_token:debug",
+                "content_token:defined",
+                "content_token:directory",
+                "content_token:does",
+                "content_token:environment",
+                "content_token:error",
+                "content_token:expected",
+                "content_token:fail",
+                "content_token:file",
+                "content_token:flags",
+                "content_token:function",
+                "content_token:global",
+                "content_token:import",
+                "content_token:index",
+                "content_token:internal",
+                "content_token:keep",
+                "content_token:keys",
+                "content_token:load",
+                "content_token:may",
+                "content_token:mode",
+                "content_token:name",
+                "content_token:new",
+                "content_token:not",
+                "content_token:output",
+                "content_token:path",
+                "content_token:paths",
+                "content_token:point",
+                "content_token:process",
+                "content_token:program",
+                "content_token:require",
+                "content_token:required",
+                "content_token:reset",
+                "content_token:resolve",
+                "content_token:running",
+                "content_token:runtime",
+                "content_token:stack",
+                "content_token:starts",
+                "content_token:string",
+                "content_token:text",
+                "content_token:used",
+                "content_token:values",
+                "content_token:while",
+                "content_token:work"
+              ],
+              "score": 54
+            },
+            {
+              "line": 335,
+              "path": "docs/src/.vuepress/components/wasm_exec.js",
+              "reasons": [
+                "content_token:above",
+                "content_token:apply",
+                "content_token:args",
+                "content_token:arguments",
+                "content_token:argv",
+                "content_token:clear",
+                "content_token:command",
+                "content_token:currently",
+                "content_token:debug",
+                "content_token:defined",
+                "content_token:directory",
+                "content_token:does",
+                "content_token:environment",
+                "content_token:error",
+                "content_token:expected",
+                "content_token:fail",
+                "content_token:file",
+                "content_token:flags",
+                "content_token:function",
+                "content_token:global",
+                "content_token:import",
+                "content_token:index",
+                "content_token:internal",
+                "content_token:keep",
+                "content_token:keys",
+                "content_token:load",
+                "content_token:may",
+                "content_token:mode",
+                "content_token:name",
+                "content_token:new",
+                "content_token:not",
+                "content_token:output",
+                "content_token:path",
+                "content_token:paths",
+                "content_token:point",
+                "content_token:process",
+                "content_token:program",
+                "content_token:require",
+                "content_token:required",
+                "content_token:reset",
+                "content_token:resolve",
+                "content_token:running",
+                "content_token:runtime",
+                "content_token:stack",
+                "content_token:starts",
+                "content_token:string",
+                "content_token:text",
+                "content_token:used",
+                "content_token:values",
+                "content_token:while",
+                "content_token:work"
+              ],
+              "score": 51
+            }
+          ],
+          "target": "evaluator/functions.go",
+          "trigger_class": "task_start"
+        },
+        {
+          "caller_count": 2,
+          "callers": [
+            {
+              "line": 33,
+              "path": "evaluator/evaluator.go",
+              "symbol": "init"
+            },
+            {
+              "line": 679,
+              "path": "terminal/terminal.go",
+              "symbol": "getSuggestions"
+            }
+          ],
+          "fact_id": "caller_contract_view:f98c860ed35577ba",
+          "file_count": 2,
+          "kind": "caller_contract_view",
+          "subject": "GetFns",
+          "target": "evaluator/functions.go",
+          "trigger_class": "graph_caller_surface"
+        },
+        {
+          "caller_count": 1,
+          "callers": [
+            {
+              "line": 38,
+              "path": "main.go",
+              "symbol": "main"
+            }
+          ],
+          "fact_id": "caller_contract_view:8625fa2c2275d040",
+          "file_count": 1,
+          "kind": "caller_contract_view",
+          "subject": "BeginRepl",
+          "target": "repl/repl.go",
+          "trigger_class": "graph_caller_surface"
+        },
+        {
+          "fact_id": "new_file_destination:f3bc0920baac113b",
+          "kind": "new_file_destination",
+          "precedents": [
+            {
+              "inspect": [
+                "evaluator/test-ignore-source-is-not-cached.abs",
+                "evaluator/test-ignore-source-vs-require.1.abs",
+                "evaluator/test-ignore-source-vs-require.2.abs",
+                "evaluator/test-ignore-source-vs-require.abs"
+              ],
+              "path": "evaluator/test-ignore-require-is-cached.3.abs",
+              "reasons": [
+                "same_directory",
+                "same_extension"
+              ],
+              "revision": "344cdb88ab9062c98c35c8a5a825ea5e9bd584d3f585eb1faf401d9ae7d87776"
+            },
+            {
+              "inspect": [
+                "evaluator/test-ignore-require-is-cached"
+              ],
+              "path": "evaluator/test-ignore-source-is-not-cached.abs",
+              "reasons": [
+                "same_directory",
+                "same_extension"
+              ],
+              "revision": "344cdb88ab9062c98c35c8a5a825ea5e9bd584d3f585eb1faf401d9ae7d87776"
+            }
+          ],
+          "target": "evaluator/test-ignore-require-is-cached.3.abs",
+          "trigger_class": "repository_new_file",
+          "truncated": true
+        },
+        {
+          "fact_id": "trace_frame:3419e5720bb4ca23",
+          "kind": "trace_frame",
+          "line": 2346,
+          "path": "evaluator/functions.go",
+          "target": "evaluator/functions.go",
+          "trigger_class": "tool_failure_trace"
+        },
+        {
+          "fact_id": "trace_frame:63f015d4a58b0bc3",
+          "kind": "trace_frame",
+          "line": 2549,
+          "path": "evaluator/functions.go",
+          "target": "evaluator/functions.go",
+          "trigger_class": "tool_failure_trace"
+        },
+        {
+          "fact_id": "new_file_destination:8948f08b598530f9",
+          "kind": "new_file_destination",
+          "precedents": [
+            {
+              "inspect": [
+                "evaluator/test-ignore-source-is-not-cached.abs",
+                "evaluator/test-ignore-source-vs-require.1.abs",
+                "evaluator/test-ignore-source-vs-require.2.abs",
+                "evaluator/test-ignore-source-vs-require.abs"
+              ],
+              "path": "evaluator/test-ignore-require-is-cached.3.abs",
+              "reasons": [
+                "same_directory",
+                "same_extension"
+              ],
+              "revision": "42086dde6509747d68bb674dced1fd8dde4728c6b2c8ef29fe04f0be182188e9"
+            },
+            {
+              "inspect": [
+                "evaluator/test-ignore-require-is-cached"
+              ],
+              "path": "evaluator/test-ignore-source-is-not-cached.abs",
+              "reasons": [
+                "same_directory",
+                "same_extension"
+              ],
+              "revision": "42086dde6509747d68bb674dced1fd8dde4728c6b2c8ef29fe04f0be182188e9"
+            }
+          ],
+          "target": "evaluator/test-ignore-require-is-cached.3.abs",
+          "trigger_class": "repository_new_file",
+          "truncated": true
+        }
+      ],
+      "graph_state_id": "abs-module-cache-flags-runs-19-21",
+      "targets": [
+        {
+          "path": "evaluator/functions.go",
+          "source": "graph_index"
+        },
+        {
+          "path": "evaluator/test-ignore-require-is-cached.3.abs",
+          "source": "workspace_snapshot"
+        },
+        {
+          "path": "repl/repl.go",
+          "source": "graph_index"
+        }
+      ]
+    }
+  ],
+  "provider_calls_required": 0,
+  "runs": [
+    {
+      "deliveries": [
+        {
+          "delivery_id": "33563173631:0:localization",
+          "envelope": {
+            "canonical_claim": "ranked_repository_targets:evaluator/functions.go:44,evaluator/evaluator.go:14,docs/src/.vuepress/public/wasm_exec.js:1,docs/src/.vuepress/components/wasm_exec.js:335",
+            "consequence": "inspect_ranked_targets_before_editing",
+            "target": "evaluator/functions.go",
+            "trigger_class": "task_start"
+          },
+          "fact_id": "localization:7e39e6b6470c336a",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "8e224f36de210f2f47097f65e3258443df1c451c98d25e949ab0ae1e48302c4b",
+          "recorded_payload_bytes": 5119,
+          "recorded_payload_sha256": "7e39e6b6470c336adf3746e5ac60c91be38c61d481c8b0f935fe2d24b61cabb4",
+          "recorded_trigger_class": "task_start",
+          "source_event_hash": "aca1af1be3a414b6a0937efe07fc92fb2555fe781e92b8dc3d27272f178baca3"
+        },
+        {
+          "delivery_id": "33563173631:5:caller_contract_view",
+          "envelope": {
+            "canonical_claim": "production_callers:GetFns:2:2",
+            "consequence": "preserve_production_caller_compatibility",
+            "target": "evaluator/functions.go",
+            "trigger_class": "graph_caller_surface"
+          },
+          "fact_id": "caller_contract_view:f98c860ed35577ba",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "2e41e8937645ce2ad62cf83df9573e6f8e40bb770101b1cec21f7de13ddd9521",
+          "recorded_payload_bytes": 253,
+          "recorded_payload_sha256": "f98c860ed35577baed6f05c377729963bb0d891451c709b29cd21785f8e0b8dd",
+          "recorded_trigger_class": "graph_caller_surface",
+          "source_event_hash": "2ea122bc03c06949e27afa65304c2f230e43a45c62c2234c5aa335d07c3ec108"
+        },
+        {
+          "delivery_id": "33563173631:10:caller_contract_view",
+          "envelope": {
+            "canonical_claim": "production_callers:BeginRepl:1:1",
+            "consequence": "preserve_production_caller_compatibility",
+            "target": "repl/repl.go",
+            "trigger_class": "graph_caller_surface"
+          },
+          "fact_id": "caller_contract_view:8625fa2c2275d040",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "7f315399eac26272781407a1e6f85b458c176cab6796ffcb9efb63470c7cb7f8",
+          "recorded_payload_bytes": 154,
+          "recorded_payload_sha256": "8625fa2c2275d040ebaf79b03cc50db01c518baca7f917f6b9935641dc8f88ac",
+          "recorded_trigger_class": "graph_caller_surface",
+          "source_event_hash": "66247bef7f5848469fb140f762da7177aca9ed9af15c58222c21002d408cea0f"
+        },
+        {
+          "delivery_id": "33563173631:13:new_file_destination",
+          "envelope": {
+            "canonical_claim": "new_file_precedents:evaluator/test-ignore-require-is-cached.3.abs:344cdb88ab9062c98c35c8a5a825ea5e9bd584d3f585eb1faf401d9ae7d87776",
+            "consequence": "inspect_repository_precedents_before_adding_file",
+            "target": "evaluator/test-ignore-require-is-cached.3.abs",
+            "trigger_class": "repository_new_file"
+          },
+          "fact_id": "new_file_destination:f3bc0920baac113b",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "fb72e686037a767c82c32a4f2057c56ff3162fbe9f42906bcd44c67e44aa68f1",
+          "recorded_payload_bytes": 656,
+          "recorded_payload_sha256": "f3bc0920baac113b459d0ffe4d86ec088377ba9c4294ad43faaa935fbf72ce52",
+          "recorded_trigger_class": "repository_new_file",
+          "source_event_hash": "8f19a00a668a1a538dd8b03afa03f0570e8a6b0f80913f3fc57ad1a016e153fd"
+        },
+        {
+          "delivery_id": "33563173631:28:trace_frame",
+          "envelope": {
+            "canonical_claim": "failure_trace_frame:evaluator/functions.go:2346",
+            "consequence": "inspect_recorded_failure_location",
+            "target": "evaluator/functions.go",
+            "trigger_class": "tool_failure_trace"
+          },
+          "fact_id": "trace_frame:3419e5720bb4ca23",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "43756bfa870e9ad08c0e787f93961dcb4db65aeb82d204c84c47530d5d84bc61",
+          "recorded_payload_bytes": 54,
+          "recorded_payload_sha256": "3419e5720bb4ca23db5c4448b955ffdcaa4022a21585f6d62fc7b213582d4f4d",
+          "recorded_trigger_class": "tool_failure_trace",
+          "source_event_hash": "64024dfb800878d615cba9488a7bcb3da0c15aa57bd0f97011581ebd66802da5"
+        },
+        {
+          "delivery_id": "33563173631:33:trace_frame",
+          "envelope": {
+            "canonical_claim": "failure_trace_frame:evaluator/functions.go:2549",
+            "consequence": "inspect_recorded_failure_location",
+            "target": "evaluator/functions.go",
+            "trigger_class": "tool_failure_trace"
+          },
+          "fact_id": "trace_frame:63f015d4a58b0bc3",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "6a8df0524b5c1c833fb5299c965c9ca41d3e7ad4e438c2bfc8fa2482ff61d4e4",
+          "recorded_payload_bytes": 54,
+          "recorded_payload_sha256": "63f015d4a58b0bc301645e2f1e1ff4ac7d194b7f38f22a275192b049d5c64ac5",
+          "recorded_trigger_class": "tool_failure_trace",
+          "source_event_hash": "a5ca4bfb08dd49ee863ae7abb50f462a600e0d6f94d9b69ba33efa8608c53d40"
+        }
+      ],
+      "events_sha256": "dd3e3dae019b1f2017c521c32252e9bd78a8433662928f078f9bc04b55c15fb6",
+      "graph_manifest_sha256": "84792270a870481086c8224ff49d56c616af0395b0854f7f9c88b0edfef45050",
+      "recorded_shipped_delivery_count": 6,
+      "run_id": "33563173631"
+    },
+    {
+      "deliveries": [
+        {
+          "delivery_id": "33565965241:0:localization",
+          "envelope": {
+            "canonical_claim": "ranked_repository_targets:evaluator/functions.go:44,evaluator/evaluator.go:14,docs/src/.vuepress/public/wasm_exec.js:1,docs/src/.vuepress/components/wasm_exec.js:335",
+            "consequence": "inspect_ranked_targets_before_editing",
+            "target": "evaluator/functions.go",
+            "trigger_class": "task_start"
+          },
+          "fact_id": "localization:7e39e6b6470c336a",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "8e224f36de210f2f47097f65e3258443df1c451c98d25e949ab0ae1e48302c4b",
+          "recorded_payload_bytes": 5119,
+          "recorded_payload_sha256": "7e39e6b6470c336adf3746e5ac60c91be38c61d481c8b0f935fe2d24b61cabb4",
+          "recorded_trigger_class": "task_start",
+          "source_event_hash": "4b7f3b310b72ccea0134a45732de44ae7cd9960cba65e23debc245c523b480cd"
+        },
+        {
+          "delivery_id": "33565965241:3:caller_contract_view",
+          "envelope": {
+            "canonical_claim": "production_callers:BeginRepl:1:1",
+            "consequence": "preserve_production_caller_compatibility",
+            "target": "repl/repl.go",
+            "trigger_class": "graph_caller_surface"
+          },
+          "fact_id": "caller_contract_view:8625fa2c2275d040",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "5f5446b25956d5b1d6f00946b35a566ed7bb07bab1caa66934b9ba76bf2049bb",
+          "recorded_payload_bytes": 154,
+          "recorded_payload_sha256": "8625fa2c2275d040ebaf79b03cc50db01c518baca7f917f6b9935641dc8f88ac",
+          "recorded_trigger_class": "graph_caller_surface",
+          "source_event_hash": "e3cba27331d1236787248b5b3f6f5cae224c154a1d9aad02e2c4e0d247009f0f"
+        },
+        {
+          "delivery_id": "33565965241:4:caller_contract_view",
+          "envelope": {
+            "canonical_claim": "production_callers:GetFns:2:2",
+            "consequence": "preserve_production_caller_compatibility",
+            "target": "evaluator/functions.go",
+            "trigger_class": "graph_caller_surface"
+          },
+          "fact_id": "caller_contract_view:f98c860ed35577ba",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "b590270e237f3cc22ab10abecdd3580d9dcdc058666f31985e96a792cc176d70",
+          "recorded_payload_bytes": 253,
+          "recorded_payload_sha256": "f98c860ed35577baed6f05c377729963bb0d891451c709b29cd21785f8e0b8dd",
+          "recorded_trigger_class": "graph_caller_surface",
+          "source_event_hash": "3d904de453c62e962293f00d05a97295ad6d3e1032ed4c8c09af7d8bd65993d8"
+        },
+        {
+          "delivery_id": "33565965241:29:new_file_destination",
+          "envelope": {
+            "canonical_claim": "new_file_precedents:evaluator/test-ignore-require-is-cached.3.abs:42086dde6509747d68bb674dced1fd8dde4728c6b2c8ef29fe04f0be182188e9",
+            "consequence": "inspect_repository_precedents_before_adding_file",
+            "target": "evaluator/test-ignore-require-is-cached.3.abs",
+            "trigger_class": "repository_new_file"
+          },
+          "fact_id": "new_file_destination:8948f08b598530f9",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "1f4fa6106bd4ba13cc0282ccf9291c67296f499f3aed8eabfe6bc9c2a13d9a0e",
+          "recorded_payload_bytes": 656,
+          "recorded_payload_sha256": "8948f08b598530f900f597370b13e3b79c8cbce277185ee040627f0f90656359",
+          "recorded_trigger_class": "repository_new_file",
+          "source_event_hash": "eb4d8908f7ae8d65705ad240ccc36b1be06e30f8f10eba3a2b2b307595f0e63a"
+        }
+      ],
+      "events_sha256": "4e176a1572aa37d74b818257c6e10d2080b7f8f0363af8c76ae39033c2b96594",
+      "graph_manifest_sha256": "bfe3fa3ba93f493aa346237326986b819c59b6920760fc517214fef38cd8beb5",
+      "recorded_shipped_delivery_count": 4,
+      "run_id": "33565965241"
+    },
+    {
+      "deliveries": [
+        {
+          "delivery_id": "33567358689:0:localization",
+          "envelope": {
+            "canonical_claim": "ranked_repository_targets:evaluator/functions.go:44,evaluator/evaluator.go:14,docs/src/.vuepress/public/wasm_exec.js:1,docs/src/.vuepress/components/wasm_exec.js:335",
+            "consequence": "inspect_ranked_targets_before_editing",
+            "target": "evaluator/functions.go",
+            "trigger_class": "task_start"
+          },
+          "fact_id": "localization:7e39e6b6470c336a",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "8e224f36de210f2f47097f65e3258443df1c451c98d25e949ab0ae1e48302c4b",
+          "recorded_payload_bytes": 5119,
+          "recorded_payload_sha256": "7e39e6b6470c336adf3746e5ac60c91be38c61d481c8b0f935fe2d24b61cabb4",
+          "recorded_trigger_class": "task_start",
+          "source_event_hash": "b1d1ce2ba2463b11f5e2a09e439ec7c1eaaf69a9b9dc094e5408c1a6d7a4f1e9"
+        },
+        {
+          "delivery_id": "33567358689:3:caller_contract_view",
+          "envelope": {
+            "canonical_claim": "production_callers:BeginRepl:1:1",
+            "consequence": "preserve_production_caller_compatibility",
+            "target": "repl/repl.go",
+            "trigger_class": "graph_caller_surface"
+          },
+          "fact_id": "caller_contract_view:8625fa2c2275d040",
+          "graph_state_id": "abs-module-cache-flags-runs-19-21",
+          "provider_request_sha256": "a912ae238cd20f96e60d794adf9875838e967df6bd9019f7d3b8064d734c104b",
+          "recorded_payload_bytes": 154,
+          "recorded_payload_sha256": "8625fa2c2275d040ebaf79b03cc50db01c518baca7f917f6b9935641dc8f88ac",
+          "recorded_trigger_class": "graph_caller_surface",
+          "source_event_hash": "61b5c3f485faa4de20262a04f9a4da070779e4a66eac84f76c0483345d6451a6"
+        }
+      ],
+      "events_sha256": "2ddc9dc39ed19aac2668bc0eeed0695639001d6b9e0549236e3af52c6f38a051",
+      "graph_manifest_sha256": "e2b49b3abcb4705bfcc713ed0a9b97363e9401fdb7a7fa1cd385a7207cc6fcee",
+      "recorded_shipped_delivery_count": 2,
+      "run_id": "33567358689"
+    }
+  ],
+  "schema": "gt.recorded_content_fixture.v1"
+}

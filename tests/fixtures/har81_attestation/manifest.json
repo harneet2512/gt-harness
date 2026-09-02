@@ -1,5 +1,11 @@
 {
   "schema": "gt.har81.offline_attestation_fixtures.v1",
+  "content_correctness": {
+    "fixture": "content_recordings.json",
+    "run_ids": ["33563173631", "33565965241", "33567358689"],
+    "shipped_delivery_count": 12,
+    "mutation_expected": "FAIL_AS_DESIGNED"
+  },
   "cases": [
     {
       "name": "run19_missing_runtime_receipts",
