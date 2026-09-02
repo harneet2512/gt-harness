@@ -55,9 +55,10 @@ def _atomic_bytes(path: Path, payload: bytes) -> None:
 
 
 def _atomic_json(path: Path, value: object) -> None:
-    payload = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8") + b"\n"
+    payload = (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+    )
     _atomic_bytes(path, payload)
 
 
@@ -160,6 +161,10 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
         kind = "repository_start" if index == 1 else "repository_update"
         lane = str(match.get("lane") or "sealed")
         delivery_kind = str(match.get("kind") or match.get("evidence_type") or "")
+        context_byte_count = int(match.get("rendered_bytes") or 0)
+        byte_limit = delivery_byte_limit(lane=lane, kind=delivery_kind)
+        if context_byte_count > byte_limit:
+            raise ValueError("delivery_context_budget_exceeded")
         delivered_before_call = int(provider.get("iteration") or 0) if provider else 0
         receipts.append(
             {
@@ -172,8 +177,9 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
                 "dedup_key": str(row.get("dedup_key") or ""),
                 "context_sha256": str(row.get("payload_hash") or ""),
                 "delivery_identity": str(row.get("payload_hash") or ""),
-                "context_byte_count": int(match.get("rendered_bytes") or 0),
-                "byte_limit": delivery_byte_limit(lane=lane, kind=delivery_kind),
+                "context_byte_count": context_byte_count,
+                "byte_limit": byte_limit,
+                "event_sequence": int(match.get("sequence") or 0),
                 "observed_iteration": iteration,
                 "delivered_before_call": delivered_before_call,
                 "same_observation": delivered_before_call == iteration + 1,
@@ -211,6 +217,7 @@ def _delivery_refusals(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         refusals.append(
             {
                 "event_hash": str(row.get("event_hash") or ""),
+                "event_sequence": int(row.get("sequence") or 0),
                 "lane": lane,
                 "kind": str(row.get("kind") or ""),
                 "dedup_key": str(row.get("dedup_key") or ""),
@@ -218,9 +225,7 @@ def _delivery_refusals(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate_ordinal": int(row.get("candidate_ordinal") or 0),
                 "rendered_bytes": int(row.get("rendered_bytes") or 0),
                 "payload_sha256": payload_sha256,
-                "delivery_identity": str(
-                    row.get("delivery_identity") or payload_sha256
-                ),
+                "delivery_identity": str(row.get("delivery_identity") or payload_sha256),
                 "admitted_count": int(row.get("admitted_count") or 0),
                 "admitted_bytes": int(row.get("admitted_bytes") or 0),
             }
@@ -314,41 +319,53 @@ def issue_runtime_receipts(
     delivery_identities = [str(row.get("delivery_identity") or "") for row in deliveries]
     if len(delivery_identities) != len(set(delivery_identities)):
         raise ValueError("duplicate_delivery_identity")
+    if sum(row["context_byte_count"] for row in deliveries) > _TOTAL_DELIVERY_BYTE_LIMIT:
+        raise ValueError("delivery_total_budget_exceeded")
     delivered_keys = {str(row.get("dedup_key") or "") for row in delivery_events}
-    delivered_identities = {
-        str(row.get("delivery_identity") or "") for row in delivery_events
-    }
+    delivered_identities = {str(row.get("delivery_identity") or "") for row in delivery_events}
     for refusal in refused_deliveries:
         duplicate = refusal["reason"] == "duplicate_delivery_identity"
+        later_delivery = any(
+            int(delivery["event_sequence"]) > int(refusal["event_sequence"])
+            and (
+                delivery["delivery_identity"] == refusal["delivery_identity"]
+                or delivery["dedup_key"] == refusal["dedup_key"]
+            )
+            for delivery in deliveries
+        )
+        if later_delivery:
+            raise ValueError("refused_then_delivered")
         if refusal["dedup_key"] in delivered_keys and not duplicate:
             raise ValueError("refused_delivery_present")
         if duplicate and refusal["delivery_identity"] not in delivered_identities:
             raise ValueError("invalid_duplicate_delivery_refusal")
     provider_usage = _provider_usage(event_rows, attempted_calls=provider_calls)
-    repro_path, reproduction = _single_optional(
-        state_dir, "reproducibility_manifest.json"
-    )
+    repro_path, reproduction = _single_optional(state_dir, "reproducibility_manifest.json")
     graph_path, graph = _single_optional(state_dir, "graph.manifest.json")
     reproduction = reproduction or {}
     graph = graph or {}
     dense_rows = [row for row in event_rows if row.get("event") == "dense_index_ready"]
     if len(dense_rows) > 1:
         raise ValueError("duplicate_dense_index_receipt")
-    dense_index = ({
-        "schema": "gt.dense_index_receipt.v1",
-        "query_ready": dense_rows[0].get("query_ready") is True,
-        "model_sha256": dense_rows[0].get("model_sha256"),
-        "tokenizer_sha256": dense_rows[0].get("tokenizer_sha256"),
-        "dimension": dense_rows[0].get("dimension"),
-        "document_count": dense_rows[0].get("document_count"),
-        "query_result_count": dense_rows[0].get("query_result_count"),
-        "index_sha256": dense_rows[0].get("index_sha256"),
-        "reason": dense_rows[0].get("reason"),
-    } if dense_rows else {
-        "schema": "gt.dense_index_receipt.v1",
-        "query_ready": False,
-        "reason": "dense_index_receipt_missing",
-    })
+    dense_index = (
+        {
+            "schema": "gt.dense_index_receipt.v1",
+            "query_ready": dense_rows[0].get("query_ready") is True,
+            "model_sha256": dense_rows[0].get("model_sha256"),
+            "tokenizer_sha256": dense_rows[0].get("tokenizer_sha256"),
+            "dimension": dense_rows[0].get("dimension"),
+            "document_count": dense_rows[0].get("document_count"),
+            "query_result_count": dense_rows[0].get("query_result_count"),
+            "index_sha256": dense_rows[0].get("index_sha256"),
+            "reason": dense_rows[0].get("reason"),
+        }
+        if dense_rows
+        else {
+            "schema": "gt.dense_index_receipt.v1",
+            "query_ready": False,
+            "reason": "dense_index_receipt_missing",
+        }
+    )
     provider_receipts = reproduction.get("provider_receipts")
     provider_receipts = provider_receipts if isinstance(provider_receipts, dict) else {}
     manifest_count = provider_receipts.get("request_count")
@@ -378,7 +395,8 @@ def issue_runtime_receipts(
         "schema": "gt.miniswe_treatment_receipt.v1",
         "treatment": treatment,
         "treatment_status": (
-            "ACTIVE" if treatment == "groundtruth" and report.get("gt_mode") != "off"
+            "ACTIVE"
+            if treatment == "groundtruth" and report.get("gt_mode") != "off"
             else "INACTIVE"
         ),
         "gt_mode": str(report.get("gt_mode") or "off"),
@@ -440,9 +458,7 @@ def issue_runtime_receipts(
             "report_sha256": _sha256(report_path),
             "trajectory_sha256": _sha256(trajectory_path),
             "events_sha256": _sha256(events_path) if events_path else None,
-            "reproducibility_manifest_sha256": (
-                _sha256(repro_path) if repro_path else None
-            ),
+            "reproducibility_manifest_sha256": (_sha256(repro_path) if repro_path else None),
             "graph_manifest_sha256": _sha256(graph_path) if graph_path else None,
         },
     }
@@ -503,9 +519,7 @@ def issue_runtime_receipt_failure(
     model_identity = model_identity if isinstance(model_identity, dict) else {}
     gt = report.get("gt")
     gt = gt if isinstance(gt, dict) else {}
-    effective_model = str(
-        gt.get("resolved_model") or model_identity.get("resolved") or ""
-    ) or None
+    effective_model = str(gt.get("resolved_model") or model_identity.get("resolved") or "") or None
     info = trajectory.get("info")
     info = info if isinstance(info, dict) else {}
     model_stats = info.get("model_stats")
@@ -520,9 +534,7 @@ def issue_runtime_receipt_failure(
     }
     integrity = {
         "report_sha256": _sha256(report_path) if report_path.is_file() else None,
-        "trajectory_sha256": (
-            _sha256(trajectory_path) if trajectory_path.is_file() else None
-        ),
+        "trajectory_sha256": (_sha256(trajectory_path) if trajectory_path.is_file() else None),
     }
     product: dict[str, Any] = {
         "schema": "gt.run_receipt.v1",
@@ -597,7 +609,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         report = _read_object(report_path)
         if integrity.get("report_sha256") != _sha256(report_path):
             errors.append("product_report_digest_mismatch")
-    calls = (((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls"))
+    calls = ((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls")
     if calls is None:
         errors.append("product_provider_calls_missing")
     elif int(calls) != int(receipt.get("provider_calls") or 0):
@@ -646,8 +658,11 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append(str(exc))
         else:
             for field in (
-                "provider_completed_calls", "provider_failed_calls", "input_tokens",
-                "output_tokens", "cached_tokens",
+                "provider_completed_calls",
+                "provider_failed_calls",
+                "input_tokens",
+                "output_tokens",
+                "cached_tokens",
             ):
                 if observed_usage[field] != receipt.get(field):
                     errors.append(f"product_{field}_conservation_failed")
@@ -683,9 +698,8 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         for row in deliveries
         if isinstance(row, dict)
     ]
-    if (
-        len(delivery_identities) != len(deliveries)
-        or len(delivery_identities) != len(set(delivery_identities))
+    if len(delivery_identities) != len(deliveries) or len(delivery_identities) != len(
+        set(delivery_identities)
     ):
         errors.append("treatment_duplicate_delivery_identity")
     try:
@@ -695,22 +709,17 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     except ValueError as exc:
         errors.append(str(exc))
     else:
-        if prompt_events != [
-            row for row in observed_delivery_events if row["lane"] == "prompt"
-        ]:
+        if prompt_events != [row for row in observed_delivery_events if row["lane"] == "prompt"]:
             errors.append("treatment_prompt_delivery_census_mismatch")
-        if evidence_events != [
-            row for row in observed_delivery_events if row["lane"] == "sealed"
-        ]:
+        if evidence_events != [row for row in observed_delivery_events if row["lane"] == "sealed"]:
             errors.append("treatment_sealed_delivery_census_mismatch")
         if refused_deliveries != observed_refusals:
             errors.append("treatment_refused_delivery_census_mismatch")
         if deliveries != observed_provider_deliveries:
             errors.append("treatment_provider_delivery_census_mismatch")
     all_delivery_events = [*evidence_events, *prompt_events]
-    if (
-        int(treatment.get("delivery_count") or 0) != len(deliveries)
-        or len(deliveries) != len(all_delivery_events)
+    if int(treatment.get("delivery_count") or 0) != len(deliveries) or len(deliveries) != len(
+        all_delivery_events
     ):
         errors.append("treatment_delivery_count_mismatch")
     if int(treatment.get("prompt_delivery_count") or 0) != len(prompt_events):
@@ -723,14 +732,9 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     if core_evidence < 0 or core_evidence != len(evidence_events):
         errors.append("treatment_evidence_count_invalid")
     event_hashes = [
-        str(row.get("event_hash") or "")
-        for row in all_delivery_events
-        if isinstance(row, dict)
+        str(row.get("event_hash") or "") for row in all_delivery_events if isinstance(row, dict)
     ]
-    if (
-        len(event_hashes) != len(all_delivery_events)
-        or len(event_hashes) != len(set(event_hashes))
-    ):
+    if len(event_hashes) != len(all_delivery_events) or len(event_hashes) != len(set(event_hashes)):
         errors.append("treatment_delivery_identity_invalid")
     elif any(not _SHA64.fullmatch(value) for value in event_hashes):
         errors.append("treatment_delivery_identity_invalid")
@@ -776,18 +780,27 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append("treatment_delivery_refusal_invalid")
             continue
         duplicate = refusal.get("reason") == "duplicate_delivery_identity"
+        refusal_sequence = int(refusal.get("event_sequence") or 0)
+        later_delivery = any(
+            isinstance(delivery, dict)
+            and int(delivery.get("event_sequence") or 0) > refusal_sequence
+            and (
+                delivery.get("delivery_identity") == refusal.get("delivery_identity")
+                or delivery.get("dedup_key") == refusal.get("dedup_key")
+            )
+            for delivery in deliveries
+        )
+        if later_delivery:
+            errors.append("treatment_refused_then_delivered")
         if (
             refusal.get("reason") not in allowed_refusals
             or refusal.get("lane") not in {"prompt", "sealed"}
             or not _SHA64.fullmatch(str(refusal.get("payload_sha256") or ""))
-            or (
-                str(refusal.get("dedup_key") or "") in delivered_keys
-                and not duplicate
-            )
+            or refusal_sequence < 1
+            or (str(refusal.get("dedup_key") or "") in delivered_keys and not duplicate)
             or (
                 duplicate
-                and str(refusal.get("delivery_identity") or "")
-                not in set(delivery_identities)
+                and str(refusal.get("delivery_identity") or "") not in set(delivery_identities)
             )
         ):
             errors.append("treatment_delivery_refusal_invalid")
@@ -801,9 +814,13 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     ):
         errors.append("treatment_delivery_budget_conservation_failed")
     dense = treatment.get("dense_index_receipt")
-    if treatment.get("retrieval_mode") != "hybrid_required" or not isinstance(dense, dict) or (
-        dense.get("schema") != "gt.dense_index_receipt.v1"
-        or dense.get("query_ready") is not True
+    if (
+        treatment.get("retrieval_mode") != "hybrid_required"
+        or not isinstance(dense, dict)
+        or (
+            dense.get("schema") != "gt.dense_index_receipt.v1"
+            or dense.get("query_ready") is not True
+        )
     ):
         errors.append("treatment_dense_index_not_ready")
     identity = treatment.get("provider_identity")
