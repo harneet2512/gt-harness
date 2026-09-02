@@ -673,6 +673,13 @@ def install_runtime_hooks(
                         },
                     })
                     continue
+                if (
+                    adapter.graph_db
+                    and not adapter.graph_fresh
+                    and session.capability_active("graph_refresh")
+                    and session.capability_active("graph_queries")
+                ):
+                    adapter.refresh_graph(phase="graph_query")
                 request, result = execute_typed_action_fail_open(
                     action,
                     repo_root=adapter.repo_root or os.getcwd(),
@@ -840,12 +847,6 @@ def install_runtime_hooks(
                     if adapter.phase != "IMPLEMENT":
                         adapter.begin_implement()
                     adapter.note_edit(changed_files)
-                    if (
-                        adapter.graph_db
-                        and not adapter.graph_fresh
-                        and session.capability_active("graph_refresh")
-                    ):
-                        adapter.refresh_graph(phase="post_edit")
                 if returncode not in (None, 0):
                     adapter.record_episode_failure(
                         command=command,

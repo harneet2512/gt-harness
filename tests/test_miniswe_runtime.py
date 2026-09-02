@@ -156,6 +156,47 @@ def test_native_groundtruth_action_is_routed_without_shell_execution(tmp_path):
     assert joined[0]["provider_payload_sha256"] == adapter.deliveries[-1].payload_sha256
 
 
+def test_typed_query_lazily_refreshes_a_stale_graph(monkeypatch, tmp_path):
+    (tmp_path / "mod.py").write_text("needle = 1\n", encoding="utf-8")
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t",
+        state_dir=tmp_path / "state",
+        predicates=[Predicate("p", "p")],
+        repo_root=str(tmp_path),
+        graph_db=str(tmp_path / "graph.db"),
+    )
+    adapter.graph_fresh = False
+    phases = []
+
+    def refresh_graph(*, phase="graph_query"):
+        phases.append(phase)
+        adapter.graph_fresh = True
+        return True
+
+    monkeypatch.setattr(adapter, "refresh_graph", refresh_graph)
+    install_runtime_hooks(agent, adapter)
+    agent.execute_actions(
+        {
+            "extra": {
+                "actions": [
+                    {
+                        "tool_name": "groundtruth",
+                        "tool_call_id": "gt-refresh",
+                        "gt_action": {
+                            "kind": "exact_literal_search",
+                            "arguments": {"literal": "needle", "paths": ["mod.py"]},
+                        },
+                    }
+                ]
+            }
+        }
+    )
+
+    assert phases == ["graph_query"]
+    assert adapter.graph_fresh is True
+
+
 def test_malformed_groundtruth_action_fails_open_without_becoming_shell(tmp_path):
     agent = FakeAgent()
     adapter = MiniSweAdapter(
