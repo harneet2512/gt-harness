@@ -217,8 +217,15 @@ def test_har9_persisted_assembly_inputs_are_deterministic_and_provisional() -> N
     assert rebuilt == receipt
 
 
-def test_finalstand_is_machine_valid() -> None:
-    result = _load_validator().validate()
+def test_finalstand_is_machine_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    validator = _load_validator()
+    # Keep the complete unit suite provider/credential-free. The API/archive
+    # verifier has dedicated response and mutation fixtures below; this test
+    # exercises the remaining checked-in finalstand graph.
+    monkeypatch.setattr(
+        validator, "_github_api_confirms_provenance", lambda _p, _w: True
+    )
+    result = validator.validate()
     assert result["errors"] == []
     assert result["counts"] == {
         "direct": 17,
@@ -383,8 +390,13 @@ def test_promotion_refusal_uses_terminal_offline_receipt() -> None:
     ]
 
 
-def test_fs023_provenance_cross_binds_terminal_workflow_and_artifact() -> None:
+def test_fs023_provenance_cross_binds_terminal_workflow_and_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     validator = _load_validator()
+    monkeypatch.setattr(
+        validator, "_github_api_confirms_provenance", lambda _p, _w: True
+    )
     receipt = json.loads(
         (ROOT / "gt_finalstand" / "receipts" / "fs023_provenance.json").read_text(
             encoding="utf-8"
