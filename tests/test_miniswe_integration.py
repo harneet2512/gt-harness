@@ -4,6 +4,7 @@ import json
 
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter, ProviderModelMismatch
+from gt_engine.run_diagnostics import DiagnosticCode
 from gt_engine.task_contract import Obligation, TaskContract, extract_task_contract
 from gt_engine.verification_contract import compile_obligation_predicates
 
@@ -570,6 +571,36 @@ def test_graph_rebuild_failure_keeps_graph_stale(monkeypatch, tmp_path):
     monkeypatch.setattr("gt_engine.indexer.ensure_index", lambda *a, **k: None)
     assert a.refresh_graph() is False
     assert a.graph_fresh is False
+
+
+def test_submit_refreshes_stale_graph_and_refuses_when_refresh_fails(
+    monkeypatch, tmp_path
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+        graph_db=str(graph),
+    )
+    a.start_task()
+    a.note_edit(["mod.py"])
+    monkeypatch.setattr("gt_engine.indexer.ensure_index", lambda *a, **k: None)
+    a.begin_verify()
+    a.begin_submit()
+
+    assert a.submit_decision() is False
+    assert a.phase == "IMPLEMENT"
+    assert a.graph_fresh is False
+    assert any(
+        event.code is DiagnosticCode.GT_GRAPH_REFRESH_FAILED
+        and event.phase == "submit"
+        for event in a.diagnostics._events
+    )
 
 
 def test_provider_receipt_binds_exact_response_and_immediate_next_action(tmp_path):

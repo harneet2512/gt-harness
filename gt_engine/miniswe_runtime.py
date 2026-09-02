@@ -486,7 +486,7 @@ def install_runtime_hooks(
                 and not adapter.graph_fresh
                 and session.capability_active("graph_refresh")
             ):
-                adapter.refresh_graph(DecisionBoundary.POST_EDIT_GRAPH_DELTA)
+                adapter.refresh_graph(phase="delivery")
             batch = session.before_model(messages, iteration=adapter.iteration)
             parts = batch.context_additions
             if parts and prepared and isinstance(prepared[-1], dict):
@@ -844,11 +844,8 @@ def install_runtime_hooks(
                         adapter.graph_db
                         and not adapter.graph_fresh
                         and session.capability_active("graph_refresh")
-                        and os.environ.get(
-                            "GT_REFRESH_INDEX_AFTER_EDIT", ""
-                        ).strip().lower() in {"1", "true", "yes", "on"}
                     ):
-                        adapter.refresh_graph()
+                        adapter.refresh_graph(phase="post_edit")
                 if returncode not in (None, 0):
                     adapter.record_episode_failure(
                         command=command,
