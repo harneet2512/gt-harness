@@ -55,7 +55,8 @@ jobs:
           set -euo pipefail
           SOURCE_ROOT="${GITHUB_WORKSPACE}/.pinned/groundtruth"
           OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
-          GO_IMAGE='golang:1.22.5-bookworm@sha256:30bd2d5cc0ab74b88de9067884ec6bf87c0b88f0d5fcb7bbb35a3a7fdda71cdc'
+          # Docker Hub's linux/amd64 manifest for the immutable Go 1.22.5 image.
+          GO_IMAGE='golang:1.22.5-bookworm@sha256:a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3'
           SOURCE_COMMIT='43c6d723840f784d5eb939418dc2df57a6ff0a37'
           SOURCE_TREE='1028a3b8f6be7c585393ce07b2e9ba87bd052084'
           BUILD_TIME='2026-09-01T04:21:55Z'
