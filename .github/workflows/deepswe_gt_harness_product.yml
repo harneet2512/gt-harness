@@ -60,10 +60,13 @@ jobs:
           SOURCE_COMMIT='43c6d723840f784d5eb939418dc2df57a6ff0a37'
           SOURCE_TREE='1028a3b8f6be7c585393ce07b2e9ba87bd052084'
           BUILD_TIME='2026-09-01T04:21:55Z'
+          export SOURCE_COMMIT BUILD_TIME
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
           mkdir -p "${OUTPUT_ROOT}"
           docker run --rm --network bridge \
+            --user "$(id -u):$(id -g)" \
+            -e SOURCE_COMMIT -e BUILD_TIME \
             -v "${SOURCE_ROOT}:/source:ro" \
             -v "${OUTPUT_ROOT}:/output" \
             -w /source/gt-index \
@@ -71,9 +74,10 @@ jobs:
             bash -c 'set -euo pipefail
               SOURCE_FINGERPRINT="$(find . -type f \( -name "*.go" -o -name "*.c" -o -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.s" -o -name "go.mod" -o -name "go.sum" \) -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | awk "{print \$1}")"
               GO_TOOLCHAIN="$(go version | awk "{print \$3}")"
+              LDFLAGS="-linkmode external -extldflags=-static -X main.commitSHA=${SOURCE_COMMIT} -X main.buildTimeUTC=${BUILD_TIME} -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}"
               CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
                 -buildvcs=false -tags sqlite_fts5 -trimpath -mod=readonly \
-                -ldflags "-X main.commitSHA='"${SOURCE_COMMIT}"' -X main.buildTimeUTC='"${BUILD_TIME}"' -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}" \
+                -ldflags "${LDFLAGS}" \
                 -o /output/gt-index-linux-amd64 ./cmd/gt-index/'
           chmod +x "${OUTPUT_ROOT}/gt-index-linux-amd64"
           "${OUTPUT_ROOT}/gt-index-linux-amd64" -build-info > "${OUTPUT_ROOT}/build-info.json"
