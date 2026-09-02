@@ -679,7 +679,7 @@ def attest_deepswe(
         "provider_gate": {
             key: (
                 {
-                    check: (provider_gate.get("checks") or {}).get(check)
+                    check: (provider_gate.get("checks") or {}).get(check) is True
                     for check in sorted(required_provider_checks)
                 }
                 if key == "checks" else provider_gate.get(key)

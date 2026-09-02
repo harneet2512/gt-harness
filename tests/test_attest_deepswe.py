@@ -838,6 +838,24 @@ def test_unknown_nested_provider_check_fails_without_leaking_value(
     assert "SECRET_CANARY_NESTED" not in json.dumps(receipt)
 
 
+def test_allowlisted_provider_check_value_is_booleanized_without_leak(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "provider-gate.json"
+    gate = json.loads(path.read_text(encoding="utf-8"))
+    gate["checks"]["credential_valid"] = {"api_key": "SECRET_CANARY_VALUE"}
+    _write(path, gate)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert "provider_gate_checks_invalid" in receipt["errors"]
+    rendered = json.dumps(receipt)
+    assert "SECRET_CANARY_VALUE" not in rendered
+    assert receipt["provider_gate"]["checks"]["credential_valid"] is False
+
+
 @pytest.mark.parametrize(
     ("artifact", "mutate", "expected"),
     [
