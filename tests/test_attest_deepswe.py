@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from gt_harness.runtime_receipts import issue_runtime_receipts
-from scripts.attest_deepswe import attest_deepswe
+from scripts.attest_deepswe import attest_deepswe, main
 
 TASK = "abs-module-cache-flags"
 REQUESTED = "meta/muse-spark-1.2-contributor"
@@ -263,6 +263,57 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
         "failure_class": "setup_failure",
         "error_code": "runner_setup_or_execution_failed",
     }
+
+
+@pytest.mark.parametrize("task_job_result", ["failure", "cancelled"])
+def test_non_success_task_job_fails_closed(
+    tmp_path: Path, task_job_result: str
+) -> None:
+    _fixture(tmp_path)
+
+    receipt = attest_deepswe(
+        tmp_path,
+        source_sha="f" * 40,
+        task_job_result=task_job_result,
+        workflow_run_id="offline",
+    )
+
+    assert receipt["status"] == "FAIL"
+    assert receipt["errors"] == [
+        f"task_job_result_not_success:{task_job_result}"
+    ]
+
+
+def test_malformed_official_verifier_writes_durable_fail_receipt(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    verifier = next(
+        tmp_path.rglob("agent/official-verifier-result.json")
+    )
+    verifier.write_text("{not-json", encoding="utf-8")
+    output = tmp_path / "attestation" / "deepswe20-attestation.json"
+
+    exit_code = main(
+        [
+            "--root", str(tmp_path),
+            "--source-sha", "f" * 40,
+            "--task-job-result", "success",
+            "--workflow-run-id", "offline",
+            "--output", str(output),
+        ]
+    )
+
+    assert exit_code == 1
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+    assert receipt["status"] == "FAIL"
+    assert receipt["outcomes"][TASK]["error_code"] == (
+        "official_verifier_result_missing"
+    )
+    assert receipt["errors"] == [
+        "invalid_official_verifier:tasks/trial/agent/official-verifier-result.json:JSONDecodeError",
+        "official_verifier_task_set_mismatch",
+    ]
 
 
 @pytest.mark.parametrize(

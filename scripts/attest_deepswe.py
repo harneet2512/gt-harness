@@ -36,6 +36,9 @@ def attest_deepswe(
         row["task"]: str(row["time_budget_seconds"]) for row in plan["matrix"]
     }
     errors: list[str] = []
+    normalized_job_result = str(task_job_result or "").strip().lower() or "unknown"
+    if normalized_job_result != "success":
+        errors.append(f"task_job_result_not_success:{normalized_job_result}")
     if provider_gate.get("status") != "PASS":
         errors.append("provider_gate_failed")
     if provider_gate.get("source_sha") != source_sha:
@@ -58,7 +61,12 @@ def attest_deepswe(
 
     adapters: dict[str, dict[str, Any]] = {}
     for path in (root / "tasks").rglob("agent/benchmark-adapter.json"):
-        row = _object(path)
+        try:
+            row = _object(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            relative = path.relative_to(root).as_posix()
+            errors.append(f"invalid_adapter_receipt:{relative}:{type(exc).__name__}")
+            continue
         task = str(row.get("task_id") or "")
         if task in adapters:
             errors.append(f"duplicate_adapter_receipt:{task}")
@@ -83,7 +91,12 @@ def attest_deepswe(
     product_runs: dict[str, dict[str, Any]] = {}
     product_rows: list[dict[str, Any]] = []
     for path in (root / "tasks").rglob("agent/gt-run.json"):
-        row = _object(path)
+        try:
+            row = _object(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            relative = path.relative_to(root).as_posix()
+            errors.append(f"invalid_product_receipt:{relative}:{type(exc).__name__}")
+            continue
         task = str(row.get("task_id") or "")
         if task in product_runs:
             errors.append(f"duplicate_product_receipt:{task}")
@@ -129,7 +142,14 @@ def attest_deepswe(
 
     official_results: dict[str, dict[str, Any]] = {}
     for path in (root / "tasks").rglob("agent/official-verifier-result.json"):
-        row = _object(path)
+        try:
+            row = _object(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            relative = path.relative_to(root).as_posix()
+            errors.append(
+                f"invalid_official_verifier:{relative}:{type(exc).__name__}"
+            )
+            continue
         task = str(row.get("task_id") or "")
         if task in official_results:
             errors.append(f"duplicate_official_verifier:{task}")
