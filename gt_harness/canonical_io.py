@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,16 @@ def _atomic_write_locked(path: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        replace_delays = (0.0, 0.01, 0.05, 0.1) if os.name == "nt" else (0.0,)
+        for attempt, delay in enumerate(replace_delays):
+            if delay:
+                time.sleep(delay)
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt == len(replace_delays) - 1:
+                    raise
         temporary = None
         directory_fd = None
         if os.name != "nt":
