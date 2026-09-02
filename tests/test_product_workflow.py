@@ -38,8 +38,10 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "repository: abhigyanpatwari/GitNexus" in provider_free
     assert "ref: 7e993ab8972386294fb96bf14a8665d0b5325397" in provider_free
     assert "fetch-depth: 0" in provider_free
-    assert "PRODUCER_PATH=\"${RUNNER_TEMP}/gt-index\"" in provider_free
-    assert "GT_INDEX_BINARY=%s" in provider_free
+    assert "e56c7ef17eaffee36c80ff4dde4f0cd3991c4dcd" in provider_free
+    assert "7bbbc9d0b7f02f8cdaab79ad82ee86884b738eb5" in provider_free
+    assert "+refs/heads/*:refs/remotes/origin/*" in provider_free
+    assert "PRODUCER_PATH=\"/opt/groundtruth/gt-index/gt-index\"" in provider_free
     assert "sha256sum --check --strict" in provider_free
     assert "git config --global user.email \"gt-harness-ci@example.invalid\"" in provider_free
     assert "git config core.hooksPath \"${GITHUB_WORKSPACE}/.githooks\"" in provider_free

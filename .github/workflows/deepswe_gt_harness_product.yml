@@ -43,6 +43,13 @@ jobs:
       - name: Configure isolated Git fixtures
         run: |
           set -euo pipefail
+          git fetch --force --no-tags origin \
+            '+refs/heads/*:refs/remotes/origin/*'
+          git fetch --force --no-tags origin \
+            e56c7ef17eaffee36c80ff4dde4f0cd3991c4dcd \
+            7bbbc9d0b7f02f8cdaab79ad82ee86884b738eb5
+          git cat-file -e e56c7ef17eaffee36c80ff4dde4f0cd3991c4dcd^{commit}
+          git cat-file -e 7bbbc9d0b7f02f8cdaab79ad82ee86884b738eb5^{commit}
           git config --global user.name "GT Harness CI"
           git config --global user.email "gt-harness-ci@example.invalid"
           git config core.hooksPath "${GITHUB_WORKSPACE}/.githooks"
@@ -109,12 +116,12 @@ jobs:
       - name: Stage the verified producer outside the source closure
         run: |
           set -euo pipefail
-          PRODUCER_PATH="${RUNNER_TEMP}/gt-index"
-          install -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
+          PRODUCER_PATH="/opt/groundtruth/gt-index/gt-index"
+          sudo install -D -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
           printf '%s  %s\n' \
             '024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a' \
             "${PRODUCER_PATH}" | sha256sum --check --strict
-          printf 'GT_INDEX_BINARY=%s\n' "${PRODUCER_PATH}" >> "${GITHUB_ENV}"
+          "${PRODUCER_PATH}" -h >/dev/null
 
       - name: Run the full Python suite serially
         run: |
