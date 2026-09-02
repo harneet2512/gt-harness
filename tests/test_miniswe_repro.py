@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -202,3 +206,48 @@ def test_agent_shell_environment_excludes_host_credentials(monkeypatch, tmp_path
     template = env.get_template_vars()
     assert "OPENAI_API_KEY" not in template
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in template
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux procfs boundary")
+def test_model_shell_cannot_read_provider_key_from_parent_procfs(tmp_path):
+    canary = "gt-provider-procfs-canary"
+    parent_code = r'''
+import os
+import subprocess
+import sys
+from scripts.miniswe_gt_run import _harden_process_secret_boundary
+
+_harden_process_secret_boundary()
+child_env = {key: value for key, value in os.environ.items() if key != "OPENAI_API_KEY"}
+child_code = r"""
+import os
+try:
+    payload = open(f"/proc/{os.getppid()}/environ", "rb").read()
+except OSError:
+    print("BLOCKED")
+else:
+    print("LEAK" if b"gt-provider-procfs-canary" in payload else "READABLE")
+"""
+result = subprocess.run(
+    [sys.executable, "-c", child_code],
+    env=child_env,
+    text=True,
+    capture_output=True,
+    check=True,
+)
+print(result.stdout.strip())
+'''
+    env = dict(os.environ)
+    env["OPENAI_API_KEY"] = canary
+
+    result = subprocess.run(
+        [sys.executable, "-c", parent_code],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "BLOCKED"
+    assert canary not in result.stdout

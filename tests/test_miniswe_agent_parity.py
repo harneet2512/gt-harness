@@ -67,6 +67,8 @@ def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
     assert "--time-budget-seconds 3600" in command
     assert "--product-receipt /logs/agent/gt-run.json" in command
     assert "--adapter-receipt /logs/agent/benchmark-adapter.json" in command
+    assert command.startswith('exec "$HOME/.local/share/uv/tools/nano-harness/bin/python"')
+    assert "scripts.provider_probe" not in command
 
 
 def test_installed_agent_resolves_explicit_verified_bundle_artifacts(

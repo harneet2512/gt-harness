@@ -75,6 +75,27 @@ _SENSITIVE_SHELL_ENV = {
 }
 
 
+def _harden_process_secret_boundary() -> None:
+    """Deny same-UID task children access to this process through ``/proc``.
+
+    The provider credential is intentionally held by the model client process.
+    Linux otherwise permits a same-UID child shell to read its parent's initial
+    environment through ``/proc/$PPID/environ`` even when the child's inherited
+    environment is scrubbed. ``PR_SET_DUMPABLE=0`` closes that ptrace/procfs
+    boundary. The Harbor launcher uses ``exec`` so no credential-bearing shell
+    remains alongside this protected process.
+    """
+    if sys.platform != "linux":
+        return
+    import ctypes
+
+    pr_set_dumpable = 4
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(pr_set_dumpable, 0, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), "prctl(PR_SET_DUMPABLE)")
+
+
 def _is_sensitive_env_name(name: str) -> bool:
     upper = name.upper()
     return upper in _SENSITIVE_SHELL_ENV or upper.endswith((
@@ -524,6 +545,7 @@ def _classify_terminal(exception: BaseException | None, result: dict) -> str:
 
 
 def main() -> int:
+    _harden_process_secret_boundary()
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
     parser.add_argument("--model", default="deepseek-v4-flash")
