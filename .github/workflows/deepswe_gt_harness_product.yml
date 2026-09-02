@@ -55,6 +55,23 @@ jobs:
           git config core.hooksPath "${GITHUB_WORKSPACE}/.githooks"
           chmod +x .githooks/pre-commit
 
+      - name: Restore the exact DeepSWE task image cache
+        id: restore-task-image
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/deepswe-task-image.tar.zst
+          key: deepswe-task-image-v1-3a4d47f5281269305343c83729836ac2f3172811aee72681e472a4196178eda1
+
+      - name: Load the cached DeepSWE task image
+        if: steps.restore-task-image.outputs.cache-hit == 'true'
+        run: |
+          set -euo pipefail
+          zstd --decompress --stdout "${RUNNER_TEMP}/deepswe-task-image.tar.zst" |
+            docker load
+          docker image inspect \
+            'public.ecr.aws/d3j8x8q7/swe-bench-202605:kh75679ajj3b8dtd7se3h7z0a1833y6r-v1.1@sha256:3a4d47f5281269305343c83729836ac2f3172811aee72681e472a4196178eda1' \
+            >/dev/null
+
       - name: Install the frozen provider-free test surface
         run: |
           set -euo pipefail
@@ -117,6 +134,30 @@ jobs:
             --fixture tests/fixtures/har81_attestation/content_recordings.json \
             --output artifacts/product-closeout/har81-a21-content-measurement.json
           python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/har81-a21-content-measurement.json').read_text()); assert p['provider_calls'] == 0; assert p['run_count'] == 3; assert p['delivery_count'] == 12; assert p['match_count'] == 12; assert p['mismatch_count'] == 0; assert p['mutation_case']['outcome'] == 'FAIL_AS_DESIGNED'; assert p['status'] == 'PASS'"
+
+      - name: Stage the exact DeepSWE task image for caching
+        if: steps.restore-task-image.outputs.cache-hit != 'true'
+        id: stage-task-image
+        run: |
+          set -euo pipefail
+          IMAGE_REF='public.ecr.aws/d3j8x8q7/swe-bench-202605:kh75679ajj3b8dtd7se3h7z0a1833y6r-v1.1@sha256:3a4d47f5281269305343c83729836ac2f3172811aee72681e472a4196178eda1'
+          IMAGE_SIZE="$(docker image inspect --format '{{.Size}}' "${IMAGE_REF}")"
+          if [ "${IMAGE_SIZE}" -gt 4000000000 ]; then
+            echo "Exact task image exceeds the 4 GB cache safety limit; cache not written."
+            echo "cacheable=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          docker save "${IMAGE_REF}" |
+            zstd --threads=0 --fast=1 --stdout > "${RUNNER_TEMP}/deepswe-task-image.tar.zst"
+          test -s "${RUNNER_TEMP}/deepswe-task-image.tar.zst"
+          echo "cacheable=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Save the exact DeepSWE task image cache
+        if: steps.restore-task-image.outputs.cache-hit != 'true' && steps.stage-task-image.outputs.cacheable == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/deepswe-task-image.tar.zst
+          key: deepswe-task-image-v1-3a4d47f5281269305343c83729836ac2f3172811aee72681e472a4196178eda1
 
       - name: Verify the complete feature proof matrix
         run: |

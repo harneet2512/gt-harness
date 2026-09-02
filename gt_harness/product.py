@@ -694,30 +694,51 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
     pull_output = ""
     pull_return_code = 1
     pull_attempts = 0
-    for delay in (0, 15, 30, 60):
-        pull_attempts += 1
-        if delay:
-            time.sleep(delay)
-        try:
-            pull = subprocess.run(
-                ["docker", "pull", image_ref],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=180,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return {
-                "status": "FAILED",
-                "reason": f"container_image_pull_{type(exc).__name__}",
-                "image": image,
-                "digest": digest,
-                "pull_attempts": pull_attempts,
-            }
-        pull_output += pull.stdout + pull.stderr
-        pull_return_code = pull.returncode
-        if pull.returncode == 0:
-            break
+    image_source = "registry_pull"
+    try:
+        cached = subprocess.run(
+            ["docker", "image", "inspect", image_ref],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "status": "FAILED",
+            "reason": f"container_cache_inspect_{type(exc).__name__}",
+            "image": image,
+            "digest": digest,
+            "pull_attempts": 0,
+        }
+    if cached.returncode == 0:
+        image_source = "local_digest_cache"
+        pull_return_code = 0
+    else:
+        for delay in (0, 15, 30, 60):
+            pull_attempts += 1
+            if delay:
+                time.sleep(delay)
+            try:
+                pull = subprocess.run(
+                    ["docker", "pull", image_ref],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=180,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return {
+                    "status": "FAILED",
+                    "reason": f"container_image_pull_{type(exc).__name__}",
+                    "image": image,
+                    "digest": digest,
+                    "pull_attempts": pull_attempts,
+                }
+            pull_output += pull.stdout + pull.stderr
+            pull_return_code = pull.returncode
+            if pull.returncode == 0:
+                break
     if pull_return_code != 0:
         lowered = pull_output.casefold()
         reason = (
@@ -772,6 +793,7 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
         "image": image,
         "digest": digest,
         "pull_attempts": pull_attempts,
+        "image_source": image_source,
         "wheel_sha256": wheel_record.get("sha256"),
         "return_code": process.returncode,
         "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),

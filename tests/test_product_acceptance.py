@@ -12,6 +12,7 @@ import pytest
 from gt_harness.product import (
     BundleError,
     _assert_committed_source_closure,
+    _prove_container_install,
     aggregate_results,
     build_product_bundle,
     project_task_environment,
@@ -21,6 +22,41 @@ from gt_harness.product import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "deepswe_product_bundle_v1.json"
+
+
+def test_container_install_reuses_exact_digest_image_without_registry_pull(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheel = tmp_path / "dist" / "product.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel")
+    image = "registry.example.invalid/task:fixed"
+    digest = "sha256:" + "a" * 64
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[:3] == ["docker", "image", "inspect"]:
+            return subprocess.CompletedProcess(command, 0, stdout="cached\n", stderr="")
+        if command[:2] == ["docker", "run"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="installed-product-ok\n", stderr=""
+            )
+        raise AssertionError(f"unexpected registry command: {command}")
+
+    monkeypatch.setattr("gt_harness.product.subprocess.run", fake_run)
+    proof = _prove_container_install(
+        {
+            "python_wheel": {"filename": wheel.name, "sha256": "b" * 64},
+            "tasks": [{"container_image": image, "container_digest": digest}],
+        },
+        bundle_dir=tmp_path,
+    )
+
+    assert proof["status"] == "VERIFIED"
+    assert proof["pull_attempts"] == 0
+    assert proof["image_source"] == "local_digest_cache"
+    assert not any(command[:2] == ["docker", "pull"] for command in calls)
 
 
 def test_operator_entrypoint_is_direct_script_reachable_outside_checkout(
