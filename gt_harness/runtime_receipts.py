@@ -366,6 +366,81 @@ def issue_runtime_receipts(
     return product
 
 
+def issue_runtime_receipt_failure(
+    *,
+    report_path: Path,
+    trajectory_path: Path,
+    product_receipt_path: Path,
+    adapter_receipt_path: Path,
+    task_id: str,
+    product_source_sha: str,
+    treatment: str,
+    requested_model: str,
+    scaffold_version: str,
+    time_budget_seconds: int,
+    terminal: str,
+    exit_code: int,
+    error: BaseException,
+) -> dict[str, Any]:
+    """Write fail-closed receipts without changing the completed task outcome.
+
+    This path makes a receipt-construction defect visible to downstream
+    attestation while preserving the agent's native terminal state and exit
+    code.  It intentionally makes no treatment, evidence, or research claim.
+    """
+
+    failure = {
+        "code": "runtime_receipt_issuance_failed",
+        "type": type(error).__name__,
+        "message": str(error),
+    }
+    integrity = {
+        "report_sha256": _sha256(report_path) if report_path.is_file() else None,
+        "trajectory_sha256": (
+            _sha256(trajectory_path) if trajectory_path.is_file() else None
+        ),
+    }
+    product: dict[str, Any] = {
+        "schema": "gt.run_receipt.v1",
+        "task_id": task_id,
+        "status": "ERROR",
+        "terminal": terminal,
+        "stop_reason": terminal,
+        "exit_code": exit_code,
+        "treatment": treatment,
+        "requested_model": requested_model,
+        "effective_model": None,
+        "agent_scaffold_version": scaffold_version,
+        "product_source_sha": product_source_sha,
+        "time_budget_seconds": time_budget_seconds,
+        "provider_calls": None,
+        "research_valid": False,
+        "receipt_issuance": failure,
+        "integrity": integrity,
+    }
+    adapter: dict[str, Any] = {
+        "schema": "gt.benchmark_adapter_receipt.v1",
+        "task_id": task_id,
+        "status": "ERROR",
+        "product_command": "gt-miniswe-run",
+        "attempt": 1,
+        "treatment": treatment,
+        "requested_model": requested_model,
+        "effective_model": None,
+        "agent_scaffold_version": scaffold_version,
+        "product_source_sha": product_source_sha,
+        "time_budget_seconds": time_budget_seconds,
+        "receipt_issuance": failure,
+    }
+
+    if trajectory_path.is_file():
+        trajectory_copy = product_receipt_path.with_name("gt-run.trajectory.json")
+        _atomic_bytes(trajectory_copy, trajectory_path.read_bytes())
+    _atomic_json(adapter_receipt_path, adapter)
+    _atomic_json(product_receipt_path, product)
+    return product
+
+
 def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     """Verify a completed receipt against the exact adjacent runtime files."""
 
@@ -533,4 +608,8 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     return errors
 
 
-__all__ = ["issue_runtime_receipts", "verify_runtime_receipt"]
+__all__ = [
+    "issue_runtime_receipt_failure",
+    "issue_runtime_receipts",
+    "verify_runtime_receipt",
+]

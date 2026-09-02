@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -89,3 +90,69 @@ def test_setup_failure_writes_report_and_manifest_and_returns_nonzero(
     assert "injected setup failure" in report["exception"]
     repro = json.loads(manifest.read_text(encoding="utf-8"))
     assert repro["research_valid"] is False
+
+
+def test_receipt_issuance_failure_preserves_native_exit_and_writes_error_receipts(
+    monkeypatch, tmp_path, capsys
+):
+    import gt_harness.runtime_receipts as receipts
+    import scripts.miniswe_gt_run as runner
+
+    output = tmp_path / "trajectory.json"
+
+    class FakeAgent:
+        model = SimpleNamespace()
+        n_calls = 2
+        cost = 0.25
+
+        def run(self, _task):
+            output.write_text(
+                json.dumps({"messages": [], "info": {"model_stats": {"api_calls": 2}}}),
+                encoding="utf-8",
+            )
+            return {"submission": False}
+
+    def fail_receipt_issuance(**_kwargs):
+        raise ValueError("injected conservation failure")
+
+    monkeypatch.setattr(
+        runner, "build_agent", lambda **_kwargs: (FakeAgent(), None, None)
+    )
+    monkeypatch.setattr(receipts, "issue_runtime_receipts", fail_receipt_issuance)
+    metrics = tmp_path / "miniswe_report.json"
+    product = tmp_path / "gt-run.json"
+    adapter = tmp_path / "benchmark-adapter.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "miniswe_gt_run.py",
+            "--task", "fix it",
+            "--cwd", str(tmp_path),
+            "--state-dir", str(tmp_path / "state"),
+            "--output", str(output),
+            "--metrics", str(metrics),
+            "--product-receipt", str(product),
+            "--adapter-receipt", str(adapter),
+            "--task-id", "task-a",
+            "--product-source-sha", "f" * 40,
+            "--time-budget-seconds", "60",
+            "--gt-off",
+        ],
+    )
+
+    assert runner.main() == TERMINAL_EXIT_CODES["task_failed"]
+    assert "runtime receipt issuance failed" in capsys.readouterr().err
+    report = json.loads(metrics.read_text(encoding="utf-8"))
+    assert report["terminal"] == "task_failed"
+    assert report["receipt_issuance"]["status"] == "ERROR"
+    product_receipt = json.loads(product.read_text(encoding="utf-8"))
+    adapter_receipt = json.loads(adapter.read_text(encoding="utf-8"))
+    assert product_receipt["status"] == "ERROR"
+    assert product_receipt["terminal"] == "task_failed"
+    assert product_receipt["exit_code"] == TERMINAL_EXIT_CODES["task_failed"]
+    assert product_receipt["receipt_issuance"]["code"] == (
+        "runtime_receipt_issuance_failed"
+    )
+    assert adapter_receipt["status"] == "ERROR"
+    assert adapter_receipt["receipt_issuance"] == product_receipt["receipt_issuance"]

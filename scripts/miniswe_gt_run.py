@@ -743,26 +743,80 @@ def main() -> int:
     if args.metrics:
         Path(args.metrics).parent.mkdir(parents=True, exist_ok=True)
         Path(args.metrics).write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
-    if bool(args.product_receipt) != bool(args.adapter_receipt):
-        raise ValueError("product and adapter receipt paths must be configured together")
-    if args.product_receipt:
-        from gt_harness.runtime_receipts import issue_runtime_receipts
-
-        issue_runtime_receipts(
-            report_path=Path(args.metrics),
-            trajectory_path=Path(args.output),
-            state_dir=Path(args.state_dir),
-            product_receipt_path=Path(args.product_receipt),
-            adapter_receipt_path=Path(args.adapter_receipt),
-            task_id=args.task_id,
-            product_source_sha=args.product_source_sha,
-            treatment="bare" if not gt_active else "groundtruth",
-            requested_model=args.model,
-            scaffold_version="2.4.6",
-            time_budget_seconds=args.time_budget_seconds,
+    native_exit_code = TERMINAL_EXIT_CODES.get(
+        terminal, TERMINAL_EXIT_CODES["internal_error"]
+    )
+    if args.product_receipt or args.adapter_receipt:
+        from gt_harness.runtime_receipts import (
+            issue_runtime_receipt_failure,
+            issue_runtime_receipts,
         )
+
+        receipt_error: BaseException | None = None
+        try:
+            if not args.product_receipt or not args.adapter_receipt:
+                raise ValueError(
+                    "product and adapter receipt paths must be configured together"
+                )
+            if not args.metrics or not args.output:
+                raise ValueError(
+                    "metrics and trajectory paths are required for runtime receipts"
+                )
+            issue_runtime_receipts(
+                report_path=Path(args.metrics),
+                trajectory_path=Path(args.output),
+                state_dir=Path(args.state_dir),
+                product_receipt_path=Path(args.product_receipt),
+                adapter_receipt_path=Path(args.adapter_receipt),
+                task_id=args.task_id,
+                product_source_sha=args.product_source_sha,
+                treatment="bare" if not gt_active else "groundtruth",
+                requested_model=args.model,
+                scaffold_version="2.4.6",
+                time_budget_seconds=args.time_budget_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - receipts cannot mask task outcome
+            receipt_error = exc
+            report["receipt_issuance"] = {
+                "status": "ERROR",
+                "code": "runtime_receipt_issuance_failed",
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            if args.metrics:
+                Path(args.metrics).write_text(
+                    json.dumps(report, sort_keys=True), encoding="utf-8"
+                )
+            print(
+                "runtime receipt issuance failed: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+        if receipt_error is not None and args.product_receipt and args.adapter_receipt:
+            try:
+                issue_runtime_receipt_failure(
+                    report_path=Path(args.metrics),
+                    trajectory_path=Path(args.output),
+                    product_receipt_path=Path(args.product_receipt),
+                    adapter_receipt_path=Path(args.adapter_receipt),
+                    task_id=args.task_id,
+                    product_source_sha=args.product_source_sha,
+                    treatment="bare" if not gt_active else "groundtruth",
+                    requested_model=args.model,
+                    scaffold_version="2.4.6",
+                    time_budget_seconds=args.time_budget_seconds,
+                    terminal=terminal,
+                    exit_code=native_exit_code,
+                    error=receipt_error,
+                )
+            except Exception as fallback_exc:  # noqa: BLE001 - preserve native exit
+                print(
+                    "runtime ERROR receipt publication failed: "
+                    f"{type(fallback_exc).__name__}: {fallback_exc}",
+                    file=sys.stderr,
+                )
     print(json.dumps(report, sort_keys=True))
-    return TERMINAL_EXIT_CODES.get(terminal, TERMINAL_EXIT_CODES["internal_error"])
+    return native_exit_code
 
 
 if __name__ == "__main__":
