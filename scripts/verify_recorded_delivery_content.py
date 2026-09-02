@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
+from gt_harness.product import atomic_json
 from gt_harness.recorded_content import measure_recorded_content
 
 
@@ -15,11 +16,7 @@ def main() -> int:
     args = parser.parse_args()
     fixture = json.loads(args.fixture.read_text(encoding="utf-8"))
     result = measure_recorded_content(fixture)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_json(args.output, result)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result["status"] == "PASS" else 1
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from gt_engine.result_envelope import envelope_for_result, envelope_from_mapping
+from gt_harness.recorded_content import measure_recorded_content
 
 PRODUCT_SOURCE_SCHEMA = "gt.product_bundle_source.v1"
 PRODUCT_BUNDLE_SCHEMA = "gt.product_bundle.v1"
@@ -457,6 +458,12 @@ def _atomic_json(path: Path, value: Any) -> None:
     os.replace(temporary, path)
 
 
+def atomic_json(path: Path, value: Any) -> None:
+    """Publish canonical UTF-8 JSON atomically."""
+
+    _atomic_json(path, value)
+
+
 def _install_and_attest_wheel(
     bundle: Mapping[str, Any], *, bundle_dir: Path, output: Path
 ) -> dict[str, Any]:
@@ -866,6 +873,20 @@ def run_provider_free_acceptance(
     if output.exists() and any(output.iterdir()):
         raise ValueError("acceptance_output_must_be_empty")
     output.mkdir(parents=True, exist_ok=True)
+    repository_root = _repository_root(Path(manifest_path))
+    content_fixture = json.loads(
+        (
+            repository_root
+            / "tests"
+            / "fixtures"
+            / "har81_attestation"
+            / "content_recordings.json"
+        ).read_text(encoding="utf-8")
+    )
+    content_correctness = measure_recorded_content(content_fixture)
+    _atomic_json(
+        output / "har81-a21-content-measurement.json", content_correctness
+    )
     bundle_dir = output / "bundle"
     bundle = build_product_bundle(manifest_path, output_dir=bundle_dir)
     installation = _install_and_attest_wheel(bundle, bundle_dir=bundle_dir, output=output)
@@ -906,7 +927,11 @@ def run_provider_free_acceptance(
             matches.extend(canary for canary in canaries if canary.encode() in content)
     receipt: dict[str, Any] = {
         "schema": CLOSEOUT_SCHEMA,
-        "status": "VERIFIED_PROVIDER_FREE" if parity_equal and not matches else "FAILED",
+        "status": (
+            "VERIFIED_PROVIDER_FREE"
+            if parity_equal and not matches and content_correctness["status"] == "PASS"
+            else "FAILED"
+        ),
         "bundle_digest_sha256": bundle["bundle_digest_sha256"],
         "release_eligible": bundle["release_eligible"] and installation["status"] == "VERIFIED",
         "release_blockers": sorted(
@@ -917,6 +942,7 @@ def run_provider_free_acceptance(
             }
             | ({"container_install_not_executed"} if container_proof["status"] != "VERIFIED" else set())
             | ({"openai_compatible_fake_provider_not_executed"} if fake_provider_proof["status"] != "VERIFIED" else set())
+            | ({"recorded_content_correctness_failed"} if content_correctness["status"] != "PASS" else set())
         ),
         "install_attestation_sha256": installation["attestation_digest_sha256"],
         "provider_calls": 0,
@@ -932,6 +958,7 @@ def run_provider_free_acceptance(
         "full_benchmark": {"status": "APPROVAL_GATED", "executed": False},
         "container_proof": container_proof,
         "fake_provider_proof": fake_provider_proof,
+        "content_correctness": content_correctness,
     }
     receipt["closeout_digest_sha256"] = _digest(receipt)
     _atomic_json(output / "product-closeout.json", receipt)

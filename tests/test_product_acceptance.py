@@ -218,6 +218,14 @@ def test_provider_free_acceptance_executes_both_parity_arms(tmp_path: Path) -> N
     assert receipt["release_eligible"] is False
     assert receipt["container_proof"]["status"] == "VERIFIED"
     assert receipt["fake_provider_proof"]["status"] == "VERIFIED"
+    assert receipt["content_correctness"]["status"] == "PASS"
+    assert receipt["content_correctness"]["provider_calls"] == 0
+    assert receipt["content_correctness"]["run_count"] == 3
+    assert receipt["content_correctness"]["delivery_count"] == 12
+    assert receipt["content_correctness"]["mutation_case"]["outcome"] == "FAIL_AS_DESIGNED"
+    assert receipt["content_correctness"]["packet_digest_sha256"] == json.loads(
+        (tmp_path / "har81-a21-content-measurement.json").read_text(encoding="utf-8")
+    )["packet_digest_sha256"]
     assert "groundtruth_source_not_accepted_default_ancestor" in receipt["release_blockers"]
     assert [row["arm"] for row in receipt["arms"]] == ["bare", "groundtruth"]
     assert receipt["parity"]["structural_identity_equal"] is True
