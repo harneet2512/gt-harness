@@ -1,0 +1,33 @@
+{
+  "created_at":"2026-09-02T00:45:43.199925Z",
+  "detail":{
+    "benchmark_runs":0,
+    "container_proof":"VERIFIED",
+    "feature_matrix":"19/19_witnessed",
+    "full_serial_suite":"green",
+    "landed_sha":"7dc80b7eaa021f23809cc200e854ad8b59a7f605",
+    "landing":"exact_fast_forward",
+    "paid_dispatch":false,
+    "parent_sha":"ca744e7ebb7d03b6d11e31eeab8600cdb3669bdd",
+    "provider_calls":0,
+    "provider_free_ci_conclusion":"success",
+    "provider_free_ci_run":33576261615
+  },
+  "file":"",
+  "head_sha":"7dc80b7eaa021f23809cc200e854ad8b59a7f605",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 offline readiness repairs landed on main after provider-free CI success",
+  "packet_digest_sha256":"ae4abb52b2002e0aade2ec28454c97012a4ba9bfc0a8162c7d1ebab5ab98bd7e",
+  "packet_id":"merge-har81-7dc80b7e",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":"har81-readiness-7dc80b7e",
+  "ticket":"HAR-81"
+}
