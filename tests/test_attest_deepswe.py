@@ -22,26 +22,41 @@ def _write(path: Path, value: object) -> None:
 
 def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
     plan = {
+        "schema": "gt.deepswe_gt_harness_plan.v1",
         "source_sha": source_sha,
         "benchmark_sha": "b" * 40,
         "task_ids": [TASK],
         "task_count": 1,
         "matrix": [{"task": TASK, "time_budget_seconds": 3600}],
-        "task_order_sha256": "1" * 64,
+        "task_order_sha256": hashlib.sha256((TASK + "\n").encode()).hexdigest(),
         "language_counts": {"go": 1},
         "requested_model": REQUESTED,
         "effective_model": EFFECTIVE,
         "agent": "miniswe",
         "agent_scaffold_version": "2.4.6",
         "treatment": "groundtruth",
-        "paid_run_approval": True,
+        "provider_route_sha256": "2" * 64,
+        "paid_run_approval": {"approved": True, "input": "approve_paid_run"},
         "baseline": None,
     }
     _write(root / "deepswe20-plan.json", plan)
-    _write(root / "provider-gate.json", {"status": "PASS", "source_sha": source_sha})
+    _write(
+        root / "provider-gate.json",
+        {
+            "schema": "gt.provider_preflight.v1",
+            "status": "PASS",
+            "source_sha": source_sha,
+            "mode": "live",
+            "provider_ready": True,
+            "paid_run_approved": True,
+            "model": REQUESTED,
+            "route_sha256": "2" * 64,
+        },
+    )
     trial = root / "tasks" / "trial"
     agent = trial / "agent"
-    _write(trial / "result.json", {"task_name": TASK, "trial_name": "trial-1"})
+    result_path = trial / "result.json"
+    _write(result_path, {"task_name": TASK, "trial_name": "trial-1"})
     trajectory = agent / "miniswe_trajectory.json"
     report = agent / "miniswe_report.json"
     _write(
@@ -134,7 +149,17 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
     )
     _write(
         agent / "official-verifier-result.json",
-        {"task_id": TASK, "status": "GRADED", "reward": 0, "product_source_sha": source_sha},
+        {
+            "schema": "gt.official_verifier_result.v1",
+            "benchmark_suite": "deepswe",
+            "task_id": TASK,
+            "status": "GRADED",
+            "reward": 0,
+            "product_source_sha": source_sha,
+            "product_receipt_present": True,
+            "runner_result_path": result_path.relative_to(root).as_posix(),
+            "runner_result_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
+        },
     )
     return agent / "benchmark-adapter.json", agent / "gt-run.json"
 
@@ -216,6 +241,9 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
         {"task": failed_task, "time_budget_seconds": 3600}
     )
     plan["language_counts"] = {"go": 1, "typescript": 1}
+    plan["task_order_sha256"] = hashlib.sha256(
+        ("\n".join(plan["task_ids"]) + "\n").encode()
+    ).hexdigest()
     _write(plan_path, plan)
 
     passing = next(
@@ -226,19 +254,27 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
     _write(passing, passing_row)
 
     failed_trial = tmp_path / "tasks" / "failed-wrapper" / "failed__trial"
+    failed_result = failed_trial / "result.json"
     _write(
-        failed_trial / "result.json",
+        failed_result,
         {"task_name": failed_task, "trial_name": "failed-trial"},
     )
     _write(
         failed_trial / "agent" / "official-verifier-result.json",
         {
+            "schema": "gt.official_verifier_result.v1",
+            "benchmark_suite": "deepswe",
             "task_id": failed_task,
             "status": "ERROR",
             "reward": None,
             "failure_class": "setup_failure",
             "error_code": "runner_setup_or_execution_failed",
             "product_source_sha": "f" * 40,
+            "product_receipt_present": False,
+            "runner_result_path": failed_result.relative_to(tmp_path).as_posix(),
+            "runner_result_sha256": hashlib.sha256(
+                failed_result.read_bytes()
+            ).hexdigest(),
         },
     )
 
@@ -371,8 +407,136 @@ def test_missing_plan_writes_minimal_durable_fail_receipt(tmp_path: Path) -> Non
 
     assert exit_code == 1
     assert receipt["status"] == "FAIL"
-    assert receipt["errors"] == ["attestation_construction_failed:FileNotFoundError"]
+    assert receipt["schema"] == "gt.deepswe_gt_harness_attestation_error.v1"
+    assert receipt["errors"] == [
+        "attestation_construction_failed:required_artifact_missing"
+    ]
+    assert receipt["primary_error"]["evidence_ref"] == "deepswe20-plan.json"
     assert receipt["outcomes"] == {}
+
+
+@pytest.mark.parametrize("value", [3.9, True])
+def test_non_integer_provider_call_count_fails_closed(
+    tmp_path: Path, value: object
+) -> None:
+    _adapter, product = _fixture(tmp_path)
+    row = json.loads(product.read_text(encoding="utf-8"))
+    row["provider_calls"] = value
+    _write(product, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"invalid_product_receipt_field:{TASK}:provider_calls" in receipt["errors"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.0])
+def test_non_finite_or_negative_total_cost_fails_closed(
+    tmp_path: Path, value: float
+) -> None:
+    _adapter, product = _fixture(tmp_path)
+    row = json.loads(product.read_text(encoding="utf-8"))
+    row["total_cost"] = value
+    _write(product, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"invalid_product_receipt_field:{TASK}:total_cost" in receipt["errors"]
+    assert receipt["product_rows"][0]["total_cost"] == 0.0
+
+
+def test_string_verified_flag_fails_closed(tmp_path: Path) -> None:
+    _adapter, product = _fixture(tmp_path)
+    row = json.loads(product.read_text(encoding="utf-8"))
+    row["treatment_receipt"]["verified"] = "false"
+    _write(product, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"invalid_product_receipt_field:{TASK}:verified" in receipt["errors"]
+    assert receipt["product_rows"][0]["verified"] is False
+
+
+def test_boolean_official_reward_cannot_manufacture_solve(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    verifier = next(tmp_path.rglob("agent/official-verifier-result.json"))
+    row = json.loads(verifier.read_text(encoding="utf-8"))
+    row["reward"] = True
+    _write(verifier, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"official_verifier_reward_invalid:{TASK}" in receipt["errors"]
+    assert receipt["graded"] == 0
+    assert receipt["solved"] == 0
+
+
+@pytest.mark.parametrize(
+    ("target", "mutate", "expected"),
+    [
+        (
+            "plan",
+            lambda row: row.update(task_order_sha256="0" * 64),
+            "planned_task_order_digest_mismatch",
+        ),
+        (
+            "plan",
+            lambda row: row["paid_run_approval"].update(approved=False),
+            "paid_run_approval_invalid",
+        ),
+        (
+            "gate",
+            lambda row: row.update(provider_ready=False),
+            "provider_gate_live_approval_invalid",
+        ),
+        (
+            "gate",
+            lambda row: row.update(route_sha256="0" * 64),
+            "provider_gate_route_mismatch",
+        ),
+    ],
+)
+def test_plan_and_provider_gate_mutations_fail_closed(
+    tmp_path: Path, target: str, mutate, expected: str
+) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / (
+        "deepswe20-plan.json" if target == "plan" else "provider-gate.json"
+    )
+    row = json.loads(path.read_text(encoding="utf-8"))
+    mutate(row)
+    _write(path, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert expected in receipt["errors"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("schema", "wrong", "official_verifier_schema_mismatch"),
+        ("runner_result_sha256", "0" * 64, "official_verifier_result_digest_mismatch"),
+    ],
+)
+def test_official_verifier_provenance_mutations_cannot_grade(
+    tmp_path: Path, field: str, value: object, expected: str
+) -> None:
+    _fixture(tmp_path)
+    verifier = next(tmp_path.rglob("agent/official-verifier-result.json"))
+    row = json.loads(verifier.read_text(encoding="utf-8"))
+    row[field] = value
+    _write(verifier, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"{expected}:{TASK}" in receipt["errors"]
+    assert receipt["graded"] == 0
 
 
 @pytest.mark.parametrize(

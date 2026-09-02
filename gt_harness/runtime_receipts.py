@@ -663,6 +663,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
                 "input_tokens",
                 "output_tokens",
                 "cached_tokens",
+                "total_cost",
             ):
                 if observed_usage[field] != receipt.get(field):
                     errors.append(f"product_{field}_conservation_failed")

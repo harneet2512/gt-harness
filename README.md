@@ -20,7 +20,8 @@ supported release surfaces and are not product-acceptance evidence.
 - Arms: `bare` and `groundtruth`. Their bundle, runner, model route, task images, budgets,
   package set, and task order are structurally identical. Only activation and evidence delivery
   may differ.
-- Operator surfaces: one provider-free command and one provider-free GitHub workflow.
+- Operator surfaces: one provider-free command, one provider-free acceptance workflow, and one
+  separately approval-gated paid smoke workflow.
 
 No supported command performs a live benchmark. A live one-task smoke and any full benchmark
 require separate approval receipts. GCP is not part of installation, acceptance, or scoring.

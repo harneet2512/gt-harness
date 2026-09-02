@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -26,21 +28,62 @@ def _task_name(value: object) -> str:
 def _integer(
     value: object, *, field: str, task: str, errors: list[str]
 ) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
+    if type(value) is not int or value < 0:
         errors.append(f"invalid_product_receipt_field:{task}:{field}")
         return 0
+    return value
 
 
 def _number(
     value: object, *, field: str, task: str, errors: list[str]
 ) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
         errors.append(f"invalid_product_receipt_field:{task}:{field}")
         return 0.0
+    return float(value)
+
+
+def _boolean(
+    value: object, *, field: str, task: str, errors: list[str]
+) -> bool:
+    if type(value) is not bool:
+        errors.append(f"invalid_product_receipt_field:{task}:{field}")
+        return False
+    return value
+
+
+def _array(
+    value: object, *, field: str, task: str, errors: list[str]
+) -> list[object]:
+    if not isinstance(value, list):
+        errors.append(f"invalid_product_receipt_field:{task}:{field}")
+        return []
+    return value
+
+
+def _claimed_result(
+    root: Path, claimed: object
+) -> tuple[Path | None, str]:
+    if not isinstance(claimed, str) or not claimed:
+        return None, "path_missing"
+    relative = Path(claimed)
+    if relative.is_absolute() or ".." in relative.parts:
+        return None, "path_unsafe"
+    candidates = []
+    for path in (root / relative, root / "tasks" / relative):
+        resolved = path.resolve()
+        if resolved.is_relative_to(root.resolve()) and resolved.is_file():
+            candidates.append(resolved)
+    candidates = list(dict.fromkeys(candidates))
+    if len(candidates) != 1:
+        return None, "path_ambiguous" if candidates else "result_missing"
+    path = candidates[0]
+    return path, hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def attest_deepswe(
@@ -56,17 +99,50 @@ def attest_deepswe(
         row["task"]: str(row["time_budget_seconds"]) for row in plan["matrix"]
     }
     errors: list[str] = []
+    if plan.get("schema") != "gt.deepswe_gt_harness_plan.v1":
+        errors.append("plan_schema_mismatch")
+    if not all(isinstance(task, str) and task for task in expected):
+        errors.append("planned_task_identity_invalid")
     if len(expected) != len(expected_set):
         errors.append("duplicate_planned_task")
     if plan.get("task_count") != len(expected):
         errors.append("planned_task_count_mismatch")
+    task_order_sha256 = hashlib.sha256(
+        ("\n".join(str(task) for task in expected) + "\n").encode("utf-8")
+    ).hexdigest()
+    if plan.get("task_order_sha256") != task_order_sha256:
+        errors.append("planned_task_order_digest_mismatch")
+    matrix = plan.get("matrix")
+    if not isinstance(matrix, list) or [
+        row.get("task") for row in matrix if isinstance(row, dict)
+    ] != expected or len(matrix) != len(expected):
+        errors.append("planned_task_matrix_mismatch")
+    approval = plan.get("paid_run_approval")
+    if not isinstance(approval, dict) or (
+        approval.get("approved") is not True
+        or approval.get("input") != "approve_paid_run"
+    ):
+        errors.append("paid_run_approval_invalid")
     normalized_job_result = str(task_job_result or "").strip().lower() or "unknown"
     if normalized_job_result != "success":
         errors.append(f"task_job_result_not_success:{normalized_job_result}")
+    if provider_gate.get("schema") != "gt.provider_preflight.v1":
+        errors.append("provider_gate_schema_mismatch")
     if provider_gate.get("status") != "PASS":
         errors.append("provider_gate_failed")
     if provider_gate.get("source_sha") != source_sha:
         errors.append("provider_gate_source_sha_mismatch")
+    if (
+        provider_gate.get("mode") != "live"
+        or provider_gate.get("provider_ready") is not True
+        or provider_gate.get("paid_run_approved") is not True
+    ):
+        errors.append("provider_gate_live_approval_invalid")
+    if (
+        provider_gate.get("model") != plan.get("requested_model")
+        or provider_gate.get("route_sha256") != plan.get("provider_route_sha256")
+    ):
+        errors.append("provider_gate_route_mismatch")
 
     trial_rows: list[dict[str, Any]] = []
     for path in (root / "tasks").rglob("result.json"):
@@ -145,6 +221,10 @@ def attest_deepswe(
             errors.append(f"missing_treatment_receipt:{task}")
             continue
         graph = treatment.get("graph_certification") or {}
+        unmet_predicates = _array(
+            treatment.get("unmet_predicates"), field="unmet_predicates",
+            task=task, errors=errors,
+        )
         product_rows.append(
             {
                 "task": task,
@@ -186,8 +266,11 @@ def attest_deepswe(
                     treatment.get("delivery_count"), field="delivery_count",
                     task=task, errors=errors,
                 ),
-                "verified": bool(treatment.get("verified")),
-                "unmet_predicate_count": len(treatment.get("unmet_predicates") or []),
+                "verified": _boolean(
+                    treatment.get("verified"), field="verified",
+                    task=task, errors=errors,
+                ),
+                "unmet_predicate_count": len(unmet_predicates),
             }
         )
     if set(product_runs) != expected_set:
@@ -204,6 +287,41 @@ def attest_deepswe(
             )
             continue
         task = str(row.get("task_id") or "")
+        row_errors: list[str] = []
+        if row.get("schema") != "gt.official_verifier_result.v1":
+            row_errors.append(f"official_verifier_schema_mismatch:{task}")
+        if row.get("benchmark_suite") != "deepswe":
+            row_errors.append(f"official_verifier_suite_mismatch:{task}")
+        status = row.get("status")
+        product_receipt_present = row.get("product_receipt_present")
+        if type(product_receipt_present) is not bool:
+            row_errors.append(
+                f"official_verifier_product_receipt_flag_invalid:{task}"
+            )
+        elif status == "GRADED" and not product_receipt_present:
+            row_errors.append(f"official_verifier_product_receipt_missing:{task}")
+        result_path, result_digest = _claimed_result(
+            root, row.get("runner_result_path")
+        )
+        if result_path is None:
+            row_errors.append(f"official_verifier_result_missing:{task}")
+        elif row.get("runner_result_sha256") != result_digest:
+            row_errors.append(f"official_verifier_result_digest_mismatch:{task}")
+        reward = row.get("reward")
+        if status not in {"GRADED", "ERROR"}:
+            row_errors.append(f"official_verifier_status_invalid:{task}")
+        if status == "GRADED" and (
+            isinstance(reward, bool)
+            or not isinstance(reward, (int, float))
+            or not math.isfinite(reward)
+            or reward not in (0, 1)
+        ):
+            row_errors.append(f"official_verifier_reward_invalid:{task}")
+        if status == "ERROR" and reward is not None:
+            row_errors.append(f"official_verifier_reward_invalid:{task}")
+        if row_errors:
+            errors.extend(row_errors)
+            continue
         if task in official_results:
             errors.append(f"duplicate_official_verifier:{task}")
         official_results[task] = row
@@ -281,8 +399,24 @@ def main(argv: list[str] | None = None) -> int:
             workflow_run_id=args.workflow_run_id,
         )
     except Exception as exc:  # noqa: BLE001 - the attestation must always be durable
+        cause = {
+            FileNotFoundError: "required_artifact_missing",
+            json.JSONDecodeError: "artifact_json_malformed",
+            KeyError: "required_field_missing",
+            TypeError: "artifact_type_invalid",
+            ValueError: "artifact_value_invalid",
+        }.get(type(exc), "unexpected_construction_failure")
+        evidence_ref = ""
+        filename = getattr(exc, "filename", None)
+        if filename:
+            try:
+                evidence_ref = Path(filename).resolve().relative_to(
+                    args.root.resolve()
+                ).as_posix()
+            except ValueError:
+                evidence_ref = Path(filename).name
         receipt = {
-            "schema": "gt.deepswe_gt_harness_attestation.v1",
+            "schema": "gt.deepswe_gt_harness_attestation_error.v1",
             "status": "FAIL",
             "workflow_run_id": args.workflow_run_id,
             "source_sha": args.source_sha,
@@ -292,11 +426,21 @@ def main(argv: list[str] | None = None) -> int:
             "graded": 0,
             "solved": 0,
             "outcomes": {},
-            "errors": [f"attestation_construction_failed:{type(exc).__name__}"],
+            "errors": [f"attestation_construction_failed:{cause}"],
+            "primary_error": {
+                "code": "attestation_construction_failed",
+                "cause": cause,
+                "exception_type": type(exc).__name__,
+                "evidence_ref": evidence_ref,
+                "recovery": "repair_or_restore_the_named_artifact_and_rerun_attestation",
+            },
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps(receipt, indent=2, sort_keys=True))
+    args.output.write_text(
+        json.dumps(receipt, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps(receipt, allow_nan=False, indent=2, sort_keys=True))
     return 0 if receipt["status"] == "PASS" else 1
 
 

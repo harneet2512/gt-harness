@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -85,7 +86,14 @@ def _reward(payload: dict[str, Any]) -> int | None:
                     for metric in metrics
                     if isinstance(metric, dict)
                 )
-    rewards = {int(value) for value in candidates if value in (0, 0.0, 1, 1.0)}
+    rewards = {
+        int(value)
+        for value in candidates
+        if not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+        and value in (0, 1)
+    }
     return next(iter(rewards)) if len(rewards) == 1 else None
 
 
@@ -199,7 +207,8 @@ def standardize_result(
     ) / "official-verifier-result.json"
     temporary = target.with_suffix(f"{target.suffix}.tmp.{os.getpid()}")
     temporary.write_text(
-        json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(receipt, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
     os.replace(temporary, target)
     return receipt
