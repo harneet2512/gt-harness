@@ -21,8 +21,8 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
-    "source_tree": "1028a3b8f6be7c585393ce07b2e9ba87bd052084",
+    "source_commit": "ecd54695da61f64b34bb76b625a010caccc66490",
+    "source_tree": "3f9d0c73c459a80bef0afb727deac2f97a8ce175",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "wheel_sha256": "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e",
@@ -44,8 +44,8 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
-      "source_tree": "1028a3b8f6be7c585393ce07b2e9ba87bd052084",
+      "source_commit": "ecd54695da61f64b34bb76b625a010caccc66490",
+      "source_tree": "3f9d0c73c459a80bef0afb727deac2f97a8ce175",
       "binary_sha256": "55deddbae6f32a8d6c2bf82fa8ec13775f6fed94e4cc287c4b71178758432170",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
       "build_info_sha256": "bdbdf74dd88f737a1500f365913da336c01f8eb5af622f07e50c249cd7e334f9",
@@ -60,16 +60,23 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
+      "source_commit": "ecd54695da61f64b34bb76b625a010caccc66490",
       "certified_source_commit": "db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
         "7b4d70433d11b4792adf59e8fac09a063d9ada53",
         "db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
-        "43c6d723840f784d5eb939418dc2df57a6ff0a37"
+        "43c6d723840f784d5eb939418dc2df57a6ff0a37",
+        "1f10cdf1c7c972567c9916f0c0f30147e52b4ebf",
+        "ecd54695da61f64b34bb76b625a010caccc66490"
       ],
       "post_certification_changed_paths": [
-        "gt-index/HAR80_ROUTE_B_CERTIFICATION.md"
+          ".githooks/red-artifacts/har81_candidate_only_selection_red.out",
+          ".githooks/red-artifacts/har81_candidate_only_selection_red.receipt",
+          ".githooks/tests/har81_candidate_only_selection_red.sh",
+          "gt-index/HAR80_ROUTE_B_CERTIFICATION.md",
+          "gt-index/cmd/gt-index/dispatch_selection_test.go",
+          "gt-index/cmd/gt-index/main.go"
       ],
       "review_inbox_commit": "ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685",
       "review_packets": [
@@ -84,7 +91,7 @@
           "packet_digest_sha256": "105b62af2e0e09e6f671fc4500c6bf94340e7fd3197e23e8feb46517f4c6b1be"
         }
       ],
-      "attestation_digest_sha256": "4beb4126c568e41a711bcd9e3d17e159425df3be77d25150635cffec1d9be227"
+      "attestation_digest_sha256": "6e83a1e13a744ae554fff6c6a717bc237cffc40ffbd4b3bec124ccfa56294996"
     }
   },
   "capabilities": [

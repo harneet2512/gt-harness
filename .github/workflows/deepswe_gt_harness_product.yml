@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: harneet2512/groundtruth
-          ref: 43c6d723840f784d5eb939418dc2df57a6ff0a37
+          ref: ecd54695da61f64b34bb76b625a010caccc66490
           path: .pinned/groundtruth
           fetch-depth: 0
           persist-credentials: false
@@ -65,9 +65,9 @@ jobs:
           OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
           # Docker Hub's linux/amd64 manifest for the immutable Go 1.22.5 image.
           GO_IMAGE='golang:1.22.5-bookworm@sha256:a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3'
-          SOURCE_COMMIT='43c6d723840f784d5eb939418dc2df57a6ff0a37'
-          SOURCE_TREE='1028a3b8f6be7c585393ce07b2e9ba87bd052084'
-          BUILD_TIME='2026-09-01T04:21:55Z'
+          SOURCE_COMMIT='ecd54695da61f64b34bb76b625a010caccc66490'
+          SOURCE_TREE='3f9d0c73c459a80bef0afb727deac2f97a8ce175'
+          BUILD_TIME='2026-09-02T06:41:43Z'
           export SOURCE_COMMIT BUILD_TIME
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
@@ -104,7 +104,7 @@ jobs:
           expected = manifest["groundtruth"]
           assert info["schema"] == "gt-index.build.v1"
           assert info["complete"] is True
-          assert info["git_commit"] == "43c6d723840f784d5eb939418dc2df57a6ff0a37"
+          assert info["git_commit"] == "ecd54695da61f64b34bb76b625a010caccc66490"
           assert info["go_toolchain"] == "go1.22.5"
           assert info["build_tags"] == "sqlite_fts5"
           assert info["graph_schema_version"] == "v15.2-trust-tier"
