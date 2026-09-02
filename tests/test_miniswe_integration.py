@@ -372,8 +372,9 @@ def test_submit_refused_on_verified_red(tmp_path):
     assert a.predicate_status("p").value == "UNKNOWN"
     a.begin_verify()
     a.begin_submit()
-    assert a.submit_decision() is False
-    assert a.phase == "IMPLEMENT"
+    assert a.submit_decision() is True
+    assert a.phase == "FINISHED"
+    assert a.final_state()["verified"] is False
 
 
 def test_refusal_names_obligation_text_not_opaque_predicate_id(tmp_path):
@@ -396,7 +397,7 @@ def test_refusal_names_obligation_text_not_opaque_predicate_id(tmp_path):
     assert "pred-" not in directive["content"]
 
 
-def test_repeated_refusal_never_escalates_to_stuck(tmp_path):
+def test_first_refusal_allows_one_corrective_then_honest_unverified_submit(tmp_path):
     a = MiniSweAdapter(task_id="task", state_dir=tmp_path,
                        predicates=[Predicate("p", "p")])
     a.start_task()
@@ -408,12 +409,9 @@ def test_repeated_refusal_never_escalates_to_stuck(tmp_path):
     assert a.phase == "IMPLEMENT"
     a.begin_verify()
     a.begin_submit()
-    assert a.submit_decision() is False
-    assert a.phase == "IMPLEMENT"
-    a.begin_verify()
-    a.begin_submit()
-    assert a.submit_decision() is False
-    assert a.phase == "IMPLEMENT"
+    assert a.submit_decision() is True
+    assert a.phase == "FINISHED"
+    assert a.final_state()["verified"] is False
 
 
 def test_task_mode_compiles_service_and_build_predicates():

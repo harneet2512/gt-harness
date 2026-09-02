@@ -92,6 +92,7 @@ class GroundtruthController:
         self.verification_plan = verification_plan
         self._verification_plan_evaluated = False
         self._verification_plan_epoch: int | None = None
+        self._submit_refusals = 0
 
     @property
     def phase(self) -> str:
@@ -205,7 +206,15 @@ class GroundtruthController:
             raise LifecycleError(
                 f"submit decision requires VERIFY then SUBMIT, got {self._phase}"
             )
-        accepted = not self.blocking_reasons
+        blockers = self.blocking_reasons
+        if blockers and self._submit_refusals == 0:
+            self._submit_refusals = 1
+            self._transition("IMPLEMENT")
+            return False
+        # The first mismatch gets exactly one corrective opportunity. A second
+        # submit may terminate, but final_state remains explicitly unverified
+        # while any obligation lacks current GREEN semantic evidence.
+        accepted = not blockers or self._submit_refusals == 1
         self._transition("FINISHED" if accepted else "IMPLEMENT")
         return accepted
 

@@ -18,7 +18,6 @@ _SECRET_KEY = re.compile(
 )
 _SECRET_VALUE = re.compile(r"(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)", re.I)
 
-
 class DiagnosticCode(StrEnum):
     GT_DENSE_MODEL_UNAVAILABLE = "GT_DENSE_MODEL_UNAVAILABLE"
     GT_DENSE_MODEL_DIGEST_MISMATCH = "GT_DENSE_MODEL_DIGEST_MISMATCH"
@@ -52,11 +51,47 @@ class DiagnosticCode(StrEnum):
     GT_PLAN_CONSERVATION_FAILED = "GT_PLAN_CONSERVATION_FAILED"
 
 
+_PRIMARY_PRECEDENCE = {
+    DiagnosticCode.GT_QUERY_RESULT_TOO_LARGE: 10,
+    DiagnosticCode.GT_QUERY_SCAN_LIMIT: 11,
+    DiagnosticCode.GT_PROVIDER_REQUEST_TOO_LARGE: 20,
+    DiagnosticCode.GT_DENSE_MODEL_UNAVAILABLE: 30,
+    DiagnosticCode.GT_GRAPH_REFRESH_FAILED: 40,
+    DiagnosticCode.GT_VERIFICATION_SEMANTIC_MISMATCH: 50,
+    DiagnosticCode.GT_PROVIDER_BAD_REQUEST: 80,
+    DiagnosticCode.GT_VERIFIER_FAILED: 90,
+    DiagnosticCode.GT_RECEIPT_MISSING: 100,
+}
+
+
 class CapabilityState(StrEnum):
     WORKING = "WORKING"
     DEGRADED = "DEGRADED"
     FAILED = "FAILED"
     UNEXERCISED = "UNEXERCISED"
+
+
+def classify_provider_failure(exc: BaseException) -> tuple[DiagnosticCode, bool]:
+    """Classify provider failures without collapsing deterministic failures."""
+
+    status = getattr(exc, "status_code", None)
+    name = type(exc).__name__.lower()
+    provider_code = str(getattr(exc, "code", "") or "").lower()
+    message = str(exc).lower()
+    signal = " ".join((name, provider_code, message))
+    if status == 402 or any(word in signal for word in ("billing", "credits", "balance")):
+        return DiagnosticCode.GT_PROVIDER_BILLING, False
+    if status == 429 or "ratelimit" in name or "rate limit" in signal:
+        return DiagnosticCode.GT_PROVIDER_RATE_LIMIT, True
+    if isinstance(exc, MemoryError) or "resource exhausted" in signal:
+        return DiagnosticCode.GT_RESOURCE_EXHAUSTED, False
+    if "timeout" in name or "timed out" in signal:
+        return DiagnosticCode.GT_PROVIDER_TIMEOUT, True
+    if "connection" in name or "disconnect" in signal:
+        return DiagnosticCode.GT_PROVIDER_DISCONNECT, True
+    if status == 400 or "badrequest" in name or "invalid request" in signal:
+        return DiagnosticCode.GT_PROVIDER_BAD_REQUEST, False
+    return DiagnosticCode.GT_PROVIDER_MALFORMED_RESPONSE, False
 
 
 def _normalize(value: str) -> str:
@@ -224,20 +259,24 @@ class DiagnosisReport:
     primary_by_task: dict[str, DiagnosticEvent]
     artifact_issues: tuple[str, ...]
     capabilities: tuple[dict[str, Any], ...]
+    task_ids: tuple[str, ...]
 
     def to_mapping(self) -> dict[str, Any]:
+        task_rows = []
+        for task in self.task_ids:
+            event = self.primary_by_task.get(task)
+            task_rows.append(
+                {
+                    "task_id": task,
+                    "primary_diagnostic": event.code.value if event else "HEALTHY",
+                    "fingerprint": event.fingerprint if event else "",
+                    "recovery": _normalize(event.recovery) if event else "none",
+                }
+            )
         return {
             "schema": "gt.diagnostic_summary.v1", "exit_code": self.exit_code,
             "artifact_issues": list(self.artifact_issues),
-            "tasks": [
-                {
-                    "task_id": task,
-                    "primary_diagnostic": event.code.value,
-                    "fingerprint": event.fingerprint,
-                    "recovery": _normalize(event.recovery),
-                }
-                for task, event in sorted(self.primary_by_task.items())
-            ],
+            "tasks": task_rows,
             "capabilities": list(self.capabilities),
         }
 
@@ -286,14 +325,85 @@ def diagnose_artifact_root(root: str | Path, *, strict: bool = False) -> Diagnos
         if task_id in diagnosed_tasks:
             issues.append(f"task {task_id}: duplicate diagnostics artifacts")
         diagnosed_tasks.add(task_id)
-        for capability in payload.get("capabilities") or ():
-            if isinstance(capability, dict):
-                capabilities.append({"task_id": task_id, **capability})
+        capability_rows = payload.get("capabilities")
+        if not isinstance(capability_rows, list):
+            issues.append(f"{path}: capabilities must be an array")
+            capability_rows = []
+        if strict and not capability_rows:
+            issues.append(f"{path}: no capability health rows")
+        capability_names: set[str] = set()
+        for capability in capability_rows:
+            if not isinstance(capability, dict):
+                issues.append(f"{path}: non-object capability row")
+                continue
+            name = str(capability.get("capability") or "")
+            try:
+                state = CapabilityState(capability.get("state", ""))
+            except ValueError:
+                issues.append(f"{path}: capability {name!r} has invalid state")
+                continue
+            if not name or name in capability_names:
+                issues.append(f"{path}: missing or duplicate capability identity {name!r}")
+                continue
+            capability_names.add(name)
+            bool_fields = (
+                "required", "declared", "initialized", "triggered", "delivered",
+                "refused", "degraded", "verified",
+            )
+            if any(not isinstance(capability.get(field), bool) for field in bool_fields):
+                issues.append(f"{path}: capability {name!r} has malformed state flags")
+                continue
+            if state is CapabilityState.WORKING and not capability.get("verified"):
+                issues.append(f"{path}: capability {name!r} claims WORKING without verification")
+                continue
+            capabilities.append({"task_id": task_id, **capability})
+        replay_path = path.with_name("incident-replay.json")
+        text_path = path.with_name("diagnostics.txt")
+        if strict and not text_path.is_file():
+            issues.append(f"{path}: missing diagnostics.txt")
+        if not replay_path.is_file():
+            issues.append(f"{path}: missing incident-replay.json")
+        else:
+            try:
+                replay = _load_json(replay_path)
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                issues.append(f"{replay_path}: malformed JSON: {type(exc).__name__}")
+            else:
+                canonical = json.dumps(
+                    payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+                if (
+                    not isinstance(replay, dict)
+                    or replay.get("schema") != "gt.incident_replay.v1"
+                    or replay.get("task_id") != task_id
+                ):
+                    issues.append(f"{replay_path}: invalid replay identity")
+                elif replay.get("diagnostics_sha256") != hashlib.sha256(canonical).hexdigest():
+                    issues.append(f"{replay_path}: replay diagnostics digest mismatch")
+                else:
+                    expected_fingerprints = sorted(
+                        str(row.get("fingerprint") or "")
+                        for row in payload.get("diagnostics") or ()
+                        if isinstance(row, dict)
+                    )
+                    if sorted(replay.get("fingerprints") or ()) != expected_fingerprints:
+                        issues.append(
+                            f"{replay_path}: replay fingerprint inventory mismatch"
+                        )
         for row in payload.get("diagnostics") or ():
             if not isinstance(row, dict):
                 issues.append(f"{path}: non-object diagnostic row")
                 continue
             try:
+                first_sequence = int(row.get("first_event_sequence") or 0)
+                last_sequence = int(row.get("last_event_sequence") or 0)
+                occurrence_count = int(row.get("occurrence_count") or 0)
+                if (
+                    row.get("schema") != SCHEMA
+                    or occurrence_count < 1
+                    or last_sequence < first_sequence
+                ):
+                    raise ValueError("invalid diagnostic occurrence envelope")
                 event = DiagnosticEvent.create(
                     code=row.get("code", ""), severity=row.get("severity", ""),
                     phase=str(row.get("phase") or ""), subsystem=str(row.get("subsystem") or ""),
@@ -303,7 +413,7 @@ def diagnose_artifact_root(root: str | Path, *, strict: bool = False) -> Diagnos
                     cause=str(row.get("cause") or ""),
                     impact=str(row.get("impact") or ""), recovery=str(row.get("recovery") or ""),
                     retryable=bool(row.get("retryable")),
-                    event_sequence=int(row.get("first_event_sequence") or 0),
+                    event_sequence=first_sequence,
                     identities=row.get("identities") or {},
                     evidence_refs=row.get("evidence_refs") or (),
                 )
@@ -330,28 +440,40 @@ def diagnose_artifact_root(root: str | Path, *, strict: bool = False) -> Diagnos
                     issues.append(f"{target}: digest mismatch")
     if strict:
         planned = _planned_tasks(base)
+        if not planned:
+            issues.append("strict audit requires a discoverable task plan")
         for task in sorted(planned - diagnosed_tasks):
             issues.append(f"planned task {task}: missing diagnostics")
+        for task in sorted(diagnosed_tasks - planned):
+            issues.append(f"unplanned task {task}: unexpected diagnostics")
         for row in capabilities:
             if row.get("required") and row.get("state") != CapabilityState.WORKING:
                 # Operational state is represented by exit 1, not malformed exit 2.
                 pass
     primary: dict[str, DiagnosticEvent] = {}
-    for event in sorted(events, key=lambda item: item.event_sequence):
-        current = primary.get(event.task_id)
-        if current is None or (
-            current.classification != "primary" and event.classification == "primary"
-        ):
+    def precedence(event: DiagnosticEvent) -> tuple[int, int, str]:
+        return (
+            0 if event.classification == "primary" else 1,
+            _PRIMARY_PRECEDENCE.get(event.code, 70),
+            event.fingerprint,
+        )
+
+    for event in sorted(events, key=precedence):
+        if event.task_id not in primary:
             primary[event.task_id] = event
     unhealthy = bool(events) or any(
         row.get("required") and row.get("state") != CapabilityState.WORKING
         for row in capabilities
     )
     exit_code = 2 if issues else 1 if unhealthy else 0
-    return DiagnosisReport(exit_code, tuple(events), primary, tuple(issues), tuple(capabilities))
+    return DiagnosisReport(
+        exit_code, tuple(events), primary, tuple(issues), tuple(capabilities),
+        tuple(sorted(diagnosed_tasks)),
+    )
 
 
 __all__ = [
     "CapabilityState", "DiagnosticCode", "DiagnosticEvent", "DiagnosticJournal",
-    "DiagnosticPaths", "DiagnosisReport", "diagnose_artifact_root",
+    "DiagnosticPaths", "DiagnosisReport", "classify_provider_failure",
+    "diagnose_artifact_root",
 ]

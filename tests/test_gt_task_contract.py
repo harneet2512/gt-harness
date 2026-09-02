@@ -1029,8 +1029,10 @@ def test_semantic_relation_distinguishes_startswith_from_contains():
         contract, predicates, "pytest -q", "assert contains('urn:gt:') PASSED",
         action_index=1,
     )
+    literal_sha = __import__("hashlib").sha256(b"urn:gt:").hexdigest()
     right = evaluate_passing_observation(
-        contract, predicates, "pytest -q", "assert startsWith('urn:gt:') PASSED",
+        contract, predicates, "pytest -q",
+        f"GT_SEMANTIC_ASSERT relation=starts_with literal_sha256={literal_sha} result=pass",
         action_index=2,
     )
     assert wrong == ()

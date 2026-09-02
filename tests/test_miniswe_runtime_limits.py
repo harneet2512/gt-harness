@@ -3,8 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from gt_engine.miniswe_typed_actions import execute_typed_action
-from gt_engine.provider_limits import ProviderRequestTooLarge, enforce_provider_request_limit
+from gt_engine.provider_limits import (
+    ProviderRequestTooLarge,
+    enforce_provider_request_limit,
+    provider_request_bytes,
+)
 
 
 def test_literal_query_is_bounded_before_model_visibility(tmp_path: Path):
@@ -37,3 +43,8 @@ def test_provider_size_refusal_occurs_before_transport():
         assert exc.retryable is False
     else:
         raise AssertionError("oversized request was accepted")
+
+
+def test_provider_size_does_not_stringify_unsupported_wire_values():
+    with pytest.raises(ValueError, match="not JSON serializable"):
+        provider_request_bytes({"messages": [], "opaque": object()})

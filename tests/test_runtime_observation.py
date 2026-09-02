@@ -34,6 +34,33 @@ def test_workspace_revision_changes_and_multifile_transaction_is_canonical(tmp_p
     ).hexdigest()
 
 
+def test_workspace_revision_uses_repository_text_bytes(tmp_path):
+    source = tmp_path / "module.py"
+    source.write_bytes(b"first\nsecond\n")
+    lf = capture_workspace(tmp_path)
+
+    source.write_bytes(b"first\r\nsecond\r\n")
+    crlf = capture_workspace(tmp_path)
+    assert crlf.revision == lf.revision
+    assert [item.mapping() for item in crlf.files] == [
+        item.mapping() for item in lf.files
+    ]
+
+    source.write_bytes(b"first\r\nchanged\r\n")
+    changed = capture_workspace(tmp_path)
+    assert changed.revision != lf.revision
+
+
+def test_workspace_revision_keeps_binary_crlf_byte_exact(tmp_path):
+    source = tmp_path / "payload.bin"
+    source.write_bytes(b"\x00first\r\n")
+    crlf = capture_workspace(tmp_path)
+
+    source.write_bytes(b"\x00first\n")
+    lf = capture_workspace(tmp_path)
+    assert crlf.revision != lf.revision
+
+
 def test_execution_evidence_preserves_exact_raw_bytes_and_structure():
     raw = "tests/test_mod.py::test_x FAILED\r\n1 failed\r\n"
     artifact = compile_execution_evidence(

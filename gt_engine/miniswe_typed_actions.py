@@ -508,14 +508,21 @@ def _literal_search(request: Mapping[str, Any], root: Path) -> tuple[list[dict],
         if not path.is_file():
             continue
         try:
-            data = path.read_bytes()
+            remaining = QUERY_SCAN_MAX_BYTES - scanned_bytes
+            size = path.stat().st_size
+            if size > remaining:
+                with path.open("rb") as handle:
+                    data = handle.read(max(0, remaining))
+                omissions.append("query_scan_byte_limit")
+                stopped = True
+            else:
+                data = path.read_bytes()
         except OSError:
             omissions.append(f"unreadable:{relative}")
             continue
         scanned_bytes += len(data)
-        if scanned_bytes > QUERY_SCAN_MAX_BYTES:
-            omissions.append("query_scan_byte_limit")
-            break
+        if scanned_bytes >= QUERY_SCAN_MAX_BYTES:
+            stopped = True
         for line_number, line in enumerate(data.splitlines(), start=1):
             count = line.count(query_bytes)
             if count:

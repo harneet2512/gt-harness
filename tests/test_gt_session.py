@@ -65,6 +65,7 @@ def test_task_start_localization_is_compressed_into_1400_byte_lane(tmp_path, mon
 
     assert len(rendered.encode("utf-8")) <= 1400
     assert "compressed sha256=" in rendered
+    assert rendered.startswith("header\nxxx")
 
 
 def test_session_close_records_terminal_event(tmp_path):

@@ -18,6 +18,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from .repository_identity import canonical_repository_bytes
+
 _SCHEMA = "gt.runtime_observation.v1"
 _SKIP_DIRS = frozenset({
     ".git", ".gt", ".gt-state", ".groundtruth", ".hg", ".svn", ".venv", "venv",
@@ -210,11 +212,16 @@ def capture_workspace(
                     else:
                         payload = path.read_bytes()
                         kind = "file"
+                    identity_payload = (
+                        canonical_repository_bytes(payload)
+                        if kind == "file"
+                        else payload
+                    )
                     files.append(FileState(
                         path=relative,
                         kind=kind,
-                        sha256=hashlib.sha256(payload).hexdigest(),
-                        size=len(payload),
+                        sha256=hashlib.sha256(identity_payload).hexdigest(),
+                        size=len(identity_payload),
                         captured=payload if len(payload) <= _MAX_CAPTURE_BYTES else None,
                     ))
                 except OSError:

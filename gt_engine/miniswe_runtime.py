@@ -40,8 +40,12 @@ from .miniswe_evidence import (
     run_evidence_pipeline,
 )
 from .miniswe_integration import MiniSweAdapter, ProviderModelMismatch
-from .provider_limits import ProviderRequestTooLarge, enforce_provider_request_limit
-from .run_diagnostics import DiagnosticCode, DiagnosticEvent
+from .provider_limits import (
+    ProviderRequestTooLarge,
+    build_provider_request_envelope,
+    enforce_provider_request_limit,
+)
+from .run_diagnostics import DiagnosticCode, DiagnosticEvent, classify_provider_failure
 from .runtime_observation import (
     EditTransaction,
     capture_workspace,
@@ -477,6 +481,12 @@ def install_runtime_hooks(
         if session.disabled:
             return prepared
         try:
+            if (
+                adapter.graph_db
+                and not adapter.graph_fresh
+                and session.capability_active("graph_refresh")
+            ):
+                adapter.refresh_graph(DecisionBoundary.POST_EDIT_GRAPH_DELTA)
             batch = session.before_model(messages, iteration=adapter.iteration)
             parts = batch.context_additions
             if parts and prepared and isinstance(prepared[-1], dict):
@@ -500,33 +510,26 @@ def install_runtime_hooks(
             # Admission covers the complete logical envelope. This happens
             # before original_query, so a refusal produces zero provider calls.
             enforce_provider_request_limit(
-                {
-                    "messages": messages,
-                    "model": str(getattr(_model, "model_name", "") or ""),
-                    "model_kwargs": dict(getattr(_model, "model_kwargs", {}) or {}),
-                    "tools": getattr(_model, "tools", None),
-                    "query_kwargs": kwargs,
-                }
+                build_provider_request_envelope(
+                    messages=messages,
+                    model=str(getattr(_model, "model_name", "") or ""),
+                    model_kwargs=dict(getattr(_model, "model_kwargs", {}) or {}),
+                    tools=getattr(_model, "tools", None),
+                    call_kwargs=kwargs,
+                )
             )
             message = original_query(messages, **kwargs)
         except Exception as exc:
             if not session.disabled:
                 try:
                     adapter.bind_provider_failure(exc)
-                    status = getattr(exc, "status_code", None)
-                    name = type(exc).__name__.lower()
                     if isinstance(exc, ProviderRequestTooLarge):
-                        code = DiagnosticCode.GT_PROVIDER_REQUEST_TOO_LARGE
-                    elif status == 429 or "ratelimit" in name:
-                        code = DiagnosticCode.GT_PROVIDER_RATE_LIMIT
-                    elif "timeout" in name:
-                        code = DiagnosticCode.GT_PROVIDER_TIMEOUT
-                    elif "connection" in name or "disconnect" in name:
-                        code = DiagnosticCode.GT_PROVIDER_DISCONNECT
-                    elif "badrequest" in name or status == 400:
-                        code = DiagnosticCode.GT_PROVIDER_BAD_REQUEST
+                        code, retryable = (
+                            DiagnosticCode.GT_PROVIDER_REQUEST_TOO_LARGE,
+                            False,
+                        )
                     else:
-                        code = DiagnosticCode.GT_PROVIDER_MALFORMED_RESPONSE
+                        code, retryable = classify_provider_failure(exc)
                     adapter.diagnostics.record(
                         DiagnosticEvent.create(
                             code=code, severity="ERROR", phase="provider_transport",
@@ -535,10 +538,10 @@ def install_runtime_hooks(
                             cause=type(exc).__name__, impact="provider_response_unavailable",
                             recovery=(
                                 "refine_request_before_retry"
-                                if not getattr(exc, "retryable", False)
+                                if not retryable
                                 else "retry_transient_transport_failure"
                             ),
-                            retryable=bool(getattr(exc, "retryable", False)),
+                            retryable=retryable,
                             event_sequence=int(adapter.store.receipt()["event_count"]),
                         )
                     )
@@ -575,6 +578,8 @@ def install_runtime_hooks(
 
         actions = tuple((message.get("extra") or {}).get("actions") or ())
         outputs: list[dict] = []
+        repository_wide_queries = 0
+        typed_turn_bytes = 0
         rendered_by_index: dict[int, str] = {}
         typed_by_index: dict[int, dict[str, Any]] = {}
         directives: list[dict] = []
@@ -595,6 +600,42 @@ def install_runtime_hooks(
                 # observation so Mini-SWE can select Bash on its next turn.
                 adapter.global_action += 1
                 typed_kind = str((action.get("gt_action") or {}).get("kind") or "")
+                typed_arguments = (action.get("gt_action") or {}).get("arguments") or {}
+                scopes = typed_arguments.get("paths", ["."])
+                repository_wide = bool(
+                    typed_kind == "exact_literal_search"
+                    and isinstance(scopes, list)
+                    and "." in scopes
+                )
+                if repository_wide and repository_wide_queries >= 1:
+                    output = json.dumps(
+                        {
+                            "schema": "gt.compiled_observation.v1",
+                            "direct_answer": None,
+                            "evidence": {
+                                "schema": "gt.evidence_artifact.v1",
+                                "semantics": "incomplete",
+                                "omissions": ["query_fanout_refused"],
+                            },
+                            "decision": {
+                                "schema": "gt.interception_decision.v1",
+                                "mode": "PASS_THROUGH",
+                                "reason_codes": ["refine_query_scope_next_turn"],
+                            },
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    outputs.append(
+                        {
+                            "output": output,
+                            "returncode": 2,
+                            "exception_info": "repository-wide query fanout refused",
+                            "extra": {"gt_typed_action": True},
+                        }
+                    )
+                    continue
+                repository_wide_queries += int(repository_wide)
                 capability = f"typed_{typed_kind}"
                 if not (
                     session.capability_active("typed_actions")
@@ -647,6 +688,34 @@ def install_runtime_hooks(
                         "gt_mode": session.mode.value,
                     },
                 )
+                result_bytes = len(str(result.get("output") or "").encode("utf-8"))
+                if typed_turn_bytes + result_bytes > 49_152:
+                    output = json.dumps(
+                        {
+                            "schema": "gt.compiled_observation.v1",
+                            "direct_answer": None,
+                            "evidence": {
+                                "schema": "gt.evidence_artifact.v1",
+                                "semantics": "incomplete",
+                                "omissions": ["query_turn_budget_exceeded"],
+                            },
+                            "decision": {
+                                "schema": "gt.interception_decision.v1",
+                                "mode": "PASS_THROUGH",
+                                "reason_codes": ["refine_query_scope_next_turn"],
+                            },
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    result = {
+                        "output": output,
+                        "returncode": 2,
+                        "exception_info": "typed query turn budget exceeded",
+                        "extra": {"gt_typed_action": True},
+                    }
+                    result_bytes = len(output.encode("utf-8"))
+                typed_turn_bytes += result_bytes
                 outputs.append(result)
                 extra = dict(result.get("extra") or {})
                 typed_by_index[action_index] = {
