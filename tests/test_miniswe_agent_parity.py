@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,11 @@ from eval.miniswe_agent import (
     MiniSweGtAgent,
     _miniswe_agent_version,
 )
+
+
+@pytest.fixture(autouse=True)
+def _host_attestation_key(monkeypatch):
+    monkeypatch.setenv("GT_RESOURCE_ATTESTATION_KEY", "f" * 64)
 
 
 def test_gt_off_and_gt_on_share_the_exact_installer_implementation():
@@ -109,6 +115,13 @@ async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_p
 
     async def execute(_environment, _command, *, env, **_kwargs):
         captured.update(env)
+        if "agent_resource_evidence" in _command:
+            return SimpleNamespace(stdout=json.dumps({
+                "schema": "gt.agent_resource_snapshot.v1",
+                "task_id": "arktype-task",
+                "product_source_sha": "a" * 40,
+                "cgroup": {"oom": 0, "oom_kill": 0},
+            }))
 
     monkeypatch.setattr(agent, "exec_as_agent", execute)
 
@@ -116,6 +129,7 @@ async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_p
 
     assert captured["GT_TASK_ID"] == "arktype-task"
     assert captured["GT_PRODUCT_SOURCE_SHA"] == "a" * 40
+    assert "GT_RESOURCE_ATTESTATION_KEY" not in captured
 
 
 @pytest.mark.asyncio
@@ -124,6 +138,7 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
         logs_dir=tmp_path / "logs", task_id="arktype-task", product_source_sha="a" * 40
     )
     commands: list[str] = []
+    snapshots = iter([(0, 0), (1, 1)])
     monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
     monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_a, **_k: {})
     monkeypatch.setattr(agent, "resolve_env_vars", lambda: {})
@@ -132,15 +147,24 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
         commands.append(command)
         if "scripts.miniswe_gt_run" in command:
             raise NonZeroAgentExitCodeError("Command failed (exit 137)")
+        oom, oom_kill = next(snapshots)
+        return SimpleNamespace(stdout=json.dumps({
+            "schema": "gt.agent_resource_snapshot.v1",
+            "task_id": "arktype-task",
+            "product_source_sha": "a" * 40,
+            "cgroup": {"oom": oom, "oom_kill": oom_kill},
+        }))
 
     monkeypatch.setattr(agent, "exec_as_agent", execute)
     with pytest.raises(NonZeroAgentExitCodeError):
         await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
-    assert "--phase before" in commands[0]
+    assert "scripts.agent_resource_evidence" in commands[0]
     assert commands[1].startswith("exec ")
     assert "scripts.miniswe_gt_run" in commands[1]
-    assert "--phase after" in commands[2]
-    assert "--exit-code 137" in commands[2]
+    assert "scripts.agent_resource_evidence" in commands[2]
+    evidence = json.loads((tmp_path / "logs" / "agent-resource.json").read_text())
+    assert evidence["attestation_scope"] == "host_agent_adapter"
+    assert evidence["error_code"] == "GT_AGENT_CGROUP_OOM"
 
 
 @pytest.mark.asyncio
@@ -161,6 +185,36 @@ async def test_gt_run_refuses_invalid_identity_before_any_command(monkeypatch, t
     with pytest.raises(ValueError, match="identity is incomplete"):
         await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
     assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_host_finalization_removes_task_forged_resource(monkeypatch, tmp_path):
+    agent = MiniSweGtAgent(
+        logs_dir=tmp_path / "logs", task_id="task-a", product_source_sha="a" * 40
+    )
+    monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
+    monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_a, **_k: {})
+    monkeypatch.setattr(agent, "resolve_env_vars", lambda: {})
+    calls = 0
+
+    async def execute(_environment, command, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if "scripts.miniswe_gt_run" in command:
+            (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "logs" / "agent-resource.json").write_text("forged")
+            raise NonZeroAgentExitCodeError("Command failed (exit 137)")
+        if calls == 1:
+            return SimpleNamespace(stdout=json.dumps({
+                "schema": "gt.agent_resource_snapshot.v1", "task_id": "task-a",
+                "product_source_sha": "a" * 40, "cgroup": {"oom": 0, "oom_kill": 0},
+            }))
+        return SimpleNamespace(stdout="not-json")
+
+    monkeypatch.setattr(agent, "exec_as_agent", execute)
+    with pytest.raises(NonZeroAgentExitCodeError):
+        await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
+    assert not (tmp_path / "logs" / "agent-resource.json").exists()
 
 
 @pytest.mark.asyncio

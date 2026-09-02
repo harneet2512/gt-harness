@@ -177,6 +177,9 @@ def _resource_evidence(
     root: Path, *, task_id: str, product_source_sha: str
 ) -> tuple[Path | None, dict[str, Any] | None]:
     valid: list[tuple[Path, dict[str, Any]]] = []
+    attestation_key = os.environ.get("GT_RESOURCE_ATTESTATION_KEY", "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", attestation_key):
+        return None, None
     for path in sorted(root.rglob("agent-resource.json")):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != "gt.agent_resource.v1":
@@ -193,10 +196,21 @@ def _resource_evidence(
             continue
         oom_delta = max(0, after["oom"] - before["oom"])
         oom_kill_delta = max(0, after["oom_kill"] - before["oom_kill"])
+        unsigned = dict(payload)
+        supplied_hmac = unsigned.pop("attestation_hmac_sha256", None)
+        unsigned.pop("evidence_sha256", None)
+        expected_hmac = hmac.new(
+            bytes.fromhex(attestation_key),
+            json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
         if (
             _valid_self_digest(payload, "evidence_sha256")
+            and isinstance(supplied_hmac, str)
+            and hmac.compare_digest(supplied_hmac, expected_hmac)
             and payload.get("task_id") == task_id
             and payload.get("product_source_sha") == product_source_sha
+            and payload.get("attestation_scope") == "host_agent_adapter"
             and payload.get("exit_code") == 137
             and payload.get("error_code") == "GT_AGENT_CGROUP_OOM"
             and payload.get("memory_evidence") is True

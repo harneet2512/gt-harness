@@ -168,6 +168,26 @@ def test_bounded_indexer_kills_only_child_when_rss_guard_is_crossed(
     assert result.memory_evidence is True
 
 
+def test_pipe_cleanup_closes_raw_descriptors_not_buffered_streams(monkeypatch) -> None:
+    closed: list[int] = []
+
+    class Stream:
+        def __init__(self, fd: int):
+            self.fd = fd
+
+        def fileno(self):
+            return self.fd
+
+        def close(self):
+            raise AssertionError("buffered close may block")
+
+    process = type("Process", (), {"stdout": Stream(7), "stderr": Stream(8)})()
+    monkeypatch.setattr(indexer.os, "close", closed.append)
+
+    indexer._close_pipe_descriptors(process)
+    assert closed == [7, 8]
+
+
 def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
     mib = 1024 * 1024
     limit = indexer._effective_index_memory_limit(
@@ -358,3 +378,44 @@ def test_failed_refresh_preserves_previous_graph_manifest_and_resource_pair(
     assert valid is True
     assert reason == "ok"
     assert graph.with_name("index-failure-resource.json").is_file()
+
+    source.write_text("x = 1\n", encoding="utf-8")
+    assert indexer.ensure_index(str(repo), state_dir=str(state)) == str(graph)
+    assert not graph.with_name("graph.failure.json").exists()
+    assert not graph.with_name("index-failure-resource.json").exists()
+
+
+def test_failure_receipt_rejects_semantically_mismatched_pair(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    state = tmp_path / "state"
+    repo.mkdir()
+    (repo / "main.py").write_text("pass\n", encoding="utf-8")
+    monkeypatch.setattr(
+        indexer,
+        "_run_index_bounded",
+        lambda *_args: indexer.IndexProcessResult(
+            False, "timeout", "GT_INDEX_TIMEOUT", exit_code=-9
+        ),
+    )
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+    first = indexer.ensure_index_with_receipt(repo, state_dir=state)
+    assert first.error_type == "GT_INDEX_TIMEOUT"
+    failure_path = next(state.rglob("graph.failure.json"))
+    failure = json.loads(failure_path.read_text(encoding="utf-8"))
+    failure["error_code"] = "GT_INDEX_OUTPUT_INVALID"
+    failure["resource_evidence_path"] = "wrong.json"
+    failure.pop("manifest_sha256")
+    failure["manifest_sha256"] = hashlib.sha256(
+        json.dumps(failure, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    failure_path.write_text(json.dumps(failure), encoding="utf-8")
+    monkeypatch.setattr(indexer, "ensure_index", lambda *_args, **_kwargs: None)
+
+    receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
+    assert receipt.error_type == "index_failure_evidence_invalid"

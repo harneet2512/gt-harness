@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import sys
 from pathlib import Path
@@ -12,6 +13,11 @@ from scripts.standardize_benchmark_result import (
     main,
     standardize_result,
 )
+
+
+@pytest.fixture(autouse=True)
+def _host_attestation_key(monkeypatch):
+    monkeypatch.setenv("GT_RESOURCE_ATTESTATION_KEY", "f" * 64)
 
 
 def _write_case(
@@ -95,6 +101,7 @@ def test_standardize_provider_balance_failure_is_not_rate_limit(tmp_path: Path) 
 def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
     payload: dict[str, object] = {
         "schema": "gt.agent_resource.v1",
+        "attestation_scope": "host_agent_adapter",
         "error_code": "GT_AGENT_CGROUP_OOM",
         "exit_code": 137,
         "memory_evidence": True,
@@ -106,6 +113,11 @@ def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
         "product_source_sha": "a" * 40,
     }
     payload.update(overrides)
+    payload["attestation_hmac_sha256"] = hmac.new(
+        bytes.fromhex("f" * 64),
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
     payload["evidence_sha256"] = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -182,6 +194,34 @@ def test_tampered_memory_evidence_does_not_authorize_oom_classification(tmp_path
     receipt = _standardize(tmp_path)
 
     assert receipt["failure_class"] == "process_signal_failure"
+    assert receipt["error_code"] == "process_exit_137_unattributed"
+    assert receipt["resource_evidence_path"] is None
+
+
+def test_self_digest_without_host_hmac_cannot_classify_exit_137(tmp_path: Path) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+    path = _write_resource_evidence(agent)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["attestation_hmac_sha256"] = "0" * 64
+    payload.pop("evidence_sha256")
+    payload["evidence_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    receipt = _standardize(tmp_path)
     assert receipt["error_code"] == "process_exit_137_unattributed"
     assert receipt["resource_evidence_path"] is None
 

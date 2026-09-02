@@ -415,6 +415,10 @@ jobs:
           echo "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854  $model_dir/tokenizer.json" | sha256sum -c -
           echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
 
+      - name: Mint the host-only resource attestation key
+        run: |
+          python -c "import os, secrets; open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write('GT_RESOURCE_ATTESTATION_KEY=' + secrets.token_hex(32) + '\n')"
+
       - name: Run DeepSWE through the released gt-harness run boundary
         env:
           OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

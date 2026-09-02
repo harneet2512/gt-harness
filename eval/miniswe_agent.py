@@ -29,6 +29,7 @@ from harbor.models.agent.context import AgentContext
 
 from eval._env import UTF8_ENV, provider_env
 from gt_harness.product import project_task_environment
+from scripts.agent_resource_evidence import parse_snapshot, write_host_interval
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_BUNDLE_DIR = "/installed-agent/bundle"
@@ -39,8 +40,6 @@ _REMOTE_PYTHON_DIR = "/installed-agent/python"
 _REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
-_REMOTE_AGENT_RESOURCE_BEFORE = "/logs/agent/agent-resource-before.json"
-_REMOTE_AGENT_RESOURCE = "/logs/agent/agent-resource.json"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
 _DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
@@ -351,21 +350,12 @@ class MiniSweGtAgent(MiniSweAgent):
         )
 
     @staticmethod
-    def _resource_command(
-        phase: str, task_id: str, product_source_sha: str, exit_code: int | None = None
-    ) -> str:
-        command = (
+    def _resource_command(task_id: str, product_source_sha: str) -> str:
+        return (
             f'"{_REMOTE_PY}" -m scripts.agent_resource_evidence '
-            f"--phase {phase} --before {_REMOTE_AGENT_RESOURCE_BEFORE} "
-            f"--output {_REMOTE_AGENT_RESOURCE} "
             f"--task-id {shlex.quote(task_id)} "
             f"--product-source-sha {shlex.quote(product_source_sha)}"
         )
-        if phase == "after":
-            if exit_code is None:
-                raise ValueError("after resource evidence requires an exit code")
-            command += f" --exit-code {exit_code}"
-        return command
 
     @with_prompt_template
     async def run(
@@ -383,16 +373,26 @@ class MiniSweGtAgent(MiniSweAgent):
         product_source_sha = env["GT_PRODUCT_SOURCE_SHA"].strip()
         if not task_id or not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
             raise ValueError("benchmark agent resource identity is incomplete")
+        attestation_key = os.environ.get("GT_RESOURCE_ATTESTATION_KEY", "").strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", attestation_key):
+            raise ValueError("GT_RESOURCE_ATTESTATION_KEY must be 64 lowercase hex characters")
         # GT state (events.jsonl) lives OUTSIDE the graded workspace AND inside
         # the captured /logs/agent/ tree so a post-run 17-feature census reads
         # the exact evidence_delivery rows instead of heuristic transcript text.
         env["GT_STATE_DIR"] = "/logs/agent/gt-state"
         # GT state (events.jsonl, graph.db) lives OUTSIDE the graded workspace.
         extra = '--state-dir "$GT_STATE_DIR" --gt-mode advisory '
-        await self.exec_as_agent(
+        resource_path = Path(self.logs_dir) / "agent-resource.json"
+        resource_path.unlink(missing_ok=True)
+        before_result = await self.exec_as_agent(
             environment,
-            self._resource_command("before", task_id, product_source_sha),
+            self._resource_command(task_id, product_source_sha),
             env=dict(UTF8_ENV),
+        )
+        before = parse_snapshot(
+            str(before_result.stdout),
+            task_id=task_id,
+            product_source_sha=product_source_sha,
         )
         try:
             await self.exec_as_agent(
@@ -401,15 +401,30 @@ class MiniSweGtAgent(MiniSweAgent):
                 env=env,
             )
         except NonZeroAgentExitCodeError as exc:
+            # Remove anything the task may have written at the canonical name;
+            # only the host adapter is permitted to publish this attestation.
+            resource_path.unlink(missing_ok=True)
             match = re.search(r"Command failed \(exit (-?\d+)\)", str(exc))
             if match:
                 try:
-                    await self.exec_as_agent(
+                    after_result = await self.exec_as_agent(
                         environment,
-                        self._resource_command(
-                            "after", task_id, product_source_sha, int(match.group(1))
-                        ),
+                        self._resource_command(task_id, product_source_sha),
                         env=dict(UTF8_ENV),
+                    )
+                    after = parse_snapshot(
+                        str(after_result.stdout),
+                        task_id=task_id,
+                        product_source_sha=product_source_sha,
+                    )
+                    write_host_interval(
+                        resource_path,
+                        before=before,
+                        after=after,
+                        task_id=task_id,
+                        product_source_sha=product_source_sha,
+                        exit_code=int(match.group(1)),
+                        attestation_key=attestation_key,
                     )
                 except Exception:
                     # Resource finalization cannot replace the exact runner error.
