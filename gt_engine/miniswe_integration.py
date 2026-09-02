@@ -183,6 +183,7 @@ class MiniSweAdapter(GroundtruthController):
         self._recovery_delivered = 0
         self._model_visible_delivery_count = 0
         self._model_visible_delivery_bytes = 0
+        self._model_visible_delivery_identities: set[str] = set()
         self._accepted_sealed_delivery_count = 0
         self._pending_delivery_metadata: dict[str, str] = {}
         self.pending_transient = ""
@@ -886,6 +887,10 @@ class MiniSweAdapter(GroundtruthController):
         encoded = rendered.encode("utf-8")
         rendered_bytes = len(encoded)
         payload_sha256 = hashlib.sha256(encoded).hexdigest()
+        delivery_identity = payload_sha256
+        effective_dedup_key = (
+            f"prompt:{delivery_identity}" if lane == "prompt" else dedup_key
+        )
         candidate_ordinal = self._model_visible_delivery_count + 1
         budget_kind = (
             "repository_start" if candidate_ordinal == 1 else "repository_update"
@@ -895,8 +900,10 @@ class MiniSweAdapter(GroundtruthController):
             per_delivery_limit = min(per_delivery_limit, PROMPT_CONTEXT_BYTE_LIMIT)
 
         reason = ""
-        if candidate_ordinal > MAX_TASK_DELIVERIES:
-            reason = "task_delivery_dose_ceiling"
+        if delivery_identity in self._model_visible_delivery_identities:
+            reason = "duplicate_delivery_identity"
+        elif candidate_ordinal > MAX_TASK_DELIVERIES:
+            reason = "task_delivery_storm_backstop"
         elif rendered_bytes > per_delivery_limit:
             reason = "delivery_byte_ceiling"
         elif self._model_visible_delivery_bytes + rendered_bytes > TOTAL_DELIVERY_BYTE_LIMIT:
@@ -906,11 +913,12 @@ class MiniSweAdapter(GroundtruthController):
                 "delivery_refused",
                 lane=lane,
                 kind=kind,
-                dedup_key=dedup_key,
+                dedup_key=effective_dedup_key,
                 reason=reason,
                 candidate_ordinal=candidate_ordinal,
                 rendered_bytes=rendered_bytes,
                 payload_sha256=payload_sha256,
+                delivery_identity=delivery_identity,
                 per_delivery_limit=per_delivery_limit,
                 admitted_count=self._model_visible_delivery_count,
                 admitted_bytes=self._model_visible_delivery_bytes,
@@ -923,6 +931,7 @@ class MiniSweAdapter(GroundtruthController):
 
         self._model_visible_delivery_count = candidate_ordinal
         self._model_visible_delivery_bytes += rendered_bytes
+        self._model_visible_delivery_identities.add(delivery_identity)
         if lane == "sealed":
             self._accepted_sealed_delivery_count += 1
         event = "context_addition_delivery" if lane == "prompt" else "evidence_delivery"
@@ -933,17 +942,18 @@ class MiniSweAdapter(GroundtruthController):
             action_index=action_index,
             iteration=iteration,
             evidence_type=kind,
-            dedup_key=dedup_key,
+            dedup_key=effective_dedup_key,
             target=target,
             rendered_bytes=rendered_bytes,
             payload_sha256=payload_sha256,
+            delivery_identity=delivery_identity,
             semantics=semantics,
             artifact_sha256=artifact_sha256,
             delivery_ordinal=candidate_ordinal,
         )
         self.record_delivery_receipt(
             evidence_type=kind,
-            dedup_key=dedup_key,
+            dedup_key=effective_dedup_key,
             target=target,
             payload_hash=payload_sha256,
             action_index=action_index,

@@ -247,9 +247,9 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "conversion_from_legacy_tokens": "4_bytes_per_token",
         "repository_start_limit": 2_000,
         "repository_update_limit": 1_400,
-        "total_limit": 4_800,
+        "total_limit": 9_600,
         "total_observed": 223,
-        "task_delivery_limit": 4,
+        "task_delivery_limit": 24,
         "admitted_count": 2,
         "refused_count": 1,
     }
@@ -275,7 +275,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     mutations = {
         "treatment_delivery_limit_exceeded": lambda row: row["treatment_receipt"][
             "provider_delivery_receipts"
-        ].extend(deepcopy(row["treatment_receipt"]["provider_delivery_receipts"]) * 4),
+        ].extend(deepcopy(row["treatment_receipt"]["provider_delivery_receipts"]) * 12),
         "treatment_delivery_late": lambda row: row["treatment_receipt"][
             "provider_delivery_receipts"
         ][0].update(same_observation=False),
@@ -285,6 +285,16 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "treatment_prompt_context_budget_exceeded": lambda row: row[
             "treatment_receipt"
         ]["provider_delivery_receipts"][0].update(context_byte_count=1_401),
+        "treatment_duplicate_delivery_identity": lambda row: row[
+            "treatment_receipt"
+        ]["provider_delivery_receipts"][1].update(
+            context_sha256=row["treatment_receipt"]["provider_delivery_receipts"][0][
+                "context_sha256"
+            ],
+            delivery_identity=row["treatment_receipt"]["provider_delivery_receipts"][0][
+                "delivery_identity"
+            ],
+        ),
         "treatment_delivery_refusal_invalid": lambda row: row[
             "treatment_receipt"
         ]["refused_deliveries"][0].update(dedup_key="prompt-contract-1"),

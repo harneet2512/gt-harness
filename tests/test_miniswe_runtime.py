@@ -522,7 +522,7 @@ def test_evidence_capsule_splices_into_observation(monkeypatch, tmp_path):
     assert "<returncode>" in spliced[0]
 
 
-def test_sealed_evidence_is_refused_after_shared_prompt_lane_dose_ceiling(
+def test_sealed_evidence_is_refused_after_shared_prompt_lane_storm_backstop(
     monkeypatch, tmp_path
 ):
     agent = FakeAgent()
@@ -535,11 +535,11 @@ def test_sealed_evidence_is_refused_after_shared_prompt_lane_dose_ceiling(
     )
     monkeypatch.setattr(
         rt, "run_evidence_pipeline",
-        lambda *a, **k: EvidenceResult(rendered="[GT] fifth evidence", sealed=True),
+        lambda *a, **k: EvidenceResult(rendered="[GT] twenty-fifth evidence", sealed=True),
     )
     install_runtime_hooks(agent, adapter)
     agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
-    for ordinal in range(2, 5):
+    for ordinal in range(2, 25):
         assert adapter.admit_model_visible_delivery(
             lane="prompt",
             kind="context_delta",
@@ -560,8 +560,8 @@ def test_sealed_evidence_is_refused_after_shared_prompt_lane_dose_ceiling(
     ]
     refused = [row for row in rows if row["event"] == "delivery_refused"]
     assert refused[-1]["lane"] == "sealed"
-    assert refused[-1]["candidate_ordinal"] == 5
-    assert refused[-1]["reason"] == "task_delivery_dose_ceiling"
+    assert refused[-1]["candidate_ordinal"] == 25
+    assert refused[-1]["reason"] == "task_delivery_storm_backstop"
 
 
 def test_newfile_precedent_delivered_on_file_create(tmp_path, monkeypatch):

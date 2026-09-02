@@ -4,8 +4,10 @@ from __future__ import annotations
 
 DELIVERY_BYTE_LIMITS = {"repository_start": 2_000, "repository_update": 1_400}
 PROMPT_CONTEXT_BYTE_LIMIT = DELIVERY_BYTE_LIMITS["repository_update"]
-TOTAL_DELIVERY_BYTE_LIMIT = 4_800
-MAX_TASK_DELIVERIES = 4
+TOTAL_DELIVERY_BYTE_LIMIT = 9_600
+# This is a pathological re-offer-loop backstop, not a context dose policy.
+# Legitimate distinct deliveries are controlled by content identity and bytes.
+MAX_TASK_DELIVERIES = 24
 
 
 def truncate_utf8(value: str, limit: int) -> str:

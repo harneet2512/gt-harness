@@ -259,7 +259,7 @@ class GTSession:
                     rendered=rendered,
                     action_index=0,
                     iteration=iteration,
-                    dedup_key=f"prompt:{kind}:{iteration}:{payload_hash}",
+                    dedup_key=f"prompt:{payload_hash}",
                     target="provider_prompt",
                 ):
                     additions.append(rendered)

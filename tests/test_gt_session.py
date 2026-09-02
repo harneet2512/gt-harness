@@ -181,27 +181,27 @@ def test_prompt_context_addition_is_bounded_and_receipt_visible(
     assert census[0]["payload_sha256"] == hashlib.sha256(encoded).hexdigest()
 
 
-def test_runtime_delivery_ceiling_refuses_fifth_prompt_dose_without_raising(
+def test_runtime_storm_backstop_refuses_twenty_fifth_prompt_dose_without_raising(
     tmp_path, monkeypatch
 ):
     a = _adapter(tmp_path)
-    deltas = iter(f"delta-{index}" for index in range(5))
+    deltas = iter(f"delta-{index}" for index in range(25))
     monkeypatch.setattr(a, "next_contract_delta", lambda **_kwargs: next(deltas))
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)
 
     delivered = [
         s.before_model([], iteration=index).context_additions
-        for index in range(5)
+        for index in range(25)
     ]
 
-    assert all(delivered[index] for index in range(4))
-    assert delivered[4] == []
+    assert all(delivered[index] for index in range(24))
+    assert delivered[24] == []
     rows = [
         json.loads(line)
         for line in a.store.path.read_text(encoding="utf-8").splitlines()
     ]
-    assert len([row for row in rows if row["event"] == "context_addition_delivery"]) == 4
+    assert len([row for row in rows if row["event"] == "context_addition_delivery"]) == 24
     refused = [row for row in rows if row["event"] == "delivery_refused"]
     assert len(refused) == 1
-    assert refused[0]["reason"] == "task_delivery_dose_ceiling"
-    assert refused[0]["candidate_ordinal"] == 5
+    assert refused[0]["reason"] == "task_delivery_storm_backstop"
+    assert refused[0]["candidate_ordinal"] == 25
