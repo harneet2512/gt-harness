@@ -1,0 +1,29 @@
+{
+  "created_at":"2026-09-02T00:10:54.193403Z",
+  "detail":{
+    "benchmark_runs":0,
+    "candidate_parent":"ca744e7ebb7d03b6d11e31eeab8600cdb3669bdd",
+    "feature_matrix":"19/19_witnessed",
+    "provider_calls":0,
+    "serial_local":"green_except_linux_container_proof_deselected",
+    "workflow_validation":"green",
+    "xdist_local":"green_except_linux_container_proof_deselected"
+  },
+  "file":"",
+  "head_sha":"40637f03744ae1e06d6b318933fa45f9fa6670c9",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 offline readiness candidate awaits provider-free Linux CI",
+  "packet_digest_sha256":"c30fd546d806c541a7f4201b199745cbe2a5c7adc278edf8777e84741d18cc30",
+  "packet_id":"har81-readiness-40637f03",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"offline-readiness-candidate",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":null,
+  "ticket":"HAR-81"
+}

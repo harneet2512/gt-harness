@@ -125,6 +125,7 @@
     "har80-harness-b98ef05c",
     "har80-inbox-tool-bf088d22",
     "har80-route-b-701a8472",
+    "har81-readiness-40637f03",
     "merge-har70-ff578719",
     "merge-har70-ff578719-v2",
     "merge-har76-701a8472",
@@ -341,6 +342,7 @@
       "merge-har80-a4af3484"
     ],
     "HAR-81":[
+      "har81-readiness-40637f03",
       "merge-har81-35766673",
       "merge-har81-529d835a",
       "merge-har81-ca744e7e",
