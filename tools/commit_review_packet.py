@@ -35,7 +35,7 @@ def write_index(index: dict) -> None:
 
 
 def supersession_chain(index: dict, *, ticket: str, packet_id: str | None) -> list[str]:
-    """Return a verified same-ticket live ancestry, newest first."""
+    """Return verified same-ticket ancestry, requiring the direct target live."""
     chain: list[str] = []
     seen: set[str] = set()
     live = set(index.get("live_packets") or [])
@@ -54,7 +54,10 @@ def supersession_chain(index: dict, *, ticket: str, packet_id: str | None) -> li
             or packet.get("packet_digest_sha256") != digest_packet(packet)
         ):
             raise SystemExit(f"invalid superseded packet: {current}")
-        if current not in live:
+        # Only the packet named by the new packet can still be live. Its
+        # ancestors were necessarily retired when it was issued, but they
+        # remain part of the immutable chain and must still verify.
+        if not chain and current not in live:
             raise SystemExit(f"superseded packet is not live: {current}")
         chain.append(current)
         parent = packet.get("supersedes")
