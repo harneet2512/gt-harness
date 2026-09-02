@@ -63,10 +63,12 @@ jobs:
           export SOURCE_COMMIT BUILD_TIME
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
-          mkdir -p "${OUTPUT_ROOT}"
+          mkdir -p "${OUTPUT_ROOT}/.cache/go-build" "${OUTPUT_ROOT}/.cache/gomod"
           docker run --rm --network bridge \
             --user "$(id -u):$(id -g)" \
             -e SOURCE_COMMIT -e BUILD_TIME \
+            -e GOCACHE=/output/.cache/go-build \
+            -e GOMODCACHE=/output/.cache/gomod \
             -v "${SOURCE_ROOT}:/source:ro" \
             -v "${OUTPUT_ROOT}:/output" \
             -w /source/gt-index \
@@ -80,6 +82,7 @@ jobs:
                 -ldflags "${LDFLAGS}" \
                 -o /output/gt-index-linux-amd64 ./cmd/gt-index/'
           chmod +x "${OUTPUT_ROOT}/gt-index-linux-amd64"
+          rm -rf "${OUTPUT_ROOT}/.cache"
           "${OUTPUT_ROOT}/gt-index-linux-amd64" -build-info > "${OUTPUT_ROOT}/build-info.json"
           python - <<'PY'
           import hashlib, json
