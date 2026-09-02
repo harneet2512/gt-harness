@@ -82,8 +82,8 @@ jobs:
             -w /source/gt-index \
             "${GO_IMAGE}" \
             bash -c 'set -euo pipefail
-              SOURCE_FINGERPRINT="$(find . -type f \( -name "*.go" -o -name "*.c" -o -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.s" -o -name "go.mod" -o -name "go.sum" \) -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | awk "{print \$1}")"
-              GO_TOOLCHAIN="$(go version | awk "{print \$3}")"
+              SOURCE_FINGERPRINT="$(find . -type f \( -name "*.go" -o -name "*.c" -o -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.s" -o -name "go.mod" -o -name "go.sum" \) -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d " " -f 1)"
+              GO_TOOLCHAIN="$(go env GOVERSION)"
               LDFLAGS="-linkmode external -extldflags=-static -X main.commitSHA=${SOURCE_COMMIT} -X main.buildTimeUTC=${BUILD_TIME} -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}"
               CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
                 -buildvcs=false -tags sqlite_fts5 -trimpath -mod=readonly \
