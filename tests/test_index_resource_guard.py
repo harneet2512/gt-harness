@@ -188,6 +188,28 @@ def test_pipe_cleanup_closes_raw_descriptors_not_buffered_streams(monkeypatch) -
     assert closed == [7, 8]
 
 
+def test_windows_tree_kill_uses_taskkill_tree_flag(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    class Process:
+        pid = 42
+
+        @staticmethod
+        def poll():
+            return 1
+
+        @staticmethod
+        def kill():
+            raise AssertionError("parent-only kill must not be the primary path")
+
+    monkeypatch.setattr(indexer.os, "name", "nt")
+    monkeypatch.setattr(
+        indexer.subprocess, "run", lambda command, **_kwargs: calls.append(command)
+    )
+    indexer._kill_index_process_tree(Process())
+    assert calls == [["taskkill", "/PID", "42", "/T", "/F"]]
+
+
 def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
     mib = 1024 * 1024
     limit = indexer._effective_index_memory_limit(
@@ -416,6 +438,28 @@ def test_failure_receipt_rejects_semantically_mismatched_pair(
     ).hexdigest()
     failure_path.write_text(json.dumps(failure), encoding="utf-8")
     monkeypatch.setattr(indexer, "ensure_index", lambda *_args, **_kwargs: None)
+
+    receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
+    assert receipt.error_type == "index_failure_evidence_invalid"
+
+    evidence_path = next(state.rglob("index-failure-resource.json"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    evidence["status"] = "NOT_A_REAL_STATUS"
+    evidence.pop("evidence_sha256")
+    evidence["evidence_sha256"] = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+    failure["error_code"] = "GT_INDEX_TIMEOUT"
+    failure["resource_evidence_path"] = evidence_path.name
+    failure["resource_evidence_sha256"] = hashlib.sha256(
+        evidence_path.read_bytes()
+    ).hexdigest()
+    failure.pop("manifest_sha256")
+    failure["manifest_sha256"] = hashlib.sha256(
+        json.dumps(failure, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    failure_path.write_text(json.dumps(failure), encoding="utf-8")
 
     receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
     assert receipt.error_type == "index_failure_evidence_invalid"

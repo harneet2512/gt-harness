@@ -115,7 +115,7 @@ async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_p
 
     async def execute(_environment, _command, *, env, **_kwargs):
         captured.update(env)
-        if "agent_resource_evidence" in _command:
+        if "resource-snapshot.py" in _command:
             return SimpleNamespace(stdout=json.dumps({
                 "schema": "gt.agent_resource_snapshot.v1",
                 "task_id": "arktype-task",
@@ -158,10 +158,12 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
     monkeypatch.setattr(agent, "exec_as_agent", execute)
     with pytest.raises(NonZeroAgentExitCodeError):
         await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
-    assert "scripts.agent_resource_evidence" in commands[0]
+    assert "/installed-agent/resource-snapshot.py" in commands[0]
+    assert "sha256sum -c -" in commands[0]
+    assert ' -I /installed-agent/resource-snapshot.py ' in commands[0]
     assert commands[1].startswith("exec ")
     assert "scripts.miniswe_gt_run" in commands[1]
-    assert "scripts.agent_resource_evidence" in commands[2]
+    assert "/installed-agent/resource-snapshot.py" in commands[2]
     evidence = json.loads((tmp_path / "logs" / "agent-resource.json").read_text())
     assert evidence["attestation_scope"] == "host_agent_adapter"
     assert evidence["error_code"] == "GT_AGENT_CGROUP_OOM"
@@ -265,10 +267,14 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(
 
     await agent.install(Environment())
 
-    install = commands[-1]
+    install = next(command for command in commands if "tool install --offline" in command)
     assert '--with "mini-swe-agent==2.4.6"' in install
     assert "m.version('mini-swe-agent') == '2.4.6'" in install
     assert "sha256sum -c -" in install
     assert "curl -LsSf" not in install
     assert str(harness_wheel.name) in install
     assert "/installed-agent/miniswe" not in install
+    immutable = commands[-1]
+    assert "chown -R 0:0 /installed-agent/python" in immutable
+    assert "chmod 555 /installed-agent/resource-snapshot.py" in immutable
+    assert "sha256sum -c -" in immutable

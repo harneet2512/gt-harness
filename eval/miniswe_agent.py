@@ -12,6 +12,7 @@ interpreter lives at the layout GTNanoAgent already relies on.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -40,6 +41,7 @@ _REMOTE_PYTHON_DIR = "/installed-agent/python"
 _REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
+_REMOTE_RESOURCE_HELPER = "/installed-agent/resource-snapshot.py"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
 _DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
@@ -237,6 +239,8 @@ class MiniSweAgent(BaseInstalledAgent):
         uv_installer = self._uv_installer_host()
         python_archive = self._python_archive_host()
         wheelhouse = self._wheelhouse_host()
+        resource_helper = _REPO_ROOT / "scripts" / "agent_resource_evidence.py"
+        resource_helper_sha256 = hashlib.sha256(resource_helper.read_bytes()).hexdigest()
         miniswe_version = _miniswe_agent_version()
         remote_gt_wheel = f"{_REMOTE_BUNDLE_DIR}/{wheel.name}"
         # Harbor's task images do not guarantee that the treatment mount exists.
@@ -251,6 +255,7 @@ class MiniSweAgent(BaseInstalledAgent):
         await environment.upload_file(uv_installer, _REMOTE_UV_INSTALLER)
         await environment.upload_file(python_archive, _REMOTE_PYTHON_ARCHIVE)
         await environment.upload_dir(wheelhouse, _REMOTE_WHEELHOUSE)
+        await environment.upload_file(resource_helper, _REMOTE_RESOURCE_HELPER)
         await self.exec_as_root(environment, f"chmod 755 {_REMOTE_GT_BINARY}")
         install = (
             "set -eu; "
@@ -281,6 +286,13 @@ class MiniSweAgent(BaseInstalledAgent):
             f"rm -rf -- {_REMOTE_BUNDLE_DIR} /tmp/gt-install-smoke-src"
         )
         await self.exec_as_agent(environment, install, env=dict(UTF8_ENV))
+        await self.exec_as_root(
+            environment,
+            f"chown -R 0:0 {_REMOTE_PYTHON_DIR} {_REMOTE_RESOURCE_HELPER} && "
+            f"chmod -R a-w {_REMOTE_PYTHON_DIR} && chmod 555 {_REMOTE_RESOURCE_HELPER} && "
+            f"echo '{resource_helper_sha256}  {_REMOTE_RESOURCE_HELPER}' | sha256sum -c -",
+            env=dict(UTF8_ENV),
+        )
 
     def _model_and_env(self) -> tuple[str, dict[str, str]]:
         model = str(self.model_name or "").strip()
@@ -351,8 +363,11 @@ class MiniSweGtAgent(MiniSweAgent):
 
     @staticmethod
     def _resource_command(task_id: str, product_source_sha: str) -> str:
+        helper = _REPO_ROOT / "scripts" / "agent_resource_evidence.py"
+        expected = hashlib.sha256(helper.read_bytes()).hexdigest()
         return (
-            f'"{_REMOTE_PY}" -m scripts.agent_resource_evidence '
+            f"echo '{expected}  {_REMOTE_RESOURCE_HELPER}' | sha256sum -c - >/dev/null && "
+            f'"{_REMOTE_PYTHON_DIR}/bin/python3.12" -I {_REMOTE_RESOURCE_HELPER} '
             f"--task-id {shlex.quote(task_id)} "
             f"--product-source-sha {shlex.quote(product_source_sha)}"
         )
@@ -388,6 +403,7 @@ class MiniSweGtAgent(MiniSweAgent):
             environment,
             self._resource_command(task_id, product_source_sha),
             env=dict(UTF8_ENV),
+            cwd="/",
         )
         before = parse_snapshot(
             str(before_result.stdout),
@@ -411,6 +427,7 @@ class MiniSweGtAgent(MiniSweAgent):
                         environment,
                         self._resource_command(task_id, product_source_sha),
                         env=dict(UTF8_ENV),
+                        cwd="/",
                     )
                     after = parse_snapshot(
                         str(after_result.stdout),
@@ -430,3 +447,8 @@ class MiniSweGtAgent(MiniSweAgent):
                     # Resource finalization cannot replace the exact runner error.
                     pass
             raise
+        except BaseException:
+            resource_path.unlink(missing_ok=True)
+            raise
+        else:
+            resource_path.unlink(missing_ok=True)

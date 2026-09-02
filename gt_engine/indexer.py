@@ -368,10 +368,19 @@ def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
 def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> None:
     try:
         if os.name == "nt":
-            process.kill()
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+            if process.poll() is None:
+                process.kill()
         else:
             os.killpg(process.pid, signal.SIGKILL)
-    except (OSError, ProcessLookupError):
+    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
         pass
 
 
@@ -1056,6 +1065,38 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             if evidence is not None
             else ""
         )
+        status_by_code = {
+            "GT_INDEX_CGROUP_OOM": "cgroup_oom",
+            "GT_INDEX_EXIT_137_UNATTRIBUTED": "signal_9_unattributed",
+            "GT_INDEX_IDENTITY_INVALID": "identity_refused",
+            "GT_INDEX_LAUNCH_FAILED": "launch_failed",
+            "GT_INDEX_MEMORY_GUARD_TRIGGERED": "memory_guard_triggered",
+            "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT": "memory_headroom_refused",
+            "GT_INDEX_OUTPUT_INVALID": "output_invalid",
+            "GT_INDEX_OUTPUT_MISSING": "output_missing",
+            "GT_INDEX_PROCESS_FAILED": "nonzero_exit",
+            "GT_INDEX_TIMEOUT": "timeout",
+        }
+        evidence_code = str(evidence.get("error_code") or "") if evidence else ""
+        memory_codes = {"GT_INDEX_CGROUP_OOM", "GT_INDEX_MEMORY_GUARD_TRIGGERED"}
+        evidence_exit = evidence.get("exit_code") if evidence else None
+        if evidence_code in {
+            "GT_INDEX_IDENTITY_INVALID",
+            "GT_INDEX_LAUNCH_FAILED",
+            "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
+        }:
+            exit_valid = evidence_exit is None
+        elif evidence_code in {"GT_INDEX_OUTPUT_INVALID", "GT_INDEX_OUTPUT_MISSING"}:
+            exit_valid = evidence_exit == 0
+        elif evidence_code in {
+            "GT_INDEX_CGROUP_OOM",
+            "GT_INDEX_EXIT_137_UNATTRIBUTED",
+            "GT_INDEX_MEMORY_GUARD_TRIGGERED",
+            "GT_INDEX_TIMEOUT",
+        }:
+            exit_valid = evidence_exit in {-9, 137}
+        else:
+            exit_valid = type(evidence_exit) is int and evidence_exit not in {0, -9, 137}
         bound = bool(
             failure is not None
             and evidence is not None
@@ -1064,7 +1105,32 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             and failure.get("resource_evidence_sha256") == evidence_file_sha
             and failure.get("resource_evidence_path") == evidence_path.name
             and failure.get("error_code") == evidence.get("error_code")
-            and evidence.get("status") != "completed"
+            and evidence.get("status") == status_by_code.get(evidence_code)
+            and evidence.get("memory_evidence") is (evidence_code in memory_codes)
+            and exit_valid
+            and (
+                evidence_code != "GT_INDEX_CGROUP_OOM"
+                or (
+                    type(evidence.get("cgroup_oom_delta")) is int
+                    and type(evidence.get("cgroup_oom_kill_delta")) is int
+                    and (
+                        evidence.get("cgroup_oom_delta", 0) > 0
+                        or evidence.get("cgroup_oom_kill_delta", 0) > 0
+                    )
+                )
+            )
+            and (
+                evidence_code != "GT_INDEX_MEMORY_GUARD_TRIGGERED"
+                or (
+                    type(evidence.get("peak_rss_bytes")) is int
+                    and type(evidence.get("memory_limit_bytes")) is int
+                    and evidence.get("peak_rss_bytes", 0)
+                    > evidence.get("memory_limit_bytes", 0) > 0
+                )
+            )
+            and type(evidence.get("elapsed_ms")) is int
+            and type(evidence.get("stdout_bytes")) is int
+            and type(evidence.get("stderr_bytes")) is int
             and failure.get("error_code")
             in {
                 "GT_INDEX_CGROUP_OOM",

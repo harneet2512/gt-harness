@@ -253,8 +253,12 @@ def standardize_result(
     if len(product_paths) > 1:
         raise ValueError(f"expected at most one GT product receipt, found {len(product_paths)}")
     product = _read_json(product_paths[0]) if product_paths else None
-    if product is not None and str(product.get("task_id") or "") != task_id:
-        raise ValueError("GT product receipt task does not match runner task")
+    if product is not None and (
+        product.get("schema") != "gt.run_receipt.v1"
+        or str(product.get("task_id") or "") != task_id
+        or product.get("product_source_sha") != source_sha
+    ):
+        raise ValueError("GT product receipt identity does not match runner task")
 
     result_path, runner_result, trial = _runner_results(root)
     if trial is not None:

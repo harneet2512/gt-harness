@@ -35,7 +35,8 @@ def _write_case(
     (trial_dir / "result.json").write_text(json.dumps(trial), encoding="utf-8")
     if product:
         (agent / "gt-run.json").write_text(
-            json.dumps({"schema": "gt.run_receipt.v1", "task_id": "task-a"}),
+            json.dumps({"schema": "gt.run_receipt.v1", "task_id": "task-a",
+                        "product_source_sha": "a" * 40}),
             encoding="utf-8",
         )
     return agent
@@ -96,6 +97,30 @@ def test_standardize_provider_balance_failure_is_not_rate_limit(tmp_path: Path) 
     assert receipt["error_code"] == "provider_insufficient_balance"
     assert receipt["product_receipt_present"] is False
     assert (agent / "official-verifier-result.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"schema": "wrong.schema"},
+        {"product_source_sha": "b" * 40},
+    ],
+)
+def test_product_receipt_identity_mutation_cannot_be_accepted(
+    tmp_path: Path, mutation: dict[str, object]
+) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={"task_name": "datacurve/task-a", "trial_name": "task-a__trial"},
+    )
+    path = agent / "gt-run.json"
+    product = json.loads(path.read_text(encoding="utf-8"))
+    product.update(mutation)
+    path.write_text(json.dumps(product), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="product receipt identity"):
+        _standardize(tmp_path)
 
 
 def _write_resource_evidence(agent: Path, **overrides: object) -> Path:

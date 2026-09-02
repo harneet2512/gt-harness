@@ -10,13 +10,37 @@ import re
 import tempfile
 from pathlib import Path
 
-from gt_engine.indexer import _cgroup_snapshot
-
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 
 
 def _canonical(payload: dict[str, object]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _read_integer(path: Path) -> int | None:
+    try:
+        value = path.read_text(encoding="ascii").strip()
+        return None if value == "max" else int(value)
+    except (OSError, ValueError):
+        return None
+
+
+def _cgroup_snapshot() -> dict[str, int | None]:
+    root = Path("/sys/fs/cgroup")
+    events: dict[str, int] = {}
+    try:
+        for line in (root / "memory.events").read_text(encoding="ascii").splitlines():
+            name, value = line.split(maxsplit=1)
+            events[name] = int(value)
+    except (OSError, ValueError):
+        pass
+    return {
+        "current": _read_integer(root / "memory.current"),
+        "max": _read_integer(root / "memory.max"),
+        "peak": _read_integer(root / "memory.peak"),
+        "oom": events.get("oom"),
+        "oom_kill": events.get("oom_kill"),
+    }
 
 
 def capture_snapshot(*, task_id: str, product_source_sha: str) -> dict[str, object]:
