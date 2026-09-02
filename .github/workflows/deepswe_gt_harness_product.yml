@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: harneet2512/groundtruth
-          ref: ecd54695da61f64b34bb76b625a010caccc66490
+          ref: 0aadb1b9111f70f3c6b8874e1b8eff927397d22b
           path: .pinned/groundtruth
           fetch-depth: 0
           persist-credentials: false
@@ -65,9 +65,9 @@ jobs:
           OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
           # Docker Hub's linux/amd64 manifest for the immutable Go 1.22.5 image.
           GO_IMAGE='golang:1.22.5-bookworm@sha256:a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3'
-          SOURCE_COMMIT='ecd54695da61f64b34bb76b625a010caccc66490'
-          SOURCE_TREE='3f9d0c73c459a80bef0afb727deac2f97a8ce175'
-          BUILD_TIME='2026-09-02T06:41:43Z'
+          SOURCE_COMMIT='0aadb1b9111f70f3c6b8874e1b8eff927397d22b'
+          SOURCE_TREE='354a411ead9e00f4302beff97f72d478673db201'
+          BUILD_TIME='2026-09-02T06:51:07Z'
           export SOURCE_COMMIT BUILD_TIME
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
@@ -104,7 +104,7 @@ jobs:
           expected = manifest["groundtruth"]
           assert info["schema"] == "gt-index.build.v1"
           assert info["complete"] is True
-          assert info["git_commit"] == "ecd54695da61f64b34bb76b625a010caccc66490"
+          assert info["git_commit"] == "0aadb1b9111f70f3c6b8874e1b8eff927397d22b"
           assert info["go_toolchain"] == "go1.22.5"
           assert info["build_tags"] == "sqlite_fts5"
           assert info["graph_schema_version"] == "v15.2-trust-tier"
@@ -256,7 +256,7 @@ jobs:
           PRODUCER_PATH="/opt/groundtruth/gt-index/gt-index"
           sudo install -D -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
           printf '%s  %s\n' \
-            '55deddbae6f32a8d6c2bf82fa8ec13775f6fed94e4cc287c4b71178758432170' \
+            '743cb2aba6fa6b91417f45d2a60eedc823e74cb800e8ad9de9e59ac984aff294' \
             "${PRODUCER_PATH}" | sha256sum --check --strict
           "${PRODUCER_PATH}" -h >/dev/null
 
