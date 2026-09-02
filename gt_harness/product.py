@@ -925,11 +925,19 @@ def run_provider_free_acceptance(
         if path.is_file():
             content = path.read_bytes()
             matches.extend(canary for canary in canaries if canary.encode() in content)
+    acceptance_verified = (
+        parity_equal
+        and not matches
+        and installation["status"] == "VERIFIED"
+        and container_proof["status"] == "VERIFIED"
+        and fake_provider_proof["status"] == "VERIFIED"
+        and content_correctness["status"] == "PASS"
+    )
     receipt: dict[str, Any] = {
         "schema": CLOSEOUT_SCHEMA,
         "status": (
             "VERIFIED_PROVIDER_FREE"
-            if parity_equal and not matches and content_correctness["status"] == "PASS"
+            if acceptance_verified
             else "FAILED"
         ),
         "bundle_digest_sha256": bundle["bundle_digest_sha256"],
