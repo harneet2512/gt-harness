@@ -59,11 +59,13 @@ def verify_groundtruth_lineage(
     )
     expected_changes = sorted(lineage["post_certification_changed_paths"])
     failures: list[str] = []
+    source_status = _git(source, "status", "--porcelain=v1", "--untracked-files=all")
+    review_status = _git(review, "status", "--porcelain=v1", "--untracked-files=all")
     if _git(source, "rev-parse", "HEAD") != source_commit:
         failures.append("source_commit_mismatch")
     if _git(source, "rev-parse", "HEAD^{tree}") != source_tree:
         failures.append("source_tree_mismatch")
-    if _git(source, "status", "--porcelain=v1", "--untracked-files=all"):
+    if source_status:
         failures.append("source_checkout_dirty")
     ancestor = subprocess.run(
         ["git", "-C", str(source), "merge-base", "--is-ancestor", accepted, source_commit],
@@ -79,7 +81,7 @@ def verify_groundtruth_lineage(
     review_commit = str(lineage["review_inbox_commit"])
     if _git(review, "rev-parse", "HEAD") != review_commit:
         failures.append("review_checkout_commit_mismatch")
-    if _git(review, "status", "--porcelain=v1", "--untracked-files=all"):
+    if review_status:
         failures.append("review_checkout_dirty")
     try:
         index = json.loads((review / "inbox" / "INDEX.json").read_text(encoding="utf-8"))
@@ -121,14 +123,18 @@ def verify_groundtruth_lineage(
             failures.append(f"review_packet_mismatch:{packet_id}")
             continue
         superseding_live = []
-        for live_id in live_packets:
-            live_candidates = list((review / "inbox").rglob(f"{live_id}.json"))
-            if len(live_candidates) != 1:
-                superseding_live.append(live_id)
+        for live_path in (review / "inbox").rglob("*.json"):
+            if live_path.name == "INDEX.json":
                 continue
-            live_packet = json.loads(live_candidates[0].read_text(encoding="utf-8"))
-            if live_packet.get("supersedes") == packet_id:
-                superseding_live.append(live_id)
+            try:
+                live_packet = json.loads(live_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                live_packet.get("packet_id") in live_packets
+                and live_packet.get("supersedes") == packet_id
+            ):
+                superseding_live.append(str(live_packet["packet_id"]))
         if superseding_live:
             failures.append(f"review_packet_superseded_live:{packet_id}")
             continue
@@ -146,6 +152,8 @@ def verify_groundtruth_lineage(
         "post_certification_diff_match": observed_changes == expected_changes,
         "review_packet_match_count": verified_packets,
         "review_inbox_commit": review_commit,
+        "source_checkout_status": source_status.splitlines(),
+        "review_checkout_status": review_status.splitlines(),
         "failures": failures,
     }
     result["measurement_digest_sha256"] = hashlib.sha256(canonical_json_bytes(result)).hexdigest()
