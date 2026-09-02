@@ -53,20 +53,22 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "from gt_harness.runtime_receipts import" not in paid
 
 
-def test_paid_smoke_requires_exact_task_image_cache_before_provider_gate() -> None:
+def test_paid_smoke_requires_all_exact_task_image_digests_before_provider_gate() -> None:
     paid = PAID_WORKFLOW.read_text(encoding="utf-8")
     assert '"container_image": bundle_task["container_image"]' in paid
     assert '"container_digest": bundle_task["container_digest"]' in paid
-    assert "image_cache:" in paid
-    assert "needs: [plan, image_cache]" in paid
-    assert "needs: [plan, image_cache, provider_gate]" in paid
-    assert "Restore the exact task image cache" in paid
-    assert "Populate the exact task image cache without provider access" in paid
-    assert "Load and verify the exact cached task image" in paid
-    assert 'CACHE_DIGEST_REF="${CACHE_REPOSITORY}@${SOURCE_DIGEST}"' in paid
-    assert 'docker pull "$CACHE_DIGEST_REF"' in paid
-    assert 'docker pull "$SOURCE_DIGEST_REF"' in paid
-    assert "docker image inspect" in paid
-    assert "secrets.OPENROUTER_API_KEY" not in paid.split("  image_cache:", 1)[1].split(
+    assert "image_digest_gate:" in paid
+    assert "needs: [plan, image_digest_gate]" in paid
+    assert "needs: [plan, image_digest_gate, provider_gate]" in paid
+    assert "Verify all exact task-image manifests without provider access" in paid
+    assert 'docker buildx imagetools inspect --raw "$IMAGE_REF"' in paid
+    assert 'test "sha256:${OBSERVED}" = "${DIGEST}"' in paid
+    assert "Pull and verify the exact task image" in paid
+    assert 'docker pull "${SOURCE_IMAGE}@${SOURCE_DIGEST}"' in paid
+    assert "image_cache:" not in paid
+    assert "ghcr.io/" not in paid
+    assert "secrets.OPENROUTER_API_KEY" not in paid.split(
+        "  image_digest_gate:", 1
+    )[1].split(
         "  provider_gate:", 1
     )[0]
