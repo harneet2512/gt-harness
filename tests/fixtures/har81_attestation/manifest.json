@@ -4,6 +4,12 @@
     "fixture": "content_recordings.json",
     "run_ids": ["33563173631", "33565965241", "33567358689"],
     "shipped_delivery_count": 12,
+    "renderer_source_revisions": [
+      "529d835a2b3e1c6c3e3752cd8bfa477b27b591a0",
+      "357666739cfe778b71508c68341948087f639b89",
+      "ca744e7ebb7d03b6d11e31eeab8600cdb3669bdd"
+    ],
+    "historical_adjudication_count": 5,
     "artifact_source": "HAR-82",
     "mutation_surfaces": [
       "payload",

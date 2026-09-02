@@ -1,0 +1,14 @@
+{
+  "benchmark_suite": "deepswe",
+  "error_code": "",
+  "failure_class": "graded",
+  "product_receipt_present": false,
+  "product_source_sha": "529d835a2b3e1c6c3e3752cd8bfa477b27b591a0",
+  "reward": 1,
+  "runner_result_path": "deepswe-gt-harness-33563173631-abs-module-cache-flags/result.json",
+  "runner_result_sha256": "c8d76965841758a0070197aeb90d1466aadd9a7731aae511d51003be5f478c3c",
+  "schema": "gt.official_verifier_result.v1",
+  "solved": true,
+  "status": "GRADED",
+  "task_id": "abs-module-cache-flags"
+}

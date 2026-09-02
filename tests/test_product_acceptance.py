@@ -221,7 +221,9 @@ def test_provider_free_acceptance_executes_both_parity_arms(tmp_path: Path) -> N
     assert receipt["content_correctness"]["run_count"] == 3
     assert receipt["content_correctness"]["delivery_count"] == 12
     assert receipt["content_correctness"]["payload_match_count"] == 12
-    assert receipt["content_correctness"]["mismatch_count"] == 5
+    assert receipt["content_correctness"]["mismatch_count"] == 0
+    assert receipt["content_correctness"]["historical_adjudication_count"] == 5
+    assert receipt["content_correctness"]["renderer_provenance_match_count"] == 3
     assert set(receipt["content_correctness"]["mutation_cases"].values()) == {"FAIL_AS_DESIGNED"}
     assert "recorded_content_correctness_failed" in receipt["release_blockers"]
     assert (

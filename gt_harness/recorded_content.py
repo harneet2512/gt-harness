@@ -122,7 +122,11 @@ def _cap_evidence(text: str, max_chars: int) -> str:
 
 
 def _new_file_body(
-    snapshot: dict[str, Any], created_files: list[str], revision: str
+    snapshot: dict[str, Any],
+    created_files: list[str],
+    revision: str,
+    *,
+    max_chars: int | None = 600,
 ) -> str:
     paths = [str(row.get("path") or "") for row in snapshot.get("files", [])]
     lines: list[str] = []
@@ -145,7 +149,77 @@ def _new_file_body(
                 "reason=same_directory,same_extension; inspect="
                 + ", ".join(f"{directory}/{item}".lstrip("/") for item in siblings)
             )
-    return _cap_evidence("\n".join(lines), 600)
+    body = "\n".join(lines)
+    return _cap_evidence(body, max_chars) if max_chars is not None else body
+
+
+def _git_blob_sha1(payload: bytes) -> str:
+    header = b"blob " + str(len(payload)).encode("ascii") + b"\0"
+    return hashlib.sha1(header + payload).hexdigest()  # noqa: S324 - Git identity
+
+
+def _verify_renderer_provenance(
+    root: Path, run: dict[str, Any]
+) -> tuple[bool, list[str]]:
+    """Bind retained runtime bytes to the exact product source revision."""
+
+    reasons: list[str] = []
+    provenance = run.get("renderer_provenance")
+    if not isinstance(provenance, dict):
+        return False, ["renderer_provenance_missing"]
+    try:
+        config_bytes = _safe_path(root, provenance["product_config_path"]).read_bytes()
+        run_bytes = _safe_path(root, provenance["run_receipt_path"]).read_bytes()
+        repro_bytes = _safe_path(root, provenance["reproducibility_manifest_path"]).read_bytes()
+        if _sha256(config_bytes) != provenance["product_config_sha256"]:
+            reasons.append("product_config_digest_mismatch")
+        if _sha256(run_bytes) != provenance["run_receipt_sha256"]:
+            reasons.append("run_receipt_digest_mismatch")
+        if _sha256(repro_bytes) != provenance["reproducibility_manifest_sha256"]:
+            reasons.append("reproducibility_manifest_digest_mismatch")
+        config = json.loads(config_bytes)
+        run_receipt = json.loads(run_bytes)
+        repro = json.loads(repro_bytes)
+        source_commit = provenance["source_commit"]
+        configured_commit = config["agent"]["kwargs"]["product_source_sha"]
+        if configured_commit != source_commit or run_receipt.get("product_source_sha") != source_commit:
+            reasons.append("renderer_source_revision_mismatch")
+        integrity = run_receipt.get("integrity") or {}
+        if integrity and integrity.get("reproducibility_manifest_sha256") != _sha256(repro_bytes):
+            reasons.append("run_to_reproducibility_digest_mismatch")
+        source_files = provenance.get("source_files")
+        if not isinstance(source_files, list) or not source_files:
+            reasons.append("renderer_source_closure_missing")
+            source_files = []
+        by_repository_path: dict[str, dict[str, Any]] = {}
+        for record in source_files:
+            source_bytes = _safe_path(root, record["path"]).read_bytes()
+            if (
+                len(source_bytes) != record["bytes"]
+                or _sha256(source_bytes) != record["sha256"]
+                or _git_blob_sha1(source_bytes) != record["git_blob_sha1"]
+            ):
+                reasons.append("renderer_source_digest_mismatch")
+            by_repository_path[str(record["repository_path"])] = record
+        runner_record = by_repository_path.get("scripts/miniswe_gt_run.py")
+        installed_runner = next(
+            (
+                row
+                for row in repro.get("runner_sources", [])
+                if str(row.get("path") or "").endswith("/scripts/miniswe_gt_run.py")
+            ),
+            None,
+        )
+        if (
+            runner_record is None
+            or installed_runner is None
+            or installed_runner.get("sha256") != runner_record.get("sha256")
+            or installed_runner.get("bytes") != runner_record.get("bytes")
+        ):
+            reasons.append("installed_renderer_source_mismatch")
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        reasons.append("renderer_provenance_invalid")
+    return not reasons, sorted(set(reasons))
 
 
 def _trace_body(trajectory: dict[str, Any], message_index: int, target: str) -> str:
@@ -204,9 +278,12 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
         "claim_match_count": 0,
         "consequence_match_count": 0,
         "attestation_match_count": 0,
+        "renderer_provenance_match_count": 0,
+        "historical_adjudication_count": 0,
         "mismatch_count": 0,
     }
-    if fixture.get("schema") != "gt.recorded_content_fixture.v2":
+    adjudications: list[dict[str, Any]] = []
+    if fixture.get("schema") != "gt.recorded_content_fixture.v3":
         failures.append(
             {
                 "run_id": "fixture",
@@ -226,6 +303,11 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
     for run in fixture.get("runs", []):
         run_id = str(run.get("run_id") or "")
         run_failures: list[str] = []
+        provenance_ok, provenance_reasons = _verify_renderer_provenance(root, run)
+        if provenance_ok:
+            counts["renderer_provenance_match_count"] += 1
+        else:
+            run_failures.extend(provenance_reasons)
         try:
             events_bytes = _safe_path(root, run["events_path"]).read_bytes()
             if _sha256(events_bytes) != run["events_sha256"]:
@@ -350,11 +432,13 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
                             )
                             if snapshot.get("revision") != edit.get("post_revision"):
                                 reasons.append("snapshot_revision_mismatch")
-                            rederived = _new_file_body(
+                            full_rederived = _new_file_body(
                                 snapshot,
                                 [str(path) for path in edit.get("changed_paths", [])],
                                 str(edit.get("post_revision") or "unknown"),
+                                max_chars=None,
                             )
+                            rederived = _cap_evidence(full_rederived, 600)
                         elif kind == "trace_frame":
                             derivation_bytes = _safe_path(
                                 root, delivery["derivation_path"]
@@ -385,12 +469,39 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
                     else:
                         reasons.append("shipped_payload_mismatch")
                     target_paths = {target}
-                    if kind == "new_file_destination":
-                        target_paths = {
-                            line.split(": advisory precedent", 1)[0]
-                            for line in rederived.splitlines()
-                        }
-                    if target_paths and target_paths <= graph_paths:
+                    target_proven = bool(target_paths and target_paths <= graph_paths)
+                    if kind == "new_file_destination" and not target_proven:
+                        try:
+                            snapshot_event = by_sequence.get(
+                                int(delivery["delivery_time_snapshot_sequence"]), {}
+                            )
+                            snapshot_bytes = _safe_path(
+                                root, delivery["derivation_path"]
+                            ).read_bytes()
+                            delivery_snapshot = json.loads(snapshot_bytes)
+                            snapshot_paths = {
+                                str(row.get("path") or "")
+                                for row in delivery_snapshot.get("files", [])
+                            }
+                            edit_sequence = int(delivery["edit_transaction_sequence"])
+                            if not (
+                                snapshot_event.get("event") == "repository_snapshot"
+                                and snapshot_event.get("boundary") == "after_action"
+                                and snapshot_event.get("snapshot_sha256")
+                                == delivery.get("derivation_sha256")
+                                and int(snapshot_event.get("sequence") or 0) < edit_sequence
+                                < int(delivery.get("event_sequence") or 0)
+                            ):
+                                reasons.append("delivery_time_snapshot_order_invalid")
+                            elif not target_paths <= snapshot_paths:
+                                reasons.append("target_not_in_delivery_time_snapshot")
+                            elif not provenance_ok:
+                                reasons.append("new_file_adjudication_provenance_invalid")
+                            else:
+                                target_proven = True
+                        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                            reasons.append("delivery_time_snapshot_invalid")
+                    if target_proven:
                         counts["target_match_count"] += 1
                     else:
                         reasons.append("target_not_in_recorded_graph")
@@ -410,9 +521,51 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
                         counts["consequence_match_count"] += 1
                     else:
                         reasons.append("consequence_mismatch")
-                    if receipt.get("payload_hash") != _sha256(shipped_bytes):
+                    receipt_matches = receipt.get("payload_hash") == _sha256(shipped_bytes)
+                    rendered_count_matches = event.get("rendered_bytes") == len(shipped_bytes)
+                    adjudication: dict[str, Any] | None = None
+                    if kind == "localization" and provenance_ok:
+                        artifact_bytes = _safe_path(root, delivery["artifact_path"]).read_bytes()
+                        if (
+                            event.get("artifact_sha256") == _sha256(artifact_bytes)
+                            and event.get("rendered_bytes") == len(artifact_bytes)
+                            and receipt_matches
+                        ):
+                            rendered_count_matches = True
+                            adjudication = {
+                                "run_id": run_id,
+                                "delivery_id": delivery_id,
+                                "kind": kind,
+                                "disposition": (
+                                    "artifact_json_count_proven_by_renderer_source"
+                                ),
+                                "historical_event_byte_semantics": "artifact_json_utf8",
+                                "model_payload_byte_semantics": "rendered_localization_utf8",
+                            }
+                    elif kind == "new_file_destination" and provenance_ok:
+                        full_bytes = full_rederived.encode("utf-8")
+                        if (
+                            receipt.get("payload_hash") == _sha256(full_bytes)
+                            and event.get("rendered_bytes") == len(full_bytes)
+                            and shipped == _cap_evidence(full_rederived, 600)
+                            and target_proven
+                        ):
+                            receipt_matches = True
+                            rendered_count_matches = True
+                            adjudication = {
+                                "run_id": run_id,
+                                "delivery_id": delivery_id,
+                                "kind": kind,
+                                "disposition": "legacy_precap_telemetry_defect_repaired",
+                                "historical_event_byte_semantics": "uncapped_precedent_utf8",
+                                "model_payload_byte_semantics": "capped_precedent_utf8",
+                            }
+                    if adjudication is not None:
+                        adjudications.append(adjudication)
+                        counts["historical_adjudication_count"] += 1
+                    if not receipt_matches:
                         reasons.append("receipt_payload_hash_mismatch")
-                    if event.get("rendered_bytes") != len(shipped_bytes):
+                    if not rendered_count_matches:
                         reasons.append("recorded_rendered_bytes_mismatch")
                     if reasons:
                         counts["mismatch_count"] += 1
@@ -428,12 +581,13 @@ def verify_recorded_content(fixture_path: str | Path) -> dict[str, Any]:
             finally:
                 connection.close()
     result: dict[str, Any] = {
-        "schema": "gt.recorded_content_measurement.v2",
+        "schema": "gt.recorded_content_measurement.v3",
         "status": "PASS" if not failures else "FAIL",
         "provider_calls": 0,
         "artifact_source": fixture.get("artifact_source"),
         "run_count": len(fixture.get("runs", [])),
         **counts,
+        "adjudications": adjudications,
         "failures": failures,
     }
     return _sealed(result)

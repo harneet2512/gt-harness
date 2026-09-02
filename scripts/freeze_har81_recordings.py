@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,12 @@ CONSEQUENCES = {
     "new_file_destination": "inspect_repository_precedents_before_adding_file",
     "trace_frame": "inspect_recorded_failure_location",
 }
+RENDERER_SOURCE_PATHS = (
+    "scripts/miniswe_gt_run.py",
+    "gt_engine/miniswe_integration.py",
+    "gt_engine/miniswe_runtime.py",
+    "config/deepswe_product_bundle_v1.json",
+)
 
 
 def _sha256(payload: bytes) -> str:
@@ -36,6 +43,15 @@ def _atomic_bytes(path: Path, payload: bytes) -> None:
     temporary = path.with_name(f".{path.name}.tmp.{os.getpid()}")
     temporary.write_bytes(payload)
     os.replace(temporary, path)
+
+
+def _git(source: Path, *arguments: str) -> bytes:
+    return subprocess.check_output(["git", "-C", str(source), *arguments])
+
+
+def _git_blob_sha1(payload: bytes) -> str:
+    header = b"blob " + str(len(payload)).encode("ascii") + b"\0"
+    return hashlib.sha1(header + payload).hexdigest()  # noqa: S324 - Git identity
 
 
 def _claim(kind: str, target: str, body: str) -> str:
@@ -73,7 +89,7 @@ def _shipped_body(request: dict[str, Any], kind: str) -> tuple[int, str]:
     raise ValueError(f"provider request does not contain {marker}")
 
 
-def freeze(source: Path, output: Path) -> dict[str, Any]:
+def freeze(source: Path, output: Path, harness_repository: Path) -> dict[str, Any]:
     runs: list[dict[str, Any]] = []
     for run_id in RUN_IDS:
         run_root = source / run_id
@@ -85,6 +101,17 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
         reproduction = json.loads(
             (state / "reproducibility_manifest.json").read_text(encoding="utf-8")
         )
+        trial_root = state.parents[2]
+        trial_config_source = trial_root / "config.json"
+        run_receipt_source = state.parents[1] / "gt-run.json"
+        if not run_receipt_source.is_file():
+            run_receipt_source = state.parents[1] / "official-verifier-result.json"
+        trial_config_bytes = trial_config_source.read_bytes()
+        run_receipt_bytes = run_receipt_source.read_bytes()
+        reproduction_bytes = (state / "reproducibility_manifest.json").read_bytes()
+        trial_config = json.loads(trial_config_bytes)
+        source_commit = str(trial_config["agent"]["kwargs"]["product_source_sha"])
+        source_tree = _git(harness_repository, "rev-parse", f"{source_commit}^{{tree}}").decode().strip()
         events_bytes = events_path.read_bytes()
         event_rows = [json.loads(line) for line in events_bytes.splitlines() if line]
         receipts = [
@@ -105,6 +132,28 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
             _atomic_bytes(trajectory_target, trajectory_bytes)
         else:
             trajectory_target.unlink(missing_ok=True)
+        config_target = run_output / "provenance" / "trial-config.json"
+        run_receipt_target = run_output / "provenance" / run_receipt_source.name
+        reproduction_target = run_output / "provenance" / "reproducibility_manifest.json"
+        _atomic_bytes(config_target, trial_config_bytes)
+        _atomic_bytes(run_receipt_target, run_receipt_bytes)
+        _atomic_bytes(reproduction_target, reproduction_bytes)
+        source_files: list[dict[str, Any]] = []
+        for repository_path in RENDERER_SOURCE_PATHS:
+            source_bytes = _git(
+                harness_repository, "show", f"{source_commit}:{repository_path}"
+            )
+            source_target = run_output / "renderer_sources" / source_commit / repository_path
+            _atomic_bytes(source_target, source_bytes)
+            source_files.append(
+                {
+                    "repository_path": repository_path,
+                    "path": source_target.relative_to(output).as_posix(),
+                    "bytes": len(source_bytes),
+                    "sha256": _sha256(source_bytes),
+                    "git_blob_sha1": _git_blob_sha1(source_bytes),
+                }
+            )
         deliveries: list[dict[str, Any]] = []
         for ordinal, receipt in enumerate(receipts):
             kind = str(receipt["evidence_type"])
@@ -171,14 +220,15 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
                 _atomic_bytes(snapshot_target, snapshot_bytes)
                 derivation_path = snapshot_target.relative_to(output).as_posix()
                 derivation_sha256 = _sha256(snapshot_bytes)
+                delivery_time_snapshot_sequence = int(snapshot["sequence"])
+                edit_transaction_sequence = int(edit["sequence"])
             elif kind == "trace_frame":
                 derivation_path = (
                     run_output / "miniswe_trajectory.json"
                 ).relative_to(output).as_posix()
                 derivation_sha256 = _sha256(trajectory_bytes)
             target = str(receipt.get("target") or delivery.get("target") or "")
-            deliveries.append(
-                {
+            delivery_record = {
                     "delivery_id": f"{run_id}:{ordinal}:{kind}",
                     "kind": kind,
                     "target": target,
@@ -202,7 +252,14 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
                     "canonical_claim": _claim(kind, target, body),
                     "consequence": CONSEQUENCES[kind],
                 }
-            )
+            if kind == "new_file_destination":
+                delivery_record.update(
+                    {
+                        "delivery_time_snapshot_sequence": delivery_time_snapshot_sequence,
+                        "edit_transaction_sequence": edit_transaction_sequence,
+                    }
+                )
+            deliveries.append(delivery_record)
         runs.append(
             {
                 "run_id": run_id,
@@ -220,11 +277,22 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
                 .relative_to(output)
                 .as_posix(),
                 "graph_manifest_sha256": _sha256(graph_manifest.read_bytes()),
+                "renderer_provenance": {
+                    "source_commit": source_commit,
+                    "source_tree": source_tree,
+                    "product_config_path": config_target.relative_to(output).as_posix(),
+                    "product_config_sha256": _sha256(trial_config_bytes),
+                    "run_receipt_path": run_receipt_target.relative_to(output).as_posix(),
+                    "run_receipt_sha256": _sha256(run_receipt_bytes),
+                    "reproducibility_manifest_path": reproduction_target.relative_to(output).as_posix(),
+                    "reproducibility_manifest_sha256": _sha256(reproduction_bytes),
+                    "source_files": source_files,
+                },
                 "deliveries": deliveries,
             }
         )
     result = {
-        "schema": "gt.recorded_content_fixture.v2",
+        "schema": "gt.recorded_content_fixture.v3",
         "artifact_source": "HAR-82",
         "source_locator": str(source),
         "provider_calls_required": 0,
@@ -238,9 +306,14 @@ def freeze(source: Path, output: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument(
+        "--harness-repository",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    freeze(args.source, args.output)
+    freeze(args.source, args.output, args.harness_repository)
     return 0
 
 

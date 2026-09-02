@@ -36,6 +36,21 @@ def test_lexical_localization_is_stable_advisory_and_includes_dirty_files(tmp_pa
     assert artifact["coverage"]["complete"] is True
     assert artifact["items"][0]["anchor"] == "alpha.py:1"
 
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "state" / "first" / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    delivery = next(row for row in rows if row["event"] == "evidence_delivery")
+    receipt = next(row for row in rows if row["event"] == "receipt")
+    shipped = outputs[0]
+    assert delivery["rendered_bytes"] == len(shipped.encode("utf-8"))
+    assert delivery["payload_sha256"] == receipt["payload_hash"]
+    assert receipt["payload_hash"] == __import__("hashlib").sha256(
+        shipped.encode("utf-8")
+    ).hexdigest()
+
 
 def test_lexical_localization_is_quiet_on_no_match(tmp_path):
     repo = tmp_path / "repo"

@@ -610,6 +610,30 @@ def test_newfile_precedent_delivered_on_file_create(tmp_path, monkeypatch):
     assert "reason=same_directory,same_extension" in joined
     assert "inspect=src/util.py" in joined
     assert "<output>ok</output>" in joined
+    rows = [
+        __import__("json").loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    delivery = next(
+        row
+        for row in rows
+        if row["event"] == "evidence_delivery"
+        and row["evidence_type"] == "new_file_destination"
+    )
+    receipt = next(
+        row
+        for row in rows
+        if row["event"] == "receipt"
+        and row["evidence_type"] == "new_file_destination"
+    )
+    marker = "[GT_EVIDENCE:new_file_destination]\n"
+    shipped = marker + joined.split(marker, 1)[1].split("\n</gt-facts>", 1)[0]
+    assert delivery["target"] == "src/new_util.py"
+    assert delivery["rendered_bytes"] == len(shipped.encode("utf-8"))
+    assert delivery["payload_sha256"] == receipt["payload_hash"]
+    assert receipt["payload_hash"] == __import__("hashlib").sha256(
+        shipped.encode("utf-8")
+    ).hexdigest()
 
 
 def test_newfile_precedent_is_quiet_without_inspectable_sibling(tmp_path):

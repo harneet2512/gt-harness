@@ -22,29 +22,58 @@ def _digest_is_sealed(result: dict) -> bool:
 def test_real_run_19_20_21_content_is_rederived_from_retained_artifacts() -> None:
     result = verify_recorded_content(FIXTURE)
 
-    assert result["status"] == "FAIL"
+    assert result["status"] == "PASS"
     assert result["run_count"] == 3
     assert result["delivery_count"] == 12
     assert result["rederived_count"] == 12
     assert result["payload_match_count"] == 12
     assert result["provider_request_match_count"] == 12
-    assert result["target_match_count"] == 10
+    assert result["target_match_count"] == 12
     assert result["trigger_match_count"] == 12
     assert result["claim_match_count"] == 12
     assert result["consequence_match_count"] == 12
-    assert result["attestation_match_count"] == 7
-    assert result["mismatch_count"] == 5
-    reasons = {reason for failure in result["failures"] for reason in failure["reason_codes"]}
-    assert "recorded_rendered_bytes_mismatch" in reasons
-    assert "receipt_payload_hash_mismatch" in reasons
-    assert "target_not_in_recorded_graph" in reasons
+    assert result["attestation_match_count"] == 12
+    assert result["mismatch_count"] == 0
+    assert result["renderer_provenance_match_count"] == 3
+    assert result["historical_adjudication_count"] == 5
+    assert result["failures"] == []
+    assert {
+        (row["run_id"], row["kind"], row["disposition"])
+        for row in result["adjudications"]
+    } == {
+        (
+            "33563173631",
+            "localization",
+            "artifact_json_count_proven_by_renderer_source",
+        ),
+        (
+            "33565965241",
+            "localization",
+            "artifact_json_count_proven_by_renderer_source",
+        ),
+        (
+            "33567358689",
+            "localization",
+            "artifact_json_count_proven_by_renderer_source",
+        ),
+        (
+            "33563173631",
+            "new_file_destination",
+            "legacy_precap_telemetry_defect_repaired",
+        ),
+        (
+            "33565965241",
+            "new_file_destination",
+            "legacy_precap_telemetry_defect_repaired",
+        ),
+    }
     assert _digest_is_sealed(result)
 
 
 def test_measurement_reproduces_all_four_mutation_surfaces() -> None:
     result = measure_recorded_content(FIXTURE)
 
-    assert result["status"] == "FAIL"
+    assert result["status"] == "PASS"
     assert result["provider_calls"] == 0
     assert result["mutation_cases"] == {
         "payload": "FAIL_AS_DESIGNED",
@@ -53,6 +82,50 @@ def test_measurement_reproduces_all_four_mutation_surfaces() -> None:
         "provider_request": "FAIL_AS_DESIGNED",
     }
     assert _digest_is_sealed(result)
+
+
+def test_renderer_source_or_product_revision_mutation_fails_closed(tmp_path: Path) -> None:
+    copied = tmp_path / "attestation"
+    shutil.copytree(FIXTURE.parent, copied)
+    copied_fixture = copied / FIXTURE.name
+    fixture = json.loads(copied_fixture.read_text(encoding="utf-8"))
+    run = fixture["runs"][0]
+    source_record = next(
+        row
+        for row in run["renderer_provenance"]["source_files"]
+        if row["repository_path"] == "scripts/miniswe_gt_run.py"
+    )
+    source = copied / source_record["path"]
+    source.write_bytes(source.read_bytes() + b"\n# tampered\n")
+
+    result = verify_recorded_content(copied_fixture)
+    reasons = {reason for failure in result["failures"] for reason in failure["reason_codes"]}
+
+    assert result["status"] == "FAIL"
+    assert "renderer_source_digest_mismatch" in reasons
+
+
+def test_new_file_adjudication_requires_delivery_time_snapshot_target(
+    tmp_path: Path,
+) -> None:
+    copied = tmp_path / "attestation"
+    shutil.copytree(FIXTURE.parent, copied)
+    copied_fixture = copied / FIXTURE.name
+    fixture = json.loads(copied_fixture.read_text(encoding="utf-8"))
+    delivery = next(
+        delivery
+        for run in fixture["runs"]
+        for delivery in run["deliveries"]
+        if delivery["kind"] == "new_file_destination"
+    )
+    delivery["delivery_time_snapshot_sequence"] = delivery["event_sequence"] + 1
+    copied_fixture.write_text(json.dumps(fixture), encoding="utf-8")
+
+    result = verify_recorded_content(copied_fixture)
+    reasons = {reason for failure in result["failures"] for reason in failure["reason_codes"]}
+
+    assert result["status"] == "FAIL"
+    assert "delivery_time_snapshot_order_invalid" in reasons
 
 
 def test_independent_derivation_artifact_tampering_fails_closed(tmp_path: Path) -> None:
@@ -92,6 +165,12 @@ def test_a15_manifest_routes_to_real_retained_recordings() -> None:
     assert content["run_ids"] == ["33563173631", "33565965241", "33567358689"]
     assert content["shipped_delivery_count"] == 12
     assert content["artifact_source"] == "HAR-82"
+    assert content["historical_adjudication_count"] == 5
+    assert content["renderer_source_revisions"] == [
+        "529d835a2b3e1c6c3e3752cd8bfa477b27b591a0",
+        "357666739cfe778b71508c68341948087f639b89",
+        "ca744e7ebb7d03b6d11e31eeab8600cdb3669bdd",
+    ]
     assert content["mutation_surfaces"] == [
         "payload",
         "graph",
