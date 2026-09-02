@@ -27,10 +27,35 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Resolve immutable product pins from manifest
+        id: product-pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          manifest = json.loads(Path("config/deepswe_product_bundle_v1.json").read_text(encoding="utf-8"))
+          pins = {
+              "groundtruth_commit": manifest["groundtruth"]["source_commit"],
+              "groundtruth_tree": manifest["groundtruth"]["source_tree"],
+              "python_version": manifest["python_version"],
+              "review_inbox_commit": manifest["groundtruth"]["lineage_exception"]["review_inbox_commit"],
+          }
+          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for key, value in pins.items() if key != "python_version"):
+              raise SystemExit("product_manifest_git_pin_invalid")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              for key, value in pins.items():
+                  output.write(f"{key}={value}\n")
+          PY
+
       - name: Install exact Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          python-version: "3.12.13"
+          python-version: ${{ steps.product-pins.outputs.python_version }}
           cache: pip
 
       - name: Checkout immutable GitNexus capability source
@@ -45,7 +70,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: harneet2512/groundtruth
-          ref: 0aadb1b9111f70f3c6b8874e1b8eff927397d22b
+          ref: ${{ steps.product-pins.outputs.groundtruth_commit }}
           path: .pinned/groundtruth
           fetch-depth: 0
           persist-credentials: false
@@ -54,19 +79,20 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: harneet2512/gt-harness
-          ref: ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685
+          ref: ${{ steps.product-pins.outputs.review_inbox_commit }}
           path: .pinned/review-inbox
           persist-credentials: false
 
       - name: Build source-bound Groundtruth producer
+        env:
+          SOURCE_COMMIT: ${{ steps.product-pins.outputs.groundtruth_commit }}
+          SOURCE_TREE: ${{ steps.product-pins.outputs.groundtruth_tree }}
         run: |
           set -euo pipefail
           SOURCE_ROOT="${GITHUB_WORKSPACE}/.pinned/groundtruth"
           OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
           # Docker Hub's linux/amd64 manifest for the immutable Go 1.22.5 image.
           GO_IMAGE='golang:1.22.5-bookworm@sha256:a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3'
-          SOURCE_COMMIT='0aadb1b9111f70f3c6b8874e1b8eff927397d22b'
-          SOURCE_TREE='354a411ead9e00f4302beff97f72d478673db201'
           BUILD_TIME='2026-09-02T06:51:07Z'
           export SOURCE_COMMIT BUILD_TIME
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
@@ -93,7 +119,7 @@ jobs:
           sudo rm -rf -- "${OUTPUT_ROOT}/.cache"
           "${OUTPUT_ROOT}/gt-index-linux-amd64" -build-info > "${OUTPUT_ROOT}/build-info.json"
           python - <<'PY'
-          import hashlib, json
+          import hashlib, json, os
           from pathlib import Path
 
           root = Path("artifacts/source-bound-producer")
@@ -104,7 +130,7 @@ jobs:
           expected = manifest["groundtruth"]
           assert info["schema"] == "gt-index.build.v1"
           assert info["complete"] is True
-          assert info["git_commit"] == "0aadb1b9111f70f3c6b8874e1b8eff927397d22b"
+          assert info["git_commit"] == os.environ["SOURCE_COMMIT"]
           assert info["go_toolchain"] == "go1.22.5"
           assert info["build_tags"] == "sqlite_fts5"
           assert info["graph_schema_version"] == "v15.2-trust-tier"

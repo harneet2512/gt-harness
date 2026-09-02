@@ -15,6 +15,20 @@ def test_product_workflow_is_reachable_pinned_and_provider_free() -> None:
     assert validate_workflow(WORKFLOW, root=ROOT) == []
 
 
+def test_product_workflow_rejects_bypassing_manifest_pin_resolution(
+    tmp_path: Path,
+) -> None:
+    altered = tmp_path / "workflow.yml"
+    altered.write_text(
+        WORKFLOW.read_text(encoding="utf-8").replace(
+            "${{ steps.product-pins.outputs.review_inbox_commit }}",
+            "ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685",
+        ),
+        encoding="utf-8",
+    )
+    assert "product_manifest_pins_unreachable" in validate_workflow(altered, root=ROOT)
+
+
 def test_only_canonical_product_workflow_is_active() -> None:
     active = sorted(
         path.name

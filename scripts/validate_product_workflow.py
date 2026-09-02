@@ -37,6 +37,16 @@ def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
         "scripts/gt_product_acceptance.py" not in text or "--fake-provider" not in text
     ):
         failures.append("product_acceptance_unreachable")
+    if not paid:
+        manifest_pin_routes = (
+            "id: product-pins",
+            "steps.product-pins.outputs.python_version",
+            "steps.product-pins.outputs.groundtruth_commit",
+            "steps.product-pins.outputs.groundtruth_tree",
+            "steps.product-pins.outputs.review_inbox_commit",
+        )
+        if any(route not in text for route in manifest_pin_routes):
+            failures.append("product_manifest_pins_unreachable")
     for revision in _ACTION.findall(text):
         if not re.fullmatch(r"[0-9a-f]{40}", revision):
             failures.append(f"action_not_pinned:{revision}")
