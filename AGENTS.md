@@ -14,6 +14,13 @@ The local `nano` CLI and historical benchmark workflows are development or compa
 - Existing DeepSeek receipts are historical evidence and must not drive new dispatches. The paid workflow resolves its active OpenRouter route from `config/provider_route.v1.json`; do not duplicate provider/model/base-URL literals in YAML or runner defaults.
 - Every paid dispatch requires an explicit approval input recorded in the immutable run plan and final receipt. Provider availability and funding gates fail closed without logging monetary amounts.
 
+## Existing Muse baseline evidence
+
+- Do not rerun the GT-off baseline. The downloaded DeepSWE v1.1 result bundle is at `D:\muse-spark-1.2_DeepSWE_v1.1`.
+- It contains 113 tasks with four official Muse trials each (452 trials total): 248 pass and 204 fail/error. Join comparisons by `task_name`, never row position.
+- Verify the bundle through `SHA256SUMS.txt`. Anchors: `SUMMARY.json` SHA-256 `d39cc6b6fc4c1827d4aad635cc91cbb3a18ec96ca51b4beec915cd1b89b89036`; per-task comparison SHA-256 `48336a5a102242cbf9cb7a01030543f31ba28bed02d3a0a87415345cc05fd3fa`; 452-trial JSON SHA-256 `ea4f001474d37eeae1fde4ee9020f2a8834588db6fb7d33b053c75c46a1e5d02`.
+- The next GT-on smoke uses the frozen 20-task subset from this Muse dataset. The local baseline is read-only comparison evidence and does not authorize a provider call.
+
 ## Current release gate
 
 The product remains not ready until installed-bundle identity, official-verifier binding, credential isolation, task-result conservation, workflow reachability, and provider-free clean-container acceptance all pass. Missing, malformed, setup-failed, provider-failed, or unverified trials remain typed failures with unknown reward; never manufacture a score.

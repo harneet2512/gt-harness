@@ -122,6 +122,12 @@ jobs:
 
           manifest_path = Path("eval/deepswe_smoke20_v1.json")
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          bundle = json.loads(
+              Path("config/deepswe_product_bundle_v1.json").read_text(encoding="utf-8")
+          )
+          bundle_tasks = {
+              str(row["task_id"]): row for row in bundle.get("tasks", [])
+          }
           bench = Path("deepswe-bench")
           if manifest.get("schema") != "gt.deepswe_smoke20.v1":
               raise SystemExit("invalid DeepSWE smoke20 manifest schema")
@@ -153,6 +159,11 @@ jobs:
               language = str((task_config.get("metadata") or {}).get("language") or "unknown")
               language_counts[language] = language_counts.get(language, 0) + 1
               budget = resolve_budget(config, multiplier=1.0)
+              bundle_task = bundle_tasks.get(task)
+              if bundle_task is None:
+                  raise SystemExit(f"task missing from product bundle: {task}")
+              if budget["task_config_sha256"] != bundle_task["task_config_sha256"]:
+                  raise SystemExit(f"task config digest differs from product bundle: {task}")
               matrix.append(
                   {
                       "ordinal": ordinal,
@@ -164,6 +175,8 @@ jobs:
                           int(float(budget["execution_budget_sec"]) - SUPERVISOR_GRACE_SECONDS),
                       ),
                       "task_config_sha256": budget["task_config_sha256"],
+                      "container_image": bundle_task["container_image"],
+                      "container_digest": bundle_task["container_digest"],
                   }
               )
           if not selection and language_counts != manifest.get("language_counts"):
@@ -223,9 +236,65 @@ jobs:
           path: deepswe20-plan.json
           if-no-files-found: error
 
+  image_cache:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      # The public ECR source is used only to seed a missing immutable mirror.
+      # Keep that provider-free first fill bounded; later smoke jobs use GHCR.
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      SOURCE_IMAGE: ${{ matrix.container_image }}
+      SOURCE_DIGEST: ${{ matrix.container_digest }}
+    steps:
+      - name: Authenticate the repository-owned immutable image mirror
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io \
+            --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Populate the exact task image cache without provider access
+        run: |
+          set -euo pipefail
+          CACHE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/deepswe-task-cache"
+          CACHE_TAG="${CACHE_REPOSITORY}:${SOURCE_DIGEST#sha256:}"
+          CACHE_DIGEST_REF="${CACHE_REPOSITORY}@${SOURCE_DIGEST}"
+          if docker pull "$CACHE_DIGEST_REF"; then
+            docker image inspect "$CACHE_DIGEST_REF" >/dev/null
+            echo "cache_source=existing_ghcr_digest"
+            exit 0
+          fi
+          SOURCE_DIGEST_REF="${SOURCE_IMAGE}@${SOURCE_DIGEST}"
+          for attempt in 1 2 3 4 5; do
+            if docker pull "$SOURCE_DIGEST_REF"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Unable to seed exact DeepSWE image after five bounded attempts" >&2
+              exit 1
+            fi
+            sleep $(( attempt * 30 ))
+          done
+          docker image inspect "$SOURCE_DIGEST_REF" >/dev/null
+          docker tag "$SOURCE_DIGEST_REF" "$CACHE_TAG"
+          docker push "$CACHE_TAG"
+          # Fail closed if the mirror rewrote the source manifest. The paid
+          # gate remains unreachable unless the original digest resolves.
+          docker pull "$CACHE_DIGEST_REF"
+          docker image inspect "$CACHE_DIGEST_REF" >/dev/null
+          echo "cache_source=seeded_from_exact_public_ecr_digest"
+
   provider_gate:
     if: ${{ inputs.approve_paid_run == true }}
-    needs: plan
+    needs: [plan, image_cache]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -258,7 +327,7 @@ jobs:
 
   task:
     if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, provider_gate]
+    needs: [plan, image_cache, provider_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -318,57 +387,31 @@ jobs:
           # clean build above is a source/toolchain verification only; do not
           # silently execute a different binary with a different digest.
 
-      - name: Authenticate Docker Hub account for task image pulls
+      - name: Restore the exact task image cache
         env:
-          DOCKERHUB_USERNAME_PRIMARY: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN_PRIMARY: ${{ secrets.DOCKERHUB_TOKEN }}
-          DOCKERHUB_USERNAME_ROTATION: ${{ secrets.DOCKERHUB_USERNAME_ROTATION }}
-          DOCKERHUB_TOKEN_ROTATION: ${{ secrets.DOCKERHUB_TOKEN_ROTATION }}
+          GHCR_TOKEN: ${{ github.token }}
+          SOURCE_IMAGE: ${{ matrix.container_image }}
+          SOURCE_DIGEST: ${{ matrix.container_digest }}
         run: |
           set -euo pipefail
-          if [ "$(( ORDINAL % 2 ))" -eq 0 ]; then
-            user="$DOCKERHUB_USERNAME_PRIMARY"
-            token="$DOCKERHUB_TOKEN_PRIMARY"
-          else
-            user="$DOCKERHUB_USERNAME_ROTATION"
-            token="$DOCKERHUB_TOKEN_ROTATION"
-          fi
-          test -n "$user" -a -n "$token"
-          printf '%s' "$token" | docker login docker.io --username "$user" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io \
+            --username "${GITHUB_ACTOR}" --password-stdin
+          CACHE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/deepswe-task-cache"
+          CACHE_DIGEST_REF="${CACHE_REPOSITORY}@${SOURCE_DIGEST}"
+          docker pull "$CACHE_DIGEST_REF"
+          docker image inspect "$CACHE_DIGEST_REF" >/dev/null
+          docker tag "$CACHE_DIGEST_REF" "$SOURCE_IMAGE"
+          docker image inspect "$SOURCE_IMAGE" >/dev/null
 
-      - name: Authenticate public ECR for DeepSWE task image pulls
-        run: |
-          set -uo pipefail
-          # DeepSWE task images are public.ecr.aws images. Docker Hub login
-          # does not authorize this registry. The public registry token keeps
-          # the 20-task matrix from falling back to anonymous ECR pulls.
-          # The registry's bearer token endpoint is not a Docker Basic-auth
-          # endpoint; piping its bearer token to `docker login` returns HTTP
-          # 400 on GitHub-hosted runners.  Anonymous pulls are supported, so
-          # do not turn an optional optimization into a task failure.  The
-          # stagger below prevents the 20-job matrix from creating a burst.
-          set +e
-          token="$(curl --fail --silent --show-error \
-            'https://public.ecr.aws/token/?scope=repository:d3j8x8q7/swe-bench-202605:pull&service=public.ecr.aws' \
-            | python -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null)"
-          token_status=$?
-          set -e
-          if [ "$token_status" -eq 0 ] && [ -n "$token" ] && printf '%s' "$token" | docker login public.ecr.aws --username AWS --password-stdin; then
-            echo "Public ECR authentication configured"
-          else
-            echo "Public ECR authenticated pull unavailable; using staggered anonymous pull"
-          fi
-
-      - name: Stagger Docker task-image pulls
+      - name: Load and verify the exact cached task image
+        env:
+          SOURCE_IMAGE: ${{ matrix.container_image }}
+          SOURCE_DIGEST: ${{ matrix.container_digest }}
         run: |
           set -euo pipefail
-          # GitHub-hosted runners have isolated Docker daemons, while public
-          # ECR applies a shared anonymous-pull quota. Keep all task jobs
-          # parallel after setup, but serialize the initial image pulls enough
-          # to avoid turning quota exhaustion into missing-task failures.
-          delay=$(( (ORDINAL - 1) * 240 ))
-          echo "Waiting ${delay}s before the task image pull"
-          sleep "$delay"
+          CACHE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/deepswe-task-cache"
+          docker image inspect "${CACHE_REPOSITORY}@${SOURCE_DIGEST}" >/dev/null
+          docker image inspect "$SOURCE_IMAGE" >/dev/null
 
       - name: Stage the verified uv installer for the task container
         run: |
