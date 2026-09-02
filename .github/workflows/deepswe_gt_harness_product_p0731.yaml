@@ -3,11 +3,6 @@ name: "GT Harness: DeepSWE paid smoke20"
 on:
   workflow_dispatch:
     inputs:
-      task_selection:
-        description: "Optional comma-separated subset of the pinned smoke20 task IDs"
-        required: false
-        type: string
-        default: ""
       approve_paid_run:
         description: "Explicit approval for authenticated paid provider requests"
         required: false
@@ -15,11 +10,6 @@ on:
         default: false
   workflow_call:
     inputs:
-      task_selection:
-        description: "Optional comma-separated subset of the pinned smoke20 task IDs"
-        required: false
-        type: string
-        default: ""
       approve_paid_run:
         description: "Explicit approval for authenticated paid provider requests"
         required: false
@@ -68,7 +58,6 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           TREATMENT: groundtruth
-          TASK_SELECTION: ${{ inputs.task_selection || '' }}
           APPROVE_PAID_RUN: ${{ inputs.approve_paid_run || 'false' }}
         run: |
           set -euo pipefail
@@ -111,10 +100,7 @@ jobs:
           if order_hash != manifest.get("task_order_sha256"):
               raise SystemExit("DeepSWE smoke20 order hash mismatch")
 
-          selection = [item.strip() for item in os.environ["TASK_SELECTION"].split(",") if item.strip()]
-          if selection and (len(selection) != len(set(selection)) or not set(selection).issubset(tasks)):
-              raise SystemExit("task_selection must contain unique IDs from the pinned smoke20 cohort")
-          selected_tasks = selection or tasks
+          selected_tasks = tasks
 
           language_counts = {}
           matrix = []
@@ -147,7 +133,7 @@ jobs:
                       "container_digest": bundle_task["container_digest"],
                   }
               )
-          if not selection and language_counts != manifest.get("language_counts"):
+          if language_counts != manifest.get("language_counts"):
               raise SystemExit(
                   f"DeepSWE language balance mismatch: {language_counts!r}"
               )

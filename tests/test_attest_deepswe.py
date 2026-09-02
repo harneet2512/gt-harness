@@ -599,7 +599,8 @@ def test_missing_plan_writes_minimal_durable_fail_receipt(tmp_path: Path) -> Non
         "attestation_construction_failed:required_artifact_missing"
     ]
     assert receipt["primary_error"]["evidence_ref"] == "deepswe20-plan.json"
-    assert receipt["outcomes"] == {}
+    assert list(receipt["outcomes"]) == [TASK]
+    assert receipt["outcomes"][TASK]["error_code"] == "official_verifier_result_missing"
 
 
 @pytest.mark.parametrize("value", [3.9, True])
@@ -803,6 +804,22 @@ def test_coordinated_plan_and_gate_route_mutation_fails_closed(
     assert "planned_provider_route_mismatch" in receipt["errors"]
     assert "provider_gate_route_mismatch" in receipt["errors"]
     assert "provider_gate_checks_invalid" in receipt["errors"]
+
+
+def test_unknown_provider_gate_field_fails_without_leaking_value(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "provider-gate.json"
+    gate = json.loads(path.read_text(encoding="utf-8"))
+    gate["api_key"] = "SECRET_CANARY"
+    _write(path, gate)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert "provider_gate_fields_invalid" in receipt["errors"]
+    assert "SECRET_CANARY" not in json.dumps(receipt)
 
 
 @pytest.mark.parametrize(

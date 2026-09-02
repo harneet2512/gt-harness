@@ -71,6 +71,7 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "attestation/gt-audit.json" in paid
     assert "attestation/gt-live-gate.json" in paid
     assert "attestation/feature-matrix.json" in paid
+    assert "task_selection" not in paid
     assert "if: always()" in paid.split(
         "- name: Verify all DeepSWE outcomes and product receipts", 1
     )[1].split("- name: Upload final DeepSWE GT Harness attestation", 1)[0]

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-from scripts.standardize_benchmark_result import conservative_outcomes, standardize_result
+from scripts.standardize_benchmark_result import (
+    conservative_outcomes,
+    main,
+    standardize_result,
+)
 
 
 def _write_case(
@@ -160,6 +165,38 @@ def test_standardize_malformed_nested_reward_evidence_stays_ungraded(
     assert receipt["status"] == "ERROR"
     assert receipt["reward"] is None
     assert receipt["solved"] is None
+
+
+def test_ambiguous_results_write_typed_error_receipt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={"task_name": "datacurve/task-a", "trial_name": "task-a__trial"},
+    )
+    extra = tmp_path / "other" / "result.json"
+    extra.parent.mkdir()
+    extra.write_text(json.dumps({"n_total_trials": 1, "stats": {}}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "standardize_benchmark_result",
+            "--root", str(tmp_path),
+            "--suite", "deepswe",
+            "--task-id", "task-a",
+            "--source-sha", "a" * 40,
+        ],
+    )
+
+    exit_code = main()
+
+    receipt_path = tmp_path / "task-a" / "agent" / "official-verifier-result.json"
+    receipt = json.loads(receipt_path.read_text())
+    assert exit_code == 1
+    assert receipt["status"] == "ERROR"
+    assert receipt["error_code"] == "official_verifier_construction_failed"
 
 
 def test_conservative_outcomes_represents_missing_task_once() -> None:

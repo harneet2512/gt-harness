@@ -245,6 +245,14 @@ def attest_deepswe(
         errors.append(f"task_job_result_not_success:{normalized_job_result}")
     if provider_gate.get("schema") != "gt.provider_preflight.v1":
         errors.append("provider_gate_schema_mismatch")
+    provider_gate_fields = {
+        "schema", "status", "error_code", "mode", "source_sha", "route_id",
+        "provider", "base_url", "model", "route_sha256", "checks",
+        "provider_ready", "paid_run_approved", "account_amounts_recorded",
+        "provider_inference_attempts", "provider_inference_calls",
+    }
+    if set(provider_gate) != provider_gate_fields:
+        errors.append("provider_gate_fields_invalid")
     if provider_gate.get("status") != "PASS":
         errors.append("provider_gate_failed")
     if provider_gate.get("source_sha") != source_sha:
@@ -668,7 +676,9 @@ def attest_deepswe(
         "agent": plan["agent"],
         "agent_scaffold_version": plan["agent_scaffold_version"],
         "treatment": plan["treatment"],
-        "provider_gate": provider_gate,
+        "provider_gate": {
+            key: provider_gate.get(key) for key in sorted(provider_gate_fields)
+        },
         "canonical_evidence": {
             name: {
                 "artifact_ref": path.name,
@@ -728,17 +738,7 @@ def main(argv: list[str] | None = None) -> int:
                 ).as_posix()
             except ValueError:
                 evidence_ref = Path(filename).name
-        fallback_tasks: list[str] = []
-        try:
-            fallback_plan = _object(args.root / "deepswe20-plan.json")
-            fallback_ids = fallback_plan.get("task_ids")
-            if isinstance(fallback_ids, list):
-                fallback_tasks = list(dict.fromkeys(
-                    task for task in fallback_ids
-                    if isinstance(task, str) and task
-                ))
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass
+        fallback_tasks = list(CANONICAL_TASK_IDS)
         receipt = {
             "schema": "gt.deepswe_gt_harness_attestation_error.v1",
             "status": "FAIL",

@@ -244,12 +244,37 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    receipt = standardize_result(
-        root=args.root,
-        suite=args.suite,
-        task_id=args.task_id,
-        source_sha=args.source_sha,
-    )
+    try:
+        receipt = standardize_result(
+            root=args.root,
+            suite=args.suite,
+            task_id=args.task_id,
+            source_sha=args.source_sha,
+        )
+    except Exception as exc:  # noqa: BLE001 - task-level failure must be durable
+        receipt = {
+            "schema": "gt.official_verifier_result.v1",
+            "benchmark_suite": args.suite,
+            "task_id": args.task_id,
+            "product_source_sha": args.source_sha,
+            "status": "ERROR",
+            "reward": None,
+            "solved": None,
+            "failure_class": "artifact_failure",
+            "error_code": "official_verifier_construction_failed",
+            "product_receipt_present": False,
+            "runner_result_sha256": None,
+            "runner_result_path": None,
+            "construction_error_type": type(exc).__name__,
+        }
+        target = args.root / args.task_id / "agent" / "official-verifier-result.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(f"{target.suffix}.tmp.{os.getpid()}")
+        temporary.write_text(
+            json.dumps(receipt, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return 0 if receipt["status"] == "GRADED" else 1
 
