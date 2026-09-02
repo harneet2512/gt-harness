@@ -113,9 +113,7 @@ def test_bundle_source_closure_rejects_uncommitted_bytes(tmp_path: Path) -> None
         cwd=tmp_path,
         check=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "Fixture"], cwd=tmp_path, check=True
-    )
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=tmp_path, check=True)
     source = tmp_path / "product.py"
     source.write_text("VALUE = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", "product.py"], cwd=tmp_path, check=True)
@@ -213,19 +211,25 @@ def test_summary_is_exact_once_and_conservative() -> None:
 def test_provider_free_acceptance_executes_both_parity_arms(tmp_path: Path) -> None:
     receipt = run_provider_free_acceptance(MANIFEST, output_dir=tmp_path)
     assert receipt["schema"] == "gt.product_closeout.v1"
-    assert receipt["status"] == "VERIFIED_PROVIDER_FREE"
+    assert receipt["status"] == "FAILED"
     assert receipt["provider_calls"] == 0
     assert receipt["release_eligible"] is False
     assert receipt["container_proof"]["status"] == "VERIFIED"
     assert receipt["fake_provider_proof"]["status"] == "VERIFIED"
-    assert receipt["content_correctness"]["status"] == "PASS"
+    assert receipt["content_correctness"]["status"] == "FAIL"
     assert receipt["content_correctness"]["provider_calls"] == 0
     assert receipt["content_correctness"]["run_count"] == 3
     assert receipt["content_correctness"]["delivery_count"] == 12
-    assert receipt["content_correctness"]["mutation_case"]["outcome"] == "FAIL_AS_DESIGNED"
-    assert receipt["content_correctness"]["packet_digest_sha256"] == json.loads(
-        (tmp_path / "har81-a21-content-measurement.json").read_text(encoding="utf-8")
-    )["packet_digest_sha256"]
+    assert receipt["content_correctness"]["payload_match_count"] == 12
+    assert receipt["content_correctness"]["mismatch_count"] == 5
+    assert set(receipt["content_correctness"]["mutation_cases"].values()) == {"FAIL_AS_DESIGNED"}
+    assert "recorded_content_correctness_failed" in receipt["release_blockers"]
+    assert (
+        receipt["content_correctness"]["packet_digest_sha256"]
+        == json.loads(
+            (tmp_path / "har81-a21-content-measurement.json").read_text(encoding="utf-8")
+        )["packet_digest_sha256"]
+    )
     assert "groundtruth_source_not_accepted_default_ancestor" in receipt["release_blockers"]
     assert [row["arm"] for row in receipt["arms"]] == ["bare", "groundtruth"]
     assert receipt["parity"]["structural_identity_equal"] is True

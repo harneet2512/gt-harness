@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from gt_engine.result_envelope import envelope_for_result, envelope_from_mapping
+from gt_harness.canonical_io import atomic_json, canonical_json_bytes
 from gt_harness.recorded_content import measure_recorded_content
 
 PRODUCT_SOURCE_SCHEMA = "gt.product_bundle_source.v1"
@@ -33,16 +34,6 @@ _HASH = frozenset("0123456789abcdef")
 
 class BundleError(ValueError):
     """A bundle or one of its bound inputs is invalid."""
-
-
-def canonical_json_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
 
 
 def _digest(value: Any) -> str:
@@ -105,9 +96,10 @@ def _assert_committed_source_closure(root: Path, paths: list[str]) -> None:
 
 def _normalize_wheel(source: Path, target: Path) -> None:
     """Rewrite a wheel with stable order, timestamps, permissions, and compression."""
-    with zipfile.ZipFile(source) as incoming, zipfile.ZipFile(
-        target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
-    ) as outgoing:
+    with (
+        zipfile.ZipFile(source) as incoming,
+        zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as outgoing,
+    ):
         for name in sorted(incoming.namelist()):
             data = incoming.read(name)
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
@@ -315,9 +307,7 @@ def validate_product_bundle(bundle: Mapping[str, Any], *, root: str | Path) -> N
         raise BundleError("python_wheel_identity_invalid")
 
 
-def project_task_environment(
-    host: Mapping[str, str], *, treatment: str
-) -> dict[str, str]:
+def project_task_environment(host: Mapping[str, str], *, treatment: str) -> dict[str, str]:
     """Project a closed, typed, credential-free environment into task tools."""
     if treatment not in {"bare", "groundtruth"}:
         raise ValueError(f"unsupported_treatment:{treatment}")
@@ -452,16 +442,7 @@ def aggregate_results(
 
 
 def _atomic_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    temporary.write_bytes(canonical_json_bytes(value) + b"\n")
-    os.replace(temporary, path)
-
-
-def atomic_json(path: Path, value: Any) -> None:
-    """Publish canonical UTF-8 JSON atomically."""
-
-    _atomic_json(path, value)
+    atomic_json(path, value)
 
 
 def _install_and_attest_wheel(
@@ -523,10 +504,7 @@ def _install_and_attest_wheel(
         raise BundleError("acceptance_installed_import_output_invalid") from exc
     installed_root = str(installed.resolve()).casefold()
     import_names = ("adapter", "product", "runner")
-    if any(
-        not str(resolved[name]).casefold().startswith(installed_root)
-        for name in import_names
-    ):
+    if any(not str(resolved[name]).casefold().startswith(installed_root) for name in import_names):
         raise BundleError("acceptance_import_resolved_to_source")
     observed: dict[str, str | None] = {}
     for distribution in ("mini-swe-agent", "harbor", "datacurve-pier"):
@@ -541,9 +519,7 @@ def _install_and_attest_wheel(
         "harbor": bundle["harbor_version"],
         "datacurve-pier": bundle["pier_version"],
     }
-    mismatches = sorted(
-        name for name, version in expected.items() if observed.get(name) != version
-    )
+    mismatches = sorted(name for name, version in expected.items() if observed.get(name) != version)
     attestation: dict[str, Any] = {
         "schema": INSTALL_SCHEMA,
         "status": "VERIFIED" if not mismatches else "INCOMPLETE",
@@ -584,9 +560,7 @@ def _run_fixture_arm(root: Path, *, arm: str, plan: Mapping[str, Any]) -> dict[s
     )
     canaries = {
         "OPENAI_API_KEY": "_".join(("GT", "SECRET", "CANARY", "OPENAI")),
-        "GOOGLE_APPLICATION_CREDENTIALS": "_".join(
-            ("GT", "SECRET", "CANARY", "GCP")
-        ),
+        "GOOGLE_APPLICATION_CREDENTIALS": "_".join(("GT", "SECRET", "CANARY", "GCP")),
         "GITHUB_TOKEN": "_".join(("GT", "SECRET", "CANARY", "GITHUB")),
     }
     safe_env = project_task_environment(
@@ -796,7 +770,9 @@ def _prove_container_install(bundle: Mapping[str, Any], *, bundle_dir: Path) -> 
         return {"status": "FAILED", "reason": f"container_probe_{type(exc).__name__}"}
     output = process.stdout + process.stderr
     return {
-        "status": "VERIFIED" if process.returncode == 0 and "installed-product-ok" in output else "FAILED",
+        "status": "VERIFIED"
+        if process.returncode == 0 and "installed-product-ok" in output
+        else "FAILED",
         "image": image,
         "digest": digest,
         "pull_attempts": pull_attempts,
@@ -823,7 +799,13 @@ def _prove_fake_openai_transport() -> dict[str, Any]:
                 {
                     "id": "fake-provider-1",
                     "object": "chat.completion",
-                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
                 }
             )
@@ -852,7 +834,10 @@ def _prove_fake_openai_transport() -> dict[str, Any]:
         with urlopen(request, timeout=10) as response:
             body = json.loads(response.read().decode("utf-8"))
         valid = body.get("choices", [{}])[0].get("message", {}).get("content") == "ok"
-        return {"status": "VERIFIED" if valid and Handler.calls == 1 else "FAILED", "calls": Handler.calls}
+        return {
+            "status": "VERIFIED" if valid and Handler.calls == 1 else "FAILED",
+            "calls": Handler.calls,
+        }
     except Exception as exc:  # noqa: BLE001 - receipt must retain typed failure
         return {"status": "FAILED", "calls": Handler.calls, "reason": type(exc).__name__}
     finally:
@@ -874,19 +859,11 @@ def run_provider_free_acceptance(
         raise ValueError("acceptance_output_must_be_empty")
     output.mkdir(parents=True, exist_ok=True)
     repository_root = _repository_root(Path(manifest_path))
-    content_fixture = json.loads(
-        (
-            repository_root
-            / "tests"
-            / "fixtures"
-            / "har81_attestation"
-            / "content_recordings.json"
-        ).read_text(encoding="utf-8")
+    content_fixture = (
+        repository_root / "tests" / "fixtures" / "har81_attestation" / "content_recordings.json"
     )
     content_correctness = measure_recorded_content(content_fixture)
-    _atomic_json(
-        output / "har81-a21-content-measurement.json", content_correctness
-    )
+    _atomic_json(output / "har81-a21-content-measurement.json", content_correctness)
     bundle_dir = output / "bundle"
     bundle = build_product_bundle(manifest_path, output_dir=bundle_dir)
     installation = _install_and_attest_wheel(bundle, bundle_dir=bundle_dir, output=output)
@@ -917,8 +894,7 @@ def run_provider_free_acceptance(
         )
     parity_equal = plans[0]["parity_identity_sha256"] == plans[1]["parity_identity_sha256"]
     canaries = tuple(
-        "_".join(("GT", "SECRET", "CANARY", suffix))
-        for suffix in ("OPENAI", "GCP", "GITHUB")
+        "_".join(("GT", "SECRET", "CANARY", suffix)) for suffix in ("OPENAI", "GCP", "GITHUB")
     )
     matches: list[str] = []
     for path in output.rglob("*"):
@@ -935,11 +911,7 @@ def run_provider_free_acceptance(
     )
     receipt: dict[str, Any] = {
         "schema": CLOSEOUT_SCHEMA,
-        "status": (
-            "VERIFIED_PROVIDER_FREE"
-            if acceptance_verified
-            else "FAILED"
-        ),
+        "status": ("VERIFIED_PROVIDER_FREE" if acceptance_verified else "FAILED"),
         "bundle_digest_sha256": bundle["bundle_digest_sha256"],
         "release_eligible": bundle["release_eligible"] and installation["status"] == "VERIFIED",
         "release_blockers": sorted(
@@ -948,9 +920,21 @@ def run_provider_free_acceptance(
                 f"dependency_identity_mismatch:{name}"
                 for name in installation["dependency_mismatches"]
             }
-            | ({"container_install_not_executed"} if container_proof["status"] != "VERIFIED" else set())
-            | ({"openai_compatible_fake_provider_not_executed"} if fake_provider_proof["status"] != "VERIFIED" else set())
-            | ({"recorded_content_correctness_failed"} if content_correctness["status"] != "PASS" else set())
+            | (
+                {"container_install_not_executed"}
+                if container_proof["status"] != "VERIFIED"
+                else set()
+            )
+            | (
+                {"openai_compatible_fake_provider_not_executed"}
+                if fake_provider_proof["status"] != "VERIFIED"
+                else set()
+            )
+            | (
+                {"recorded_content_correctness_failed"}
+                if content_correctness["status"] != "PASS"
+                else set()
+            )
         ),
         "install_attestation_sha256": installation["attestation_digest_sha256"],
         "provider_calls": 0,

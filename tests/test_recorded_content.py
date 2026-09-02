@@ -12,9 +12,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "har81_attestation" / "content_re
 def _digest_is_sealed(result: dict) -> bool:
     body = dict(result)
     supplied = body.pop("packet_digest_sha256")
-    encoded = json.dumps(
-        body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
     return hashlib.sha256(encoded).hexdigest() == supplied
 
 
@@ -33,11 +33,7 @@ def test_real_run_19_20_21_content_is_rederived_from_retained_artifacts() -> Non
     assert result["consequence_match_count"] == 12
     assert result["attestation_match_count"] == 7
     assert result["mismatch_count"] == 5
-    reasons = {
-        reason
-        for failure in result["failures"]
-        for reason in failure["reason_codes"]
-    }
+    reasons = {reason for failure in result["failures"] for reason in failure["reason_codes"]}
     assert "recorded_rendered_bytes_mismatch" in reasons
     assert "receipt_payload_hash_mismatch" in reasons
     assert "target_not_in_recorded_graph" in reasons

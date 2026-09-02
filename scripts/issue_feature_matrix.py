@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Issue the feature proof matrix and bind it atomically."""
+
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,16 +17,10 @@ from gt_engine.feature_matrix import (  # noqa: E402
     render_markdown,
     verify_matrix,
 )
+from gt_harness.canonical_io import atomic_json, atomic_write  # noqa: E402
 
 JSON_OUT = ROOT / "gt_finalstand" / "feature_matrix.json"
 MD_OUT = ROOT / "gt_finalstand" / "FEATURE_MATRIX.md"
-
-
-def _atomic_write(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(payload)
-    tmp.replace(path)
 
 
 def main() -> int:
@@ -53,9 +47,8 @@ def main() -> int:
         for issue in errors:
             print(issue, file=sys.stderr)
         return 1
-    encoded = json.dumps(matrix, sort_keys=True, separators=(",", ":"), indent=2)
-    _atomic_write(JSON_OUT, (encoded + "\n").encode())
-    _atomic_write(MD_OUT, (render_markdown(matrix) + "\n").encode())
+    atomic_json(JSON_OUT, matrix)
+    atomic_write(MD_OUT, (render_markdown(matrix) + "\n").encode())
     print(JSON_OUT)
     print(MD_OUT)
     return 0

@@ -118,22 +118,30 @@ jobs:
             --expected-receipt-sha256 "$RECEIPT_SHA" \
             --replay
 
+      - name: Re-derive recorded delivery content offline
+        run: |
+          set -euo pipefail
+          set +e
+          python -m scripts.verify_recorded_delivery_content \
+            --fixture tests/fixtures/har81_attestation/content_recordings.json \
+            --output artifacts/a21-preflight/har81-a21-content-measurement.json
+          A21_EXIT="$?"
+          set -e
+          test "${A21_EXIT}" -eq 1
+          python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/a21-preflight/har81-a21-content-measurement.json').read_text()); assert p['provider_calls'] == 0; assert p['run_count'] == 3; assert p['delivery_count'] == 12; assert p['payload_match_count'] == 12; assert p['mismatch_count'] == 5; assert set(p['mutation_cases'].values()) == {'FAIL_AS_DESIGNED'}; assert p['status'] == 'FAIL'"
+
       - name: Run deterministic bare and Groundtruth arms
         run: |
           set -euo pipefail
+          set +e
           python scripts/gt_product_acceptance.py \
             --manifest config/deepswe_product_bundle_v1.json \
             --fake-provider \
             --output artifacts/product-closeout
-          python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/product-closeout.json').read_text()); assert p['provider_calls'] == 0; assert p['benchmark_runs'] == 0; assert p['status'] == 'VERIFIED_PROVIDER_FREE'; assert p['container_proof']['status'] == 'VERIFIED'; assert p['secret_canary_matches'] == []"
-
-      - name: Re-derive recorded delivery content offline
-        run: |
-          set -euo pipefail
-          python -m scripts.verify_recorded_delivery_content \
-            --fixture tests/fixtures/har81_attestation/content_recordings.json \
-            --output artifacts/product-closeout/har81-a21-content-measurement.json
-          python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/har81-a21-content-measurement.json').read_text()); assert p['provider_calls'] == 0; assert p['run_count'] == 3; assert p['delivery_count'] == 12; assert p['match_count'] == 12; assert p['mismatch_count'] == 0; assert p['mutation_case']['outcome'] == 'FAIL_AS_DESIGNED'; assert p['status'] == 'PASS'"
+          ACCEPTANCE_EXIT="$?"
+          set -e
+          test "${ACCEPTANCE_EXIT}" -eq 1
+          python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/product-closeout.json').read_text()); assert p['provider_calls'] == 0; assert p['benchmark_runs'] == 0; assert p['status'] == 'FAILED'; assert 'recorded_content_correctness_failed' in p['release_blockers']; assert p['content_correctness']['packet_digest_sha256'] == json.loads(Path('artifacts/product-closeout/har81-a21-content-measurement.json').read_text())['packet_digest_sha256']; assert p['secret_canary_matches'] == []"
 
       - name: Stage the exact DeepSWE task image for caching
         if: steps.restore-task-image.outputs.cache-hit != 'true'

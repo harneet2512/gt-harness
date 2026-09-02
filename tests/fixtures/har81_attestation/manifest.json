@@ -4,6 +4,13 @@
     "fixture": "content_recordings.json",
     "run_ids": ["33563173631", "33565965241", "33567358689"],
     "shipped_delivery_count": 12,
+    "artifact_source": "HAR-82",
+    "mutation_surfaces": [
+      "payload",
+      "graph",
+      "event_stream",
+      "provider_request"
+    ],
     "mutation_expected": "FAIL_AS_DESIGNED"
   },
   "cases": [
