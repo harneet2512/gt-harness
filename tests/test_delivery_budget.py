@@ -8,6 +8,7 @@ from gt_engine.delivery_budget import (
     MAX_TASK_DELIVERIES,
     PROMPT_CONTEXT_BYTE_LIMIT,
     TOTAL_DELIVERY_BYTE_LIMIT,
+    delivery_byte_limit,
 )
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter
@@ -30,12 +31,45 @@ def _events(adapter: MiniSweAdapter) -> list[dict]:
 
 def test_delivery_policy_preserves_size_caps_and_uses_storm_backstop() -> None:
     assert DELIVERY_BYTE_LIMITS == {
-        "repository_start": 2_000,
-        "repository_update": 1_400,
+        "sealed": 1_400,
+        "context_contract": 2_000,
+        "context_delta": 1_400,
     }
     assert PROMPT_CONTEXT_BYTE_LIMIT == 1_400
+    assert delivery_byte_limit(lane="sealed", kind="localization") == 1_400
+    assert delivery_byte_limit(lane="prompt", kind="context_contract") == 2_000
+    assert delivery_byte_limit(lane="prompt", kind="context_delta") == 1_400
     assert TOTAL_DELIVERY_BYTE_LIMIT == 9_600
     assert MAX_TASK_DELIVERIES == 24
+
+
+def test_first_sealed_delivery_cannot_borrow_contract_budget(tmp_path) -> None:
+    adapter = _adapter(tmp_path)
+
+    assert not adapter.admit_model_visible_delivery(
+        lane="sealed",
+        kind="localization",
+        rendered="x" * 1_401,
+        action_index=0,
+        iteration=0,
+        dedup_key="sealed-first",
+    )
+    refusal = [row for row in _events(adapter) if row["event"] == "delivery_refused"][0]
+    assert refusal["reason"] == "delivery_byte_ceiling"
+    assert refusal["per_delivery_limit"] == 1_400
+
+
+def test_contract_can_use_full_two_thousand_byte_budget(tmp_path) -> None:
+    adapter = _adapter(tmp_path)
+
+    assert adapter.admit_model_visible_delivery(
+        lane="prompt",
+        kind="context_contract",
+        rendered="x" * 2_000,
+        action_index=0,
+        iteration=0,
+        dedup_key="contract",
+    )
 
 
 def test_five_distinct_legitimate_deliveries_are_admitted(tmp_path) -> None:

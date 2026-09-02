@@ -245,8 +245,9 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert treatment["delivery_budget"] == {
         "unit": "utf8_bytes",
         "conversion_from_legacy_tokens": "4_bytes_per_token",
-        "repository_start_limit": 2_000,
-        "repository_update_limit": 1_400,
+        "sealed_limit": 1_400,
+        "prompt_contract_limit": 2_000,
+        "prompt_delta_limit": 1_400,
         "total_limit": 9_600,
         "total_observed": 223,
         "task_delivery_limit": 24,
@@ -281,10 +282,10 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         ][0].update(same_observation=False),
         "treatment_delivery_context_budget_exceeded": lambda row: row[
             "treatment_receipt"
-        ]["provider_delivery_receipts"][0].update(context_byte_count=2_001),
+        ]["provider_delivery_receipts"][1].update(context_byte_count=1_401),
         "treatment_prompt_context_budget_exceeded": lambda row: row[
             "treatment_receipt"
-        ]["provider_delivery_receipts"][0].update(context_byte_count=1_401),
+        ]["provider_delivery_receipts"][0].update(delivery_kind="localization"),
         "treatment_duplicate_delivery_identity": lambda row: row[
             "treatment_receipt"
         ]["provider_delivery_receipts"][1].update(

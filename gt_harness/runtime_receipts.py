@@ -18,13 +18,12 @@ from typing import Any
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
     MAX_TASK_DELIVERIES,
-    PROMPT_CONTEXT_BYTE_LIMIT,
     TOTAL_DELIVERY_BYTE_LIMIT,
+    delivery_byte_limit,
 )
 
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 _SHA64 = re.compile(r"[0-9a-f]{64}")
-_DELIVERY_BYTE_LIMITS = DELIVERY_BYTE_LIMITS
 _TOTAL_DELIVERY_BYTE_LIMIT = TOTAL_DELIVERY_BYTE_LIMIT
 
 
@@ -159,22 +158,22 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
         )
         index = len(receipts) + 1
         kind = "repository_start" if index == 1 else "repository_update"
+        lane = str(match.get("lane") or "sealed")
+        delivery_kind = str(match.get("kind") or match.get("evidence_type") or "")
         delivered_before_call = int(provider.get("iteration") or 0) if provider else 0
         receipts.append(
             {
                 "schema": "gt.provider_delivery.v2",
                 "delivery_index": index,
                 "kind": kind,
-                "lane": str(match.get("lane") or "sealed"),
-                "delivery_kind": str(
-                    match.get("kind") or match.get("evidence_type") or ""
-                ),
+                "lane": lane,
+                "delivery_kind": delivery_kind,
                 "evidence_type": str(row.get("evidence_type") or ""),
                 "dedup_key": str(row.get("dedup_key") or ""),
                 "context_sha256": str(row.get("payload_hash") or ""),
                 "delivery_identity": str(row.get("payload_hash") or ""),
                 "context_byte_count": int(match.get("rendered_bytes") or 0),
-                "byte_limit": _DELIVERY_BYTE_LIMITS[kind],
+                "byte_limit": delivery_byte_limit(lane=lane, kind=delivery_kind),
                 "observed_iteration": iteration,
                 "delivered_before_call": delivered_before_call,
                 "same_observation": delivered_before_call == iteration + 1,
@@ -399,8 +398,9 @@ def issue_runtime_receipts(
         "delivery_budget": {
             "unit": "utf8_bytes",
             "conversion_from_legacy_tokens": "4_bytes_per_token",
-            "repository_start_limit": _DELIVERY_BYTE_LIMITS["repository_start"],
-            "repository_update_limit": _DELIVERY_BYTE_LIMITS["repository_update"],
+            "sealed_limit": DELIVERY_BYTE_LIMITS["sealed"],
+            "prompt_contract_limit": DELIVERY_BYTE_LIMITS["context_contract"],
+            "prompt_delta_limit": DELIVERY_BYTE_LIMITS["context_delta"],
             "total_limit": _TOTAL_DELIVERY_BYTE_LIMIT,
             "total_observed": sum(row["context_byte_count"] for row in deliveries),
             "task_delivery_limit": MAX_TASK_DELIVERIES,
@@ -740,7 +740,6 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         if not isinstance(delivery, dict):
             errors.append("treatment_provider_delivery_invalid")
             continue
-        kind = str(delivery.get("kind") or "")
         lane = str(delivery.get("lane") or "")
         delivery_kind = str(delivery.get("delivery_kind") or "")
         observed = int(delivery.get("context_byte_count") or 0)
@@ -750,12 +749,14 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append("treatment_delivery_late")
         if lane not in {"prompt", "sealed"}:
             errors.append("treatment_delivery_lane_invalid")
-        if lane == "prompt" and (
-            delivery_kind not in {"context_contract", "context_delta"}
-            or observed > PROMPT_CONTEXT_BYTE_LIMIT
-        ):
+        try:
+            expected_limit = delivery_byte_limit(lane=lane, kind=delivery_kind)
+        except ValueError:
+            expected_limit = 0
+            errors.append("treatment_delivery_context_kind_invalid")
+        if lane == "prompt" and delivery_kind not in {"context_contract", "context_delta"}:
             errors.append("treatment_prompt_context_budget_exceeded")
-        if kind not in _DELIVERY_BYTE_LIMITS or observed > _DELIVERY_BYTE_LIMITS.get(kind, 0):
+        if observed > expected_limit or delivery.get("byte_limit") != expected_limit:
             errors.append("treatment_delivery_context_budget_exceeded")
         if not _SHA64.fullmatch(str(delivery.get("context_sha256") or "")):
             errors.append("treatment_delivery_context_digest_invalid")

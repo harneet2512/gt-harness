@@ -14,10 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from .delivery_budget import (
-    DELIVERY_BYTE_LIMITS,
     MAX_TASK_DELIVERIES,
-    PROMPT_CONTEXT_BYTE_LIMIT,
     TOTAL_DELIVERY_BYTE_LIMIT,
+    delivery_byte_limit,
 )
 from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
@@ -892,12 +891,7 @@ class MiniSweAdapter(GroundtruthController):
             f"prompt:{delivery_identity}" if lane == "prompt" else dedup_key
         )
         candidate_ordinal = self._model_visible_delivery_count + 1
-        budget_kind = (
-            "repository_start" if candidate_ordinal == 1 else "repository_update"
-        )
-        per_delivery_limit = DELIVERY_BYTE_LIMITS[budget_kind]
-        if lane == "prompt":
-            per_delivery_limit = min(per_delivery_limit, PROMPT_CONTEXT_BYTE_LIMIT)
+        per_delivery_limit = delivery_byte_limit(lane=lane, kind=kind)
 
         reason = ""
         if delivery_identity in self._model_visible_delivery_identities:
