@@ -41,6 +41,59 @@ jobs:
           path: .pinned/gitnexus
           persist-credentials: false
 
+      - name: Checkout exact Groundtruth producer source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: harneet2512/groundtruth
+          ref: 43c6d723840f784d5eb939418dc2df57a6ff0a37
+          path: .pinned/groundtruth
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build source-bound Groundtruth producer
+        run: |
+          set -euo pipefail
+          SOURCE_ROOT="${GITHUB_WORKSPACE}/.pinned/groundtruth"
+          OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
+          GO_IMAGE='golang:1.22.5-bookworm@sha256:30bd2d5cc0ab74b88de9067884ec6bf87c0b88f0d5fcb7bbb35a3a7fdda71cdc'
+          SOURCE_COMMIT='43c6d723840f784d5eb939418dc2df57a6ff0a37'
+          SOURCE_TREE='1028a3b8f6be7c585393ce07b2e9ba87bd052084'
+          BUILD_TIME='2026-09-01T04:21:55Z'
+          test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
+          test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
+          mkdir -p "${OUTPUT_ROOT}"
+          docker run --rm --network bridge \
+            -v "${SOURCE_ROOT}:/source:ro" \
+            -v "${OUTPUT_ROOT}:/output" \
+            -w /source/gt-index \
+            "${GO_IMAGE}" \
+            bash -c 'set -euo pipefail
+              SOURCE_FINGERPRINT="$(find . -type f \( -name "*.go" -o -name "*.c" -o -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.s" -o -name "go.mod" -o -name "go.sum" \) -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | awk "{print \$1}")"
+              GO_TOOLCHAIN="$(go version | awk "{print \$3}")"
+              CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+                -buildvcs=false -tags sqlite_fts5 -trimpath -mod=readonly \
+                -ldflags "-X main.commitSHA='"${SOURCE_COMMIT}"' -X main.buildTimeUTC='"${BUILD_TIME}"' -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}" \
+                -o /output/gt-index-linux-amd64 ./cmd/gt-index/'
+          chmod +x "${OUTPUT_ROOT}/gt-index-linux-amd64"
+          "${OUTPUT_ROOT}/gt-index-linux-amd64" -build-info > "${OUTPUT_ROOT}/build-info.json"
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          root = Path("artifacts/source-bound-producer")
+          binary = root / "gt-index-linux-amd64"
+          info = json.loads((root / "build-info.json").read_text(encoding="utf-8"))
+          digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+          assert info["schema"] == "gt-index.build.v1"
+          assert info["complete"] is True
+          assert info["git_commit"] == "43c6d723840f784d5eb939418dc2df57a6ff0a37"
+          assert info["go_toolchain"] == "go1.22.5"
+          assert info["build_tags"] == "sqlite_fts5"
+          assert info["graph_schema_version"] == "v15.2-trust-tier"
+          assert info["executable_sha256"] == digest
+          (root / "sha256.txt").write_text(digest + "\n", encoding="utf-8")
+          PY
+
       - name: Configure isolated Git fixtures
         run: |
           set -euo pipefail
@@ -186,4 +239,12 @@ jobs:
         with:
           name: gt-product-provider-free-${{ github.run_id }}
           path: artifacts/product-closeout/
+          if-no-files-found: error
+
+      - name: Upload source-bound producer bootstrap
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gt-source-bound-producer-${{ github.run_id }}
+          path: artifacts/source-bound-producer/
           if-no-files-found: error
