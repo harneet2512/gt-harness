@@ -30,7 +30,7 @@ def test_product_workflow_rejects_bypassing_manifest_pin_resolution(
     assert "product_manifest_pins_unreachable" in validate_workflow(altered, root=ROOT)
 
 
-def test_only_canonical_product_workflow_is_active() -> None:
+def test_only_closed_supported_workflow_set_is_active() -> None:
     active = sorted(
         path.name
         for pattern in ("*.yml", "*.yaml")

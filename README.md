@@ -82,11 +82,14 @@ results never silently become baseline successes.
 
 ## Workflow
 
-`.github/workflows/deepswe_gt_harness_product.yml` is the only active workflow. It contains no
-secret reference or provider route, pins every action by commit SHA, validates its own module and
-path reachability, runs both provider-free arms, asserts zero provider and benchmark calls, and
-uploads the closeout evidence. Historical workflows were removed from the active directory and
-remain recoverable from Git history.
+The active workflow surface is closed to two files. The canonical
+`.github/workflows/deepswe_gt_harness_product.yml` acceptance workflow is provider-free: it
+contains no secret reference or provider route, pins every action by commit SHA, validates its own
+module and path reachability, runs both provider-free arms, asserts zero provider and benchmark
+calls, and uploads the closeout evidence. The separate
+`.github/workflows/deepswe_gt_harness_product_p0731.yaml` paid smoke wrapper is disabled unless its
+explicit approval and readiness gates pass. Historical workflows were removed from the active
+directory and remain recoverable from Git history.
 
 ## Groundtruth boundary
 
