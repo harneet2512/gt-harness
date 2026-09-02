@@ -677,7 +677,14 @@ def attest_deepswe(
         "agent_scaffold_version": plan["agent_scaffold_version"],
         "treatment": plan["treatment"],
         "provider_gate": {
-            key: provider_gate.get(key) for key in sorted(provider_gate_fields)
+            key: (
+                {
+                    check: (provider_gate.get("checks") or {}).get(check)
+                    for check in sorted(required_provider_checks)
+                }
+                if key == "checks" else provider_gate.get(key)
+            )
+            for key in sorted(provider_gate_fields)
         },
         "canonical_evidence": {
             name: {

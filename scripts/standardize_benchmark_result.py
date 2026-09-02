@@ -252,6 +252,7 @@ def main() -> int:
             source_sha=args.source_sha,
         )
     except Exception as exc:  # noqa: BLE001 - task-level failure must be durable
+        product_receipt_present = any(args.root.rglob("agent/gt-run.json"))
         receipt = {
             "schema": "gt.official_verifier_result.v1",
             "benchmark_suite": args.suite,
@@ -262,7 +263,7 @@ def main() -> int:
             "solved": None,
             "failure_class": "artifact_failure",
             "error_code": "official_verifier_construction_failed",
-            "product_receipt_present": False,
+            "product_receipt_present": product_receipt_present,
             "runner_result_sha256": None,
             "runner_result_path": None,
             "construction_error_type": type(exc).__name__,

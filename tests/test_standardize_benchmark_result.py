@@ -197,6 +197,7 @@ def test_ambiguous_results_write_typed_error_receipt(
     assert exit_code == 1
     assert receipt["status"] == "ERROR"
     assert receipt["error_code"] == "official_verifier_construction_failed"
+    assert receipt["product_receipt_present"] is True
 
 
 def test_conservative_outcomes_represents_missing_task_once() -> None:
