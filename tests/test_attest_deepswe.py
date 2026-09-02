@@ -316,6 +316,65 @@ def test_malformed_official_verifier_writes_durable_fail_receipt(
     ]
 
 
+def _run_cli(root: Path, output: Path) -> tuple[int, dict]:
+    exit_code = main(
+        [
+            "--root", str(root),
+            "--source-sha", "f" * 40,
+            "--task-job-result", "success",
+            "--workflow-run-id", "offline",
+            "--output", str(output),
+        ]
+    )
+    return exit_code, json.loads(output.read_text(encoding="utf-8"))
+
+
+def test_invalid_numeric_receipt_field_writes_durable_fail_receipt(
+    tmp_path: Path,
+) -> None:
+    _adapter, product = _fixture(tmp_path)
+    row = json.loads(product.read_text(encoding="utf-8"))
+    row["provider_calls"] = "not-an-int"
+    _write(product, row)
+
+    exit_code, receipt = _run_cli(
+        tmp_path, tmp_path / "attestation" / "deepswe20-attestation.json"
+    )
+
+    assert exit_code == 1
+    assert receipt["status"] == "FAIL"
+    assert f"invalid_product_receipt_field:{TASK}:provider_calls" in receipt["errors"]
+
+
+def test_duplicate_planned_task_writes_durable_fail_receipt(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    plan_path = tmp_path / "deepswe20-plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["task_ids"].append(TASK)
+    plan["task_count"] = 2
+    _write(plan_path, plan)
+
+    exit_code, receipt = _run_cli(
+        tmp_path, tmp_path / "attestation" / "deepswe20-attestation.json"
+    )
+
+    assert exit_code == 1
+    assert receipt["status"] == "FAIL"
+    assert "duplicate_planned_task" in receipt["errors"]
+    assert list(receipt["outcomes"]) == [TASK]
+
+
+def test_missing_plan_writes_minimal_durable_fail_receipt(tmp_path: Path) -> None:
+    output = tmp_path / "attestation" / "deepswe20-attestation.json"
+
+    exit_code, receipt = _run_cli(tmp_path, output)
+
+    assert exit_code == 1
+    assert receipt["status"] == "FAIL"
+    assert receipt["errors"] == ["attestation_construction_failed:FileNotFoundError"]
+    assert receipt["outcomes"] == {}
+
+
 @pytest.mark.parametrize(
     ("target", "mutation", "expected"),
     [

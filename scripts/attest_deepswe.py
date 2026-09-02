@@ -23,6 +23,26 @@ def _task_name(value: object) -> str:
     return str(value).split("__", 1)[0].rsplit("/", 1)[-1]
 
 
+def _integer(
+    value: object, *, field: str, task: str, errors: list[str]
+) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        errors.append(f"invalid_product_receipt_field:{task}:{field}")
+        return 0
+
+
+def _number(
+    value: object, *, field: str, task: str, errors: list[str]
+) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        errors.append(f"invalid_product_receipt_field:{task}:{field}")
+        return 0.0
+
+
 def attest_deepswe(
     root: Path, *, source_sha: str, task_job_result: str, workflow_run_id: str
 ) -> dict[str, Any]:
@@ -36,6 +56,10 @@ def attest_deepswe(
         row["task"]: str(row["time_budget_seconds"]) for row in plan["matrix"]
     }
     errors: list[str] = []
+    if len(expected) != len(expected_set):
+        errors.append("duplicate_planned_task")
+    if plan.get("task_count") != len(expected):
+        errors.append("planned_task_count_mismatch")
     normalized_job_result = str(task_job_result or "").strip().lower() or "unknown"
     if normalized_job_result != "success":
         errors.append(f"task_job_result_not_success:{normalized_job_result}")
@@ -101,7 +125,12 @@ def attest_deepswe(
         if task in product_runs:
             errors.append(f"duplicate_product_receipt:{task}")
         product_runs[task] = row
-        errors.extend(f"product_receipt:{task}:{reason}" for reason in verify_runtime_receipt(path))
+        try:
+            receipt_errors = verify_runtime_receipt(path)
+        except (TypeError, ValueError) as exc:
+            errors.append(f"invalid_product_receipt:{task}:{type(exc).__name__}")
+            receipt_errors = []
+        errors.extend(f"product_receipt:{task}:{reason}" for reason in receipt_errors)
         for field, expected_value in (
             ("product_source_sha", source_sha),
             ("requested_model", plan.get("requested_model")),
@@ -120,19 +149,43 @@ def attest_deepswe(
             {
                 "task": task,
                 "status": row.get("status"),
-                "provider_calls": int(row.get("provider_calls") or 0),
-                "provider_completed_calls": int(row.get("provider_completed_calls") or 0),
-                "provider_failed_calls": int(row.get("provider_failed_calls") or 0),
-                "input_tokens": int(row.get("input_tokens") or 0),
-                "cached_tokens": int(row.get("cached_tokens") or 0),
-                "output_tokens": int(row.get("output_tokens") or 0),
-                "total_cost": float(row.get("total_cost") or 0),
+                "provider_calls": _integer(
+                    row.get("provider_calls"), field="provider_calls",
+                    task=task, errors=errors,
+                ),
+                "provider_completed_calls": _integer(
+                    row.get("provider_completed_calls"),
+                    field="provider_completed_calls", task=task, errors=errors,
+                ),
+                "provider_failed_calls": _integer(
+                    row.get("provider_failed_calls"), field="provider_failed_calls",
+                    task=task, errors=errors,
+                ),
+                "input_tokens": _integer(
+                    row.get("input_tokens"), field="input_tokens",
+                    task=task, errors=errors,
+                ),
+                "cached_tokens": _integer(
+                    row.get("cached_tokens"), field="cached_tokens",
+                    task=task, errors=errors,
+                ),
+                "output_tokens": _integer(
+                    row.get("output_tokens"), field="output_tokens",
+                    task=task, errors=errors,
+                ),
+                "total_cost": _number(
+                    row.get("total_cost"), field="total_cost",
+                    task=task, errors=errors,
+                ),
                 "treatment_status": treatment.get("treatment_status"),
                 "graph_status": "CERTIFIED" if (
                     graph.get("binary_certified") is True
                     and graph.get("sqlite_quick_check") == "ok"
                 ) else "INVALID",
-                "delivery_count": int(treatment.get("delivery_count") or 0),
+                "delivery_count": _integer(
+                    treatment.get("delivery_count"), field="delivery_count",
+                    task=task, errors=errors,
+                ),
                 "verified": bool(treatment.get("verified")),
                 "unmet_predicate_count": len(treatment.get("unmet_predicates") or []),
             }
@@ -161,7 +214,15 @@ def attest_deepswe(
     if set(official_results) != expected_set:
         errors.append("official_verifier_task_set_mismatch")
 
-    outcomes = conservative_outcomes(expected, official_results)
+    outcome_tasks = list(dict.fromkeys(expected))
+    expected_official = {
+        task: row for task, row in official_results.items() if task in expected_set
+    }
+    try:
+        outcomes = conservative_outcomes(outcome_tasks, expected_official)
+    except ValueError as exc:
+        errors.append(f"outcome_conservation_failed:{exc}")
+        outcomes = conservative_outcomes(outcome_tasks, {})
     if source_sha != plan.get("source_sha"):
         errors.append("source_sha_mismatch")
     totals = {
@@ -212,12 +273,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workflow-run-id", default=os.environ.get("GITHUB_RUN_ID", "offline"))
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    receipt = attest_deepswe(
-        args.root,
-        source_sha=args.source_sha,
-        task_job_result=args.task_job_result,
-        workflow_run_id=args.workflow_run_id,
-    )
+    try:
+        receipt = attest_deepswe(
+            args.root,
+            source_sha=args.source_sha,
+            task_job_result=args.task_job_result,
+            workflow_run_id=args.workflow_run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - the attestation must always be durable
+        receipt = {
+            "schema": "gt.deepswe_gt_harness_attestation.v1",
+            "status": "FAIL",
+            "workflow_run_id": args.workflow_run_id,
+            "source_sha": args.source_sha,
+            "task_job_result": args.task_job_result,
+            "task_count": 0,
+            "task_ids": [],
+            "graded": 0,
+            "solved": 0,
+            "outcomes": {},
+            "errors": [f"attestation_construction_failed:{type(exc).__name__}"],
+        }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(receipt, indent=2, sort_keys=True))
