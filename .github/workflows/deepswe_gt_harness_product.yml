@@ -134,7 +134,7 @@ jobs:
             --manifest config/deepswe_product_bundle_v1.json \
             --fake-provider \
             --output artifacts/product-closeout
-          python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/product-closeout.json').read_text()); assert p['provider_calls'] == 0; assert p['benchmark_runs'] == 0; assert p['status'] == 'READY'; assert p['release_blockers'] == []; assert p['content_correctness']['packet_digest_sha256'] == json.loads(Path('artifacts/product-closeout/har81-a21-content-measurement.json').read_text())['packet_digest_sha256']; assert p['secret_canary_matches'] == []"
+          python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/product-closeout.json').read_text()); assert p['provider_calls'] == 0; assert p['benchmark_runs'] == 0; assert p['status'] == 'VERIFIED_PROVIDER_FREE'; assert p['release_eligible'] is True; assert p['release_blockers'] == []; assert p['content_correctness']['packet_digest_sha256'] == json.loads(Path('artifacts/product-closeout/har81-a21-content-measurement.json').read_text())['packet_digest_sha256']; assert p['secret_canary_matches'] == []"
 
       - name: Stage the exact DeepSWE task image for caching
         if: steps.restore-task-image.outputs.cache-hit != 'true'
