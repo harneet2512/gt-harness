@@ -151,8 +151,11 @@ def test_receipt_issuance_failure_preserves_native_exit_and_writes_error_receipt
     assert product_receipt["status"] == "ERROR"
     assert product_receipt["terminal"] == "task_failed"
     assert product_receipt["exit_code"] == TERMINAL_EXIT_CODES["task_failed"]
+    assert product_receipt["effective_model"] == "deepseek-v4-flash"
+    assert product_receipt["provider_calls"] == 2
     assert product_receipt["receipt_issuance"]["code"] == (
         "runtime_receipt_issuance_failed"
     )
     assert adapter_receipt["status"] == "ERROR"
+    assert adapter_receipt["effective_model"] == "deepseek-v4-flash"
     assert adapter_receipt["receipt_issuance"] == product_receipt["receipt_issuance"]

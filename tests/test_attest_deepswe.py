@@ -187,6 +187,24 @@ def test_historical_model_route_mismatch_is_exact(tmp_path: Path) -> None:
     ]
 
 
+def test_error_product_receipt_fails_attestation_closed(tmp_path: Path) -> None:
+    _adapter, product = _fixture(tmp_path)
+    product_row = json.loads(product.read_text(encoding="utf-8"))
+    product_row["status"] = "ERROR"
+    product_row["research_valid"] = False
+    product_row["receipt_issuance"] = {
+        "code": "runtime_receipt_issuance_failed",
+        "type": "ValueError",
+        "message": "injected conservation failure",
+    }
+    _write(product, product_row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"product_receipt:{TASK}:product_not_completed" in receipt["errors"]
+
+
 @pytest.mark.parametrize(
     ("target", "mutation", "expected"),
     [

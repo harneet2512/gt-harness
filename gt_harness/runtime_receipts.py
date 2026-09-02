@@ -389,6 +389,30 @@ def issue_runtime_receipt_failure(
     code.  It intentionally makes no treatment, evidence, or research claim.
     """
 
+    report: dict[str, Any] = {}
+    trajectory: dict[str, Any] = {}
+    try:
+        report = _read_object(report_path)
+    except ValueError:
+        pass
+    try:
+        trajectory = _read_object(trajectory_path)
+    except ValueError:
+        pass
+    model_identity = report.get("model_identity")
+    model_identity = model_identity if isinstance(model_identity, dict) else {}
+    gt = report.get("gt")
+    gt = gt if isinstance(gt, dict) else {}
+    effective_model = str(
+        gt.get("resolved_model") or model_identity.get("resolved") or ""
+    ) or None
+    info = trajectory.get("info")
+    info = info if isinstance(info, dict) else {}
+    model_stats = info.get("model_stats")
+    model_stats = model_stats if isinstance(model_stats, dict) else {}
+    provider_calls = model_stats.get("api_calls")
+    provider_calls = int(provider_calls) if provider_calls is not None else None
+
     failure = {
         "code": "runtime_receipt_issuance_failed",
         "type": type(error).__name__,
@@ -409,11 +433,11 @@ def issue_runtime_receipt_failure(
         "exit_code": exit_code,
         "treatment": treatment,
         "requested_model": requested_model,
-        "effective_model": None,
+        "effective_model": effective_model,
         "agent_scaffold_version": scaffold_version,
         "product_source_sha": product_source_sha,
         "time_budget_seconds": time_budget_seconds,
-        "provider_calls": None,
+        "provider_calls": provider_calls,
         "research_valid": False,
         "receipt_issuance": failure,
         "integrity": integrity,
@@ -426,7 +450,7 @@ def issue_runtime_receipt_failure(
         "attempt": 1,
         "treatment": treatment,
         "requested_model": requested_model,
-        "effective_model": None,
+        "effective_model": effective_model,
         "agent_scaffold_version": scaffold_version,
         "product_source_sha": product_source_sha,
         "time_budget_seconds": time_budget_seconds,
