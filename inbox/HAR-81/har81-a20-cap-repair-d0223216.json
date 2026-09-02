@@ -1,0 +1,39 @@
+{
+  "created_at":"2026-09-02T04:31:17.957073Z",
+  "detail":{
+    "caps":{
+      "context_contract":2000,
+      "context_delta":1400,
+      "sealed":1400,
+      "total":9600
+    },
+    "defect_at_bbe5594e":"cap selected by delivery ordinal, allowing first sealed payload 2000 bytes and limiting later contract to 1400; refusal chronology absent from receipts",
+    "focused_command":"python -m pytest -q tests/test_delivery_budget.py tests/test_runtime_receipts.py",
+    "focused_result":"12 passed",
+    "implementation_commits":[
+      "e61eb4262b6e517e2d4b3a963acf55fe940662ff",
+      "c6197b1e612c4244a5fcd107c835dd83528985b6"
+    ],
+    "paid_dispatch":false,
+    "provider_calls":0,
+    "red_test_commit":"3cb16ad9a98ef85d05f9195ee39cd5c83bbbdeff",
+    "review_status":"pending_independent_loop"
+  },
+  "file":"",
+  "head_sha":"d02232163fe121a3dbdcf46ca6d9865666a5f632",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"A20 repaired candidate evidence; independent exact-SHA review required",
+  "packet_digest_sha256":"8682d1c5288efbf67a4f695126d438947add27db138ca390e5d137638fbdc8f6",
+  "packet_id":"har81-a20-cap-repair-d0223216",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"substance",
+  "source":{
+    "check":"A20-lane-type-cap-repair",
+    "system":"codex-check"
+  },
+  "status":"open",
+  "supersedes":"har81-a20-check-bbe5594e",
+  "ticket":"HAR-81"
+}
