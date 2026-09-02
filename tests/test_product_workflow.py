@@ -65,6 +65,8 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "python scripts/gt_live_gate.py" in paid
     assert "--require-complete-census" in paid
     assert "python -m scripts.attest_deepswe" in paid
+    assert "cp gt_finalstand/feature_matrix.json attestation/feature-matrix.json" in paid
+    assert "AUDIT_EXIT=0" in paid
     assert "if: always()" in paid.split(
         "- name: Verify all DeepSWE outcomes and product receipts", 1
     )[1].split("- name: Upload final DeepSWE GT Harness attestation", 1)[0]

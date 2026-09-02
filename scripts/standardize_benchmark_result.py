@@ -48,7 +48,13 @@ def conservative_outcomes(
             }
             continue
         reward = result.get("reward")
-        graded = result.get("status") == "GRADED" and reward in (0, 0.0, 1, 1.0)
+        graded = (
+            result.get("status") == "GRADED"
+            and not isinstance(reward, bool)
+            and isinstance(reward, (int, float))
+            and math.isfinite(reward)
+            and reward in (0, 1)
+        )
         outcomes[task_id] = {
             "status": "GRADED" if graded else "ERROR",
             "graded": graded,
@@ -69,12 +75,20 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _reward(payload: dict[str, Any]) -> int | None:
+    verifier_result = payload.get("verifier_result")
+    verifier_result = verifier_result if isinstance(verifier_result, dict) else {}
+    verifier_rewards = verifier_result.get("rewards")
+    verifier_rewards = verifier_rewards if isinstance(verifier_rewards, dict) else {}
+    direct_rewards = payload.get("rewards")
+    direct_rewards = direct_rewards if isinstance(direct_rewards, dict) else {}
     candidates: list[Any] = [
-        ((payload.get("verifier_result") or {}).get("rewards") or {}).get("reward"),
-        (payload.get("rewards") or {}).get("reward"),
+        verifier_rewards.get("reward"),
+        direct_rewards.get("reward"),
         payload.get("reward"),
     ]
-    evals = ((payload.get("stats") or {}).get("evals") or {})
+    stats = payload.get("stats")
+    stats = stats if isinstance(stats, dict) else {}
+    evals = stats.get("evals") or {}
     if isinstance(evals, dict):
         for evaluation in evals.values():
             if not isinstance(evaluation, dict):
@@ -129,6 +143,7 @@ def _failure_class(
     if not runner_result_present:
         return "setup_failure", "runner_result_missing"
     exception = (trial or {}).get("exception_info") or {}
+    exception = exception if isinstance(exception, dict) else {}
     exception_type = str(exception.get("exception_type") or "")
     message = str(exception.get("exception_message") or "")
     if _INSUFFICIENT_BALANCE.search(message):

@@ -504,9 +504,13 @@ jobs:
         env:
           EXPECTED_MODEL: ${{ needs.plan.outputs.model }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          AUDIT_EXIT=0
+          LIVE_EXIT=0
+          MATRIX_ISSUE_EXIT=0
+          MATRIX_VERIFY_EXIT=0
           python scripts/gt_audit.py attestation/tasks \
-            --json attestation/gt-audit.json
+            --json attestation/gt-audit.json || AUDIT_EXIT=$?
           TASK_COUNT="$(python -c "import json; print(json.load(open('attestation/deepswe20-plan.json'))['task_count'])")"
           python scripts/gt_live_gate.py attestation/gt-audit.json \
             --run-dir attestation/tasks \
@@ -515,9 +519,18 @@ jobs:
             --min-witnessed 0 \
             --min-exercised 0 \
             --require-complete-census \
-            --json attestation/gt-live-gate.json
-          python scripts/issue_feature_matrix.py
-          python scripts/verify_feature_matrix.py
+            --json attestation/gt-live-gate.json || LIVE_EXIT=$?
+          python scripts/issue_feature_matrix.py || MATRIX_ISSUE_EXIT=$?
+          if test -f gt_finalstand/feature_matrix.json; then
+            cp gt_finalstand/feature_matrix.json attestation/feature-matrix.json
+            python scripts/verify_feature_matrix.py attestation/feature-matrix.json || MATRIX_VERIFY_EXIT=$?
+          else
+            MATRIX_VERIFY_EXIT=1
+          fi
+          if test "$AUDIT_EXIT" -ne 0 || test "$LIVE_EXIT" -ne 0 || \
+             test "$MATRIX_ISSUE_EXIT" -ne 0 || test "$MATRIX_VERIFY_EXIT" -ne 0; then
+            exit 1
+          fi
 
       - name: Verify all DeepSWE outcomes and product receipts
         if: always()

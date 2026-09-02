@@ -129,6 +129,31 @@ def test_standardize_boolean_reward_cannot_manufacture_grade(tmp_path: Path) -> 
     assert receipt["solved"] is None
 
 
+def test_standardize_malformed_nested_reward_evidence_stays_ungraded(
+    tmp_path: Path,
+) -> None:
+    _write_case(
+        tmp_path,
+        aggregate={
+            "n_total_trials": 1,
+            "verifier_result": [],
+            "rewards": [],
+            "stats": [],
+        },
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": [],
+        },
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["reward"] is None
+    assert receipt["solved"] is None
+
+
 def test_conservative_outcomes_represents_missing_task_once() -> None:
     outcomes = conservative_outcomes(
         ["task-a", "task-b"],
@@ -152,3 +177,13 @@ def test_conservative_outcomes_represents_missing_task_once() -> None:
         "failure_class": "missing_result",
         "error_code": "official_verifier_result_missing",
     }
+
+
+def test_conservative_outcomes_rejects_boolean_reward() -> None:
+    outcomes = conservative_outcomes(
+        ["task-a"],
+        {"task-a": {"status": "GRADED", "reward": True}},
+    )
+
+    assert outcomes["task-a"]["graded"] is False
+    assert outcomes["task-a"]["solved"] is False

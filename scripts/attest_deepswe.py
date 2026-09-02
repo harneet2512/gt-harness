@@ -10,8 +10,16 @@ import os
 from pathlib import Path
 from typing import Any
 
+from gt_engine.feature_matrix import verify_matrix
 from gt_harness.runtime_receipts import verify_runtime_receipt
-from scripts.standardize_benchmark_result import conservative_outcomes
+from scripts.provider_preflight import load_route
+from scripts.standardize_benchmark_result import (
+    _failure_class,
+    _reward,
+    conservative_outcomes,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _object(path: Path) -> dict[str, Any]:
@@ -67,7 +75,7 @@ def _array(
 
 
 def _claimed_result(
-    root: Path, claimed: object
+    root: Path, claimed: object, *, expected: Path | None
 ) -> tuple[Path | None, str]:
     if not isinstance(claimed, str) or not claimed:
         return None, "path_missing"
@@ -83,7 +91,21 @@ def _claimed_result(
     if len(candidates) != 1:
         return None, "path_ambiguous" if candidates else "result_missing"
     path = candidates[0]
+    if path.name != "result.json" or expected is None or path != expected.resolve():
+        return None, "result_not_canonical"
     return path, hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _required_evidence(
+    path: Path, *, missing: str, invalid: str, errors: list[str]
+) -> dict[str, Any] | None:
+    try:
+        return _object(path)
+    except FileNotFoundError:
+        errors.append(missing)
+    except (OSError, json.JSONDecodeError, ValueError):
+        errors.append(invalid)
+    return None
 
 
 def attest_deepswe(
@@ -93,30 +115,103 @@ def attest_deepswe(
 
     plan = _object(root / "deepswe20-plan.json")
     provider_gate = _object(root / "provider-gate.json")
-    expected = list(plan["task_ids"])
-    expected_set = set(expected)
-    expected_budgets = {
-        row["task"]: str(row["time_budget_seconds"]) for row in plan["matrix"]
-    }
     errors: list[str] = []
+    task_ids = plan.get("task_ids")
+    if not isinstance(task_ids, list):
+        raise ValueError("planned_task_ids_not_array")
+    expected = list(task_ids)
+    expected_set = set(expected)
     if plan.get("schema") != "gt.deepswe_gt_harness_plan.v1":
         errors.append("plan_schema_mismatch")
     if not all(isinstance(task, str) and task for task in expected):
         errors.append("planned_task_identity_invalid")
     if len(expected) != len(expected_set):
         errors.append("duplicate_planned_task")
-    if plan.get("task_count") != len(expected):
+    if type(plan.get("task_count")) is not int or plan.get("task_count") != len(expected):
         errors.append("planned_task_count_mismatch")
     task_order_sha256 = hashlib.sha256(
         ("\n".join(str(task) for task in expected) + "\n").encode("utf-8")
     ).hexdigest()
     if plan.get("task_order_sha256") != task_order_sha256:
         errors.append("planned_task_order_digest_mismatch")
-    matrix = plan.get("matrix")
-    if not isinstance(matrix, list) or [
-        row.get("task") for row in matrix if isinstance(row, dict)
-    ] != expected or len(matrix) != len(expected):
+    matrix_value = plan.get("matrix")
+    matrix = matrix_value if isinstance(matrix_value, list) else []
+    if (
+        not isinstance(matrix_value, list)
+        or not all(isinstance(row, dict) for row in matrix)
+        or [row.get("task") for row in matrix if isinstance(row, dict)] != expected
+        or len(matrix) != len(expected)
+    ):
         errors.append("planned_task_matrix_mismatch")
+    trusted_bundle = _object(ROOT / "config" / "deepswe_product_bundle_v1.json")
+    trusted_manifest = _object(ROOT / "eval" / "deepswe_smoke20_v1.json")
+    trusted_tasks = {
+        row.get("task_id"): row
+        for row in trusted_bundle.get("tasks", [])
+        if isinstance(row, dict)
+    }
+    if (
+        plan.get("benchmark_sha") != trusted_manifest.get("benchmark_sha")
+        or plan.get("benchmark_sha") != trusted_bundle.get("dataset", {}).get("commit")
+        or plan.get("task_config_identity")
+        != trusted_bundle.get("dataset", {}).get("task_config_identity")
+        or not expected_set.issubset(set(trusted_manifest.get("task_ids", [])))
+    ):
+        errors.append("planned_benchmark_identity_mismatch")
+    expected_budgets: dict[str, str] = {}
+    observed_languages: dict[str, int] = {}
+    for ordinal, row in enumerate(matrix, start=1):
+        if not isinstance(row, dict):
+            continue
+        task = row.get("task")
+        trusted = trusted_tasks.get(task)
+        language = row.get("language")
+        time_budget = row.get("time_budget_seconds")
+        outer_budget = row.get("outer_agent_timeout_seconds")
+        if (
+            trusted is None
+            or type(row.get("ordinal")) is not int
+            or row.get("ordinal") != ordinal
+            or not isinstance(language, str)
+            or not language
+            or language != trusted.get("language")
+            or type(time_budget) is not int
+            or time_budget < 30
+            or type(outer_budget) is not int
+            or outer_budget <= time_budget
+            or row.get("task_config_sha256") != trusted.get("task_config_sha256")
+            or row.get("container_image") != trusted.get("container_image")
+            or row.get("container_digest") != trusted.get("container_digest")
+        ):
+            errors.append(f"planned_task_provenance_mismatch:{task}")
+            continue
+        expected_budgets[str(task)] = str(time_budget)
+        observed_languages[language] = observed_languages.get(language, 0) + 1
+    if plan.get("language_counts") != observed_languages:
+        errors.append("planned_language_counts_mismatch")
+    if (
+        plan.get("attempts_per_task") != 1
+        or type(plan.get("max_parallel")) is not int
+        or plan.get("max_parallel") != min(20, len(expected))
+        or plan.get("agent")
+        != "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent"
+        or plan.get("agent_scaffold") != "mini-swe-agent"
+        or plan.get("agent_scaffold_version") != "2.4.6"
+        or plan.get("treatment") != "groundtruth"
+    ):
+        errors.append("planned_execution_contract_mismatch")
+    trusted_route, trusted_route_digest = load_route(
+        ROOT / "config" / "provider_route.v1.json"
+    )
+    if (
+        plan.get("provider_route_id") != trusted_route.get("route_id")
+        or plan.get("provider_route_sha256") != trusted_route_digest
+        or plan.get("provider") != trusted_route.get("provider")
+        or plan.get("provider_base_url") != trusted_route.get("base_url")
+        or plan.get("requested_model") != trusted_route.get("model")
+        or plan.get("effective_model") != f"openai/{trusted_route.get('model')}"
+    ):
+        errors.append("planned_provider_route_mismatch")
     approval = plan.get("paid_run_approval")
     if not isinstance(approval, dict) or (
         approval.get("approved") is not True
@@ -139,25 +234,52 @@ def attest_deepswe(
     ):
         errors.append("provider_gate_live_approval_invalid")
     if (
-        provider_gate.get("model") != plan.get("requested_model")
-        or provider_gate.get("route_sha256") != plan.get("provider_route_sha256")
+        provider_gate.get("route_id") != trusted_route.get("route_id")
+        or provider_gate.get("provider") != trusted_route.get("provider")
+        or provider_gate.get("base_url") != trusted_route.get("base_url")
+        or provider_gate.get("model") != trusted_route.get("model")
+        or provider_gate.get("route_sha256") != trusted_route_digest
     ):
         errors.append("provider_gate_route_mismatch")
+    checks = provider_gate.get("checks")
+    required_provider_checks = {
+        "credential_valid",
+        "key_limit_available",
+        "model_visible",
+        "model_canary_served",
+    }
+    if (
+        not isinstance(checks, dict)
+        or set(checks) != required_provider_checks
+        or any(checks.get(key) is not True for key in required_provider_checks)
+        or provider_gate.get("error_code") is not None
+        or provider_gate.get("account_amounts_recorded") is not False
+        or type(provider_gate.get("provider_inference_attempts")) is not int
+        or provider_gate.get("provider_inference_attempts") != 1
+        or type(provider_gate.get("provider_inference_calls")) is not int
+        or provider_gate.get("provider_inference_calls") != 1
+    ):
+        errors.append("provider_gate_checks_invalid")
 
-    trial_rows: list[dict[str, Any]] = []
+    result_rows: list[tuple[Path, dict[str, Any]]] = []
+    trial_rows: list[tuple[Path, dict[str, Any]]] = []
     for path in (root / "tasks").rglob("result.json"):
         try:
             row = _object(path)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             errors.append(f"invalid_result:{path}:{type(exc).__name__}")
             continue
+        result_rows.append((path, row))
         if row.get("task_name") and row.get("trial_name"):
-            trial_rows.append(row)
-    observed_trials = [_task_name(row["task_name"]) for row in trial_rows]
+            trial_rows.append((path, row))
+    observed_trials = [_task_name(row["task_name"]) for _, row in trial_rows]
     if len(observed_trials) != len(expected) or set(observed_trials) != expected_set:
         errors.append("trial_task_set_mismatch")
     if len(observed_trials) != len(set(observed_trials)):
         errors.append("duplicate_trial_task")
+    trial_evidence = {
+        _task_name(row["task_name"]): (path, row) for path, row in trial_rows
+    }
 
     adapters: dict[str, dict[str, Any]] = {}
     for path in (root / "tasks").rglob("agent/benchmark-adapter.json"):
@@ -298,13 +420,32 @@ def attest_deepswe(
             row_errors.append(
                 f"official_verifier_product_receipt_flag_invalid:{task}"
             )
-        elif status == "GRADED" and not product_receipt_present:
-            row_errors.append(f"official_verifier_product_receipt_missing:{task}")
+        elif product_receipt_present != (task in product_runs):
+            row_errors.append(f"official_verifier_product_receipt_mismatch:{task}")
+        trial_path, trial_row = trial_evidence.get(task, (None, None))
+        aggregate_candidates = [
+            (candidate_path, candidate_row)
+            for candidate_path, candidate_row in result_rows
+            if candidate_path != trial_path
+            and "stats" in candidate_row
+            and "n_total_trials" in candidate_row
+            and trial_path is not None
+            and trial_path.is_relative_to(candidate_path.parent)
+        ]
+        if len(aggregate_candidates) > 1:
+            row_errors.append(f"official_verifier_result_ambiguous:{task}")
+            expected_result_path = None
+            expected_result_row: dict[str, Any] = {}
+        elif aggregate_candidates:
+            expected_result_path, expected_result_row = aggregate_candidates[0]
+        else:
+            expected_result_path = trial_path
+            expected_result_row = trial_row or {}
         result_path, result_digest = _claimed_result(
-            root, row.get("runner_result_path")
+            root, row.get("runner_result_path"), expected=expected_result_path
         )
         if result_path is None:
-            row_errors.append(f"official_verifier_result_missing:{task}")
+            row_errors.append(f"official_verifier_result_not_canonical:{task}")
         elif row.get("runner_result_sha256") != result_digest:
             row_errors.append(f"official_verifier_result_digest_mismatch:{task}")
         reward = row.get("reward")
@@ -319,6 +460,34 @@ def attest_deepswe(
             row_errors.append(f"official_verifier_reward_invalid:{task}")
         if status == "ERROR" and reward is not None:
             row_errors.append(f"official_verifier_reward_invalid:{task}")
+        try:
+            recomputed_reward = _reward(expected_result_row)
+            if recomputed_reward is None and trial_row is not None:
+                recomputed_reward = _reward(trial_row)
+        except (AttributeError, TypeError, ValueError):
+            recomputed_reward = None
+            row_errors.append(f"official_verifier_result_malformed:{task}")
+        if status == "GRADED" and (
+            recomputed_reward is None
+            or reward != recomputed_reward
+            or row.get("solved") is not (recomputed_reward == 1)
+        ):
+            row_errors.append(f"official_verifier_recomputation_mismatch:{task}")
+        if status == "ERROR":
+            try:
+                expected_failure, expected_error = _failure_class(
+                    trial_row, runner_result_present=expected_result_path is not None
+                )
+            except (AttributeError, TypeError, ValueError):
+                expected_failure, expected_error = "", ""
+                row_errors.append(f"official_verifier_result_malformed:{task}")
+            if (
+                recomputed_reward is not None
+                or row.get("solved") is not None
+                or row.get("failure_class") != expected_failure
+                or row.get("error_code") != expected_error
+            ):
+                row_errors.append(f"official_verifier_recomputation_mismatch:{task}")
         if row_errors:
             errors.extend(row_errors)
             continue
@@ -331,6 +500,91 @@ def attest_deepswe(
             errors.append(f"official_verifier_source_mismatch:{task}")
     if set(official_results) != expected_set:
         errors.append("official_verifier_task_set_mismatch")
+
+    audit = _required_evidence(
+        root / "gt-audit.json",
+        missing="canonical_audit_missing",
+        invalid="canonical_audit_invalid",
+        errors=errors,
+    )
+    if audit is not None:
+        audit_tasks = audit.get("tasks")
+        audit_names = [
+            row.get("task_name")
+            for row in audit_tasks
+            if isinstance(row, dict)
+        ] if isinstance(audit_tasks, list) else []
+        if (
+            not isinstance(audit_tasks, list)
+            or len(audit_tasks) != len(expected)
+            or len(audit_names) != len(expected)
+            or set(audit_names) != expected_set
+            or any(
+                row.get("verdict") not in {
+                    "GREEN",
+                    "GREEN-quiet",
+                    "GREEN-dormant",
+                    "GREEN-delivered",
+                }
+                for row in audit_tasks
+                if isinstance(row, dict)
+            )
+        ):
+            errors.append("canonical_audit_failed_or_incomplete")
+    live_gate = _required_evidence(
+        root / "gt-live-gate.json",
+        missing="canonical_live_gate_missing",
+        invalid="canonical_live_gate_invalid",
+        errors=errors,
+    )
+    if live_gate is not None and (
+        live_gate.get("schema") != "gt.live_acceptance.v1"
+        or live_gate.get("passed") is not True
+        or type(live_gate.get("task_count")) is not int
+        or live_gate.get("task_count") != len(expected)
+        or type(live_gate.get("expected_tasks")) is not int
+        or live_gate.get("expected_tasks") != len(expected)
+        or live_gate.get("expected_model") != plan.get("requested_model")
+        or live_gate.get("observed_models") != [plan.get("requested_model")]
+        or live_gate.get("issues") != []
+    ):
+        errors.append("canonical_live_gate_failed_or_incomplete")
+    feature_matrix = _required_evidence(
+        root / "feature-matrix.json",
+        missing="canonical_feature_matrix_missing",
+        invalid="canonical_feature_matrix_invalid",
+        errors=errors,
+    )
+    if feature_matrix is not None:
+        feature_errors = verify_matrix(
+            feature_matrix, expected_source_revision=source_sha
+        )
+        feature_rows = feature_matrix.get("rows")
+        if isinstance(feature_rows, list):
+            witnessed = True
+            for row in feature_rows:
+                if not isinstance(row, dict):
+                    witnessed = False
+                    continue
+                evidence = row.get("evidence")
+                freshness = row.get("freshness_pins")
+                witnessed = witnessed and (
+                    row.get("disposition") == "WITNESSED"
+                    and isinstance(evidence, dict)
+                    and evidence.get("exit_code") == 0
+                    and isinstance(freshness, dict)
+                    and freshness.get("source_revision") == source_sha
+                )
+            if (
+                type(feature_matrix.get("identity_count")) is not int
+                or feature_matrix.get("identity_count") != len(feature_rows)
+                or not witnessed
+            ):
+                feature_errors.append("feature evidence is not freshly witnessed")
+        if feature_errors:
+            errors.extend(
+                f"canonical_feature_matrix:{reason}" for reason in feature_errors
+            )
 
     outcome_tasks = list(dict.fromkeys(expected))
     expected_official = {

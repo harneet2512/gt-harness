@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from gt_engine.attribution import DIRECT_FEATURES
+from gt_engine.feature_matrix import digest_body
 from gt_harness.runtime_receipts import issue_runtime_receipts
 from scripts.attest_deepswe import attest_deepswe, main
+from scripts.provider_preflight import load_route
 
 TASK = "abs-module-cache-flags"
 REQUESTED = "meta/muse-spark-1.2-contributor"
@@ -21,21 +24,43 @@ def _write(path: Path, value: object) -> None:
 
 
 def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
+    repo_root = Path(__file__).resolve().parents[1]
+    bundle = json.loads(
+        (repo_root / "config" / "deepswe_product_bundle_v1.json").read_text()
+    )
+    bundle_task = next(row for row in bundle["tasks"] if row["task_id"] == TASK)
+    route, route_digest = load_route(repo_root / "config" / "provider_route.v1.json")
     plan = {
         "schema": "gt.deepswe_gt_harness_plan.v1",
         "source_sha": source_sha,
-        "benchmark_sha": "b" * 40,
+        "benchmark_sha": bundle["dataset"]["commit"],
         "task_ids": [TASK],
         "task_count": 1,
-        "matrix": [{"task": TASK, "time_budget_seconds": 3600}],
+        "task_config_identity": bundle["dataset"]["task_config_identity"],
+        "matrix": [{
+            "ordinal": 1,
+            "task": TASK,
+            "language": bundle_task["language"],
+            "outer_agent_timeout_seconds": 3630,
+            "time_budget_seconds": 3600,
+            "task_config_sha256": bundle_task["task_config_sha256"],
+            "container_image": bundle_task["container_image"],
+            "container_digest": bundle_task["container_digest"],
+        }],
         "task_order_sha256": hashlib.sha256((TASK + "\n").encode()).hexdigest(),
         "language_counts": {"go": 1},
         "requested_model": REQUESTED,
         "effective_model": EFFECTIVE,
-        "agent": "miniswe",
+        "attempts_per_task": 1,
+        "max_parallel": 1,
+        "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent",
+        "agent_scaffold": "mini-swe-agent",
         "agent_scaffold_version": "2.4.6",
         "treatment": "groundtruth",
-        "provider_route_sha256": "2" * 64,
+        "provider_route_id": route["route_id"],
+        "provider_route_sha256": route_digest,
+        "provider": route["provider"],
+        "provider_base_url": route["base_url"],
         "paid_run_approval": {"approved": True, "input": "approve_paid_run"},
         "baseline": None,
     }
@@ -49,14 +74,30 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "mode": "live",
             "provider_ready": True,
             "paid_run_approved": True,
+            "route_id": route["route_id"],
+            "provider": route["provider"],
+            "base_url": route["base_url"],
             "model": REQUESTED,
-            "route_sha256": "2" * 64,
+            "route_sha256": route_digest,
+            "error_code": None,
+            "checks": {
+                "credential_valid": True,
+                "key_limit_available": True,
+                "model_visible": True,
+                "model_canary_served": True,
+            },
+            "account_amounts_recorded": False,
+            "provider_inference_attempts": 1,
+            "provider_inference_calls": 1,
         },
     )
     trial = root / "tasks" / "trial"
     agent = trial / "agent"
     result_path = trial / "result.json"
-    _write(result_path, {"task_name": TASK, "trial_name": "trial-1"})
+    _write(
+        result_path,
+        {"task_name": TASK, "trial_name": "trial-1", "reward": 0},
+    )
     trajectory = agent / "miniswe_trajectory.json"
     report = agent / "miniswe_report.json"
     _write(
@@ -155,12 +196,57 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "task_id": TASK,
             "status": "GRADED",
             "reward": 0,
+            "solved": False,
+            "failure_class": "graded",
+            "error_code": "",
             "product_source_sha": source_sha,
             "product_receipt_present": True,
             "runner_result_path": result_path.relative_to(root).as_posix(),
             "runner_result_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
         },
     )
+    _write(
+        root / "gt-audit.json",
+        {"run_dir": "tasks", "tasks": [{"task_name": TASK, "verdict": "GREEN"}]},
+    )
+    _write(
+        root / "gt-live-gate.json",
+        {
+            "schema": "gt.live_acceptance.v1",
+            "passed": True,
+            "task_count": 1,
+            "expected_tasks": 1,
+            "expected_model": REQUESTED,
+            "observed_models": [REQUESTED],
+            "issues": [],
+        },
+    )
+    feature_rows = []
+    for identity, spec in sorted(DIRECT_FEATURES.items()):
+        feature = {
+            "identity": identity,
+            "kind": spec["kind"],
+            "disposition": "WITNESSED",
+            "trigger_source": "tests/provider_free.py",
+            "evidence": {"exit_code": 0},
+            "freshness_pins": {"source_revision": source_sha},
+            "receipt_digest_sha256": None,
+        }
+        feature["cell_digest_sha256"] = digest_body(
+            feature, field="cell_digest_sha256"
+        )
+        feature_rows.append(feature)
+    feature_matrix = {
+        "schema": "gt.feature_matrix.v1",
+        "source_revision": source_sha,
+        "generated_at": "2026-09-02T00:00:00Z",
+        "identity_count": len(feature_rows),
+        "rows": feature_rows,
+    }
+    feature_matrix["matrix_digest_sha256"] = digest_body(
+        feature_matrix, field="matrix_digest_sha256"
+    )
+    _write(root / "feature-matrix.json", feature_matrix)
     return agent / "benchmark-adapter.json", agent / "gt-run.json"
 
 
@@ -187,6 +273,8 @@ def test_historical_missing_receipts_are_exact(tmp_path: Path) -> None:
     assert _attest(tmp_path)["errors"] == [
         "adapter_receipt_task_set_mismatch",
         "product_receipt_task_set_mismatch",
+        f"official_verifier_product_receipt_mismatch:{TASK}",
+        "official_verifier_task_set_mismatch",
     ]
 
 
@@ -232,15 +320,32 @@ def test_error_product_receipt_fails_attestation_closed(tmp_path: Path) -> None:
 
 def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) -> None:
     _fixture(tmp_path)
-    failed_task = "failed-task"
+    failed_task = "adaptix-name-mapping-aliases"
+    repo_root = Path(__file__).resolve().parents[1]
+    bundle = json.loads(
+        (repo_root / "config" / "deepswe_product_bundle_v1.json").read_text()
+    )
+    failed_bundle = next(
+        row for row in bundle["tasks"] if row["task_id"] == failed_task
+    )
     plan_path = tmp_path / "deepswe20-plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     plan["task_ids"].append(failed_task)
     plan["task_count"] = 2
+    plan["max_parallel"] = 2
     plan["matrix"].append(
-        {"task": failed_task, "time_budget_seconds": 3600}
+        {
+            "ordinal": 2,
+            "task": failed_task,
+            "language": failed_bundle["language"],
+            "outer_agent_timeout_seconds": 3630,
+            "time_budget_seconds": 3600,
+            "task_config_sha256": failed_bundle["task_config_sha256"],
+            "container_image": failed_bundle["container_image"],
+            "container_digest": failed_bundle["container_digest"],
+        }
     )
-    plan["language_counts"] = {"go": 1, "typescript": 1}
+    plan["language_counts"] = {"go": 1, "python": 1}
     plan["task_order_sha256"] = hashlib.sha256(
         ("\n".join(plan["task_ids"]) + "\n").encode()
     ).hexdigest()
@@ -251,13 +356,29 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
     )
     passing_row = json.loads(passing.read_text(encoding="utf-8"))
     passing_row["reward"] = 1
+    passing_row["solved"] = True
+    _write(passing, passing_row)
+    passing_result = next(
+        path for path in (tmp_path / "tasks").rglob("result.json")
+        if path.parent.name == "trial"
+    )
+    passing_result_row = json.loads(passing_result.read_text(encoding="utf-8"))
+    passing_result_row["reward"] = 1
+    _write(passing_result, passing_result_row)
+    passing_row["runner_result_sha256"] = hashlib.sha256(
+        passing_result.read_bytes()
+    ).hexdigest()
     _write(passing, passing_row)
 
     failed_trial = tmp_path / "tasks" / "failed-wrapper" / "failed__trial"
     failed_result = failed_trial / "result.json"
     _write(
         failed_result,
-        {"task_name": failed_task, "trial_name": "failed-trial"},
+        {
+            "task_name": failed_task,
+            "trial_name": "failed-trial",
+            "exception_info": {"exception_type": "NonZeroAgentExitCodeError"},
+        },
     )
     _write(
         failed_trial / "agent" / "official-verifier-result.json",
@@ -267,6 +388,7 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
             "task_id": failed_task,
             "status": "ERROR",
             "reward": None,
+            "solved": None,
             "failure_class": "setup_failure",
             "error_code": "runner_setup_or_execution_failed",
             "product_source_sha": "f" * 40,
@@ -277,6 +399,15 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
             ).hexdigest(),
         },
     )
+    audit_path = tmp_path / "gt-audit.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit["tasks"].append({"task_name": failed_task, "verdict": "RED"})
+    _write(audit_path, audit)
+    live_path = tmp_path / "gt-live-gate.json"
+    live = json.loads(live_path.read_text(encoding="utf-8"))
+    live.update(passed=False, task_count=2, expected_tasks=2)
+    live["issues"] = ["failed task"]
+    _write(live_path, live)
 
     receipt = _attest(tmp_path)
 
@@ -474,6 +605,37 @@ def test_boolean_official_reward_cannot_manufacture_solve(tmp_path: Path) -> Non
     assert receipt["solved"] == 0
 
 
+def test_numeric_official_reward_cannot_manufacture_solve(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    verifier = next(tmp_path.rglob("agent/official-verifier-result.json"))
+    row = json.loads(verifier.read_text(encoding="utf-8"))
+    row.update(reward=1, solved=True)
+    _write(verifier, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"official_verifier_recomputation_mismatch:{TASK}" in receipt["errors"]
+    assert receipt["graded"] == 0
+    assert receipt["solved"] == 0
+
+
+def test_official_verifier_cannot_claim_arbitrary_in_root_file(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    verifier = next(tmp_path.rglob("agent/official-verifier-result.json"))
+    row = json.loads(verifier.read_text(encoding="utf-8"))
+    arbitrary = tmp_path / "deepswe20-plan.json"
+    row["runner_result_path"] = arbitrary.relative_to(tmp_path).as_posix()
+    row["runner_result_sha256"] = hashlib.sha256(arbitrary.read_bytes()).hexdigest()
+    _write(verifier, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"official_verifier_result_not_canonical:{TASK}" in receipt["errors"]
+    assert receipt["graded"] == 0
+
+
 @pytest.mark.parametrize(
     ("target", "mutate", "expected"),
     [
@@ -497,6 +659,26 @@ def test_boolean_official_reward_cannot_manufacture_solve(tmp_path: Path) -> Non
             lambda row: row.update(route_sha256="0" * 64),
             "provider_gate_route_mismatch",
         ),
+        (
+            "gate",
+            lambda row: row["checks"].update(model_canary_served=False),
+            "provider_gate_checks_invalid",
+        ),
+        (
+            "plan",
+            lambda row: row.update(task_count=True),
+            "planned_task_count_mismatch",
+        ),
+        (
+            "plan",
+            lambda row: row["matrix"][0].update(container_digest="sha256:" + "0" * 64),
+            "planned_task_provenance_mismatch",
+        ),
+        (
+            "plan",
+            lambda row: row.update(provider_route_sha256="0" * 64),
+            "planned_provider_route_mismatch",
+        ),
     ],
 )
 def test_plan_and_provider_gate_mutations_fail_closed(
@@ -513,7 +695,84 @@ def test_plan_and_provider_gate_mutations_fail_closed(
     receipt = _attest(tmp_path)
 
     assert receipt["status"] == "FAIL"
+    assert any(expected in error for error in receipt["errors"])
+
+
+def test_coordinated_plan_and_gate_route_mutation_fails_closed(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    plan_path = tmp_path / "deepswe20-plan.json"
+    gate_path = tmp_path / "provider-gate.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    for row in (plan, gate):
+        row["provider_route_id"] = "mutated-route"
+        row["provider_route_sha256"] = "0" * 64
+        row["route_id"] = "mutated-route"
+        row["route_sha256"] = "0" * 64
+    gate["checks"] = {key: False for key in gate["checks"]}
+    gate["provider_inference_attempts"] = 0
+    gate["provider_inference_calls"] = 0
+    _write(plan_path, plan)
+    _write(gate_path, gate)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert "planned_provider_route_mismatch" in receipt["errors"]
+    assert "provider_gate_route_mismatch" in receipt["errors"]
+    assert "provider_gate_checks_invalid" in receipt["errors"]
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutate", "expected"),
+    [
+        (
+            "gt-audit.json",
+            lambda row: row["tasks"][0].update(verdict="RED"),
+            "canonical_audit_failed_or_incomplete",
+        ),
+        (
+            "gt-live-gate.json",
+            lambda row: row.update(passed=False),
+            "canonical_live_gate_failed_or_incomplete",
+        ),
+        (
+            "feature-matrix.json",
+            lambda row: row.update(source_revision="0" * 40),
+            "canonical_feature_matrix:source_revision does not match checkout HEAD",
+        ),
+    ],
+)
+def test_canonical_acceptance_evidence_mutations_fail_closed(
+    tmp_path: Path, artifact: str, mutate, expected: str
+) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / artifact
+    row = json.loads(path.read_text(encoding="utf-8"))
+    mutate(row)
+    if artifact == "feature-matrix.json":
+        row["matrix_digest_sha256"] = digest_body(
+            row, field="matrix_digest_sha256"
+        )
+    _write(path, row)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
     assert expected in receipt["errors"]
+
+
+def test_missing_canonical_audit_preserves_per_task_outcome(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    (tmp_path / "gt-audit.json").unlink()
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert receipt["errors"] == ["canonical_audit_missing"]
+    assert receipt["outcomes"][TASK]["graded"] is True
 
 
 @pytest.mark.parametrize(
