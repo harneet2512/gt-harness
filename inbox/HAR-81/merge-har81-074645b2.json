@@ -1,0 +1,35 @@
+{
+  "created_at":"2026-09-02T01:09:07.135826Z",
+  "detail":{
+    "a17_nonfatal_receipt_issuance":"verified",
+    "benchmark_runs":0,
+    "container_proof":"VERIFIED",
+    "feature_matrix":"19/19_witnessed",
+    "full_serial_suite":"green",
+    "landed_sha":"074645b256490794f487df855f60041eb4bc4990",
+    "landing":"exact_fast_forward",
+    "paid_dispatch":false,
+    "parent_sha":"7dc80b7eaa021f23809cc200e854ad8b59a7f605",
+    "provider_calls":0,
+    "provider_free_ci_conclusion":"success",
+    "provider_free_ci_run":33577711729,
+    "secret_canary_matches":[]
+  },
+  "file":"",
+  "head_sha":"074645b256490794f487df855f60041eb4bc4990",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 offline readiness and nonfatal receipt issuance landed on main after provider-free CI success",
+  "packet_digest_sha256":"4cd2e2d9b2be3e7550df9ef1dbafab3b82ff5a4b22e3cbbbe57a323926ec6745",
+  "packet_id":"merge-har81-074645b2",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":"merge-har81-7dc80b7e",
+  "ticket":"HAR-81"
+}
