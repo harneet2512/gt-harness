@@ -173,6 +173,19 @@ def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
     )
 
     assert 0 < limit <= 96 * mib
+    assert indexer._effective_index_memory_limit({"max": 1024 * mib, "current": None}) == 0
+
+
+def test_partial_benchmark_identity_fails_closed(monkeypatch) -> None:
+    monkeypatch.setenv("GT_TASK_ID", "task-a")
+    monkeypatch.delenv("GT_PRODUCT_SOURCE_SHA", raising=False)
+
+    try:
+        indexer._execution_identity()
+    except ValueError as exc:
+        assert str(exc) == "benchmark index identity is incomplete"
+    else:
+        raise AssertionError("partial benchmark identity was accepted")
 
 
 def test_successful_process_with_corrupt_database_emits_sealed_failure(
@@ -244,3 +257,48 @@ def test_concurrent_index_builds_are_serialized_and_publish_one_pair(
     graph = Path(results[0])
     manifest = json.loads(graph.with_suffix(".manifest.json").read_text(encoding="utf-8"))
     assert manifest["graph_sha256"] == hashlib.sha256(graph.read_bytes()).hexdigest()
+
+
+def test_failed_refresh_preserves_previous_graph_manifest_and_resource_pair(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    state = tmp_path / "state"
+    repo.mkdir()
+    source = repo / "main.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+
+    def build(_root: str, output: Path, _log_dir: Path):
+        connection = indexer.sqlite3.connect(output)
+        connection.execute("create table project_meta (key text)")
+        connection.commit()
+        connection.close()
+        return indexer.IndexProcessResult(True, "completed", "", exit_code=0)
+
+    monkeypatch.setattr(indexer, "_run_index_bounded", build)
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+    graph = Path(indexer.ensure_index(str(repo), state_dir=str(state)))
+    manifest = graph.with_suffix(".manifest.json")
+    resource = graph.with_name("index-resource.json")
+    before = (graph.read_bytes(), manifest.read_bytes(), resource.read_bytes())
+    source.write_text("x = 2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        indexer,
+        "_run_index_bounded",
+        lambda *_args: indexer.IndexProcessResult(
+            False, "memory_guard_triggered", "GT_INDEX_MEMORY_GUARD_TRIGGERED", exit_code=-9
+        ),
+    )
+
+    assert indexer.ensure_index(str(repo), state_dir=str(state)) is None
+    assert (graph.read_bytes(), manifest.read_bytes(), resource.read_bytes()) == before
+    valid, reason = indexer._certify_published_graph(
+        graph, manifest, expected_root=repo, expected_binary_sha256="b" * 64
+    )
+    assert valid is True
+    assert reason == "ok"
+    assert graph.with_name("index-failure-resource.json").is_file()

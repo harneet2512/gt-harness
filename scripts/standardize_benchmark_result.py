@@ -28,8 +28,22 @@ _EXIT_137 = re.compile(r"(?:exit(?: code)?|return(?: code)?)\s*[:=]?\s*137\b", r
 _MEMORY_EVIDENCE_CODES = frozenset(
     {
         "GT_INDEX_MEMORY_GUARD_TRIGGERED",
-        "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
         "GT_INDEX_CGROUP_OOM",
+    }
+)
+_SOURCE_EXTS = frozenset(
+    {
+        ".c", ".cc", ".cjs", ".clj", ".cpp", ".cs", ".dart", ".erl", ".ex",
+        ".exs", ".go", ".h", ".hh", ".hpp", ".hs", ".java", ".js", ".jsx",
+        ".kt", ".kts", ".lua", ".m", ".mjs", ".ml", ".mm", ".php", ".py",
+        ".pyi", ".rb", ".rs", ".scala", ".sh", ".swift", ".ts", ".tsx", ".zig",
+    }
+)
+_SKIP_DIRS = frozenset(
+    {
+        ".git", ".groundtruth", ".gt", ".hg", ".idea", ".mypy_cache", ".ruff_cache",
+        ".svn", ".tox", ".venv", ".vscode", "__pycache__", "build", "dist",
+        "node_modules", "target", "vendor", "venv",
     }
 )
 
@@ -46,6 +60,61 @@ def _valid_self_digest(payload: dict[str, Any], field: str) -> bool:
         json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return isinstance(supplied, str) and hmac.compare_digest(supplied, calculated)
+
+
+def _configured_producer_sha256() -> str:
+    path = Path(__file__).resolve().parents[1] / "config" / "deepswe_product_bundle_v1.json"
+    payload = _read_json(path)
+    groundtruth = payload.get("groundtruth") if payload else None
+    value = groundtruth.get("producer_sha256") if isinstance(groundtruth, dict) else None
+    return value if _is_sha256(value) else ""
+
+
+def _snapshot_source_manifest(snapshot: dict[str, Any]) -> str:
+    files = snapshot.get("files")
+    if snapshot.get("schema") != "gt.runtime_observation.v1" or not isinstance(files, list):
+        return ""
+    records: list[tuple[str, int, str]] = []
+    for item in files:
+        if not isinstance(item, dict) or item.get("kind") != "file":
+            continue
+        relative = item.get("path")
+        size = item.get("size")
+        digest = item.get("sha256")
+        if (
+            not isinstance(relative, str)
+            or type(size) is not int
+            or size < 0
+            or not _is_sha256(digest)
+        ):
+            return ""
+        path = Path(relative)
+        if any(part in _SKIP_DIRS for part in path.parts) or path.suffix.lower() not in _SOURCE_EXTS:
+            continue
+        records.append((path.as_posix(), size, digest))
+    encoded = bytearray()
+    for relative, size, digest in sorted(records):
+        path_bytes = relative.encode("utf-8", "surrogatepass")
+        hash_bytes = digest.encode("ascii")
+        encoded.extend(len(path_bytes).to_bytes(8, "big"))
+        encoded.extend(path_bytes)
+        encoded.extend(size.to_bytes(8, "big"))
+        encoded.extend(len(hash_bytes).to_bytes(8, "big"))
+        encoded.extend(hash_bytes)
+    return hashlib.sha256(bytes(encoded)).hexdigest()
+
+
+def _snapshot_binds_source(root: Path, evidence: dict[str, Any]) -> bool:
+    for path in root.rglob("repository_snapshots/*.json"):
+        snapshot = _read_json(path)
+        if (
+            snapshot is not None
+            and snapshot.get("complete") is True
+            and snapshot.get("root_sha256") == evidence.get("repository_root_sha256")
+            and _snapshot_source_manifest(snapshot) == evidence.get("source_manifest_sha256")
+        ):
+            return True
+    return False
 
 
 def conservative_outcomes(
@@ -183,11 +252,7 @@ def _failure_class(
             suffix = (
                 "memory_guard_triggered"
                 if code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
-                else (
-                    "memory_headroom_insufficient"
-                    if code == "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT"
-                    else "cgroup_oom"
-                )
+                else "cgroup_oom"
             )
             return "resource_exhaustion", f"gt_index_{suffix}"
         return "process_signal_failure", "process_exit_137_unattributed"
@@ -200,7 +265,8 @@ def _resource_evidence(
     root: Path, *, task_id: str, product_source_sha: str
 ) -> tuple[Path | None, dict[str, Any] | None]:
     valid: list[tuple[Path, dict[str, Any]]] = []
-    for path in sorted(root.rglob("index-resource.json")):
+    expected_producer = _configured_producer_sha256()
+    for path in sorted(root.rglob("index-failure-resource.json")):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != "gt.index_resource.v1":
             continue
@@ -238,6 +304,7 @@ def _resource_evidence(
             and _valid_self_digest(failure, "manifest_sha256")
             and failure.get("task_id") == task_id
             and failure.get("product_source_sha") == product_source_sha
+            and failure.get("identity_scope") == "benchmark_bound"
             and failure.get("error_code") == code
             and failure.get("resource_evidence_path") == path.name
             and failure.get("resource_evidence_sha256")
@@ -252,6 +319,9 @@ def _resource_evidence(
             _valid_self_digest(payload, "evidence_sha256")
             and payload.get("task_id") == task_id
             and payload.get("product_source_sha") == product_source_sha
+            and payload.get("identity_scope") == "benchmark_bound"
+            and payload.get("producer_binary_sha256") == expected_producer
+            and _snapshot_binds_source(root, payload)
             and payload.get("memory_evidence") is memory_semantics_valid
             and bound_failure
         ):
@@ -292,6 +362,10 @@ def standardize_result(
         raise ValueError("GT product receipt task does not match runner task")
 
     result_path, runner_result, trial = _runner_results(root)
+    if trial is not None:
+        runner_task = str(trial.get("task_name") or "").rsplit("/", 1)[-1]
+        if runner_task != task_id:
+            raise ValueError("runner task identity does not match requested task")
     resource_path, resource_evidence = _resource_evidence(
         root, task_id=task_id, product_source_sha=source_sha
     )

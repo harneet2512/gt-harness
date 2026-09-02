@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -83,9 +84,9 @@ class IndexProcessResult:
     @property
     def memory_evidence(self) -> bool:
         return (
-            self.status in {"memory_guard_triggered", "memory_headroom_refused", "cgroup_oom"}
+            self.status in {"memory_guard_triggered", "cgroup_oom"}
             and (
-                self.status in {"memory_guard_triggered", "memory_headroom_refused"}
+                self.status == "memory_guard_triggered"
                 or self.cgroup_oom_delta > 0
                 or self.cgroup_oom_kill_delta > 0
             )
@@ -247,6 +248,24 @@ def _sealed_json(path: Path, payload: dict[str, object], digest_field: str) -> s
     return digest
 
 
+def _execution_identity() -> dict[str, str]:
+    task_id = os.environ.get("GT_TASK_ID", "").strip()
+    product_source_sha = os.environ.get("GT_PRODUCT_SOURCE_SHA", "").strip()
+    if not task_id and not product_source_sha:
+        return {
+            "identity_scope": "local_unbound",
+            "task_id": "",
+            "product_source_sha": "",
+        }
+    if not task_id or not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
+        raise ValueError("benchmark index identity is incomplete")
+    return {
+        "identity_scope": "benchmark_bound",
+        "task_id": task_id,
+        "product_source_sha": product_source_sha,
+    }
+
+
 def _read_integer(path: Path) -> int | None:
     try:
         value = path.read_text(encoding="ascii").strip()
@@ -314,7 +333,9 @@ def _effective_index_memory_limit(snapshot: dict[str, int | None]) -> int:
     cgroup_max = snapshot.get("max")
     if cgroup_max is None:
         return _INDEX_RSS_LIMIT_BYTES
-    current = snapshot.get("current") or 0
+    current = snapshot.get("current")
+    if current is None:
+        return 0
     headroom = max(0, cgroup_max - current)
     safe_headroom = max(0, headroom - 128 * 1024 * 1024)
     # Leave half of a constrained task cgroup to the runner and its provider
@@ -437,7 +458,10 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
     except (OSError, subprocess.SubprocessError):
         if process is not None and process.poll() is None:
             process.kill()
-            process.wait()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
         return IndexProcessResult(
             False,
             status,
@@ -454,8 +478,7 @@ def _write_index_evidence(
 ) -> str:
     payload: dict[str, object] = {
         "schema": INDEX_RESOURCE_SCHEMA,
-        "task_id": os.environ.get("GT_TASK_ID", ""),
-        "product_source_sha": os.environ.get("GT_PRODUCT_SOURCE_SHA", ""),
+        **_execution_identity(),
         "repository_root_sha256": hashlib.sha256(
             os.path.realpath(root).encode("utf-8", "surrogatepass")
         ).hexdigest(),
@@ -492,8 +515,7 @@ def _write_graph_failure(
 ) -> None:
     failure_payload: dict[str, object] = {
         "schema": "gt.graph_failure.v1",
-        "task_id": os.environ.get("GT_TASK_ID", ""),
-        "product_source_sha": os.environ.get("GT_PRODUCT_SOURCE_SHA", ""),
+        **_execution_identity(),
         "error_code": error_code,
         "repository_root_sha256": hashlib.sha256(
             os.path.realpath(root).encode("utf-8", "surrogatepass")
@@ -504,6 +526,25 @@ def _write_graph_failure(
         "resource_evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
     }
     _sealed_json(gt_dir / "graph.failure.json", failure_payload, "manifest_sha256")
+
+
+def _publish_graph_failure(
+    gt_dir: Path,
+    *,
+    root: str,
+    reuse_key: IndexReuseKey,
+    error_code: str,
+    staged_evidence: Path,
+) -> None:
+    evidence_path = gt_dir / "index-failure-resource.json"
+    os.replace(staged_evidence, evidence_path)
+    _write_graph_failure(
+        gt_dir,
+        root=root,
+        reuse_key=reuse_key,
+        error_code=error_code,
+        evidence_path=evidence_path,
+    )
 
 
 def _graph_state_dir(root: str | Path, state_dir: str | Path | None) -> Path:
@@ -576,29 +617,29 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             candidate = Path(handle.name)
         candidate.unlink(missing_ok=True)
         process_result = _run_index_bounded(str(root), candidate, gt_dir)
-        evidence_path = gt_dir / "index-resource.json"
+        evidence_path = candidate.with_suffix(".resource.json")
         _write_index_evidence(
             evidence_path, root=str(root), result=process_result, reuse_key=reuse_key
         )
         evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
         failure_manifest = gt_dir / "graph.failure.json"
         if not process_result.success:
-            _write_graph_failure(
+            _publish_graph_failure(
                 gt_dir,
                 root=root,
                 reuse_key=reuse_key,
                 error_code=process_result.error_code,
-                evidence_path=evidence_path,
+                staged_evidence=evidence_path,
             )
             candidate.unlink(missing_ok=True)
             return None
         if not candidate.is_file():
-            _write_graph_failure(
+            _publish_graph_failure(
                 gt_dir,
                 root=root,
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_MISSING",
-                evidence_path=evidence_path,
+                staged_evidence=evidence_path,
             )
             return None
         try:
@@ -610,28 +651,29 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             finally:
                 con.close()
         except (sqlite3.Error, OSError):
-            _write_graph_failure(
+            _publish_graph_failure(
                 gt_dir,
                 root=root,
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_INVALID",
-                evidence_path=evidence_path,
+                staged_evidence=evidence_path,
             )
             candidate.unlink(missing_ok=True)
             return None
         if quick_check.lower() != "ok":
-            _write_graph_failure(
+            _publish_graph_failure(
                 gt_dir,
                 root=root,
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_INVALID",
-                evidence_path=evidence_path,
+                staged_evidence=evidence_path,
             )
             candidate.unlink(missing_ok=True)
             return None
         graph_sha256 = hashlib.sha256(candidate.read_bytes()).hexdigest()
         manifest = {
             "schema": "gt.graph_certification.v1",
+            **_execution_identity(),
             "graph_schema_version": GRAPH_SCHEMA_VERSION,
             "index_reuse_key": reuse_key.as_dict(),
             "index_reuse_key_sha256": reuse_key.digest,
@@ -650,24 +692,48 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         backup = gt_dir / ".graph.previous.db"
+        manifest_path = db.with_suffix(".manifest.json")
+        manifest_backup = gt_dir / ".graph.previous.manifest.json"
+        canonical_evidence = gt_dir / "index-resource.json"
+        evidence_backup = gt_dir / ".index-resource.previous.json"
         had_previous = db.is_file()
+        had_manifest = manifest_path.is_file()
+        had_evidence = canonical_evidence.is_file()
         if had_previous:
             shutil.copyfile(db, backup)
+        if had_manifest:
+            shutil.copyfile(manifest_path, manifest_backup)
+        if had_evidence:
+            shutil.copyfile(canonical_evidence, evidence_backup)
         try:
-            # The database itself is published in one atomic filesystem swap.
+            # All readers enter through ensure_index's lock. Publish the three
+            # staged files as one locked transaction and restore the prior set
+            # if any swap fails.
             os.replace(candidate, db)
-            _atomic_write(db.with_suffix(".manifest.json"), manifest_bytes)
+            os.replace(evidence_path, canonical_evidence)
+            _atomic_write(manifest_path, manifest_bytes)
         except Exception:
             if had_previous and backup.is_file():
                 os.replace(backup, db)
             else:
                 db.unlink(missing_ok=True)
-                db.with_suffix(".manifest.json").unlink(missing_ok=True)
+            if had_evidence and evidence_backup.is_file():
+                os.replace(evidence_backup, canonical_evidence)
+            else:
+                canonical_evidence.unlink(missing_ok=True)
+            if had_manifest and manifest_backup.is_file():
+                os.replace(manifest_backup, manifest_path)
+            else:
+                manifest_path.unlink(missing_ok=True)
             raise
         finally:
             candidate.unlink(missing_ok=True)
+            evidence_path.unlink(missing_ok=True)
             backup.unlink(missing_ok=True)
+            evidence_backup.unlink(missing_ok=True)
+            manifest_backup.unlink(missing_ok=True)
         failure_manifest.unlink(missing_ok=True)
+        (gt_dir / "index-failure-resource.json").unlink(missing_ok=True)
         return str(db)
     except Exception:  # noqa: BLE001 - indexing failure means GT dormant, never a crash
         return None
@@ -757,7 +823,15 @@ def _graph_publication_lock(path: Path):
         else:
             import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            deadline = time.monotonic() + _INDEX_TIMEOUT_SECONDS + 30
+            while True:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("gt-index publication lock timed out") from None
+                    time.sleep(0.05)
         try:
             yield
         finally:
@@ -832,6 +906,18 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
         or resource.get("source_manifest_sha256")
         != manifest.get("source_manifest_sha256")
         or resource.get("producer_binary_sha256") != manifest.get("binary_sha256")
+        or resource.get("task_id") != manifest.get("task_id")
+        or resource.get("product_source_sha") != manifest.get("product_source_sha")
+        or resource.get("identity_scope") != manifest.get("identity_scope")
+        or (
+            os.environ.get("GT_TASK_ID")
+            and resource.get("task_id") != os.environ["GT_TASK_ID"]
+        )
+        or (
+            os.environ.get("GT_PRODUCT_SOURCE_SHA")
+            and resource.get("product_source_sha")
+            != os.environ["GT_PRODUCT_SOURCE_SHA"]
+        )
     ):
         return False, "index_resource_identity_mismatch"
     valid, reason = _graph_schema_receipt(graph)
@@ -851,7 +937,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
     if not graph:
         gt_dir = _graph_state_dir(root_path, state_dir)
         failure = _read_sealed_json(gt_dir / "graph.failure.json", "manifest_sha256")
-        evidence_path = gt_dir / "index-resource.json"
+        evidence_path = gt_dir / "index-failure-resource.json"
         evidence = _read_sealed_json(evidence_path, "evidence_sha256")
         evidence_file_sha = (
             hashlib.sha256(evidence_path.read_bytes()).hexdigest()
@@ -879,6 +965,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
                 for field in (
                     "task_id",
                     "product_source_sha",
+                    "identity_scope",
                     "repository_root_sha256",
                     "source_manifest_sha256",
                     "producer_binary_sha256",

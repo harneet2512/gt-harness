@@ -5,7 +5,11 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.standardize_benchmark_result import (
+    _configured_producer_sha256,
+    _snapshot_source_manifest,
     conservative_outcomes,
     main,
     standardize_result,
@@ -91,6 +95,14 @@ def test_standardize_provider_balance_failure_is_not_rate_limit(tmp_path: Path) 
 
 
 def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
+    snapshot = {
+        "schema": "gt.runtime_observation.v1",
+        "complete": True,
+        "root_sha256": "b" * 64,
+        "files": [
+            {"kind": "file", "path": "main.py", "size": 1, "sha256": "f" * 64}
+        ],
+    }
     payload: dict[str, object] = {
         "schema": "gt.index_resource.v1",
         "status": "cgroup_oom",
@@ -100,21 +112,27 @@ def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
         "cgroup_oom_kill_delta": 1,
         "task_id": "task-a",
         "product_source_sha": "a" * 40,
+        "identity_scope": "benchmark_bound",
         "repository_root_sha256": "b" * 64,
-        "source_manifest_sha256": "c" * 64,
-        "producer_binary_sha256": "d" * 64,
+        "source_manifest_sha256": _snapshot_source_manifest(snapshot),
+        "producer_binary_sha256": _configured_producer_sha256(),
     }
     payload.update(overrides)
     payload["evidence_sha256"] = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    path = agent / "gt-state" / "index-resource.json"
+    path = agent / "gt-state" / "index-failure-resource.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+    snapshot["root_sha256"] = payload["repository_root_sha256"]
+    snapshots = path.parent / "repository_snapshots"
+    snapshots.mkdir()
+    (snapshots / "source.json").write_text(json.dumps(snapshot), encoding="utf-8")
     failure = {
         "schema": "gt.graph_failure.v1",
         "task_id": payload["task_id"],
         "product_source_sha": payload["product_source_sha"],
+        "identity_scope": payload["identity_scope"],
         "error_code": payload["error_code"],
         "repository_root_sha256": payload["repository_root_sha256"],
         "source_manifest_sha256": payload["source_manifest_sha256"],
@@ -222,6 +240,69 @@ def test_foreign_or_unbound_memory_evidence_cannot_classify_exit_137(tmp_path: P
     assert receipt["failure_class"] == "process_signal_failure"
     assert receipt["error_code"] == "process_exit_137_unattributed"
     assert receipt["resource_evidence_path"] is None
+
+
+def test_prelaunch_headroom_refusal_cannot_explain_later_exit_137(tmp_path: Path) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+    _write_resource_evidence(
+        agent,
+        status="memory_headroom_refused",
+        error_code="GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
+        exit_code=None,
+        memory_evidence=False,
+        cgroup_memory_current_before=950 * 1024 * 1024,
+        cgroup_memory_max=1024 * 1024 * 1024,
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "process_signal_failure"
+    assert receipt["error_code"] == "process_exit_137_unattributed"
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"task_id": "task-foreign"},
+        {"product_source_sha": "b" * 40},
+        {"producer_binary_sha256": "e" * 64},
+        {"source_manifest_sha256": "e" * 64},
+    ],
+)
+def test_memory_evidence_identity_mutations_fail_closed(
+    tmp_path: Path, override: dict[str, object]
+) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+    _write_resource_evidence(agent, **override)
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "process_signal_failure"
+    assert receipt["error_code"] == "process_exit_137_unattributed"
 
 
 def test_standardize_setup_failure_without_runner_output_remains_ungraded(
