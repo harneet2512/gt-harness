@@ -1635,6 +1635,31 @@ def audit_run(run_dir: Path) -> list[TaskAudit]:
     return [audit_task(d) for d in dirs]  # find_task_dirs is sorted -> deterministic
 
 
+def artifact_corpus_sha256(run_dir: Path) -> str:
+    """Digest every downloaded task artifact by relative identity and content."""
+    rows = []
+    for path in sorted(
+        (item for item in run_dir.rglob("*") if item.is_file()),
+        key=lambda item: item.relative_to(run_dir).as_posix(),
+    ):
+        content = path.read_bytes()
+        rows.append(
+            {
+                "path": path.relative_to(run_dir).as_posix(),
+                "bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def audit_digest_sha256(payload: dict) -> str:
+    body = {key: value for key, value in payload.items() if key != "audit_digest_sha256"}
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 # --------------------------------------------------------------------------- #
 # reporting
 # --------------------------------------------------------------------------- #
@@ -1839,6 +1864,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="baseline run dir - adds the paired no-harm table")
     ap.add_argument("--json", dest="json_out", default=None,
                     help="write the full machine-readable audit to this path")
+    ap.add_argument("--source-sha", default="",
+                    help="exact product source revision bound to this audit")
+    ap.add_argument("--workflow-run-id", default="offline",
+                    help="workflow run identity bound to this audit")
     args = ap.parse_args(argv)
 
     run_dir = Path(args.run_dir)
@@ -1859,13 +1888,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json_out:
         payload: dict = {
+            "schema": "gt.audit.v1",
+            "source_sha": args.source_sha,
+            "workflow_run_id": args.workflow_run_id,
             "run_dir": str(run_dir),
+            "artifact_corpus_sha256": artifact_corpus_sha256(run_dir),
             "tasks": [asdict(a) | {"error_rate": a.error_rate} for a in audits],
         }
         if base_audits is not None:
             payload["baseline_dir"] = str(args.baseline)
             payload["baseline_tasks"] = [
                 asdict(a) | {"error_rate": a.error_rate} for a in base_audits]
+        payload["audit_digest_sha256"] = audit_digest_sha256(payload)
         Path(args.json_out).write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 

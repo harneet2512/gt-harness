@@ -43,7 +43,11 @@ def test_standardize_success_binds_only_official_reward(tmp_path: Path) -> None:
             "n_total_trials": 1,
             "stats": {"evals": {"task": {"metrics": [{"reward": 1.0}]}}},
         },
-        trial={"task_name": "datacurve/task-a", "trial_name": "task-a__trial"},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": {"rewards": {"reward": 1}},
+        },
     )
 
     receipt = _standardize(tmp_path)
@@ -119,7 +123,11 @@ def test_standardize_boolean_reward_cannot_manufacture_grade(tmp_path: Path) -> 
             "n_total_trials": 1,
             "stats": {"evals": {"task": {"metrics": [{"reward": True}]}}},
         },
-        trial={"task_name": "datacurve/task-a", "trial_name": "task-a__trial"},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": {"rewards": {"reward": 1}},
+        },
     )
 
     receipt = _standardize(tmp_path)

@@ -189,9 +189,13 @@ def standardize_result(
 
     result_path, runner_result, trial = _runner_results(root)
     result_bytes = result_path.read_bytes() if result_path is not None else None
-    reward = _reward(runner_result)
-    if reward is None and trial is not None:
-        reward = _reward(trial)
+    aggregate_reward = _reward(runner_result)
+    trial_reward = _reward(trial or {})
+    reward = (
+        aggregate_reward
+        if aggregate_reward is not None and aggregate_reward == trial_reward
+        else None
+    )
     failure_class, error_code = (
         ("graded", "")
         if reward is not None

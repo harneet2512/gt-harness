@@ -8,6 +8,7 @@ auditor.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -573,6 +574,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
         run_dir=Path(args.run_dir),
     )
+    report["source_sha"] = audit.get("source_sha")
+    report["workflow_run_id"] = audit.get("workflow_run_id")
+    report["audit_digest_sha256"] = audit.get("audit_digest_sha256")
+    report["audit_file_sha256"] = hashlib.sha256(audit_path.read_bytes()).hexdigest()
+    report_body = json.dumps(
+        report, sort_keys=True, separators=(",", ":")
+    ).encode()
+    report["report_digest_sha256"] = hashlib.sha256(report_body).hexdigest()
     rendered = json.dumps(report, indent=2, sort_keys=True)
     print(rendered)
     if args.output_json:

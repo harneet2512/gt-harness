@@ -510,6 +510,8 @@ jobs:
           MATRIX_ISSUE_EXIT=0
           MATRIX_VERIFY_EXIT=0
           python scripts/gt_audit.py attestation/tasks \
+            --source-sha "${{ needs.plan.outputs.source_sha }}" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
             --json attestation/gt-audit.json || AUDIT_EXIT=$?
           TASK_COUNT="$(python -c "import json; print(json.load(open('attestation/deepswe20-plan.json'))['task_count'])")"
           python scripts/gt_live_gate.py attestation/gt-audit.json \
@@ -550,5 +552,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gt-harness-deepswe20-attestation-${{ github.run_id }}
-          path: attestation/deepswe20-attestation.json
+          path: |
+            attestation/deepswe20-attestation.json
+            attestation/gt-audit.json
+            attestation/gt-live-gate.json
+            attestation/feature-matrix.json
           if-no-files-found: error

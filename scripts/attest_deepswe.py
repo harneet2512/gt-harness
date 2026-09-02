@@ -12,6 +12,7 @@ from typing import Any
 
 from gt_engine.feature_matrix import verify_matrix
 from gt_harness.runtime_receipts import verify_runtime_receipt
+from scripts.gt_audit import artifact_corpus_sha256, audit_digest_sha256
 from scripts.provider_preflight import load_route
 from scripts.standardize_benchmark_result import (
     _failure_class,
@@ -20,6 +21,11 @@ from scripts.standardize_benchmark_result import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_TASK_IDS = tuple(
+    json.loads(
+        (ROOT / "eval" / "deepswe_smoke20_v1.json").read_text(encoding="utf-8")
+    )["task_ids"]
+)
 
 
 def _object(path: Path) -> dict[str, Any]:
@@ -108,6 +114,20 @@ def _required_evidence(
     return None
 
 
+def _digest_without(payload: dict[str, Any], field: str) -> str:
+    body = {key: value for key, value in payload.items() if key != field}
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _total_cost(rows: list[dict[str, Any]], errors: list[str]) -> float:
+    value = sum(row["total_cost"] for row in rows)
+    if not math.isfinite(value):
+        errors.append("product_total_cost_overflow")
+        return 0.0
+    return round(value, 12)
+
+
 def attest_deepswe(
     root: Path, *, source_sha: str, task_job_result: str, workflow_run_id: str
 ) -> dict[str, Any]:
@@ -121,6 +141,8 @@ def attest_deepswe(
         raise ValueError("planned_task_ids_not_array")
     expected = list(task_ids)
     expected_set = set(expected)
+    if expected != list(CANONICAL_TASK_IDS):
+        errors.append("planned_canonical_cohort_mismatch")
     if plan.get("schema") != "gt.deepswe_gt_harness_plan.v1":
         errors.append("plan_schema_mismatch")
     if not all(isinstance(task, str) and task for task in expected):
@@ -347,6 +369,14 @@ def attest_deepswe(
             treatment.get("unmet_predicates"), field="unmet_predicates",
             task=task, errors=errors,
         )
+        verified = _boolean(
+            treatment.get("verified"), field="verified",
+            task=task, errors=errors,
+        )
+        if not verified:
+            errors.append(f"product_completion_unverified:{task}")
+        if unmet_predicates:
+            errors.append(f"product_unmet_predicates:{task}")
         product_rows.append(
             {
                 "task": task,
@@ -388,10 +418,7 @@ def attest_deepswe(
                     treatment.get("delivery_count"), field="delivery_count",
                     task=task, errors=errors,
                 ),
-                "verified": _boolean(
-                    treatment.get("verified"), field="verified",
-                    task=task, errors=errors,
-                ),
+                "verified": verified,
                 "unmet_predicate_count": len(unmet_predicates),
             }
         )
@@ -432,15 +459,12 @@ def attest_deepswe(
             and trial_path is not None
             and trial_path.is_relative_to(candidate_path.parent)
         ]
-        if len(aggregate_candidates) > 1:
+        if len(aggregate_candidates) != 1:
             row_errors.append(f"official_verifier_result_ambiguous:{task}")
             expected_result_path = None
             expected_result_row: dict[str, Any] = {}
-        elif aggregate_candidates:
-            expected_result_path, expected_result_row = aggregate_candidates[0]
         else:
-            expected_result_path = trial_path
-            expected_result_row = trial_row or {}
+            expected_result_path, expected_result_row = aggregate_candidates[0]
         result_path, result_digest = _claimed_result(
             root, row.get("runner_result_path"), expected=expected_result_path
         )
@@ -461,9 +485,13 @@ def attest_deepswe(
         if status == "ERROR" and reward is not None:
             row_errors.append(f"official_verifier_reward_invalid:{task}")
         try:
-            recomputed_reward = _reward(expected_result_row)
-            if recomputed_reward is None and trial_row is not None:
-                recomputed_reward = _reward(trial_row)
+            aggregate_reward = _reward(expected_result_row)
+            trial_reward = _reward(trial_row or {})
+            recomputed_reward = (
+                aggregate_reward
+                if aggregate_reward is not None and aggregate_reward == trial_reward
+                else None
+            )
         except (AttributeError, TypeError, ValueError):
             recomputed_reward = None
             row_errors.append(f"official_verifier_result_malformed:{task}")
@@ -515,7 +543,15 @@ def attest_deepswe(
             if isinstance(row, dict)
         ] if isinstance(audit_tasks, list) else []
         if (
-            not isinstance(audit_tasks, list)
+            audit.get("schema") != "gt.audit.v1"
+            or audit.get("source_sha") != source_sha
+            or audit.get("workflow_run_id") != workflow_run_id
+            or str(audit.get("run_dir", "")).replace("\\", "/")
+            != "attestation/tasks"
+            or audit.get("artifact_corpus_sha256")
+            != artifact_corpus_sha256(root / "tasks")
+            or audit.get("audit_digest_sha256") != audit_digest_sha256(audit)
+            or not isinstance(audit_tasks, list)
             or len(audit_tasks) != len(expected)
             or len(audit_names) != len(expected)
             or set(audit_names) != expected_set
@@ -547,6 +583,17 @@ def attest_deepswe(
         or live_gate.get("expected_model") != plan.get("requested_model")
         or live_gate.get("observed_models") != [plan.get("requested_model")]
         or live_gate.get("issues") != []
+        or live_gate.get("source_sha") != source_sha
+        or live_gate.get("workflow_run_id") != workflow_run_id
+        or live_gate.get("audit_digest_sha256")
+        != (audit or {}).get("audit_digest_sha256")
+        or live_gate.get("audit_file_sha256")
+        != (
+            hashlib.sha256((root / "gt-audit.json").read_bytes()).hexdigest()
+            if audit is not None else None
+        )
+        or live_gate.get("report_digest_sha256")
+        != _digest_without(live_gate, "report_digest_sha256")
     ):
         errors.append("canonical_live_gate_failed_or_incomplete")
     feature_matrix = _required_evidence(
@@ -604,7 +651,7 @@ def attest_deepswe(
             "input_tokens", "cached_tokens", "output_tokens", "delivery_count",
         )
     }
-    totals["total_cost"] = round(sum(row["total_cost"] for row in product_rows), 12)
+    totals["total_cost"] = _total_cost(product_rows, errors)
     return {
         "schema": "gt.deepswe_gt_harness_attestation.v1",
         "status": "PASS" if not errors else "FAIL",
@@ -622,6 +669,18 @@ def attest_deepswe(
         "agent_scaffold_version": plan["agent_scaffold_version"],
         "treatment": plan["treatment"],
         "provider_gate": provider_gate,
+        "canonical_evidence": {
+            name: {
+                "artifact_ref": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()
+                if path.is_file() else None,
+            }
+            for name, path in {
+                "audit": root / "gt-audit.json",
+                "live_gate": root / "gt-live-gate.json",
+                "feature_matrix": root / "feature-matrix.json",
+            }.items()
+        },
         "paid_run_approval": plan["paid_run_approval"],
         "baseline": plan["baseline"],
         "graded": sum(1 for row in outcomes.values() if row["graded"]),
@@ -669,17 +728,28 @@ def main(argv: list[str] | None = None) -> int:
                 ).as_posix()
             except ValueError:
                 evidence_ref = Path(filename).name
+        fallback_tasks: list[str] = []
+        try:
+            fallback_plan = _object(args.root / "deepswe20-plan.json")
+            fallback_ids = fallback_plan.get("task_ids")
+            if isinstance(fallback_ids, list):
+                fallback_tasks = list(dict.fromkeys(
+                    task for task in fallback_ids
+                    if isinstance(task, str) and task
+                ))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
         receipt = {
             "schema": "gt.deepswe_gt_harness_attestation_error.v1",
             "status": "FAIL",
             "workflow_run_id": args.workflow_run_id,
             "source_sha": args.source_sha,
             "task_job_result": args.task_job_result,
-            "task_count": 0,
-            "task_ids": [],
+            "task_count": len(fallback_tasks),
+            "task_ids": fallback_tasks,
             "graded": 0,
             "solved": 0,
-            "outcomes": {},
+            "outcomes": conservative_outcomes(fallback_tasks, {}),
             "errors": [f"attestation_construction_failed:{cause}"],
             "primary_error": {
                 "code": "attestation_construction_failed",

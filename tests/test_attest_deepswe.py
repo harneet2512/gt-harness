@@ -7,15 +7,22 @@ from pathlib import Path
 
 import pytest
 
+import scripts.attest_deepswe as attest_module
 from gt_engine.attribution import DIRECT_FEATURES
 from gt_engine.feature_matrix import digest_body
 from gt_harness.runtime_receipts import issue_runtime_receipts
-from scripts.attest_deepswe import attest_deepswe, main
+from scripts.attest_deepswe import _total_cost, attest_deepswe, main
+from scripts.gt_audit import artifact_corpus_sha256, audit_digest_sha256
 from scripts.provider_preflight import load_route
 
 TASK = "abs-module-cache-flags"
 REQUESTED = "meta/muse-spark-1.2-contributor"
 EFFECTIVE = "openai/meta/muse-spark-1.2-contributor"
+
+
+@pytest.fixture(autouse=True)
+def _single_task_canonical_cohort(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(attest_module, "CANONICAL_TASK_IDS", (TASK,))
 
 
 def _write(path: Path, value: object) -> None:
@@ -91,12 +98,25 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "provider_inference_calls": 1,
         },
     )
-    trial = root / "tasks" / "trial"
+    job = root / "tasks" / "job"
+    trial = job / "trial"
     agent = trial / "agent"
     result_path = trial / "result.json"
     _write(
         result_path,
-        {"task_name": TASK, "trial_name": "trial-1", "reward": 0},
+        {
+            "task_name": TASK,
+            "trial_name": "trial-1",
+            "verifier_result": {"rewards": {"reward": 0}},
+        },
+    )
+    aggregate_path = job / "result.json"
+    _write(
+        aggregate_path,
+        {
+            "n_total_trials": 1,
+            "stats": {"evals": {"task": {"metrics": [{"reward": 0}]}}},
+        },
     )
     trajectory = agent / "miniswe_trajectory.json"
     report = agent / "miniswe_report.json"
@@ -119,6 +139,9 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
                 "provider_reported_model": REQUESTED,
                 "resolved_model": EFFECTIVE,
                 "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+                "verified": True,
+                "unmet_predicates": [],
+                "unverified_predicates": [],
             },
         },
     )
@@ -201,26 +224,38 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "error_code": "",
             "product_source_sha": source_sha,
             "product_receipt_present": True,
-            "runner_result_path": result_path.relative_to(root).as_posix(),
-            "runner_result_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
+            "runner_result_path": aggregate_path.relative_to(root).as_posix(),
+            "runner_result_sha256": hashlib.sha256(aggregate_path.read_bytes()).hexdigest(),
         },
     )
-    _write(
-        root / "gt-audit.json",
-        {"run_dir": "tasks", "tasks": [{"task_name": TASK, "verdict": "GREEN"}]},
+    audit = {
+        "schema": "gt.audit.v1",
+        "source_sha": source_sha,
+        "workflow_run_id": "offline",
+        "run_dir": "attestation/tasks",
+        "artifact_corpus_sha256": artifact_corpus_sha256(root / "tasks"),
+        "tasks": [{"task_name": TASK, "verdict": "GREEN"}],
+    }
+    audit["audit_digest_sha256"] = audit_digest_sha256(audit)
+    audit_path = root / "gt-audit.json"
+    _write(audit_path, audit)
+    live_gate = {
+        "schema": "gt.live_acceptance.v1",
+        "passed": True,
+        "task_count": 1,
+        "expected_tasks": 1,
+        "expected_model": REQUESTED,
+        "observed_models": [REQUESTED],
+        "issues": [],
+        "source_sha": source_sha,
+        "workflow_run_id": "offline",
+        "audit_digest_sha256": audit["audit_digest_sha256"],
+        "audit_file_sha256": hashlib.sha256(audit_path.read_bytes()).hexdigest(),
+    }
+    live_gate["report_digest_sha256"] = digest_body(
+        live_gate, field="report_digest_sha256"
     )
-    _write(
-        root / "gt-live-gate.json",
-        {
-            "schema": "gt.live_acceptance.v1",
-            "passed": True,
-            "task_count": 1,
-            "expected_tasks": 1,
-            "expected_model": REQUESTED,
-            "observed_models": [REQUESTED],
-            "issues": [],
-        },
-    )
+    _write(root / "gt-live-gate.json", live_gate)
     feature_rows = []
     for identity, spec in sorted(DIRECT_FEATURES.items()):
         feature = {
@@ -275,6 +310,7 @@ def test_historical_missing_receipts_are_exact(tmp_path: Path) -> None:
         "product_receipt_task_set_mismatch",
         f"official_verifier_product_receipt_mismatch:{TASK}",
         "official_verifier_task_set_mismatch",
+        "canonical_audit_failed_or_incomplete",
     ]
 
 
@@ -297,6 +333,7 @@ def test_historical_model_route_mismatch_is_exact(tmp_path: Path) -> None:
     assert _attest(tmp_path)["errors"] == [
         f"effective_model_mismatch:{TASK}",
         f"product_effective_model_mismatch:{TASK}",
+        "canonical_audit_failed_or_incomplete",
     ]
 
 
@@ -318,7 +355,9 @@ def test_error_product_receipt_fails_attestation_closed(tmp_path: Path) -> None:
     assert f"product_receipt:{TASK}:product_not_completed" in receipt["errors"]
 
 
-def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) -> None:
+def test_partial_run_preserves_graded_pass_and_explicit_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _fixture(tmp_path)
     failed_task = "adaptix-name-mapping-aliases"
     repo_root = Path(__file__).resolve().parents[1]
@@ -328,6 +367,7 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
     failed_bundle = next(
         row for row in bundle["tasks"] if row["task_id"] == failed_task
     )
+    monkeypatch.setattr(attest_module, "CANONICAL_TASK_IDS", (TASK, failed_task))
     plan_path = tmp_path / "deepswe20-plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     plan["task_ids"].append(failed_task)
@@ -363,14 +403,22 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
         if path.parent.name == "trial"
     )
     passing_result_row = json.loads(passing_result.read_text(encoding="utf-8"))
-    passing_result_row["reward"] = 1
+    passing_result_row["verifier_result"]["rewards"]["reward"] = 1
     _write(passing_result, passing_result_row)
+    passing_aggregate = passing_result.parent.parent / "result.json"
+    passing_aggregate_row = json.loads(
+        passing_aggregate.read_text(encoding="utf-8")
+    )
+    passing_aggregate_row["stats"]["evals"]["task"]["metrics"][0]["reward"] = 1
+    _write(passing_aggregate, passing_aggregate_row)
     passing_row["runner_result_sha256"] = hashlib.sha256(
-        passing_result.read_bytes()
+        passing_aggregate.read_bytes()
     ).hexdigest()
     _write(passing, passing_row)
 
     failed_trial = tmp_path / "tasks" / "failed-wrapper" / "failed__trial"
+    failed_aggregate = failed_trial.parent / "result.json"
+    _write(failed_aggregate, {"n_total_trials": 1, "stats": {"evals": {}}})
     failed_result = failed_trial / "result.json"
     _write(
         failed_result,
@@ -393,20 +441,27 @@ def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) ->
             "error_code": "runner_setup_or_execution_failed",
             "product_source_sha": "f" * 40,
             "product_receipt_present": False,
-            "runner_result_path": failed_result.relative_to(tmp_path).as_posix(),
+            "runner_result_path": failed_aggregate.relative_to(tmp_path).as_posix(),
             "runner_result_sha256": hashlib.sha256(
-                failed_result.read_bytes()
+                failed_aggregate.read_bytes()
             ).hexdigest(),
         },
     )
     audit_path = tmp_path / "gt-audit.json"
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     audit["tasks"].append({"task_name": failed_task, "verdict": "RED"})
+    audit["artifact_corpus_sha256"] = artifact_corpus_sha256(tmp_path / "tasks")
+    audit["audit_digest_sha256"] = audit_digest_sha256(audit)
     _write(audit_path, audit)
     live_path = tmp_path / "gt-live-gate.json"
     live = json.loads(live_path.read_text(encoding="utf-8"))
     live.update(passed=False, task_count=2, expected_tasks=2)
     live["issues"] = ["failed task"]
+    live["audit_digest_sha256"] = audit["audit_digest_sha256"]
+    live["audit_file_sha256"] = hashlib.sha256(audit_path.read_bytes()).hexdigest()
+    live["report_digest_sha256"] = digest_body(
+        live, field="report_digest_sha256"
+    )
     _write(live_path, live)
 
     receipt = _attest(tmp_path)
@@ -478,8 +533,9 @@ def test_malformed_official_verifier_writes_durable_fail_receipt(
         "official_verifier_result_missing"
     )
     assert receipt["errors"] == [
-        "invalid_official_verifier:tasks/trial/agent/official-verifier-result.json:JSONDecodeError",
+        "invalid_official_verifier:tasks/job/trial/agent/official-verifier-result.json:JSONDecodeError",
         "official_verifier_task_set_mismatch",
+        "canonical_audit_failed_or_incomplete",
     ]
 
 
@@ -617,6 +673,30 @@ def test_numeric_official_reward_cannot_manufacture_solve(tmp_path: Path) -> Non
     assert receipt["status"] == "FAIL"
     assert f"official_verifier_recomputation_mismatch:{TASK}" in receipt["errors"]
     assert receipt["graded"] == 0
+    assert receipt["solved"] == 0
+
+
+def test_coordinated_aggregate_and_verifier_reward_mutation_cannot_solve(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    verifier = next(tmp_path.rglob("agent/official-verifier-result.json"))
+    official = json.loads(verifier.read_text(encoding="utf-8"))
+    aggregate = tmp_path / official["runner_result_path"]
+    aggregate_row = json.loads(aggregate.read_text(encoding="utf-8"))
+    aggregate_row["stats"]["evals"]["task"]["metrics"][0]["reward"] = 1
+    _write(aggregate, aggregate_row)
+    official.update(
+        reward=1,
+        solved=True,
+        runner_result_sha256=hashlib.sha256(aggregate.read_bytes()).hexdigest(),
+    )
+    _write(verifier, official)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert f"official_verifier_recomputation_mismatch:{TASK}" in receipt["errors"]
     assert receipt["solved"] == 0
 
 
@@ -771,8 +851,63 @@ def test_missing_canonical_audit_preserves_per_task_outcome(tmp_path: Path) -> N
     receipt = _attest(tmp_path)
 
     assert receipt["status"] == "FAIL"
-    assert receipt["errors"] == ["canonical_audit_missing"]
+    assert receipt["errors"] == [
+        "canonical_audit_missing",
+        "canonical_live_gate_failed_or_incomplete",
+    ]
     assert receipt["outcomes"][TASK]["graded"] is True
+
+
+def test_recomputed_synthetic_audit_still_fails_corpus_binding(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "gt-audit.json"
+    audit = json.loads(path.read_text(encoding="utf-8"))
+    audit["run_dir"] = "stale-other-run"
+    audit["artifact_corpus_sha256"] = "0" * 64
+    audit["audit_digest_sha256"] = audit_digest_sha256(audit)
+    _write(path, audit)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert "canonical_audit_failed_or_incomplete" in receipt["errors"]
+
+
+def test_unverified_completion_and_unmet_predicates_fail_closed(
+    tmp_path: Path,
+) -> None:
+    _adapter, product = _fixture(tmp_path)
+    row = json.loads(product.read_text(encoding="utf-8"))
+    row["treatment_receipt"]["verified"] = False
+    row["treatment_receipt"]["unmet_predicates"] = ["prefix_semantics"]
+    _write(product, row)
+
+    receipt = _attest(tmp_path)
+
+    assert f"product_completion_unverified:{TASK}" in receipt["errors"]
+    assert f"product_unmet_predicates:{TASK}" in receipt["errors"]
+
+
+def test_canonical_twenty_task_cohort_cannot_be_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fixture(tmp_path)
+    monkeypatch.setattr(attest_module, "CANONICAL_TASK_IDS", (TASK, "missing-task"))
+
+    receipt = _attest(tmp_path)
+
+    assert "planned_canonical_cohort_mismatch" in receipt["errors"]
+
+
+def test_total_cost_overflow_is_durable_and_finite() -> None:
+    errors: list[str] = []
+
+    total = _total_cost(
+        [{"total_cost": 1e308}, {"total_cost": 1e308}], errors
+    )
+
+    assert total == 0.0
+    assert errors == ["product_total_cost_overflow"]
 
 
 @pytest.mark.parametrize(
