@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,6 +34,36 @@ def write_index(index: dict) -> None:
     )
 
 
+def supersession_chain(index: dict, *, ticket: str, packet_id: str | None) -> list[str]:
+    """Return a verified same-ticket live ancestry, newest first."""
+    chain: list[str] = []
+    seen: set[str] = set()
+    live = set(index.get("live_packets") or [])
+    current = packet_id
+    while current:
+        if current in seen:
+            raise SystemExit(f"supersession cycle: {current}")
+        seen.add(current)
+        matches = list(INBOX_ROOT.glob(f"*/{current}.json"))
+        if len(matches) != 1:
+            raise SystemExit(f"superseded packet must resolve exactly once: {current}")
+        packet = json.loads(matches[0].read_text(encoding="utf-8"))
+        if (
+            packet.get("packet_id") != current
+            or packet.get("ticket") != ticket
+            or packet.get("packet_digest_sha256") != digest_packet(packet)
+        ):
+            raise SystemExit(f"invalid superseded packet: {current}")
+        if current not in live:
+            raise SystemExit(f"superseded packet is not live: {current}")
+        chain.append(current)
+        parent = packet.get("supersedes")
+        if parent is not None and not isinstance(parent, str):
+            raise SystemExit(f"invalid supersession link: {current}")
+        current = parent
+    return chain
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticket", required=True)
@@ -48,10 +78,17 @@ def main() -> int:
     parser.add_argument("--file", default="")
     parser.add_argument("--line", type=int, default=0)
     parser.add_argument("--message", required=True)
-    parser.add_argument("--detail", required=True, help="JSON object containing structured evidence")
+    parser.add_argument(
+        "--detail", required=True, help="JSON object containing structured evidence"
+    )
     parser.add_argument("--supersedes")
     parser.add_argument("--commit-message", default="")
     args = parser.parse_args()
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", args.packet_id):
+        raise SystemExit("invalid packet id")
+    if not re.fullmatch(r"[A-Z][A-Z0-9]*-[0-9]+", args.ticket):
+        raise SystemExit("invalid ticket id")
 
     try:
         detail = json.loads(args.detail)
@@ -59,6 +96,18 @@ def main() -> int:
         raise SystemExit(f"detail must be valid JSON: {exc}") from exc
     if not isinstance(detail, dict):
         raise SystemExit("detail must be a JSON object")
+
+    index = load_index()
+    known_ids = {
+        packet_id
+        for packet_ids in (index.get("tickets") or {}).values()
+        for packet_id in packet_ids
+    }
+    if args.packet_id in known_ids:
+        raise SystemExit(f"packet id already exists: {args.packet_id}")
+    retired = supersession_chain(
+        index, ticket=args.ticket, packet_id=args.supersedes
+    )
 
     body = {
         "schema": SCHEMA,
@@ -81,23 +130,32 @@ def main() -> int:
 
     rel = f"{args.ticket}/{args.packet_id}.json"
     out = INBOX_ROOT / rel
+    if out.exists():
+        raise SystemExit(f"packet path already exists: {rel}")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(body, sort_keys=True, separators=(",", ":"), indent=2) + "\n", encoding="utf-8")
+    out.write_text(
+        json.dumps(body, sort_keys=True, separators=(",", ":"), indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     stored = json.loads(out.read_text(encoding="utf-8"))
     if stored.get("packet_digest_sha256") != digest_packet(stored):
         raise SystemExit("packet digest verification failed after write")
 
-    index = load_index()
     tickets = index.setdefault("tickets", {})
     ticket_packets = tickets.setdefault(args.ticket, [])
     if args.packet_id not in ticket_packets:
         ticket_packets.append(args.packet_id)
         ticket_packets.sort()
     live = set(index.get("live_packets") or [])
+    live.difference_update(retired)
     live.add(args.packet_id)
     index["live_packets"] = sorted(live)
     write_index(index)
+    stored_index = load_index()
+    stored_live = set(stored_index.get("live_packets") or [])
+    if args.packet_id not in stored_live or any(old in stored_live for old in retired):
+        raise SystemExit("live packet supersession verification failed after write")
 
     msg = args.commit_message or f"inbox: {args.ticket}/{args.packet_id} ({args.kind})"
     subprocess.run(["git", "add", "inbox/"], check=True)
