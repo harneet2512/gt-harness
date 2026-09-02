@@ -19,7 +19,6 @@ jobs:
     timeout-minutes: 45
     env:
       GT_GITNEXUS_ROOT: ${{ github.workspace }}/.pinned/gitnexus
-      GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -41,16 +40,13 @@ jobs:
           path: .pinned/gitnexus
           persist-credentials: false
 
-      - name: Configure isolated Git fixtures and verified producer
+      - name: Configure isolated Git fixtures
         run: |
           set -euo pipefail
           git config --global user.name "GT Harness CI"
           git config --global user.email "gt-harness-ci@example.invalid"
           git config core.hooksPath "${GITHUB_WORKSPACE}/.githooks"
-          chmod +x .githooks/pre-commit vendor/gt-index-linux-amd64
-          printf '%s  %s\n' \
-            '024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a' \
-            'vendor/gt-index-linux-amd64' | sha256sum --check --strict
+          chmod +x .githooks/pre-commit
 
       - name: Install the frozen provider-free test surface
         run: |
@@ -109,6 +105,16 @@ jobs:
 
       - name: Verify the complete feature proof matrix
         run: python scripts/verify_feature_matrix.py
+
+      - name: Stage the verified producer outside the source closure
+        run: |
+          set -euo pipefail
+          PRODUCER_PATH="${RUNNER_TEMP}/gt-index"
+          install -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
+          printf '%s  %s\n' \
+            '024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a' \
+            "${PRODUCER_PATH}" | sha256sum --check --strict
+          printf 'GT_INDEX_BINARY=%s\n' "${PRODUCER_PATH}" >> "${GITHUB_ENV}"
 
       - name: Run the full Python suite serially
         run: |
