@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEMA = "gt.review_packet.v1"
+PACKET_KINDS = ("finding", "check_outcome", "measurement")
 INBOX_ROOT = Path(__file__).resolve().parents[1] / "inbox"
 
 
@@ -75,7 +76,7 @@ def main() -> int:
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--system", required=True, choices=["codex-check", "gt-ci", "coordinator"])
     parser.add_argument("--check", required=True)
-    parser.add_argument("--kind", required=True, choices=["finding", "check_outcome"])
+    parser.add_argument("--kind", required=True, choices=PACKET_KINDS)
     parser.add_argument("--severity", default="substance")
     parser.add_argument("--status", default="open")
     parser.add_argument("--file", default="")

@@ -7,6 +7,10 @@ import pytest
 from tools import commit_review_packet as writer
 
 
+def test_writer_accepts_measurement_packets() -> None:
+    assert "measurement" in writer.PACKET_KINDS
+
+
 def _packet(root: Path, packet_id: str, *, supersedes: str | None = None) -> None:
     body = {
         "schema": writer.SCHEMA,
