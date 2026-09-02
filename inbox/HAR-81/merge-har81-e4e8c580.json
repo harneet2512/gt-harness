@@ -1,0 +1,36 @@
+{
+  "created_at":"2026-09-02T01:16:42.576126Z",
+  "detail":{
+    "a17_attestation_rejection":"verified",
+    "a17_nonfatal_receipt_issuance":"verified",
+    "benchmark_runs":0,
+    "container_proof":"VERIFIED",
+    "feature_matrix":"19/19_witnessed",
+    "full_serial_suite":"green",
+    "landed_sha":"e4e8c580e2993d92b40bd20d8cbdca4340be0920",
+    "landing":"exact_fast_forward",
+    "paid_dispatch":false,
+    "parent_sha":"074645b256490794f487df855f60041eb4bc4990",
+    "provider_calls":0,
+    "provider_free_ci_conclusion":"success",
+    "provider_free_ci_run":33578478802,
+    "secret_canary_matches":[]
+  },
+  "file":"",
+  "head_sha":"e4e8c580e2993d92b40bd20d8cbdca4340be0920",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 terminal offline readiness landed with explicit attestation rejection proof",
+  "packet_digest_sha256":"f2bfb730dac3458ef8c439dea56c30c7095ff7a7bf48d64617e68e363e059e3d",
+  "packet_id":"merge-har81-e4e8c580",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":"merge-har81-074645b2",
+  "ticket":"HAR-81"
+}
