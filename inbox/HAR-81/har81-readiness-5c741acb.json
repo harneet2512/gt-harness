@@ -1,0 +1,29 @@
+{
+  "created_at":"2026-09-02T00:27:52.586263Z",
+  "detail":{
+    "benchmark_runs":0,
+    "candidate_parent":"9c21cd77808edd38422b5c6e257c1fd1cb28a078",
+    "fixed_failure":"tracked_producer_mode_mutated_bundle_source_closure",
+    "prior_ci_run":33575249060,
+    "producer_sha256":"024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a",
+    "provider_calls":0,
+    "staged_producer":"${RUNNER_TEMP}/gt-index"
+  },
+  "file":"",
+  "head_sha":"5c741acbfb34f1b5da2defbfd0bc335a7162737c",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 candidate stages verified producer outside immutable bundle source closure",
+  "packet_digest_sha256":"10498fe350600f0897d34a35df56b321070bffea106eed5b612bd4626853665a",
+  "packet_id":"har81-readiness-5c741acb",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"offline-readiness-candidate",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":"har81-readiness-9c21cd77",
+  "ticket":"HAR-81"
+}
