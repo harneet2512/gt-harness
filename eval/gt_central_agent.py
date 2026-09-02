@@ -819,6 +819,16 @@ def _bootstrap_provider_message(
         if callable(prepare)
         else [{key: value for key, value in item.items() if key != "extra"} for item in messages]
     )
+    from gt_engine.provider_limits import enforce_provider_request_limit
+
+    enforce_provider_request_limit(
+        {
+            "messages": prepared,
+            "tools": tools,
+            "model_kwargs": _model_kwargs(model),
+            "call_kwargs": call_kwargs,
+        }
+    )
     raw_response = _bootstrap_completion(model, prepared, tools=tools, **call_kwargs)
     response_dump = _raw_response_dump(raw_response)
     try:
@@ -7322,6 +7332,34 @@ class MiniSweCentralAgent(BaseAgent):
                         terminal = "DeadlineReserveReached"
                         solver_exhausted_reason = "deadline_reserve_reached"
                         deadline_reserve_exits += 1
+                        break
+                    from gt_engine.provider_limits import (
+                        ProviderRequestTooLarge,
+                        enforce_provider_request_limit,
+                    )
+                    try:
+                        enforce_provider_request_limit(
+                            _provider_request_envelope(
+                                model,
+                                provider_messages,
+                                call_kwargs=executor_query_kwargs,
+                                provider_tools=replay_provider_tools,
+                            )
+                        )
+                    except ProviderRequestTooLarge:
+                        contribution_receipt["dispatch_status"] = "prepared_not_sent"
+                        contribution_receipt["dispatch_reason"] = (
+                            "provider_request_size_limit"
+                        )
+                        provider_evidence.mark_not_sent(
+                            call=calls, reason="provider_request_size_limit"
+                        )
+                        replay_bundle.record_not_sent(
+                            call=calls, reason="provider_request_size_limit"
+                        )
+                        model_call_contexts[-1]["dispatch_status"] = "size_refused"
+                        terminal = "ProviderRequestTooLarge"
+                        solver_exhausted_reason = "provider_request_size_limit"
                         break
                     next_model_query_invocation = model_query_invocations + 1
                     provider_query_marker_error = self._write_provider_query_marker(

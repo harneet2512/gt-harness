@@ -94,6 +94,9 @@ _BUILD_OBLIGATION_RE = re.compile(
     r"(?i)\b(?:build|install|compile|package|extension|import|setup\.py|"
     r"Makefile|docker)\b"
 )
+_QUOTED_LITERAL_RE = re.compile(r"(?:`([^`]+)`|'([^']+)'|\"([^\"]+)\")")
+_STARTS_WITH_RE = re.compile(r"(?i)\b(?:starts?\s+with|begins?\s+with|prefix(?:ed)?\s+by)\b")
+_CONTAINS_RE = re.compile(r"(?i)\bcontains?\b")
 
 
 def is_executable_check(command: str) -> bool:
@@ -116,6 +119,10 @@ class ObligationPredicate:
     kind: str
     scope: tuple[str, ...] = ()
     anchors: tuple[str, ...] = ()
+    operator: str = ""
+    literal: str = ""
+    expected_relation: str = ""
+    evidence_rule: str = ""
 
 
 @dataclass(frozen=True)
@@ -293,6 +300,18 @@ def compile_obligation_predicates(
     mode = str(getattr(getattr(contract, "task_mode", None), "value", "") or "")
     for item in contract.obligations:
         text = str(item.text or "")
+        relation = ""
+        operator = ""
+        literal = ""
+        evidence_rule = ""
+        quoted = _QUOTED_LITERAL_RE.search(text)
+        if _STARTS_WITH_RE.search(text):
+            relation, operator = "starts_with", "startsWith"
+        elif _CONTAINS_RE.search(text):
+            relation, operator = "contains", "contains"
+        if relation:
+            literal = next((part for part in quoted.groups() if part), "") if quoted else ""
+            evidence_rule = "exact_operator_literal_assertion"
         paths = tuple(sorted(set(_PATH_RE.findall(text))))
         if mode == "SERVICE" and _SERVICE_OBLIGATION_RE.search(text):
             kind = "service_probe"
@@ -321,6 +340,10 @@ def compile_obligation_predicates(
             kind=kind,
             scope=paths,
             anchors=significant_tokens(text),
+            operator=operator,
+            literal=literal,
+            expected_relation=relation,
+            evidence_rule=evidence_rule,
         )
     return compiled
 
@@ -390,10 +413,18 @@ def evaluate_passing_observation(
             verified = full_suite or (
                 executable and item.obligation_id in lexical
             )
+            if verified and predicate.expected_relation:
+                normalized = observed.lower().replace("_", "")
+                expected_operator = predicate.operator.lower().replace("_", "")
+                verified = bool(
+                    expected_operator in normalized
+                    and (not predicate.literal or predicate.literal.lower() in observed.lower())
+                )
             if verified:
                 coverage_basis = (
-                    "full_repository_suite"
-                    if full_suite else "targeted_executable_anchor_match"
+                    "exact_operator_literal_assertion"
+                    if predicate.expected_relation else
+                    "full_repository_suite" if full_suite else "targeted_executable_anchor_match"
                 )
         elif predicate.kind == "artifact":
             verified = bool(

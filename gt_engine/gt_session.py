@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .run_diagnostics import CapabilityState, DiagnosticCode, DiagnosticEvent
+
 # Capabilities a host can declare (see the verdict's negotiation list).
 HOST_CAPABILITIES = (
     "exact_provider_payload",     # finalized logical request bytes are exact
@@ -33,6 +35,30 @@ HOST_CAPABILITIES = (
     "checkpointing",              # crash-safe resume
     "trusted_verifier",           # clean-env verifier outside the agent
 )
+
+
+def _compress_context(value: str, limit: int) -> str:
+    """Select complete lines and a digest marker within a byte lane."""
+
+    import hashlib
+
+    encoded = value.encode("utf-8")
+    if len(encoded) <= limit:
+        return value
+    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    marker = f"\n[compressed sha256={digest}]"
+    marker_bytes = marker.encode("utf-8")
+    budget = max(0, int(limit) - len(marker_bytes))
+    selected: list[str] = []
+    used = 0
+    for line in value.splitlines(keepends=True):
+        data = line.encode("utf-8")
+        if used + len(data) > budget:
+            continue
+        selected.append(line)
+        used += len(data)
+    result = "".join(selected).rstrip() + marker
+    return result if len(result.encode("utf-8")) <= limit else marker.lstrip()
 
 
 class Assurance(StrEnum):
@@ -69,7 +95,7 @@ class GTSessionConfig:
     issue_text: str = ""
     mode: GTMode | str = GTMode.ADVISORY
     fail_open: bool = True
-    context_budget_bytes: int = 2400
+    context_budget_bytes: int = 1400
     capability_modes: Mapping[str, GTMode | str] = field(default_factory=dict)
     disabled_capabilities: tuple[str, ...] = ()
     delivery_path: str = "compiled"
@@ -218,6 +244,8 @@ class GTSession:
     # -- capability negotiation -------------------------------------------
     def _capability_check(self) -> None:
         declared = set(self.config.capabilities)
+        if not declared:
+            self._assurance.append("no host capabilities declared")
         if "exact_provider_payload" in declared and not self.config.state_dir:
             self._assurance.append("exact_provider_payload declared without state_dir")
         if "trusted_verifier" in declared and os.environ.get("GT_VERIFY_EXECUTE") != "1":
@@ -269,6 +297,32 @@ class GTSession:
             self._task_start_shipped = True
             localization = self._engine.task_start_localization()
             if localization:
+                original_bytes = len(localization.encode("utf-8"))
+                localization = _compress_context(localization, 1400)
+                delivered_bytes = len(localization.encode("utf-8"))
+                if delivered_bytes < original_bytes:
+                    self._engine.store.append(
+                        "localization_compressed",
+                        original_bytes=original_bytes,
+                        delivered_bytes=delivered_bytes,
+                        lane_cap_bytes=1400,
+                    )
+                    self._engine.diagnostics.record(
+                        DiagnosticEvent.create(
+                            code=DiagnosticCode.GT_LOCALIZATION_OVERSIZED,
+                            severity="WARNING", phase="task_start",
+                            subsystem="delivery", capability="localization",
+                            task_id=self._engine.task_id,
+                            classification="consequential",
+                            cause="localization_exceeded_lane_cap",
+                            impact="localization_compressed",
+                            recovery="retain_ranked_evidence_within_1400_bytes",
+                            retryable=False,
+                            event_sequence=int(
+                                self._engine.store.receipt()["event_count"]
+                            ),
+                        )
+                    )
                 if self.model_visible:
                     additions.append(localization)
                 else:
@@ -333,3 +387,33 @@ class GTSession:
         self._terminal = terminal
         if self._engine is not None:
             self._engine.store.append("session_closed", terminal=terminal)
+            diagnostics = getattr(self._engine, "diagnostics", None)
+            if diagnostics is not None:
+                diagnostics.capability(
+                    "receipt_writer", CapabilityState.WORKING,
+                    "append_only_event_journal_present",
+                )
+                diagnostics.capability(
+                    "capability_negotiation",
+                    CapabilityState.WORKING
+                    if self.assurance_state is Assurance.FULL
+                    else CapabilityState.DEGRADED,
+                    "declared_capabilities_checked",
+                )
+                if self.assurance_state is Assurance.DEGRADED:
+                    diagnostics.record(
+                        DiagnosticEvent.create(
+                            code=DiagnosticCode.GT_CAPABILITY_DEGRADED,
+                            severity="ERROR", phase="startup",
+                            subsystem="session", capability="capability_negotiation",
+                            task_id=self._engine.task_id, classification="primary",
+                            cause="capability_assurance_degraded",
+                            impact="full_assurance_prohibited",
+                            recovery="declare_and_verify_required_host_capabilities",
+                            retryable=False,
+                            event_sequence=int(
+                                self._engine.store.receipt()["event_count"]
+                            ),
+                        )
+                    )
+                diagnostics.seal()

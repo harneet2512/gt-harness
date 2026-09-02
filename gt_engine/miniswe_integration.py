@@ -32,6 +32,7 @@ from .graph_lease import (
     GraphRefreshMode,
 )
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
+from .run_diagnostics import DiagnosticCode, DiagnosticEvent, DiagnosticJournal
 from .task_contract import (
     TaskContract,
     matching_obligation_ids,
@@ -173,6 +174,7 @@ class MiniSweAdapter(GroundtruthController):
             value: key for key, value in self._predicate_by_obligation.items()
         }
         self.store = ExternalStateStore(state_dir, task_id)
+        self.diagnostics = DiagnosticJournal(self.store.root, task_id=task_id)
         self.iteration = 0
         self.deliveries: list[ProviderDelivery] = []
         self._last_payload_hash = ""
@@ -674,6 +676,19 @@ class MiniSweAdapter(GroundtruthController):
         if not (result.success and result.health_valid):
             self.graph_fresh = False
             self.store.append("graph_refresh_failed", error_type=result.error or "invalid_graph")
+            self.diagnostics.record(
+                DiagnosticEvent.create(
+                    code=DiagnosticCode.GT_GRAPH_REFRESH_FAILED,
+                    severity="ERROR", phase=boundary.value.lower(),
+                    subsystem="graph", capability="graph_freshness",
+                    task_id=self.task_id, classification="primary",
+                    cause=result.error or "invalid_graph", impact="verified_claims_prohibited",
+                    recovery="rebuild_graph_for_current_workspace_revision",
+                    retryable=False,
+                    event_sequence=int(self.store.receipt()["event_count"]),
+                    identities={"repository": self.repository_revision},
+                )
+            )
             return False
         self.graph_db = result.graph_path
         self.graph_fresh = True
@@ -1925,9 +1940,35 @@ class MiniSweAdapter(GroundtruthController):
         return False
 
     def submit_decision(self) -> bool:
+        if self.graph_db and not self.graph_fresh:
+            if not self.refresh_graph(DecisionBoundary.PRE_SUBMIT):
+                self.store.append(
+                    "submit_decision", accepted=False, phase=self.phase,
+                    iteration=self.iteration, reason="graph_refresh_failed",
+                )
+                self.begin_implement()
+                return False
         self.verify_live_submit()
         accepted = super().submit_decision()
         if not accepted:
+            code = (
+                DiagnosticCode.GT_VERIFICATION_PLAN_MISSING
+                if self.verification_plan and not self._verification_plan_evaluated
+                else DiagnosticCode.GT_VERIFICATION_SEMANTIC_MISMATCH
+            )
+            self.diagnostics.record(
+                DiagnosticEvent.create(
+                    code=code, severity="ERROR", phase="submit",
+                    subsystem="verification", capability="semantic_verification",
+                    task_id=self.task_id, classification="primary",
+                    cause="required_semantic_evidence_not_green",
+                    impact="submission_refused",
+                    recovery="run_exact_obligation_checks_and_resubmit_once",
+                    retryable=True,
+                    event_sequence=int(self.store.receipt()["event_count"]),
+                    identities={"repository": self.repository_revision},
+                )
+            )
             self._refuse("unmet_obligations")
             return False
         self._refusal_count = 0

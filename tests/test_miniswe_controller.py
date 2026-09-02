@@ -37,8 +37,8 @@ def test_edit_invalidates_receipt_and_refuses_stale_submit():
     c.note_edit(["out.txt"])
     c.begin_verify()
     c.begin_submit()
-    assert c.submit_decision() is True
-    # the wipe reset the predicate to UNKNOWN, which is not a failure
+    assert c.submit_decision() is False
+    # The wipe reset the predicate to UNKNOWN; incomplete work fails closed.
     assert c.predicate_status("artifact") is PredicateStatus.UNKNOWN
 
 
@@ -92,12 +92,10 @@ def test_unknown_receipt_is_not_green():
     c.record_receipt("p", "check", 0, "unknown", epoch=c.workspace_epoch)
     c.begin_submit()
     assert c.predicate_status("p") is PredicateStatus.UNKNOWN
-    # D3-G: UNKNOWN (no evidence either way) does not block submission. Only a
-    # real RED receipt blocks.
-    assert c.submit_decision() is True
+    assert c.submit_decision() is False
 
 
-def test_unevaluated_verification_plan_is_unknown_and_nonblocking():
+def test_unevaluated_verification_plan_is_unknown_and_blocking():
     c = GroundtruthController(
         [Predicate("artifact", "artifact is semantically valid")],
         verification_plan=VerificationPlan("plan-1", ("artifact",)),
@@ -107,8 +105,8 @@ def test_unevaluated_verification_plan_is_unknown_and_nonblocking():
     c.record_receipt("artifact", "check", 0, "valid artifact", epoch=0,
                      status=PredicateStatus.GREEN, semantic=True)
     c.begin_submit()
-    assert c.submit_decision() is True
-    assert c.phase == "FINISHED"
+    assert c.submit_decision() is False
+    assert c.phase == "IMPLEMENT"
     assert any("verification_plan" in reason for reason in c.unmet_reasons)
 
 
@@ -133,8 +131,9 @@ def test_nonsemantic_zero_exit_cannot_be_green():
     c.record_receipt("p", "grep", 0, "matched", epoch=0)
     assert c.predicate_status("p") is PredicateStatus.UNKNOWN
     assert "semantic evidence" in c.unmet_reasons[0]
-    # non-semantic receipts never certify GREEN, but UNKNOWN is not RED
-    assert c.blocking_predicates == ()
+    # Non-semantic receipts never certify GREEN; UNKNOWN therefore blocks a
+    # verified completion claim.
+    assert c.blocking_predicates == ("p",)
 
 
 def test_red_receipt_blocks_submission():

@@ -103,15 +103,9 @@ class GroundtruthController:
 
     @property
     def blocking_predicates(self) -> tuple[str, ...]:
-        """Only predicates with a RED receipt (real failing evidence) block.
+        """Return every obligation lacking current positive semantic evidence."""
 
-        D3-G: an UNKNOWN predicate is an open question, not a failure. Refusing
-        a submission because evidence was merely never gathered is what forced
-        the model into verification spirals (measured: modernize 8->31 calls,
-        portfolio 26->70). GT blocks only when it has a receipt that says the
-        obligation is actually failing.
-        """
-        return tuple(sorted(k for k, v in self._status.items() if v is PredicateStatus.RED))
+        return self.unmet_predicates
 
     @property
     def unmet_reasons(self) -> tuple[str, ...]:
@@ -122,9 +116,9 @@ class GroundtruthController:
 
     @property
     def blocking_reasons(self) -> tuple[str, ...]:
-        reasons = [f"failing obligation evidence for {key}" for key in self.blocking_predicates]
-        # An unevaluated verification plan is UNKNOWN, not positive failure
-        # evidence. Keep it visible in unmet_reasons but never block on it.
+        reasons = [f"unverified obligation evidence for {key}" for key in self.blocking_predicates]
+        if self.verification_plan and not self._verification_plan_evaluated:
+            reasons.append("verification_plan not evaluated")
         return tuple(reasons)
 
     def _transition(self, target: str) -> None:
