@@ -109,12 +109,15 @@
           "packet_id": "har81-a21-real-content-measurement-355ec281",
           "head_sha": "355ec281e2f87c97320b17d5864f8cd404d75ba7",
           "packet_digest_sha256": "9f1d6b94e1c9965c1362f50cc96e1c1364ba06fc84baa9cfcc6ae93a17df26dd",
+          "measurement_digest_sha256": "b2f479d8789f1c8d5082356aede782b0db7b044fd1360f13bf386f9d4682e9e0",
+          "measurement_file_sha256": "eed6862eb01e07d2eb0bae5d03656664c2ef1f6bd104b7e5212de272b0b7e4e0",
           "kind": "measurement",
           "status": "PASS",
-          "supersedes": "har81-a21-real-content-measurement-619b61b8"
+          "supersedes": "har81-a21-real-content-measurement-619b61b8",
+          "source_runs": [33563173631, 33565965241, 33567358689]
         }
       ],
-      "attestation_digest_sha256": "9223f4131d3905d3208053bb049847c6a08a53ab4e0476c0e55b56b2c904fc56"
+      "attestation_digest_sha256": "1bdbe82c25ba214f34290d4e1d00be84069fa5848bdaa526a3ce9670fd18b7bd"
     }
   },
   "capabilities": [

@@ -298,7 +298,12 @@ def _groundtruth_release_blockers(
                 and isinstance(row.get("head_sha"), str)
                 and len(row.get("head_sha")) == 40
                 and _is_sha256(row.get("packet_digest_sha256"))
+                and _is_sha256(row.get("measurement_digest_sha256"))
+                and _is_sha256(row.get("measurement_file_sha256"))
                 and isinstance(row.get("supersedes"), str)
+                and isinstance(row.get("source_runs"), list)
+                and len(row.get("source_runs")) == 3
+                and len(set(row.get("source_runs"))) == 3
                 for row in product_reviews
             )
             == 1

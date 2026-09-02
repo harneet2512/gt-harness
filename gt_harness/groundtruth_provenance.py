@@ -30,6 +30,123 @@ def _packet_digest(packet: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json_bytes(body)).hexdigest()
 
 
+def _retired_supersession_chain_valid(
+    review: Path,
+    *,
+    packet_id: str,
+    ticket: str,
+    tickets: Mapping[str, Any],
+    live_packets: list[str],
+) -> bool:
+    current: str | None = packet_id
+    seen: set[str] = set()
+    first = True
+    while current is not None:
+        if current in seen or current in live_packets:
+            return False
+        seen.add(current)
+        candidates = list((review / "inbox").rglob(f"{current}.json"))
+        if len(candidates) != 1:
+            return False
+        try:
+            packet = json.loads(candidates[0].read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        memberships = sum(
+            current in list(packet_ids or []) for packet_ids in tickets.values()
+        )
+        detail = packet.get("detail")
+        measurement = detail.get("measurement") if isinstance(detail, Mapping) else None
+        if (
+            packet.get("schema") != "gt.review_packet.v1"
+            or packet.get("packet_id") != current
+            or packet.get("ticket") != ticket
+            or packet.get("packet_digest_sha256") != _packet_digest(packet)
+            or memberships != 1
+            or current not in list(tickets.get(ticket) or [])
+        ):
+            return False
+        if first and not (
+            packet.get("status") == "FAIL"
+            or (
+                packet.get("kind") == "measurement"
+                and isinstance(measurement, Mapping)
+                and measurement.get("status") == "FAIL"
+            )
+        ):
+            return False
+        parent = packet.get("supersedes")
+        if parent is not None and not isinstance(parent, str):
+            return False
+        current = parent
+        first = False
+    return True
+
+
+def _recorded_content_review_valid(
+    packet: Mapping[str, Any], expected: Mapping[str, Any]
+) -> bool:
+    detail = packet.get("detail")
+    if not isinstance(detail, Mapping):
+        return False
+    measurement = detail.get("measurement")
+    if not isinstance(measurement, Mapping):
+        return False
+    unsigned = dict(measurement)
+    measurement_digest = unsigned.pop("packet_digest_sha256", None)
+    count = measurement.get("delivery_count")
+    conserved_fields = (
+        "attestation_match_count",
+        "claim_match_count",
+        "consequence_match_count",
+        "payload_match_count",
+        "provider_request_match_count",
+        "rederived_count",
+        "target_match_count",
+        "trigger_match_count",
+    )
+    mutation_cases = measurement.get("mutation_cases")
+    adjudications = measurement.get("adjudications")
+    provider_free_ci = detail.get("provider_free_ci")
+    independent_review = detail.get("independent_review")
+    file_digest = hashlib.sha256(canonical_json_bytes(measurement) + b"\n").hexdigest()
+    return bool(
+        expected.get("purpose") == "recorded_content_correctness"
+        and packet.get("kind") == "measurement"
+        and packet.get("status") == "PASS"
+        and detail.get("implementation_sha") == packet.get("head_sha")
+        and detail.get("provider_calls") == 0
+        and detail.get("paid_dispatch") is False
+        and detail.get("source_runs") == expected.get("source_runs")
+        and isinstance(provider_free_ci, Mapping)
+        and provider_free_ci.get("head_sha") == packet.get("head_sha")
+        and provider_free_ci.get("conclusion") == "success"
+        and isinstance(independent_review, Mapping)
+        and independent_review.get("verdict") == "PASS"
+        and measurement.get("schema") == "gt.recorded_content_measurement.v3"
+        and measurement.get("status") == "PASS"
+        and measurement.get("provider_calls") == 0
+        and measurement.get("run_count") == len(expected.get("source_runs") or [])
+        and isinstance(count, int)
+        and count > 0
+        and all(measurement.get(field) == count for field in conserved_fields)
+        and measurement.get("mismatch_count") == 0
+        and measurement.get("failures") == []
+        and isinstance(adjudications, list)
+        and measurement.get("historical_adjudication_count") == len(adjudications)
+        and isinstance(mutation_cases, Mapping)
+        and set(mutation_cases)
+        == {"event_stream", "graph", "payload", "provider_request"}
+        and set(mutation_cases.values()) == {"FAIL_AS_DESIGNED"}
+        and measurement_digest == expected.get("measurement_digest_sha256")
+        and hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+        == measurement_digest
+        and detail.get("measurement_file_sha256")
+        == expected.get("measurement_file_sha256")
+        and file_digest == expected.get("measurement_file_sha256")
+    )
+
+
 def _checkout_status(repository: Path) -> str:
     """Return Git-semantic dirt while tolerating checkout EOL materialization.
 
@@ -211,6 +328,15 @@ def verify_groundtruth_lineage(
             or ticket_memberships != 1
             or packet_id not in list(tickets.get(ticket) or [])
             or (isinstance(supersedes, str) and supersedes in live_packets)
+            or not isinstance(supersedes, str)
+            or not _retired_supersession_chain_valid(
+                review,
+                packet_id=supersedes,
+                ticket=ticket,
+                tickets=tickets,
+                live_packets=live_packets,
+            )
+            or not _recorded_content_review_valid(packet, expected)
         ):
             failures.append(f"product_review_packet_mismatch:{packet_id}")
             continue

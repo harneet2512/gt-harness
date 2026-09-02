@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import subprocess
 from pathlib import Path
 
 from gt_harness.canonical_io import canonical_json_bytes
-from gt_harness.groundtruth_provenance import _checkout_status, verify_groundtruth_lineage
+from gt_harness.groundtruth_provenance import (
+    _checkout_status,
+    _recorded_content_review_valid,
+    _retired_supersession_chain_valid,
+    verify_groundtruth_lineage,
+)
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -50,6 +56,61 @@ def _packet(
     return packet
 
 
+def _content_packet(packet_id: str, *, head: str, supersedes: str) -> dict[str, object]:
+    measurement: dict[str, object] = {
+        "schema": "gt.recorded_content_measurement.v3",
+        "status": "PASS",
+        "provider_calls": 0,
+        "run_count": 1,
+        "delivery_count": 1,
+        "attestation_match_count": 1,
+        "claim_match_count": 1,
+        "consequence_match_count": 1,
+        "payload_match_count": 1,
+        "provider_request_match_count": 1,
+        "rederived_count": 1,
+        "target_match_count": 1,
+        "trigger_match_count": 1,
+        "mismatch_count": 0,
+        "failures": [],
+        "adjudications": [],
+        "historical_adjudication_count": 0,
+        "mutation_cases": {
+            "event_stream": "FAIL_AS_DESIGNED",
+            "graph": "FAIL_AS_DESIGNED",
+            "payload": "FAIL_AS_DESIGNED",
+            "provider_request": "FAIL_AS_DESIGNED",
+        },
+    }
+    measurement["packet_digest_sha256"] = hashlib.sha256(
+        canonical_json_bytes(measurement)
+    ).hexdigest()
+    packet = _packet(
+        packet_id,
+        head=head,
+        supersedes=supersedes,
+        kind="measurement",
+    )
+    packet["detail"] = {
+        "implementation_sha": head,
+        "provider_calls": 0,
+        "paid_dispatch": False,
+        "source_runs": [1],
+        "provider_free_ci": {"head_sha": head, "conclusion": "success"},
+        "independent_review": {"verdict": "PASS"},
+        "measurement": measurement,
+        "measurement_file_sha256": hashlib.sha256(
+            canonical_json_bytes(measurement) + b"\n"
+        ).hexdigest(),
+    }
+    packet["packet_digest_sha256"] = hashlib.sha256(
+        canonical_json_bytes(
+            {key: value for key, value in packet.items() if key != "packet_digest_sha256"}
+        )
+    ).hexdigest()
+    return packet
+
+
 def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -68,12 +129,7 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
         failed_content_id, head=source_head, status="FAIL", kind="measurement"
     )
     content_id = "har81-content-pass"
-    content = _packet(
-        content_id,
-        head=source_head,
-        supersedes=failed_content_id,
-        kind="measurement",
-    )
+    content = _content_packet(content_id, head=source_head, supersedes=failed_content_id)
     _write_json(review / "inbox" / "HAR-81" / f"{packet_id}.json", packet)
     _write_json(
         review / "inbox" / "HAR-81" / f"{failed_content_id}.json", failed_content
@@ -115,9 +171,12 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
                         "packet_id": content_id,
                         "head_sha": source_head,
                         "packet_digest_sha256": content["packet_digest_sha256"],
+                        "measurement_digest_sha256": content["detail"]["measurement"]["packet_digest_sha256"],
+                        "measurement_file_sha256": content["detail"]["measurement_file_sha256"],
                         "kind": "measurement",
                         "status": "PASS",
                         "supersedes": failed_content_id,
+                        "source_runs": [1],
                     }
                 ],
             },
@@ -128,6 +187,13 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
         manifest, groundtruth_checkout=source, review_checkout=review
     )
     assert clean["status"] == "PASS", clean
+    assert not _retired_supersession_chain_valid(
+        review,
+        packet_id="nonexistent-prior-packet",
+        ticket="HAR-81",
+        tickets={"HAR-81": ["nonexistent-prior-packet"]},
+        live_packets=[content_id, packet_id],
+    )
 
     (source / "producer.go").write_text("package forged\n", encoding="utf-8")
     dirty = verify_groundtruth_lineage(
@@ -238,3 +304,36 @@ def test_lineage_rejects_reviews_that_only_cover_ancestors(tmp_path: Path) -> No
     assert result["status"] == "FAIL"
     assert result["exact_source_review_packet_match"] is False
     assert "exact_source_review_packet_missing" in result["failures"]
+
+
+def test_recorded_content_review_rejects_resealed_inner_failure() -> None:
+    packet = _content_packet("content-pass", head="a" * 40, supersedes="content-fail")
+    measurement = packet["detail"]["measurement"]
+    expected = {
+        "purpose": "recorded_content_correctness",
+        "measurement_digest_sha256": measurement["packet_digest_sha256"],
+        "measurement_file_sha256": packet["detail"]["measurement_file_sha256"],
+        "source_runs": [1],
+    }
+    assert _recorded_content_review_valid(packet, expected)
+
+    forged = copy.deepcopy(packet)
+    forged_measurement = forged["detail"]["measurement"]
+    forged_measurement["status"] = "FAIL"
+    forged_measurement["failures"] = [{"reason": "tampered"}]
+    unsigned = dict(forged_measurement)
+    unsigned.pop("packet_digest_sha256")
+    forged_measurement["packet_digest_sha256"] = hashlib.sha256(
+        canonical_json_bytes(unsigned)
+    ).hexdigest()
+    forged["detail"]["measurement_file_sha256"] = hashlib.sha256(
+        canonical_json_bytes(forged_measurement) + b"\n"
+    ).hexdigest()
+    forged_expected = dict(expected)
+    forged_expected["measurement_digest_sha256"] = forged_measurement[
+        "packet_digest_sha256"
+    ]
+    forged_expected["measurement_file_sha256"] = forged["detail"][
+        "measurement_file_sha256"
+    ]
+    assert not _recorded_content_review_valid(forged, forged_expected)
