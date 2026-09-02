@@ -4,6 +4,7 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
+from harbor.agents.installed.base import NonZeroAgentExitCodeError
 
 from eval.miniswe_agent import (
     _DEFAULT_MINISWE_AGENT_VERSION,
@@ -115,6 +116,51 @@ async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_p
 
     assert captured["GT_TASK_ID"] == "arktype-task"
     assert captured["GT_PRODUCT_SOURCE_SHA"] == "a" * 40
+
+
+@pytest.mark.asyncio
+async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch, tmp_path):
+    agent = MiniSweGtAgent(
+        logs_dir=tmp_path / "logs", task_id="arktype-task", product_source_sha="a" * 40
+    )
+    commands: list[str] = []
+    monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
+    monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_a, **_k: {})
+    monkeypatch.setattr(agent, "resolve_env_vars", lambda: {})
+
+    async def execute(_environment, command, **_kwargs):
+        commands.append(command)
+        if "scripts.miniswe_gt_run" in command:
+            raise NonZeroAgentExitCodeError("Command failed (exit 137)")
+
+    monkeypatch.setattr(agent, "exec_as_agent", execute)
+    with pytest.raises(NonZeroAgentExitCodeError):
+        await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
+    assert "--phase before" in commands[0]
+    assert commands[1].startswith("exec ")
+    assert "scripts.miniswe_gt_run" in commands[1]
+    assert "--phase after" in commands[2]
+    assert "--exit-code 137" in commands[2]
+
+
+@pytest.mark.asyncio
+async def test_gt_run_refuses_invalid_identity_before_any_command(monkeypatch, tmp_path):
+    agent = MiniSweGtAgent(
+        logs_dir=tmp_path / "logs", task_id="", product_source_sha="a" * 40
+    )
+    calls = 0
+    monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
+    monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_a, **_k: {})
+    monkeypatch.setattr(agent, "resolve_env_vars", lambda: {})
+
+    async def execute(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(agent, "exec_as_agent", execute)
+    with pytest.raises(ValueError, match="identity is incomplete"):
+        await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
+    assert calls == 0
 
 
 @pytest.mark.asyncio

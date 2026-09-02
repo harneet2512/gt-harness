@@ -123,6 +123,7 @@
   },
   "capabilities": [
     "atomic_graph_publication",
+    "agent_resource_evidence_v1",
     "bounded_index_resource_v1",
     "call_resolution_v2",
     "credential_isolated_task_tools",
@@ -160,6 +161,7 @@
     "scripts/build_muse_smoke20_baseline.py",
     "scripts/freeze_har81_recordings.py",
     "scripts/__init__.py",
+    "scripts/agent_resource_evidence.py",
     "scripts/miniswe_gt_run.py",
     "scripts/standardize_benchmark_result.py",
     "scripts/provider_probe.py",

@@ -258,7 +258,11 @@ def _execution_identity() -> dict[str, str]:
             "product_source_sha": "",
         }
     if not task_id or not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
-        raise ValueError("benchmark index identity is incomplete")
+        return {
+            "identity_scope": "benchmark_invalid",
+            "task_id": task_id,
+            "product_source_sha": product_source_sha,
+        }
     return {
         "identity_scope": "benchmark_bound",
         "task_id": task_id,
@@ -367,6 +371,7 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
     exit_code: int | None = None
     peak_rss: int | None = None
     streams: dict[str, object] = {}
+    drainers: list[threading.Thread] = []
     try:
         if memory_limit < 64 * 1024 * 1024:
             return IndexProcessResult(
@@ -462,6 +467,15 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+        for drainer in drainers:
+            drainer.join(timeout=1)
         return IndexProcessResult(
             False,
             status,
@@ -474,11 +488,12 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
 
 
 def _write_index_evidence(
-    path: Path, *, root: str, result: IndexProcessResult, reuse_key: IndexReuseKey
+    path: Path, *, root: str, result: IndexProcessResult, reuse_key: IndexReuseKey,
+    identity: dict[str, str],
 ) -> str:
     payload: dict[str, object] = {
         "schema": INDEX_RESOURCE_SCHEMA,
-        **_execution_identity(),
+        **identity,
         "repository_root_sha256": hashlib.sha256(
             os.path.realpath(root).encode("utf-8", "surrogatepass")
         ).hexdigest(),
@@ -512,10 +527,11 @@ def _write_graph_failure(
     reuse_key: IndexReuseKey,
     error_code: str,
     evidence_path: Path,
+    identity: dict[str, str],
 ) -> None:
     failure_payload: dict[str, object] = {
         "schema": "gt.graph_failure.v1",
-        **_execution_identity(),
+        **identity,
         "error_code": error_code,
         "repository_root_sha256": hashlib.sha256(
             os.path.realpath(root).encode("utf-8", "surrogatepass")
@@ -535,16 +551,38 @@ def _publish_graph_failure(
     reuse_key: IndexReuseKey,
     error_code: str,
     staged_evidence: Path,
+    identity: dict[str, str],
 ) -> None:
     evidence_path = gt_dir / "index-failure-resource.json"
-    os.replace(staged_evidence, evidence_path)
-    _write_graph_failure(
-        gt_dir,
-        root=root,
-        reuse_key=reuse_key,
-        error_code=error_code,
-        evidence_path=evidence_path,
-    )
+    failure_path = gt_dir / "graph.failure.json"
+    evidence_backup = gt_dir / ".index-failure.previous.json"
+    failure_backup = gt_dir / ".graph-failure.previous.json"
+    had_evidence = evidence_path.is_file()
+    had_failure = failure_path.is_file()
+    if had_evidence:
+        shutil.copyfile(evidence_path, evidence_backup)
+    if had_failure:
+        shutil.copyfile(failure_path, failure_backup)
+    try:
+        os.replace(staged_evidence, evidence_path)
+        _write_graph_failure(
+            gt_dir, root=root, reuse_key=reuse_key, error_code=error_code,
+            evidence_path=evidence_path, identity=identity,
+        )
+    except Exception:
+        if had_evidence and evidence_backup.is_file():
+            os.replace(evidence_backup, evidence_path)
+        else:
+            evidence_path.unlink(missing_ok=True)
+        if had_failure and failure_backup.is_file():
+            os.replace(failure_backup, failure_path)
+        else:
+            failure_path.unlink(missing_ok=True)
+        raise
+    finally:
+        staged_evidence.unlink(missing_ok=True)
+        evidence_backup.unlink(missing_ok=True)
+        failure_backup.unlink(missing_ok=True)
 
 
 def _graph_state_dir(root: str | Path, state_dir: str | Path | None) -> Path:
@@ -594,7 +632,23 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             if not ignore.exists():
                 ignore.write_text("*\n", encoding="utf-8")
         db = gt_dir / "graph.db"
+        identity = _execution_identity()
         reuse_key = compute_index_reuse_key(root)
+        if identity["identity_scope"] == "benchmark_invalid":
+            staged_evidence = gt_dir / ".index-identity-resource.json"
+            refusal = IndexProcessResult(
+                False, "identity_refused", "GT_INDEX_IDENTITY_INVALID"
+            )
+            _write_index_evidence(
+                staged_evidence, root=str(root), result=refusal,
+                reuse_key=reuse_key, identity=identity,
+            )
+            _publish_graph_failure(
+                gt_dir, root=root, reuse_key=reuse_key,
+                error_code=refusal.error_code, staged_evidence=staged_evidence,
+                identity=identity,
+            )
+            return None
         existing_manifest = db.with_suffix(".manifest.json")
         if db.is_file() and existing_manifest.is_file():
             try:
@@ -619,7 +673,8 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
         process_result = _run_index_bounded(str(root), candidate, gt_dir)
         evidence_path = candidate.with_suffix(".resource.json")
         _write_index_evidence(
-            evidence_path, root=str(root), result=process_result, reuse_key=reuse_key
+            evidence_path, root=str(root), result=process_result,
+            reuse_key=reuse_key, identity=identity,
         )
         evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
         failure_manifest = gt_dir / "graph.failure.json"
@@ -630,6 +685,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                 reuse_key=reuse_key,
                 error_code=process_result.error_code,
                 staged_evidence=evidence_path,
+                identity=identity,
             )
             candidate.unlink(missing_ok=True)
             return None
@@ -640,6 +696,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_MISSING",
                 staged_evidence=evidence_path,
+                identity=identity,
             )
             return None
         try:
@@ -657,6 +714,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_INVALID",
                 staged_evidence=evidence_path,
+                identity=identity,
             )
             candidate.unlink(missing_ok=True)
             return None
@@ -667,13 +725,14 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_INVALID",
                 staged_evidence=evidence_path,
+                identity=identity,
             )
             candidate.unlink(missing_ok=True)
             return None
         graph_sha256 = hashlib.sha256(candidate.read_bytes()).hexdigest()
         manifest = {
             "schema": "gt.graph_certification.v1",
-            **_execution_identity(),
+            **identity,
             "graph_schema_version": GRAPH_SCHEMA_VERSION,
             "index_reuse_key": reuse_key.as_dict(),
             "index_reuse_key_sha256": reuse_key.digest,
@@ -952,6 +1011,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             in {
                 "GT_INDEX_CGROUP_OOM",
                 "GT_INDEX_EXIT_137_UNATTRIBUTED",
+                "GT_INDEX_IDENTITY_INVALID",
                 "GT_INDEX_LAUNCH_FAILED",
                 "GT_INDEX_MEMORY_GUARD_TRIGGERED",
                 "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",

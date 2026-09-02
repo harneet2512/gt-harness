@@ -39,6 +39,8 @@ _REMOTE_PYTHON_DIR = "/installed-agent/python"
 _REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
+_REMOTE_AGENT_RESOURCE_BEFORE = "/logs/agent/agent-resource-before.json"
+_REMOTE_AGENT_RESOURCE = "/logs/agent/agent-resource.json"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
 _DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
@@ -348,6 +350,23 @@ class MiniSweGtAgent(MiniSweAgent):
             "print(minisweagent.__version__)\""
         )
 
+    @staticmethod
+    def _resource_command(
+        phase: str, task_id: str, product_source_sha: str, exit_code: int | None = None
+    ) -> str:
+        command = (
+            f'"{_REMOTE_PY}" -m scripts.agent_resource_evidence '
+            f"--phase {phase} --before {_REMOTE_AGENT_RESOURCE_BEFORE} "
+            f"--output {_REMOTE_AGENT_RESOURCE} "
+            f"--task-id {shlex.quote(task_id)} "
+            f"--product-source-sha {shlex.quote(product_source_sha)}"
+        )
+        if phase == "after":
+            if exit_code is None:
+                raise ValueError("after resource evidence requires an exit code")
+            command += f" --exit-code {exit_code}"
+        return command
+
     @with_prompt_template
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
@@ -360,6 +379,10 @@ class MiniSweGtAgent(MiniSweAgent):
         env["GT_PRODUCT_SOURCE_SHA"] = str(
             self._resolved_flags.get("product_source_sha", "")
         )
+        task_id = env["GT_TASK_ID"].strip()
+        product_source_sha = env["GT_PRODUCT_SOURCE_SHA"].strip()
+        if not task_id or not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
+            raise ValueError("benchmark agent resource identity is incomplete")
         # GT state (events.jsonl) lives OUTSIDE the graded workspace AND inside
         # the captured /logs/agent/ tree so a post-run 17-feature census reads
         # the exact evidence_delivery rows instead of heuristic transcript text.
@@ -368,6 +391,27 @@ class MiniSweGtAgent(MiniSweAgent):
         extra = '--state-dir "$GT_STATE_DIR" --gt-mode advisory '
         await self.exec_as_agent(
             environment,
-            self._run_command(instruction, model, extra_args=extra),
-            env=env,
+            self._resource_command("before", task_id, product_source_sha),
+            env=dict(UTF8_ENV),
         )
+        try:
+            await self.exec_as_agent(
+                environment,
+                self._run_command(instruction, model, extra_args=extra),
+                env=env,
+            )
+        except NonZeroAgentExitCodeError as exc:
+            match = re.search(r"Command failed \(exit (-?\d+)\)", str(exc))
+            if match:
+                try:
+                    await self.exec_as_agent(
+                        environment,
+                        self._resource_command(
+                            "after", task_id, product_source_sha, int(match.group(1))
+                        ),
+                        env=dict(UTF8_ENV),
+                    )
+                except Exception:
+                    # Resource finalization cannot replace the exact runner error.
+                    pass
+            raise

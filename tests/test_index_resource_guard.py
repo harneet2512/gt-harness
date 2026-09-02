@@ -8,6 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 from gt_engine import indexer
 
 
@@ -176,16 +178,70 @@ def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
     assert indexer._effective_index_memory_limit({"max": 1024 * mib, "current": None}) == 0
 
 
-def test_partial_benchmark_identity_fails_closed(monkeypatch) -> None:
+def test_partial_benchmark_identity_refuses_before_process_launch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    state = tmp_path / "state"
+    repo.mkdir()
+    (repo / "main.py").write_text("pass\n", encoding="utf-8")
     monkeypatch.setenv("GT_TASK_ID", "task-a")
     monkeypatch.delenv("GT_PRODUCT_SOURCE_SHA", raising=False)
+    calls = 0
 
-    try:
-        indexer._execution_identity()
-    except ValueError as exc:
-        assert str(exc) == "benchmark index identity is incomplete"
-    else:
-        raise AssertionError("partial benchmark identity was accepted")
+    def run(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("gt-index must not launch")
+
+    monkeypatch.setattr(indexer, "_run_index_bounded", run)
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+
+    assert indexer.ensure_index(str(repo), state_dir=str(state)) is None
+    assert calls == 0
+    failures = list(state.rglob("graph.failure.json"))
+    evidence = list(state.rglob("index-failure-resource.json"))
+    assert len(failures) == len(evidence) == 1
+    failure = json.loads(failures[0].read_text(encoding="utf-8"))
+    assert failure["error_code"] == "GT_INDEX_IDENTITY_INVALID"
+    assert failure["identity_scope"] == "benchmark_invalid"
+    receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
+    assert receipt.error_type == "GT_INDEX_IDENTITY_INVALID"
+
+
+def test_failure_pair_publication_rolls_back_on_manifest_write_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    gt_dir = tmp_path / "state"
+    gt_dir.mkdir()
+    old_evidence = gt_dir / "index-failure-resource.json"
+    old_failure = gt_dir / "graph.failure.json"
+    old_evidence.write_bytes(b"old-evidence")
+    old_failure.write_bytes(b"old-failure")
+    staged = gt_dir / ".new-resource.json"
+    staged.write_bytes(b"new-evidence")
+    reuse_key = indexer.IndexReuseKey("a" * 64, "b" * 64, "v")
+    original = indexer._sealed_json
+
+    def fail_manifest(path, payload, digest_field):
+        if path.name == "graph.failure.json":
+            raise OSError("injected publication failure")
+        return original(path, payload, digest_field)
+
+    monkeypatch.setattr(indexer, "_sealed_json", fail_manifest)
+    with pytest.raises(OSError, match="injected"):
+        indexer._publish_graph_failure(
+            gt_dir, root=str(tmp_path), reuse_key=reuse_key,
+            error_code="GT_INDEX_PROCESS_FAILED", staged_evidence=staged,
+            identity={"identity_scope": "benchmark_bound", "task_id": "task-a",
+                      "product_source_sha": "a" * 40},
+        )
+    assert old_evidence.read_bytes() == b"old-evidence"
+    assert old_failure.read_bytes() == b"old-failure"
 
 
 def test_successful_process_with_corrupt_database_emits_sealed_failure(
