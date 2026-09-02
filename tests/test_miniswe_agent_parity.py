@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -90,6 +91,25 @@ def test_installed_agent_resolves_explicit_verified_bundle_artifacts(
 
     assert MiniSweAgent._gt_wheel() == gt_wheel
     assert MiniSweAgent._harness_wheel() == harness_wheel
+
+
+@pytest.mark.asyncio
+async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_path):
+    agent = MiniSweGtAgent(logs_dir=tmp_path / "logs", task_id="arktype-task")
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
+    monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(agent, "resolve_env_vars", lambda: {})
+
+    async def execute(_environment, _command, *, env, **_kwargs):
+        captured.update(env)
+
+    monkeypatch.setattr(agent, "exec_as_agent", execute)
+
+    await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
+
+    assert captured["GT_TASK_ID"] == "arktype-task"
 
 
 @pytest.mark.asyncio

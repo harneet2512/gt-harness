@@ -123,6 +123,7 @@
   },
   "capabilities": [
     "atomic_graph_publication",
+    "bounded_index_resource_v1",
     "call_resolution_v2",
     "credential_isolated_task_tools",
     "framework_surface_resolution_v1",
@@ -144,6 +145,7 @@
     "eval/muse_spark_1_2_smoke20_baseline.json",
     "eval/pier_gt_harness_adapter.py",
     "eval/pier_filtered_docker.py",
+    "gt_engine/indexer.py",
     "gt_engine/result_envelope.py",
     "gt_harness/canonical_io.py",
       "gt_harness/groundtruth_provenance.py",
@@ -159,6 +161,7 @@
     "scripts/freeze_har81_recordings.py",
     "scripts/__init__.py",
     "scripts/miniswe_gt_run.py",
+    "scripts/standardize_benchmark_result.py",
     "scripts/provider_probe.py",
     "scripts/resolve_harbor_budget.py",
     "scripts/verify_recorded_delivery_content.py",

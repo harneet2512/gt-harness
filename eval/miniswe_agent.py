@@ -356,6 +356,7 @@ class MiniSweGtAgent(MiniSweAgent):
         env.update(project_task_environment(os.environ, treatment="groundtruth"))
         env.update(self.resolve_env_vars())
         env.setdefault("GT_INDEX_BINARY", _REMOTE_GT_BINARY)
+        env["GT_TASK_ID"] = str(self._resolved_flags.get("task_id", ""))
         # GT state (events.jsonl) lives OUTSIDE the graded workspace AND inside
         # the captured /logs/agent/ tree so a post-run 17-feature census reads
         # the exact evidence_delivery rows instead of heuristic transcript text.

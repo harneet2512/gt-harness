@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -87,6 +88,97 @@ def test_standardize_provider_balance_failure_is_not_rate_limit(tmp_path: Path) 
     assert receipt["error_code"] == "provider_insufficient_balance"
     assert receipt["product_receipt_present"] is False
     assert (agent / "official-verifier-result.json").is_file()
+
+
+def _write_resource_evidence(agent: Path, **overrides: object) -> Path:
+    payload: dict[str, object] = {
+        "schema": "gt.index_resource.v1",
+        "status": "cgroup_oom",
+        "error_code": "GT_INDEX_CGROUP_OOM",
+        "exit_code": 137,
+        "memory_evidence": True,
+        "cgroup_oom_kill_delta": 1,
+        "task_id": "task-a",
+    }
+    payload.update(overrides)
+    payload["evidence_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    path = agent / "gt-state" / "index-resource.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_exit_137_requires_memory_evidence_before_oom_classification(tmp_path: Path) -> None:
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "process_signal_failure"
+    assert receipt["error_code"] == "process_exit_137_unattributed"
+
+
+def test_exit_137_with_sealed_memory_evidence_is_resource_exhaustion(tmp_path: Path) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+    evidence = _write_resource_evidence(agent)
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "resource_exhaustion"
+    assert receipt["error_code"] == "gt_index_cgroup_oom"
+    assert receipt["resource_evidence_path"] == str(evidence.relative_to(tmp_path)).replace("\\", "/")
+    assert receipt["resource_evidence_sha256"] == hashlib.sha256(evidence.read_bytes()).hexdigest()
+
+
+def test_tampered_memory_evidence_does_not_authorize_oom_classification(tmp_path: Path) -> None:
+    agent = _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 137)",
+            },
+        },
+        product=False,
+    )
+    evidence = _write_resource_evidence(agent)
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    payload["cgroup_oom_kill_delta"] = 99
+    evidence.write_text(json.dumps(payload), encoding="utf-8")
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "process_signal_failure"
+    assert receipt["error_code"] == "process_exit_137_unattributed"
+    assert receipt["resource_evidence_path"] is None
 
 
 def test_standardize_setup_failure_without_runner_output_remains_ungraded(

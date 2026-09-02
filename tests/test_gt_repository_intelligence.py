@@ -358,44 +358,47 @@ def _producer_environment() -> dict[str, str]:
 @contextmanager
 def _observe_gt_index() -> list[dict[str, object]]:
     """Observe the subprocess actually launched by the production indexer."""
-    from groundtruth import _binary
+    import gt_engine.indexer as indexer
 
     observed: list[dict[str, object]] = []
-    original_run = _binary.subprocess.run
+    original_popen = indexer.subprocess.Popen
 
-    def run_and_record(command, *args, **kwargs):
-        try:
-            result = original_run(command, *args, **kwargs)
-        except Exception as exc:
-            observed.append(
-                {
-                    "command": tuple(map(str, command)),
-                    "exit_code": None,
-                    "exception": type(exc).__name__,
-                }
-            )
-            raise
-        observed.append(
-            {
-                "command": tuple(map(str, command)),
-                "exit_code": int(result.returncode),
-                "stdout_sha256": _sha256(
-                    result.stdout if isinstance(result.stdout, bytes)
-                    else str(result.stdout or "").encode("utf-8")
-                ),
-                "stderr_sha256": _sha256(
-                    result.stderr if isinstance(result.stderr, bytes)
-                    else str(result.stderr or "").encode("utf-8")
-                ),
-            }
-        )
-        return result
+    class ObservedProcess:
+        def __init__(self, command, *args, **kwargs):
+            self._command = command
+            self._stdout_path = Path(kwargs["stdout"].name)
+            self._stderr_path = Path(kwargs["stderr"].name)
+            self._process = original_popen(command, *args, **kwargs)
+            self._recorded = False
 
-    _binary.subprocess.run = run_and_record
+        def __getattr__(self, name):
+            return getattr(self._process, name)
+
+        def poll(self):
+            return self._process.poll()
+
+        def kill(self):
+            return self._process.kill()
+
+        def wait(self, *args, **kwargs):
+            return_code = self._process.wait(*args, **kwargs)
+            if not self._recorded:
+                observed.append(
+                    {
+                        "command": tuple(map(str, self._command)),
+                        "exit_code": int(return_code),
+                        "stdout_sha256": _sha256(self._stdout_path.read_bytes()),
+                        "stderr_sha256": _sha256(self._stderr_path.read_bytes()),
+                    }
+                )
+                self._recorded = True
+            return return_code
+
+    indexer.subprocess.Popen = ObservedProcess
     try:
         yield observed
     finally:
-        _binary.subprocess.run = original_run
+        indexer.subprocess.Popen = original_popen
 
 
 def _verify_producer_environment(producer: dict[str, object]) -> None:

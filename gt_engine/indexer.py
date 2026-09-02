@@ -1,8 +1,8 @@
 """Auto-detect a code repository and build the gateway's graph.db.
 
-Uses ``groundtruth._binary.run_index`` (the Go gt-index binary) - NEVER the
-``groundtruth index`` CLI, which builds the MCP SymbolStore index.db, a
-DIFFERENT database the gateway cannot read.
+Invokes the resolved Go ``gt-index`` binary behind a bounded child-process
+boundary - NEVER the ``groundtruth index`` CLI, which builds the MCP
+SymbolStore index.db, a DIFFERENT database the gateway cannot read.
 
 Binary resolution is find_binary()'s: $GT_INDEX_BINARY -> PATH -> local build
 -> release download. Because find_binary's "local build" probe is cwd-relative,
@@ -19,7 +19,9 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -50,6 +52,42 @@ _LOCAL_BINARY_CANDIDATES = (
 _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 
 GRAPH_SCHEMA_VERSION = "gt.graph_certification.v1"
+INDEX_RESOURCE_SCHEMA = "gt.index_resource.v1"
+_INDEX_GOMEMLIMIT_BYTES = 768 * 1024 * 1024
+_INDEX_RSS_LIMIT_BYTES = 1024 * 1024 * 1024
+_INDEX_TIMEOUT_SECONDS = 600
+_INDEX_MAX_PROCS = 2
+
+
+@dataclass(frozen=True, slots=True)
+class IndexProcessResult:
+    success: bool
+    status: str
+    error_code: str
+    exit_code: int | None = None
+    peak_rss_bytes: int | None = None
+    memory_limit_bytes: int = _INDEX_RSS_LIMIT_BYTES
+    elapsed_ms: int = 0
+    stdout_bytes: int = 0
+    stdout_sha256: str = ""
+    stderr_bytes: int = 0
+    stderr_sha256: str = ""
+    cgroup_memory_current_before: int | None = None
+    cgroup_memory_current_after: int | None = None
+    cgroup_memory_peak_after: int | None = None
+    cgroup_oom_delta: int = 0
+    cgroup_oom_kill_delta: int = 0
+
+    @property
+    def memory_evidence(self) -> bool:
+        return (
+            self.status in {"memory_guard_triggered", "cgroup_oom"}
+            and (
+                self.status == "memory_guard_triggered"
+                or self.cgroup_oom_delta > 0
+                or self.cgroup_oom_kill_delta > 0
+            )
+        )
 
 
 def verify_configured_producer_artifact(
@@ -83,8 +121,8 @@ def source_manifest_digest(root: str | Path) -> str:
             if path.suffix.lower() not in SOURCE_EXTS:
                 continue
             relative = path.relative_to(root_path).as_posix()
-            payload = path.read_bytes()
-            records.append((relative, len(payload), hashlib.sha256(payload).hexdigest()))
+            size, digest = _file_identity(path)
+            records.append((relative, size, digest))
     encoded = bytearray()
     for relative, size, byte_hash in sorted(records):
         path_bytes = relative.encode("utf-8", "surrogatepass")
@@ -193,6 +231,249 @@ def _atomic_write(path: Path, payload: bytes) -> None:
             temporary.unlink()
 
 
+def _canonical_json(payload: dict[str, object]) -> bytes:
+    return json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _sealed_json(path: Path, payload: dict[str, object], digest_field: str) -> str:
+    digest = hashlib.sha256(_canonical_json(payload)).hexdigest()
+    sealed = dict(payload)
+    sealed[digest_field] = digest
+    _atomic_write(path, _canonical_json(sealed) + b"\n")
+    return digest
+
+
+def _read_integer(path: Path) -> int | None:
+    try:
+        value = path.read_text(encoding="ascii").strip()
+        return None if value == "max" else int(value)
+    except (OSError, ValueError):
+        return None
+
+
+def _cgroup_snapshot() -> dict[str, int | None]:
+    root = Path("/sys/fs/cgroup")
+    events: dict[str, int] = {}
+    try:
+        for line in (root / "memory.events").read_text(encoding="ascii").splitlines():
+            name, value = line.split(maxsplit=1)
+            events[name] = int(value)
+    except (OSError, ValueError):
+        pass
+    return {
+        "current": _read_integer(root / "memory.current"),
+        "max": _read_integer(root / "memory.max"),
+        "peak": _read_integer(root / "memory.peak"),
+        "oom": events.get("oom"),
+        "oom_kill": events.get("oom_kill"),
+    }
+
+
+def _process_rss_bytes(pid: int) -> int | None:
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="ascii").splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _file_identity(path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            size += len(chunk)
+            digest.update(chunk)
+    return size, digest.hexdigest()
+
+
+def _index_command(binary: str, root: str, output: str) -> list[str]:
+    return [binary, "-root", root, "-output", output]
+
+
+def _index_child_environment(memory_limit_bytes: int) -> dict[str, str]:
+    # gt-index gets only process-launch essentials. Provider credentials and the
+    # rest of the agent environment never enter this child process.
+    allowed = (
+        "HOME", "LANG", "LC_ALL", "PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "WINDIR"
+    )
+    child = {name: os.environ[name] for name in allowed if os.environ.get(name)}
+    child["GOMAXPROCS"] = str(_INDEX_MAX_PROCS)
+    go_limit = min(_INDEX_GOMEMLIMIT_BYTES, memory_limit_bytes * 3 // 4)
+    child["GOMEMLIMIT"] = f"{max(48 * 1024 * 1024, go_limit)}B"
+    return child
+
+
+def _effective_index_memory_limit(snapshot: dict[str, int | None]) -> int:
+    cgroup_max = snapshot.get("max")
+    if cgroup_max is None:
+        return _INDEX_RSS_LIMIT_BYTES
+    # Leave half of a constrained task cgroup to the runner and its provider
+    # transcript. Tiny cgroups fail the index safely instead of risking them.
+    return min(_INDEX_RSS_LIMIT_BYTES, max(64 * 1024 * 1024, cgroup_max // 2))
+
+
+def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessResult:
+    before = _cgroup_snapshot()
+    memory_limit = _effective_index_memory_limit(before)
+    started = time.monotonic()
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+    process: subprocess.Popen[bytes] | None = None
+    status = "launch_failed"
+    error_code = "GT_INDEX_LAUNCH_FAILED"
+    exit_code: int | None = None
+    peak_rss: int | None = None
+    try:
+        binary = _resolved_binary_path()
+        if not binary:
+            return IndexProcessResult(False, status, error_code, memory_limit_bytes=memory_limit)
+        with (
+            tempfile.NamedTemporaryFile(
+                mode="wb", dir=log_dir, prefix=".index.", suffix=".stdout", delete=False
+            ) as stdout,
+            tempfile.NamedTemporaryFile(
+                mode="wb", dir=log_dir, prefix=".index.", suffix=".stderr", delete=False
+            ) as stderr,
+        ):
+            stdout_path = Path(stdout.name)
+            stderr_path = Path(stderr.name)
+            process = subprocess.Popen(
+                _index_command(binary, root, str(output)),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
+                env=_index_child_environment(memory_limit),
+            )
+            while process.poll() is None:
+                rss = _process_rss_bytes(process.pid)
+                if rss is not None:
+                    peak_rss = max(peak_rss or 0, rss)
+                if rss is not None and rss > memory_limit:
+                    status = "memory_guard_triggered"
+                    error_code = "GT_INDEX_MEMORY_GUARD_TRIGGERED"
+                    process.kill()
+                    break
+                if time.monotonic() - started > _INDEX_TIMEOUT_SECONDS:
+                    status = "timeout"
+                    error_code = "GT_INDEX_TIMEOUT"
+                    process.kill()
+                    break
+                time.sleep(0.05)
+            exit_code = process.wait(timeout=10)
+        after = _cgroup_snapshot()
+        oom_delta = max(0, (after.get("oom") or 0) - (before.get("oom") or 0))
+        oom_kill_delta = max(
+            0, (after.get("oom_kill") or 0) - (before.get("oom_kill") or 0)
+        )
+        if status not in {"memory_guard_triggered", "timeout"}:
+            if exit_code in {-9, 137} and (oom_delta or oom_kill_delta):
+                status = "cgroup_oom"
+                error_code = "GT_INDEX_CGROUP_OOM"
+            elif exit_code == 0:
+                status = "completed"
+                error_code = ""
+            elif exit_code in {-9, 137}:
+                status = "signal_9_unattributed"
+                error_code = "GT_INDEX_EXIT_137_UNATTRIBUTED"
+            else:
+                status = "nonzero_exit"
+                error_code = "GT_INDEX_PROCESS_FAILED"
+        stdout_bytes, stdout_sha = _file_identity(stdout_path)
+        stderr_bytes, stderr_sha = _file_identity(stderr_path)
+        return IndexProcessResult(
+            success=status == "completed",
+            status=status,
+            error_code=error_code,
+            exit_code=exit_code,
+            peak_rss_bytes=peak_rss,
+            memory_limit_bytes=memory_limit,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+            stdout_bytes=stdout_bytes,
+            stdout_sha256=stdout_sha,
+            stderr_bytes=stderr_bytes,
+            stderr_sha256=stderr_sha,
+            cgroup_memory_current_before=before.get("current"),
+            cgroup_memory_current_after=after.get("current"),
+            cgroup_memory_peak_after=after.get("peak"),
+            cgroup_oom_delta=oom_delta,
+            cgroup_oom_kill_delta=oom_kill_delta,
+        )
+    except (OSError, subprocess.SubprocessError):
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()
+        return IndexProcessResult(
+            False,
+            status,
+            error_code,
+            exit_code=exit_code,
+            peak_rss_bytes=peak_rss,
+            memory_limit_bytes=memory_limit,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+    finally:
+        if stdout_path is not None:
+            stdout_path.unlink(missing_ok=True)
+        if stderr_path is not None:
+            stderr_path.unlink(missing_ok=True)
+
+
+def _write_index_evidence(
+    path: Path, *, root: str, result: IndexProcessResult
+) -> str:
+    payload: dict[str, object] = {
+        "schema": INDEX_RESOURCE_SCHEMA,
+        "task_id": os.environ.get("GT_TASK_ID", ""),
+        "repository_root_sha256": hashlib.sha256(
+            os.path.realpath(root).encode("utf-8", "surrogatepass")
+        ).hexdigest(),
+        "status": result.status,
+        "error_code": result.error_code,
+        "exit_code": result.exit_code,
+        "memory_evidence": result.memory_evidence,
+        "memory_limit_bytes": result.memory_limit_bytes,
+        "peak_rss_bytes": result.peak_rss_bytes,
+        "elapsed_ms": result.elapsed_ms,
+        "stdout_bytes": result.stdout_bytes,
+        "stdout_sha256": result.stdout_sha256,
+        "stderr_bytes": result.stderr_bytes,
+        "stderr_sha256": result.stderr_sha256,
+        "cgroup_memory_current_before": result.cgroup_memory_current_before,
+        "cgroup_memory_current_after": result.cgroup_memory_current_after,
+        "cgroup_memory_peak_after": result.cgroup_memory_peak_after,
+        "cgroup_oom_delta": result.cgroup_oom_delta,
+        "cgroup_oom_kill_delta": result.cgroup_oom_kill_delta,
+    }
+    return _sealed_json(path, payload, "evidence_sha256")
+
+
+def _graph_state_dir(root: str | Path, state_dir: str | Path | None) -> Path:
+    external = str(state_dir or os.environ.get("GT_STATE_DIR") or "").strip()
+    if external:
+        root_key = hashlib.sha256(
+            os.path.realpath(root).encode("utf-8", "surrogatepass")
+        ).hexdigest()[:16]
+        return Path(external) / root_key
+    return Path(root) / ".gt"
+
+
+def _read_sealed_json(path: Path, digest_field: str) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        supplied = payload.pop(digest_field, None)
+        calculated = hashlib.sha256(_canonical_json(payload)).hexdigest()
+        return payload if supplied == calculated else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
     """Ensure a fresh graph.db exists for ``root``; return its path or None.
 
@@ -208,17 +489,11 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
         if not is_code_repo(root):
             return None  # non-code task: GT dormant
         _seed_binary_env()
-        from groundtruth._binary import run_index
 
-        external = str(state_dir or os.environ.get("GT_STATE_DIR") or "").strip()
-        if external:
-            root_key = hashlib.sha256(
-                os.path.realpath(root).encode("utf-8", "surrogatepass")
-            ).hexdigest()[:16]
-            gt_dir = Path(external) / root_key
+        gt_dir = _graph_state_dir(root, state_dir)
+        if gt_dir != Path(root) / ".gt":
             gt_dir.mkdir(parents=True, exist_ok=True)
         else:
-            gt_dir = Path(root) / ".gt"
             gt_dir.mkdir(exist_ok=True)
             ignore = gt_dir / ".gitignore"
             if not ignore.exists():
@@ -246,7 +521,26 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
         ) as handle:
             candidate = Path(handle.name)
         candidate.unlink(missing_ok=True)
-        if not run_index(str(root), str(candidate)):
+        process_result = _run_index_bounded(str(root), candidate, gt_dir)
+        evidence_path = gt_dir / "index-resource.json"
+        _write_index_evidence(
+            evidence_path, root=str(root), result=process_result
+        )
+        evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+        failure_manifest = gt_dir / "graph.failure.json"
+        if not process_result.success:
+            failure_payload: dict[str, object] = {
+                "schema": "gt.graph_failure.v1",
+                "error_code": process_result.error_code,
+                "repository_root_sha256": hashlib.sha256(
+                    os.path.realpath(root).encode("utf-8", "surrogatepass")
+                ).hexdigest(),
+                "source_manifest_sha256": reuse_key.source_manifest_sha256,
+                "producer_binary_sha256": reuse_key.producer_binary_sha256,
+                "resource_evidence_path": evidence_path.name,
+                "resource_evidence_sha256": evidence_sha256,
+            }
+            _sealed_json(failure_manifest, failure_payload, "manifest_sha256")
             candidate.unlink(missing_ok=True)
             return None
         if not candidate.is_file():
@@ -278,6 +572,7 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
             "graph_sha256": graph_sha256,
             "graph_bytes": candidate.stat().st_size,
             "sqlite_quick_check": "ok",
+            "index_resource_sha256": evidence_sha256,
             **_binary_certification(),
         }
         manifest["binary_certified"] = bool(manifest["binary_sha256"])
@@ -302,6 +597,7 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
         finally:
             candidate.unlink(missing_ok=True)
             backup.unlink(missing_ok=True)
+        failure_manifest.unlink(missing_ok=True)
         return str(db)
     except Exception:  # noqa: BLE001 - indexing failure means GT dormant, never a crash
         return None
@@ -322,6 +618,10 @@ class IndexBuildReceipt:
     graph_revision: str = ""
     error_type: str = ""
     error_diagnostic: str = ""
+    resource_evidence_path: str = ""
+    resource_evidence_sha256: str = ""
+    memory_evidence: bool = False
+    exit_code: int | None = None
     attempts: tuple[str, ...] = ()
 
     @property
@@ -333,12 +633,20 @@ class IndexBuildReceipt:
             "status": self.status.value, "graph_db": self.graph_db,
             "source_revision": self.source_revision, "graph_revision": self.graph_revision,
             "error_type": self.error_type, "error_diagnostic": self.error_diagnostic,
+            "resource_evidence_path": self.resource_evidence_path,
+            "resource_evidence_sha256": self.resource_evidence_sha256,
+            "memory_evidence": self.memory_evidence, "exit_code": self.exit_code,
             "attempts": self.attempts,
         }
 
 
 def _resolved_binary_path() -> str:
-    candidate = os.environ.get("GT_INDEX_BINARY") or shutil.which("gt-index") or ""
+    try:
+        from groundtruth._binary import find_binary
+
+        candidate = find_binary()
+    except (ImportError, RuntimeError, OSError):
+        candidate = os.environ.get("GT_INDEX_BINARY") or shutil.which("gt-index") or ""
     return str(Path(candidate).resolve()) if candidate else ""
 
 
@@ -390,6 +698,13 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
         return False, "graph_bytes_mismatch"
     if manifest.get("graph_sha256") != hashlib.sha256(graph.read_bytes()).hexdigest():
         return False, "graph_sha256_mismatch"
+    resource_path = graph.with_name("index-resource.json")
+    if (
+        not resource_path.is_file()
+        or manifest.get("index_resource_sha256")
+        != hashlib.sha256(resource_path.read_bytes()).hexdigest()
+    ):
+        return False, "index_resource_mismatch"
     valid, reason = _graph_schema_receipt(graph)
     return (True, "ok") if valid else (False, f"graph_schema_invalid:{reason}")
 
@@ -405,11 +720,41 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
                                  error_type=type(exc).__name__, error_diagnostic=str(exc)[:600])
     if not graph:
+        gt_dir = _graph_state_dir(root_path, state_dir)
+        failure = _read_sealed_json(gt_dir / "graph.failure.json", "manifest_sha256")
+        evidence_path = gt_dir / "index-resource.json"
+        evidence = _read_sealed_json(evidence_path, "evidence_sha256")
+        evidence_file_sha = (
+            hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            if evidence is not None
+            else ""
+        )
+        bound = bool(
+            failure is not None
+            and evidence is not None
+            and failure.get("resource_evidence_sha256") == evidence_file_sha
+        )
         return IndexBuildReceipt(
             IndexBuildStatus.BUILD_FAILED,
             source_revision=source_revision,
-            error_type="run_index_false",
-            error_diagnostic="gt-index did not publish a graph",
+            error_type=(
+                str(failure.get("error_code") or "GT_INDEX_PROCESS_FAILED")
+                if bound and failure is not None
+                else "index_failure_evidence_invalid"
+            ),
+            error_diagnostic=(
+                str(evidence.get("status") or "index build failed")
+                if bound and evidence is not None
+                else "gt-index failed without valid sealed evidence"
+            ),
+            resource_evidence_path=str(evidence_path) if bound else "",
+            resource_evidence_sha256=evidence_file_sha if bound else "",
+            memory_evidence=bool(evidence.get("memory_evidence")) if bound and evidence else False,
+            exit_code=(
+                int(evidence["exit_code"])
+                if bound and evidence and isinstance(evidence.get("exit_code"), int)
+                else None
+            ),
         )
     graph_path = Path(graph)
     valid, reason = _graph_schema_receipt(graph_path)

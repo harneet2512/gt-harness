@@ -628,7 +628,7 @@ def test_ensure_index_non_code_root_returns_none(tmp_path):
 @requires_gt
 def test_ensure_index_can_keep_graph_state_outside_repository(
         tmp_path, monkeypatch):
-    import groundtruth._binary
+    import gt_engine.indexer as indexer
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -636,7 +636,7 @@ def test_ensure_index_can_keep_graph_state_outside_repository(
     state = tmp_path / "private-state"
     monkeypatch.setenv("GT_STATE_DIR", str(state))
 
-    def fake_run_index(_root, output):
+    def fake_run_index(_root, output, _log_dir):
         import sqlite3
 
         connection = sqlite3.connect(output)
@@ -645,9 +645,9 @@ def test_ensure_index_can_keep_graph_state_outside_repository(
             connection.commit()
         finally:
             connection.close()
-        return True
+        return indexer.IndexProcessResult(True, "completed", "", exit_code=0)
 
-    monkeypatch.setattr(groundtruth._binary, "run_index", fake_run_index)
+    monkeypatch.setattr(indexer, "_run_index_bounded", fake_run_index)
 
     db = ensure_index(str(repo))
 
@@ -663,7 +663,7 @@ def test_ensure_index_can_keep_graph_state_outside_repository(
 
 @requires_gt
 def test_failed_index_build_preserves_previous_database(tmp_path, monkeypatch):
-    import groundtruth._binary
+    import gt_engine.indexer as indexer
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -676,7 +676,13 @@ def test_failed_index_build_preserves_previous_database(tmp_path, monkeypatch):
     target.parent.mkdir(parents=True)
     target.write_bytes(b"known-good")
     monkeypatch.setenv("GT_STATE_DIR", str(state))
-    monkeypatch.setattr(groundtruth._binary, "run_index", lambda *_args: False)
+    monkeypatch.setattr(
+        indexer,
+        "_run_index_bounded",
+        lambda *_args: indexer.IndexProcessResult(
+            False, "nonzero_exit", "GT_INDEX_PROCESS_FAILED", exit_code=1
+        ),
+    )
 
     assert ensure_index(str(repo)) is None
     assert target.read_bytes() == b"known-good"
@@ -685,8 +691,6 @@ def test_failed_index_build_preserves_previous_database(tmp_path, monkeypatch):
 @requires_gt
 def test_manifest_publication_failure_rolls_back_database(tmp_path, monkeypatch):
     import sqlite3
-
-    import groundtruth._binary
 
     import gt_engine.indexer as indexer
 
@@ -702,14 +706,14 @@ def test_manifest_publication_failure_rolls_back_database(tmp_path, monkeypatch)
     target.write_bytes(b"known-good")
     monkeypatch.setenv("GT_STATE_DIR", str(state))
 
-    def valid_index(_root, output):
+    def valid_index(_root, output, _log_dir):
         connection = sqlite3.connect(output)
         connection.execute("CREATE TABLE nodes(id INTEGER PRIMARY KEY)")
         connection.commit()
         connection.close()
-        return True
+        return indexer.IndexProcessResult(True, "completed", "", exit_code=0)
 
-    monkeypatch.setattr(groundtruth._binary, "run_index", valid_index)
+    monkeypatch.setattr(indexer, "_run_index_bounded", valid_index)
     monkeypatch.setattr(
         indexer, "_atomic_write",
         lambda *_args: (_ for _ in ()).throw(OSError("manifest fault")),

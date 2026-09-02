@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -22,6 +23,10 @@ _PROVIDER_EXCEPTIONS = frozenset(
         "BadRequestError",
         "RateLimitError",
     }
+)
+_EXIT_137 = re.compile(r"(?:exit(?: code)?|return(?: code)?)\s*[:=]?\s*137\b", re.I)
+_MEMORY_EVIDENCE_CODES = frozenset(
+    {"GT_INDEX_MEMORY_GUARD_TRIGGERED", "GT_INDEX_CGROUP_OOM"}
 )
 
 
@@ -138,7 +143,10 @@ def _runner_results(
 
 
 def _failure_class(
-    trial: dict[str, Any] | None, *, runner_result_present: bool
+    trial: dict[str, Any] | None,
+    *,
+    runner_result_present: bool,
+    resource_evidence: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     if not runner_result_present:
         return "setup_failure", "runner_result_missing"
@@ -150,9 +158,60 @@ def _failure_class(
         return "provider_billing_failure", "provider_insufficient_balance"
     if exception_type in _PROVIDER_EXCEPTIONS:
         return "provider_failure", "provider_request_failed"
+    if _EXIT_137.search(message):
+        evidence = resource_evidence or {}
+        code = str(evidence.get("error_code") or "")
+        if evidence.get("memory_evidence") is True and code in _MEMORY_EVIDENCE_CODES:
+            suffix = (
+                "memory_guard_triggered"
+                if code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
+                else "cgroup_oom"
+            )
+            return "resource_exhaustion", f"gt_index_{suffix}"
+        return "process_signal_failure", "process_exit_137_unattributed"
     if exception_type:
         return "setup_failure", "runner_setup_or_execution_failed"
     return "missing_verifier", "official_verifier_missing"
+
+
+def _resource_evidence(
+    root: Path, *, task_id: str
+) -> tuple[Path | None, dict[str, Any] | None]:
+    valid: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(root.rglob("index-resource.json")):
+        payload = _read_json(path)
+        if payload is None or payload.get("schema") != "gt.index_resource.v1":
+            continue
+        supplied = payload.get("evidence_sha256")
+        unsigned = dict(payload)
+        unsigned.pop("evidence_sha256", None)
+        calculated = hashlib.sha256(
+            json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        evidence_task = str(payload.get("task_id") or "")
+        code = str(payload.get("error_code") or "")
+        memory_semantics_valid = (
+            code == "GT_INDEX_CGROUP_OOM"
+            and (
+                isinstance(payload.get("cgroup_oom_delta"), int)
+                and payload["cgroup_oom_delta"] > 0
+                or isinstance(payload.get("cgroup_oom_kill_delta"), int)
+                and payload["cgroup_oom_kill_delta"] > 0
+            )
+        ) or (
+            code == "GT_INDEX_MEMORY_GUARD_TRIGGERED"
+            and isinstance(payload.get("peak_rss_bytes"), int)
+            and isinstance(payload.get("memory_limit_bytes"), int)
+            and payload["peak_rss_bytes"] > payload["memory_limit_bytes"] > 0
+        )
+        if (
+            isinstance(supplied, str)
+            and hmac.compare_digest(supplied, calculated)
+            and evidence_task in {"", task_id}
+            and payload.get("memory_evidence") is memory_semantics_valid
+        ):
+            valid.append((path, payload))
+    return valid[0] if len(valid) == 1 else (None, None)
 
 
 def _target_agent_dir(
@@ -188,6 +247,7 @@ def standardize_result(
         raise ValueError("GT product receipt task does not match runner task")
 
     result_path, runner_result, trial = _runner_results(root)
+    resource_path, resource_evidence = _resource_evidence(root, task_id=task_id)
     result_bytes = result_path.read_bytes() if result_path is not None else None
     aggregate_reward = _reward(runner_result)
     trial_reward = _reward(trial or {})
@@ -199,7 +259,11 @@ def standardize_result(
     failure_class, error_code = (
         ("graded", "")
         if reward is not None
-        else _failure_class(trial, runner_result_present=result_path is not None)
+        else _failure_class(
+            trial,
+            runner_result_present=result_path is not None,
+            resource_evidence=resource_evidence,
+        )
     )
     receipt: dict[str, object] = {
         "schema": "gt.official_verifier_result.v1",
@@ -218,6 +282,16 @@ def standardize_result(
         "runner_result_path": (
             str(result_path.relative_to(root)).replace("\\", "/")
             if result_path is not None
+            else None
+        ),
+        "resource_evidence_path": (
+            str(resource_path.relative_to(root)).replace("\\", "/")
+            if resource_path is not None
+            else None
+        ),
+        "resource_evidence_sha256": (
+            hashlib.sha256(resource_path.read_bytes()).hexdigest()
+            if resource_path is not None
             else None
         ),
     }
@@ -266,6 +340,8 @@ def main() -> int:
             "product_receipt_present": product_receipt_present,
             "runner_result_sha256": None,
             "runner_result_path": None,
+            "resource_evidence_path": None,
+            "resource_evidence_sha256": None,
             "construction_error_type": type(exc).__name__,
         }
         target = args.root / args.task_id / "agent" / "official-verifier-result.json"
