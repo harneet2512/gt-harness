@@ -1006,3 +1006,33 @@ def test_bridge_credits_repository_wide_negative_content_search(
     )
 
     assert bridge._predicate_receipts
+
+
+def test_semantic_relation_distinguishes_startswith_from_contains():
+    from gt_engine.task_contract import Obligation, TaskContract
+    from gt_engine.verification_contract import (
+        compile_obligation_predicates,
+        evaluate_passing_observation,
+    )
+
+    contract = TaskContract(
+        "code_behavior",
+        (Obligation("prefix", "The value starts with `urn:gt:`.", "task"),),
+    )
+    predicates = compile_obligation_predicates(contract)
+    predicate = predicates["prefix"]
+    assert (predicate.operator, predicate.literal, predicate.expected_relation) == (
+        "startsWith", "urn:gt:", "starts_with"
+    )
+
+    wrong = evaluate_passing_observation(
+        contract, predicates, "pytest -q", "assert contains('urn:gt:') PASSED",
+        action_index=1,
+    )
+    right = evaluate_passing_observation(
+        contract, predicates, "pytest -q", "assert startsWith('urn:gt:') PASSED",
+        action_index=2,
+    )
+    assert wrong == ()
+    assert len(right) == 1
+    assert right[0].coverage_basis == "exact_operator_literal_assertion"

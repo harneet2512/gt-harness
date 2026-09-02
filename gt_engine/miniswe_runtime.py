@@ -40,6 +40,8 @@ from .miniswe_evidence import (
     run_evidence_pipeline,
 )
 from .miniswe_integration import MiniSweAdapter, ProviderModelMismatch
+from .provider_limits import ProviderRequestTooLarge, enforce_provider_request_limit
+from .run_diagnostics import DiagnosticCode, DiagnosticEvent
 from .runtime_observation import (
     EditTransaction,
     capture_workspace,
@@ -495,11 +497,51 @@ def install_runtime_hooks(
 
     def query(_model: Any, messages: list[dict], **kwargs: Any) -> dict:
         try:
+            # Admission covers the complete logical envelope. This happens
+            # before original_query, so a refusal produces zero provider calls.
+            enforce_provider_request_limit(
+                {
+                    "messages": messages,
+                    "model": str(getattr(_model, "model_name", "") or ""),
+                    "model_kwargs": dict(getattr(_model, "model_kwargs", {}) or {}),
+                    "tools": getattr(_model, "tools", None),
+                    "query_kwargs": kwargs,
+                }
+            )
             message = original_query(messages, **kwargs)
         except Exception as exc:
             if not session.disabled:
                 try:
                     adapter.bind_provider_failure(exc)
+                    status = getattr(exc, "status_code", None)
+                    name = type(exc).__name__.lower()
+                    if isinstance(exc, ProviderRequestTooLarge):
+                        code = DiagnosticCode.GT_PROVIDER_REQUEST_TOO_LARGE
+                    elif status == 429 or "ratelimit" in name:
+                        code = DiagnosticCode.GT_PROVIDER_RATE_LIMIT
+                    elif "timeout" in name:
+                        code = DiagnosticCode.GT_PROVIDER_TIMEOUT
+                    elif "connection" in name or "disconnect" in name:
+                        code = DiagnosticCode.GT_PROVIDER_DISCONNECT
+                    elif "badrequest" in name or status == 400:
+                        code = DiagnosticCode.GT_PROVIDER_BAD_REQUEST
+                    else:
+                        code = DiagnosticCode.GT_PROVIDER_MALFORMED_RESPONSE
+                    adapter.diagnostics.record(
+                        DiagnosticEvent.create(
+                            code=code, severity="ERROR", phase="provider_transport",
+                            subsystem="provider", capability="provider_transport",
+                            task_id=adapter.task_id, classification="primary",
+                            cause=type(exc).__name__, impact="provider_response_unavailable",
+                            recovery=(
+                                "refine_request_before_retry"
+                                if not getattr(exc, "retryable", False)
+                                else "retry_transient_transport_failure"
+                            ),
+                            retryable=bool(getattr(exc, "retryable", False)),
+                            event_sequence=int(adapter.store.receipt()["event_count"]),
+                        )
+                    )
                 except Exception as receipt_exc:  # noqa: BLE001
                     session.degrade("provider_failure_receipt", receipt_exc)
             raise

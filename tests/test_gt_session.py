@@ -24,14 +24,14 @@ def test_session_negotiates_degraded_assurance_without_state_dir(tmp_path):
     assert "exact_provider_payload" in s.degraded_notes()[0]
 
 
-def test_session_full_assurance_when_capabilities_met(tmp_path):
+def test_session_empty_capability_declaration_is_degraded(tmp_path):
     a = _adapter(tmp_path)
     s = GTSession(
         GTSessionConfig(task_id="t", state_dir=str(tmp_path), capabilities=()),
         engine=a,
     )
-    assert s.assurance_state is Assurance.FULL
-    assert s.degraded_notes() == ()
+    assert s.assurance_state is Assurance.DEGRADED
+    assert s.degraded_notes() == ("no host capabilities declared",)
     assert s.mode is GTMode.ADVISORY
     assert s.disabled is False
 
@@ -49,10 +49,22 @@ def test_session_completion_state_reports_unverified_when_unknown(tmp_path):
     a.start_task()
     a.begin_verify()
     a.begin_submit()
-    assert a.submit_decision() is True
+    assert a.submit_decision() is False
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)
     state = s.completion_state()
-    assert state["verified"] is False
+    assert state.get("verified", False) is False
+    assert state["phase"] == "IMPLEMENT"
+
+
+def test_task_start_localization_is_compressed_into_1400_byte_lane(tmp_path, monkeypatch):
+    a = _adapter(tmp_path)
+    monkeypatch.setattr(a, "task_start_localization", lambda: "header\n" + "x" * 5000)
+    s = GTSession(GTSessionConfig(task_id="t", delivery_path="compiled"), engine=a)
+
+    rendered = s.before_model([], iteration=0).context_additions[0]
+
+    assert len(rendered.encode("utf-8")) <= 1400
+    assert "compressed sha256=" in rendered
 
 
 def test_session_close_records_terminal_event(tmp_path):

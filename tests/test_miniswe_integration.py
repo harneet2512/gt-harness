@@ -366,14 +366,14 @@ def test_submit_refused_on_verified_red(tmp_path):
     a.begin_submit()
     assert a.submit_decision() is False
     assert a.phase == "IMPLEMENT"
-    # An edit invalidates the old workspace-bound RED to UNKNOWN.  UNKNOWN is
-    # nonblocking; it is not silently relabeled GREEN.
+    # An edit invalidates the old workspace-bound RED to UNKNOWN. UNKNOWN is
+    # not silently relabeled GREEN and cannot support verified completion.
     a.note_edit(["src/mod.py"])
     assert a.predicate_status("p").value == "UNKNOWN"
     a.begin_verify()
     a.begin_submit()
-    assert a.submit_decision() is True
-    assert a.phase == "FINISHED"
+    assert a.submit_decision() is False
+    assert a.phase == "IMPLEMENT"
 
 
 def test_refusal_names_obligation_text_not_opaque_predicate_id(tmp_path):
@@ -451,17 +451,16 @@ def test_final_state_reports_verified_only_when_all_obligations_green(tmp_path):
     assert state["unverified_predicates"] == []
 
 
-def test_final_state_reports_unverified_when_any_obligation_unknown(tmp_path):
+def test_unknown_obligation_refuses_completion_without_verified_claim(tmp_path):
     a = MiniSweAdapter(task_id="task", state_dir=tmp_path,
                        predicates=[Predicate("p", "p")])
     a.start_task()
     a.begin_verify()
     a.begin_submit()
-    assert a.submit_decision() is True
+    assert a.submit_decision() is False
     state = a.final_state()
-    # T2.2: UNKNOWN obligations must NOT be reported as verified.
-    assert state["verified"] is False
-    assert state["unverified_predicates"] == ["p"]
+    assert state["phase"] == "IMPLEMENT"
+    assert state.get("verified", False) is False
 
 
 def test_edit_invalidates_stale_red_without_fabricating_green(tmp_path):

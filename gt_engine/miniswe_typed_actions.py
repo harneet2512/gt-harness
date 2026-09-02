@@ -18,6 +18,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -83,6 +84,23 @@ GROUNDTRUTH_TOOL = {
         },
     },
 }
+
+QUERY_MATCH_LIMIT = 20
+# 512 is the hard per-line ceiling. The fallback projection reserves half of
+# it so the canonical evidence and model-facing projection remain under the
+# 16 KiB whole-query ceiling even when all 20 slots are populated.
+QUERY_LINE_MAX_BYTES = 256
+QUERY_RESULT_MAX_BYTES = 16_384
+QUERY_SCAN_MAX_BYTES = 64 * 1024 * 1024
+QUERY_SCAN_TIMEOUT_SEC = 10.0
+
+
+def _truncate_utf8(value: bytes, limit: int) -> bytes:
+    """Truncate bytes without emitting a partial UTF-8 sequence."""
+
+    if len(value) <= limit:
+        return value
+    return value[:limit].decode("utf-8", "ignore").encode("utf-8")
 
 
 class _CoreCompiler(Protocol):
@@ -470,7 +488,13 @@ def _literal_search(request: Mapping[str, Any], root: Path) -> tuple[list[dict],
     ]
     answer: list[dict[str, Any]] = []
     omissions: list[str] = []
+    scanned_bytes = 0
+    started = time.monotonic()
+    stopped = False
     for path in sorted(paths, key=lambda item: item.as_posix()):
+        if time.monotonic() - started >= QUERY_SCAN_TIMEOUT_SEC:
+            omissions.append("query_scan_time_limit")
+            break
         try:
             relative = path.relative_to(root).as_posix()
         except ValueError:
@@ -488,18 +512,31 @@ def _literal_search(request: Mapping[str, Any], root: Path) -> tuple[list[dict],
         except OSError:
             omissions.append(f"unreadable:{relative}")
             continue
+        scanned_bytes += len(data)
+        if scanned_bytes > QUERY_SCAN_MAX_BYTES:
+            omissions.append("query_scan_byte_limit")
+            break
         for line_number, line in enumerate(data.splitlines(), start=1):
             count = line.count(query_bytes)
             if count:
+                preview = _truncate_utf8(line, QUERY_LINE_MAX_BYTES)
                 answer.append(
                     {
                         "path": relative,
                         "line": line_number,
                         "occurrences": count,
                         "line_sha256": hashlib.sha256(line).hexdigest(),
-                        "preview": line.decode("utf-8", "replace"),
+                        "preview": preview.decode("utf-8", "replace"),
                     }
                 )
+                if len(line) > QUERY_LINE_MAX_BYTES:
+                    omissions.append("query_line_limit")
+                if len(answer) >= QUERY_MATCH_LIMIT:
+                    omissions.append("query_match_limit")
+                    stopped = True
+                    break
+        if stopped:
+            break
     return answer, sorted(set(omissions))
 
 
@@ -802,6 +839,29 @@ def execute_typed_action(
         "honesty": honesty,
     }
     output = _canonical_bytes(result).decode("utf-8")
+    if len(output.encode("utf-8")) > QUERY_RESULT_MAX_BYTES:
+        evidence_map = result.get("evidence")
+        if isinstance(evidence_map, dict):
+            omissions = list(evidence_map.get("omissions") or ())
+            if "query_result_byte_limit" not in omissions:
+                omissions.append("query_result_byte_limit")
+            evidence_map["omissions"] = omissions
+        # Both projections contain the same fallback rows. Remove tail rows
+        # deterministically until the complete model-visible envelope fits.
+        while (
+            len(_canonical_bytes(result)) > QUERY_RESULT_MAX_BYTES
+            and isinstance(result.get("direct_answer"), list)
+            and result["direct_answer"]
+        ):
+            result["direct_answer"].pop()
+            if isinstance(evidence_map, dict) and isinstance(evidence_map.get("answer"), list):
+                evidence_map["answer"].pop()
+            if isinstance(evidence_map, dict) and isinstance(evidence_map.get("anchors"), list):
+                evidence_map["anchors"].pop()
+            if isinstance(evidence_map, dict) and isinstance(evidence_map.get("witnesses"), list):
+                evidence_map["witnesses"].pop()
+        returncode = 2
+        output = _canonical_bytes(result).decode("utf-8")
     return {
         "output": output,
         "returncode": returncode,
