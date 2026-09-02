@@ -50,6 +50,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout exact review-inbox evidence
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: harneet2512/gt-harness
+          ref: ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685
+          path: .pinned/review-inbox
+          persist-credentials: false
+
       - name: Build source-bound Groundtruth producer
         run: |
           set -euo pipefail
@@ -82,7 +90,7 @@ jobs:
                 -ldflags "${LDFLAGS}" \
                 -o /output/gt-index-linux-amd64 ./cmd/gt-index/'
           chmod +x "${OUTPUT_ROOT}/gt-index-linux-amd64"
-          rm -rf "${OUTPUT_ROOT}/.cache"
+          sudo rm -rf -- "${OUTPUT_ROOT}/.cache"
           "${OUTPUT_ROOT}/gt-index-linux-amd64" -build-info > "${OUTPUT_ROOT}/build-info.json"
           python - <<'PY'
           import hashlib, json
@@ -92,6 +100,8 @@ jobs:
           binary = root / "gt-index-linux-amd64"
           info = json.loads((root / "build-info.json").read_text(encoding="utf-8"))
           digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+          manifest = json.loads(Path("config/deepswe_product_bundle_v1.json").read_text(encoding="utf-8"))
+          expected = manifest["groundtruth"]
           assert info["schema"] == "gt-index.build.v1"
           assert info["complete"] is True
           assert info["git_commit"] == "43c6d723840f784d5eb939418dc2df57a6ff0a37"
@@ -99,8 +109,22 @@ jobs:
           assert info["build_tags"] == "sqlite_fts5"
           assert info["graph_schema_version"] == "v15.2-trust-tier"
           assert info["executable_sha256"] == digest
+          assert digest == expected["producer_sha256"]
+          assert hashlib.sha256((root / "build-info.json").read_bytes()).hexdigest() == expected["producer_build"]["build_info_sha256"]
+          assert (root / "build-info.json").read_bytes() == Path(expected["producer_build"]["build_info_path"]).read_bytes()
+          assert binary.read_bytes() == Path(expected["producer_path"]).read_bytes()
           (root / "sha256.txt").write_text(digest + "\n", encoding="utf-8")
           PY
+          file "${OUTPUT_ROOT}/gt-index-linux-amd64" | grep -F 'statically linked'
+
+      - name: Verify Groundtruth lineage and review provenance
+        run: |
+          set -euo pipefail
+          python -m scripts.verify_groundtruth_provenance \
+            --manifest config/deepswe_product_bundle_v1.json \
+            --groundtruth-checkout .pinned/groundtruth \
+            --review-checkout .pinned/review-inbox \
+            --output artifacts/source-bound-producer/lineage-measurement.json
 
       - name: Configure isolated Git fixtures
         run: |
@@ -232,7 +256,7 @@ jobs:
           PRODUCER_PATH="/opt/groundtruth/gt-index/gt-index"
           sudo install -D -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
           printf '%s  %s\n' \
-            '024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a' \
+            '55deddbae6f32a8d6c2bf82fa8ec13775f6fed94e4cc287c4b71178758432170' \
             "${PRODUCER_PATH}" | sha256sum --check --strict
           "${PRODUCER_PATH}" -h >/dev/null
 

@@ -178,6 +178,115 @@ def _validate_tasks(tasks: object) -> list[dict[str, Any]]:
     return validated
 
 
+def _groundtruth_release_blockers(
+    groundtruth: Mapping[str, Any], *, root: str | Path
+) -> list[str]:
+    """Validate the closed Route-B source, binary, wheel, and lineage contract."""
+    blockers: list[str] = []
+    source_commit = groundtruth.get("source_commit")
+    source_tree = groundtruth.get("source_tree")
+    producer_sha = groundtruth.get("producer_sha256")
+    if not (
+        isinstance(source_commit, str)
+        and len(source_commit) == 40
+        and isinstance(source_tree, str)
+        and len(source_tree) == 40
+        and _is_sha256(producer_sha)
+    ):
+        return ["groundtruth_source_identity_invalid"]
+
+    build = groundtruth.get("producer_build")
+    if not isinstance(build, Mapping):
+        blockers.append("groundtruth_source_to_artifact_provenance_unverified")
+    else:
+        build_info_relative = build.get("build_info_path")
+        build_info_path = (
+            Path(root) / build_info_relative
+            if isinstance(build_info_relative, str)
+            else Path()
+        )
+        try:
+            build_info = json.loads(build_info_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            build_info = None
+        required_capabilities = set(groundtruth.get("producer_capabilities") or [])
+        build_valid = (
+            groundtruth.get("provenance_status") == "VERIFIED_ROUTE_B_SOURCE_BOUND"
+            and groundtruth.get("wheel_runtime_status") == "VERIFIED_VENDORED_ROUTE_B"
+            and build.get("schema") == "gt.producer_build_binding.v1"
+            and build.get("status") == "VERIFIED"
+            and build.get("source_commit") == source_commit
+            and build.get("source_tree") == source_tree
+            and build.get("binary_sha256") == producer_sha
+            and isinstance(build_info_relative, str)
+            and build_info_path.is_file()
+            and _is_sha256(build.get("build_info_sha256"))
+            and _sha256_file(build_info_path) == build.get("build_info_sha256")
+            and _is_sha256(build.get("builder_image_digest"))
+            and build.get("static_linking") is True
+            and isinstance(build_info, Mapping)
+            and build_info.get("schema") == "gt-index.build.v1"
+            and build_info.get("complete") is True
+            and build_info.get("git_commit") == source_commit
+            and build_info.get("executable_sha256") == producer_sha
+            and build_info.get("graph_schema_version")
+            == groundtruth.get("graph_schema_version")
+            and build_info.get("build_tags") == build.get("build_tags")
+            and isinstance(build_info.get("source_fingerprint"), str)
+            and _is_sha256(build_info.get("source_fingerprint"))
+            and required_capabilities
+            and required_capabilities.issubset(set(build_info.get("capabilities") or []))
+        )
+        if not build_valid:
+            blockers.append("groundtruth_source_to_artifact_provenance_unverified")
+
+    lineage = groundtruth.get("lineage_exception")
+    if groundtruth.get("accepted_default_ancestor") is True:
+        if not isinstance(groundtruth.get("accepted_default_ref"), str):
+            blockers.append("groundtruth_accepted_default_identity_invalid")
+    elif not isinstance(lineage, Mapping):
+        blockers.append("groundtruth_source_not_accepted_default_ancestor")
+    else:
+        unsigned = dict(lineage)
+        supplied_digest = unsigned.pop("attestation_digest_sha256", None)
+        path = lineage.get("ancestry_path")
+        reviews = lineage.get("review_packets")
+        accepted = lineage.get("accepted_default_commit")
+        certified = lineage.get("certified_source_commit")
+        changed_paths = lineage.get("post_certification_changed_paths")
+        lineage_valid = (
+            lineage.get("schema") == "gt.groundtruth_lineage_exception.v1"
+            and lineage.get("status") == "VERIFIED_DESCENDANT_LINEAGE_EXCEPTION"
+            and lineage.get("authority") == "HAR-81_OWNER_DIRECTIVE"
+            and lineage.get("source_commit") == source_commit
+            and isinstance(accepted, str)
+            and len(accepted) == 40
+            and isinstance(path, list)
+            and len(path) >= 2
+            and len(path) == len(set(path))
+            and path[0] == accepted
+            and path[-1] == source_commit
+            and all(isinstance(value, str) and len(value) == 40 for value in path)
+            and certified in path
+            and isinstance(changed_paths, list)
+            and all(isinstance(value, str) and value for value in changed_paths)
+            and isinstance(reviews, list)
+            and len(reviews) >= 2
+            and all(
+                isinstance(row, Mapping)
+                and isinstance(row.get("packet_id"), str)
+                and _is_sha256(row.get("packet_digest_sha256"))
+                and row.get("head_sha") in path
+                for row in reviews
+            )
+            and _is_sha256(supplied_digest)
+            and _digest(unsigned) == supplied_digest
+        )
+        if not lineage_valid:
+            blockers.append("groundtruth_lineage_exception_invalid")
+    return sorted(set(blockers))
+
+
 def build_product_bundle(
     manifest_path: str | Path,
     *,
@@ -217,11 +326,7 @@ def build_product_bundle(
             "sha256": _sha256_file(wheel),
         }
     groundtruth = dict(source["groundtruth"])
-    release_blockers: list[str] = []
-    if groundtruth.get("provenance_status") != "VERIFIED_ACCEPTED_DEFAULT":
-        release_blockers.append("groundtruth_source_to_artifact_provenance_unverified")
-    if groundtruth.get("accepted_default_ancestor") is not True:
-        release_blockers.append("groundtruth_source_not_accepted_default_ancestor")
+    release_blockers = _groundtruth_release_blockers(groundtruth, root=root)
     body: dict[str, Any] = {
         "schema": PRODUCT_BUNDLE_SCHEMA,
         "harness": {"commit": commit, "tree": tree},
@@ -298,6 +403,11 @@ def validate_product_bundle(bundle: Mapping[str, Any], *, root: str | Path) -> N
         candidate = root_path / relative
         if not candidate.is_file() or _sha256_file(candidate) != expected:
             raise BundleError(f"groundtruth_{kind}_digest_mismatch")
+    expected_blockers = _groundtruth_release_blockers(groundtruth, root=root_path)
+    if bundle.get("release_blockers") != expected_blockers:
+        raise BundleError("groundtruth_release_blockers_mismatch")
+    if bundle.get("release_eligible") is not (not expected_blockers):
+        raise BundleError("groundtruth_release_eligibility_mismatch")
     wheel = bundle.get("python_wheel")
     if wheel is not None and (
         not isinstance(wheel, Mapping)

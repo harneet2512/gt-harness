@@ -27,10 +27,65 @@
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "wheel_sha256": "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a",
-    "provenance_status": "UNVERIFIED_SOURCE_TO_BYTES",
-    "accepted_default_ref": "origin/gt_main",
-    "accepted_default_ancestor": false
+    "producer_sha256": "55deddbae6f32a8d6c2bf82fa8ec13775f6fed94e4cc287c4b71178758432170",
+    "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
+    "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
+    "accepted_default_ref": "origin/gt-trial",
+    "accepted_default_ancestor": false,
+    "producer_capabilities": [
+      "atomic_graph_publication",
+      "call_resolution_v2",
+      "framework_surface_resolution_v1",
+      "incremental_stale_suppression",
+      "parse_failure_accounting",
+      "retained_call_candidates",
+      "versioned_query_policy"
+    ],
+    "producer_build": {
+      "schema": "gt.producer_build_binding.v1",
+      "status": "VERIFIED",
+      "source_commit": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
+      "source_tree": "1028a3b8f6be7c585393ce07b2e9ba87bd052084",
+      "binary_sha256": "55deddbae6f32a8d6c2bf82fa8ec13775f6fed94e4cc287c4b71178758432170",
+      "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
+      "build_info_sha256": "bdbdf74dd88f737a1500f365913da336c01f8eb5af622f07e50c249cd7e334f9",
+      "builder_image_digest": "a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3",
+      "build_tags": "sqlite_fts5",
+      "static_linking": true
+    },
+    "lineage_exception": {
+      "schema": "gt.groundtruth_lineage_exception.v1",
+      "status": "VERIFIED_DESCENDANT_LINEAGE_EXCEPTION",
+      "authority": "HAR-81_OWNER_DIRECTIVE",
+      "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
+      "accepted_default_ref": "origin/gt-trial",
+      "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
+      "source_commit": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
+      "certified_source_commit": "db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
+      "ancestry_path": [
+        "ea79b92669cbfa549e43a0286fc92ae942348a76",
+        "7b4d70433d11b4792adf59e8fac09a063d9ada53",
+        "db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
+        "43c6d723840f784d5eb939418dc2df57a6ff0a37"
+      ],
+      "post_certification_changed_paths": [
+        "gt-index/HAR80_ROUTE_B_CERTIFICATION.md"
+      ],
+      "review_inbox_commit": "ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685",
+      "review_packets": [
+        {
+          "packet_id": "har70-groundtruth-db9daf9e",
+          "head_sha": "db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
+          "packet_digest_sha256": "6d22f4fa95321d93b93780afab4f00c7e635bc847b7c751086ef6cb5fac17296"
+        },
+        {
+          "packet_id": "har80-groundtruth-43c6d723",
+          "head_sha": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
+          "packet_digest_sha256": "105b62af2e0e09e6f671fc4500c6bf94340e7fd3197e23e8feb46517f4c6b1be"
+        }
+      ],
+      "attestation_digest_sha256": "4beb4126c568e41a711bcd9e3d17e159425df3be77d25150635cffec1d9be227"
+    }
   },
   "capabilities": [
     "atomic_graph_publication",
@@ -57,12 +112,14 @@
     "eval/pier_filtered_docker.py",
     "gt_engine/result_envelope.py",
     "gt_harness/canonical_io.py",
+    "gt_harness/groundtruth_provenance.py",
     "gt_harness/__init__.py",
     "gt_harness/product.py",
     "gt_harness/recorded_content.py",
     "gt_harness/runtime_receipts.py",
     "pyproject.toml",
     "scripts/gt_product_acceptance.py",
+    "scripts/verify_groundtruth_provenance.py",
     "scripts/build_muse_smoke20_baseline.py",
     "scripts/freeze_har81_recordings.py",
     "scripts/__init__.py",
@@ -124,7 +181,8 @@
     "tests/fixtures/har81_attestation/recorded_runs/33567358689/renderer_sources/ca744e7ebb7d03b6d11e31eeab8600cdb3669bdd/gt_engine/miniswe_runtime.py",
     "tests/fixtures/har81_attestation/recorded_runs/33567358689/renderer_sources/ca744e7ebb7d03b6d11e31eeab8600cdb3669bdd/scripts/miniswe_gt_run.py",
     "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "vendor/gt-index-linux-amd64"
+    "vendor/gt-index-linux-amd64",
+    "vendor/gt-index-linux-amd64.build-info.json"
   ],
   "tasks": [
     {

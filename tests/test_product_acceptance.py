@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib
+import importlib.metadata
 import json
 import subprocess
 import sys
@@ -12,6 +14,7 @@ import pytest
 from gt_harness.product import (
     BundleError,
     _assert_committed_source_closure,
+    _groundtruth_release_blockers,
     _prove_container_install,
     aggregate_results,
     build_product_bundle,
@@ -90,6 +93,30 @@ def test_shipping_adapter_and_every_manifest_task_are_reachable() -> None:
     assert [row["ordinal"] for row in tasks] == list(range(1, len(tasks) + 1))
     for row in tasks:
         assert len(row["task_config_sha256"]) == 64
+
+
+def test_groundtruth_route_b_provenance_and_lineage_exception_fail_closed() -> None:
+    groundtruth = json.loads(MANIFEST.read_text(encoding="utf-8"))["groundtruth"]
+    assert _groundtruth_release_blockers(groundtruth, root=ROOT) == []
+
+    mutations = {
+        "source_commit": lambda row: row.__setitem__("source_commit", "0" * 40),
+        "producer_sha256": lambda row: row.__setitem__("producer_sha256", "0" * 64),
+        "lineage_base": lambda row: row["lineage_exception"].__setitem__(
+            "accepted_default_commit", "0" * 40
+        ),
+        "lineage_path": lambda row: row["lineage_exception"]["ancestry_path"].reverse(),
+        "review_packet": lambda row: row["lineage_exception"]["review_packets"][0].__setitem__(
+            "packet_digest_sha256", "0" * 64
+        ),
+        "producer_build_info": lambda row: row["producer_build"].__setitem__(
+            "build_info_sha256", "0" * 64
+        ),
+    }
+    for mutate in mutations.values():
+        altered = copy.deepcopy(groundtruth)
+        mutate(altered)
+        assert _groundtruth_release_blockers(altered, root=ROOT)
 
 
 def test_bundle_is_reproducible_and_tamper_evident(tmp_path: Path) -> None:
@@ -208,15 +235,33 @@ def test_summary_is_exact_once_and_conservative() -> None:
         aggregate_results(plan, [complete, complete])
 
 
-def test_provider_free_acceptance_executes_both_parity_arms(tmp_path: Path) -> None:
+def test_provider_free_acceptance_executes_both_parity_arms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    expected_versions = {
+        "mini-swe-agent": manifest["miniswe_agent_version"],
+        "harbor": manifest["harbor_version"],
+        "datacurve-pier": manifest["pier_version"],
+    }
+    real_version = importlib.metadata.version
+    monkeypatch.setattr(
+        importlib.metadata,
+        "version",
+        lambda name: expected_versions[name] if name in expected_versions else real_version(name),
+    )
+    monkeypatch.setattr(
+        "gt_harness.product._prove_container_install",
+        lambda *_args, **_kwargs: {"status": "VERIFIED", "image_source": "test_fixture"},
+    )
     receipt = run_provider_free_acceptance(MANIFEST, output_dir=tmp_path)
     assert receipt["schema"] == "gt.product_closeout.v1"
-    assert receipt["status"] == "FAILED"
+    assert receipt["status"] == "VERIFIED_PROVIDER_FREE"
     assert receipt["provider_calls"] == 0
-    assert receipt["release_eligible"] is False
+    assert receipt["release_eligible"] is True
     assert receipt["container_proof"]["status"] == "VERIFIED"
     assert receipt["fake_provider_proof"]["status"] == "VERIFIED"
-    assert receipt["content_correctness"]["status"] == "FAIL"
+    assert receipt["content_correctness"]["status"] == "PASS"
     assert receipt["content_correctness"]["provider_calls"] == 0
     assert receipt["content_correctness"]["run_count"] == 3
     assert receipt["content_correctness"]["delivery_count"] == 12
@@ -225,14 +270,13 @@ def test_provider_free_acceptance_executes_both_parity_arms(tmp_path: Path) -> N
     assert receipt["content_correctness"]["historical_adjudication_count"] == 5
     assert receipt["content_correctness"]["renderer_provenance_match_count"] == 3
     assert set(receipt["content_correctness"]["mutation_cases"].values()) == {"FAIL_AS_DESIGNED"}
-    assert "recorded_content_correctness_failed" in receipt["release_blockers"]
+    assert receipt["release_blockers"] == []
     assert (
         receipt["content_correctness"]["packet_digest_sha256"]
         == json.loads(
             (tmp_path / "har81-a21-content-measurement.json").read_text(encoding="utf-8")
         )["packet_digest_sha256"]
     )
-    assert "groundtruth_source_not_accepted_default_ancestor" in receipt["release_blockers"]
     assert [row["arm"] for row in receipt["arms"]] == ["bare", "groundtruth"]
     assert receipt["parity"]["structural_identity_equal"] is True
     assert receipt["secret_canary_matches"] == []
