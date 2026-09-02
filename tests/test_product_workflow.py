@@ -37,6 +37,11 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "python -m pytest -q -ra tests" in provider_free
     assert "repository: abhigyanpatwari/GitNexus" in provider_free
     assert "ref: 7e993ab8972386294fb96bf14a8665d0b5325397" in provider_free
+    assert "fetch-depth: 0" in provider_free
+    assert "GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64" in provider_free
+    assert "sha256sum --check --strict" in provider_free
+    assert "git config --global user.email \"gt-harness-ci@example.invalid\"" in provider_free
+    assert "git config core.hooksPath \"${GITHUB_WORKSPACE}/.githooks\"" in provider_free
     assert "python scripts/verify_feature_matrix.py" in provider_free
     assert "python scripts/gt_audit.py" in paid
     assert "python scripts/gt_live_gate.py" in paid

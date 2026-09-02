@@ -19,10 +19,12 @@ jobs:
     timeout-minutes: 45
     env:
       GT_GITNEXUS_ROOT: ${{ github.workspace }}/.pinned/gitnexus
+      GT_INDEX_BINARY: ${{ github.workspace }}/vendor/gt-index-linux-amd64
     steps:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install exact Python
@@ -38,6 +40,17 @@ jobs:
           ref: 7e993ab8972386294fb96bf14a8665d0b5325397
           path: .pinned/gitnexus
           persist-credentials: false
+
+      - name: Configure isolated Git fixtures and verified producer
+        run: |
+          set -euo pipefail
+          git config --global user.name "GT Harness CI"
+          git config --global user.email "gt-harness-ci@example.invalid"
+          git config core.hooksPath "${GITHUB_WORKSPACE}/.githooks"
+          chmod +x .githooks/pre-commit vendor/gt-index-linux-amd64
+          printf '%s  %s\n' \
+            '024851815218f5ade0932f4a661287c743ce20d89e8ab2d1375f05d5b0b96c8a' \
+            'vendor/gt-index-linux-amd64' | sha256sum --check --strict
 
       - name: Install the frozen provider-free test surface
         run: |
