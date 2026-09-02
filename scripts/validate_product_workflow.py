@@ -15,6 +15,17 @@ _MODULE = re.compile(
 _PATH = re.compile(r"(?:--manifest|--workflow)\s+([^\s\\]+)")
 
 
+def _active_step_body(text: str, name: str) -> str:
+    match = re.search(
+        rf"(?ms)^(?P<indent>[ \t]*)-\s+name:\s*{re.escape(name)}\s*$\n"
+        rf"(?P<body>.*?)(?=^(?P=indent)-\s+name:|\Z)",
+        text,
+    )
+    if match is None:
+        return ""
+    return "\n".join(line.split("#", 1)[0] for line in match.group("body").splitlines())
+
+
 def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
     text = workflow.read_text(encoding="utf-8")
     failures: list[str] = []
@@ -39,13 +50,31 @@ def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
         failures.append("product_acceptance_unreachable")
     if not paid:
         manifest_pin_routes = (
-            "id: product-pins",
-            "steps.product-pins.outputs.python_version",
-            "steps.product-pins.outputs.groundtruth_commit",
-            "steps.product-pins.outputs.groundtruth_tree",
-            "steps.product-pins.outputs.review_inbox_commit",
+            (
+                "Resolve immutable product pins from manifest",
+                "id: product-pins",
+            ),
+            (
+                "Install exact Python",
+                "python-version: ${{ steps.product-pins.outputs.python_version }}",
+            ),
+            (
+                "Checkout exact Groundtruth producer source",
+                "ref: ${{ steps.product-pins.outputs.groundtruth_commit }}",
+            ),
+            (
+                "Checkout exact review-inbox evidence",
+                "ref: ${{ steps.product-pins.outputs.review_inbox_commit }}",
+            ),
+            (
+                "Build source-bound Groundtruth producer",
+                "SOURCE_TREE: ${{ steps.product-pins.outputs.groundtruth_tree }}",
+            ),
         )
-        if any(route not in text for route in manifest_pin_routes):
+        if any(
+            route not in _active_step_body(text, step)
+            for step, route in manifest_pin_routes
+        ):
             failures.append("product_manifest_pins_unreachable")
     for revision in _ACTION.findall(text):
         if not re.fullmatch(r"[0-9a-f]{40}", revision):

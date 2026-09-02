@@ -23,7 +23,8 @@ def test_product_workflow_rejects_bypassing_manifest_pin_resolution(
         WORKFLOW.read_text(encoding="utf-8").replace(
             "${{ steps.product-pins.outputs.review_inbox_commit }}",
             "ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685",
-        ),
+        )
+        + "\n# steps.product-pins.outputs.review_inbox_commit\n",
         encoding="utf-8",
     )
     assert "product_manifest_pins_unreachable" in validate_workflow(altered, root=ROOT)
