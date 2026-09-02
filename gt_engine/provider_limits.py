@@ -24,14 +24,36 @@ class ProviderRequestTooLarge(RuntimeError):
         )
 
 
+def build_provider_request_envelope(
+    *,
+    messages: Any,
+    model: str,
+    model_kwargs: Mapping[str, Any] | None = None,
+    tools: Any = None,
+    call_kwargs: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the one complete logical envelope used by every admission seam."""
+
+    effective_kwargs = dict(model_kwargs or {})
+    effective_kwargs.update(call_kwargs or {})
+    return {
+        "messages": messages,
+        "model": str(model or ""),
+        "model_kwargs": effective_kwargs,
+        "tools": tools,
+    }
+
+
 def provider_request_bytes(payload: Mapping[str, Any]) -> int:
     """Return the exact canonical UTF-8 envelope size used for admission."""
 
-    return len(
-        json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    try:
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
-    )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("provider request is not JSON serializable") from exc
+    return len(encoded)
 
 
 def enforce_provider_request_limit(
@@ -48,6 +70,7 @@ def enforce_provider_request_limit(
 __all__ = [
     "PROVIDER_REQUEST_MAX_BYTES",
     "ProviderRequestTooLarge",
+    "build_provider_request_envelope",
     "enforce_provider_request_limit",
     "provider_request_bytes",
 ]

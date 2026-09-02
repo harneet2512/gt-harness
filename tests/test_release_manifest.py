@@ -55,6 +55,35 @@ def test_release_manifest_rejects_stale_content_hash(tmp_path: Path) -> None:
         load_release_manifest(path, root=tmp_path)
 
 
+def test_release_manifest_hash_is_stable_across_checkout_newlines(tmp_path: Path) -> None:
+    path = _write_fixture(tmp_path)
+    prediction = tmp_path / "prediction.json"
+    lf_bytes = b'{\n  "value": true\n}\n'
+    prediction.write_bytes(lf_bytes)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["prediction"]["sha256"] = hashlib.sha256(lf_bytes).hexdigest()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    prediction.write_bytes(lf_bytes.replace(b"\n", b"\r\n"))
+
+    manifest = load_release_manifest(path, root=tmp_path)
+
+    assert manifest.prediction_path == prediction
+
+
+def test_release_manifest_still_rejects_non_newline_mutation(tmp_path: Path) -> None:
+    path = _write_fixture(tmp_path)
+    prediction = tmp_path / "prediction.json"
+    lf_bytes = b'{\n  "value": true\n}\n'
+    prediction.write_bytes(lf_bytes)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["prediction"]["sha256"] = hashlib.sha256(lf_bytes).hexdigest()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    prediction.write_bytes(lf_bytes.replace(b"true", b"false").replace(b"\n", b"\r\n"))
+
+    with pytest.raises(ValueError, match="prediction sha256 mismatch"):
+        load_release_manifest(path, root=tmp_path)
+
+
 def test_release_manifest_rejects_paths_outside_repository(tmp_path: Path) -> None:
     path = _write_fixture(tmp_path)
     payload = json.loads(path.read_text(encoding="utf-8"))

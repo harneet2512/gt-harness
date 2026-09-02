@@ -325,14 +325,9 @@ def build_agent(
             repo_root=cwd,
             state_dir=state_dir,
             graph_db=graph_db,
-            capabilities=(
-                "exact_provider_payload",
-                "provider_response_ids",
-                "structured_actions",
-                "structured_results",
-                "workspace_deltas",
-                "filesystem_snapshots",
-            ),
+            # Capability assurance is earned from runtime receipts. Declaring
+            # host support here would incorrectly produce FULL at startup.
+            capabilities=(),
             issue_text=task,
             mode=GTMode(gt_mode),
             capability_modes=dict(capability_modes or {}),

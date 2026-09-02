@@ -13,6 +13,7 @@ from gt_engine.decision_value_corpus import (
     score_decision_value_observations,
 )
 from gt_engine.decision_value_observations import observation_from_run_receipt
+from gt_engine.repository_identity import repository_file_sha256
 from gt_engine.run_receipt_v2 import RunReceiptFinalizer
 from gt_engine.runtime_observation import capture_workspace
 
@@ -166,9 +167,9 @@ def test_checked_in_decision_value_corpus_is_content_frozen() -> None:
     for case in corpus.cases:
         assert case.repository_revision == capture_workspace(case.repository).revision
         for fact in case.facts:
-            assert fact.content_sha256 == hashlib.sha256(
-                (case.repository / fact.path).read_bytes()
-            ).hexdigest()
+            assert fact.content_sha256 == repository_file_sha256(
+                case.repository / fact.path
+            )
 
 
 def test_corpus_marks_mutated_source_hash_as_unsupported(tmp_path: Path) -> None:

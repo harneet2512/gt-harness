@@ -54,7 +54,10 @@ def _compress_context(value: str, limit: int) -> str:
     for line in value.splitlines(keepends=True):
         data = line.encode("utf-8")
         if used + len(data) > budget:
-            continue
+            if budget > used:
+                prefix = data[: budget - used].decode("utf-8", "ignore")
+                selected.append(prefix)
+            break
         selected.append(line)
         used += len(data)
     result = "".join(selected).rstrip() + marker
@@ -95,7 +98,7 @@ class GTSessionConfig:
     issue_text: str = ""
     mode: GTMode | str = GTMode.ADVISORY
     fail_open: bool = True
-    context_budget_bytes: int = 1400
+    context_budget_bytes: int = 2000
     capability_modes: Mapping[str, GTMode | str] = field(default_factory=dict)
     disabled_capabilities: tuple[str, ...] = ()
     delivery_path: str = "compiled"

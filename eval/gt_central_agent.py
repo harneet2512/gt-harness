@@ -819,15 +819,22 @@ def _bootstrap_provider_message(
         if callable(prepare)
         else [{key: value for key, value in item.items() if key != "extra"} for item in messages]
     )
-    from gt_engine.provider_limits import enforce_provider_request_limit
+    from gt_engine.provider_limits import (
+        build_provider_request_envelope,
+        enforce_provider_request_limit,
+    )
 
     enforce_provider_request_limit(
-        {
-            "messages": prepared,
-            "tools": tools,
-            "model_kwargs": _model_kwargs(model),
-            "call_kwargs": call_kwargs,
-        }
+        build_provider_request_envelope(
+            messages=prepared,
+            model=str(
+                getattr(getattr(model, "config", None), "model_name", "")
+                or getattr(model, "model_name", "")
+            ),
+            model_kwargs=_model_kwargs(model),
+            tools=tools,
+            call_kwargs=call_kwargs,
+        )
     )
     raw_response = _bootstrap_completion(model, prepared, tools=tools, **call_kwargs)
     response_dump = _raw_response_dump(raw_response)
@@ -7335,15 +7342,24 @@ class MiniSweCentralAgent(BaseAgent):
                         break
                     from gt_engine.provider_limits import (
                         ProviderRequestTooLarge,
+                        build_provider_request_envelope,
                         enforce_provider_request_limit,
                     )
                     try:
                         enforce_provider_request_limit(
-                            _provider_request_envelope(
-                                model,
-                                provider_messages,
+                            build_provider_request_envelope(
+                                messages=provider_messages,
+                                model=str(
+                                    getattr(
+                                        getattr(model, "config", None),
+                                        "model_name",
+                                        "",
+                                    )
+                                    or getattr(model, "model_name", "")
+                                ),
+                                model_kwargs=_model_kwargs(model),
+                                tools=replay_provider_tools,
                                 call_kwargs=executor_query_kwargs,
-                                provider_tools=replay_provider_tools,
                             )
                         )
                     except ProviderRequestTooLarge:

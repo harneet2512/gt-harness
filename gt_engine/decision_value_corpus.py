@@ -8,12 +8,13 @@ bytes named by that corpus; a producer cannot certify itself by emitting a
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .repository_identity import repository_file_sha256
 
 _SCHEMA = "gt.decision_value_corpus.v1"
 _REQUIRED_LANGUAGE_GROUPS = {
@@ -220,7 +221,7 @@ def _score_fact(
             reason = "repository_file_missing"
         else:
             content = source.read_bytes()
-            if hashlib.sha256(content).hexdigest() != expected.content_sha256:
+            if repository_file_sha256(source) != expected.content_sha256:
                 reason = "repository_hash_mismatch"
             elif expected.end_line > len(content.decode("utf-8", "replace").splitlines()):
                 reason = "source_range_invalid"

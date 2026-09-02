@@ -3,8 +3,11 @@
   "release_id": "gt-decision-value-reliability-2026-08-29-v37",
   "task_profile": "repair20-v1",
   "runtime_commit": "2bf3f4954b123c222b7f6c2b98761654ef2ef007",
-  "benchmark_authorized": true,
-  "authorization_blockers": [],
+  "benchmark_authorized": false,
+  "authorization_blockers": [
+    "HAR-81 changes invalidate the frozen runtime proof commit",
+    "a new exact-SHA prediction and independent review are required before paid dispatch"
+  ],
   "authorized_workflows": [
     "tb2_miniswe_central.yml",
     "deepswe_miniswe_central.yml"

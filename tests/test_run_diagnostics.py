@@ -13,6 +13,7 @@ from gt_engine.run_diagnostics import (
     DiagnosticCode,
     DiagnosticEvent,
     DiagnosticJournal,
+    classify_provider_failure,
     diagnose_artifact_root,
 )
 
@@ -68,6 +69,24 @@ def test_diagnostic_event_rejects_unknown_codes_and_secret_material():
         )
 
 
+@pytest.mark.parametrize(
+    ("exc", "code", "retryable"),
+    [
+        (type("BillingError", (Exception,), {"status_code": 402})("payment"),
+         DiagnosticCode.GT_PROVIDER_BILLING, False),
+        (type("RateLimitError", (Exception,), {"status_code": 429})("slow"),
+         DiagnosticCode.GT_PROVIDER_RATE_LIMIT, True),
+        (type("BadRequestError", (Exception,), {"status_code": 400})("bad"),
+         DiagnosticCode.GT_PROVIDER_BAD_REQUEST, False),
+        (TimeoutError("timed out"), DiagnosticCode.GT_PROVIDER_TIMEOUT, True),
+        (ConnectionError("disconnect"), DiagnosticCode.GT_PROVIDER_DISCONNECT, True),
+        (ValueError("malformed"), DiagnosticCode.GT_PROVIDER_MALFORMED_RESPONSE, False),
+    ],
+)
+def test_provider_failures_are_classified_independently(exc, code, retryable):
+    assert classify_provider_failure(exc) == (code, retryable)
+
+
 def test_diagnose_root_validates_evidence_hashes_and_plan_conservation(tmp_path: Path):
     evidence = tmp_path / "nested" / "event.json"
     evidence.parent.mkdir()
@@ -113,6 +132,28 @@ def test_strict_diagnosis_rejects_missing_task_diagnostics(tmp_path: Path):
     assert "planned-b" in " ".join(report.artifact_issues)
 
 
+def test_strict_diagnosis_rejects_missing_plan_empty_capabilities_and_replay_tamper(
+    tmp_path: Path,
+):
+    journal = DiagnosticJournal(tmp_path / "trial", task_id="task")
+    paths = journal.seal()
+
+    no_plan = diagnose_artifact_root(tmp_path, strict=True)
+    assert no_plan.exit_code == 2
+    assert any("task plan" in issue for issue in no_plan.artifact_issues)
+    assert any("capability" in issue for issue in no_plan.artifact_issues)
+
+    (tmp_path / "task-plan.json").write_text(
+        json.dumps({"tasks": ["task"]}), encoding="utf-8"
+    )
+    replay = json.loads(paths.replay.read_text(encoding="utf-8"))
+    replay["diagnostics_sha256"] = "0" * 64
+    paths.replay.write_text(json.dumps(replay), encoding="utf-8")
+    tampered = diagnose_artifact_root(tmp_path, strict=True)
+    assert tampered.exit_code == 2
+    assert any("replay diagnostics digest mismatch" in issue for issue in tampered.artifact_issues)
+
+
 def test_packaged_cli_discovers_nested_healthy_artifact(tmp_path: Path):
     journal = DiagnosticJournal(tmp_path / "deep" / "trial", task_id="healthy")
     journal.capability("receipt_writer", CapabilityState.WORKING, "verified journal")
@@ -130,5 +171,14 @@ def test_packaged_cli_discovers_nested_healthy_artifact(tmp_path: Path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout)["exit_code"] == 0
+    payload = json.loads(completed.stdout)
+    assert payload["exit_code"] == 0
+    assert payload["tasks"] == [
+        {
+            "fingerprint": "",
+            "primary_diagnostic": "HEALTHY",
+            "recovery": "none",
+            "task_id": "healthy",
+        }
+    ]
     assert (tmp_path / "diagnostic-summary.json").is_file()

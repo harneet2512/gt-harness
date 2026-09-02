@@ -19,6 +19,7 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from gt_engine.repository_identity import repository_file_sha256  # noqa: E402
 from scripts.release_manifest import (  # noqa: E402
     ReleaseManifest,
     load_release_manifest,
@@ -32,7 +33,7 @@ def _canonical(value: Any) -> bytes:
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return repository_file_sha256(path)
 
 
 def _task_set_sha256(tasks: list[str]) -> str:

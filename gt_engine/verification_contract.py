@@ -97,6 +97,10 @@ _BUILD_OBLIGATION_RE = re.compile(
 _QUOTED_LITERAL_RE = re.compile(r"(?:`([^`]+)`|'([^']+)'|\"([^\"]+)\")")
 _STARTS_WITH_RE = re.compile(r"(?i)\b(?:starts?\s+with|begins?\s+with|prefix(?:ed)?\s+by)\b")
 _CONTAINS_RE = re.compile(r"(?i)\bcontains?\b")
+_SEMANTIC_ASSERTION_RE = re.compile(
+    r"(?m)^GT_SEMANTIC_ASSERT\s+relation=(?P<relation>[a-z_]+)\s+"
+    r"literal_sha256=(?P<literal>[0-9a-f]{64})\s+result=pass$"
+)
 
 
 def is_executable_check(command: str) -> bool:
@@ -414,11 +418,13 @@ def evaluate_passing_observation(
                 executable and item.obligation_id in lexical
             )
             if verified and predicate.expected_relation:
-                normalized = observed.lower().replace("_", "")
-                expected_operator = predicate.operator.lower().replace("_", "")
-                verified = bool(
-                    expected_operator in normalized
-                    and (not predicate.literal or predicate.literal.lower() in observed.lower())
+                expected_literal = hashlib.sha256(
+                    predicate.literal.encode("utf-8", "surrogatepass")
+                ).hexdigest()
+                verified = any(
+                    match.group("relation") == predicate.expected_relation
+                    and match.group("literal") == expected_literal
+                    for match in _SEMANTIC_ASSERTION_RE.finditer(output)
                 )
             if verified:
                 coverage_basis = (

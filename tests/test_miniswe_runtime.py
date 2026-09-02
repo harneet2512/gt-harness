@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 import gt_engine.miniswe_runtime as rt
 from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
 from gt_engine.miniswe_controller import Predicate
@@ -111,6 +113,21 @@ def test_runtime_hooks_capture_provider_payload_and_action(tmp_path):
     assert adapter.iteration == 1
 
 
+def test_runtime_hook_refuses_oversized_request_before_native_query(tmp_path):
+    from gt_engine.provider_limits import ProviderRequestTooLarge
+
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(task_id="t", state_dir=tmp_path, predicates=[])
+    install_runtime_hooks(agent, adapter)
+
+    with pytest.raises(ProviderRequestTooLarge):
+        agent.model.query(
+            [{"role": "user", "content": "x" * (6 * 1024 * 1024)}]
+        )
+
+    assert agent.model.calls == []
+
+
 def test_provider_delivery_records_only_gt_bytes_present_in_prepared_messages(
     monkeypatch, tmp_path
 ):
@@ -184,6 +201,28 @@ def test_native_groundtruth_action_is_routed_without_shell_execution(tmp_path):
     assert len(joined) == 1
     assert joined[0]["final_observation_sha256"]
     assert joined[0]["provider_payload_sha256"] == adapter.deliveries[-1].payload_sha256
+
+
+def test_second_repository_wide_typed_query_in_one_response_is_refused(tmp_path):
+    (tmp_path / "mod.py").write_text("needle = 1\n", encoding="utf-8")
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path / "state", predicates=[], repo_root=str(tmp_path)
+    )
+    install_runtime_hooks(agent, adapter)
+    action = {
+        "tool_name": "groundtruth", "tool_call_id": "gt-wide",
+        "gt_action": {
+            "kind": "exact_literal_search",
+            "arguments": {"literal": "needle", "paths": ["."]},
+        },
+    }
+
+    messages = agent.execute_actions({"extra": {"actions": [action, action]}})
+
+    assert "query_fanout_refused" not in messages[0]["content"]
+    assert "query_fanout_refused" in messages[1]["content"]
+    assert agent.env.executed == []
 
 
 def test_malformed_groundtruth_action_fails_open_without_becoming_shell(tmp_path):

@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gt_engine.repository_identity import matches_repository_file_sha256
+
 ACTIVE_RELEASE_PATH = Path("eval/release/active_release.json")
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _matches_checkout_sha256(path: Path, expected: str) -> bool:
+    """Compare against platform-stable repository bytes."""
+
+    return matches_repository_file_sha256(path, expected)
 
 
 def _full_sha(value: object, *, field: str) -> str:
@@ -78,7 +81,9 @@ def load_release_manifest(
             release_root, entry.get("path"), field=field
         )
         expected_hash = str(entry.get("sha256") or "").lower()
-        if len(expected_hash) != 64 or _sha256(artifact) != expected_hash:
+        if len(expected_hash) != 64 or not _matches_checkout_sha256(
+            artifact, expected_hash
+        ):
             raise ValueError(f"{field} sha256 mismatch")
         resolved[field] = (relative, artifact)
 
