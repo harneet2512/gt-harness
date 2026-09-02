@@ -520,6 +520,7 @@ jobs:
           python scripts/verify_feature_matrix.py
 
       - name: Verify all DeepSWE outcomes and product receipts
+        if: always()
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
           TASK_JOB_RESULT: ${{ needs.task.result }}

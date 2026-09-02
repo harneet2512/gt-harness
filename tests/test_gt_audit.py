@@ -845,6 +845,22 @@ def test_nested_run_dir_is_found(tmp_path):
     assert len(audits) == 1 and audits[0].task_name == "t"
 
 
+def test_merged_artifact_wrappers_discover_every_task(tmp_path):
+    expected = [f"task-{index:02d}" for index in range(1, 21)]
+    for task_name in expected:
+        wrapper = tmp_path / f"deepswe-run-{task_name}"
+        make_task_dir(
+            wrapper,
+            f"{task_name}__trial",
+            task_name,
+            HEALTHY_NONCODE,
+        )
+
+    audits = gt_audit.audit_run(tmp_path)
+
+    assert [audit.task_name for audit in audits] == expected
+
+
 def test_empty_run_dir_fails_loud(tmp_path):
     with pytest.raises(SystemExit):
         gt_audit.audit_run(tmp_path)

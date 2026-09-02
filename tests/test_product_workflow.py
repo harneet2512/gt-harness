@@ -65,6 +65,9 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "python scripts/gt_live_gate.py" in paid
     assert "--require-complete-census" in paid
     assert "python -m scripts.attest_deepswe" in paid
+    assert "if: always()" in paid.split(
+        "- name: Verify all DeepSWE outcomes and product receipts", 1
+    )[1].split("- name: Upload final DeepSWE GT Harness attestation", 1)[0]
     assert "from gt_harness.runtime_receipts import" not in paid
 
 

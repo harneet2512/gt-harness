@@ -205,6 +205,66 @@ def test_error_product_receipt_fails_attestation_closed(tmp_path: Path) -> None:
     assert f"product_receipt:{TASK}:product_not_completed" in receipt["errors"]
 
 
+def test_partial_run_preserves_graded_pass_and_explicit_error(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    failed_task = "failed-task"
+    plan_path = tmp_path / "deepswe20-plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["task_ids"].append(failed_task)
+    plan["task_count"] = 2
+    plan["matrix"].append(
+        {"task": failed_task, "time_budget_seconds": 3600}
+    )
+    plan["language_counts"] = {"go": 1, "typescript": 1}
+    _write(plan_path, plan)
+
+    passing = next(
+        (tmp_path / "tasks").rglob("agent/official-verifier-result.json")
+    )
+    passing_row = json.loads(passing.read_text(encoding="utf-8"))
+    passing_row["reward"] = 1
+    _write(passing, passing_row)
+
+    failed_trial = tmp_path / "tasks" / "failed-wrapper" / "failed__trial"
+    _write(
+        failed_trial / "result.json",
+        {"task_name": failed_task, "trial_name": "failed-trial"},
+    )
+    _write(
+        failed_trial / "agent" / "official-verifier-result.json",
+        {
+            "task_id": failed_task,
+            "status": "ERROR",
+            "reward": None,
+            "failure_class": "setup_failure",
+            "error_code": "runner_setup_or_execution_failed",
+            "product_source_sha": "f" * 40,
+        },
+    )
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert receipt["graded"] == 1
+    assert receipt["solved"] == 1
+    assert receipt["outcomes"][TASK] == {
+        "status": "GRADED",
+        "graded": True,
+        "reward": 1,
+        "solved": True,
+        "failure_class": "graded",
+        "error_code": "",
+    }
+    assert receipt["outcomes"][failed_task] == {
+        "status": "ERROR",
+        "graded": False,
+        "reward": None,
+        "solved": False,
+        "failure_class": "setup_failure",
+        "error_code": "runner_setup_or_execution_failed",
+    }
+
+
 @pytest.mark.parametrize(
     ("target", "mutation", "expected"),
     [

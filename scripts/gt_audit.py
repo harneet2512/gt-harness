@@ -1612,19 +1612,20 @@ def audit_task(task_dir: Path) -> TaskAudit:
 # run-dir walking
 # --------------------------------------------------------------------------- #
 def find_task_dirs(run_dir: Path) -> list[Path]:
-    """Task dirs = dirs containing result.json AND agent/. Handles one level
-    of nesting (the downloaded artifact often wraps the run dir once)."""
-    def is_task(d: Path) -> bool:
-        return (d / "result.json").is_file() and (d / "agent").is_dir()
+    """Return every task directory in an artifact download tree.
 
-    found = sorted(d for d in run_dir.iterdir() if d.is_dir() and is_task(d))
-    if found:
-        return found
-    for sub in sorted(d for d in run_dir.iterdir() if d.is_dir()):
-        nested = sorted(d for d in sub.iterdir() if d.is_dir() and is_task(d))
-        if nested:
-            return nested
-    return []
+    ``actions/download-artifact`` with ``merge-multiple: true`` preserves each
+    task artifact's wrapper directory.  Returning after the first wrapper
+    silently reduced a 20-task run to one audited task.  Discover from the
+    task's two required anchors at any nesting depth and sort by relative path
+    so the census is exhaustive and deterministic.
+    """
+    found = {
+        result.parent
+        for result in run_dir.rglob("result.json")
+        if (result.parent / "agent").is_dir()
+    }
+    return sorted(found, key=lambda path: path.relative_to(run_dir).as_posix())
 
 
 def audit_run(run_dir: Path) -> list[TaskAudit]:
