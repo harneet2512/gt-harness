@@ -1,0 +1,37 @@
+{
+  "created_at":"2026-09-02T00:39:51.355869Z",
+  "detail":{
+    "benchmark_runs":0,
+    "candidate_parent":"570229f196547df70349d728c14520eb59fa7a15",
+    "fixed_failure":"unit_suite_required_ambient_gh_artifact_credentials",
+    "fixture_tests":[
+      "metadata",
+      "artifact_digest",
+      "archive_members",
+      "path_traversal",
+      "stale_receipts",
+      "workflow_bytes",
+      "api_failure"
+    ],
+    "prior_ci_run":33575879842,
+    "production_validator":"unchanged_fail_closed",
+    "provider_calls":0
+  },
+  "file":"",
+  "head_sha":"7dc80b7eaa021f23809cc200e854ad8b59a7f605",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 candidate makes finalstand unit validation credential-free with mutation fixtures retained",
+  "packet_digest_sha256":"ba144c4b02dd9fa50fc02c6ae4a044bc813d6123be8c6a02f92ae808b827e181",
+  "packet_id":"har81-readiness-7dc80b7e",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"offline-readiness-candidate",
+    "system":"coordinator"
+  },
+  "status":"open",
+  "supersedes":"har81-readiness-570229f1",
+  "ticket":"HAR-81"
+}
