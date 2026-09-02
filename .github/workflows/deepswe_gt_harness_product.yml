@@ -256,7 +256,7 @@ jobs:
           PRODUCER_PATH="/opt/groundtruth/gt-index/gt-index"
           sudo install -D -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
           printf '%s  %s\n' \
-            '743cb2aba6fa6b91417f45d2a60eedc823e74cb800e8ad9de9e59ac984aff294' \
+            '9bd146c8aa7087516fdce60fbdb0e096edb3565eb2a4d393130180d9b1021346' \
             "${PRODUCER_PATH}" | sha256sum --check --strict
           "${PRODUCER_PATH}" -h >/dev/null
 
