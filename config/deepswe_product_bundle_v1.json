@@ -83,7 +83,7 @@
           "gt-index/cmd/gt-index/dispatch_selection_test.go",
           "gt-index/cmd/gt-index/main.go"
       ],
-      "review_inbox_commit": "ac45a546cb3c39d5b8ce0f630b5c8ce2ef572685",
+      "review_inbox_commit": "b45d41a923bd9c53526d53beee9becffcf6e7b17",
       "review_packets": [
         {
           "packet_id": "har70-groundtruth-db9daf9e",
@@ -94,9 +94,27 @@
           "packet_id": "har80-groundtruth-43c6d723",
           "head_sha": "43c6d723840f784d5eb939418dc2df57a6ff0a37",
           "packet_digest_sha256": "105b62af2e0e09e6f671fc4500c6bf94340e7fd3197e23e8feb46517f4c6b1be"
+        },
+        {
+          "packet_id": "har81-groundtruth-dispatch-review-0aadb1b9",
+          "head_sha": "0aadb1b9111f70f3c6b8874e1b8eff927397d22b",
+          "packet_digest_sha256": "08f889e9af71678c5ed9ba4f3e892935111c63aa0eee980651982aa79e2d7cd2",
+          "kind": "check_outcome",
+          "status": "PASS"
         }
       ],
-      "attestation_digest_sha256": "422fbb8a4ede10bbdcc60a8ebc464fe5bd8bff603e556eaa30516920f0d03a44"
+      "product_review_packets": [
+        {
+          "purpose": "recorded_content_correctness",
+          "packet_id": "har81-a21-real-content-measurement-355ec281",
+          "head_sha": "355ec281e2f87c97320b17d5864f8cd404d75ba7",
+          "packet_digest_sha256": "9f1d6b94e1c9965c1362f50cc96e1c1364ba06fc84baa9cfcc6ae93a17df26dd",
+          "kind": "measurement",
+          "status": "PASS",
+          "supersedes": "har81-a21-real-content-measurement-619b61b8"
+        }
+      ],
+      "attestation_digest_sha256": "9223f4131d3905d3208053bb049847c6a08a53ab4e0476c0e55b56b2c904fc56"
     }
   },
   "capabilities": [

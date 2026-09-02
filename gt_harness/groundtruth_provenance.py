@@ -30,8 +30,14 @@ def _packet_digest(packet: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json_bytes(body)).hexdigest()
 
 
-def _raw_status(repository: Path) -> str:
-    """Compare checkout bytes to the index without clean/smudge filter drift."""
+def _checkout_status(repository: Path) -> str:
+    """Return Git-semantic dirt while tolerating checkout EOL materialization.
+
+    This deliberately does not claim literal byte identity for every source file:
+    text EOLs and LFS materialization are checkout concerns. Source identity is
+    bound by the exact commit/tree and the clean-filter comparison here; the
+    executable and its build-info use separate literal SHA-256 verification.
+    """
 
     return _git(
         repository,
@@ -78,8 +84,8 @@ def verify_groundtruth_lineage(
     )
     expected_changes = sorted(lineage["post_certification_changed_paths"])
     failures: list[str] = []
-    source_status = _raw_status(source)
-    review_status = _raw_status(review)
+    source_status = _checkout_status(source)
+    review_status = _checkout_status(review)
     if _git(source, "rev-parse", "HEAD") != source_commit:
         failures.append("source_commit_mismatch")
     if _git(source, "rev-parse", "HEAD^{tree}") != source_tree:
@@ -116,8 +122,11 @@ def verify_groundtruth_lineage(
         tickets = {}
 
     verified_packets = 0
+    exact_source_review = False
     for expected in lineage["review_packets"]:
         packet_id = str(expected["packet_id"])
+        expected_kind = str(expected.get("kind") or "check_outcome")
+        expected_status = str(expected.get("status") or "open")
         candidates = list((review / "inbox").rglob(f"{packet_id}.json"))
         if len(candidates) != 1:
             failures.append(f"review_packet_count:{packet_id}")
@@ -133,8 +142,8 @@ def verify_groundtruth_lineage(
             or packet.get("packet_digest_sha256") != expected["packet_digest_sha256"]
             or _packet_digest(packet) != expected["packet_digest_sha256"]
             or packet.get("schema") != "gt.review_packet.v1"
-            or packet.get("kind") != "check_outcome"
-            or packet.get("status") != "open"
+            or packet.get("kind") != expected_kind
+            or packet.get("status") != expected_status
             or live_packets.count(packet_id) != 1
             or ticket_memberships != 1
             or packet_id not in list(tickets.get(ticket) or [])
@@ -158,6 +167,58 @@ def verify_groundtruth_lineage(
             failures.append(f"review_packet_superseded_live:{packet_id}")
             continue
         verified_packets += 1
+        exact_source_review = exact_source_review or (
+            packet.get("head_sha") == source_commit
+            and packet.get("kind") == "check_outcome"
+            and packet.get("status") == "PASS"
+        )
+
+    if not exact_source_review:
+        failures.append("exact_source_review_packet_missing")
+
+    product_review_packets = lineage.get("product_review_packets")
+    verified_product_reviews = 0
+    verified_product_purposes: list[str] = []
+    if not isinstance(product_review_packets, list) or not product_review_packets:
+        failures.append("product_review_packets_missing")
+        product_review_packets = []
+    for expected in product_review_packets:
+        if not isinstance(expected, Mapping):
+            failures.append("product_review_packet_invalid")
+            continue
+        packet_id = str(expected.get("packet_id") or "")
+        candidates = list((review / "inbox").rglob(f"{packet_id}.json"))
+        if len(candidates) != 1:
+            failures.append(f"product_review_packet_count:{packet_id}")
+            continue
+        packet = json.loads(candidates[0].read_text(encoding="utf-8"))
+        ticket = str(packet.get("ticket") or "")
+        ticket_memberships = sum(
+            packet_id in list(packet_ids or []) for packet_ids in tickets.values()
+        )
+        supersedes = expected.get("supersedes")
+        if (
+            packet.get("packet_id") != packet_id
+            or packet.get("head_sha") != expected.get("head_sha")
+            or packet.get("packet_digest_sha256")
+            != expected.get("packet_digest_sha256")
+            or _packet_digest(packet) != expected.get("packet_digest_sha256")
+            or packet.get("schema") != "gt.review_packet.v1"
+            or packet.get("kind") != expected.get("kind")
+            or packet.get("status") != expected.get("status")
+            or packet.get("supersedes") != supersedes
+            or live_packets.count(packet_id) != 1
+            or ticket_memberships != 1
+            or packet_id not in list(tickets.get(ticket) or [])
+            or (isinstance(supersedes, str) and supersedes in live_packets)
+        ):
+            failures.append(f"product_review_packet_mismatch:{packet_id}")
+            continue
+        verified_product_reviews += 1
+        verified_product_purposes.append(str(expected.get("purpose") or ""))
+
+    if verified_product_purposes.count("recorded_content_correctness") != 1:
+        failures.append("recorded_content_review_packet_missing")
 
     result: dict[str, Any] = {
         "schema": "gt.groundtruth_lineage_measurement.v1",
@@ -170,6 +231,9 @@ def verify_groundtruth_lineage(
         "ancestry_path_match": observed_path == expected_path,
         "post_certification_diff_match": observed_changes == expected_changes,
         "review_packet_match_count": verified_packets,
+        "exact_source_review_packet_match": exact_source_review,
+        "product_review_packet_match_count": verified_product_reviews,
+        "product_review_purposes": sorted(verified_product_purposes),
         "review_inbox_commit": review_commit,
         "source_checkout_status": source_status.splitlines(),
         "review_checkout_status": review_status.splitlines(),

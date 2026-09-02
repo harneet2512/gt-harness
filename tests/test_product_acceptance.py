@@ -109,6 +109,12 @@ def test_groundtruth_route_b_provenance_and_lineage_exception_fail_closed() -> N
         "review_packet": lambda row: row["lineage_exception"]["review_packets"][0].__setitem__(
             "packet_digest_sha256", "0" * 64
         ),
+        "exact_source_review": lambda row: row["lineage_exception"]["review_packets"][-1].__setitem__(
+            "status", "open"
+        ),
+        "content_review": lambda row: row["lineage_exception"]["product_review_packets"][0].__setitem__(
+            "packet_digest_sha256", "0" * 64
+        ),
         "producer_build_info": lambda row: row["producer_build"].__setitem__(
             "build_info_sha256", "0" * 64
         ),

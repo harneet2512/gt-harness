@@ -251,6 +251,7 @@ def _groundtruth_release_blockers(
         supplied_digest = unsigned.pop("attestation_digest_sha256", None)
         path = lineage.get("ancestry_path")
         reviews = lineage.get("review_packets")
+        product_reviews = lineage.get("product_review_packets")
         accepted = lineage.get("accepted_default_commit")
         certified = lineage.get("certified_source_commit")
         changed_paths = lineage.get("post_certification_changed_paths")
@@ -279,6 +280,28 @@ def _groundtruth_release_blockers(
                 and row.get("head_sha") in path
                 for row in reviews
             )
+            and any(
+                isinstance(row, Mapping)
+                and row.get("head_sha") == source_commit
+                and row.get("kind") == "check_outcome"
+                and row.get("status") == "PASS"
+                for row in reviews
+            )
+            and isinstance(product_reviews, list)
+            and len(product_reviews) >= 1
+            and sum(
+                isinstance(row, Mapping)
+                and row.get("purpose") == "recorded_content_correctness"
+                and row.get("kind") == "measurement"
+                and row.get("status") == "PASS"
+                and isinstance(row.get("packet_id"), str)
+                and isinstance(row.get("head_sha"), str)
+                and len(row.get("head_sha")) == 40
+                and _is_sha256(row.get("packet_digest_sha256"))
+                and isinstance(row.get("supersedes"), str)
+                for row in product_reviews
+            )
+            == 1
             and _is_sha256(supplied_digest)
             and _digest(unsigned) == supplied_digest
         )
