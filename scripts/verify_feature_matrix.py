@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,7 +29,14 @@ def main() -> int:
     )
     args = parser.parse_args()
     matrix = json.loads(args.matrix.read_text(encoding="utf-8"))
-    errors = verify_matrix(matrix)
+    checkout_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    errors = verify_matrix(matrix, expected_source_revision=checkout_head)
     if errors:
         for issue in errors:
             print(issue, file=sys.stderr)

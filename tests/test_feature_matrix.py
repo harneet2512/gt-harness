@@ -34,6 +34,11 @@ def test_feature_matrix_schema_and_coverage(repo_root):
     assert not verify_matrix(matrix)
 
 
+def test_feature_matrix_rejects_foreign_source_revision(repo_root):
+    matrix = build_matrix(repo_root=repo_root, execute=False)
+    assert verify_matrix(matrix, expected_source_revision="f" * 40)
+
+
 def test_cell_digest_rejects_tamper(repo_root):
     matrix = build_matrix(repo_root=repo_root, execute=False)
     mutated = copy.deepcopy(matrix)

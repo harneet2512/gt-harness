@@ -196,10 +196,19 @@ def build_matrix(*, repo_root: Path, execute: bool = True) -> dict[str, Any]:
     return body
 
 
-def verify_matrix(matrix: dict[str, Any]) -> list[str]:
+def verify_matrix(
+    matrix: dict[str, Any],
+    *,
+    expected_source_revision: str | None = None,
+) -> list[str]:
     errors: list[str] = []
     if matrix.get("schema") != SCHEMA:
         errors.append("schema mismatch")
+    if (
+        expected_source_revision is not None
+        and matrix.get("source_revision") != expected_source_revision
+    ):
+        errors.append("source_revision does not match checkout HEAD")
     supplied = matrix.get("matrix_digest_sha256")
     if not isinstance(supplied, str):
         errors.append("missing matrix_digest_sha256")

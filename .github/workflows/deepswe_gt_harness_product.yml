@@ -111,7 +111,9 @@ jobs:
           python -c "import json; from pathlib import Path; p=json.loads(Path('artifacts/product-closeout/product-closeout.json').read_text()); assert p['provider_calls'] == 0; assert p['benchmark_runs'] == 0; assert p['status'] == 'VERIFIED_PROVIDER_FREE'; assert p['container_proof']['status'] == 'VERIFIED'; assert p['secret_canary_matches'] == []"
 
       - name: Verify the complete feature proof matrix
-        run: python scripts/verify_feature_matrix.py
+        run: |
+          python scripts/issue_feature_matrix.py
+          python scripts/verify_feature_matrix.py
 
       - name: Stage the verified producer outside the source closure
         run: |

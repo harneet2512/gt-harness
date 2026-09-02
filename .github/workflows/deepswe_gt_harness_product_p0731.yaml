@@ -545,6 +545,7 @@ jobs:
             --min-exercised 0 \
             --require-complete-census \
             --json attestation/gt-live-gate.json
+          python scripts/issue_feature_matrix.py
           python scripts/verify_feature_matrix.py
 
       - name: Verify all DeepSWE outcomes and product receipts

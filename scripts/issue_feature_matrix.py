@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,7 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from gt_engine.feature_matrix import build_matrix, render_markdown  # noqa: E402
+from gt_engine.feature_matrix import (  # noqa: E402
+    build_matrix,
+    render_markdown,
+    verify_matrix,
+)
 
 JSON_OUT = ROOT / "gt_finalstand" / "feature_matrix.json"
 MD_OUT = ROOT / "gt_finalstand" / "FEATURE_MATRIX.md"
@@ -33,6 +38,21 @@ def main() -> int:
     )
     args = parser.parse_args()
     matrix = build_matrix(repo_root=ROOT, execute=not args.dry_run)
+    checkout_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    errors = verify_matrix(
+        matrix,
+        expected_source_revision=checkout_head,
+    )
+    if errors:
+        for issue in errors:
+            print(issue, file=sys.stderr)
+        return 1
     encoded = json.dumps(matrix, sort_keys=True, separators=(",", ":"), indent=2)
     _atomic_write(JSON_OUT, (encoded + "\n").encode())
     _atomic_write(MD_OUT, (render_markdown(matrix) + "\n").encode())
