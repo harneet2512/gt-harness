@@ -210,6 +210,31 @@ def test_windows_tree_kill_uses_taskkill_tree_flag(monkeypatch) -> None:
     assert calls == [["taskkill", "/PID", "42", "/T", "/F"]]
 
 
+def test_windows_tree_kill_falls_back_when_taskkill_times_out(monkeypatch) -> None:
+    killed: list[bool] = []
+
+    class Process:
+        pid = 42
+
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill():
+            killed.append(True)
+
+    def time_out(*_args, **_kwargs):
+        raise indexer.subprocess.TimeoutExpired("taskkill", 5)
+
+    monkeypatch.setattr(indexer.os, "name", "nt")
+    monkeypatch.setattr(indexer.subprocess, "run", time_out)
+
+    indexer._kill_index_process_tree(Process())
+
+    assert killed == [True]
+
+
 def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
     mib = 1024 * 1024
     limit = indexer._effective_index_memory_limit(

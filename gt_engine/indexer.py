@@ -366,8 +366,8 @@ def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
 
 
 def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> None:
-    try:
-        if os.name == "nt":
+    if os.name == "nt":
+        try:
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 stdin=subprocess.DEVNULL,
@@ -376,11 +376,18 @@ def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> None:
                 timeout=5,
                 check=False,
             )
-            if process.poll() is None:
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if process.poll() is None:
+            try:
                 process.kill()
-        else:
+            except OSError:
+                pass
+        return
+    try:
+        if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
-    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+    except (OSError, ProcessLookupError):
         pass
 
 
