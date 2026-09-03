@@ -1,4 +1,6 @@
-# GT harness pipeline flow
+# arch_pipeline — the GT harness, layer by layer
+
+_Successor to `pipeline_flow.md`. Updated as final_hardening lands; every status row names a SHA or a run id._
 
 Where a benchmark run starts, every layer it passes through, what each layer is
 capable of, and — separately — what is actually *proven* about each one today.
@@ -49,7 +51,7 @@ acceptance gate that must pass first.
 |---|---|---|
 | CI rebuild + digest assert | **VERIFIED** | Run 33778444842 failed the assert on a wrong pin; 33779096992 passed it after re-pinning to CI's own artifact `b4bfba37…` |
 | Static linking | **VERIFIED** | CI `file` output: "statically linked"; ELF has no `PT_INTERP`, no `PT_DYNAMIC` |
-| Lineage/provenance verification | **VERIFIED (as blocking)** | Run 33779096992: `exact_source_review_packet_missing` — it genuinely cannot be satisfied by editing the bundle |
+| Lineage/provenance verification | **VERIFIED** | First refused a bundle-only edit (33779096992: `exact_source_review_packet_missing`), then passed once the packet existed on the branch (33785370968, 33791548818) — it cannot be satisfied by editing the bundle, which is the point |
 | Review packet for `cffca1fd2` | **VERIFIED** | Exists on `gt-review-inbox` @ `ea2f30d3` (owner acceptance, `reviewer_verdict_present: false`); harness re-pinned at `5823193a`; provenance verifier `PASS`, CI 33785370968 green |
 
 > This layer is the reason no money has been spent on a bad build. It is
@@ -122,7 +124,7 @@ worst possible failure mode, and until this session it was silent.
 | Atomic publication | **VERIFIED (the hard way)** | 4 distinct defects each destroyed a whole graph |
 | Closure | **VERIFIED** | arktype depth 1: 1402, depth 2: 1150, depth 3: 1050 |
 | `MaxDepth = 3`, `MinEdgeConfidence = 0.7` | **VERIFIED** | `internal/closure/closure.go:52,60` — the requested depth-6 change is **not done** |
-| boa | **BROKEN** | Publication never terminates; WAL past 11.5 GB; *not* the closure (reproduced with `-closure=false`) |
+| boa | **BROKEN — fix in flight** | Publication never terminates; WAL past 11.5 GB; *not* the closure (`-closure=false` reproduces it). Root cause traced: `AnalyzeVTA` called unbounded although `AnalyzeVTAWithBudget` and a typed `budget_exhausted` abstention already exist; the per-candidate flow-fact writer does a `SELECT` per fact with no prepared statements. final_hardening item 1 (stream A) owns it |
 
 **Defects found and fixed this session** (all fixture-first, RED replayed in a
 clean checkout by the pre-push hook):
@@ -136,6 +138,32 @@ clean checkout by the pre-push hook):
 4. Candidates sharing one `TargetStableID` collided on the candidate edge id
    (**pre-existing** — the shipped producer `0aadb1b9` fails aiomonitor
    identically, so that task has never had a graph).
+
+---
+
+## Layer 2b — Derived layers landed by final_hardening
+
+Everything here is a pure projection or extraction over what Layer 2 already
+stores. None of it calls a model. Each row names the exact SHA and the number it
+was measured at, on the arktype graph (`04355e8b`) unless stated.
+
+| Capability | Where | Mark | What was measured |
+|---|---|---|---|
+| **Symbol contract** — `{params, returns, guards, side_effects, boundaries, data_flow, visibility}` projected from `properties`, every claim carrying its `properties.id`, byte-identical across runs, explicitly empty when no facts exist | harness `fac84bcc` — `gt_engine/contract.py` | **MEASURED** | 3,511 symbols; contract density **1.39 facts/symbol** (the 2.6 headline includes non-contract kinds); **60% of symbols empty**; `side_effects` on 68 symbols (1.9%), `boundaries` 197, `guards` 240. Carries the producer-minted id for 3,509/3,511 |
+| **Symbol-level hybrid retrieval** — FTS5 over `nodes_fts`, property-value rank, dense via `dense_runtime` with a *named* degraded reason, fused by RRF with per-source provenance; never touches an edge or tier | harness `1122c213` — `gt_engine/retrieval.py` (companion to the file-level, identity-bound `hybrid_retrieval.py`) | **MEASURED** | Both example queries < 0.1 s over the 379 MB graph; property-only hits demonstrated ("validates empty input" → `createNode` via a `param` fact, no identifier match). `nodes_fts` indexes all 159,548 nodes, so results are filtered to source labels |
+| **Co-change extraction** — bounded by construction (500 commits × C(50,2) = 612,500 pairs worst case, zero means default, no way to spell unlimited), every return path carries a `Reason` | producer `ce5e0370` — `internal/cochange/` (REV-255 GREEN); wiring waits on item 1 | **MEASURED** | Depth-1 fixture → `shallow_clone`, 0 pairs. Same repo at `--depth=500` (the state CI builds) → **23,720 pairs**, 442 commits, 58 mass commits skipped and counted |
+| **Test-witnessed processes** — certified `CALLS` paths (`confidence ≥ 0.7`) from an entry point, emitted only with a witnessing `assertions` row; `witness_assertion_id NOT NULL` in the schema | producer `a2d536bf4` — `internal/process/`; wiring waits on item 1 | **MEASURED** | 105 assertions → 53 with a target (52 score 0.0) → **6 entry points, 95 processes**, depth 1:25 / 2:54 / 3:16. Only **3 of 53** test→target CALLS edges are CERTIFIED — the assertion is the bridge certified traversal cannot cross |
+
+**One identity across all of it.** `nodes.stable_id` is NULL on every code symbol,
+but the producer mints one in `resolution_symbols` (`native_id = nodes.id`) for
+3,509 of 3,511, and the engine's `resolution_provenance.stable_symbol_id`
+reproduces it **400/400 bit-identical**. Contracts, retrieval, processes and the
+resolution candidates all carry that one id.
+
+**The closure sidecar cannot yield a path.** Its columns are
+`(source_id, target_id, depth, min_confidence)` — it records *that* A reaches B
+in N hops, never *which* intermediates. Processes walk `edges` directly under a
+stricter rule, and a test fails loudly if the closure ever gains path detail.
 
 ---
 
@@ -253,9 +281,10 @@ tripped both arms of attestation on run 33708231670.
 
 | Layer | Working? |
 |---|---|
-| 0 Dispatch admission | Working as designed; **red** pending a real review packet |
+| 0 Dispatch admission | Working as designed; **green** — packet on `gt-review-inbox` @ `ea2f30d3`, CI 33785370968 and 33791548818 |
 | 1 Task materialisation | Working |
-| 2 Producer | Working on 18/19; **boa broken** |
+| 2 Producer | Working on 18/19; **boa broken**, fix in flight (item 1) |
+| 2b Derived layers | **Measured** — contract, retrieval, co-change, processes landed; wiring of the two producer packages waits on item 1 |
 | 3 Index lifecycle | Working; LSP + ONNX **unproven in a run** |
 | 4 Agent loop | Unproven end to end |
 | 5 Attribution | Unproven end to end |
@@ -270,9 +299,11 @@ successful smoke would prove, and nothing short of one will.
 ### Open, ordered
 
 1. ~~Review packet for `cffca1fd2`~~ — landed (`ea2f30d3`); dispatch is unblocked and awaits typed authorisation.
-2. boa's non-terminating publication — blocks the remaining 19, not the gate.
-3. `MaxDepth` 3 → 6 — requested, not done, needs the same CI rebuild.
-4. LSP promotion and ONNX retrieval — wired but unmeasured.
+2. boa's non-terminating publication — final_hardening item 1, stream A in flight. Blocks the remaining 19, not the gate.
+3. `MaxDepth` 3 → 6 — **deliberately not scheduled**: at 2.4% CERTIFIED edges it widens traversal over an already-thin set. Resolution rate (36%) and property density are the levers. Owner decides whether the request stands.
+4. LSP promotion and ONNX retrieval — wired but unmeasured in a run.
+5. Wiring `internal/cochange/` and `internal/process/` into `main.go` — fixture-first, after item 1.
+6. Engine side of co-change: emit `cochange_partner`, allow-list `cochange_prior` in the capability packs — today it is dead at both layers.
 
 ---
 
@@ -362,7 +393,7 @@ stores nothing.
 
 ## Empty capabilities
 
-- `cochanges` — **0 rows** in every graph built. So `cochange_prior`, one of the
+- `cochanges` — **0 rows** in every graph built *from the local fixtures*, because every smoke fixture is a depth-1 clone; the producer's `mineCochanges` emitter exists and production containers clone fully. At `--depth=500` the same repo yields 23,720 pairs. `cochange_prior`, one of the
   four `GRAPH_BACKED_FEATURES` the graph-use enforcement depends on, can never
   fire; `cochange_partner` has no emitter anywhere in the codebase.
 - `content_passages` — **the table does not exist**. I listed it as schema.
