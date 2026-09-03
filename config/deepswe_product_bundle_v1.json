@@ -110,7 +110,7 @@
         "gt-index/internal/store/sqlite.go",
         "scripts/swebench/build_gt_index_linux.sh"
       ],
-      "review_inbox_commit": "b45d41a923bd9c53526d53beee9becffcf6e7b17",
+      "review_inbox_commit": "ea2f30d33ddfcf83cddb6d49eba225fd03b8c677",
       "review_packets": [
         {
           "packet_id": "har70-groundtruth-db9daf9e",
@@ -132,13 +132,12 @@
         {
           "packet_id": "har81-groundtruth-owner-acceptance-cffca1fd2",
           "head_sha": "cffca1fd29001577bf35a3355b7238e6cedd1130",
-          "packet_digest_sha256": "d04356c768904f14d98438ce452d59ceb5a3ed3049ee7c2e7764e867372a857b",
+          "packet_digest_sha256": "fb58cf89b1cdd7e537e9eb1829b1bed2a5982c4e9e81e8db62afea3b65cf6d0e",
           "kind": "check_outcome",
           "status": "PASS",
           "authority": "HAR-81_OWNER_DIRECTIVE",
           "basis": "owner_directive",
-          "reviewer_verdict_present": false,
-          "evidence_path": "artifacts/har81_producer_acceptance_cffca1fd2.json"
+          "reviewer_verdict_present": false
         }
       ],
       "product_review_packets": [
@@ -159,7 +158,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "65f3a44cfc711edb1c1cc48a44c83fd58b0f367618953fa248becd4a4dddb28f"
+      "attestation_digest_sha256": "7619dc24ed55255004da3157169e8dfa5d9c7c7e613981451e5914b894d41e54"
     }
   },
   "capabilities": [
