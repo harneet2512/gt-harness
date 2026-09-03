@@ -307,7 +307,7 @@ jobs:
               "schema": "gt.workflow_run_receipt.v1",
               "run_id": int("${{ github.run_id }}"),
               "head_sha": "${{ github.sha }}",
-              "status": "success",
+              "status": "${{ job.status }}",
               "provider_calls": 0,
               "benchmark_runs": 0,
           }
