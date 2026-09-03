@@ -39,6 +39,7 @@ _REMOTE_PYTHON_ARCHIVE = "/installed-agent/python-3.12.13.tar.gz"
 _REMOTE_PYTHON_DIR = "/installed-agent/python"
 _REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _REMOTE_DENSE_MODEL_DIR = "/installed-agent/dense-model"
+_REMOTE_LSP_BIN = "/installed-agent/lsp-bin"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
 _UV_VERSION = "0.11.32"
@@ -197,6 +198,30 @@ class MiniSweAgent(BaseInstalledAgent):
         return path
 
     @staticmethod
+    def _lsp_bin_host() -> Path | None:
+        """Locate host-staged language servers, if any were provisioned.
+
+        LSP promotion discovers servers with shutil.which, and the task
+        container reaches only the model transport -- nothing can be installed
+        at task time. Servers therefore arrive the way every other execution
+        input does: resolved on the host, uploaded, and put on PATH.
+
+        Staging is optional. With none provisioned the runtime records
+        promotion_no_servers, which is a visible no-op rather than a silent
+        one, and the graph is exactly what it is today.
+        """
+
+        configured = os.environ.get("GT_LSP_BIN_HOST", "").strip()
+        if not configured:
+            return None
+        path = Path(configured)
+        if not path.is_dir():
+            raise FileNotFoundError(
+                f"GT_LSP_BIN_HOST is set but no directory exists at {path}"
+            )
+        return path
+
+    @staticmethod
     def _dense_model_host() -> Path | None:
         """Locate the pinned retrieval model on the host, if one is provisioned.
 
@@ -272,6 +297,12 @@ class MiniSweAgent(BaseInstalledAgent):
         dense_model = self._dense_model_host()
         if dense_model is not None:
             await environment.upload_dir(dense_model, _REMOTE_DENSE_MODEL_DIR)
+        lsp_bin = self._lsp_bin_host()
+        if lsp_bin is not None:
+            await environment.upload_dir(lsp_bin, _REMOTE_LSP_BIN)
+            await self.exec_as_root(
+                environment, f"chmod -R 755 {_REMOTE_LSP_BIN}"
+            )
         await self.exec_as_root(environment, f"chmod 755 {_REMOTE_GT_BINARY}")
         install = (
             "set -eu; "
@@ -318,6 +349,10 @@ class MiniSweAgent(BaseInstalledAgent):
         # dropped before, so a non-default model fell back to a stale default).
         # The runner's --model + --metrics are the single source of truth.
         return (
+            # Staged language servers must be discoverable by shutil.which,
+            # which is how LSP promotion finds them. Prepending keeps the
+            # image PATH intact and simply wins for these four names.
+            f'PATH="{_REMOTE_LSP_BIN}:$PATH" '
             f'exec "{_REMOTE_PY}" -m scripts.miniswe_gt_run '
             f"--task {shlex.quote(instruction)} --model {shlex.quote(model)} "
             f'--cwd "$PWD" '
