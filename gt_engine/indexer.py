@@ -385,8 +385,7 @@ def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> None:
                 pass
         return
     try:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(process.pid, signal.SIGKILL)
     except (OSError, ProcessLookupError):
         pass
 
@@ -401,7 +400,21 @@ def _close_pipe_descriptors(process: subprocess.Popen[bytes]) -> None:
             pass
 
 
+def _has_verified_index_process_tree_guard() -> bool:
+    # taskkill is useful as best-effort cleanup, but it cannot prove descendant
+    # teardown when the command itself fails. Refuse to start the parser on
+    # Windows until it is launched inside a kill-on-close Job Object.
+    return os.name != "nt"
+
+
 def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessResult:
+    if not _has_verified_index_process_tree_guard():
+        return IndexProcessResult(
+            False,
+            "resource_guard_unavailable",
+            "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE",
+            memory_limit_bytes=0,
+        )
     before = _cgroup_snapshot()
     memory_limit = _effective_index_memory_limit(before)
     started = time.monotonic()
@@ -1082,6 +1095,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             "GT_INDEX_OUTPUT_INVALID": "output_invalid",
             "GT_INDEX_OUTPUT_MISSING": "output_missing",
             "GT_INDEX_PROCESS_FAILED": "nonzero_exit",
+            "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE": "resource_guard_unavailable",
             "GT_INDEX_TIMEOUT": "timeout",
         }
         evidence_code = str(evidence.get("error_code") or "") if evidence else ""
@@ -1091,6 +1105,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             "GT_INDEX_IDENTITY_INVALID",
             "GT_INDEX_LAUNCH_FAILED",
             "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
+            "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE",
         }:
             exit_valid = evidence_exit is None
         elif evidence_code in {"GT_INDEX_OUTPUT_INVALID", "GT_INDEX_OUTPUT_MISSING"}:
@@ -1149,6 +1164,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
                 "GT_INDEX_OUTPUT_INVALID",
                 "GT_INDEX_OUTPUT_MISSING",
                 "GT_INDEX_PROCESS_FAILED",
+                "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE",
                 "GT_INDEX_TIMEOUT",
             }
             and all(

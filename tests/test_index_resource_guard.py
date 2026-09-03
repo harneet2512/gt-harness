@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +12,12 @@ from pathlib import Path
 import pytest
 
 from gt_engine import indexer
+
+
+@pytest.fixture(autouse=True)
+def _enable_guarded_test_process_on_windows(monkeypatch):
+    if os.name == "nt":
+        monkeypatch.setattr(indexer, "_has_verified_index_process_tree_guard", lambda: True)
 
 
 def _write_fake_indexer(path: Path) -> None:
@@ -233,6 +240,61 @@ def test_windows_tree_kill_falls_back_when_taskkill_times_out(monkeypatch) -> No
     indexer._kill_index_process_tree(Process())
 
     assert killed == [True]
+
+
+def test_windows_runtime_refuses_parser_without_verified_tree_guard(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(indexer, "_has_verified_index_process_tree_guard", lambda: False)
+    monkeypatch.setattr(
+        indexer.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("parser must not launch"),
+    )
+
+    result = indexer._run_index_bounded(
+        str(tmp_path), tmp_path / "graph.db", tmp_path
+    )
+
+    assert result.success is False
+    assert result.status == "resource_guard_unavailable"
+    assert result.error_code == "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE"
+    assert result.exit_code is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group semantics")
+def test_posix_tree_kill_reaches_descendant_after_leader_exits() -> None:
+    leader = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                "print(child.pid, flush=True)"
+            ),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        text=True,
+    )
+    assert leader.stdout is not None
+    child_pid = int(leader.stdout.readline().strip())
+    assert leader.wait(timeout=5) == 0
+    assert Path(f"/proc/{child_pid}").exists()
+
+    indexer._kill_index_process_tree(leader)
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        stat = Path(f"/proc/{child_pid}/stat")
+        if not stat.exists() or stat.read_text(encoding="utf-8").split()[2] == "Z":
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("descendant survived process-group teardown")
 
 
 def test_index_memory_budget_accounts_for_current_cgroup_usage() -> None:
