@@ -1,4 +1,4 @@
-# gnx-parity build plan
+# final_hardening build plan
 
 **Status:** ready
 **Derived from:** [03-gt-gnx-pipeline.md](03-gt-gnx-pipeline.md) — the itemized
