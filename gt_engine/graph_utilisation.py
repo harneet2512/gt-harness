@@ -30,6 +30,10 @@ __all__ = [
 #
 # `localization` is deliberately excluded: `trace_frame` maps to it and is
 # runtime-derived, so its presence would not evidence graph use.
+#
+# `cochange_prior` is live as of final-hardening item 6 -- emitted by
+# `gt_engine.cochange_evidence` and allow-listed in the editing capability
+# packs -- but it is gated: see `cochange_rows` below.
 GRAPH_BACKED_FEATURES: frozenset[str] = frozenset(
     {
         "caller_contract",
@@ -40,8 +44,24 @@ GRAPH_BACKED_FEATURES: frozenset[str] = frozenset(
 )
 
 
-def graph_utilisation(deliveries: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Summarise which delivered evidence could only have come from the graph."""
+def graph_utilisation(
+    deliveries: Iterable[dict[str, Any]],
+    *,
+    cochange_rows: int | None = None,
+) -> dict[str, Any]:
+    """Summarise which delivered evidence could only have come from the graph.
+
+    ``cochange_rows`` states how many rows the graph's ``cochanges`` table
+    holds. It gates ``cochange_prior`` and nothing else, because that feature
+    is the one whose backing table is empty in every graph built from a
+    depth-1 clone: a prior claimed against an empty table is not graph use,
+    and must not discharge the graph-evidence obligation on its own.
+
+    The gate is fail-closed. ``None`` means the count was not stated, and an
+    unproven row is treated exactly like an absent one. The delivery is still
+    reported in ``graph_backed_features``; only ``enforcement_features`` --
+    the set ``graph_backed_delivery`` keys on -- is gated.
+    """
 
     delivered_features: set[str] = set()
     graph_backed: set[str] = set()
@@ -54,9 +74,16 @@ def graph_utilisation(deliveries: Iterable[dict[str, Any]]) -> dict[str, Any]:
         if feature in GRAPH_BACKED_FEATURES:
             graph_backed.add(feature)
 
+    rows = None if cochange_rows is None else max(0, int(cochange_rows))
+    enforcement = set(graph_backed)
+    if not rows:
+        enforcement.discard("cochange_prior")
+
     return {
         "schema": "gt.graph_utilisation.v1",
         "delivered_features": sorted(delivered_features),
         "graph_backed_features": sorted(graph_backed),
-        "graph_backed_delivery": bool(graph_backed),
+        "enforcement_features": sorted(enforcement),
+        "cochange_rows": rows,
+        "graph_backed_delivery": bool(enforcement),
     }
