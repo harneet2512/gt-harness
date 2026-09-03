@@ -28,7 +28,7 @@
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "wheel_sha256": "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "4c8357c729dddf11a9c964d1ea1074c4aa399e07092f3bae9822c11a491108bf",
+    "producer_sha256": "b4bfba37d3e7348e6b4b415b96fd06df3ed0653532b013b497a671bbe2095dfb",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -47,10 +47,10 @@
       "status": "VERIFIED",
       "source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "source_tree": "7b25858b49ec7ef91cbec2e8045b0bf3f19ccd8c",
-      "binary_sha256": "4c8357c729dddf11a9c964d1ea1074c4aa399e07092f3bae9822c11a491108bf",
+      "binary_sha256": "b4bfba37d3e7348e6b4b415b96fd06df3ed0653532b013b497a671bbe2095dfb",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "1d3566a2fe4f6927d0f7ea13530b35d65ff65f291bd7abccf32148a587c46738",
-      "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+      "build_info_sha256": "64c53ed1a02a7eb0661b4da85e1ee4b495ba3294bc8721c585ac46bdf08f695b",
+      "builder_image_digest": "a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3",
       "build_tags": "sqlite_fts5",
       "static_linking": true
     },
@@ -132,7 +132,7 @@
         {
           "packet_id": "har81-groundtruth-owner-acceptance-cffca1fd2",
           "head_sha": "cffca1fd29001577bf35a3355b7238e6cedd1130",
-          "packet_digest_sha256": "8ead2ba6e760a69e08c3337a348b5da59bc90f64c700e12991cfe1d0dd394d0b",
+          "packet_digest_sha256": "d04356c768904f14d98438ce452d59ceb5a3ed3049ee7c2e7764e867372a857b",
           "kind": "check_outcome",
           "status": "PASS",
           "authority": "HAR-81_OWNER_DIRECTIVE",
@@ -159,7 +159,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "e5c6a0a59e69c4b8ef6b3183b1972ed7da370153a9c22718900916fafc9ce659"
+      "attestation_digest_sha256": "65f3a44cfc711edb1c1cc48a44c83fd58b0f367618953fa248becd4a4dddb28f"
     }
   },
   "capabilities": [
