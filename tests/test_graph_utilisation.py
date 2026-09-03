@@ -73,3 +73,65 @@ def test_features_are_deduplicated_and_sorted():
     )
 
     assert report["delivered_features"] == ["caller_contract", "newfile_precedent"]
+
+
+# --- the co-change row gate -------------------------------------------------
+#
+# `cochange_prior` is now emittable, so it can reach this report. It must not
+# be able to discharge the graph-evidence obligation on a graph whose
+# `cochanges` table is empty -- which is every graph built from a depth-1
+# clone. The delivery is still reported; only the enforcement set is gated.
+
+
+def test_cochange_alone_does_not_discharge_the_obligation_when_rows_are_unstated():
+    report = graph_utilisation([{"evidence_type": "cochange_partner"}])
+
+    assert report["graph_backed_features"] == ["cochange_prior"]
+    assert report["enforcement_features"] == []
+    assert report["graph_backed_delivery"] is False
+
+
+def test_cochange_alone_does_not_discharge_the_obligation_on_an_empty_table():
+    report = graph_utilisation(
+        [{"evidence_type": "cochange_partner"}], cochange_rows=0
+    )
+
+    assert report["cochange_rows"] == 0
+    assert report["enforcement_features"] == []
+    assert report["graph_backed_delivery"] is False
+
+
+def test_cochange_discharges_the_obligation_once_rows_exist():
+    report = graph_utilisation(
+        [{"evidence_type": "cochange_partner"}], cochange_rows=23_720
+    )
+
+    assert report["cochange_rows"] == 23_720
+    assert report["enforcement_features"] == ["cochange_prior"]
+    assert report["graph_backed_delivery"] is True
+
+
+def test_the_gate_touches_no_other_graph_backed_feature():
+    report = graph_utilisation(
+        [{"evidence_type": "caller_contract_view"}], cochange_rows=0
+    )
+
+    assert report["enforcement_features"] == ["caller_contract"]
+    assert report["graph_backed_delivery"] is True
+
+
+def test_a_gated_cochange_never_suppresses_a_real_graph_delivery():
+    report = graph_utilisation(
+        [
+            {"evidence_type": "cochange_partner"},
+            {"evidence_type": "signature_mismatch"},
+        ]
+    )
+
+    assert report["graph_backed_features"] == ["cochange_prior", "signature_delta"]
+    assert report["enforcement_features"] == ["signature_delta"]
+    assert report["graph_backed_delivery"] is True
+
+
+def test_cochange_prior_is_a_declared_graph_backed_feature():
+    assert "cochange_prior" in GRAPH_BACKED_FEATURES
