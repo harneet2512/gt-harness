@@ -297,9 +297,15 @@ congruent with structural coupling, which is precisely why both are worth having
 - Extraction is bounded and honours the item 1 budget.
 - A shallow clone with no history yields zero rows and an explicit reason, not a
   silent empty table.
+- Correction (REV-253): a producer emitter already exists -- `mineCochanges`
+  (`main.go:2520`, wired `:1331`, fixed `7713e9cd`); the bounded, reason-carrying
+  package at `ce5e0370` replaces it (REV-255 GREEN). The remaining gaps are on
+  the engine side and in fixture history, not in the producer.
 - `cochange_partner` evidence becomes emittable, which is the precondition for
   `cochange_prior` ever firing — it is currently dead at two layers
-  (no emitter, and absent from every capability pack).
+  (not emitted by `gt_engine`, and absent from every capability pack).
+- Acceptance is measured on a `--depth=500` fixture, the state CI builds; depth-1
+  clones cannot satisfy it and production containers do not use them.
 
 **Verify**
 

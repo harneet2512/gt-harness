@@ -50,7 +50,7 @@ acceptance gate that must pass first.
 | CI rebuild + digest assert | **VERIFIED** | Run 33778444842 failed the assert on a wrong pin; 33779096992 passed it after re-pinning to CI's own artifact `b4bfba37…` |
 | Static linking | **VERIFIED** | CI `file` output: "statically linked"; ELF has no `PT_INTERP`, no `PT_DYNAMIC` |
 | Lineage/provenance verification | **VERIFIED (as blocking)** | Run 33779096992: `exact_source_review_packet_missing` — it genuinely cannot be satisfied by editing the bundle |
-| Review packet for `cffca1fd2` | **BROKEN / open** | Must be authored on `gt-review-inbox`; does not exist yet |
+| Review packet for `cffca1fd2` | **VERIFIED** | Exists on `gt-review-inbox` @ `ea2f30d3` (owner acceptance, `reviewer_verdict_present: false`); harness re-pinned at `5823193a`; provenance verifier `PASS`, CI 33785370968 green |
 
 > This layer is the reason no money has been spent on a bad build. It is
 > working *as designed* even though it is currently red.
@@ -269,7 +269,7 @@ successful smoke would prove, and nothing short of one will.
 
 ### Open, ordered
 
-1. Review packet for `cffca1fd2` on `gt-review-inbox` — blocks dispatch.
+1. ~~Review packet for `cffca1fd2`~~ — landed (`ea2f30d3`); dispatch is unblocked and awaits typed authorisation.
 2. boa's non-terminating publication — blocks the remaining 19, not the gate.
 3. `MaxDepth` 3 → 6 — requested, not done, needs the same CI rebuild.
 4. LSP promotion and ONNX retrieval — wired but unmeasured.

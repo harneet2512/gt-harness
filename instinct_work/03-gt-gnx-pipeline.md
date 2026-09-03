@@ -254,7 +254,12 @@ if indexed_files > 0 and not utilisation.get("graph_backed_delivery"):
 ```
 
 **Defect in that set, MEASURED:** `cochange_prior` can never fire. `cochanges`
-is empty in every graph built; `cochange_partner` has no emitter anywhere in the
+is empty in every graph built. Correction (REV-253): the producer DOES have an
+emitter -- `mineCochanges` (`cmd/gt-index/main.go:2520`, wired at `:1331`, format bug
+fixed in `7713e9cd`). The zero rows come from the indexed checkouts carrying no usable
+history (depth-1 fixture clones), not from a missing miner. What is genuinely absent is
+on the engine side: `cochange_partner` evidence is not emitted in `gt_engine` and
+`cochange_prior` is in no capability pack. Earlier text here claimed "no emitter anywhere in the
 codebase; and it is absent from every capability pack's `allowed_evidence`. The
 enforcement therefore rests on **three** features, not four.
 
@@ -357,7 +362,7 @@ failed to resolve, which is the ambiguity representation 00-comparison flagged.
 
 ## B3. What gnx stores per node
 
-23 node tables: File, Folder, Function, Class, Interface, Method, CodeElement,
+17 node tables: File, Folder, Function, Class, Interface, Method, CodeElement,
 Community, Process, Section, Struct, Enum, Macro, Typedef, Union, Namespace,
 Trait, Impl, TypeAlias, Const, Static, Variable, Property.
 
@@ -485,7 +490,7 @@ work. Marked **[cite-unverified]** collectively here rather than on every line.
 | 5 | `contentHash` staleness | `fingerprint` property, `file_hashes`, `incremental_stale_suppression` | **INVERT** | Invalidate on the semantic fingerprint, not the byte hash |
 | 6 | `Community` — keywords, description, cohesion, enrichedBy | `closure`, 4 trust tiers, `caller_usage` 1,637, **`cochanges` exists but empty** | **COPY + AMPLIFY** | §C2 |
 | 7 | `Process` — heuristic entry/terminal, `STEP_IN_PROCESS` | `closure` paths, `dispatch_form`, `api_edges.go`, **`assertions`** | **COMPOSE** | Processes as interprocedural slices witnessed by a covering test |
-| 8 | 23 node tables | 4 labels + `properties` carrying `class_field`, `param`, `visibility` | **COMPOSE** | Extend symbol emission; keep one node model. Lands across 30 languages, not 10 |
+| 8 | 17 node tables | 4 labels + `properties` carrying `class_field`, `param`, `visibility` | **COMPOSE** | Extend symbol emission; keep one node model. Lands across 30 languages, not 10 |
 | 9 | 30 relation types, one flat table (`type`, `confidence`, `reason`, `step`) | Typed edges + `DerivationFact` ×10,820 + 4 tiers + **retained candidate sets** | **COMPOSE** | Keep the over-approximation visible instead of collapsing it |
 | 10 | `reason` free text per relation | `DerivationFact` ×10,820 | **PROJECT** | Render `reason` from derivation facts |
 | 11 | `step` — producing pass | `pass_kind` on 124,515 nodes | **PROJECT** | Join onto edges |
