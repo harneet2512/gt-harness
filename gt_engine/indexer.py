@@ -61,6 +61,18 @@ _INDEX_GOMEMLIMIT_BYTES = 3 * 1024**3
 _INDEX_RSS_LIMIT_BYTES = 4 * 1024**3
 _INDEX_TIMEOUT_SECONDS = 600
 _INDEX_MAX_PROCS = 2
+# gt-index defaults to -max-files 10000 and silently truncates the walk at
+# that point, so a large repository yields a partial graph with no signal.
+# The ceiling is stated here instead of inherited.
+_INDEX_MAX_FILES = 200_000
+# gt-index defaults -workers to NumCPU, which oversubscribes a runtime already
+# capped at GOMAXPROCS and raises peak RSS against a fixed memory ceiling.
+_INDEX_WORKERS = _INDEX_MAX_PROCS
+# Retained so a failing index can be read. gt-index runs with a minimal child
+# environment carrying no credentials, and the tail is scrubbed regardless.
+_INDEX_STDERR_TAIL_BYTES = 4096
+_INDEX_BUILD_ATTEMPTS = 3
+_OK = "ok"
 _INDEX_TREE_TEARDOWN_SECONDS = 5
 
 
@@ -77,6 +89,7 @@ class IndexProcessResult:
     stdout_sha256: str = ""
     stderr_bytes: int = 0
     stderr_sha256: str = ""
+    stderr_tail: str = ""
     cgroup_memory_current_before: int | None = None
     cgroup_memory_current_after: int | None = None
     cgroup_memory_max: int | None = None
@@ -326,7 +339,16 @@ def _file_identity(path: Path) -> tuple[int, str]:
 
 
 def _index_command(binary: str, root: str, output: str) -> list[str]:
-    return [binary, "-root", root, "-output", output]
+    """State every budget that shapes the graph rather than inheriting defaults."""
+
+    return [
+        binary,
+        "-root", root,
+        "-output", output,
+        "-max-files", str(_INDEX_MAX_FILES),
+        "-workers", str(_INDEX_WORKERS),
+        "-closure=true",
+    ]
 
 
 def _index_child_environment(memory_limit_bytes: int) -> dict[str, str]:
@@ -357,13 +379,37 @@ def _effective_index_memory_limit(snapshot: dict[str, int | None]) -> int:
     return min(_INDEX_RSS_LIMIT_BYTES, cgroup_max // 2, safe_headroom)
 
 
+_SECRET_RUN = re.compile(r"[A-Za-z0-9_\-]{24,}")
+_SECRET_ASSIGN = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*\S+"
+)
+
+
+def scrub_index_stderr(raw: bytes) -> str:
+    """Return a readable, secret-free tail of a failing index process.
+
+    An index failure is currently unreadable: only a digest of stderr is kept,
+    so a nonzero exit cannot be explained after the fact and the graph cannot
+    be repaired. The text is bounded and scrubbed so retaining it does not
+    widen the secret boundary.
+    """
+
+    text = raw.decode("utf-8", "replace")
+    text = _SECRET_ASSIGN.sub(lambda m: f"{m.group(1)}=[redacted]", text)
+    text = _SECRET_RUN.sub("[redacted]", text)
+    return text
+
+
 def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
     digest = hashlib.sha256()
     size = 0
+    tail = bytearray()
     try:
         for chunk in iter(lambda: stream.read(64 * 1024), b""):
             size += len(chunk)
             digest.update(chunk)
+            tail.extend(chunk)
+            del tail[:-_INDEX_STDERR_TAIL_BYTES]
     finally:
         try:
             stream.close()
@@ -371,6 +417,7 @@ def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
             pass
     result[f"{prefix}_bytes"] = size
     result[f"{prefix}_sha256"] = digest.hexdigest()
+    result[f"{prefix}_tail"] = scrub_index_stderr(bytes(tail))
 
 
 def _posix_process_group_state(
@@ -577,6 +624,7 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
             stdout_sha256=str(streams.get("stdout_sha256", "")),
             stderr_bytes=int(streams.get("stderr_bytes", 0)),
             stderr_sha256=str(streams.get("stderr_sha256", "")),
+            stderr_tail=str(streams.get("stderr_tail", "")),
             cgroup_memory_current_before=before.get("current"),
             cgroup_memory_current_after=after.get("current"),
             cgroup_memory_max=before.get("max"),
@@ -607,9 +655,34 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
         )
 
 
+def _build_index_with_attempts(
+    root: str, output: Path, log_dir: Path
+) -> tuple[IndexProcessResult, tuple[str, ...]]:
+    """Build the graph, retrying a failed attempt before giving it up.
+
+    A single failure previously cost the run its entire graph: the index ran
+    once and a nonzero exit returned no database, so every graph-dependent
+    capability degraded for the whole task. Attempts are bounded and each one
+    is recorded, so a transient failure is survived and a deterministic one is
+    visible as the same failure repeating rather than inferred from a single
+    sample.
+    """
+
+    attempts: list[str] = []
+    result: IndexProcessResult | None = None
+    for attempt in range(1, _INDEX_BUILD_ATTEMPTS + 1):
+        result = _run_index_bounded(root, output, log_dir)
+        attempts.append(f"{attempt}:{result.status}:{result.error_code or _OK}")
+        if result.success:
+            break
+        # A partial database from a failed attempt must never be reused.
+        output.unlink(missing_ok=True)
+    assert result is not None
+    return result, tuple(attempts)
+
 def _write_index_evidence(
     path: Path, *, root: str, result: IndexProcessResult, reuse_key: IndexReuseKey,
-    identity: dict[str, str],
+    identity: dict[str, str], attempts: tuple[str, ...] = (),
 ) -> str:
     payload: dict[str, object] = {
         "schema": INDEX_RESOURCE_SCHEMA,
@@ -630,6 +703,9 @@ def _write_index_evidence(
         "stdout_sha256": result.stdout_sha256,
         "stderr_bytes": result.stderr_bytes,
         "stderr_sha256": result.stderr_sha256,
+        "stderr_tail": result.stderr_tail,
+        "build_attempts": list(attempts),
+        "build_attempt_count": len(attempts),
         "cgroup_memory_current_before": result.cgroup_memory_current_before,
         "cgroup_memory_current_after": result.cgroup_memory_current_after,
         "cgroup_memory_max": result.cgroup_memory_max,
@@ -792,11 +868,13 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
         ) as handle:
             candidate = Path(handle.name)
         candidate.unlink(missing_ok=True)
-        process_result = _run_index_bounded(str(root), candidate, gt_dir)
+        process_result, build_attempts = _build_index_with_attempts(
+            str(root), candidate, gt_dir
+        )
         evidence_path = candidate.with_suffix(".resource.json")
         _write_index_evidence(
             evidence_path, root=str(root), result=process_result,
-            reuse_key=reuse_key, identity=identity,
+            reuse_key=reuse_key, identity=identity, attempts=build_attempts,
         )
         evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
         failure_manifest = gt_dir / "graph.failure.json"
