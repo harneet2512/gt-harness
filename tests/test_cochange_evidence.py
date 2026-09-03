@@ -407,3 +407,37 @@ def test_the_seam_hook_covers_an_edited_file(tmp_path: Path):
 
     assert "partner=src/b.py" in dose
     assert adapter.staged[0]["kind"] == COCHANGE_EVIDENCE_TYPE
+
+
+def test_the_seam_hook_changes_nothing_on_a_graph_with_no_rows(tmp_path: Path):
+    """The state every depth-1 fixture ships in: the runtime must be unchanged.
+
+    `_run_evidence` previously ended in `return cap_evidence(result.rendered)`,
+    which is `""` when the pipeline said nothing. The hook is reached only in
+    that case and returns `""` here, so an empty `cochanges` table leaves the
+    delivered bytes byte-identical to the pre-item-6 runtime.
+    """
+
+    from gt_engine.miniswe_runtime import _cochange_prior
+
+    db = _graph(tmp_path / "g.db")
+    adapter = _StagingAdapter(db, str(tmp_path))
+
+    assert _cochange_prior(adapter, "cat src/a.py", ("src/a.py",)) == ""
+    assert adapter.staged == []
+
+
+def test_the_seam_hook_never_raises_on_a_broken_adapter(tmp_path: Path):
+    """Correct-or-quiet: a prior may not be the thing that kills a turn."""
+
+    from gt_engine.miniswe_runtime import _cochange_prior
+
+    class _Broken:
+        repo_root = str(tmp_path)
+        repository_revision = "rev0"
+
+        @property
+        def graph_db(self):
+            raise RuntimeError("graph handle exploded")
+
+    assert _cochange_prior(_Broken(), "cat src/a.py", ("src/a.py",)) == ""
