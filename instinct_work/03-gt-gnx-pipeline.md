@@ -456,71 +456,260 @@ surfaces across frameworks. **Breadth is GT's, depth-per-framework is gnx's.**
 
 ---
 
-# Part C — The delta, itemized
+# Part C — The delta, and how GT beats it
 
-Each line is a *capability*, not a schema to copy — consistent with
-00-comparison's rule that the goal is a GT-native version, not imitation.
+**Citation discipline.** The references below are named from model knowledge, not
+fetched. They are load-bearing for the *design argument*, so they must be
+verified at exact-citation level before this document is treated as referenced
+work. Marked **[cite-unverified]** collectively here rather than on every line.
 
-## C1. Not in GT
+**Strategy vocabulary.** Not every gap should be closed the same way.
 
-| # | gnx capability | GT today | Why it matters |
-|---|---|---|---|
-| 1 | **`content` on the node** — the symbol's source text | Not stored; GT keeps `file_path` + line range | GT cannot answer "show me this symbol" from the graph; every delivery needs a re-read |
-| 2 | **`description` on the node** — generated summary, with `enrichedBy` provenance and a heuristic fallback | None | No natural-language handle for retrieval, ranking or delivery |
-| 3 | **Chunked per-node embeddings + HNSW index** — `CodeEmbedding(nodeId, chunkIndex, startLine, endLine, embedding[384], contentHash)` | ONNX arctic-embed-m exists, but no per-node chunk table bound into the graph | The semantic neighbourhood of a *symbol* is not queryable |
-| 4 | **Full-text index over content and description** | No FTS over source text in the graph | No lexical fallback when structure fails |
-| 5 | **Content-hash staleness for embeddings** | `file_hashes` is file-level only | Re-embedding is coarser than it needs to be |
-| 6 | **Community nodes** — keywords, description, `cohesion DOUBLE` | None | No mid-level grouping between file and repository |
-| 7 | **Process nodes** — `processType`, `communities[]`, `entryPointId`, `terminalId`, `STEP_IN_PROCESS` | None | No end-to-end flow object to hand an agent |
-| 8 | **23 node types** incl. Struct, Enum, Trait, Impl, TypeAlias, Namespace, Macro, Typedef, Union, Const, Static, Variable, Property, Section | 4 measured: Function, Class, Method, File | Rust/C++/Go type structure is invisible in GT's node layer despite GT parsing those languages |
-| 9 | **30 relation types** incl. ACCESSES, HAS_PROPERTY, METHOD_OVERRIDES, METHOD_IMPLEMENTS, MEMBER_OF, HANDLES_ROUTE, FETCHES, HANDLES_TOOL, ENTRY_POINT_OF, WRAPS, QUERIES, INJECTS, CONDITIONAL_ON, DECLARES, ADVISED_BY | 4 measured semantic types: CALLS, IMPORTS, CONTAINS, IMPLEMENTS | Framework, DI and data-access structure is not represented |
-| 10 | **`reason` on every relation** | Machine provenance only | GT's provenance is richer but not presentable to a model as-is |
-| 11 | **`step` on every relation** — which pass produced it | `mechanism` is per-candidate, not per-edge | Harder to attribute an edge to a pass |
-| 12 | **Overload narrowing** as a resolution pass | Absent | Overloaded APIs resolve worse |
-| 13 | **MRO as a first-class pass** | `inherited` rung only | Multiple inheritance resolves worse |
-| 14 | **Explicit unresolved-receiver modelling** (`unresolved-receivers.ts`, `undecided-satisfaction.ts`) | `UnresolvedFact` nodes exist (15,089 in arktype) — **partial parity**, and arguably GT's is stronger | — |
-| 15 | **Bounded expensive passes** (explicit inspection/edge caps) | No cap on publication volume | This is the direct cause of the boa blow-up |
-| 16 | **Separable analysis layer** (`skipGraphPhases`) | Publication is all-or-nothing | Cannot trade analysis depth for time |
-| 17 | **Per-framework depth** — four dedicated Spring phases | One generic framework overlay | Spring-heavy Java repos are under-represented |
+| Strategy | When it applies |
+|---|---|
+| **INVERT** | gnx stores a conclusion; GT stores the evidence and derives something stronger |
+| **COMPOSE** | GT already holds the inputs; the capability is a join or a pass away |
+| **PROJECT** | The data exists; only a rendering is missing |
+| **COPY + AMPLIFY** | GT has nothing to derive from. Copy the design, then extend it where gnx structurally cannot follow |
 
-## C2. In GT, not in gnx
+---
+
+## C1. The table
+
+| # | gnx capability | GT primitive today | Strategy | The move |
+|---|---|---|---|---|
+| 1 | `content` (source text) on every node | Line ranges on 3,511 symbols; byte ranges on 16,431 callsites; `file_hashes`; `fingerprint` ×1,407 | **INVERT** | Store a content *address* `(file_hash, start, end)`, resolved at delivery against a hash-verified file |
+| 2 | `description` — LLM prose per node | `properties`: `param` 1,285, `return_shape` 1,158, `guard_clause` 317, `boundary_condition` 323, `side_effect` 151 | **INVERT** | Emit a structured behavioural contract instead of prose |
+| 3 | Chunked embeddings of raw text, arctic-embed-**xs**, HNSW | ONNX arctic-embed-**m**, pinned by revision | **INVERT** | Embed the contract, not the source |
+| 4 | FTS over name + content + description | `nodes_fts` already populated; `sqlite_fts5` already in build tags | **COMPOSE** | Hybrid retrieval: lexical + dense over the contract, fused |
+| 5 | `contentHash` staleness | `fingerprint` property, `file_hashes`, `incremental_stale_suppression` | **INVERT** | Invalidate on the semantic fingerprint, not the byte hash |
+| 6 | `Community` — keywords, description, cohesion, enrichedBy | `closure`, 4 trust tiers, `caller_usage` 1,637, **`cochanges` exists but empty** | **COPY + AMPLIFY** | §C2 |
+| 7 | `Process` — heuristic entry/terminal, `STEP_IN_PROCESS` | `closure` paths, `dispatch_form`, `api_edges.go`, **`assertions`** | **COMPOSE** | Processes as interprocedural slices witnessed by a covering test |
+| 8 | 23 node tables | 4 labels + `properties` carrying `class_field`, `param`, `visibility` | **COMPOSE** | Extend symbol emission; keep one node model. Lands across 30 languages, not 10 |
+| 9 | 30 relation types, one flat table (`type`, `confidence`, `reason`, `step`) | Typed edges + `DerivationFact` ×10,820 + 4 tiers + **retained candidate sets** | **COMPOSE** | Keep the over-approximation visible instead of collapsing it |
+| 10 | `reason` free text per relation | `DerivationFact` ×10,820 | **PROJECT** | Render `reason` from derivation facts |
+| 11 | `step` — producing pass | `pass_kind` on 124,515 nodes | **PROJECT** | Join onto edges |
+| 12 | `overload-narrowing` pass | `param` ×1,285 + `signature` (40%) | **COMPOSE** | Arity/type narrowing as a query over stored data |
+| 13 | `mro` pass | Inheritance chains (772 parent-linked classes in boa) | **COMPOSE** | C3 linearisation over stored parents, published with a trust tier |
+| 14 | Explicit caps on expensive passes | **Deficit — publication uncapped** | **COPY + AMPLIFY** | §C3 |
+| 15 | `skipGraphPhases` | One all-or-nothing transaction | **COMPOSE** | Two transactions, two receipts |
+
+---
+
+## C2. Row 6 — Community, copied then amplified
+
+### Copy exactly
+
+The node shape, including the discipline worth stealing: gnx keeps
+`heuristicLabel` *alongside* `label` and records `enrichedBy`, so the graph
+degrades to heuristics when no model is available and a reader can always tell
+which they got. Copy that verbatim.
+
+### Amplify on four axes gnx structurally cannot follow
+
+**1. Populate `cochanges` and cluster on evolutionary coupling.**
+The table exists in GT's schema and is empty. Logical/evolutionary coupling —
+files that change together across history — was established as a first-class
+architectural signal by Gall, Hajek and Jazayeri (1998) and operationalised for
+change guidance by Zimmermann, Weißgerber, Diehl and Zeller (*Mining Version
+Histories to Guide Software Changes*, ICSE 2004 / TSE 2005), which showed
+history-derived coupling surfaces dependencies static structure misses.
+
+Critically, Beck and Diehl (*On the Congruence of Modularity and Code Coupling*,
+FSE 2010) found structural and evolutionary coupling are **not congruent** —
+which is exactly why using both is strictly more informative than either.
+**gnx's store is a snapshot with no history at all**, so this is not a feature it
+declined to build; its model cannot hold the signal.
+
+**2. Cluster with Leiden and an explicit resolution parameter — not plain
+modularity.**
+Traag, Waltman and van Eck (*From Louvain to Leiden*, Scientific Reports 2019)
+showed Louvain can produce internally **disconnected** communities and that
+Leiden guarantees well-connected ones. Separately, Fortunato and Barthélemy
+(PNAS 2007) proved modularity optimisation has a **resolution limit** that hides
+small communities in large graphs — so the objective must expose a resolution
+parameter (CPM) rather than optimise raw modularity. Software-specific module
+clustering (Mancoridis et al., *Bunch*, IWPC 1998; Mitchell and Mancoridis on
+MQ) is the prior art for applying this to code.
+
+Amplification: cluster a **trust-weighted multigraph** — certified `CALLS` edges
+plus co-change edges, weighted by tier. gnx clusters a confidence-flat
+structural graph, so its communities silently inherit every resolution error the
+resolver made.
+
+**3. Make `cohesion` falsifiable rather than descriptive.**
+gnx stores a structural cohesion score, which is a property of the partition,
+not a claim about the world. GT should hold out the last *N* commits and measure
+whether the community **predicted co-modification**, storing that measured rate
+with a Wilson interval — the same evaluation discipline
+[02-trust-calibration.md](02-trust-calibration.md) already sets for resolution
+confidence. This is a metric gnx cannot compute at any effort, because it has no
+history.
+
+**4. Store the evidence set behind every label.**
+A wrong label becomes traceable to the edges that produced it, rather than to an
+opaque model call.
+
+**Net:** gnx's community asserts *these things look related*. GT's would assert
+*these things change together, over certified edges, and here is the measured
+hit rate on held-out history.*
+
+---
+
+## C3. Row 14 — Caps, copied then amplified
+
+### Copy exactly
+
+gnx's cap ergonomics are well designed and should be taken as-is: a per-unit cap
+and an aggregate cap, both named, with `0` meaning disabled
+(`springAopMaxCandidateInspectionsPerAdvice` / `springAopMaxCandidateInspections`).
+
+### Amplify on four axes
+
+**1. Budget the layer that actually explodes.**
+GT writes ≈6.9 fact nodes per callsite. boa's 68,227 callsites is roughly half a
+million fact nodes before any candidate blow-up, which is why publication never
+terminates and the WAL passes 11.5 GB. The budget belongs on facts-per-callsite
+and total facts — not on an analysis phase.
+
+**2. Exceeding budget must produce evidence, not silence — this is the anytime
+contract.**
+Zilberstein (*Using Anytime Algorithms in Intelligent Systems*, AI Magazine
+1996) defines the requirement precisely: an interruptible algorithm must expose
+a **performance profile** — a stated relationship between resources consumed and
+answer quality — so a consumer knows what it is holding. A cap that merely stops
+work, as gnx's does, violates this: the graph quietly contains less and nothing
+records it.
+
+GT already has the machinery to satisfy the contract. `resolutionDerivation`
+returns an `abstentionReason`, and the vocabulary already includes
+`candidate_only_flow_evidence` and `dynamic_target_not_statically_proven`. Over
+budget should publish the callsite as `candidate_only` with
+`abstention_reason = candidate_budget_exceeded`. **The cap becomes recorded
+evidence.**
+
+This is also the soundiness position: Livshits et al. (*In Defense of
+Soundiness: A Manifesto*, CACM 2015) argue analyses should **declare** the
+constructs they do not model rather than silently under-approximate. An
+abstention is a declaration; a silent cap is exactly the unsoundness the
+manifesto objects to. Reif et al. (*Judge*, ISSTA 2019) demonstrated how much
+real-world call-graph unsoundness goes unrecorded in practice.
+
+**3. Bound by demand, not by uniform truncation.**
+The analysis literature's answer to cost is demand-driven and refinement-based
+evaluation — Heintze and Tardieu (PLDI 2001) for demand-driven pointer analysis,
+Sridharan and Bodík (PLDI 2006) for refinement-based points-to that returns a
+result at a *stated precision* under a budget. Amplification: spend the fact
+budget where the agent is actually looking (the localisation frontier), and
+abstain at uniform low precision elsewhere — rather than truncating every
+callsite equally.
+
+**4. Seal the budget into the receipt.**
+A run declares the budget it ran under, making two runs comparable and a
+degraded graph provably degraded. gnx's caps are runtime options that leave no
+trace. This also makes GT's atomic publication **survivable**: today it publishes
+everything or nothing, which is why one runaway repository yields no graph at
+all.
+
+**Net:** gnx's cap prevents a blow-up. GT's would prevent the blow-up, record
+exactly what was given up, and let the consumer price it.
+
+---
+
+## C4. Why the other thirteen rows are inversions, not copies
+
+**Rows 2–4 — structure beats prose and beats raw text.**
+Guo et al. (*GraphCodeBERT*, ICLR 2021) showed injecting **data-flow structure**
+into pretraining improves code search and clone detection over token-only
+models; CodeSearchNet (Husain et al. 2019) established the natural-language↔code
+vocabulary gap that raw-token embedding must fight. Embedding a normalised
+behavioural contract — params, return shape, guards, side effects, boundary
+conditions — attacks that gap directly, and is invariant to renaming and
+reformatting in a way raw-text chunks are not.
+
+For retrieval composition, Thakur et al. (*BEIR*, NeurIPS 2021) showed dense
+retrievers frequently underperform BM25 out of domain, and reciprocal rank
+fusion (Cormack, Clarke and Büttcher, SIGIR 2009) is the standard, robust way to
+combine lexical and dense rankings. GT should therefore run **both** over the
+contract and fuse — not replace lexical with dense. `nodes_fts` already exists,
+so the lexical half is nearly free.
+
+On delivery format: Liu et al. (*Lost in the Middle*, TACL 2023) showed model
+accuracy degrades sharply with position in long contexts, which is an argument
+for compact structured facts over long prose summaries — and matches GT's
+existing law that an over-budget delta is dropped whole rather than clipped.
+
+**Row 7 — a process is a slice, and a slice is only credible if something
+executes it.**
+The formal object is an interprocedural slice: Weiser (1981) for slicing,
+Ferrante, Ottenstein and Warren (*The Program Dependence Graph*, TOPLAS 1987)
+for the dependence substrate. What makes GT's version stronger is the witness:
+spectrum-based fault localisation (Jones and Harrold, *Tarantula*, ASE 2005;
+Abreu, Zoeteweij and van Gemund on *Ochiai*, 2006–07) established that coverage
+spectra from real test executions localise behaviour far better than static
+structure alone, and test-to-code traceability (Van Rompaey and Demeyer, CSMR
+2009) is the established technique for the link. GT already stores `assertions`
+mapping tests to targets — gnx has no test↔code linkage at all, so its processes
+can never be more than plausible.
+
+**Row 9 — keeping candidate sets is keeping the over-approximation honest.**
+GT's resolution ladder is the CHA → RTA → VTA lineage: Dean, Grove and Chambers
+(*Class Hierarchy Analysis*, ECOOP 1995), Bacon and Sweeney (*Rapid Type
+Analysis*, OOPSLA 1996), Sundaresan et al. (*Variable Type Analysis*, OOPSLA
+2000). Each refines an over-approximate call set. gnx's storage model —
+one row, one target, one confidence — forces a **collapse** of that set at write
+time; GT retains all 10,820 candidates across 16,431 callsites with
+selected/unselected marking, so two analyses that disagree remain
+representable and the consumer chooses by tier. That is not a feature gnx can
+retrofit without changing its schema.
+
+**Row 13 — MRO is a solved algorithm.**
+Python's method resolution order is C3 linearisation (Barrett et al., 1996). GT
+already extracts inheritance chains; the pass is a linearisation over stored
+parents, published with a trust tier so an ambiguous or inconsistent hierarchy
+stays visibly ambiguous rather than silently ordered.
+
+**Rows 1, 5 — invalidation granularity is the whole cost of incremental
+analysis.**
+Content-addressing is the Git object model applied to symbols, and incremental
+analysis work (Arzt and Bodden, *Reviser*, ICSE 2014) shows correctness under
+change depends on invalidating exactly what changed. Hashing bytes re-embeds on
+whitespace; hashing the semantic fingerprint — which GT already computes for
+1,407 symbols — re-embeds on behaviour change. Addressing rather than copying
+also converts silent staleness into a detectable hash mismatch.
+
+---
+
+## C5. In GT, not in gnx
 
 Recorded so the delta is not read as one-directional.
 
 | GT capability | gnx equivalent |
 |---|---|
-| Per-candidate derivation provenance: mechanism, derivation kind, evidence set, dispatch state, candidate sets, trust tier, explicit resolution contract | `confidence DOUBLE` + `reason STRING` |
-| Candidate *sets* retained per callsite (10,820 candidates over 16,431 callsites) with selected/unselected marking | Single resolved target |
-| Trust tiers (CERTIFIED / CANDIDATE / SPECULATIVE / STRUCTURAL) | None |
-| Atomic publication bound to a reproducible build identity, digest-asserted in CI | None observed |
-| `properties` layer — `guard_clause`, `boundary_condition`, `side_effect`, `data_flow`, `call_order`, `field_read`, `param`, `return_shape` | No per-symbol fact table |
+| Per-candidate derivation provenance: mechanism, derivation kind, evidence set, dispatch state, trust tier, explicit resolution contract | `confidence DOUBLE` + `reason STRING` |
+| Retained candidate sets with selected/unselected marking | Single resolved target |
+| Four trust tiers | None |
+| Atomic publication bound to a reproducible, digest-asserted build identity | None observed |
+| `properties` fact layer — guards, boundary conditions, side effects, data flow, call order, field reads | No per-symbol fact table |
 | `assertions` — test → target with expression and expected | None observed |
 | Transitive closure sidecar | None observed |
 | Receipts, attestation, replay, and enforcement that a built graph was *used* | None observed |
 | **30 languages** | 10 grammars + COBOL + markdown |
 
-## C3. Ordering, and one correction
+## C6. Ordering
 
-**Cheapest with the largest effect — items 1, 2, 4.** `content` and `description`
-are per-symbol writes on nodes GT already creates, and an FTS index over them is
-additive. Together they would let GT deliver a symbol without re-reading the
-file and give it a lexical fallback it currently lacks.
-
-**Next, item 3** — the chunked embedding table. GT already ships the ONNX model;
-what is missing is binding vectors to node ids with line ranges and a content
-hash.
-
-**Item 15 is not optional.** gnx caps its expensive passes explicitly. GT's
-publication is uncapped, and that is the mechanism behind the one repository in
-the smoke set that cannot be indexed at all.
-
-**Items 6–7 (Community/Process) depend on a clustering pass GT does not have**,
-and gnx's own enrichment is LLM-dependent with a heuristic fallback — so the
-GT-native version should store `enrichedBy`-style provenance from day one rather
-than presenting heuristic labels as semantic ones.
+1. **Row 14 first.** It is the only item currently costing a whole repository,
+   and the anytime contract makes GT's atomicity survivable rather than brittle.
+2. **Rows 1, 2, 4** — content addressing, the structured contract, and hybrid
+   retrieval over it. All three reuse machinery GT already ships (`file_hashes`,
+   `properties`, `nodes_fts`).
+3. **Rows 3, 5** — embed the contract; invalidate on the fingerprint.
+4. **Row 6** — requires the co-change extractor to exist first, and is worth the
+   most once it does, because it is the one signal gnx can never have.
+5. **Row 7** onwards.
 
 **Correction to an earlier plan item.** Raising closure `MaxDepth` from 3 to 6
 widens traversal over a set where only 2.4% of edges are CERTIFIED. It makes the
 closure larger without making it know more. Resolution rate (36%) and property
-density (2.6 facts per symbol) are the levers that move quality — and items 1–4
-above raise what a symbol *is worth* once reached.
+density (2.6 facts per symbol) are the levers — and items 1–4 raise what a
+symbol is worth once reached.
