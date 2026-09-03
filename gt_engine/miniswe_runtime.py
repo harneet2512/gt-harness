@@ -425,7 +425,28 @@ def _run_evidence(
         # Self-diagnosing splice: the trajectory tool messages carry the exact
         # evidence type so a post-run census is exact, not heuristic.
         return result.rendered
-    return cap_evidence(result.rendered)
+    rendered = cap_evidence(result.rendered)
+    if rendered:
+        return rendered
+    # Last, and only into silence. A co-change prior is the weakest signal GT
+    # delivers and must never displace a covering RED, a syntax error or any
+    # arbitrated envelope; it speaks only when nothing stronger did.
+    return _cochange_prior(adapter, command, changed_files)
+
+
+def _cochange_prior(
+    adapter: MiniSweAdapter, command: str, changed_files: tuple[str, ...]
+) -> str:
+    """Advisory co-change dose for the files this action edited or viewed."""
+    from .cochange_evidence import cochange_prior_dose
+
+    files = tuple(dict.fromkeys((*changed_files, *_viewed_files(command))))
+    if not files:
+        return ""
+    try:
+        return cochange_prior_dose(adapter, files)
+    except Exception:  # noqa: BLE001 - a prior is correct-or-quiet, never fatal
+        return ""
 
 
 def _coerce_session(owner: GTSession | MiniSweAdapter) -> GTSession:

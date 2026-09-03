@@ -1,4 +1,13 @@
-"""Deterministic lifecycle capability packs selected from task roles."""
+"""Deterministic lifecycle capability packs selected from task roles.
+
+`cochange_prior` is allowed in `code_build` and `data_transform` only. Both are
+editing lifecycles -- they carry `pre_edit`/`post_edit` and behavioural
+predicate kinds -- and "the file you just touched has a historical companion"
+is actionable exactly there. `repository_content` is a completeness sweep over
+content: a historical companion neither widens nor closes its scope, and that
+pack's allowed set is deliberately the minimum a scan needs, which is why it
+already excludes `caller_contract` and every other structural graph fact.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,18 +30,18 @@ _PACKS = {
         "1",
         ("task_start", "research", "pre_edit", "post_edit", "test", "verify", "submit"),
         ("behavior", "artifact"),
-        ("obligations", "localization", "caller_contract", "def_partition",
-         "newfile_precedent", "signature_delta", "syntax_result",
-         "covering_red", "recovery", "submit_refusal"),
+        ("obligations", "localization", "caller_contract", "cochange_prior",
+         "def_partition", "newfile_precedent", "signature_delta",
+         "syntax_result", "covering_red", "recovery", "submit_refusal"),
     ),
     "data_transform": CapabilityPack(
         "data_transform",
         "1",
         ("task_start", "research", "pre_edit", "post_edit", "test", "verify", "submit"),
         ("behavior", "artifact", "numeric_threshold"),
-        ("obligations", "localization", "caller_contract", "def_partition",
-         "newfile_precedent", "signature_delta", "syntax_result",
-         "covering_red", "recovery", "submit_refusal"),
+        ("obligations", "localization", "caller_contract", "cochange_prior",
+         "def_partition", "newfile_precedent", "signature_delta",
+         "syntax_result", "covering_red", "recovery", "submit_refusal"),
     ),
     "content_scan": CapabilityPack(
         "repository_content",
