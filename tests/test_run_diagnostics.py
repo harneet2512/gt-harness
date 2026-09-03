@@ -132,6 +132,17 @@ def test_strict_diagnosis_rejects_missing_task_diagnostics(tmp_path: Path):
     assert "planned-b" in " ".join(report.artifact_issues)
 
 
+def test_strict_diagnosis_discovers_task_ids_plan(tmp_path: Path):
+    journal = DiagnosticJournal(tmp_path / "trial", task_id="planned")
+    journal.capability("receipt_writer", CapabilityState.WORKING, "verified journal")
+    journal.seal()
+    (tmp_path / "deepswe20-plan.json").write_text(
+        json.dumps({"task_ids": ["planned"]}), encoding="utf-8"
+    )
+    report = diagnose_artifact_root(tmp_path, strict=True)
+    assert report.exit_code == 0
+
+
 def test_strict_diagnosis_rejects_missing_plan_empty_capabilities_and_replay_tamper(
     tmp_path: Path,
 ):

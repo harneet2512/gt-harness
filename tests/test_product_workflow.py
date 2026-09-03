@@ -71,6 +71,10 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "attestation/gt-audit.json" in paid
     assert "attestation/gt-live-gate.json" in paid
     assert "attestation/feature-matrix.json" in paid
+    assert "cohort_stage" in paid
+    assert "remaining-19" in paid
+    assert "validate_prior_gate" in paid
+    assert "diagnose_benchmark_run" in paid
     assert "task_selection" not in paid
     assert "if: always()" in paid.split(
         "- name: Verify all DeepSWE outcomes and product receipts", 1
