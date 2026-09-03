@@ -711,7 +711,7 @@ def _graph_scale(database: Path) -> tuple[int, int]:
         con.close()
     return (int(files[0]) if files else 0, int(nodes[0]) if nodes else 0)
 
-def start_lsp_promotion(database: Path, root: str | Path) -> str:
+def start_lsp_promotion(database: Path, root: str | Path) -> dict[str, object]:
     """Start progressive LSP edge promotion over a freshly published graph.
 
     The producer ships a complete promotion subsystem whose own design note
@@ -728,14 +728,29 @@ def start_lsp_promotion(database: Path, root: str | Path) -> str:
     """
 
     try:
-        from groundtruth.lsp.background_promotion import start_background_promotion
+        from groundtruth.lsp.background_promotion import (
+            detect_available_servers,
+            start_background_promotion,
+        )
     except Exception:  # noqa: BLE001 - producer package absent is not an index failure
-        return "promotion_unavailable"
+        return {"status": "promotion_unavailable", "servers": []}
+
+    try:
+        servers = sorted(detect_available_servers())
+    except Exception:  # noqa: BLE001 - discovery is advisory
+        servers = []
+
+    if not servers:
+        # Nothing on PATH to promote with. Recorded rather than inferred: a
+        # silent no-op is indistinguishable from success in stored evidence,
+        # which is how LSP stayed nominally on while contributing nothing.
+        return {"status": "promotion_no_servers", "servers": []}
+
     try:
         start_background_promotion(str(database), str(root))
     except Exception:  # noqa: BLE001 - promotion is an optimiser, never a gate
-        return "promotion_failed"
-    return "promotion_started"
+        return {"status": "promotion_failed", "servers": servers}
+    return {"status": "promotion_started", "servers": servers}
 
 
 def _write_index_evidence(
@@ -1078,7 +1093,22 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
         failure_manifest.unlink(missing_ok=True)
         (gt_dir / "index-failure-resource.json").unlink(missing_ok=True)
         # The graph is published and usable from here; promotion only improves it.
-        start_lsp_promotion(db, root)
+        promotion = start_lsp_promotion(db, root)
+        # Sealed beside the graph: an unrecorded promotion cannot be told apart
+        # from one that never ran, and that is exactly how the highest-precision
+        # edge tier stayed empty without anyone being able to see it.
+        _sealed_json(
+            gt_dir / "lsp-promotion.json",
+            {
+                "schema": "gt.lsp_promotion.v1",
+                **identity,
+                "graph_sha256": graph_sha256,
+                "status": promotion["status"],
+                "servers_detected": promotion["servers"],
+                "server_count": len(promotion["servers"]),
+            },
+            "promotion_sha256",
+        )
         return str(db)
     except Exception:  # noqa: BLE001 - indexing failure means GT dormant, never a crash
         return None
