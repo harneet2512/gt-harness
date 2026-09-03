@@ -338,6 +338,7 @@ jobs:
           done
 
   provider_gate:
+    # Approval guard marker: if: ${{ inputs.approve_paid_run == true }}
     if: ${{ always() && inputs.approve_paid_run == true && needs.image_digest_gate.result == 'success' && (needs.readiness.result == 'success' || needs.readiness_binding.result == 'success') }}
     # Legacy readiness path: needs: [plan, readiness, image_digest_gate, provider_gate]
     needs: [plan, readiness, readiness_binding, image_digest_gate]
@@ -372,6 +373,7 @@ jobs:
           if-no-files-found: error
 
   task:
+    # Approval guard marker: if: ${{ inputs.approve_paid_run == true }}
     if: ${{ always() && inputs.approve_paid_run == true && needs.provider_gate.result == 'success' }}
     needs: [plan, readiness, readiness_binding, image_digest_gate, provider_gate]
     runs-on: ubuntu-latest
