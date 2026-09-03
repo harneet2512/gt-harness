@@ -205,6 +205,19 @@ jobs:
           set -euo pipefail
           python -m scripts.validate_product_workflow \
             --workflow .github/workflows/deepswe_gt_harness_product.yml
+          python -m scripts.validate_product_workflow \
+            --workflow .github/workflows/deepswe_gt_harness_product_p0731.yaml
+
+      - name: Prove the producer binary matches its declared source
+        run: |
+          set -euo pipefail
+          # Gates on defects that are decidable here: the shipped binary must
+          # match its declared digest, be present, and carry complete pins.
+          # The source binding itself resolves only against the producer
+          # repository, which is not checked out in CI; that is reported as
+          # undecided rather than failed, so this cannot red the pipeline over
+          # the ordinary fact that the producer lives elsewhere.
+          python -m scripts.verify_producer_binding --enforce
 
       - name: Validate failure IDs and canonical RED evidence production
         run: |

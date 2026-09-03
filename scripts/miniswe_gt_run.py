@@ -287,9 +287,30 @@ def _render_gt_advisory_system(contract_text: str, localization: str) -> str:
     return "\n\n".join(parts)
 
 
+def resolve_run_task_identity(canonical_task_id: str, task: str) -> str:
+    """Identify a run by its planned task rather than by a digest of its text.
+
+    The diagnostics journal, the external state store, and the
+    reproducibility manifest are all addressed by this value, and
+    attestation matches them against the planned cohort.  A digest of the
+    task text is not a planned identifier, so artifacts written under it
+    read as belonging to an unplanned task while the planned task reads as
+    having produced nothing -- both halves of the same run.
+
+    The digest remains only for ad-hoc callers that bind no identity; every
+    workflow passes --task-id.
+    """
+
+    canonical = str(canonical_task_id or "").strip()
+    if canonical:
+        return canonical
+    return hashlib.sha256(task.encode("utf-8")).hexdigest()[:16]
+
+
 def build_agent(
     *,
     task: str,
+    canonical_task_id: str = "",
     model: str,
     cwd: str,
     state_dir: str,
@@ -318,7 +339,7 @@ def build_agent(
         model_obj = GroundTruthLitellmModel(
             model_name=model_name, model_kwargs=model_kwargs
         )
-    task_id = hashlib.sha256(task.encode("utf-8")).hexdigest()[:16]
+    task_id = resolve_run_task_identity(canonical_task_id, task)
     env_obj = CredentialIsolatedLocalEnvironment(
         config_class=LocalEnvironmentConfig,
         cwd=cwd,
@@ -343,7 +364,7 @@ def build_agent(
 
     from gt_engine.bridge import apply_profile_env
     from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
-    from gt_engine.indexer import ensure_index
+    from gt_engine.indexer import BenchmarkGraphRequired, ensure_index
     from gt_engine.miniswe_controller import Predicate
     from gt_engine.miniswe_integration import MiniSweAdapter
     from gt_engine.miniswe_runtime import install_runtime_hooks
@@ -373,6 +394,12 @@ def build_agent(
     index_error: Exception | None = None
     try:
         graph_db = ensure_index(cwd, state_dir=state_dir)
+    except BenchmarkGraphRequired:
+        # Indexing is an optional observer everywhere except here. On a
+        # benchmark-bound run the graph is the product under measurement, so a
+        # missing one is not an observation to record and continue past -- it
+        # stops the run before a single provider call is billed.
+        raise
     except Exception as exc:  # noqa: BLE001 - indexing is an optional observer
         index_error = exc
     adapter = MiniSweAdapter(
@@ -574,6 +601,7 @@ def main() -> int:
     try:
         agent, adapter, session = build_agent(
             task=args.task,
+            canonical_task_id=args.task_id,
             model=args.model,
             cwd=args.cwd,
             state_dir=args.state_dir,
@@ -618,7 +646,7 @@ def main() -> int:
             request_receipt=request_receipt,
             binary_paths=[sys.executable],
         )
-        task_id = hashlib.sha256(args.task.encode("utf-8")).hexdigest()[:16]
+        task_id = resolve_run_task_identity(args.task_id, args.task)
         manifest_path = Path(args.manifest) if args.manifest else (
             Path(args.state_dir) / task_id / "reproducibility_manifest.json"
         )
@@ -735,7 +763,7 @@ def main() -> int:
         manifest["research_valid"]
         and TERMINAL_EXIT_CODES.get(terminal, 5) == 0
     )
-    task_id = hashlib.sha256(args.task.encode("utf-8")).hexdigest()[:16]
+    task_id = resolve_run_task_identity(args.task_id, args.task)
     manifest_path = Path(args.manifest) if args.manifest else (
         Path(args.state_dir) / task_id / "reproducibility_manifest.json"
     )

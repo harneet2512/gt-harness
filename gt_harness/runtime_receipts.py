@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from gt_engine.graph_utilisation import graph_utilisation
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
     MAX_TASK_DELIVERIES,
@@ -425,6 +426,7 @@ def issue_runtime_receipts(
             "admitted_count": len(deliveries),
             "refused_count": len(refused_deliveries),
         },
+        "graph_utilisation": graph_utilisation(deliveries),
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
         "event_journal": event_journal,
@@ -849,6 +851,18 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         and _SHA64.fullmatch(str(graph.get("graph_sha256") or ""))
     ):
         errors.append("treatment_graph_certification_invalid")
+    # A repository that had source to index owes graph-derived evidence: the
+    # treatment either used the mechanism under test or it did not. The exemption
+    # is for a task that starts with no source at all -- there the graph fills as
+    # files are created, and an empty graph is a wait state, not a failure. Keying
+    # this on indexed FILES rather than nodes is deliberate: files present with no
+    # nodes is a broken index, and must not be exempted as though it were empty.
+    utilisation = treatment.get("graph_utilisation")
+    utilisation = utilisation if isinstance(utilisation, dict) else {}
+    certification = graph if isinstance(graph, dict) else {}
+    indexed_files = int(certification.get("indexed_file_count") or 0)
+    if indexed_files > 0 and not utilisation.get("graph_backed_delivery"):
+        errors.append("treatment_graph_evidence_absent")
     return errors
 
 

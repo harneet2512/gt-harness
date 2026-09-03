@@ -10,6 +10,7 @@ from harbor.agents.installed.base import NonZeroAgentExitCodeError
 
 from eval.miniswe_agent import (
     _DEFAULT_MINISWE_AGENT_VERSION,
+    _REMOTE_LSP_BIN,
     _PYTHON_VERSION,
     _UV_INSTALL,
     _UV_VERSION,
@@ -76,7 +77,12 @@ def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
     assert "--time-budget-seconds 3600" in command
     assert "--product-receipt /logs/agent/gt-run.json" in command
     assert "--adapter-receipt /logs/agent/benchmark-adapter.json" in command
-    assert command.startswith('exec "$HOME/.local/share/uv/tools/nano-harness/bin/python"')
+    # The installed runner must be what executes, with nothing wrapping it. The
+    # only permitted prefix is the staged language-server PATH, which changes
+    # lookup for the promotion servers and not the interpreter.
+    prefix, _, tail = command.partition("exec ")
+    assert tail.startswith('"$HOME/.local/share/uv/tools/nano-harness/bin/python"')
+    assert prefix == f'PATH="{_REMOTE_LSP_BIN}:$PATH" '
     assert "scripts.provider_probe" not in command
 
 
@@ -163,7 +169,9 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
     with pytest.raises(NonZeroAgentExitCodeError):
         await agent.run.__wrapped__(agent, "task", Environment(), SimpleNamespace())
     assert len(commands) == 1
-    assert commands[0].startswith("exec ")
+    # Prefixed only by the staged language-server PATH; the installed runner
+    # is still what executes.
+    assert commands[0].startswith(f'PATH="{_REMOTE_LSP_BIN}:$PATH" exec ')
     assert "scripts.miniswe_gt_run" in commands[0]
     evidence = json.loads((tmp_path / "logs" / "agent-resource.json").read_text())
     assert evidence["attestation_scope"] == "host_agent_adapter"

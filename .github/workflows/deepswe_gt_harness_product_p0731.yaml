@@ -546,6 +546,71 @@ jobs:
           echo "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854  $model_dir/tokenizer.json" | sha256sum -c -
           echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
 
+      - name: Provision the pinned language servers
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Stage the pinned language servers for LSP promotion
+        run: |
+          set -euo pipefail
+          lsp_bin="$RUNNER_TEMP/lsp-bin"
+          mkdir -p "$lsp_bin"
+
+          # gopls: module-only, so version-pinned and checksum-verified by the
+          # Go module proxy against sum.golang.org.
+          GOBIN="$lsp_bin" go install golang.org/x/tools/gopls@v0.23.0
+
+          # rust-analyzer: released as a binary, pinned by tag and digest.
+          ra_gz="$RUNNER_TEMP/rust-analyzer.gz"
+          curl -fsSL -o "$ra_gz" \
+            https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-31/rust-analyzer-x86_64-unknown-linux-gnu.gz
+          echo "a775f9edb543bb0c077da339b783e89446092986cde921c9d8e1733b091080c6  $ra_gz" | sha256sum -c -
+          gunzip -c "$ra_gz" > "$lsp_bin/rust-analyzer"
+          chmod 755 "$lsp_bin"/*
+
+          # Fail loudly rather than staging an empty directory: a silently
+          # skipped provisioning step is how LSP stayed nominally on while
+          # contributing nothing.
+          test -x "$lsp_bin/gopls"
+          test -x "$lsp_bin/rust-analyzer"
+
+          # python, typescript and javascript are 12 of the 20 cohort tasks and
+          # their servers are npm packages. The task container has no network and
+          # no guaranteed Node, so the runtime is staged alongside them, exactly
+          # as the Python runtime already is.
+          node_tar="$RUNNER_TEMP/node.tar.xz"
+          curl -fsSL -o "$node_tar" \
+            https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz
+          echo "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2  $node_tar" | sha256sum -c -
+          node_root="$lsp_bin/node-runtime"
+          mkdir -p "$node_root"
+          tar -xJf "$node_tar" -C "$node_root" --strip-components=1
+
+          # Versions pinned; npm verifies package integrity against the
+          # registry-provided hashes it records while installing.
+          "$node_root/bin/npm" install --prefix "$node_root/servers" --no-fund --no-audit \
+            pyright@1.1.413 \
+            typescript-language-server@6.0.0 \
+            typescript@7.0.2
+
+          # Explicit shims rather than npm bin symlinks: symlinks do not survive
+          # the upload into the task environment, and a broken shim would look
+          # exactly like an absent server. Written with printf so the shebang
+          # stays on column zero inside this YAML block.
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "pyright/langserver.index.js" > "$lsp_bin/pyright-langserver"
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" > "$lsp_bin/typescript-language-server"
+          chmod 755 "$lsp_bin/pyright-langserver" "$lsp_bin/typescript-language-server"
+
+          test -x "$node_root/bin/node"
+          test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
+          test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
+
+          echo "GT_LSP_BIN_HOST=$lsp_bin" >> "$GITHUB_ENV"
+
       - name: Mint the host-only resource attestation key
         run: |
           python -c "import os, secrets; open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write('GT_RESOURCE_ATTESTATION_KEY=' + secrets.token_hex(32) + '\n')"

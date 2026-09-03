@@ -57,10 +57,22 @@ _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 
 GRAPH_SCHEMA_VERSION = "gt.graph_certification.v1"
 INDEX_RESOURCE_SCHEMA = "gt.index_resource.v1"
-_INDEX_GOMEMLIMIT_BYTES = 768 * 1024 * 1024
-_INDEX_RSS_LIMIT_BYTES = 1024 * 1024 * 1024
+_INDEX_GOMEMLIMIT_BYTES = 3 * 1024**3
+_INDEX_RSS_LIMIT_BYTES = 4 * 1024**3
 _INDEX_TIMEOUT_SECONDS = 600
 _INDEX_MAX_PROCS = 2
+# gt-index defaults to -max-files 10000 and silently truncates the walk at
+# that point, so a large repository yields a partial graph with no signal.
+# The ceiling is stated here instead of inherited.
+_INDEX_MAX_FILES = 200_000
+# gt-index defaults -workers to NumCPU, which oversubscribes a runtime already
+# capped at GOMAXPROCS and raises peak RSS against a fixed memory ceiling.
+_INDEX_WORKERS = _INDEX_MAX_PROCS
+# Retained so a failing index can be read. gt-index runs with a minimal child
+# environment carrying no credentials, and the tail is scrubbed regardless.
+_INDEX_STDERR_TAIL_BYTES = 4096
+_INDEX_BUILD_ATTEMPTS = 3
+_OK = "ok"
 _INDEX_TREE_TEARDOWN_SECONDS = 5
 
 
@@ -77,6 +89,7 @@ class IndexProcessResult:
     stdout_sha256: str = ""
     stderr_bytes: int = 0
     stderr_sha256: str = ""
+    stderr_tail: str = ""
     cgroup_memory_current_before: int | None = None
     cgroup_memory_current_after: int | None = None
     cgroup_memory_max: int | None = None
@@ -326,7 +339,16 @@ def _file_identity(path: Path) -> tuple[int, str]:
 
 
 def _index_command(binary: str, root: str, output: str) -> list[str]:
-    return [binary, "-root", root, "-output", output]
+    """State every budget that shapes the graph rather than inheriting defaults."""
+
+    return [
+        binary,
+        "-root", root,
+        "-output", output,
+        "-max-files", str(_INDEX_MAX_FILES),
+        "-workers", str(_INDEX_WORKERS),
+        "-closure=true",
+    ]
 
 
 def _index_child_environment(memory_limit_bytes: int) -> dict[str, str]:
@@ -357,13 +379,37 @@ def _effective_index_memory_limit(snapshot: dict[str, int | None]) -> int:
     return min(_INDEX_RSS_LIMIT_BYTES, cgroup_max // 2, safe_headroom)
 
 
+_SECRET_RUN = re.compile(r"[A-Za-z0-9_\-]{24,}")
+_SECRET_ASSIGN = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*\S+"
+)
+
+
+def scrub_index_stderr(raw: bytes) -> str:
+    """Return a readable, secret-free tail of a failing index process.
+
+    An index failure is currently unreadable: only a digest of stderr is kept,
+    so a nonzero exit cannot be explained after the fact and the graph cannot
+    be repaired. The text is bounded and scrubbed so retaining it does not
+    widen the secret boundary.
+    """
+
+    text = raw.decode("utf-8", "replace")
+    text = _SECRET_ASSIGN.sub(lambda m: f"{m.group(1)}=[redacted]", text)
+    text = _SECRET_RUN.sub("[redacted]", text)
+    return text
+
+
 def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
     digest = hashlib.sha256()
     size = 0
+    tail = bytearray()
     try:
         for chunk in iter(lambda: stream.read(64 * 1024), b""):
             size += len(chunk)
             digest.update(chunk)
+            tail.extend(chunk)
+            del tail[:-_INDEX_STDERR_TAIL_BYTES]
     finally:
         try:
             stream.close()
@@ -371,6 +417,7 @@ def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
             pass
     result[f"{prefix}_bytes"] = size
     result[f"{prefix}_sha256"] = digest.hexdigest()
+    result[f"{prefix}_tail"] = scrub_index_stderr(bytes(tail))
 
 
 def _posix_process_group_state(
@@ -577,6 +624,7 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
             stdout_sha256=str(streams.get("stdout_sha256", "")),
             stderr_bytes=int(streams.get("stderr_bytes", 0)),
             stderr_sha256=str(streams.get("stderr_sha256", "")),
+            stderr_tail=str(streams.get("stderr_tail", "")),
             cgroup_memory_current_before=before.get("current"),
             cgroup_memory_current_after=after.get("current"),
             cgroup_memory_max=before.get("max"),
@@ -607,9 +655,107 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
         )
 
 
+def _build_index_with_attempts(
+    root: str, output: Path, log_dir: Path
+) -> tuple[IndexProcessResult, tuple[str, ...]]:
+    """Build the graph, retrying a failed attempt before giving it up.
+
+    A single failure previously cost the run its entire graph: the index ran
+    once and a nonzero exit returned no database, so every graph-dependent
+    capability degraded for the whole task. Attempts are bounded and each one
+    is recorded, so a transient failure is survived and a deterministic one is
+    visible as the same failure repeating rather than inferred from a single
+    sample.
+    """
+
+    attempts: list[str] = []
+    result: IndexProcessResult | None = None
+    for attempt in range(1, _INDEX_BUILD_ATTEMPTS + 1):
+        result = _run_index_bounded(root, output, log_dir)
+        attempts.append(f"{attempt}:{result.status}:{result.error_code or _OK}")
+        if result.success:
+            break
+        # A partial database from a failed attempt must never be reused.
+        output.unlink(missing_ok=True)
+    assert result is not None
+    return result, tuple(attempts)
+
+def _graph_scale(database: Path) -> tuple[int, int]:
+    """Return (indexed files, indexed nodes) for a published graph.
+
+    These answer different questions and must not be conflated. A repository
+    that contains source has files to index, and a graph built from it owes
+    nodes: files present with no nodes is a broken index, not an empty one. A
+    task that starts with no source has nothing to index yet -- the graph fills
+    as the agent creates files, and each edit boundary reindexes -- so an empty
+    graph there is a legitimate wait state rather than a failure.
+
+    Both counts fail closed to zero. An uncountable graph must not manufacture
+    an obligation the run cannot discharge; the certification checks already
+    reject such a graph on their own terms.
+    """
+
+    try:
+        con = sqlite3.connect(f"file:{database.resolve().as_posix()}?mode=ro", uri=True)
+    except (sqlite3.Error, OSError):
+        return 0, 0
+    try:
+        files = con.execute("SELECT COUNT(*) FROM file_hashes").fetchone()
+    except sqlite3.Error:
+        files = None
+    try:
+        nodes = con.execute("SELECT COUNT(*) FROM nodes").fetchone()
+    except sqlite3.Error:
+        nodes = None
+    finally:
+        con.close()
+    return (int(files[0]) if files else 0, int(nodes[0]) if nodes else 0)
+
+def start_lsp_promotion(database: Path, root: str | Path) -> dict[str, object]:
+    """Start progressive LSP edge promotion over a freshly published graph.
+
+    The producer ships a complete promotion subsystem whose own design note
+    states the intent: gt-index publishes a usable graph immediately, then
+    language servers promote edges in batches so resolution quality rises while
+    the agent is already working. It was only ever started from the MCP server,
+    so the benchmark harness published a graph and left the highest-precision
+    edge tier -- lsp and lsp_verified, both admitted by the closure -- empty.
+
+    Promotion is best-effort by construction. It discovers servers with
+    shutil.which, so a container with none staged promotes nothing and keeps
+    exactly the graph we publish today. Nothing here may fail an index that has
+    already succeeded.
+    """
+
+    try:
+        from groundtruth.lsp.background_promotion import (
+            detect_available_servers,
+            start_background_promotion,
+        )
+    except Exception:  # noqa: BLE001 - producer package absent is not an index failure
+        return {"status": "promotion_unavailable", "servers": []}
+
+    try:
+        servers = sorted(detect_available_servers())
+    except Exception:  # noqa: BLE001 - discovery is advisory
+        servers = []
+
+    if not servers:
+        # Nothing on PATH to promote with. Recorded rather than inferred: a
+        # silent no-op is indistinguishable from success in stored evidence,
+        # which is how LSP stayed nominally on while contributing nothing.
+        return {"status": "promotion_no_servers", "servers": []}
+
+    try:
+        start_background_promotion(str(database), str(root))
+    except Exception:  # noqa: BLE001 - promotion is an optimiser, never a gate
+        return {"status": "promotion_failed", "servers": servers}
+    return {"status": "promotion_started", "servers": servers}
+
+
 def _write_index_evidence(
     path: Path, *, root: str, result: IndexProcessResult, reuse_key: IndexReuseKey,
-    identity: dict[str, str],
+    identity: dict[str, str], attempts: tuple[str, ...] = (),
 ) -> str:
     payload: dict[str, object] = {
         "schema": INDEX_RESOURCE_SCHEMA,
@@ -630,6 +776,9 @@ def _write_index_evidence(
         "stdout_sha256": result.stdout_sha256,
         "stderr_bytes": result.stderr_bytes,
         "stderr_sha256": result.stderr_sha256,
+        "stderr_tail": result.stderr_tail,
+        "build_attempts": list(attempts),
+        "build_attempt_count": len(attempts),
         "cgroup_memory_current_before": result.cgroup_memory_current_before,
         "cgroup_memory_current_after": result.cgroup_memory_current_after,
         "cgroup_memory_max": result.cgroup_memory_max,
@@ -792,11 +941,13 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
         ) as handle:
             candidate = Path(handle.name)
         candidate.unlink(missing_ok=True)
-        process_result = _run_index_bounded(str(root), candidate, gt_dir)
+        process_result, build_attempts = _build_index_with_attempts(
+            str(root), candidate, gt_dir
+        )
         evidence_path = candidate.with_suffix(".resource.json")
         _write_index_evidence(
             evidence_path, root=str(root), result=process_result,
-            reuse_key=reuse_key, identity=identity,
+            reuse_key=reuse_key, identity=identity, attempts=build_attempts,
         )
         evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
         failure_manifest = gt_dir / "graph.failure.json"
@@ -889,6 +1040,8 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             "graph_sha256": graph_sha256,
             "graph_bytes": candidate.stat().st_size,
             "sqlite_quick_check": "ok",
+            "indexed_file_count": _graph_scale(candidate)[0],
+            "indexed_node_count": _graph_scale(candidate)[1],
             "index_resource_sha256": evidence_sha256,
             **_binary_certification(),
         }
@@ -939,22 +1092,75 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             manifest_backup.unlink(missing_ok=True)
         failure_manifest.unlink(missing_ok=True)
         (gt_dir / "index-failure-resource.json").unlink(missing_ok=True)
+        # The graph is published and usable from here; promotion only improves it.
+        promotion = start_lsp_promotion(db, root)
+        # Sealed beside the graph: an unrecorded promotion cannot be told apart
+        # from one that never ran, and that is exactly how the highest-precision
+        # edge tier stayed empty without anyone being able to see it.
+        _sealed_json(
+            gt_dir / "lsp-promotion.json",
+            {
+                "schema": "gt.lsp_promotion.v1",
+                **identity,
+                "graph_sha256": graph_sha256,
+                "status": promotion["status"],
+                "servers_detected": promotion["servers"],
+                "server_count": len(promotion["servers"]),
+            },
+            "promotion_sha256",
+        )
         return str(db)
     except Exception:  # noqa: BLE001 - indexing failure means GT dormant, never a crash
         return None
 
 
+class BenchmarkGraphRequired(RuntimeError):
+    """A benchmark run reached provider work without the graph it measures.
+
+    Outside a benchmark, a missing graph is a degraded mode: the assistant
+    continues without repository intelligence and that is deliberate. Inside
+    one it is not a mode at all. The graph is the product under measurement,
+    so a task that proceeds without it does not produce a weaker result -- it
+    produces a result about nothing, at the full price of the provider calls
+    it spends getting there.
+
+    Run 33708231670 is the case in point: 160 provider calls, a failed index,
+    and not one delivered evidence type that needed a graph. Failing here
+    costs one container start. Not failing here costs the run and yields a
+    number that reads like a measurement of GT.
+    """
+
+
 def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
-    """Build/reuse one graph under an inter-process publication lock."""
+    """Build/reuse one graph under an inter-process publication lock.
+
+    Correct-or-quiet for local work; fail-closed for a benchmark-bound run,
+    where an absent graph is a defect rather than a degraded mode.
+    """
+
+    graph: str | None = None
+    # Whether there was source to index at all. A task that starts empty has
+    # nothing to build from yet and fills as the agent creates files; a task
+    # holding source and producing no graph is a defect.
+    indexable = bool(root and os.path.isdir(root) and is_code_repo(root))
     try:
-        if not root or not os.path.isdir(root) or not is_code_repo(root):
-            return None
-        gt_dir = _graph_state_dir(root, state_dir)
-        gt_dir.mkdir(parents=True, exist_ok=True)
-        with _graph_publication_lock(gt_dir / ".graph.lock"):
-            return _ensure_index_unlocked(root, state_dir=state_dir)
+        if indexable:
+            gt_dir = _graph_state_dir(root, state_dir)
+            gt_dir.mkdir(parents=True, exist_ok=True)
+            with _graph_publication_lock(gt_dir / ".graph.lock"):
+                graph = _ensure_index_unlocked(root, state_dir=state_dir)
     except Exception:  # noqa: BLE001 - indexing remains correct-or-quiet
-        return None
+        graph = None
+    if (
+        graph is None
+        and indexable
+        and _execution_identity()["identity_scope"] == "benchmark_bound"
+    ):
+        raise BenchmarkGraphRequired(
+            "benchmark run has no graph; refusing to measure a treatment that "
+            "cannot use the mechanism under test"
+        )
+    return graph
 
 
 class IndexBuildStatus(StrEnum):
@@ -1136,6 +1342,10 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         return IndexBuildReceipt(IndexBuildStatus.NOT_APPLICABLE, source_revision=source_revision)
     try:
         graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None)
+    except BenchmarkGraphRequired:
+        # A benchmark without its graph is not a receipt outcome to record and
+        # continue from; it stops the run.
+        raise
     except Exception as exc:  # pragma: no cover - defensive boundary
         return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
                                  error_type=type(exc).__name__, error_diagnostic=str(exc)[:600])
