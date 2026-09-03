@@ -1,0 +1,69 @@
+{
+  "basis": "owner_directive",
+  "detail": {
+    "build_info_sha256": "64c53ed1a02a7eb0661b4da85e1ee4b495ba3294bc8721c585ac46bdf08f695b",
+    "build_tags": "sqlite_fts5",
+    "builder_image_digest": "a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3",
+    "built_by": "harness CI step \"Build source-bound Groundtruth producer\" -- static (-linkmode external -extldflags=-static), golang:1.22.5-bookworm pinned by digest, BUILD_TIME fixed so the digest reproduces",
+    "cgo_enabled": true,
+    "confidence": "high",
+    "defects_fixed": [
+      "validateCandidateDerivation rejected an empty Mechanism that resolutionDerivation already maps to global_name/partial",
+      "unique_method was absent from the resolution derivation vocabulary",
+      "partial-VTA callsites claimed the vta mechanism over merged hierarchy candidates carrying no flow proof",
+      "candidates sharing one target stable id collided on the candidate edge id"
+    ],
+    "green_tests": [
+      "go-test-sqlite_fts5-all (store, cmd/gt-index, resolver, closure, parser, walker)",
+      "tests/test_product_acceptance.py 10/10",
+      "scripts/verify_producer_binding.py --producer-repo: VERIFIED, failures []"
+    ],
+    "known_open": [
+      "boa does not publish; tracked as item 1 of instinct_work/04-gnx-parity-plan.md",
+      "closure MaxDepth remains 3; raising it is recorded as deliberately not scheduled"
+    ],
+    "paid_dispatch": false,
+    "platform": "linux/amd64",
+    "producer_sha256": "b4bfba37d3e7348e6b4b415b96fd06df3ed0653532b013b497a671bbe2095dfb",
+    "provider_calls": 0,
+    "red_replay_witness": "Each RED artifact was re-executed byte-for-byte in a clean checkout by the producer pre-push hook (gt.fixture-red.v1) and accepted.",
+    "red_replays": [
+      {
+        "fixture": ".githooks/tests/har81_candidate_derivation_red.sh",
+        "outcome": "FAIL_AS_DESIGNED",
+        "sha": "830b9814bffea7c499e89be7289dc1cd8121f75a"
+      },
+      {
+        "fixture": ".githooks/tests/har81_vta_merged_mechanism_red.sh",
+        "outcome": "FAIL_AS_DESIGNED",
+        "sha": "d3729a1b05e5bd149a07839c16d53f4a3f4fc2c8"
+      },
+      {
+        "fixture": ".githooks/tests/har81_candidate_stable_identity_red.sh",
+        "outcome": "FAIL_AS_DESIGNED",
+        "sha": "f76936ef2b33c59671df920eef29c8c56b752a58"
+      }
+    ],
+    "repository_sweep": {
+      "method": "producer run against each smoke20 task repository at its own base commit",
+      "outstanding": "boa-hierarchical-evaluation-cancellation: resolution-v2 publication does not terminate (WAL past 11.5 GB; reproduced with -closure=false, so not the closure)",
+      "published": 18,
+      "total": 19
+    },
+    "reviewed_head": "cffca1fd29001577bf35a3355b7238e6cedd1130",
+    "source_tree": "7b25858b49ec7ef91cbec2e8045b0bf3f19ccd8c",
+    "static_linking": true,
+    "supersedes_producer_sha256": "9bd146c8aa7087516fdce60fbdb0e096edb3565eb2a4d393130180d9b1021346"
+  },
+  "head_sha": "cffca1fd29001577bf35a3355b7238e6cedd1130",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "213c0fd3fa8390c50aefe6e2c9c102c97c46c1f797f12e6c26d5e280f172fa33",
+  "packet_id": "har81-groundtruth-owner-acceptance-cffca1fd2",
+  "reviewer": "owner-directive/claude-code",
+  "reviewer_note": "Owner-directed acceptance, not a standards review. An exact-SHA review of cffca1fd2 was requested on HAR-81 and had not returned a verdict; the owner directed acceptance. A later reviewer verdict is to be added as a separate packet, never by relabelling this one.",
+  "reviewer_verdict_present": false,
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "supersedes": "har81-groundtruth-dispatch-review-0aadb1b9",
+  "ticket": "HAR-81"
+}
