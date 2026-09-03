@@ -1,0 +1,52 @@
+{
+  "created_at":"2026-09-03T00:58:50.5767846Z",
+  "detail":{
+    "authorized_next_stage":"exactly_one_paid_smoke_task_then_remaining_19_only_after_complete_and_all_required_features_independently_attested",
+    "gcp_actions":0,
+    "gitguardian":"success",
+    "independent_review":{
+      "reviewed_head_sha":"c6e5a47d458353d000ff65a8cabc7c906d6f1bc6",
+      "standards_verdict":"GREEN",
+      "spec_verdict":"GREEN",
+      "system":"exact-sha-two-axis-review"
+    },
+    "landed_main_sha":"c6e5a47d458353d000ff65a8cabc7c906d6f1bc6",
+    "landing":"exact_fast_forward",
+    "paid_dispatch":false,
+    "parent_main_sha":"69cfe4d8f0aca0a4ab0777f618aa1e6384cb0a31",
+    "pr":43,
+    "pr_merge_commit":"c6e5a47d458353d000ff65a8cabc7c906d6f1bc6",
+    "pr_state":"MERGED",
+    "provider_calls":0,
+    "provider_free_ci":{
+      "conclusion":"success",
+      "reviewed_head_sha":"c6e5a47d458353d000ff65a8cabc7c906d6f1bc6",
+      "run":33701135043
+    },
+    "scope":"bounded gt-index resources, verified process teardown, and host-authenticated exit-137 evidence",
+    "verification":{
+      "focused_provider_free_tests_passed":142,
+      "focused_platform_specific_tests_skipped_on_windows":1,
+      "full_serial_suite":"PASS",
+      "ruff":"PASS",
+      "workflow_feature_matrix":"PASS"
+    }
+  },
+  "file":"",
+  "head_sha":"c6e5a47d458353d000ff65a8cabc7c906d6f1bc6",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"HAR-81 gt-index resource guard and truthful exit-137 evidence landed by exact fast-forward after exact-SHA review and green CI",
+  "packet_digest_sha256":"cd5575c62b69ebcf0e377eb61d3129c967f331ac2f3dc4948e0326f2dff6e6c1",
+  "packet_id":"merge-har81-resource-c6e5a47d",
+  "pr":43,
+  "schema":"gt.review_packet.v1",
+  "severity":"process",
+  "source":{
+    "check":"exact-main-landing",
+    "system":"coordinator"
+  },
+  "status":"resolved",
+  "supersedes":"merge-har81-audit-69cfe4d8",
+  "ticket":"HAR-81"
+}

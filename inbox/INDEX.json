@@ -144,10 +144,10 @@
     "merge-har81-35766673",
     "merge-har81-529d835a",
     "merge-har81-6f30b66a",
-    "merge-har81-audit-69cfe4d8",
     "merge-har81-ca744e7e",
     "merge-har81-consolidation-9b1393c5",
     "merge-har81-da4e3988",
+    "merge-har81-resource-c6e5a47d",
     "merge-pr24-ad022ba4",
     "merge-pr25-cc52917d",
     "merge-pr26-bd099b88",
@@ -380,7 +380,8 @@
       "merge-har81-ca744e7e",
       "merge-har81-consolidation-9b1393c5",
       "merge-har81-da4e3988",
-      "merge-har81-e4e8c580"
+      "merge-har81-e4e8c580",
+      "merge-har81-resource-c6e5a47d"
     ]
   }
 }
