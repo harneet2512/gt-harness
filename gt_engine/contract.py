@@ -66,9 +66,11 @@ __all__ = [
     "canonical_json",
     "contract_digest",
     "contracts",
+    "contracts_with_node_ids",
     "coverage",
     "empty_contract",
     "symbol_contract",
+    "symbol_node_ids",
 ]
 
 CONTRACT_SCHEMA = "gt.symbol_contract.v1"
@@ -446,11 +448,42 @@ def symbol_contract(db_path: str | Path, node_id: int) -> dict[str, Any]:
     return _build_contract(node_row, property_rows)
 
 
-def contracts(db_path: str | Path) -> Iterator[dict[str, Any]]:
-    """Yield every code symbol's contract in a stable repository-order sequence.
+def symbol_node_ids(db: str | Path | sqlite3.Connection) -> dict[int, str]:
+    """Return ``node id -> the stable id this module keys that symbol by``.
 
-    Ordered by file, then position, then node id, so two runs over the same
-    graph emit the same sequence and a diff of the whole projection is readable.
+    The bridge a consumer needs to join a contract-keyed artefact -- a cached
+    embedding, say -- back to the ``nodes`` rows of one particular graph.  The
+    stable id is durable across rebuilds; ``nodes.id`` is not, so nothing may
+    persist a node id, and nothing may re-derive the stable id by hand either.
+
+    Accepts an open connection because a caller mid-query should not have to
+    reopen the graph it is already reading.
+    """
+    connection, owned = (db, False) if isinstance(db, sqlite3.Connection) else (_connect(db), True)
+    previous_factory = connection.row_factory
+    try:
+        connection.row_factory = sqlite3.Row
+        select, prefix = _symbol_query(connection)
+        rows = connection.execute(
+            f"{select} ORDER BY {prefix}file_path, {prefix}start_line, {prefix}id",
+            CODE_SYMBOL_LABELS,
+        ).fetchall()
+    finally:
+        if owned:
+            connection.close()
+        else:
+            connection.row_factory = previous_factory
+    return {int(row["id"]): _symbol_identity(row)["stable_id"] for row in rows}
+
+
+def contracts_with_node_ids(db_path: str | Path) -> Iterator[tuple[int, dict[str, Any]]]:
+    """Yield ``(node id, contract)`` in the same order :func:`contracts` does.
+
+    The node id is deliberately not part of the contract itself: it is a
+    per-build row number, and putting it in the projection would make
+    ``contract_digest`` change every time the producer renumbered a table.  A
+    consumer that needs to join back to ``nodes`` for the graph in hand takes
+    it from here instead.
     """
     connection = _connect(db_path)
     try:
@@ -469,7 +502,18 @@ def contracts(db_path: str | Path) -> Iterator[dict[str, Any]]:
         connection.close()
 
     for node_row in node_rows:
-        yield _build_contract(node_row, grouped.get(int(node_row["id"]), []))
+        node_id = int(node_row["id"])
+        yield node_id, _build_contract(node_row, grouped.get(node_id, []))
+
+
+def contracts(db_path: str | Path) -> Iterator[dict[str, Any]]:
+    """Yield every code symbol's contract in a stable repository-order sequence.
+
+    Ordered by file, then position, then node id, so two runs over the same
+    graph emit the same sequence and a diff of the whole projection is readable.
+    """
+    for _, contract in contracts_with_node_ids(db_path):
+        yield contract
 
 
 def _non_empty_fields(contract: dict[str, Any]) -> set[str]:

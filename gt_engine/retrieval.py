@@ -65,11 +65,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from gt_engine import contract, contract_embeddings
 from gt_engine.graph_context import graph_revision
 from gt_engine.resolution_provenance import stable_symbol_id
 
 __all__ = [
     "DEFAULT_LIMIT",
+    "CONTRACT_EMBEDDING_INDEX_ENV",
     "DENSE_POOL_LIMIT",
     "MAX_SNIPPET_CHARS",
     "MIN_TERM_LENGTH",
@@ -116,6 +118,11 @@ MAX_SNIPPET_CHARS = 240
 # pass.  Standalone dense_rank therefore works over a bounded, deterministically
 # ordered pool rather than the whole symbol table, and records the bound.
 DENSE_POOL_LIMIT = 256
+
+# Where a persisted contract-embedding index is looked for when the caller
+# names none.  Unset simply means "no cache": the ranker then embeds its pool
+# per call, which is slower and identical in result.
+CONTRACT_EMBEDDING_INDEX_ENV = "GT_CONTRACT_EMBEDDING_INDEX"
 
 # Same token shape as gt_engine.hybrid_retrieval, so a query tokenises
 # identically wherever it enters the engine.
@@ -723,6 +730,81 @@ def _dense_pool(
     return documents
 
 
+def _rank_from_store(
+    *,
+    query: str,
+    model_root: Path,
+    lookup: contract_embeddings.StoreLookup,
+    documents: Mapping[str, str],
+    node_stable_ids: Mapping[int, str],
+    k: int,
+    store_path: Path,
+) -> SourceRanking:
+    """Rank a pool against vectors the contract-embedding store already holds.
+
+    Only the query is embedded here.  The symbol side was embedded once, when
+    its contract last changed, which is the entire economic argument for the
+    store: a query costs one forward pass instead of one per candidate.
+
+    The query encoder is still required.  A populated store is not a licence to
+    answer without it, so a missing or broken model asset degrades by the same
+    named reasons as the uncached path rather than returning a cached order.
+    """
+    try:
+        from gt_engine.dense_runtime import embed_texts
+
+        query_vector = embed_texts(model_root, [query])[0]
+    except Exception as exc:  # noqa: BLE001 - dense fails closed, never loudly
+        return SourceRanking(
+            RetrievalSource.DENSE,
+            (),
+            available=False,
+            reason=f"dense_runtime_failed:{type(exc).__name__}:{str(exc)[:120]}",
+        )
+    if len(query_vector) != lookup.dimension:
+        return SourceRanking(
+            RetrievalSource.DENSE,
+            (),
+            available=False,
+            reason="dense_store_dimension_mismatch",
+            detail={
+                "query_dimension": len(query_vector),
+                "store_dimension": lookup.dimension,
+            },
+        )
+    scored = contract_embeddings.score_pool(query_vector, lookup.vectors)
+    ranking = tuple(
+        RankedSymbol(
+            node_stable_ids[node_id],
+            float(score),
+            _clean_snippet(documents.get(node_stable_ids[node_id], "")),
+        )
+        for node_id, score in scored
+        if node_id in node_stable_ids
+    )[: max(0, int(k))]
+    return SourceRanking(
+        RetrievalSource.DENSE,
+        ranking,
+        available=True,
+        detail={
+            "vector_source": "contract_embedding_store",
+            "store_path": str(store_path),
+            "pool_size": len(documents),
+            "store_hits": lookup.hits,
+            "store_misses": lookup.misses,
+            "missing_stable_ids": list(lookup.missing_stable_ids),
+            "dimension": lookup.dimension,
+        },
+    )
+
+
+def _resolved_store_path(store_path: str | Path | None) -> Path | None:
+    if store_path is not None:
+        return Path(store_path)
+    configured = os.environ.get(CONTRACT_EMBEDDING_INDEX_ENV, "").strip()
+    return Path(configured) if configured else None
+
+
 def dense_rank(
     db: str | Path | sqlite3.Connection,
     query: str,
@@ -730,6 +812,7 @@ def dense_rank(
     *,
     model_dir: str | Path | None = None,
     index_path: str | Path | None = None,
+    store_path: str | Path | None = None,
     labels: Sequence[str] = SYMBOL_LABELS,
     restrict_to: Sequence[str] | None = None,
     pool_limit: int = DENSE_POOL_LIMIT,
@@ -781,6 +864,7 @@ def dense_rank(
             detail={"model_dir": str(model_root), "missing": missing},
         )
 
+    resolved_store = _resolved_store_path(store_path)
     con, owned = _open(db)
     try:
         documents = _dense_pool(
@@ -789,6 +873,13 @@ def dense_rank(
             labels=labels,
             restrict_to=restrict_to,
             provenance=collected,
+        )
+        # node id -> the id `gt_engine.contract` keys that symbol by, which is
+        # the id the store holds.  Retrieval's own stable id is line-bearing and
+        # therefore not durable across a reformat; the two are joined on the
+        # node id of the graph in hand and never conflated.
+        contract_ids: dict[int, str] = (
+            contract.symbol_node_ids(con) if resolved_store is not None else {}
         )
         source_revision = "unknown-source-revision"
         row = con.execute(
@@ -812,6 +903,29 @@ def dense_rank(
         return SourceRanking(
             RetrievalSource.DENSE, (), available=False, reason="dense_pool_empty"
         )
+
+    node_stable_ids = {
+        collected[stable_id].node_id: stable_id
+        for stable_id in documents
+        if stable_id in collected
+    }
+    store_detail: dict[str, Any] = {"vector_source": "dense_runtime_pool"}
+    if resolved_store is not None:
+        lookup = contract_embeddings.lookup_vectors(
+            resolved_store, contract_ids, node_stable_ids
+        )
+        if lookup.reason is None:
+            return _rank_from_store(
+                query=query,
+                model_root=model_root,
+                lookup=lookup,
+                documents=documents,
+                node_stable_ids=node_stable_ids,
+                k=k,
+                store_path=resolved_store,
+            )
+        # Named, never silent: the caller asked for a cache and did not get one.
+        store_detail["store_reason"] = lookup.reason
 
     path = _database_path(db)
     revision = graph_revision(path) if path else ""
@@ -858,6 +972,7 @@ def dense_rank(
         available=query_ready,
         reason=None if query_ready else str(receipt.get("reason") or "dense_not_ready"),
         detail={
+            **store_detail,
             "pool_size": len(documents),
             "pool_bounded": restrict_to is None and len(documents) >= pool_limit,
             "model_sha256": receipt.get("model_sha256"),
@@ -929,6 +1044,7 @@ def hybrid_rank(
     use_dense: bool = True,
     model_dir: str | Path | None = None,
     index_path: str | Path | None = None,
+    store_path: str | Path | None = None,
 ) -> HybridRanking:
     """Run the lexical, property and dense rankers and fuse them.
 
@@ -977,6 +1093,7 @@ def hybrid_rank(
                 source_k,
                 model_dir=model_dir,
                 index_path=index_path,
+                store_path=store_path,
                 labels=labels,
                 restrict_to=candidates,
                 provenance=provenance,

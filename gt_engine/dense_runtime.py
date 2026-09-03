@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +65,34 @@ def _embed(model: Path, tokenizer_path: Path, texts: list[str]) -> list[tuple[fl
     if normalized.shape[1] != _DIMENSION:
         raise ValueError("dense_embedding_dimension_mismatch")
     return [tuple(float(value) for value in row) for row in normalized]
+
+
+def model_identity() -> dict[str, str | int]:
+    """The pinned asset identity every stored vector must be attributed to.
+
+    Exposed so a persistent index can record which model produced its vectors
+    without re-declaring the digests, which would let the two drift apart.
+    """
+    return {
+        "model_id": _MODEL_ID,
+        "model_sha256": _MODEL_SHA256,
+        "tokenizer_sha256": _TOKENIZER_SHA256,
+        "dimension": _DIMENSION,
+    }
+
+
+def embed_texts(model_dir: Path, texts: Sequence[str]) -> list[tuple[float, ...]]:
+    """Embed ``texts`` with the verified local ONNX assets.
+
+    The single embedding entry point: the contract-embedding index and the
+    query side of retrieval both come through here, so there is exactly one
+    place where a model digest is checked and exactly one pooling convention.
+    Raises rather than degrading -- the caller owns the named degraded reason.
+    """
+    if not texts:
+        return []
+    model, tokenizer = _verified_assets(Path(model_dir))
+    return _embed(model, tokenizer, list(texts))
 
 
 def rank_documents(
@@ -152,4 +180,4 @@ def rank_documents(
     return ordered, receipt
 
 
-__all__ = ["rank_documents"]
+__all__ = ["embed_texts", "model_identity", "rank_documents"]
