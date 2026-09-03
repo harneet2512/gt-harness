@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from gt_engine.graph_utilisation import graph_utilisation
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
     MAX_TASK_DELIVERIES,
@@ -425,6 +426,7 @@ def issue_runtime_receipts(
             "admitted_count": len(deliveries),
             "refused_count": len(refused_deliveries),
         },
+        "graph_utilisation": graph_utilisation(deliveries),
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
         "event_journal": event_journal,
