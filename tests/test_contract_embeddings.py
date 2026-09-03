@@ -216,6 +216,27 @@ class RecordingEmbedder:
         return tuple(value / norm for value in values)
 
 
+def retrieval_identity(node_id: int) -> str:
+    """The stable id *retrieval* mints for a fixture node.
+
+    Not the same string as the producer-minted id the store is keyed by, and
+    deliberately so: retrieval fuses three sources in one identity space, and
+    the store is keyed in the durable one.  The two are joined on the node id of
+    the graph in hand, which is exactly what this test asserts.
+    """
+    row = next(item for item in _NODES if item[0] == node_id)
+    from gt_engine.resolution_provenance import stable_symbol_id
+
+    return stable_symbol_id(
+        language=row[5],
+        path=row[4],
+        qualified_name=row[3],
+        native_kind=row[1],
+        start_line=row[6],
+        end_line=row[7],
+    )
+
+
 def _store(path: Path) -> contract_embeddings.ContractEmbeddingStore:
     return contract_embeddings.ContractEmbeddingStore(
         path, model_id="test-embedder", tokenizer_id="test-tokenizer", dimension=8
@@ -602,7 +623,7 @@ def test_dense_rank_consumes_the_stored_contract_vectors(
     assert result.reason is None
     assert result.detail["vector_source"] == "contract_embedding_store"
     assert result.detail["store_hits"] == 5
-    assert result[0].stable_id == "sym-3"
+    assert result[0].stable_id == retrieval_identity(3)
 
 
 def test_dense_rank_from_the_store_ranks_but_never_promotes(

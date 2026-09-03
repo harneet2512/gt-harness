@@ -535,6 +535,8 @@ class ContractEmbeddingStore:
         self, stable_ids: Sequence[str] | None = None
     ) -> dict[str, tuple[float, ...]]:
         """Return ``stable id -> vector`` for the requested ids, or for all."""
+        if not self._has_vector_table():
+            return {}
         if stable_ids is None:
             rows = self._connection.execute(
                 "SELECT document_id, embedding_json FROM gt_vector_documents "
@@ -556,10 +558,24 @@ class ContractEmbeddingStore:
         }
 
     def document_count(self) -> int:
+        """How many vectors the store holds; zero before the first publish.
+
+        The vector table is created by the index on first write, so a store that
+        has been opened but never refreshed has none.  That is "empty", not
+        "unreadable", and the two must not be reported as the same fault.
+        """
+        if not self._has_vector_table():
+            return 0
         row = self._connection.execute(
             "SELECT COUNT(*) FROM gt_vector_documents"
         ).fetchone()
         return int(row[0]) if row else 0
+
+    def _has_vector_table(self) -> bool:
+        return self._connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'gt_vector_documents'"
+        ).fetchone() is not None
 
     # -- the refresh ------------------------------------------------------
 
