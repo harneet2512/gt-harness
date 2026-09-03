@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, tomllib
+          import json, os, sys, tomllib
           from pathlib import Path
 
           images = set()
@@ -80,7 +80,7 @@ jobs:
               {"batch_id": i, "images": ",".join(b)} for i, b in enumerate(batches)
           ]
           print("matrix=" + json.dumps({"include": include}))
-          print(f"::notice::mirroring {len(ordered)} DeepSWE images in {len(batches)} batches")
+          print(f"::notice::mirroring {len(ordered)} DeepSWE images in {len(batches)} batches", file=sys.stderr)
           PY
 
   mirror:
