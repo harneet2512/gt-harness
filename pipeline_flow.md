@@ -273,3 +273,111 @@ successful smoke would prove, and nothing short of one will.
 2. boa's non-terminating publication — blocks the remaining 19, not the gate.
 3. `MaxDepth` 3 → 6 — requested, not done, needs the same CI rebuild.
 4. LSP promotion and ONNX retrieval — wired but unmeasured.
+
+---
+
+# Graph depth — what values are actually stored
+
+"Depth" here means the *kind of information* each row carries, not traversal
+distance. Measured on the real arktype graph (458 files, base commit
+`04355e8b`), not on the schema.
+
+## The headline count is 97.8% bookkeeping
+
+| | arktype | adaptix |
+|---|---|---|
+| Total nodes | 159,548 | 110,677 |
+| **Code symbols** (Function/Class/Method/File) | **3,511 — 2.2%** | **3,160 — 2.9%** |
+| Provenance facts (CompletenessFact 113,695, Callsite, UnresolvedFact, DerivationFact) | 156,035 | 107,515 |
+| Total edges | 188,264 | 150,918 |
+| **Semantic edges** (CALLS/IMPORTS/CONTAINS) | **8,972 — 4.8%** | 8,153 — 5.4% |
+| CERTIFIED edges | 4,593 — 2.4% | 9,575 — 6.3% |
+
+Quoting "159,548 nodes" as evidence of a rich graph is wrong, and I did it
+repeatedly. The producer writes ~6.9 fact nodes per callsite about its own
+reasoning. That is also why boa dies: 68,227 callsites is roughly half a
+million fact nodes before any candidate blow-up. **The thing that does not
+scale is the provenance layer, not the code graph.**
+
+## What a code symbol carries
+
+Fill rate across all 3,511 code symbols:
+
+| Field | Filled |
+|---|---|
+| name, qualified_name, file_path, start_line, end_line, language, is_test, is_exported | 100% |
+| signature | 40.1% |
+| return_type | 24.2% |
+| parent_id | 8.9% |
+
+A real row, complete:
+
+```
+label Function · name shouldThrow · file ark/attest/__tests__/demo.test.ts
+start_line 9 · end_line 11 · signature "(a: false) =>" · is_exported 1 · is_test 1
+```
+
+No docstring, no decorators, no structured parameter types, no visibility on the
+node itself. **At the node level this is ctags plus a signature string.**
+
+## The depth is in `properties`, and it is real
+
+9,233 rows — about 2.6 per symbol — and these are genuinely semantic:
+
+| Kind | Rows | Kind | Rows |
+|---|---|---|---|
+| caller_usage | 1,637 | field_read | 565 |
+| fingerprint | 1,407 | visibility | 403 |
+| param | 1,285 | boundary_condition | 323 |
+| data_flow | 1,236 | guard_clause | 317 |
+| return_shape | 1,158 | call_order | 279 |
+| class_field | 255 | side_effect | 151 |
+
+`guard_clause`, `boundary_condition`, `side_effect` and `data_flow` are exactly
+the GT+gnx-class facts that justify the product. They exist. There are just
+**2.6 of them per symbol**, and the thinnest kinds — side effects, guards,
+boundary conditions — are the ones a model would most benefit from.
+
+`assertions` links tests to targets with kind/expression/expected. For a
+458-file TypeScript repo with a substantial suite: **105 rows**.
+
+## The type-flow columns are declared and empty
+
+`resolution_candidates` (10,820 rows) is the deepest table in the schema. Its
+identity columns are 100% filled. Its *evidence* columns are not:
+
+| Column | Filled |
+|---|---|
+| receiver_chain | 55.2% |
+| import_chain | 16.2% |
+| receiver_origin | 3.4% |
+| **receiver_type** | **0.1%** (8 rows of 10,820) |
+
+And these node columns are **entirely empty** across the whole graph:
+`allocated_type_id`, `allocation_site_id`, `declared_receiver_type_id`,
+`receiver_value_id`, `field_id`, `configuration_artifact_id`, `input_fact_ids`.
+
+That is the allocation-site and field-sensitive VTA schema. It is modelled and
+stores nothing.
+
+## Empty capabilities
+
+- `cochanges` — **0 rows** in every graph built. So `cochange_prior`, one of the
+  four `GRAPH_BACKED_FEATURES` the graph-use enforcement depends on, can never
+  fire; `cochange_partner` has no emitter anywhere in the codebase.
+- `content_passages` — **the table does not exist**. I listed it as schema.
+
+## Honest reading
+
+The schema promises GT+gnx depth. The values deliver:
+
+- a ctags-level symbol table (3,511 symbols),
+- a resolved call graph at 36% resolution (5,933 of 16,431 callsites), only
+  2.4% of edges CERTIFIED,
+- a genuinely interesting but thin property layer (2.6 facts per symbol),
+- almost no type-flow evidence (receiver_type 0.1%),
+- and two advertised capabilities that are empty.
+
+**Raising closure MaxDepth 3 → 6 would widen traversal over an already-thin
+certified set. It is the wrong lever.** Resolution rate and property density are
+the metrics that would move quality.
