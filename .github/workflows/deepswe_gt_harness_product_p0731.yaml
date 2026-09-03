@@ -291,6 +291,18 @@ jobs:
           run-id: ${{ inputs.readiness_run_id }}
           name: gt-product-provider-free-${{ inputs.readiness_run_id }}
           path: readiness
+      - name: Verify referenced readiness run conclusion
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          READINESS_RUN_ID: ${{ inputs.readiness_run_id }}
+        run: |
+          set -euo pipefail
+          conclusion="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPOSITORY}/actions/runs/${READINESS_RUN_ID}" | jq -r '.conclusion')"
+          test "$conclusion" = success
       - name: Validate reusable readiness receipt
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
