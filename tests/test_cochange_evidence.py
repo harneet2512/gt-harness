@@ -351,6 +351,22 @@ def test_the_dose_stays_inside_its_byte_ceiling(tmp_path: Path):
     body = dose.split("\n", 1)[1]
 
     assert len(body.encode("utf-8")) <= COCHANGE_DOSE_BYTE_LIMIT
+    # Dropped, never cut: a half-line is a half-claim.
+    assert body.splitlines()
+    for line in body.splitlines():
+        assert line.endswith("status=prior_not_resolution"), line
+
+
+def test_a_line_that_cannot_fit_at_all_stages_nothing(tmp_path: Path):
+    """No dose is better than a dose whose provenance is cut in half."""
+
+    long_a = "src/" + ("a" * 400) + ".py"
+    long_b = "src/" + ("b" * 400) + ".py"
+    db = _graph(tmp_path / "g.db", [(long_a, long_b, 5)])
+    adapter = _StagingAdapter(db, str(tmp_path))
+
+    assert cochange_prior_dose(adapter, (long_a,)) == ""
+    assert adapter.staged == []
 
 
 # --- the seam never lets a prior outrank a resolution ----------------------
