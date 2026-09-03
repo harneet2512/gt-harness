@@ -19,6 +19,11 @@ on:
         required: false
         type: string
         default: ""
+      readiness_run_id:
+        description: "Completed provider-free readiness workflow run ID (reuse; no rerun)"
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       approve_paid_run:
@@ -33,6 +38,11 @@ on:
         default: gate-one
       prior_gate_run_id:
         description: "Required for remaining-19: completed gate-one workflow run ID"
+        required: false
+        type: string
+        default: ""
+      readiness_run_id:
+        description: "Completed provider-free readiness workflow run ID (reuse; no rerun)"
         required: false
         type: string
         default: ""
@@ -266,11 +276,43 @@ jobs:
           if-no-files-found: error
 
   readiness:
+    if: ${{ inputs.readiness_run_id == '' }}
     needs: plan
     uses: ./.github/workflows/deepswe_gt_harness_product.yml
 
+  readiness_binding:
+    if: ${{ inputs.readiness_run_id != '' }}
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.readiness_run_id }}
+          name: gt-product-provider-free-${{ inputs.readiness_run_id }}
+          path: readiness
+      - name: Validate reusable readiness receipt
+        env:
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          READINESS_RUN_ID: ${{ inputs.readiness_run_id }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          receipt = json.loads((Path("readiness") / "workflow-run.json").read_text())
+          closeout = json.loads((Path("readiness") / "product-closeout.json").read_text())
+          if receipt.get("schema") != "gt.workflow_run_receipt.v1": raise SystemExit("readiness schema mismatch")
+          if receipt.get("status") != "success" or str(receipt.get("run_id")) != os.environ["READINESS_RUN_ID"]: raise SystemExit("readiness run mismatch")
+          if receipt.get("head_sha") != os.environ["SOURCE_SHA"]: raise SystemExit("readiness source mismatch")
+          if receipt.get("provider_calls") != 0 or receipt.get("benchmark_runs") != 0: raise SystemExit("readiness was not provider-free")
+          if closeout.get("status") != "VERIFIED_PROVIDER_FREE" or closeout.get("release_eligible") is not False: raise SystemExit("readiness closeout invalid")
+          PY
+
   image_digest_gate:
-    needs: [plan, readiness]
+    # Legacy readiness path: needs: [plan, readiness, image_digest_gate]
+    if: ${{ always() && (needs.readiness.result == 'success' || needs.readiness_binding.result == 'success') }}
+    needs: [plan, readiness, readiness_binding]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -296,8 +338,9 @@ jobs:
           done
 
   provider_gate:
-    if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, readiness, image_digest_gate]
+    if: ${{ always() && inputs.approve_paid_run == true && needs.image_digest_gate.result == 'success' && (needs.readiness.result == 'success' || needs.readiness_binding.result == 'success') }}
+    # Legacy readiness path: needs: [plan, readiness, image_digest_gate, provider_gate]
+    needs: [plan, readiness, readiness_binding, image_digest_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -329,8 +372,8 @@ jobs:
           if-no-files-found: error
 
   task:
-    if: ${{ inputs.approve_paid_run == true }}
-    needs: [plan, readiness, image_digest_gate, provider_gate]
+    if: ${{ always() && inputs.approve_paid_run == true && needs.provider_gate.result == 'success' }}
+    needs: [plan, readiness, readiness_binding, image_digest_gate, provider_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
