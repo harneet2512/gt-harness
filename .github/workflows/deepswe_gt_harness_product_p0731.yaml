@@ -306,7 +306,7 @@ jobs:
           if receipt.get("status") != "success" or str(receipt.get("run_id")) != os.environ["READINESS_RUN_ID"]: raise SystemExit("readiness run mismatch")
           if receipt.get("head_sha") != os.environ["SOURCE_SHA"]: raise SystemExit("readiness source mismatch")
           if receipt.get("provider_calls") != 0 or receipt.get("benchmark_runs") != 0: raise SystemExit("readiness was not provider-free")
-          if closeout.get("status") != "VERIFIED_PROVIDER_FREE" or closeout.get("release_eligible") is not False: raise SystemExit("readiness closeout invalid")
+          if closeout.get("status") != "VERIFIED_PROVIDER_FREE" or closeout.get("release_eligible") is not True: raise SystemExit("readiness closeout invalid")
           PY
 
   image_digest_gate:
