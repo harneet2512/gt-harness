@@ -14,6 +14,7 @@ tasks (no harm, no noise).
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -93,6 +94,12 @@ class IndexProcessResult:
                 or self.cgroup_oom_kill_delta > 0
             )
         )
+
+
+class _ProcessGroupState(StrEnum):
+    EMPTY = "empty"
+    LIVE = "live"
+    UNKNOWN = "unknown"
 
 
 def verify_configured_producer_artifact(
@@ -366,26 +373,41 @@ def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
     result[f"{prefix}_sha256"] = digest.hexdigest()
 
 
-def _posix_process_group_has_live_members(process_group_id: int) -> bool:
-    proc = Path("/proc")
+def _posix_process_group_state(
+    process_group_id: int, proc: Path = Path("/proc")
+) -> _ProcessGroupState:
     if proc.is_dir():
-        for entry in proc.iterdir():
+        try:
+            entries = list(proc.iterdir())
+        except OSError:
+            return _ProcessGroupState.UNKNOWN
+        for entry in entries:
             if not entry.name.isdigit():
                 continue
             try:
                 fields = (entry / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
                 state = fields[0]
                 process_group = int(fields[2])
-            except (FileNotFoundError, IndexError, OSError, ValueError):
+            except FileNotFoundError:
                 continue
+            except (IndexError, OSError, ValueError):
+                return _ProcessGroupState.UNKNOWN
             if process_group == process_group_id and state != "Z":
-                return True
-        return False
+                return _ProcessGroupState.LIVE
+        return _ProcessGroupState.EMPTY
     try:
         os.killpg(process_group_id, 0)
-    except (OSError, ProcessLookupError):
-        return False
-    return True
+    except ProcessLookupError:
+        return _ProcessGroupState.EMPTY
+    except PermissionError:
+        return _ProcessGroupState.LIVE
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return _ProcessGroupState.EMPTY
+        if exc.errno == errno.EPERM:
+            return _ProcessGroupState.LIVE
+        return _ProcessGroupState.UNKNOWN
+    return _ProcessGroupState.LIVE
 
 
 def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> bool:
@@ -413,11 +435,11 @@ def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> bool:
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (OSError, ProcessLookupError):
-        return not _posix_process_group_has_live_members(process.pid)
+        return _posix_process_group_state(process.pid) is _ProcessGroupState.EMPTY
     deadline = time.monotonic() + _INDEX_TREE_TEARDOWN_SECONDS
     while time.monotonic() < deadline:
         process.poll()
-        if not _posix_process_group_has_live_members(process.pid):
+        if _posix_process_group_state(process.pid) is _ProcessGroupState.EMPTY:
             return True
         time.sleep(0.05)
     return False

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -291,6 +292,61 @@ def test_bounded_runner_refuses_success_when_tree_teardown_is_unverified(
     assert result.status == "process_tree_unverified"
     assert result.error_code == "GT_INDEX_PROCESS_TREE_UNVERIFIED"
     assert result.exit_code == 0
+
+
+def test_process_group_state_is_unknown_when_proc_stat_is_unreadable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    proc = tmp_path / "proc"
+    stat = proc / "123" / "stat"
+    stat.parent.mkdir(parents=True)
+    stat.write_text("123 (child) S 1 42", encoding="utf-8")
+    original = Path.read_text
+
+    def unreadable(path, *args, **kwargs):
+        if path == stat:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    assert (
+        indexer._posix_process_group_state(42, proc)
+        is indexer._ProcessGroupState.UNKNOWN
+    )
+
+
+def test_process_group_state_is_unknown_when_proc_enumeration_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    original = Path.iterdir
+
+    def denied(path):
+        if path == proc:
+            raise PermissionError("denied")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    assert (
+        indexer._posix_process_group_state(42, proc)
+        is indexer._ProcessGroupState.UNKNOWN
+    )
+
+
+def test_process_group_state_treats_permission_denied_fallback_as_live(
+    tmp_path: Path, monkeypatch
+) -> None:
+    missing_proc = tmp_path / "missing-proc"
+
+    def denied(*_args):
+        raise PermissionError(errno.EPERM, "denied")
+
+    monkeypatch.setattr(indexer.os, "killpg", denied, raising=False)
+    assert (
+        indexer._posix_process_group_state(42, missing_proc)
+        is indexer._ProcessGroupState.LIVE
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group semantics")
