@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -263,30 +262,34 @@ def test_windows_runtime_refuses_parser_without_verified_tree_guard(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group semantics")
-def test_posix_tree_kill_reaches_descendant_after_leader_exits() -> None:
-    leader = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import subprocess,sys; "
-                "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'], "
-                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
-                "print(child.pid, flush=True)"
-            ),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        text=True,
+def test_bounded_runner_kills_redirected_descendant_after_leader_exits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pid_path = tmp_path / "child.pid"
+    leader_script = tmp_path / "leader.py"
+    leader_script.write_text(
+        "import pathlib,subprocess,sys\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'], "
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')\n",
+        encoding="utf-8",
     )
-    assert leader.stdout is not None
-    child_pid = int(leader.stdout.readline().strip())
-    assert leader.wait(timeout=5) == 0
-    assert Path(f"/proc/{child_pid}").exists()
+    monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: sys.executable)
+    monkeypatch.setattr(
+        indexer,
+        "_index_command",
+        lambda *_args: [sys.executable, str(leader_script), str(pid_path)],
+    )
+    monkeypatch.setattr(
+        indexer, "_effective_index_memory_limit", lambda _snapshot: 64 * 1024 * 1024
+    )
 
-    indexer._kill_index_process_tree(leader)
+    result = indexer._run_index_bounded(
+        str(tmp_path), tmp_path / "graph.db", tmp_path
+    )
 
+    assert result.success is True
+    child_pid = int(pid_path.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         stat = Path(f"/proc/{child_pid}/stat")

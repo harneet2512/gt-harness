@@ -476,6 +476,10 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
                 break
             time.sleep(0.05)
         exit_code = process.wait(timeout=10)
+        # A successful group leader is not proof that its descendants exited.
+        # Tear down the session unconditionally before accepting completion;
+        # redirected descendants otherwise evade the pipe-drainer check.
+        _kill_index_process_tree(process)
         for drainer in drainers:
             drainer.join(timeout=1)
         if any(drainer.is_alive() for drainer in drainers):
