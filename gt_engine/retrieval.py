@@ -70,8 +70,8 @@ from gt_engine.graph_context import graph_revision
 from gt_engine.resolution_provenance import stable_symbol_id
 
 __all__ = [
-    "DEFAULT_LIMIT",
     "CONTRACT_EMBEDDING_INDEX_ENV",
+    "DEFAULT_LIMIT",
     "DENSE_POOL_LIMIT",
     "MAX_SNIPPET_CHARS",
     "MIN_TERM_LENGTH",
