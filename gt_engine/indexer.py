@@ -1084,17 +1084,53 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
         return None
 
 
+class BenchmarkGraphRequired(RuntimeError):
+    """A benchmark run reached provider work without the graph it measures.
+
+    Outside a benchmark, a missing graph is a degraded mode: the assistant
+    continues without repository intelligence and that is deliberate. Inside
+    one it is not a mode at all. The graph is the product under measurement,
+    so a task that proceeds without it does not produce a weaker result -- it
+    produces a result about nothing, at the full price of the provider calls
+    it spends getting there.
+
+    Run 33708231670 is the case in point: 160 provider calls, a failed index,
+    and not one delivered evidence type that needed a graph. Failing here
+    costs one container start. Not failing here costs the run and yields a
+    number that reads like a measurement of GT.
+    """
+
+
 def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
-    """Build/reuse one graph under an inter-process publication lock."""
+    """Build/reuse one graph under an inter-process publication lock.
+
+    Correct-or-quiet for local work; fail-closed for a benchmark-bound run,
+    where an absent graph is a defect rather than a degraded mode.
+    """
+
+    graph: str | None = None
+    # Whether there was source to index at all. A task that starts empty has
+    # nothing to build from yet and fills as the agent creates files; a task
+    # holding source and producing no graph is a defect.
+    indexable = bool(root and os.path.isdir(root) and is_code_repo(root))
     try:
-        if not root or not os.path.isdir(root) or not is_code_repo(root):
-            return None
-        gt_dir = _graph_state_dir(root, state_dir)
-        gt_dir.mkdir(parents=True, exist_ok=True)
-        with _graph_publication_lock(gt_dir / ".graph.lock"):
-            return _ensure_index_unlocked(root, state_dir=state_dir)
+        if indexable:
+            gt_dir = _graph_state_dir(root, state_dir)
+            gt_dir.mkdir(parents=True, exist_ok=True)
+            with _graph_publication_lock(gt_dir / ".graph.lock"):
+                graph = _ensure_index_unlocked(root, state_dir=state_dir)
     except Exception:  # noqa: BLE001 - indexing remains correct-or-quiet
-        return None
+        graph = None
+    if (
+        graph is None
+        and indexable
+        and _execution_identity()["identity_scope"] == "benchmark_bound"
+    ):
+        raise BenchmarkGraphRequired(
+            "benchmark run has no graph; refusing to measure a treatment that "
+            "cannot use the mechanism under test"
+        )
+    return graph
 
 
 class IndexBuildStatus(StrEnum):
@@ -1276,6 +1312,10 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         return IndexBuildReceipt(IndexBuildStatus.NOT_APPLICABLE, source_revision=source_revision)
     try:
         graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None)
+    except BenchmarkGraphRequired:
+        # A benchmark without its graph is not a receipt outcome to record and
+        # continue from; it stops the run.
+        raise
     except Exception as exc:  # pragma: no cover - defensive boundary
         return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
                                  error_type=type(exc).__name__, error_diagnostic=str(exc)[:600])
