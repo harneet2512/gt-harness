@@ -47,7 +47,7 @@ class StubEmbedder:
     @staticmethod
     def vector(text: str) -> tuple[float, ...]:
         raw = b"".join(
-            hashlib.sha256(f"{index}:{text}".encode("utf-8")).digest()
+            hashlib.sha256(f"{index}:{text}".encode()).digest()
             for index in range((DIMENSION * 4 // 32) + 1)
         )
         values = [float(value) - 2147483647.5 for value in
@@ -91,7 +91,7 @@ def _fingerprint_targets(path: Path, limit: int) -> list[int]:
         return [
             int(row[0])
             for row in connection.execute(
-                "SELECT node_id FROM properties WHERE kind = 'fingerprint' "
+                "SELECT DISTINCT node_id FROM properties WHERE kind = 'fingerprint' "
                 "ORDER BY node_id LIMIT ?",
                 (limit,),
             )
@@ -101,12 +101,17 @@ def _fingerprint_targets(path: Path, limit: int) -> list[int]:
 
 
 def _return_shape_targets(path: Path, limit: int) -> list[int]:
+    """Distinct symbols, not rows: a symbol can carry several return shapes.
+
+    Counting rows would report more symbols changed than exist and make the
+    re-embed count look short by the difference.
+    """
     connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
     try:
         return [
             int(row[0])
             for row in connection.execute(
-                "SELECT p.node_id FROM properties p "
+                "SELECT DISTINCT p.node_id FROM properties p "
                 "WHERE p.kind = 'return_shape' AND EXISTS ("
                 "  SELECT 1 FROM properties f WHERE f.node_id = p.node_id "
                 "  AND f.kind = 'fingerprint') "
