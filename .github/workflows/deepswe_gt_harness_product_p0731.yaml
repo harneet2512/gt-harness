@@ -546,6 +546,37 @@ jobs:
           echo "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854  $model_dir/tokenizer.json" | sha256sum -c -
           echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
 
+      - name: Provision the pinned language servers
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Stage the pinned language servers for LSP promotion
+        run: |
+          set -euo pipefail
+          lsp_bin="$RUNNER_TEMP/lsp-bin"
+          mkdir -p "$lsp_bin"
+
+          # gopls: module-only, so version-pinned and checksum-verified by the
+          # Go module proxy against sum.golang.org.
+          GOBIN="$lsp_bin" go install golang.org/x/tools/gopls@v0.23.0
+
+          # rust-analyzer: released as a binary, pinned by tag and digest.
+          ra_gz="$RUNNER_TEMP/rust-analyzer.gz"
+          curl -fsSL -o "$ra_gz" \
+            https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-31/rust-analyzer-x86_64-unknown-linux-gnu.gz
+          echo "a775f9edb543bb0c077da339b783e89446092986cde921c9d8e1733b091080c6  $ra_gz" | sha256sum -c -
+          gunzip -c "$ra_gz" > "$lsp_bin/rust-analyzer"
+          chmod 755 "$lsp_bin"/*
+
+          # Fail loudly rather than staging an empty directory: a silently
+          # skipped provisioning step is how LSP stayed nominally on while
+          # contributing nothing.
+          test -x "$lsp_bin/gopls"
+          test -x "$lsp_bin/rust-analyzer"
+          echo "GT_LSP_BIN_HOST=$lsp_bin" >> "$GITHUB_ENV"
+
       - name: Mint the host-only resource attestation key
         run: |
           python -c "import os, secrets; open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write('GT_RESOURCE_ATTESTATION_KEY=' + secrets.token_hex(32) + '\n')"
