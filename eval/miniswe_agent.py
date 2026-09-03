@@ -12,7 +12,6 @@ interpreter lives at the layout GTNanoAgent already relies on.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import shlex
@@ -30,7 +29,7 @@ from harbor.models.agent.context import AgentContext
 
 from eval._env import UTF8_ENV, provider_env
 from gt_harness.product import project_task_environment
-from scripts.agent_resource_evidence import parse_snapshot, write_host_interval
+from scripts.agent_resource_evidence import capture_snapshot, write_host_interval
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REMOTE_BUNDLE_DIR = "/installed-agent/bundle"
@@ -41,7 +40,6 @@ _REMOTE_PYTHON_DIR = "/installed-agent/python"
 _REMOTE_WHEELHOUSE = "/installed-agent/wheelhouse"
 _VENDOR_DIR = _REPO_ROOT / "vendor"
 _REMOTE_PY = "$HOME/.local/share/uv/tools/nano-harness/bin/python"
-_REMOTE_RESOURCE_HELPER = "/installed-agent/resource-snapshot.py"
 _UV_VERSION = "0.11.32"
 _PYTHON_VERSION = "3.12.13"
 _DEFAULT_MINISWE_AGENT_VERSION = "2.4.6"
@@ -63,14 +61,10 @@ class ProviderBillingError(NonZeroAgentExitCodeError):
 
 def _miniswe_agent_version() -> str:
     """Return the closed Mini-SWE treatment version for this execution."""
-    version = os.environ.get(
-        "MINISWE_AGENT_VERSION", _DEFAULT_MINISWE_AGENT_VERSION
-    )
+    version = os.environ.get("MINISWE_AGENT_VERSION", _DEFAULT_MINISWE_AGENT_VERSION)
     if version not in _ALLOWED_MINISWE_AGENT_VERSIONS:
         allowed = ", ".join(sorted(_ALLOWED_MINISWE_AGENT_VERSIONS))
-        raise ValueError(
-            f"MINISWE_AGENT_VERSION must be one of: {allowed}; got {version!r}"
-        )
+        raise ValueError(f"MINISWE_AGENT_VERSION must be one of: {allowed}; got {version!r}")
     return version
 
 
@@ -239,8 +233,6 @@ class MiniSweAgent(BaseInstalledAgent):
         uv_installer = self._uv_installer_host()
         python_archive = self._python_archive_host()
         wheelhouse = self._wheelhouse_host()
-        resource_helper = _REPO_ROOT / "scripts" / "agent_resource_evidence.py"
-        resource_helper_sha256 = hashlib.sha256(resource_helper.read_bytes()).hexdigest()
         miniswe_version = _miniswe_agent_version()
         remote_gt_wheel = f"{_REMOTE_BUNDLE_DIR}/{wheel.name}"
         # Harbor's task images do not guarantee that the treatment mount exists.
@@ -255,19 +247,18 @@ class MiniSweAgent(BaseInstalledAgent):
         await environment.upload_file(uv_installer, _REMOTE_UV_INSTALLER)
         await environment.upload_file(python_archive, _REMOTE_PYTHON_ARCHIVE)
         await environment.upload_dir(wheelhouse, _REMOTE_WHEELHOUSE)
-        await environment.upload_file(resource_helper, _REMOTE_RESOURCE_HELPER)
         await self.exec_as_root(environment, f"chmod 755 {_REMOTE_GT_BINARY}")
         install = (
             "set -eu; "
             f"echo '{_UV_INSTALLER_SHA256}  {_REMOTE_UV_INSTALLER}' | sha256sum -c - && "
-            "mkdir -p /tmp/uv-extract \"$HOME/.local/bin\" && "
+            'mkdir -p /tmp/uv-extract "$HOME/.local/bin" && '
             f"tar -xzf {_REMOTE_UV_INSTALLER} -C /tmp/uv-extract && "
-            "cp /tmp/uv-extract/uv-x86_64-unknown-linux-gnu/uv \"$HOME/.local/bin/uv\" && "
-            "chmod 755 \"$HOME/.local/bin/uv\" && "
+            'cp /tmp/uv-extract/uv-x86_64-unknown-linux-gnu/uv "$HOME/.local/bin/uv" && '
+            'chmod 755 "$HOME/.local/bin/uv" && '
             f"mkdir -p {_REMOTE_PYTHON_DIR} && tar -xzf {_REMOTE_PYTHON_ARCHIVE} "
             f"-C {_REMOTE_PYTHON_DIR} --strip-components=1 && "
             f'"$HOME/.local/bin/uv" tool install --offline --no-index '
-            f'--find-links {_REMOTE_WHEELHOUSE} --python {_REMOTE_PYTHON_DIR}/bin/python3.12 '
+            f"--find-links {_REMOTE_WHEELHOUSE} --python {_REMOTE_PYTHON_DIR}/bin/python3.12 "
             f'--with "mini-swe-agent=={miniswe_version}" '
             f"--with {shlex.quote(remote_gt_wheel)} --with 'numpy==2.5.1' "
             f"{shlex.quote(remote_harness_wheel)} && "
@@ -286,13 +277,6 @@ class MiniSweAgent(BaseInstalledAgent):
             f"rm -rf -- {_REMOTE_BUNDLE_DIR} /tmp/gt-install-smoke-src"
         )
         await self.exec_as_agent(environment, install, env=dict(UTF8_ENV))
-        await self.exec_as_root(
-            environment,
-            f"chown -R 0:0 {_REMOTE_PYTHON_DIR} {_REMOTE_RESOURCE_HELPER} && "
-            f"chmod -R a-w {_REMOTE_PYTHON_DIR} && chmod 555 {_REMOTE_RESOURCE_HELPER} && "
-            f"echo '{resource_helper_sha256}  {_REMOTE_RESOURCE_HELPER}' | sha256sum -c -",
-            env=dict(UTF8_ENV),
-        )
 
     def _model_and_env(self) -> tuple[str, dict[str, str]]:
         model = str(self.model_name or "").strip()
@@ -311,7 +295,7 @@ class MiniSweAgent(BaseInstalledAgent):
         return (
             f'exec "{_REMOTE_PY}" -m scripts.miniswe_gt_run '
             f"--task {shlex.quote(instruction)} --model {shlex.quote(model)} "
-            f"--cwd \"$PWD\" "
+            f'--cwd "$PWD" '
             f"--output /logs/agent/miniswe_trajectory.json "
             f"--temperature 1.0 "
             f"--metrics /logs/agent/miniswe_report.json "
@@ -358,19 +342,20 @@ class MiniSweGtAgent(MiniSweAgent):
         return (
             f'"{_REMOTE_PY}" -c '
             '"import minisweagent, groundtruth, gt_engine; '
-            "print(minisweagent.__version__)\""
+            'print(minisweagent.__version__)"'
         )
 
     @staticmethod
-    def _resource_command(task_id: str, product_source_sha: str) -> str:
-        helper = _REPO_ROOT / "scripts" / "agent_resource_evidence.py"
-        expected = hashlib.sha256(helper.read_bytes()).hexdigest()
-        return (
-            f"echo '{expected}  {_REMOTE_RESOURCE_HELPER}' | sha256sum -c - >/dev/null && "
-            f'"{_REMOTE_PYTHON_DIR}/bin/python3.12" -I {_REMOTE_RESOURCE_HELPER} '
-            f"--task-id {shlex.quote(task_id)} "
-            f"--product-source-sha {shlex.quote(product_source_sha)}"
-        )
+    async def _resource_snapshot(
+        environment: BaseEnvironment, task_id: str, product_source_sha: str
+    ) -> dict[str, object]:
+        snapshotter = getattr(environment, "agent_resource_snapshot", None)
+        if not callable(snapshotter):
+            raise RuntimeError("environment lacks host cgroup snapshot support")
+        cgroup = await snapshotter()
+        if not isinstance(cgroup, dict):
+            raise RuntimeError("host cgroup snapshot is malformed")
+        return capture_snapshot(cgroup, task_id=task_id, product_source_sha=product_source_sha)
 
     @with_prompt_template
     async def run(
@@ -381,9 +366,7 @@ class MiniSweGtAgent(MiniSweAgent):
         env.update(self.resolve_env_vars())
         env.setdefault("GT_INDEX_BINARY", _REMOTE_GT_BINARY)
         env["GT_TASK_ID"] = str(self._resolved_flags.get("task_id", ""))
-        env["GT_PRODUCT_SOURCE_SHA"] = str(
-            self._resolved_flags.get("product_source_sha", "")
-        )
+        env["GT_PRODUCT_SOURCE_SHA"] = str(self._resolved_flags.get("product_source_sha", ""))
         task_id = env["GT_TASK_ID"].strip()
         product_source_sha = env["GT_PRODUCT_SOURCE_SHA"].strip()
         if not task_id or not re.fullmatch(r"[0-9a-f]{40}", product_source_sha):
@@ -399,17 +382,7 @@ class MiniSweGtAgent(MiniSweAgent):
         extra = '--state-dir "$GT_STATE_DIR" --gt-mode advisory '
         resource_path = Path(self.logs_dir) / "agent-resource.json"
         resource_path.unlink(missing_ok=True)
-        before_result = await self.exec_as_agent(
-            environment,
-            self._resource_command(task_id, product_source_sha),
-            env=dict(UTF8_ENV),
-            cwd="/",
-        )
-        before = parse_snapshot(
-            str(before_result.stdout),
-            task_id=task_id,
-            product_source_sha=product_source_sha,
-        )
+        before = await self._resource_snapshot(environment, task_id, product_source_sha)
         try:
             await self.exec_as_agent(
                 environment,
@@ -423,17 +396,7 @@ class MiniSweGtAgent(MiniSweAgent):
             match = re.search(r"Command failed \(exit (-?\d+)\)", str(exc))
             if match:
                 try:
-                    after_result = await self.exec_as_agent(
-                        environment,
-                        self._resource_command(task_id, product_source_sha),
-                        env=dict(UTF8_ENV),
-                        cwd="/",
-                    )
-                    after = parse_snapshot(
-                        str(after_result.stdout),
-                        task_id=task_id,
-                        product_source_sha=product_source_sha,
-                    )
+                    after = await self._resource_snapshot(environment, task_id, product_source_sha)
                     write_host_interval(
                         resource_path,
                         before=before,
@@ -445,6 +408,7 @@ class MiniSweGtAgent(MiniSweAgent):
                     )
                 except Exception:
                     # Resource finalization cannot replace the exact runner error.
+                    resource_path.unlink(missing_ok=True)
                     pass
             raise
         except BaseException:

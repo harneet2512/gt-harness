@@ -1,7 +1,7 @@
 """Capture cgroup snapshots for host-owned agent resource attestation."""
+
 from __future__ import annotations
 
-import argparse
 import hashlib
 import hmac
 import json
@@ -17,56 +17,23 @@ def _canonical(payload: dict[str, object]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _read_integer(path: Path) -> int | None:
-    try:
-        value = path.read_text(encoding="ascii").strip()
-        return None if value == "max" else int(value)
-    except (OSError, ValueError):
-        return None
-
-
-def _cgroup_snapshot() -> dict[str, int | None]:
-    root = Path("/sys/fs/cgroup")
-    events: dict[str, int] = {}
-    try:
-        for line in (root / "memory.events").read_text(encoding="ascii").splitlines():
-            name, value = line.split(maxsplit=1)
-            events[name] = int(value)
-    except (OSError, ValueError):
-        pass
-    return {
-        "current": _read_integer(root / "memory.current"),
-        "max": _read_integer(root / "memory.max"),
-        "peak": _read_integer(root / "memory.peak"),
-        "oom": events.get("oom"),
-        "oom_kill": events.get("oom_kill"),
-    }
-
-
-def capture_snapshot(*, task_id: str, product_source_sha: str) -> dict[str, object]:
+def capture_snapshot(
+    cgroup: dict[str, object], *, task_id: str, product_source_sha: str
+) -> dict[str, object]:
     if not task_id or not _SHA40.fullmatch(product_source_sha):
         raise ValueError("agent resource identity invalid")
+    if (
+        cgroup.get("schema") != "gt.host_cgroup_snapshot.v1"
+        or not re.fullmatch(r"[0-9a-f]{64}", str(cgroup.get("container_id_sha256") or ""))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(cgroup.get("cgroup_path_sha256") or ""))
+    ):
+        raise ValueError("host cgroup snapshot invalid")
     return {
         "schema": "gt.agent_resource_snapshot.v1",
         "task_id": task_id,
         "product_source_sha": product_source_sha,
-        "cgroup": _cgroup_snapshot(),
+        "cgroup": cgroup,
     }
-
-
-def parse_snapshot(
-    encoded: str, *, task_id: str, product_source_sha: str
-) -> dict[str, object]:
-    payload = json.loads(encoded)
-    if (
-        not isinstance(payload, dict)
-        or payload.get("schema") != "gt.agent_resource_snapshot.v1"
-        or payload.get("task_id") != task_id
-        or payload.get("product_source_sha") != product_source_sha
-        or not isinstance(payload.get("cgroup"), dict)
-    ):
-        raise ValueError("agent resource snapshot identity invalid")
-    return payload
 
 
 def write_host_interval(
@@ -92,6 +59,9 @@ def write_host_interval(
     first = before["cgroup"]
     last = after["cgroup"]
     assert isinstance(first, dict) and isinstance(last, dict)
+    for field in ("container_id_sha256", "cgroup_path_sha256"):
+        if first.get(field) != last.get(field):
+            raise ValueError("agent resource cgroup identity changed")
 
     def delta(name: str) -> int:
         old = first.get(name)
@@ -130,19 +100,3 @@ def write_host_interval(
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--task-id", required=True)
-    parser.add_argument("--product-source-sha", required=True)
-    args = parser.parse_args()
-    snapshot = capture_snapshot(
-        task_id=args.task_id, product_source_sha=args.product_source_sha
-    )
-    print(_canonical(snapshot).decode("utf-8"))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

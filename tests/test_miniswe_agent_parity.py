@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 from harbor.agents.installed.base import NonZeroAgentExitCodeError
@@ -79,18 +80,14 @@ def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
     assert "scripts.provider_probe" not in command
 
 
-def test_installed_agent_resolves_explicit_verified_bundle_artifacts(
-    monkeypatch, tmp_path
-):
+def test_installed_agent_resolves_explicit_verified_bundle_artifacts(monkeypatch, tmp_path):
     gt_wheel = tmp_path / "groundtruth_mcp-1.0.0-py3-none-any.whl"
     harness_wheel = tmp_path / "nano_harness-0.0.1-py3-none-any.whl"
     gt_wheel.write_bytes(b"groundtruth")
     harness_wheel.write_bytes(b"harness")
     monkeypatch.setenv("GT_GROUNDTRUTH_WHEEL_HOST", str(gt_wheel))
     monkeypatch.setenv("GT_HARNESS_WHEEL_HOST", str(harness_wheel))
-    monkeypatch.setenv(
-        "GT_HARNESS_WHEEL_SHA256", hashlib.sha256(b"harness").hexdigest()
-    )
+    monkeypatch.setenv("GT_HARNESS_WHEEL_SHA256", hashlib.sha256(b"harness").hexdigest())
     monkeypatch.setattr(
         "eval.miniswe_agent._GT_WHEEL_SHA256",
         hashlib.sha256(b"groundtruth").hexdigest(),
@@ -115,17 +112,20 @@ async def test_gt_run_binds_task_identity_into_index_evidence(monkeypatch, tmp_p
 
     async def execute(_environment, _command, *, env, **_kwargs):
         captured.update(env)
-        if "resource-snapshot.py" in _command:
-            return SimpleNamespace(stdout=json.dumps({
-                "schema": "gt.agent_resource_snapshot.v1",
-                "task_id": "arktype-task",
-                "product_source_sha": "a" * 40,
-                "cgroup": {"oom": 0, "oom_kill": 0},
-            }))
 
     monkeypatch.setattr(agent, "exec_as_agent", execute)
 
-    await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
+    class Environment:
+        async def agent_resource_snapshot(self):
+            return {
+                "schema": "gt.host_cgroup_snapshot.v1",
+                "container_id_sha256": "b" * 64,
+                "cgroup_path_sha256": "c" * 64,
+                "oom": 0,
+                "oom_kill": 0,
+            }
+
+    await agent.run.__wrapped__(agent, "task", Environment(), SimpleNamespace())
 
     assert captured["GT_TASK_ID"] == "arktype-task"
     assert captured["GT_PRODUCT_SOURCE_SHA"] == "a" * 40
@@ -147,23 +147,24 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
         commands.append(command)
         if "scripts.miniswe_gt_run" in command:
             raise NonZeroAgentExitCodeError("Command failed (exit 137)")
-        oom, oom_kill = next(snapshots)
-        return SimpleNamespace(stdout=json.dumps({
-            "schema": "gt.agent_resource_snapshot.v1",
-            "task_id": "arktype-task",
-            "product_source_sha": "a" * 40,
-            "cgroup": {"oom": oom, "oom_kill": oom_kill},
-        }))
+
+    class Environment:
+        async def agent_resource_snapshot(self):
+            oom, oom_kill = next(snapshots)
+            return {
+                "schema": "gt.host_cgroup_snapshot.v1",
+                "container_id_sha256": "b" * 64,
+                "cgroup_path_sha256": "c" * 64,
+                "oom": oom,
+                "oom_kill": oom_kill,
+            }
 
     monkeypatch.setattr(agent, "exec_as_agent", execute)
     with pytest.raises(NonZeroAgentExitCodeError):
-        await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
-    assert "/installed-agent/resource-snapshot.py" in commands[0]
-    assert "sha256sum -c -" in commands[0]
-    assert ' -I /installed-agent/resource-snapshot.py ' in commands[0]
-    assert commands[1].startswith("exec ")
-    assert "scripts.miniswe_gt_run" in commands[1]
-    assert "/installed-agent/resource-snapshot.py" in commands[2]
+        await agent.run.__wrapped__(agent, "task", Environment(), SimpleNamespace())
+    assert len(commands) == 1
+    assert commands[0].startswith("exec ")
+    assert "scripts.miniswe_gt_run" in commands[0]
     evidence = json.loads((tmp_path / "logs" / "agent-resource.json").read_text())
     assert evidence["attestation_scope"] == "host_agent_adapter"
     assert evidence["error_code"] == "GT_AGENT_CGROUP_OOM"
@@ -171,9 +172,7 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
 
 @pytest.mark.asyncio
 async def test_gt_run_refuses_invalid_identity_before_any_command(monkeypatch, tmp_path):
-    agent = MiniSweGtAgent(
-        logs_dir=tmp_path / "logs", task_id="", product_source_sha="a" * 40
-    )
+    agent = MiniSweGtAgent(logs_dir=tmp_path / "logs", task_id="", product_source_sha="a" * 40)
     calls = 0
     monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
     monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_a, **_k: {})
@@ -203,26 +202,34 @@ async def test_failed_host_finalization_removes_task_forged_resource(monkeypatch
         nonlocal calls
         calls += 1
         if "scripts.miniswe_gt_run" in command:
-            (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
-            (tmp_path / "logs" / "agent-resource.json").write_text("forged")
+            Path(agent.logs_dir).mkdir(parents=True, exist_ok=True)
+            (Path(agent.logs_dir) / "agent-resource.json").write_text("forged")
             raise NonZeroAgentExitCodeError("Command failed (exit 137)")
-        if calls == 1:
-            return SimpleNamespace(stdout=json.dumps({
-                "schema": "gt.agent_resource_snapshot.v1", "task_id": "task-a",
-                "product_source_sha": "a" * 40, "cgroup": {"oom": 0, "oom_kill": 0},
-            }))
-        return SimpleNamespace(stdout="not-json")
+        return None
+
+    class Environment:
+        snapshots = 0
+
+        async def agent_resource_snapshot(self):
+            self.snapshots += 1
+            if self.snapshots > 1:
+                raise RuntimeError("host snapshot failed")
+            return {
+                "schema": "gt.host_cgroup_snapshot.v1",
+                "container_id_sha256": "b" * 64,
+                "cgroup_path_sha256": "c" * 64,
+                "oom": 0,
+                "oom_kill": 0,
+            }
 
     monkeypatch.setattr(agent, "exec_as_agent", execute)
     with pytest.raises(NonZeroAgentExitCodeError):
-        await agent.run.__wrapped__(agent, "task", SimpleNamespace(), SimpleNamespace())
-    assert not (tmp_path / "logs" / "agent-resource.json").exists()
+        await agent.run.__wrapped__(agent, "task", Environment(), SimpleNamespace())
+    assert not (Path(agent.logs_dir) / "agent-resource.json").exists()
 
 
 @pytest.mark.asyncio
-async def test_installer_uses_canonical_version_and_verified_uv_installer(
-    monkeypatch, tmp_path
-):
+async def test_installer_uses_canonical_version_and_verified_uv_installer(monkeypatch, tmp_path):
     wheel = tmp_path / "groundtruth_mcp-1.0.0-py3-none-any.whl"
     harness_wheel = tmp_path / "nano_harness-0.0.1-py3-none-any.whl"
     binary = tmp_path / "gt-index-linux-amd64"
@@ -238,9 +245,7 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(
     (wheelhouse / "dependency.whl").write_bytes(b"wheel")
     monkeypatch.delenv("MINISWE_AGENT_VERSION", raising=False)
     monkeypatch.setattr(MiniSweAgent, "_gt_wheel", staticmethod(lambda: wheel))
-    monkeypatch.setattr(
-        MiniSweAgent, "_harness_wheel", staticmethod(lambda: harness_wheel)
-    )
+    monkeypatch.setattr(MiniSweAgent, "_harness_wheel", staticmethod(lambda: harness_wheel))
     monkeypatch.setattr(MiniSweAgent, "_gt_binary_host", staticmethod(lambda: binary))
     monkeypatch.setattr(MiniSweAgent, "_uv_installer_host", staticmethod(lambda: uv_installer))
     monkeypatch.setattr(MiniSweAgent, "_python_archive_host", staticmethod(lambda: python_archive))
@@ -274,7 +279,3 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(
     assert "curl -LsSf" not in install
     assert str(harness_wheel.name) in install
     assert "/installed-agent/miniswe" not in install
-    immutable = commands[-1]
-    assert "chown -R 0:0 /installed-agent/python" in immutable
-    assert "chmod 555 /installed-agent/resource-snapshot.py" in immutable
-    assert "sha256sum -c -" in immutable
