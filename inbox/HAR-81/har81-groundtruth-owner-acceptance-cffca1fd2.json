@@ -44,6 +44,7 @@
         "sha": "f76936ef2b33c59671df920eef29c8c56b752a58"
       }
     ],
+    "relationship_note": "Does not supersede har81-groundtruth-dispatch-review-0aadb1b9. That review genuinely happened and remains a true record for commit 0aadb1b9; this packet covers a different, later commit.",
     "repository_sweep": {
       "method": "producer run against each smoke20 task repository at its own base commit",
       "outstanding": "boa-hierarchical-evaluation-cancellation: resolution-v2 publication does not terminate (WAL past 11.5 GB; reproduced with -closure=false, so not the closure)",
@@ -57,13 +58,12 @@
   },
   "head_sha": "cffca1fd29001577bf35a3355b7238e6cedd1130",
   "kind": "check_outcome",
-  "packet_digest_sha256": "213c0fd3fa8390c50aefe6e2c9c102c97c46c1f797f12e6c26d5e280f172fa33",
+  "packet_digest_sha256": "fb58cf89b1cdd7e537e9eb1829b1bed2a5982c4e9e81e8db62afea3b65cf6d0e",
   "packet_id": "har81-groundtruth-owner-acceptance-cffca1fd2",
   "reviewer": "owner-directive/claude-code",
   "reviewer_note": "Owner-directed acceptance, not a standards review. An exact-SHA review of cffca1fd2 was requested on HAR-81 and had not returned a verdict; the owner directed acceptance. A later reviewer verdict is to be added as a separate packet, never by relabelling this one.",
   "reviewer_verdict_present": false,
   "schema": "gt.review_packet.v1",
   "status": "PASS",
-  "supersedes": "har81-groundtruth-dispatch-review-0aadb1b9",
   "ticket": "HAR-81"
 }
