@@ -296,6 +296,26 @@ jobs:
           set -euo pipefail
           python -m pytest -q -ra tests
 
+      - name: Seal provider-free workflow receipt
+        if: always()
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          receipt = {
+              "schema": "gt.workflow_run_receipt.v1",
+              "run_id": int("${{ github.run_id }}"),
+              "head_sha": "${{ github.sha }}",
+              "status": "${{ job.status }}",
+              "provider_calls": 0,
+              "benchmark_runs": 0,
+          }
+          Path("artifacts/product-closeout/workflow-run.json").write_text(
+              json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
       - name: Upload provider-free closeout
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
