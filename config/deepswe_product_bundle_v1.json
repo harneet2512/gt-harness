@@ -166,6 +166,7 @@
     "scripts/standardize_benchmark_result.py",
     "scripts/provider_probe.py",
     "scripts/resolve_harbor_budget.py",
+    "scripts/smoke_stage.py",
     "scripts/verify_recorded_delivery_content.py",
     "scripts/validate_product_workflow.py",
     "tests/fixtures/har81_attestation/content_recordings.json",

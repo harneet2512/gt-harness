@@ -14,6 +14,7 @@ from gt_engine.feature_matrix import verify_matrix
 from gt_harness.runtime_receipts import verify_runtime_receipt
 from scripts.gt_audit import artifact_corpus_sha256, audit_digest_sha256
 from scripts.provider_preflight import load_route
+from scripts.smoke_stage import GATE_STAGE, GATE_TASK_ID, REMAINDER_STAGE, select_stage_tasks
 from scripts.standardize_benchmark_result import (
     _failure_class,
     _reward,
@@ -141,7 +142,43 @@ def attest_deepswe(
         raise ValueError("planned_task_ids_not_array")
     expected = list(task_ids)
     expected_set = set(expected)
-    if expected != list(CANONICAL_TASK_IDS):
+    cohort_stage = plan.get("cohort_stage")
+    if cohort_stage is None:
+        expected_cohort = list(CANONICAL_TASK_IDS)
+    else:
+        try:
+            expected_cohort = select_stage_tasks(list(CANONICAL_TASK_IDS), cohort_stage)
+        except ValueError:
+            expected_cohort = []
+            errors.append("planned_cohort_stage_invalid")
+        if plan.get("gate_task_id") != GATE_TASK_ID:
+            errors.append("planned_gate_task_mismatch")
+        if plan.get("full_task_count") != len(CANONICAL_TASK_IDS):
+            errors.append("planned_full_task_count_mismatch")
+        full_order_hash = hashlib.sha256(
+            ("\n".join(CANONICAL_TASK_IDS) + "\n").encode("utf-8")
+        ).hexdigest()
+        if plan.get("full_task_order_sha256") != full_order_hash:
+            errors.append("planned_full_task_order_digest_mismatch")
+        if cohort_stage == GATE_STAGE and plan.get("prior_gate") is not None:
+            errors.append("gate_one_prior_gate_unexpected")
+        if cohort_stage == REMAINDER_STAGE:
+            binding = plan.get("prior_gate")
+            if (
+                not isinstance(binding, dict)
+                or binding.get("schema") != "gt.prior_gate_binding.v1"
+                or binding.get("task_id") != GATE_TASK_ID
+                or binding.get("source_sha") != source_sha
+                or type(binding.get("workflow_run_id")) is not int
+                or not all(
+                    isinstance(binding.get(key), str)
+                    and len(binding[key]) == 64
+                    and all(char in "0123456789abcdef" for char in binding[key])
+                    for key in ("attestation_sha256", "diagnostic_summary_sha256")
+                )
+            ):
+                errors.append("prior_gate_binding_invalid")
+    if expected != expected_cohort:
         errors.append("planned_canonical_cohort_mismatch")
     if plan.get("schema") != "gt.deepswe_gt_harness_plan.v1":
         errors.append("plan_schema_mismatch")

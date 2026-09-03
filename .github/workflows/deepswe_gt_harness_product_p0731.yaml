@@ -8,6 +8,17 @@ on:
         required: false
         type: boolean
         default: false
+      cohort_stage:
+        description: "Paid cohort stage: gate exactly one task, then the remaining 19"
+        required: false
+        type: choice
+        options: [gate-one, remaining-19]
+        default: gate-one
+      prior_gate_run_id:
+        description: "Required for remaining-19: completed gate-one workflow run ID"
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       approve_paid_run:
@@ -15,10 +26,21 @@ on:
         required: false
         type: boolean
         default: false
+      cohort_stage:
+        description: "Paid cohort stage: gate exactly one task, then the remaining 19"
+        required: false
+        type: string
+        default: gate-one
+      prior_gate_run_id:
+        description: "Required for remaining-19: completed gate-one workflow run ID"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
   packages: read
+  actions: read
 
 concurrency:
   group: gt-harness-deepswe20-${{ github.run_id }}
@@ -53,12 +75,32 @@ jobs:
           ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9
           path: deepswe-bench
 
+      - name: Validate staged cohort inputs
+        if: ${{ inputs.cohort_stage == 'remaining-19' }}
+        env:
+          COHORT_STAGE: ${{ inputs.cohort_stage }}
+          PRIOR_GATE_RUN_ID: ${{ inputs.prior_gate_run_id }}
+        run: |
+          set -euo pipefail
+          python -c 'from scripts.smoke_stage import validate_stage_inputs; import os; validate_stage_inputs(os.environ["COHORT_STAGE"], os.environ["PRIOR_GATE_RUN_ID"])'
+
+      - name: Download and bind the completed gate-one attestation
+        if: ${{ inputs.cohort_stage == 'remaining-19' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.prior_gate_run_id }}
+          name: gt-harness-deepswe20-attestation-${{ inputs.prior_gate_run_id }}
+          path: prior-gate
+
       - name: Resolve and attest the balanced DeepSWE smoke20 cohort
         id: cohort
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           TREATMENT: groundtruth
           APPROVE_PAID_RUN: ${{ inputs.approve_paid_run || 'false' }}
+          COHORT_STAGE: ${{ inputs.cohort_stage || 'gate-one' }}
+          PRIOR_GATE_RUN_ID: ${{ inputs.prior_gate_run_id || '' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -74,6 +116,14 @@ jobs:
               resolve_budget,
           )
           from scripts.provider_preflight import load_route
+          from scripts.smoke_stage import (
+              GATE_STAGE,
+              GATE_TASK_ID,
+              REMAINDER_STAGE,
+              select_stage_tasks,
+              validate_prior_gate,
+              validate_stage_inputs,
+          )
 
           manifest_path = Path("eval/deepswe_smoke20_v1.json")
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -100,7 +150,29 @@ jobs:
           if order_hash != manifest.get("task_order_sha256"):
               raise SystemExit("DeepSWE smoke20 order hash mismatch")
 
-          selected_tasks = tasks
+          stage = os.environ["COHORT_STAGE"].strip() or GATE_STAGE
+          prior_gate_run_id = os.environ["PRIOR_GATE_RUN_ID"].strip()
+          validate_stage_inputs(stage, prior_gate_run_id)
+          prior_gate = None
+          if stage == REMAINDER_STAGE:
+              prior_gate = validate_prior_gate(
+                  Path("prior-gate"),
+                  source_sha=os.environ["SOURCE_SHA"],
+                  prior_gate_run_id=prior_gate_run_id,
+              )
+          selected_tasks = select_stage_tasks(tasks, stage)
+
+          full_language_counts = {}
+          for task in tasks:
+              config = bench / "tasks" / task / "task.toml"
+              if not config.is_file():
+                  raise SystemExit(f"missing DeepSWE task: {task}")
+              with config.open("rb") as handle:
+                  task_config = tomllib.load(handle)
+              language = str((task_config.get("metadata") or {}).get("language") or "unknown")
+              full_language_counts[language] = full_language_counts.get(language, 0) + 1
+          if full_language_counts != manifest.get("language_counts"):
+              raise SystemExit(f"DeepSWE language balance mismatch: {full_language_counts!r}")
 
           language_counts = {}
           matrix = []
@@ -133,10 +205,6 @@ jobs:
                       "container_digest": bundle_task["container_digest"],
                   }
               )
-          if language_counts != manifest.get("language_counts"):
-              raise SystemExit(
-                  f"DeepSWE language balance mismatch: {language_counts!r}"
-              )
           treatment = os.environ["TREATMENT"].strip().lower()
           if treatment != "groundtruth":
               raise SystemExit("paid smoke20 is GT-only; retained HAR-82 data is the baseline")
@@ -152,6 +220,12 @@ jobs:
               "task_ids": selected_tasks,
               "task_count": len(selected_tasks),
               "task_order_sha256": hashlib.sha256(("\n".join(selected_tasks) + "\n").encode()).hexdigest(),
+              "cohort_stage": stage,
+              "gate_task_id": GATE_TASK_ID,
+              "full_task_count": len(tasks),
+              "full_task_order_sha256": order_hash,
+              "full_language_counts": full_language_counts,
+              "prior_gate": prior_gate,
               "language_counts": language_counts,
               "attempts_per_task": 1,
               "max_parallel": min(20, len(selected_tasks)),
@@ -524,6 +598,14 @@ jobs:
             exit 1
           fi
 
+      - name: Diagnose every staged task artifact
+        if: always()
+        run: |
+          set -uo pipefail
+          diagnostic_exit=0
+          python -m scripts.diagnose_benchmark_run --root attestation --strict > attestation/diagnostics-console.txt || diagnostic_exit=$?
+          test "$diagnostic_exit" -eq 0
+
       - name: Verify all DeepSWE outcomes and product receipts
         if: always()
         env:
@@ -547,4 +629,6 @@ jobs:
             attestation/gt-audit.json
             attestation/gt-live-gate.json
             attestation/feature-matrix.json
+            attestation/diagnostic-summary.json
+            attestation/diagnostics-console.txt
           if-no-files-found: error

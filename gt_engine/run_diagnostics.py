@@ -295,6 +295,8 @@ def _planned_tasks(root: Path) -> set[str]:
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
         tasks = value.get("tasks") if isinstance(value, dict) else None
+        if not isinstance(tasks, list) and isinstance(value, dict):
+            tasks = value.get("task_ids")
         if isinstance(tasks, list) and all(isinstance(item, str) for item in tasks):
             planned.update(tasks)
     return planned
