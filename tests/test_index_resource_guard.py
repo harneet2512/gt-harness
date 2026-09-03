@@ -12,11 +12,19 @@ import pytest
 
 from gt_engine import indexer
 
+_REAL_KILL_INDEX_PROCESS_TREE = indexer._kill_index_process_tree
+
 
 @pytest.fixture(autouse=True)
 def _enable_guarded_test_process_on_windows(monkeypatch):
     if os.name == "nt":
+        def verified_test_kill(process):
+            if process.poll() is None:
+                process.kill()
+            return True
+
         monkeypatch.setattr(indexer, "_has_verified_index_process_tree_guard", lambda: True)
+        monkeypatch.setattr(indexer, "_kill_index_process_tree", verified_test_kill)
 
 
 def _write_fake_indexer(path: Path) -> None:
@@ -212,7 +220,7 @@ def test_windows_tree_kill_uses_taskkill_tree_flag(monkeypatch) -> None:
     monkeypatch.setattr(
         indexer.subprocess, "run", lambda command, **_kwargs: calls.append(command)
     )
-    indexer._kill_index_process_tree(Process())
+    _REAL_KILL_INDEX_PROCESS_TREE(Process())
     assert calls == [["taskkill", "/PID", "42", "/T", "/F"]]
 
 
@@ -236,7 +244,7 @@ def test_windows_tree_kill_falls_back_when_taskkill_times_out(monkeypatch) -> No
     monkeypatch.setattr(indexer.os, "name", "nt")
     monkeypatch.setattr(indexer.subprocess, "run", time_out)
 
-    indexer._kill_index_process_tree(Process())
+    _REAL_KILL_INDEX_PROCESS_TREE(Process())
 
     assert killed == [True]
 
@@ -259,6 +267,30 @@ def test_windows_runtime_refuses_parser_without_verified_tree_guard(
     assert result.status == "resource_guard_unavailable"
     assert result.error_code == "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE"
     assert result.exit_code is None
+
+
+def test_bounded_runner_refuses_success_when_tree_teardown_is_unverified(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(indexer, "_resolved_binary_path", lambda: sys.executable)
+    monkeypatch.setattr(
+        indexer,
+        "_index_command",
+        lambda *_args: [sys.executable, "-c", "pass"],
+    )
+    monkeypatch.setattr(
+        indexer, "_effective_index_memory_limit", lambda _snapshot: 64 * 1024 * 1024
+    )
+    monkeypatch.setattr(indexer, "_kill_index_process_tree", lambda _process: False)
+
+    result = indexer._run_index_bounded(
+        str(tmp_path), tmp_path / "graph.db", tmp_path
+    )
+
+    assert result.success is False
+    assert result.status == "process_tree_unverified"
+    assert result.error_code == "GT_INDEX_PROCESS_TREE_UNVERIFIED"
+    assert result.exit_code == 0
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group semantics")

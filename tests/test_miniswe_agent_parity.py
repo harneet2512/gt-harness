@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from harbor.agents.installed.base import NonZeroAgentExitCodeError
@@ -168,6 +168,40 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
     evidence = json.loads((tmp_path / "logs" / "agent-resource.json").read_text())
     assert evidence["attestation_scope"] == "host_agent_adapter"
     assert evidence["error_code"] == "GT_AGENT_CGROUP_OOM"
+
+
+@pytest.mark.asyncio
+async def test_gt_run_does_not_mislabel_other_nonzero_exit_as_137(monkeypatch, tmp_path):
+    agent = MiniSweGtAgent(
+        logs_dir=tmp_path / "logs", task_id="task-a", product_source_sha="a" * 40
+    )
+    monkeypatch.setattr(agent, "_model_and_env", lambda: ("model", {}))
+    monkeypatch.setattr("eval.miniswe_agent.project_task_environment", lambda *_a, **_k: {})
+    monkeypatch.setattr(agent, "resolve_env_vars", lambda: {})
+
+    async def execute(*_args, **_kwargs):
+        raise NonZeroAgentExitCodeError("Command failed (exit 1)")
+
+    class Environment:
+        snapshots = 0
+
+        async def agent_resource_snapshot(self):
+            self.snapshots += 1
+            return {
+                "schema": "gt.host_cgroup_snapshot.v1",
+                "container_id_sha256": "b" * 64,
+                "cgroup_path_sha256": "c" * 64,
+                "oom": 0,
+                "oom_kill": 0,
+            }
+
+    environment = Environment()
+    monkeypatch.setattr(agent, "exec_as_agent", execute)
+    with pytest.raises(NonZeroAgentExitCodeError):
+        await agent.run.__wrapped__(agent, "task", environment, SimpleNamespace())
+
+    assert environment.snapshots == 1
+    assert not (Path(agent.logs_dir) / "agent-resource.json").exists()
 
 
 @pytest.mark.asyncio

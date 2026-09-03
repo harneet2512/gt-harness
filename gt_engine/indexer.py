@@ -60,6 +60,7 @@ _INDEX_GOMEMLIMIT_BYTES = 768 * 1024 * 1024
 _INDEX_RSS_LIMIT_BYTES = 1024 * 1024 * 1024
 _INDEX_TIMEOUT_SECONDS = 600
 _INDEX_MAX_PROCS = 2
+_INDEX_TREE_TEARDOWN_SECONDS = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,7 +366,29 @@ def _drain_stream(stream, result: dict[str, object], prefix: str) -> None:
     result[f"{prefix}_sha256"] = digest.hexdigest()
 
 
-def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> None:
+def _posix_process_group_has_live_members(process_group_id: int) -> bool:
+    proc = Path("/proc")
+    if proc.is_dir():
+        for entry in proc.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                state = fields[0]
+                process_group = int(fields[2])
+            except (FileNotFoundError, IndexError, OSError, ValueError):
+                continue
+            if process_group == process_group_id and state != "Z":
+                return True
+        return False
+    try:
+        os.killpg(process_group_id, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> bool:
     if os.name == "nt":
         try:
             subprocess.run(
@@ -383,11 +406,21 @@ def _kill_index_process_tree(process: subprocess.Popen[bytes]) -> None:
                 process.kill()
             except OSError:
                 pass
-        return
+        # Parent death is not proof of descendant death on Windows. The
+        # production boundary refuses launch on this platform until a Job
+        # Object provides verifiable kill-on-close semantics.
+        return False
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (OSError, ProcessLookupError):
-        pass
+        return not _posix_process_group_has_live_members(process.pid)
+    deadline = time.monotonic() + _INDEX_TREE_TEARDOWN_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        if not _posix_process_group_has_live_members(process.pid):
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _close_pipe_descriptors(process: subprocess.Popen[bytes]) -> None:
@@ -479,7 +512,7 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
         # A successful group leader is not proof that its descendants exited.
         # Tear down the session unconditionally before accepting completion;
         # redirected descendants otherwise evade the pipe-drainer check.
-        _kill_index_process_tree(process)
+        teardown_verified = _kill_index_process_tree(process)
         for drainer in drainers:
             drainer.join(timeout=1)
         if any(drainer.is_alive() for drainer in drainers):
@@ -507,6 +540,9 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
             else:
                 status = "nonzero_exit"
                 error_code = "GT_INDEX_PROCESS_FAILED"
+        if not teardown_verified:
+            status = "process_tree_unverified"
+            error_code = "GT_INDEX_PROCESS_TREE_UNVERIFIED"
         return IndexProcessResult(
             success=status == "completed",
             status=status,
@@ -528,7 +564,9 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path) -> IndexProcessRe
         )
     except (OSError, subprocess.SubprocessError):
         if process is not None:
-            _kill_index_process_tree(process)
+            if not _kill_index_process_tree(process):
+                status = "process_tree_unverified"
+                error_code = "GT_INDEX_PROCESS_TREE_UNVERIFIED"
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -1099,6 +1137,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             "GT_INDEX_OUTPUT_INVALID": "output_invalid",
             "GT_INDEX_OUTPUT_MISSING": "output_missing",
             "GT_INDEX_PROCESS_FAILED": "nonzero_exit",
+            "GT_INDEX_PROCESS_TREE_UNVERIFIED": "process_tree_unverified",
             "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE": "resource_guard_unavailable",
             "GT_INDEX_TIMEOUT": "timeout",
         }
@@ -1114,6 +1153,8 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
             exit_valid = evidence_exit is None
         elif evidence_code in {"GT_INDEX_OUTPUT_INVALID", "GT_INDEX_OUTPUT_MISSING"}:
             exit_valid = evidence_exit == 0
+        elif evidence_code == "GT_INDEX_PROCESS_TREE_UNVERIFIED":
+            exit_valid = type(evidence_exit) is int
         elif evidence_code in {
             "GT_INDEX_CGROUP_OOM",
             "GT_INDEX_EXIT_137_UNATTRIBUTED",
@@ -1168,6 +1209,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
                 "GT_INDEX_OUTPUT_INVALID",
                 "GT_INDEX_OUTPUT_MISSING",
                 "GT_INDEX_PROCESS_FAILED",
+                "GT_INDEX_PROCESS_TREE_UNVERIFIED",
                 "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE",
                 "GT_INDEX_TIMEOUT",
             }

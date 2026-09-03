@@ -46,6 +46,8 @@ def write_host_interval(
     exit_code: int,
     attestation_key: str,
 ) -> None:
+    if exit_code != 137:
+        raise ValueError("agent resource evidence is only defined for exit 137")
     if not re.fullmatch(r"[0-9a-f]{64}", attestation_key):
         raise ValueError("host attestation key invalid")
     for snapshot in (before, after):

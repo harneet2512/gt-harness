@@ -394,7 +394,7 @@ class MiniSweGtAgent(MiniSweAgent):
             # only the host adapter is permitted to publish this attestation.
             resource_path.unlink(missing_ok=True)
             match = re.search(r"Command failed \(exit (-?\d+)\)", str(exc))
-            if match:
+            if match and int(match.group(1)) == 137:
                 try:
                     after = await self._resource_snapshot(environment, task_id, product_source_sha)
                     write_host_interval(
@@ -403,7 +403,7 @@ class MiniSweGtAgent(MiniSweAgent):
                         after=after,
                         task_id=task_id,
                         product_source_sha=product_source_sha,
-                        exit_code=int(match.group(1)),
+                        exit_code=137,
                         attestation_key=attestation_key,
                     )
                 except Exception:

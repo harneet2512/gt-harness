@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import agent_resource_evidence as evidence
 
 
@@ -60,6 +62,21 @@ def test_exit_137_without_interval_delta_is_unattributed(tmp_path: Path) -> None
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["error_code"] == "GT_AGENT_EXIT_137_UNATTRIBUTED"
     assert payload["memory_evidence"] is False
+
+
+def test_non_137_exit_cannot_be_mislabeled_as_exit_137(tmp_path: Path) -> None:
+    output = tmp_path / "agent-resource.json"
+    with pytest.raises(ValueError, match="only defined for exit 137"):
+        evidence.write_host_interval(
+            output,
+            before=_snapshot(3, 4),
+            after=_snapshot(3, 4),
+            task_id="task-a",
+            product_source_sha="a" * 40,
+            exit_code=1,
+            attestation_key="f" * 64,
+        )
+    assert not output.exists()
 
 
 def test_snapshot_capture_rejects_untrusted_cgroup_source() -> None:
