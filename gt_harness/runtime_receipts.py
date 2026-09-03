@@ -851,6 +851,14 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         and _SHA64.fullmatch(str(graph.get("graph_sha256") or ""))
     ):
         errors.append("treatment_graph_certification_invalid")
+    # A populated graph that delivered none of its evidence is a treatment that
+    # ran without the mechanism under test. An empty graph is exempt: a task with
+    # no indexable source has nothing to resolve, and that is a legitimate run.
+    utilisation = treatment.get("graph_utilisation")
+    utilisation = utilisation if isinstance(utilisation, dict) else {}
+    indexed_nodes = int((graph or {}).get("indexed_node_count") or 0) if isinstance(graph, dict) else 0
+    if indexed_nodes > 0 and not utilisation.get("graph_backed_delivery"):
+        errors.append("treatment_graph_evidence_absent")
     return errors
 
 

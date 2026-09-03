@@ -680,6 +680,28 @@ def _build_index_with_attempts(
     assert result is not None
     return result, tuple(attempts)
 
+def _graph_node_count(database: Path) -> int:
+    """Count indexed nodes, so an empty graph is distinguishable from a lost one.
+
+    A repository with no indexable source legitimately produces a graph with no
+    nodes -- a task holding only spreadsheets or data files has nothing to
+    resolve. That is a different condition from a graph that should have been
+    populated and was not, and the two must not be conflated when deciding
+    whether a run delivered the graph evidence it owed.
+    """
+
+    try:
+        con = sqlite3.connect(f"file:{database.resolve().as_posix()}?mode=ro", uri=True)
+    except (sqlite3.Error, OSError):
+        return 0
+    try:
+        row = con.execute("SELECT COUNT(*) FROM nodes").fetchone()
+    except sqlite3.Error:
+        return 0
+    finally:
+        con.close()
+    return int(row[0]) if row else 0
+
 def _write_index_evidence(
     path: Path, *, root: str, result: IndexProcessResult, reuse_key: IndexReuseKey,
     identity: dict[str, str], attempts: tuple[str, ...] = (),
@@ -967,6 +989,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             "graph_sha256": graph_sha256,
             "graph_bytes": candidate.stat().st_size,
             "sqlite_quick_check": "ok",
+            "indexed_node_count": _graph_node_count(candidate),
             "index_resource_sha256": evidence_sha256,
             **_binary_certification(),
         }
