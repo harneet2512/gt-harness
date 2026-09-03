@@ -28,6 +28,15 @@ def create_bridge(gt_root: str | None):
     """
     if not gt_root:
         return None
+    # Resolved before the guard below so the guard can name it. If the producer
+    # module cannot be imported at all, there is nothing to re-raise and the
+    # broad handler keeps its promise that GT never breaks the harness.
+    try:
+        from gt_engine.indexer import BenchmarkGraphRequired
+
+        _must_propagate: tuple[type[BaseException], ...] = (BenchmarkGraphRequired,)
+    except Exception:  # noqa: BLE001 - absent producer module is not fatal here
+        _must_propagate = ()
     try:
         import os
 
@@ -43,5 +52,9 @@ def create_bridge(gt_root: str | None):
         apply_profile_env()
         graph_db = ensure_index(gt_root)  # None -> DORMANT, wakeable bridge
         return GTBridge(repo_root=gt_root, graph_db=graph_db)
+    except _must_propagate:
+        # A benchmark run without its graph measures nothing. Dormant is the
+        # right answer for local work and the wrong one here.
+        raise
     except Exception:  # noqa: BLE001 - GT must never break the harness
         return None

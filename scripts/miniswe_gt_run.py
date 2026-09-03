@@ -364,7 +364,7 @@ def build_agent(
 
     from gt_engine.bridge import apply_profile_env
     from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
-    from gt_engine.indexer import ensure_index
+    from gt_engine.indexer import BenchmarkGraphRequired, ensure_index
     from gt_engine.miniswe_controller import Predicate
     from gt_engine.miniswe_integration import MiniSweAdapter
     from gt_engine.miniswe_runtime import install_runtime_hooks
@@ -394,6 +394,12 @@ def build_agent(
     index_error: Exception | None = None
     try:
         graph_db = ensure_index(cwd, state_dir=state_dir)
+    except BenchmarkGraphRequired:
+        # Indexing is an optional observer everywhere except here. On a
+        # benchmark-bound run the graph is the product under measurement, so a
+        # missing one is not an observation to record and continue past -- it
+        # stops the run before a single provider call is billed.
+        raise
     except Exception as exc:  # noqa: BLE001 - indexing is an optional observer
         index_error = exc
     adapter = MiniSweAdapter(
