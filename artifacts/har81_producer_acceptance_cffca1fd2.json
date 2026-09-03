@@ -1,0 +1,52 @@
+{
+  "authority": "HAR-81_OWNER_DIRECTIVE",
+  "basis": "owner_directive",
+  "defects_fixed": [
+    "validateCandidateDerivation rejected an empty Mechanism that resolutionDerivation maps to global_name",
+    "unique_method was absent from the resolution derivation vocabulary",
+    "partial-VTA callsites claimed the vta mechanism over merged hierarchy candidates carrying no flow proof",
+    "candidates sharing one target stable id produced duplicate CANDIDATE_TARGET edge ids"
+  ],
+  "fixture_first": [
+    {
+      "fix": "19a9ab212b305848a1a7832feff80b5709a9519f",
+      "red": "830b9814bffea7c499e89be7289dc1cd8121f75a"
+    },
+    {
+      "fix": "0dd8ba30b3fd08476270685052ea99a26ae1e19e",
+      "red": "d3729a1b05e5bd149a07839c16d53f4a3f4fc2c8"
+    },
+    {
+      "fix": "cffca1fd29001577bf35a3355b7238e6cedd1130",
+      "red": "f76936ef2b33c59671df920eef29c8c56b752a58"
+    }
+  ],
+  "known_false_declaration": {
+    "declared": true,
+    "field": "producer_build.static_linking",
+    "note": "Pre-existing and identical for the superseded binary; flagged on HAR-81, not silently changed.",
+    "observed": "dynamically linked (ld-linux-x86-64 present)"
+  },
+  "producer_binding": {
+    "failures": [],
+    "status": "VERIFIED"
+  },
+  "producer_sha256": "4c8357c729dddf11a9c964d1ea1074c4aa399e07092f3bae9822c11a491108bf",
+  "producer_test_suite": "green (store, cmd/gt-index, resolver, closure, parser, walker)",
+  "repository_sweep": {
+    "method": "producer run against each smoke20 task repository at its own base commit",
+    "outstanding": {
+      "not_caused_by_closure": true,
+      "symptom": "resolution-v2 publication does not terminate; WAL exceeded 11.5 GB",
+      "task": "boa-hierarchical-evaluation-cancellation"
+    },
+    "published": 18,
+    "total": 19
+  },
+  "reviewer_verdict_note": "An exact-SHA review was requested on HAR-81 and had not returned a verdict. The owner directed acceptance. This record is an owner acceptance, not a reviewer verdict, and must not be read as one.",
+  "reviewer_verdict_present": false,
+  "schema": "gt.producer_acceptance_evidence.v1",
+  "source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
+  "source_tree": "7b25858b49ec7ef91cbec2e8045b0bf3f19ccd8c",
+  "supersedes_source_commit": "0aadb1b9111f70f3c6b8874e1b8eff927397d22b"
+}
