@@ -42,7 +42,6 @@ import os
 import sqlite3
 from dataclasses import dataclass
 
-from gt_engine.delivery_budget import truncate_utf8
 from gt_engine.miniswe_covering import _repo_relative
 
 COCHANGE_EVIDENCE_TYPE = "cochange_partner"
@@ -226,13 +225,33 @@ def run_cochange_prior(
     return "\n".join(lines)
 
 
+def _whole_lines_within(rendered: str, limit: int) -> str:
+    """Keep as many complete lines as fit. A half-line is a half-claim.
+
+    Byte-truncating the render would leave a partial provenance -- a row key cut
+    mid-path -- which reads as a malformed fact rather than as a dropped one.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in rendered.splitlines():
+        cost = len(line.encode("utf-8")) + (1 if kept else 0)
+        if used + cost > limit:
+            break
+        kept.append(line)
+        used += cost
+    return "\n".join(kept)
+
+
 def cochange_prior_dose(adapter, files: tuple[str, ...]) -> str:
     """Stage and render one advisory co-change dose, or return ``""``.
 
     The dose is staged ``advisory`` and carries the evidence tag the trajectory
     census reads, so a delivered prior is attributable without heuristics.
+    Nothing is staged unless a complete line survives the byte ceiling.
     """
-    rendered = run_cochange_prior(adapter, files)
+    rendered = _whole_lines_within(
+        run_cochange_prior(adapter, files), COCHANGE_DOSE_BYTE_LIMIT
+    )
     if not rendered:
         return ""
     stage = getattr(adapter, "stage_model_visible_delivery", None)
@@ -246,7 +265,4 @@ def cochange_prior_dose(adapter, files: tuple[str, ...]) -> str:
             target=files[0],
             semantics="advisory",
         )
-    return (
-        f"[GT_EVIDENCE:{COCHANGE_EVIDENCE_TYPE}]\n"
-        + truncate_utf8(rendered, COCHANGE_DOSE_BYTE_LIMIT)
-    )
+    return f"[GT_EVIDENCE:{COCHANGE_EVIDENCE_TYPE}]\n{rendered}"
