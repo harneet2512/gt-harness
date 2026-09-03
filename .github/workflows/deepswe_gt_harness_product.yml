@@ -205,6 +205,8 @@ jobs:
           set -euo pipefail
           python -m scripts.validate_product_workflow \
             --workflow .github/workflows/deepswe_gt_harness_product.yml
+          python -m scripts.validate_product_workflow \
+            --workflow .github/workflows/deepswe_gt_harness_product_p0731.yaml
 
       - name: Validate failure IDs and canonical RED evidence production
         run: |
