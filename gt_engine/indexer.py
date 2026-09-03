@@ -680,27 +680,63 @@ def _build_index_with_attempts(
     assert result is not None
     return result, tuple(attempts)
 
-def _graph_node_count(database: Path) -> int:
-    """Count indexed nodes, so an empty graph is distinguishable from a lost one.
+def _graph_scale(database: Path) -> tuple[int, int]:
+    """Return (indexed files, indexed nodes) for a published graph.
 
-    A repository with no indexable source legitimately produces a graph with no
-    nodes -- a task holding only spreadsheets or data files has nothing to
-    resolve. That is a different condition from a graph that should have been
-    populated and was not, and the two must not be conflated when deciding
-    whether a run delivered the graph evidence it owed.
+    These answer different questions and must not be conflated. A repository
+    that contains source has files to index, and a graph built from it owes
+    nodes: files present with no nodes is a broken index, not an empty one. A
+    task that starts with no source has nothing to index yet -- the graph fills
+    as the agent creates files, and each edit boundary reindexes -- so an empty
+    graph there is a legitimate wait state rather than a failure.
+
+    Both counts fail closed to zero. An uncountable graph must not manufacture
+    an obligation the run cannot discharge; the certification checks already
+    reject such a graph on their own terms.
     """
 
     try:
         con = sqlite3.connect(f"file:{database.resolve().as_posix()}?mode=ro", uri=True)
     except (sqlite3.Error, OSError):
-        return 0
+        return 0, 0
     try:
-        row = con.execute("SELECT COUNT(*) FROM nodes").fetchone()
+        files = con.execute("SELECT COUNT(*) FROM file_hashes").fetchone()
     except sqlite3.Error:
-        return 0
+        files = None
+    try:
+        nodes = con.execute("SELECT COUNT(*) FROM nodes").fetchone()
+    except sqlite3.Error:
+        nodes = None
     finally:
         con.close()
-    return int(row[0]) if row else 0
+    return (int(files[0]) if files else 0, int(nodes[0]) if nodes else 0)
+
+def start_lsp_promotion(database: Path, root: str | Path) -> str:
+    """Start progressive LSP edge promotion over a freshly published graph.
+
+    The producer ships a complete promotion subsystem whose own design note
+    states the intent: gt-index publishes a usable graph immediately, then
+    language servers promote edges in batches so resolution quality rises while
+    the agent is already working. It was only ever started from the MCP server,
+    so the benchmark harness published a graph and left the highest-precision
+    edge tier -- lsp and lsp_verified, both admitted by the closure -- empty.
+
+    Promotion is best-effort by construction. It discovers servers with
+    shutil.which, so a container with none staged promotes nothing and keeps
+    exactly the graph we publish today. Nothing here may fail an index that has
+    already succeeded.
+    """
+
+    try:
+        from groundtruth.lsp.background_promotion import start_background_promotion
+    except Exception:  # noqa: BLE001 - producer package absent is not an index failure
+        return "promotion_unavailable"
+    try:
+        start_background_promotion(str(database), str(root))
+    except Exception:  # noqa: BLE001 - promotion is an optimiser, never a gate
+        return "promotion_failed"
+    return "promotion_started"
+
 
 def _write_index_evidence(
     path: Path, *, root: str, result: IndexProcessResult, reuse_key: IndexReuseKey,
@@ -989,7 +1025,8 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             "graph_sha256": graph_sha256,
             "graph_bytes": candidate.stat().st_size,
             "sqlite_quick_check": "ok",
-            "indexed_node_count": _graph_node_count(candidate),
+            "indexed_file_count": _graph_scale(candidate)[0],
+            "indexed_node_count": _graph_scale(candidate)[1],
             "index_resource_sha256": evidence_sha256,
             **_binary_certification(),
         }
@@ -1040,6 +1077,8 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             manifest_backup.unlink(missing_ok=True)
         failure_manifest.unlink(missing_ok=True)
         (gt_dir / "index-failure-resource.json").unlink(missing_ok=True)
+        # The graph is published and usable from here; promotion only improves it.
+        start_lsp_promotion(db, root)
         return str(db)
     except Exception:  # noqa: BLE001 - indexing failure means GT dormant, never a crash
         return None

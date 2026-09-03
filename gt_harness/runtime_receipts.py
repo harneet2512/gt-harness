@@ -851,13 +851,17 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         and _SHA64.fullmatch(str(graph.get("graph_sha256") or ""))
     ):
         errors.append("treatment_graph_certification_invalid")
-    # A populated graph that delivered none of its evidence is a treatment that
-    # ran without the mechanism under test. An empty graph is exempt: a task with
-    # no indexable source has nothing to resolve, and that is a legitimate run.
+    # A repository that had source to index owes graph-derived evidence: the
+    # treatment either used the mechanism under test or it did not. The exemption
+    # is for a task that starts with no source at all -- there the graph fills as
+    # files are created, and an empty graph is a wait state, not a failure. Keying
+    # this on indexed FILES rather than nodes is deliberate: files present with no
+    # nodes is a broken index, and must not be exempted as though it were empty.
     utilisation = treatment.get("graph_utilisation")
     utilisation = utilisation if isinstance(utilisation, dict) else {}
-    indexed_nodes = int((graph or {}).get("indexed_node_count") or 0) if isinstance(graph, dict) else 0
-    if indexed_nodes > 0 and not utilisation.get("graph_backed_delivery"):
+    certification = graph if isinstance(graph, dict) else {}
+    indexed_files = int(certification.get("indexed_file_count") or 0)
+    if indexed_files > 0 and not utilisation.get("graph_backed_delivery"):
         errors.append("treatment_graph_evidence_absent")
     return errors
 
