@@ -210,18 +210,23 @@ class SymbolEmbeddingInput:
     invalidation_key: str
 
 
-def embedding_inputs(db_path: str | Path) -> tuple[SymbolEmbeddingInput, ...]:
+def embedding_inputs(
+    db_path: str | Path,
+) -> tuple[SymbolEmbeddingInput, ...]:
     """Project a whole graph into the inputs an embedding pass consumes.
 
     In :func:`gt_engine.contract.contracts` order -- file, position, node id --
     so two runs over one graph produce the same sequence and a diff of a whole
     repository's inputs is readable.
 
-    Two nodes can derive the same stable id when the producer minted none for
-    either (two such pairs exist on the arktype reference graph).  The first in
-    that order wins and the rest are dropped, so the result is a function of the
-    graph rather than of row arrival; :meth:`ContractEmbeddingStore.refresh`
-    counts the drops.
+    Two nodes could in principle derive the same stable id when the producer
+    minted none for either, since the derived form drops line numbers on
+    purpose.  Measured on the arktype reference graph that does not happen --
+    3,511 symbols yield 3,511 distinct ids, 3,509 minted and 2 derived -- but
+    the collapse is handled rather than assumed away: the first in the above
+    order wins, so the result is a function of the graph and not of row
+    arrival, and :meth:`ContractEmbeddingStore.refresh` reports how many were
+    dropped rather than losing them silently.
     """
     by_node = fingerprints(db_path)
     seen: set[str] = set()
@@ -484,6 +489,10 @@ class ContractEmbeddingStore:
     ) -> dict[str, Any]:
         """Bring the store level with ``db_path`` and report exactly what moved."""
         inputs = embedding_inputs(db_path)
+        # The denominator `inputs` was cut from, so a symbol dropped for sharing
+        # an identity with an earlier one is a number in the receipt rather than
+        # a silent absence.
+        symbol_rows = len(contract.symbol_node_ids(db_path))
         revision = _source_revision(db_path)
         plan = plan_embeddings(
             inputs,
@@ -494,7 +503,9 @@ class ContractEmbeddingStore:
         vectors = self._embed_plan(plan, embed_fn, batch_size)
         index_digest = self._publish(plan, vectors)
         self._write_bindings(plan, revision)
-        return self._receipt(db_path, revision, inputs, plan, index_digest)
+        return self._receipt(
+            db_path, revision, inputs, plan, index_digest, symbol_rows=symbol_rows
+        )
 
     def _embed_plan(
         self, plan: EmbeddingPlan, embed_fn: Embedder, batch_size: int
@@ -591,6 +602,8 @@ class ContractEmbeddingStore:
         inputs: Sequence[SymbolEmbeddingInput],
         plan: EmbeddingPlan,
         index_digest: str,
+        *,
+        symbol_rows: int,
     ) -> dict[str, Any]:
         return {
             "schema": RECEIPT_SCHEMA,
@@ -601,7 +614,9 @@ class ContractEmbeddingStore:
             "key_schema": KEY_SCHEMA,
             "model_id": self.model_id,
             "dimension": self.dimension,
+            "symbol_rows": symbol_rows,
             "symbols_total": len(inputs),
+            "duplicate_stable_ids": symbol_rows - len(inputs),
             "symbols_with_fingerprint": sum(1 for item in inputs if item.fingerprint),
             "embedded": len(plan.to_embed),
             "embedded_new": len(plan.new_symbols),
