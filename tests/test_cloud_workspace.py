@@ -19,9 +19,9 @@ def _seed_repo(tmp_path: Path) -> Path:
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "t")
-    (repo / "README").write_text("hello\n", encoding="utf-8")
+    (repo / "README").write_bytes(b"hello\n")
     (repo / "src").mkdir()
-    (repo / "src" / "app.py").write_text("print('x')\n", encoding="utf-8")
+    (repo / "src" / "app.py").write_bytes(b"print('x')\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "seed")
     return repo
