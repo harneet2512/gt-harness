@@ -45,11 +45,11 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
-      "source_tree": "7b25858b49ec7ef91cbec2e8045b0bf3f19ccd8c",
-      "binary_sha256": "b4bfba37d3e7348e6b4b415b96fd06df3ed0653532b013b497a671bbe2095dfb",
+      "source_commit": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
+      "source_tree": "24f6b4d13d7214ff1b32cbd8a68a74bbb9bc9234",
+      "binary_sha256": "e9a12ff0ff2c9c09ad68ccbbaf3a550afcf6cda3a69e438f41866082f82d7934",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "64c53ed1a02a7eb0661b4da85e1ee4b495ba3294bc8721c585ac46bdf08f695b",
+      "build_info_sha256": "0e665c093c4e08a6ebae980680c0b9543a3af410fb42b386715ab2a455b742bf",
       "builder_image_digest": "a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3",
       "build_tags": "sqlite_fts5",
       "static_linking": true
