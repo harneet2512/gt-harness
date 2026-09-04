@@ -1,14 +1,16 @@
 # final_hardening — complete handoff
 
-**Written for a session that has none of this context.** Last updated 2026-09-04 ~17:00 ET.
+**Written for a session that has none of this context.** Last updated 2026-09-04 ~19:45 ET.
 
 ---
 
 ## 1. What was delivered
 
-A 15-row GT-vs-GitNexus delta table, turned into 11 plan items, all landed,
-wired end to end, CI green on every platform, producer re-pinned with verified
-lineage. One paid smoke dispatched (pre-existing failure, not a regression).
+A 15-row GT-vs-GitNexus delta table, turned into 11 plan items, is implemented
+and wired end to end. The corrective pass closed dynamic provider admission,
+receipt verification, incremental invalidation, taxonomy reachability, the
+omitted named edge interfaces, legacy co-change provenance, and static producer
+artifact construction. Final CI/review/smoke evidence is recorded below.
 
 ## 2. The 15-row delta table — ALL LANDED
 
@@ -32,8 +34,8 @@ lineage. One paid smoke dispatched (pre-existing failure, not a regression).
 
 | Purpose | Branch | Head |
 |---|---|---|
-| **Harness landing** | `har81/canonical-task-identity` | `8ef705f0` (CI GREEN run `33860505208`) |
-| **Producer landing** | `final_hardening/producer` | `5dc180a5e` (CI GREEN run `33889762269`, all 9/9 jobs) |
+| **Harness landing** | `har81/canonical-task-identity` | `8c19e52b` plus the closeout follow-up carrying this handoff |
+| **Producer landing** | `final_hardening/producer` | `af0854537` (exact static build run `33911978151`) |
 | **Review inbox** | `gt-review-inbox` | `9043aab7` |
 | Producer worktree | `D:/gt-fh-producer` | same as landing |
 | Harness worktree | `D:/gt-har81-canonical` | same as landing |
@@ -66,24 +68,28 @@ publication takes 2,162s.
 - `pass_coverage` removal: **713 MB of 845 MB** redundant JSON, read by nothing
 - 19-repo sweep: 19/19 exit 0, boa in **788s** (63% faster with the fix)
 
-## 6. CI infrastructure
+## 6. Verification and CI
 
-- **Harness:** push trigger on `har81/canonical-task-identity` → auto CI
-- **Producer:** push trigger on `final_hardening/**` → auto CI + build workflow
-- **Full Go test suite** in CI (`go test -tags sqlite_fts5 ./...`)
-- **Ruff lint:** 210 mechanical fixes, explicit rule set, all clean
-- **Python suite:** 0 failed on all 6 platform legs
+- **Producer local Python:** 4,225 passed, 192 skipped, 6 expected xfails.
+- **Producer local Go:** `go test -tags sqlite_fts5 ./...` passed.
+- **Corrective focused Go:** specs, taxonomy, parser, resolver, store and cmd passed.
+- **Harness focused corrective suite:** 184 passed; co-change/edge follow-up passed.
+- **Harness full Windows run:** all non-binary tests passed; seven tests fail closed with
+  `GT_INDEX_RESOURCE_GUARD_UNAVAILABLE` because the certified artifact is Linux ELF.
+- **Producer:** push triggers multi-platform CI and a separate static Linux build.
+- **Harness:** push triggers the canonical provider-free product acceptance workflow.
 
 ## 7. Producer re-pin
 
-- Binary SHA: `071fd6cb941b12adf762694c4bef1fb7f126841e4e587d56fd3b90b02002ca32`
-- Source: `9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6`
-- Build: `2026-09-04T08:38:26Z`, go1.22.5, sqlite_fts5
-- Lineage: 68-commit ancestry, 567 changed files, attestation verified
-- Harness CI: GREEN (run `33860505208`)
-- Workflow: verify-vendored (not rebuild — Go CGO static builds not reproducible)
+- Binary SHA: `932b6336adf0a82f7d752cbcc0a508fc357546b37eb857d45da9fc273401928d`
+- Source: `af08545371d8ac75fdf7b82c5858a2818202c379`
+- Source tree: `b34451a2eebae8061b9b41367de662be54b6e2c8`
+- Build-info SHA: `c1729ba72e3f5d2c37f181f270711366471706774fa9d2ffa7a496cd73a093da`
+- Build: go1.22.5, `sqlite_fts5`, musl/static; workflow run `33911978151`
+- Lineage: complete ancestry from the accepted default through the exact producer head;
+  source tree, executable bytes and embedded build identity verified.
 
-## 8. Why the smoke failed
+## 8. Prior smoke failure and correction
 
 **PRE-EXISTING — NOT a final_hardening regression.**
 
@@ -93,28 +99,30 @@ The OLD producer also failed on the same task:
 - Run `33730572741` (Sep 3, `cffca1fd2`, `main`): FAILED
 - Run `33708231670`: FAILED
 
-The smoke workflow tests ONE task. That task exceeds the provider's request
-limit. `provider_calls: 0` — failed before any LLM call. The readiness check
-passed — the producer is verified; the failure is at the agent/provider level.
-
-Options: (a) cap evidence context size, (b) different task, (c) dispatch full
-19-task sweep where most tasks won't hit the limit.
+The prior smoke used a hard-coded request ceiling and failed before any provider
+call. The runtime now fetches the selected model's live context window, reserves
+the configured completion budget, measures the exact prepared messages, and
+receipts either admission or refusal. The correction must be validated by one
+new run of the same arktype task; the other 18 tasks remain halted.
 
 ## 9. What remains
 
-### Blocking (owner decision)
-1. **Smoke resolution** — choose approach for `GT_PROVIDER_REQUEST_TOO_LARGE`
+1. Exact-head producer CI must finish green.
+2. Harness closeout commit must pass provider-free acceptance in CI.
+3. Final standards/spec review must be rerun against the closeout SHAs.
+4. One paid arktype smoke must be dispatched and analyzed; the other 18 stay halted.
 
-### Non-blocking
-2. **`SYMBOL_LABELS` extension** — new labels unreachable until extended
-3. **50 xfailed tests** — each with named reason; XPASS-fail when fixed
-4. **Oracle corpus** — vendor or env-gate
-5. **lua/sql/svelte** — three languages index no symbols (pre-existing)
+The requested overload-resolution result above the 36% baseline is not a valid
+remaining implementation target under the stronger no-promotion invariant. The
+measured narrowing removed wrong candidates and preserved the selected-target
+rate; exceeding 36% would require promoting ambiguous candidates. That criterion
+is internally inconsistent and is not reported as achieved.
 
 ## 10. Constraints
 
 - **No GT-off** ever
-- **Dispatch:** 1 of 4 spent (on pre-existing failure)
+- **Dispatch:** only one corrective arktype smoke is authorized in this closeout;
+  the other 18 tasks remain halted
 - **Never bypass hooks**; fixture-first on protected paths
 - **Candidate evidence never promoted**
 - **REVs answered:** 253-292
@@ -132,10 +140,10 @@ Options: (a) cap evidence context size, (b) different task, (c) dispatch full
 
 ```bash
 # Harness CI
-gh run view 33860505208 --repo harneet2512/gt-harness
+gh run list --branch har81/canonical-task-identity --repo harneet2512/gt-harness
 
 # Producer CI (all 9 green)
-gh run view 33889762269 --repo harneet2512/groundtruth
+gh run list --branch final_hardening/producer --repo harneet2512/groundtruth
 
 # Release blockers
 cd D:/gt-har81-canonical && python -c "

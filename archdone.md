@@ -21,8 +21,21 @@ bundle, workflow, adapter, result, or acceptance-contract change.
 6. `scripts/gt_product_acceptance.py` runs the deterministic provider-free fixture in both arms,
    proves parity and secret non-disclosure, and emits `gt.product_closeout.v1`.
 
-The fixture currently proves the local installed-wheel and result contracts. It does not claim an
-OpenAI-compatible transport or Harbor container execution; those remain explicit blockers.
+The pinned producer is built by the producer repository's digest-pinned musl workflow, which
+asserts a statically linked Linux executable before upload. The harness verifies the executable
+digest, embedded commit, source tree, build-info digest, schema version, and capability set before
+acceptance. Incremental indexing commits the core update and atomically invalidates every derived
+analysis table and receipt; stale analysis is never inherited by a fresh core graph.
+
+Provider admission is based on the live model context window returned by `/models`, the exact
+prepared message payload, and the configured output reservation. Every admitted or refused
+attempt is written to the runtime receipt. Completed runs require a one-to-one match between
+admitted entries and actual provider calls; pre-provider refusals may terminate with zero calls
+only when their measured budget fields and reason are complete.
+
+The provider-free fixture proves the installed-wheel, producer-binding, and result contracts. It
+does not claim a live OpenAI-compatible transport result; that remains the separately approved
+one-task smoke boundary.
 
 ## Authority
 

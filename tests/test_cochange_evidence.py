@@ -182,6 +182,34 @@ def test_directional_confidence_and_published_window_are_read_from_graph(tmp_pat
     assert "commits_file=5 commits_partner=4" in rendered
 
 
+def test_legacy_nullable_directional_columns_do_not_fabricate_measurements(tmp_path: Path):
+    path = tmp_path / "legacy.db"
+    con = sqlite3.connect(path)
+    try:
+        con.execute(
+            "CREATE TABLE cochanges ("
+            "file_a TEXT NOT NULL, file_b TEXT NOT NULL, count INTEGER NOT NULL, "
+            "commits_a INTEGER, commits_b INTEGER, "
+            "confidence_a_to_b REAL, confidence_b_to_a REAL)"
+        )
+        con.execute(
+            "INSERT INTO cochanges(file_a,file_b,count) VALUES(?,?,?)",
+            ("src/a.py", "src/b.py", 4),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    partner = cochange_partners(path, "src/a.py")[0]
+    assert partner.support == 4
+    assert partner.commits_file is None
+    assert partner.commits_partner is None
+    assert partner.confidence is None
+    rendered = render_cochange_prior((partner,))
+    assert "confidence=unrecorded" in rendered
+    assert "commits_file=" not in rendered
+
+
 def test_partners_rank_by_support_then_path(tmp_path: Path):
     db = _graph(
         tmp_path / "g.db",

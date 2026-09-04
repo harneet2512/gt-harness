@@ -68,7 +68,8 @@ def test_query_is_deterministic_and_rejects_missing_swapped_or_invented_witnesse
 def test_unsupported_unknown_stale_and_incomplete_facts_abstain_typed():
     assert ALLOWED_EDGE_KINDS == {
         "HAS_CALLSITE", "CANDIDATE_TARGET", "SELECTED_TARGET",
-        "RETURNS_TYPE", "OVERRIDES", "DECLARED_IMPLEMENTS",
+        "RETURNS_TYPE", "OVERRIDES", "METHOD_OVERRIDES", "DECLARED_IMPLEMENTS",
+        "ACCESSES", "INJECTS",
     }
     for mutation in (
         {"edge_kind": "OTHER"},

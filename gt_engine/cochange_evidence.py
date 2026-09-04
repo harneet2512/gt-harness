@@ -192,9 +192,19 @@ def cochange_partners(
         if len(row) == 7:
             commits_a, commits_b, confidence_a_to_b, confidence_b_to_a = row[3:]
             from_a = str(file_a) == normalized
-            commits_file = int(commits_a if from_a else commits_b)
-            commits_partner = int(commits_b if from_a else commits_a)
-            confidence = float(confidence_a_to_b if from_a else confidence_b_to_a)
+            raw_file = commits_a if from_a else commits_b
+            raw_partner = commits_b if from_a else commits_a
+            raw_confidence = confidence_a_to_b if from_a else confidence_b_to_a
+            if (
+                raw_file is not None
+                and raw_partner is not None
+                and raw_confidence is not None
+                and int(raw_file) > 0
+                and int(raw_partner) > 0
+            ):
+                commits_file = int(raw_file)
+                commits_partner = int(raw_partner)
+                confidence = float(raw_confidence)
         out.append(
             CochangePartner(
                 file_path=normalized,

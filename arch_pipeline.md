@@ -28,13 +28,13 @@ acceptance gate that must pass first.
 
 **Capabilities**
 
-- Rebuilds the producer *in-workflow* from the pinned Groundtruth source and
-  asserts the vendored binary equals what it just built. The vendored binary is
-  never trusted on sight.
-  Recipe: `golang:1.22.5-bookworm@sha256:a07daa84…`, static
-  (`-linkmode external -extldflags=-static`), `-trimpath -mod=readonly`,
-  `-buildvcs=false`, `BUILD_TIME` hardcoded to `2026-09-02T06:51:07Z` so the
-  digest reproduces.
+- Fetches the exact pinned Groundtruth commit and verifies its root tree. The
+  shipped binary comes from the producer repository's dedicated build workflow,
+  using the digest-pinned Go 1.22.5 image plus musl CGO and an explicit static
+  linker. That workflow rejects a non-static executable before artifact upload.
+  Harness acceptance checks the vendored bytes against the manifest, embedded
+  build identity, source commit/tree, and build-info digest. It does not claim
+  byte-reproducibility across builds with different timestamps.
 - Verifies lineage and review provenance against a **separate review-inbox
   branch** (`gt-review-inbox`), pinned by `review_inbox_commit`. A review packet
   must exist there as a file, appear exactly once in `inbox/INDEX.json`
@@ -106,15 +106,16 @@ the task's own container from `deepswe-bench/tasks/<task>/environment/Dockerfile
 | 2 | `name_match` / `verified_unique` | global name, fallback |
 | — | `vta` (variable type analysis) | flow-proven, candidate-only |
 
-Then **publish**, atomically: nodes, edges, `closure`, `properties`,
-`assertions`, `content_passages`, `cochanges`, `file_hashes`, plus resolution-v2
-(`resolution_callsites`, `resolution_candidates`, `resolution_symbols`,
-derivation facts).
+Then publish in two transactions. Core graph tables commit first. Repository-wide
+analysis (`closure`, communities, processes, co-change and resolution-v2) commits
+with a separate receipt; analysis failure leaves a valid `BUILT_CORE_ONLY` graph.
+An incremental core refresh cannot re-prove repository-wide analysis, so it deletes
+those derived rows and seals `analysis_state=not_run` in the same transaction.
 
-**The property that dominates everything else:** publication is a single
-transaction. One rejected candidate discards the *entire* index, and the run
-then proceeds with **no graph at all**. For a graph-only product that is the
-worst possible failure mode, and until this session it was silent.
+Taxonomy declaration emission is active for all 30 grammar specifications. Additive
+edges include `ACCESSES`, `INJECTS`, `METHOD_OVERRIDES`, `DECLARED_IMPLEMENTS`,
+`RETURNS_TYPE`, and related typed projections. Syntactic edges retain every bounded
+candidate, carry their mechanism, and are limited to CANDIDATE/SPECULATIVE tiers.
 
 **Status**
 
