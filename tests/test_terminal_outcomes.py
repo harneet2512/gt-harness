@@ -26,6 +26,14 @@ def test_limits_exceeded_maps_to_budget_exhausted():
     assert _classify_terminal(RuntimeError("LimitsExceeded"), {}) == "budget_exhausted"
 
 
+def test_miniswe_wall_time_exceeded_maps_to_budget_exhausted():
+    time_exceeded = type("TimeExceeded", (Exception,), {})
+    assert _classify_terminal(time_exceeded("wall time"), {}) == "budget_exhausted"
+    assert _classify_terminal(None, {"exit_status": "TimeExceeded"}) == (
+        "budget_exhausted"
+    )
+
+
 def test_provider_errors_map_to_provider_failed():
     assert _classify_terminal(TimeoutError("APIConnectionError"), {}) == "provider_failed"
     assert _classify_terminal(RuntimeError("AuthenticationError"), {}) == "provider_failed"

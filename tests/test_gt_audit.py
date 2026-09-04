@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from gt_engine.event_journal import GENESIS_HASH, event_hash
+
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "scripts" / "gt_audit.py"
 CRASHED_RUN = Path(__file__).resolve().parent / "fixtures" / "gt_audit" / "crashed_run"
@@ -64,6 +66,414 @@ def make_task_dir(root: Path, trial: str, task_name: str, transcript: str,
         "exception_info": None,
     }), encoding="utf-8")
     return d
+
+
+def make_native_miniswe_task(
+    root: Path,
+    *,
+    exception_info: dict | None = None,
+    tamper_request: bool = False,
+    delivery_text: str | None = None,
+    expose_delivery: bool = True,
+) -> Path:
+    """Write the canonical Mini-SWE artifact shape (no legacy nano.txt)."""
+    task = root / "native-task__trial"
+    agent = task / "agent"
+    state = agent / "gt-state" / "native-task"
+    requests = state / "provider_requests"
+    responses = state / "provider_responses"
+    requests.mkdir(parents=True)
+    responses.mkdir(parents=True)
+
+    request_content = "solve it"
+    if delivery_text is not None and expose_delivery:
+        request_content += "\n" + delivery_text
+    request_bytes = json.dumps(
+        {"messages": [{"role": "user", "content": request_content}]},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    request_sha = hashlib.sha256(request_bytes).hexdigest()
+    (requests / f"{request_sha}.json").write_bytes(
+        request_bytes + (b"tampered" if tamper_request else b"")
+    )
+    response_bytes = b'{"choices":[]}'
+    response_sha = hashlib.sha256(response_bytes).hexdigest()
+    (responses / f"{response_sha}.json").write_bytes(response_bytes)
+
+    delivery_identity = (
+        hashlib.sha256(delivery_text.encode()).hexdigest()
+        if delivery_text is not None else ""
+    )
+    rows = []
+    if delivery_text is not None:
+        deliveries = state / "deliveries"
+        deliveries.mkdir()
+        (deliveries / f"{delivery_identity}.json").write_text(
+            delivery_text, encoding="utf-8"
+        )
+        rows.append({
+            "event": "evidence_delivery",
+            "iteration": 0,
+            "evidence_type": "cochange_partner",
+            "delivery_identity": delivery_identity,
+            "payload_sha256": delivery_identity,
+            "delivery_blob": f"deliveries/{delivery_identity}.json",
+            "rendered_bytes": len(delivery_text.encode()),
+        })
+    rows.extend([
+        {
+            "event": "provider_delivery",
+            "iteration": 1,
+            "request_id": "req-1",
+            "payload_sha256": request_sha,
+            "model_visible_sha256": hashlib.sha256(json.dumps(
+                [{"content": request_content, "role": "user"}],
+                sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest(),
+            "request_blob": f"provider_requests/{request_sha}.json",
+            "delivery_ids": [delivery_identity] if delivery_text is not None else [],
+            "matches": ([{"delivery_id": delivery_identity,
+                           "rendered_sha256": delivery_identity}]
+                        if delivery_text is not None else []),
+            "unmatched_delivery_ids": [],
+        },
+        {
+            "event": "provider_response",
+            "iteration": 1,
+            "request_id": "req-1",
+            "response_sha256": response_sha,
+            "response_blob": f"provider_responses/{response_sha}.json",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 3,
+                "prompt_tokens_details": {"cached_tokens": 2},
+            },
+            "delivery_ids": [delivery_identity] if delivery_text is not None else [],
+        },
+    ])
+    parent = GENESIS_HASH
+    encoded_rows = []
+    for sequence, payload in enumerate(rows, 1):
+        row = {
+            "schema": "gt.event.v1",
+            "sequence": sequence,
+            "parent_hash": parent,
+            "timestamp_utc": "2026-09-04T00:00:00+00:00",
+            **payload,
+        }
+        row["event_hash"] = event_hash(row)
+        parent = row["event_hash"]
+        encoded_rows.append(json.dumps(row, sort_keys=True, separators=(",", ":")))
+    (state / "events.jsonl").write_text("\n".join(encoded_rows) + "\n")
+
+    trajectory = {
+        "trajectory_format": "mini-swe-agent-1.1",
+        "exit_status": "submitted",
+        "submission": "done",
+        "info": {"model_stats": {"api_calls": 1}},
+        "messages": [
+            {"role": "system", "content": "system"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"function": {"name": "bash", "arguments": "{}"}}],
+                "extra": {"response": {"usage": {"prompt_tokens": 10,
+                                                     "completion_tokens": 3}}},
+            },
+            {"role": "tool", "content": "<returncode>0</returncode>\n<output>ok</output>",
+             "extra": {"returncode": 0}},
+        ],
+    }
+    (agent / "miniswe_trajectory.json").write_text(json.dumps(trajectory))
+    (task / "result.json").write_text(json.dumps({
+        "task_name": "native-task",
+        "verifier_result": {"rewards": {"reward": 1}},
+        "exception_info": exception_info,
+    }))
+    return task
+
+
+def rewrite_native_events(task: Path, mutate) -> list[dict]:
+    events_path = next((task / "agent" / "gt-state").glob("*/events.jsonl"))
+    rows = [json.loads(line) for line in events_path.read_text().splitlines()]
+    mutate(rows)
+    parent = GENESIS_HASH
+    for row in rows:
+        row["parent_hash"] = parent
+        row["event_hash"] = event_hash(row)
+        parent = row["event_hash"]
+    events_path.write_text(
+        "\n".join(json.dumps(row, sort_keys=True, separators=(",", ":"))
+                  for row in rows) + "\n"
+    )
+    return rows
+
+
+def test_native_miniswe_audit_uses_real_artifacts_not_nano(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "GREEN-quiet"
+    assert audit.stop_reason == "submitted"
+    assert audit.iterations == 1
+    assert audit.in_tokens == 10
+    assert audit.out_tokens == 3
+    assert audit.cache_read == 2
+    assert audit.tool_results == 1
+    assert set(audit.feature_attribution) == set(
+        gt_audit.summarize_features({})
+    )
+    assert "missing agent/nano.txt" not in " ".join(audit.verdict_reasons)
+
+
+def test_native_miniswe_audit_reports_timeout_cause_not_missing_nano(tmp_path):
+    task = make_native_miniswe_task(
+        tmp_path,
+        exception_info={
+            "exception_type": "AgentTimeoutError",
+            "exception_message": "Agent execution timed out after 1800 seconds",
+        },
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert audit.stop_reason == "external_timeout"
+    reasons = " ".join(audit.verdict_reasons)
+    assert "AgentTimeoutError" in reasons
+    assert "missing agent/nano.txt" not in reasons
+
+
+def test_native_miniswe_audit_rejects_tampered_provider_blob(tmp_path):
+    task = make_native_miniswe_task(tmp_path, tamper_request=True)
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("provider request blob hash mismatch" in reason
+               for reason in audit.verdict_reasons)
+
+
+def test_native_delivery_requires_exact_bytes_in_immediate_request(tmp_path):
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="inspect sibling.py", expose_delivery=False
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert audit.feature_attribution["cochange_prior"]["status"] == (
+        "DELIVERED_UNEXPOSED"
+    )
+    assert any("delivery bytes absent" in issue for issue in audit.attribution_issues)
+
+
+def test_native_delivery_exact_bytes_are_independently_witnessed(tmp_path):
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="inspect sibling.py", expose_delivery=True
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "GREEN-delivered"
+    assert audit.feature_attribution["cochange_prior"]["status"] == "WITNESSED"
+
+
+def test_native_delivery_must_be_on_the_immediate_provider_boundary(tmp_path):
+    task = make_native_miniswe_task(tmp_path, delivery_text="inspect sibling.py")
+    rewrite_native_events(
+        task,
+        lambda rows: [row.update(iteration=2) for row in rows
+                      if row["event"].startswith("provider_")],
+    )
+    trajectory_path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(trajectory_path.read_text())
+    trajectory["info"]["model_stats"]["api_calls"] = 1
+    trajectory_path.write_text(json.dumps(trajectory))
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("not joined to its immediate boundary" in issue
+               for issue in audit.attribution_issues)
+
+
+def test_native_malformed_delivery_ids_fail_closed_without_crashing(tmp_path):
+    task = make_native_miniswe_task(tmp_path, delivery_text="inspect sibling.py")
+    rewrite_native_events(
+        task,
+        lambda rows: next(row for row in rows
+                          if row["event"] == "provider_delivery").update(
+                              delivery_ids=1
+                          ),
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("delivery_ids is not a list" in issue
+               for issue in audit.attribution_issues)
+
+
+@pytest.mark.parametrize(
+    "exit_status",
+    ["TimeExceeded", "budget_exhausted", "internal_error", "timeout", "unknown"],
+)
+def test_native_failure_terminal_is_red_without_outer_exception(tmp_path, exit_status):
+    task = make_native_miniswe_task(tmp_path)
+    path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(path.read_text())
+    trajectory["exit_status"] = exit_status
+    path.write_text(json.dumps(trajectory))
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert f"Mini-SWE failure terminal: {exit_status}" in audit.verdict_reasons
+
+
+def test_native_non_string_terminal_is_red(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+    path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(path.read_text())
+    trajectory["exit_status"] = 17
+    path.write_text(json.dumps(trajectory))
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("exit_status is not a string" in issue
+               for issue in audit.attribution_issues)
+
+
+def test_native_response_blob_must_be_a_json_object(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+    state = next((task / "agent" / "gt-state").glob("*/provider_responses/*.json"))
+    malformed = b"not JSON"
+    digest = hashlib.sha256(malformed).hexdigest()
+    replacement = state.with_name(f"{digest}.json")
+    replacement.write_bytes(malformed)
+    rewrite_native_events(
+        task,
+        lambda rows: next(row for row in rows
+                          if row["event"] == "provider_response").update(
+                              response_sha256=digest,
+                              response_blob=f"provider_responses/{digest}.json",
+                          ),
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("unreadable JSON" in issue for issue in audit.attribution_issues)
+
+
+@pytest.mark.parametrize("cached_tokens", [True, -1, 11])
+def test_native_cached_usage_must_be_bounded_integer(tmp_path, cached_tokens):
+    task = make_native_miniswe_task(tmp_path)
+    rewrite_native_events(
+        task,
+        lambda rows: next(row for row in rows
+                          if row["event"] == "provider_response")["usage"]
+        ["prompt_tokens_details"].update(cached_tokens=cached_tokens),
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("cached_tokens is invalid" in issue
+               for issue in audit.attribution_issues)
+
+
+def test_native_missing_usage_is_unknown_and_red(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+    rewrite_native_events(
+        task,
+        lambda rows: next(row for row in rows
+                          if row["event"] == "provider_response").pop("usage"),
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert audit.in_tokens is None and audit.out_tokens is None
+    assert any("usage is not an object" in issue for issue in audit.attribution_issues)
+
+
+def test_native_feature_projection_requires_request_and_response_identity_join():
+    identity = "a" * 64
+    delivery = {
+        "event": "evidence_delivery",
+        "evidence_type": "cochange_partner",
+        "delivery_identity": identity,
+    }
+    unjoined = gt_audit._native_feature_projection([delivery])
+    assert unjoined["cochange_prior"]["status"] == "DELIVERED_UNEXPOSED"
+
+    joined = gt_audit._native_feature_projection([
+        delivery,
+        {"event": "provider_delivery", "iteration": 2,
+         "delivery_ids": [identity],
+         "matches": [{"delivery_id": identity, "rendered_sha256": identity}]},
+        {"event": "provider_response", "iteration": 2,
+         "delivery_ids": [identity]},
+    ])
+    assert joined["cochange_prior"]["status"] == "WITNESSED"
+    assert joined["cochange_prior"]["exposed"] is True
+    assert joined["cochange_prior"]["response_observed"] is True
+
+
+def test_native_fact_delivery_does_not_invent_capability_execution():
+    identity = "b" * 64
+    projected = gt_audit._native_feature_projection([
+        {"event": "evidence_delivery", "evidence_type": "submit_refusal",
+         "delivery_identity": identity},
+        {"event": "provider_delivery", "iteration": 1,
+         "delivery_ids": [identity],
+         "matches": [{"delivery_id": identity, "rendered_sha256": identity}]},
+        {"event": "provider_response", "iteration": 1,
+         "delivery_ids": [identity]},
+    ])
+
+    assert projected["submit_refusal"]["status"] == "WITNESSED"
+    assert projected["GT_CERT_DELIVERY"]["status"] == "INELIGIBLE"
+    assert projected["GT_SS_SUBMIT_RED"]["status"] == "INELIGIBLE"
+
+
+def test_native_miniswe_audit_rejects_malformed_nested_schemas(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+    trajectory_path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(trajectory_path.read_text())
+    trajectory["info"] = None
+    trajectory_path.write_text(json.dumps(trajectory))
+    state = next((task / "agent" / "gt-state").glob("*/provider_requests/*.json"))
+    malformed = b"[]"
+    old_digest = state.stem
+    new_digest = hashlib.sha256(malformed).hexdigest()
+    new_state = state.with_name(f"{new_digest}.json")
+    new_state.write_bytes(malformed)
+    events_path = next((task / "agent" / "gt-state").glob("*/events.jsonl"))
+    rows = [json.loads(line) for line in events_path.read_text().splitlines()]
+    rows[0]["payload_sha256"] = new_digest
+    rows[0]["request_blob"] = rows[0]["request_blob"].replace(old_digest, new_digest)
+    parent = GENESIS_HASH
+    for row in rows:
+        row["parent_hash"] = parent
+        row["event_hash"] = event_hash(row)
+        parent = row["event_hash"]
+    events_path.write_text(
+        "\n".join(json.dumps(row, sort_keys=True, separators=(",", ":"))
+                  for row in rows) + "\n"
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    assert audit.verdict == "RED"
+    assert any("trajectory info" in issue for issue in audit.attribution_issues)
+    assert any("provider request JSON object" in issue
+               for issue in audit.attribution_issues)
 
 
 HEALTHY_NONCODE = "\n".join([

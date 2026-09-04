@@ -148,6 +148,26 @@ def test_live_gate_accepts_healthy_provider_bound_feature_union(tmp_path):
     assert report["witnessed_count"] == 3
 
 
+def test_live_gate_discovers_model_metadata_in_nested_harbor_trial(tmp_path):
+    trial = tmp_path / "artifact-wrapper" / "job" / "task__trial"
+    trial.mkdir(parents=True)
+    (trial / "result.json").write_text(json.dumps({
+        "config": {"agent": {"model_name": "deepseek-v4-flash"}},
+    }), encoding="utf-8")
+    audit = {"tasks": [_task("task", {"obligations": _feature()})]}
+
+    report = evaluate_live_gate(
+        audit,
+        min_witnessed=1,
+        expected_tasks=1,
+        expected_model="deepseek-v4-flash",
+        run_dir=tmp_path,
+    )
+
+    assert report["passed"] is True
+    assert report["observed_models"] == ["deepseek-v4-flash"]
+
+
 def test_live_gate_requires_compound_localization_on_first_provider_request(
         tmp_path):
     trial = tmp_path / "task__trial"

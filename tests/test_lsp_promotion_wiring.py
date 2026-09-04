@@ -6,15 +6,16 @@ from pathlib import Path
 from gt_engine.indexer import start_lsp_promotion
 
 
-def _producer(monkeypatch, *, servers, starter=None):
+def _producer(monkeypatch, *, servers, starter=None, stats=None):
     module = type(sys)("groundtruth.lsp.background_promotion")
     module.detect_available_servers = lambda: dict(servers)
     module.start_background_promotion = starter or (lambda db, root: None)
+    module.get_promotion_stats = lambda: dict(stats or {"status": "running"})
     monkeypatch.setitem(sys.modules, "groundtruth.lsp.background_promotion", module)
     return module
 
 
-def test_promotion_reports_the_servers_it_found(monkeypatch, tmp_path: Path):
+def test_promotion_refuses_to_claim_unreceipted_schedule(monkeypatch, tmp_path: Path):
     started: list[tuple[str, str]] = []
     _producer(
         monkeypatch,
@@ -24,8 +25,12 @@ def test_promotion_reports_the_servers_it_found(monkeypatch, tmp_path: Path):
 
     result = start_lsp_promotion(tmp_path / "graph.db", "/repo")
 
-    assert result == {"status": "promotion_started", "servers": ["go", "python"]}
-    assert started == [(str(tmp_path / "graph.db"), "/repo")]
+    assert result == {
+        "status": "promotion_not_scheduled",
+        "servers": ["go", "python"],
+        "reason": "producer_scheduler_receipt_unavailable",
+    }
+    assert started == []
 
 
 def test_no_servers_on_path_is_recorded_not_silently_successful(monkeypatch, tmp_path: Path):
@@ -63,8 +68,8 @@ def test_a_missing_producer_package_is_not_an_index_failure(monkeypatch, tmp_pat
     }
 
 
-def test_a_raising_promoter_never_fails_the_index(monkeypatch, tmp_path: Path):
-    """Promotion is an optimiser over an already-published graph, never a gate."""
+def test_unreceipted_promoter_is_never_called(monkeypatch, tmp_path: Path):
+    """No background graph mutation occurs without a graph-bound receipt."""
 
     def boom(db, root):
         raise RuntimeError("language server exploded")
@@ -73,7 +78,27 @@ def test_a_raising_promoter_never_fails_the_index(monkeypatch, tmp_path: Path):
 
     result = start_lsp_promotion(tmp_path / "graph.db", "/repo")
 
-    assert result == {"status": "promotion_failed", "servers": ["rust"]}
+    assert result == {
+        "status": "promotion_not_scheduled",
+        "servers": ["rust"],
+        "reason": "producer_scheduler_receipt_unavailable",
+    }
+
+
+def test_global_launcher_stats_are_not_used_as_graph_receipts(monkeypatch, tmp_path: Path):
+    _producer(
+        monkeypatch,
+        servers={"typescript": "typescript-language-server"},
+        stats={"status": "idle"},
+    )
+
+    result = start_lsp_promotion(tmp_path / "graph.db", "/repo")
+
+    assert result == {
+        "status": "promotion_not_scheduled",
+        "servers": ["typescript"],
+        "reason": "producer_scheduler_receipt_unavailable",
+    }
 
 
 def test_failed_discovery_degrades_to_no_servers(monkeypatch, tmp_path: Path):
@@ -89,14 +114,13 @@ def test_failed_discovery_degrades_to_no_servers(monkeypatch, tmp_path: Path):
     )
 
 
-def test_every_outcome_is_distinguishable():
-    """Four states, four names — none collapses into another."""
+def test_every_emitted_outcome_is_distinguishable():
+    """Three states, three names; none claims work that lacks a receipt."""
 
     assert len(
         {
-            "promotion_started",
             "promotion_no_servers",
             "promotion_unavailable",
-            "promotion_failed",
+            "promotion_not_scheduled",
         }
-    ) == 4
+    ) == 3

@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 
 from scripts.smoke_stage import (
+    GATE_ONE_MAX_TIMEOUT_SECONDS,
     GATE_TASK_ID,
     select_stage_tasks,
+    stage_timeout_cap_seconds,
     validate_prior_gate,
     validate_stage_inputs,
 )
@@ -30,6 +32,12 @@ def test_stage_selection_partitions_the_frozen_cohort_exactly_once() -> None:
     assert len(remainder) == 19
     assert gate + remainder == tasks
     assert set(gate).isdisjoint(remainder)
+
+
+def test_gate_one_has_a_real_thirty_minute_agent_ceiling() -> None:
+    assert GATE_ONE_MAX_TIMEOUT_SECONDS == 30 * 60
+    assert stage_timeout_cap_seconds("gate-one") == 30 * 60
+    assert stage_timeout_cap_seconds("remaining-19") is None
 
 
 @pytest.mark.parametrize("stage", ["", "all", "smoke20", "gate_one"])

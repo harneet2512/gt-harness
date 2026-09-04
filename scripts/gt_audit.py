@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """gt_audit - deterministic Tier-2 auditor for a Terminal-Bench run artifact.
 
-Reads a harbor output tree (one dir per task, each with ``agent/nano.txt`` +
-``result.json``) and grades GroundTruth's CONDUCT per task - the mechanical
+Reads a Harbor output tree and schema-dispatches each task to either the
+canonical Mini-SWE artifacts (``agent/miniswe_trajectory.json`` plus the GT
+event journal) or the legacy Nano transcript (``agent/nano.txt``). It grades
+GroundTruth's CONDUCT per task - the mechanical
 half of GT's own audit methodology (fired != delivered != consumed; this tool
 grades what was DELIVERED into observations, the model-facing surface).
 
@@ -86,6 +88,7 @@ import hashlib
 import json
 import re
 import sys
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -94,11 +97,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from gt_engine.attribution import (  # noqa: E402
+    feature_for_evidence,
     feature_provider_iterations,
     summarize_features,
     verify_lifecycle_rows,
     verify_sdlc_timing_rows,
     verify_trace_rows,
+)
+from gt_engine.event_journal import (  # noqa: E402
+    read_verified_events,
+    verify_event_journal,
 )
 from gt_engine.replay import build_iteration_replay  # noqa: E402
 
@@ -849,8 +857,606 @@ def load_attribution(path: Path) -> tuple[list[dict], list[str]]:
     return rows, issues
 
 
+def _native_miniswe_paths(
+    task_dir: Path,
+) -> tuple[Path | None, Path | None, list[str]]:
+    """Locate the one trajectory/journal pair owned by a Mini-SWE trial."""
+    agent = task_dir / "agent"
+    trajectories = sorted(agent.glob("miniswe_trajectory.json"))
+    journals = sorted((agent / "gt-state").glob("*/events.jsonl"))
+    issues: list[str] = []
+    if len(trajectories) > 1:
+        issues.append(f"multiple Mini-SWE trajectories found ({len(trajectories)})")
+    if len(journals) > 1:
+        issues.append(f"multiple GT event journals found ({len(journals)})")
+    return (
+        trajectories[0] if len(trajectories) == 1 else None,
+        journals[0] if len(journals) == 1 else None,
+        issues,
+    )
+
+
+def _read_json_object(path: Path, label: str) -> tuple[dict, list[str]]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, [f"{label} unreadable: {type(exc).__name__}"]
+    if not isinstance(value, dict):
+        return {}, [f"{label} is not a JSON object"]
+    return value, []
+
+
+def _verify_native_blob(
+    state_dir: Path,
+    row: dict,
+    *,
+    path_key: str,
+    digest_key: str,
+    label: str,
+) -> list[str]:
+    relative = str(row.get(path_key) or "")
+    expected = str(row.get(digest_key) or "")
+    if not relative or not expected:
+        return [f"{label} event missing {path_key}/{digest_key}"]
+    path = state_dir / relative
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(state_dir.resolve())
+        payload = resolved.read_bytes()
+    except (OSError, ValueError):
+        return [f"{label} blob missing or outside state directory: {relative}"]
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != expected:
+        return [f"{label} blob hash mismatch: expected {expected}, got {actual}"]
+    return []
+
+
+def _native_feature_projection(rows: list[dict]) -> dict[str, dict]:
+    """Project native events conservatively into the canonical 19 identities.
+
+    Audit-owned delivery IDs are populated only after locating the sealed exact
+    bytes in the immediate provider request and joining its response. Direct
+    callers may pass raw event rows for projection-only unit tests.
+    """
+    synthetic: list[dict] = []
+    for row in rows:
+        event = str(row.get("event") or "")
+        if event == "provider_delivery":
+            delivery_ids = row.get("_audited_delivery_ids", row.get("delivery_ids"))
+            synthetic.append({
+                "event_type": "provider.request",
+                "payload": {
+                    "iteration": int(row.get("iteration") or 0),
+                    "delivery_ids": list(delivery_ids or ()),
+                    "matches": list(row.get("matches") or ()),
+                },
+            })
+            continue
+        if event == "provider_response":
+            delivery_ids = row.get("_audited_delivery_ids", row.get("delivery_ids"))
+            synthetic.append({
+                "event_type": "model.response",
+                "payload": {
+                    "iteration": int(row.get("iteration") or 0),
+                    "delivery_ids": list(delivery_ids or ()),
+                },
+            })
+            continue
+        evidence_type = str(row.get("evidence_type") or row.get("kind") or "")
+        feature_id = feature_for_evidence(evidence_type)
+        if evidence_type == "context_contract":
+            feature_id = "obligations"
+        delivery_id = str(
+            row.get("delivery_identity") or row.get("payload_sha256") or ""
+        )
+        if event in {"evidence_delivery", "context_addition_delivery"} and feature_id:
+            synthetic.append({
+                "event_type": "decision.committed",
+                "payload": {
+                    "decision": "delivered",
+                    "feature_id": feature_id,
+                    "evidence_type": evidence_type,
+                    "delivery_id": delivery_id,
+                    "reason": "native_seal_without_provider_identity_join",
+                },
+            })
+        elif event == "delivery_refused" and feature_id:
+            reason = str(row.get("reason") or "delivery_refused")
+            # A duplicate/cap refusal after a successful seal is suppression,
+            # not evidence that the feature went dark.
+            synthetic.append({
+                "event_type": "feature.evaluated",
+                "payload": {
+                    "feature_id": feature_id,
+                    "eligible": reason not in {
+                        "duplicate_delivery_identity", "task_delivery_ceiling",
+                        "task_byte_ceiling",
+                    },
+                    "outcome": reason,
+                },
+            })
+    return summarize_features(synthetic)
+
+
+def _audit_native_miniswe_task(
+    task_dir: Path,
+    rj: dict,
+    trajectory_path: Path,
+    journal_path: Path | None,
+    discovery_issues: list[str],
+) -> TaskAudit:
+    name = rj.get("task_name") or task_dir.name.split("__", 1)[0]
+    a = TaskAudit(task_name=name, trial_dir=task_dir.name)
+    try:
+        a.reward = float(rj["verifier_result"]["rewards"]["reward"])
+    except (KeyError, TypeError, ValueError):
+        a.reward = None
+    exc = rj.get("exception_info")
+    if exc:
+        a.exception_info = json.dumps(exc, sort_keys=True)[:400]
+
+    trajectory, trajectory_issues = _read_json_object(
+        trajectory_path, "agent/miniswe_trajectory.json"
+    )
+    a.attribution_issues.extend(discovery_issues + trajectory_issues)
+    messages = trajectory.get("messages")
+    if not isinstance(messages, list):
+        messages = []
+        a.attribution_issues.append("Mini-SWE trajectory messages missing")
+    elif any(not isinstance(message, dict) for message in messages):
+        a.attribution_issues.append("Mini-SWE trajectory messages contain non-objects")
+        messages = [message for message in messages if isinstance(message, dict)]
+    info = trajectory.get("info")
+    if not isinstance(info, dict):
+        a.attribution_issues.append("Mini-SWE trajectory info is not an object")
+        info = {}
+    model_stats = info.get("model_stats")
+    if not isinstance(model_stats, dict):
+        a.attribution_issues.append(
+            "Mini-SWE trajectory info.model_stats is not an object"
+        )
+        model_stats = {}
+    api_calls = model_stats.get("api_calls")
+    if not isinstance(api_calls, int) or isinstance(api_calls, bool) or api_calls < 0:
+        a.attribution_issues.append(
+            "Mini-SWE trajectory info.model_stats.api_calls is not a nonnegative integer"
+        )
+        api_calls = 0
+    a.iterations = api_calls
+    exit_status = trajectory.get("exit_status")
+    if not isinstance(exit_status, str):
+        a.attribution_issues.append(
+            "Mini-SWE trajectory exit_status is not a string"
+        )
+        exit_status = ""
+    a.stop_reason = exit_status or None
+    if exc and isinstance(exc, dict) and "Timeout" in str(exc.get("exception_type")):
+        a.stop_reason = "external_timeout"
+    a.tool_results = sum(1 for message in messages if message.get("role") == "tool")
+    tool_errors = 0
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        extra = message.get("extra", {})
+        if not isinstance(extra, dict):
+            a.attribution_issues.append("Mini-SWE tool message extra is not an object")
+            continue
+        returncode = extra.get("returncode", 0)
+        if not isinstance(returncode, int) or isinstance(returncode, bool):
+            a.attribution_issues.append(
+                "Mini-SWE tool message returncode is not an integer"
+            )
+        elif returncode != 0:
+            tool_errors += 1
+    a.tool_errors = tool_errors
+    a.code_task = any(
+        message.get("role") == "assistant" and message.get("tool_calls")
+        for message in messages
+    )
+
+    rows: list[dict] = []
+    if journal_path is None:
+        a.attribution_issues.append("missing agent/gt-state/*/events.jsonl")
+    else:
+        verification = verify_event_journal(journal_path)
+        if not verification.valid:
+            a.attribution_issues.extend(
+                f"GT event journal: {issue}" for issue in verification.issues
+            )
+        else:
+            rows = list(read_verified_events(journal_path))
+        a.attribution_present = True
+        a.attribution_rows = verification.event_count
+
+    for row in rows:
+        iteration = row.get("iteration", 0)
+        if (
+            not isinstance(iteration, int)
+            or isinstance(iteration, bool)
+            or iteration < 0
+        ):
+            a.attribution_issues.append(
+                f"GT event {row.get('sequence')}: iteration is not a nonnegative integer"
+            )
+            row["iteration"] = 0
+        if row.get("event") in {
+            "evidence_delivery", "context_addition_delivery",
+        }:
+            rendered_bytes = row.get("rendered_bytes")
+            if (
+                not isinstance(rendered_bytes, int)
+                or isinstance(rendered_bytes, bool)
+                or rendered_bytes < 0
+            ):
+                a.attribution_issues.append(
+                    f"GT event {row.get('sequence')}: rendered_bytes is not a nonnegative integer"
+                )
+                row["rendered_bytes"] = 0
+
+    counts = Counter(str(row.get("event") or "") for row in rows)
+    a.graph_refresh_count = counts["graph_refreshed"]
+    a.graph_refresh_failure_count = counts["graph_refresh_failed"]
+    a.bash_observation_count = counts["semantic_observation"]
+    a.gt_deliveries = counts["evidence_delivery"] + counts["context_addition_delivery"]
+    a.gt_overhead_chars = sum(
+        int(row.get("rendered_bytes") or 0)
+        for row in rows
+        if row.get("event") in {"evidence_delivery", "context_addition_delivery"}
+    )
+    a.gt_delivery_kinds = dict(sorted(Counter(
+        str(row.get("evidence_type") or row.get("kind") or "unknown")
+        for row in rows
+        if row.get("event") in {"evidence_delivery", "context_addition_delivery"}
+    ).items()))
+    a.provider_receipts_required = bool(counts["provider_delivery"])
+
+    state_dir = journal_path.parent if journal_path is not None else task_dir
+    delivery_material: dict[str, tuple[str, int, int]] = {}
+    for row in rows:
+        if row.get("event") not in {
+            "evidence_delivery", "context_addition_delivery",
+        }:
+            continue
+        identity = str(row.get("delivery_identity") or "")
+        issues = _verify_native_blob(
+            state_dir, row, path_key="delivery_blob",
+            digest_key="delivery_identity", label="GT delivery",
+        )
+        a.attribution_issues.extend(issues)
+        if issues:
+            continue
+        try:
+            if identity in delivery_material:
+                a.attribution_issues.append(
+                    f"duplicate GT delivery identity: {identity}"
+                )
+                continue
+            delivery_material[identity] = (
+                (state_dir / str(row["delivery_blob"])).read_text(encoding="utf-8"),
+                int(row.get("sequence") or 0),
+                int(row.get("iteration") or 0),
+            )
+        except (OSError, KeyError, UnicodeError):
+            a.attribution_issues.append(
+                f"GT delivery blob is not valid UTF-8: {identity}"
+            )
+
+    provider_requests: dict[str, dict] = {}
+    provider_responses: dict[str, dict] = {}
+    audited_request_ids: dict[str, set[str]] = {}
+    for row in rows:
+        event = row.get("event")
+        request_id = str(row.get("request_id") or "")
+        if event == "provider_delivery":
+            if request_id in provider_requests:
+                a.attribution_issues.append(
+                    f"duplicate provider request_id: {request_id}"
+                )
+            provider_requests[request_id] = row
+            raw_delivery_ids = row.get("delivery_ids")
+            if raw_delivery_ids is None:
+                raw_delivery_ids = []
+            elif not isinstance(raw_delivery_ids, list):
+                a.attribution_issues.append(
+                    f"provider request {request_id}: delivery_ids is not a list"
+                )
+                raw_delivery_ids = []
+                row["delivery_ids"] = []
+            delivery_ids = {str(value) for value in raw_delivery_ids}
+            match_ids: set[str] = set()
+            if row.get("unmatched_delivery_ids"):
+                raw_unmatched = row.get("unmatched_delivery_ids")
+                if not isinstance(raw_unmatched, list):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: unmatched_delivery_ids is not a list"
+                    )
+                    raw_unmatched = []
+                a.attribution_issues.append(
+                    f"provider request {request_id}: admitted delivery bytes "
+                    f"not present in final messages: "
+                    f"{raw_unmatched}"
+                )
+            raw_matches = row.get("matches")
+            if raw_matches is None:
+                raw_matches = []
+            elif not isinstance(raw_matches, list):
+                a.attribution_issues.append(
+                    f"provider request {request_id}: matches is not a list"
+                )
+                raw_matches = []
+                row["matches"] = []
+            for match in raw_matches:
+                if not isinstance(match, dict):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: malformed delivery match"
+                    )
+                    continue
+                if match.get("delivery_id") != match.get("rendered_sha256"):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: delivery match hash mismatch"
+                    )
+                match_ids.add(str(match.get("delivery_id") or ""))
+            if delivery_ids != match_ids:
+                a.attribution_issues.append(
+                    f"provider request {request_id}: delivery_ids/matches mismatch"
+                )
+            a.attribution_issues.extend(_verify_native_blob(
+                state_dir, row, path_key="request_blob",
+                digest_key="payload_sha256", label="provider request",
+            ))
+            request: dict = {}
+            request_messages: list = []
+            try:
+                parsed_request = json.loads(
+                    (state_dir / str(row["request_blob"])).read_text(encoding="utf-8")
+                )
+                if not isinstance(parsed_request, dict):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: provider request JSON object required"
+                    )
+                else:
+                    request = parsed_request
+                raw_messages = request.get("messages")
+                if not isinstance(raw_messages, list):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: messages is not a list"
+                    )
+                elif any(not isinstance(message, dict) for message in raw_messages):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: messages contain non-objects"
+                    )
+                else:
+                    request_messages = raw_messages
+                visible = json.dumps(
+                    request_messages, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                if hashlib.sha256(visible).hexdigest() != row.get("model_visible_sha256"):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: model-visible hash mismatch"
+                    )
+            except (OSError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
+                a.attribution_issues.append(
+                    f"provider request {request_id}: unreadable JSON ({type(exc).__name__})"
+                )
+
+            def contains_text(value: object, needle: str) -> bool:
+                if isinstance(value, str):
+                    return needle in value
+                if isinstance(value, dict):
+                    return any(contains_text(item, needle) for item in value.values())
+                if isinstance(value, list):
+                    return any(contains_text(item, needle) for item in value)
+                return False
+
+            audited_ids: set[str] = set()
+            for delivery_id in sorted(delivery_ids & match_ids):
+                material = delivery_material.get(delivery_id)
+                if material is None:
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: no sealed bytes for delivery {delivery_id}"
+                    )
+                    continue
+                rendered, delivery_sequence, delivery_iteration = material
+                request_sequence = int(row.get("sequence") or 0)
+                request_iteration = int(row.get("iteration") or 0)
+                intervening_provider_boundary = any(
+                    other.get("event") in {"provider_delivery", "provider_response"}
+                    and delivery_sequence < int(other.get("sequence") or 0)
+                    < request_sequence
+                    for other in rows
+                )
+                if (
+                    request_sequence <= delivery_sequence
+                    or request_iteration != delivery_iteration + 1
+                    or intervening_provider_boundary
+                ):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: delivery is not joined to its immediate boundary: {delivery_id}"
+                    )
+                elif not contains_text(request_messages, rendered):
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: delivery bytes absent from final messages: {delivery_id}"
+                    )
+                else:
+                    audited_ids.add(delivery_id)
+            audited_request_ids[request_id] = audited_ids
+        elif event == "provider_response":
+            if request_id in provider_responses:
+                a.attribution_issues.append(
+                    f"duplicate provider response request_id: {request_id}"
+                )
+            provider_responses[request_id] = row
+            raw_response_ids = row.get("delivery_ids")
+            if raw_response_ids is not None and not isinstance(raw_response_ids, list):
+                a.attribution_issues.append(
+                    f"provider response {request_id}: delivery_ids is not a list"
+                )
+                row["delivery_ids"] = []
+            a.attribution_issues.extend(_verify_native_blob(
+                state_dir, row, path_key="response_blob",
+                digest_key="response_sha256", label="provider response",
+            ))
+            try:
+                response_value = json.loads(
+                    (state_dir / str(row["response_blob"])).read_text(encoding="utf-8")
+                )
+                if not isinstance(response_value, dict):
+                    a.attribution_issues.append(
+                        f"provider response {request_id}: provider response JSON object required"
+                    )
+            except (OSError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
+                a.attribution_issues.append(
+                    f"provider response {request_id}: unreadable JSON ({type(exc).__name__})"
+                )
+            usage = row.get("usage")
+            if not isinstance(usage, dict):
+                a.attribution_issues.append(
+                    f"provider response {request_id}: usage is not an object"
+                )
+                continue
+            required_usage = ("prompt_tokens", "completion_tokens")
+            if any(
+                not isinstance(usage.get(key), int)
+                or isinstance(usage.get(key), bool)
+                or usage[key] < 0
+                for key in required_usage
+            ):
+                a.attribution_issues.append(
+                    f"provider response {request_id}: incomplete token usage"
+                )
+                continue
+            a.in_tokens = (a.in_tokens or 0) + usage["prompt_tokens"]
+            a.out_tokens = (a.out_tokens or 0) + usage["completion_tokens"]
+            details = usage.get("prompt_tokens_details", {})
+            if not isinstance(details, dict):
+                a.attribution_issues.append(
+                    f"provider response {request_id}: prompt_tokens_details is not an object"
+                )
+                details = {}
+            cached_tokens = details.get("cached_tokens", 0)
+            if (
+                not isinstance(cached_tokens, int)
+                or isinstance(cached_tokens, bool)
+                or cached_tokens < 0
+                or cached_tokens > usage["prompt_tokens"]
+            ):
+                a.attribution_issues.append(
+                    f"provider response {request_id}: cached_tokens is invalid"
+                )
+            else:
+                a.cache_read = (a.cache_read or 0) + cached_tokens
+    missing_responses = sorted(set(provider_requests) - set(provider_responses))
+    extra_responses = sorted(set(provider_responses) - set(provider_requests))
+    if missing_responses:
+        a.attribution_issues.append(
+            f"provider request(s) without response: {missing_responses}"
+        )
+    if extra_responses:
+        a.attribution_issues.append(
+            f"provider response(s) without request: {extra_responses}"
+        )
+    ordered_request_iterations = [
+        int(row.get("iteration") or 0)
+        for row in sorted(
+            provider_requests.values(), key=lambda item: int(item.get("sequence") or 0)
+        )
+    ]
+    if ordered_request_iterations != list(range(1, len(provider_requests) + 1)):
+        a.attribution_issues.append(
+            "provider request iterations are not unique and strictly sequential"
+        )
+    for request_id in sorted(set(provider_requests) & set(provider_responses)):
+        requested_ids = {
+            str(value)
+            for value in provider_requests[request_id].get("delivery_ids") or ()
+        }
+        response_ids = {
+            str(value)
+            for value in provider_responses[request_id].get("delivery_ids") or ()
+        }
+        if requested_ids != response_ids:
+            a.attribution_issues.append(
+                f"provider response {request_id}: delivery identity mismatch"
+            )
+        request_row = provider_requests[request_id]
+        response_row = provider_responses[request_id]
+        response_is_immediate = (
+            int(response_row.get("sequence") or 0)
+            > int(request_row.get("sequence") or 0)
+            and int(response_row.get("iteration") or 0)
+            == int(request_row.get("iteration") or 0)
+            and not any(
+                other.get("event") in {"provider_delivery", "provider_response"}
+                and int(request_row.get("sequence") or 0)
+                < int(other.get("sequence") or 0)
+                < int(response_row.get("sequence") or 0)
+                for other in rows
+            )
+        )
+        if not response_is_immediate:
+            a.attribution_issues.append(
+                f"provider response {request_id}: not the immediate matching boundary"
+            )
+        verified = (
+            audited_request_ids.get(request_id, set()) & response_ids
+            if response_is_immediate else set()
+        )
+        provider_requests[request_id]["_audited_delivery_ids"] = sorted(verified)
+        provider_responses[request_id]["_audited_delivery_ids"] = sorted(verified)
+    a.feature_attribution = _native_feature_projection(rows)
+    if a.iterations != len(provider_requests):
+        a.attribution_issues.append(
+            f"trajectory api_calls {a.iterations} != provider requests "
+            f"{len(provider_requests)}"
+        )
+
+    if a.exception_info:
+        a.verdict_reasons.append(
+            f"harness exception_info present: {a.exception_info}"
+        )
+    a.verdict_reasons.extend(a.attribution_issues)
+    attribution_red = sorted(
+        feature_id for feature_id, item in a.feature_attribution.items()
+        if item.get("status") in {
+            "TRIGGERED_DARK", "TELEMETRY_FAULT", "DELIVERED_UNEXPOSED", "EXPOSED",
+        }
+    )
+    if attribution_red:
+        a.verdict_reasons.append(
+            "attribution RED feature(s): " + ", ".join(attribution_red)
+        )
+    if not a.stop_reason:
+        a.verdict_reasons.append("Mini-SWE trajectory has no terminal exit_status")
+    terminal_failure = bool(
+        a.stop_reason and a.stop_reason.casefold() != "submitted"
+    )
+    if terminal_failure:
+        a.verdict_reasons.append(
+            f"Mini-SWE failure terminal: {a.stop_reason}"
+        )
+    if a.verdict_reasons:
+        a.verdict = "RED" if (
+            a.exception_info or a.attribution_issues or attribution_red
+            or terminal_failure
+        ) else "YELLOW"
+    elif a.gt_deliveries:
+        a.verdict = "GREEN-delivered"
+    else:
+        a.verdict = "GREEN-quiet" if a.code_task else "GREEN-dormant"
+        a.verdict_reasons.append(
+            "zero native GT deliveries observed (correct-or-quiet)"
+        )
+    return a
+
+
 def audit_task(task_dir: Path) -> TaskAudit:
     rj = _load_result_json(task_dir)
+    trajectory_path, journal_path, native_issues = _native_miniswe_paths(task_dir)
+    if trajectory_path is not None:
+        return _audit_native_miniswe_task(
+            task_dir, rj, trajectory_path, journal_path, native_issues
+        )
     name = rj.get("task_name") or task_dir.name.split("__", 1)[0]
     a = TaskAudit(task_name=name, trial_dir=task_dir.name)
 

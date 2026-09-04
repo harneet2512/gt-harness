@@ -452,7 +452,9 @@ def evaluate_live_gate(
 
     observed_models: set[str] = set()
     if run_dir is not None and run_dir.is_dir():
-        for result_path in run_dir.glob("*/result.json"):
+        # Harbor/Pier artifacts preserve wrapper/job/trial directories. A
+        # one-level glob silently observes zero models in the canonical layout.
+        for result_path in run_dir.rglob("result.json"):
             try:
                 observed_models.update(_model_values(json.loads(
                     result_path.read_text(encoding="utf-8")

@@ -13,6 +13,17 @@ GATE_STAGE = "gate-one"
 REMAINDER_STAGE = "remaining-19"
 STAGES = frozenset({GATE_STAGE, REMAINDER_STAGE})
 GATE_TASK_ID = "arktype-json-schema-refs-dependencies"
+# Gate-one is an infrastructure proof, not a full benchmark attempt. Keep its
+# outer agent phase bounded; the remaining cohort retains each task-owned cap.
+GATE_ONE_MAX_TIMEOUT_SECONDS = 30 * 60
+
+
+def stage_timeout_cap_seconds(stage: str) -> float | None:
+    if stage == GATE_STAGE:
+        return float(GATE_ONE_MAX_TIMEOUT_SECONDS)
+    if stage == REMAINDER_STAGE:
+        return None
+    raise ValueError("cohort_stage must be gate-one or remaining-19")
 
 
 def select_stage_tasks(tasks: Sequence[str], stage: str) -> list[str]:
@@ -101,10 +112,12 @@ def validate_prior_gate(
 
 
 __all__ = [
+    "GATE_ONE_MAX_TIMEOUT_SECONDS",
     "GATE_STAGE",
     "GATE_TASK_ID",
     "REMAINDER_STAGE",
     "select_stage_tasks",
+    "stage_timeout_cap_seconds",
     "validate_prior_gate",
     "validate_stage_inputs",
 ]

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -188,44 +189,83 @@ def capture_workspace(
     if not resolved.is_dir():
         omissions.append("repository_root_missing")
     else:
-        for dirpath, dirnames, filenames in os.walk(resolved, followlinks=False):
-            base = Path(dirpath)
-            dirnames[:] = sorted(
-                name for name in dirnames
-                if name not in _SKIP_DIRS
-                and not any(
-                    (base / name).resolve() == target
-                    or target in (base / name).resolve().parents
-                    for target in excluded
-                )
+        git_paths: tuple[Path, ...] | None = None
+        try:
+            top = subprocess.run(
+                ["git", "-C", str(resolved), "rev-parse", "--show-toplevel"],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
             )
-            for name in sorted(filenames):
-                path = base / name
-                if any(path.resolve() == target or target in path.resolve().parents
-                       for target in excluded):
-                    continue
-                try:
-                    relative = path.relative_to(resolved).as_posix()
-                    if path.is_symlink():
-                        payload = os.readlink(path).encode("utf-8", "surrogatepass")
-                        kind = "symlink"
-                    else:
-                        payload = path.read_bytes()
-                        kind = "file"
-                    identity_payload = (
-                        canonical_repository_bytes(payload)
-                        if kind == "file"
-                        else payload
+            if Path(top.stdout.strip()).resolve() == resolved:
+                listed = subprocess.run(
+                    [
+                        "git", "-C", str(resolved), "ls-files", "-z",
+                        "--cached", "--others", "--exclude-standard",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=8,
+                )
+                git_paths = tuple(
+                    resolved / value
+                    for value in listed.stdout.decode(
+                        "utf-8", "surrogateescape"
+                    ).split("\0")
+                    if value and os.path.lexists(resolved / value)
+                )
+        except (OSError, subprocess.SubprocessError):
+            git_paths = None
+
+        if git_paths is None:
+            candidates: list[Path] = []
+            for dirpath, dirnames, filenames in os.walk(
+                resolved, followlinks=False
+            ):
+                base = Path(dirpath)
+                dirnames[:] = sorted(
+                    name for name in dirnames
+                    if name not in _SKIP_DIRS
+                    and not any(
+                        (base / name).resolve() == target
+                        or target in (base / name).resolve().parents
+                        for target in excluded
                     )
-                    files.append(FileState(
-                        path=relative,
-                        kind=kind,
-                        sha256=hashlib.sha256(identity_payload).hexdigest(),
-                        size=len(identity_payload),
-                        captured=payload if len(payload) <= _MAX_CAPTURE_BYTES else None,
-                    ))
-                except OSError:
-                    omissions.append(f"unreadable:{path.name}")
+                )
+                candidates.extend(base / name for name in sorted(filenames))
+            paths = tuple(candidates)
+        else:
+            paths = git_paths
+
+        for path in paths:
+            if any(path.resolve() == target or target in path.resolve().parents
+                   for target in excluded):
+                continue
+            try:
+                relative = path.relative_to(resolved).as_posix()
+                if path.is_symlink():
+                    payload = os.readlink(path).encode("utf-8", "surrogatepass")
+                    kind = "symlink"
+                else:
+                    payload = path.read_bytes()
+                    kind = "file"
+                identity_payload = (
+                    canonical_repository_bytes(payload)
+                    if kind == "file"
+                    else payload
+                )
+                files.append(FileState(
+                    path=relative,
+                    kind=kind,
+                    sha256=hashlib.sha256(identity_payload).hexdigest(),
+                    size=len(identity_payload),
+                    captured=payload if len(payload) <= _MAX_CAPTURE_BYTES else None,
+                ))
+            except OSError:
+                omissions.append(f"unreadable:{path.name}")
     identity = _canonical([item.mapping() for item in files])
     revision = hashlib.sha256(b"gt.workspace.v1\0" + identity).hexdigest()
     return WorkspaceSnapshot(

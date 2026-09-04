@@ -6,10 +6,17 @@ from pathlib import Path
 import pytest
 
 from scripts.resolve_harbor_budget import (
+    SUPERVISOR_GRACE_SECONDS,
     TASK_CONFIG_IDENTITY,
     canonical_task_config_bytes,
     resolve_budget,
 )
+
+
+def test_supervisor_reserve_covers_observed_container_startup_and_finalization() -> None:
+    # The paid gate observed ~115 seconds between Pier starting its outer timer
+    # and the GT runner attaching. Ninety seconds let Pier kill the runner first.
+    assert SUPERVISOR_GRACE_SECONDS >= 300
 
 
 def test_task_config_identity_is_checkout_line_ending_independent(

@@ -317,13 +317,16 @@ class MiniSweAgent(BaseInstalledAgent):
             f"--find-links {_REMOTE_WHEELHOUSE} --python {_REMOTE_PYTHON_DIR}/bin/python3.12 "
             f'--with "mini-swe-agent=={miniswe_version}" '
             f"--with {shlex.quote(remote_gt_wheel)} --with 'numpy==2.5.1' "
+            "--with 'onnxruntime==1.20.1' --with 'tokenizers==0.23.1' "
             f"{shlex.quote(remote_harness_wheel)} && "
             f'"{_REMOTE_PY}" -c "import importlib.metadata as m, sys; '
             "assert sys.version_info[:3] == (3, 12, 13); "
             f"assert m.version('mini-swe-agent') == '{miniswe_version}'; "
             "assert m.version('groundtruth-mcp') == '1.0.0'; "
             "assert m.version('numpy') == '2.5.1'; "
-            "import minisweagent, groundtruth, gt_engine" + '" && '
+            "assert m.version('onnxruntime') == '1.20.1'; "
+            "assert m.version('tokenizers') == '0.23.1'; "
+            "import minisweagent, groundtruth, gt_engine, onnxruntime, tokenizers" + '" && '
             "mkdir -p /tmp/gt-install-smoke-src && "
             "printf 'def smoke():\\n    return 1\\n' > /tmp/gt-install-smoke-src/smoke.py && "
             f'"{_REMOTE_GT_BINARY}" -root /tmp/gt-install-smoke-src '
@@ -361,6 +364,7 @@ class MiniSweAgent(BaseInstalledAgent):
             f"--metrics /logs/agent/miniswe_report.json "
             f"--product-receipt /logs/agent/gt-run.json "
             f"--adapter-receipt /logs/agent/benchmark-adapter.json "
+            f"--patch-output /logs/artifacts/model.patch "
             f"{self.build_cli_flags()} "
             f"{extra_args}"
             "</dev/null 2>&1"

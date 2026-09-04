@@ -712,7 +712,7 @@ def _graph_scale(database: Path) -> tuple[int, int]:
     return (int(files[0]) if files else 0, int(nodes[0]) if nodes else 0)
 
 def start_lsp_promotion(database: Path, root: str | Path) -> dict[str, object]:
-    """Start progressive LSP edge promotion over a freshly published graph.
+    """Report whether progressive LSP promotion can be safely scheduled.
 
     The producer ships a complete promotion subsystem whose own design note
     states the intent: gt-index publishes a usable graph immediately, then
@@ -721,17 +721,13 @@ def start_lsp_promotion(database: Path, root: str | Path) -> dict[str, object]:
     so the benchmark harness published a graph and left the highest-precision
     edge tier -- lsp and lsp_verified, both admitted by the closure -- empty.
 
-    Promotion is best-effort by construction. It discovers servers with
-    shutil.which, so a container with none staged promotes nothing and keeps
-    exactly the graph we publish today. Nothing here may fail an index that has
-    already succeeded.
+    The current producer lacks a graph-bound scheduling receipt, so available
+    servers are reported but not launched. Nothing here may mutate or fail an
+    index that has already succeeded.
     """
 
     try:
-        from groundtruth.lsp.background_promotion import (
-            detect_available_servers,
-            start_background_promotion,
-        )
+        from groundtruth.lsp.background_promotion import detect_available_servers
     except Exception:  # noqa: BLE001 - producer package absent is not an index failure
         return {"status": "promotion_unavailable", "servers": []}
 
@@ -746,11 +742,17 @@ def start_lsp_promotion(database: Path, root: str | Path) -> dict[str, object]:
         # which is how LSP stayed nominally on while contributing nothing.
         return {"status": "promotion_no_servers", "servers": []}
 
-    try:
-        start_background_promotion(str(database), str(root))
-    except Exception:  # noqa: BLE001 - promotion is an optimiser, never a gate
-        return {"status": "promotion_failed", "servers": servers}
-    return {"status": "promotion_started", "servers": servers}
+    # The pinned producer exposes neither a task handle nor a graph-bound
+    # scheduling receipt. Its process-global statistics can describe a prior
+    # graph and are updated only after an async coroutine starts. Calling it
+    # here would therefore mutate the graph without giving the harness a
+    # truthful way to attest which graph was promoted. Fail closed until the
+    # producer returns a graph/revision-bound scheduling receipt.
+    return {
+        "status": "promotion_not_scheduled",
+        "servers": servers,
+        "reason": "producer_scheduler_receipt_unavailable",
+    }
 
 
 def _write_index_evidence(

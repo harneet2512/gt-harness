@@ -261,6 +261,8 @@ def run_cochange_prior(
     LLM-free, correct-or-quiet, and returning rendered bytes for the seam to
     dose. A file outside the repository root is dropped, not queried.
     """
+    if getattr(adapter, "graph_fresh", True) is False:
+        return ""
     graph_db = str(getattr(adapter, "graph_db", "") or "")
     if not graph_db or not files:
         return ""

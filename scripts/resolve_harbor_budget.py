@@ -16,9 +16,11 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-# Harbor owns the real task ceiling. GT stops new work this much earlier so
-# trajectory/receipt finalization can complete without stealing material solve time.
-SUPERVISOR_GRACE_SECONDS = 90
+# Pier starts Harbor's outer timer before the task-container runner attaches.
+# The live gate observed ~115 seconds of pre-run setup. Reserve five minutes so
+# the inner supervisor can stop, close the session, and publish receipts before
+# Pier cancels the entire process.
+SUPERVISOR_GRACE_SECONDS = 300
 TASK_CONFIG_IDENTITY = "sha256_canonical_lf_v1"
 
 

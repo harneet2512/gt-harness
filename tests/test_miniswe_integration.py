@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
+from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter, ProviderModelMismatch
 from gt_engine.run_diagnostics import DiagnosticCode
@@ -277,6 +279,39 @@ def test_response_binding_records_usage_and_marks_terminal(tmp_path):
     assert response_rows and response_rows[-1]["usage"]["prompt_tokens"] == 10
 
 
+def test_native_delivery_identity_is_joined_to_immediate_request_and_response(
+    tmp_path,
+):
+    a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    assert a.admit_model_visible_delivery(
+        lane="sealed",
+        kind="cochange_partner",
+        rendered="inspect sibling.py",
+        action_index=1,
+        iteration=1,
+        dedup_key="cochange:sibling.py",
+        target="sibling.py",
+    )
+    identity = hashlib.sha256(b"inspect sibling.py").hexdigest()
+
+    request = a.bind_provider_payload({
+        "model": "m",
+        "messages": [{"role": "tool", "content": "inspect sibling.py"}],
+    })
+    a.bind_provider_response({"model": "m", "choices": []})
+
+    assert request.delivery_ids == (identity,)
+    rows = [json.loads(line) for line in a.store.path.read_text().splitlines()]
+    provider = next(row for row in rows if row["event"] == "provider_delivery")
+    response = next(row for row in rows if row["event"] == "provider_response")
+    assert provider["delivery_ids"] == [identity]
+    assert provider["matches"] == [{
+        "delivery_id": identity,
+        "rendered_sha256": identity,
+    }]
+    assert response["delivery_ids"] == [identity]
+
+
 def test_provider_request_commits_exact_logical_payload_and_model_identity(tmp_path):
     a = MiniSweAdapter(
         task_id="task", state_dir=tmp_path, predicates=[],
@@ -545,18 +580,27 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
         repo_root=str(repo), graph_db=str(graph),
     )
     a.start_task()
+    assert a.gateway_state().graph_db == str(graph)
     a.repository_revision = "a" * 64
     a.note_edit(["mod.py"])
     assert a.graph_fresh is False
+    assert a.gateway_state().graph_db is None
 
     rebuilt = tmp_path / "rebuilt.db"
     rebuilt.write_bytes(b"new")
     monkeypatch.setattr(
-        "gt_engine.indexer.ensure_index", lambda root, state_dir=None: str(rebuilt)
+        "gt_engine.indexer.ensure_index_with_receipt",
+        lambda root, state_dir=None: IndexBuildReceipt(
+            IndexBuildStatus.BUILT,
+            graph_db=str(rebuilt),
+            graph_revision="b" * 64,
+            analysis_state="complete",
+        ),
     )
     assert a.refresh_graph() is True
     assert a.graph_fresh is True
     assert a.graph_db == str(rebuilt)
+    assert a.gateway_state().graph_db == str(rebuilt)
 
 
 def test_graph_rebuild_failure_keeps_graph_stale(monkeypatch, tmp_path):
@@ -600,6 +644,44 @@ def test_submit_refreshes_stale_graph_and_refuses_when_refresh_fails(
         event.code is DiagnosticCode.GT_GRAPH_REFRESH_FAILED
         and event.phase == "submit"
         for event in a.diagnostics._events
+    )
+
+
+def test_advisory_submit_does_not_rebuild_stale_graph(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    a = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+        graph_db=str(tmp_path / "graph.db"),
+    )
+    a.start_task()
+    a.note_edit(["mod.py"])
+    phases = []
+
+    def refresh_graph(*, phase="graph_query"):
+        phases.append(phase)
+        a.graph_fresh = True
+        return True
+
+    monkeypatch.setattr(a, "refresh_graph", refresh_graph)
+    a.begin_verify()
+    a.begin_submit()
+
+    assert a.advisory_submit_decision() is True
+    assert phases == []
+    assert a.graph_fresh is False
+    rows = [
+        json.loads(line)
+        for line in a.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        row["event"] == "graph_refresh_deferred"
+        and row.get("phase") == "submit_advisory"
+        and row.get("reason") == "advisory_submit_cannot_consume_refresh"
+        for row in rows
     )
 
 

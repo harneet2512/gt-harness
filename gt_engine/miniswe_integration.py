@@ -42,6 +42,7 @@ class ProviderDelivery:
     phase: str
     suffix: str
     model_visible_sha256: str = ""
+    delivery_ids: tuple[str, ...] = ()
 
 
 class ProviderModelMismatch(RuntimeError):
@@ -187,6 +188,11 @@ class MiniSweAdapter(GroundtruthController):
         self._model_visible_delivery_identities: set[str] = set()
         self._accepted_sealed_delivery_count = 0
         self._pending_delivery_metadata: dict[str, str] = {}
+        # Exact admitted bytes awaiting the immediate provider-final request.
+        # This is deliberately per-request transient state, not carried chat
+        # history: attribution asks which decision boundary first exposed a
+        # delivery, not every later request that still contains it.
+        self._pending_provider_deliveries: list[tuple[str, str]] = []
         self.pending_transient = ""
         self.pending_directives: list[str] = []
         self._refusal_count = 0
@@ -415,6 +421,11 @@ class MiniSweAdapter(GroundtruthController):
         self._edited_files.update(normalized_paths)
         if normalized_paths and self.graph_db:
             self.graph_fresh = False
+            # GatewayState captures graph_db at construction. Drop the cached
+            # wrapper immediately so automatic evidence cannot keep reading a
+            # pre-edit graph while the adapter correctly reports it stale.
+            # The persistent EpisodeState is retained and reattached lazily.
+            self._gateway_state = None
             self.graph_stale_since_revision = self.repository_revision
             self.store.append(
                 "graph_invalidated",
@@ -502,9 +513,9 @@ class MiniSweAdapter(GroundtruthController):
         if not self.repo_root:
             return False
         try:
-            from .indexer import ensure_index
+            from .indexer import ensure_index_with_receipt
 
-            rebuilt = ensure_index(
+            receipt = ensure_index_with_receipt(
                 self.repo_root, state_dir=str(self.store.root.parent)
             )
         except Exception as exc:  # noqa: BLE001 - freshness is fail-open
@@ -513,12 +524,19 @@ class MiniSweAdapter(GroundtruthController):
             )
             self._record_graph_refresh_failure(type(exc).__name__, phase=phase)
             return False
-        if not rebuilt:
-            self.store.append("graph_refresh_failed", error_type="index_unavailable")
-            self._record_graph_refresh_failure("index_unavailable", phase=phase)
+        if not receipt.success or not receipt.graph_db:
+            cause = receipt.error_type or "index_unavailable"
+            self.store.append(
+                "graph_refresh_failed",
+                error_type=cause,
+                index_receipt=receipt.as_dict(),
+            )
+            self._record_graph_refresh_failure(cause, phase=phase)
             return False
+        rebuilt = receipt.graph_db
         self.graph_db = rebuilt
         self.graph_fresh = True
+        self._gateway_state = None
         self.graph_stale_since_revision = ""
         self.store.append(
             "graph_refreshed",
@@ -589,6 +607,24 @@ class MiniSweAdapter(GroundtruthController):
             separators=(",", ":"),
         ).encode("utf-8")
         model_visible_digest = hashlib.sha256(model_visible).hexdigest()
+        def contains_text(value: Any, needle: str) -> bool:
+            if isinstance(value, str):
+                return needle in value
+            if isinstance(value, Mapping):
+                return any(contains_text(item, needle) for item in value.values())
+            if isinstance(value, (list, tuple)):
+                return any(contains_text(item, needle) for item in value)
+            return False
+
+        pending = tuple(self._pending_provider_deliveries)
+        matched = tuple(
+            identity for identity, rendered in pending
+            if contains_text(messages, rendered)
+        )
+        unmatched = tuple(
+            identity for identity, rendered in pending
+            if not contains_text(messages, rendered)
+        )
         self.store.put_blob("provider_requests", digest, encoded)
         self.iteration += 1
         request_id = f"{self.task_id}-{self.iteration}-{digest[:16]}"
@@ -600,6 +636,7 @@ class MiniSweAdapter(GroundtruthController):
             self.phase,
             suffix,
             model_visible_digest,
+            matched,
         )
         self.deliveries.append(delivery)
         self._last_payload_hash = digest
@@ -615,7 +652,14 @@ class MiniSweAdapter(GroundtruthController):
             requested_model=self.requested_model,
             resolved_model=self.resolved_model,
             request_blob=f"provider_requests/{digest}.json",
+            delivery_ids=list(matched),
+            matches=[
+                {"delivery_id": identity, "rendered_sha256": identity}
+                for identity in matched
+            ],
+            unmatched_delivery_ids=list(unmatched),
         )
+        self._pending_provider_deliveries.clear()
         for typed in self._pending_typed_observations:
             self.store.append(
                 "typed_observation_provider_join",
@@ -731,7 +775,7 @@ class MiniSweAdapter(GroundtruthController):
             episode = self._episode or EpisodeState(episode_id=self.task_id)
             self._episode = episode
             self._gateway_state = GatewayState(
-                graph_db=self.graph_db,
+                graph_db=self.graph_db if self.graph_fresh else None,
                 repo_root=self.repo_root,
                 issue_text=self.issue_text,
                 episode=episode,
@@ -805,6 +849,10 @@ class MiniSweAdapter(GroundtruthController):
             resolved_model=self.resolved_model,
             fallback_model=self.fallback_model,
             model_mismatch=mismatch,
+            delivery_ids=list(
+                self._latest_delivery.delivery_ids
+                if self._latest_delivery else ()
+            ),
         )
         if self._latest_delivery is not None:
             self._terminal_request_ids.add(self._latest_delivery.request_id)
@@ -950,6 +998,10 @@ class MiniSweAdapter(GroundtruthController):
         self._model_visible_delivery_count = candidate_ordinal
         self._model_visible_delivery_bytes += rendered_bytes
         self._model_visible_delivery_identities.add(delivery_identity)
+        self._pending_provider_deliveries.append((delivery_identity, rendered))
+        self.store.put_blob(
+            "deliveries", delivery_identity, rendered.encode("utf-8")
+        )
         if lane == "sealed":
             self._accepted_sealed_delivery_count += 1
         event = "context_addition_delivery" if lane == "prompt" else "evidence_delivery"
@@ -965,6 +1017,7 @@ class MiniSweAdapter(GroundtruthController):
             rendered_bytes=rendered_bytes,
             payload_sha256=payload_sha256,
             delivery_identity=delivery_identity,
+            delivery_blob=f"deliveries/{delivery_identity}.json",
             semantics=semantics,
             artifact_sha256=artifact_sha256,
             delivery_ordinal=candidate_ordinal,
@@ -1408,6 +1461,18 @@ class MiniSweAdapter(GroundtruthController):
         """
         if self.phase != "SUBMIT":
             raise RuntimeError(f"advisory submit requires SUBMIT, got {self.phase}")
+        if self.graph_db and not self.graph_fresh:
+            # Advisory mode cannot consume a refreshed graph to change the
+            # native submission decision. A synchronous whole-repository build
+            # here would only consume the finalization window. Keep the stale
+            # state explicit; enforced submit and typed graph queries remain
+            # genuine demand boundaries.
+            self.store.append(
+                "graph_refresh_deferred",
+                phase="submit_advisory",
+                reason="advisory_submit_cannot_consume_refresh",
+                graph_fresh=False,
+            )
         self._transition("FINISHED")
         self.store.append(
             "submit_decision",

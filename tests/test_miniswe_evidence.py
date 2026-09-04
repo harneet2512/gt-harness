@@ -70,6 +70,28 @@ def test_classify_event_derives_view_boundary():
     assert ev.primary_boundary == "file_view"
 
 
+def test_workspace_delta_is_always_an_edit_boundary():
+    ev = me.classify_event(
+        "python scripts/rewrite.py", "rewritten", 0,
+        action_index=1,
+        changed_files=("src/mod.py",),
+        viewed_files=("scripts/rewrite.py",),
+    )
+    assert ev.primary_boundary == "edit_result"
+    assert ev.semantic_events == ("edit_result", "file_view")
+
+
+def test_test_and_edit_boundaries_are_both_preserved():
+    ev = me.classify_event(
+        "npm run build", "built generated source", 0,
+        action_index=1,
+        changed_files=("src/generated.ts",),
+        test_outcome="pass",
+    )
+    assert ev.primary_boundary == "edit_result"
+    assert ev.semantic_events == ("edit_result", "test_result")
+
+
 def test_run_evidence_pipeline_one_dose_seals_and_updates_chain():
     env = EvidenceEnvelope(
         producer="test",

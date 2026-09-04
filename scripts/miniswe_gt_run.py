@@ -76,6 +76,112 @@ _SENSITIVE_SHELL_ENV = {
     "OPENAI_API_KEY",
 }
 
+# Match the bounded-output behavior of nano/tools.py. Mini-SWE otherwise keeps
+# every byte of every command result and resends the complete history on each
+# provider call; one 430k-character grep result caused 117k extra prompt tokens
+# per subsequent call in paid run 33915825554.
+MAX_TOOL_OUTPUT_CHARS = 16_000
+MINISWE_HISTORY_CHAR_BUDGET = 120_000
+
+
+def _truncate_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    dropped = len(text) - limit
+    return f"{text[:half]}\n... [truncated {dropped} chars] ...\n{text[-half:]}"
+
+
+def _provider_visible_chars(message: dict) -> int:
+    visible = {key: value for key, value in message.items() if key != "extra"}
+    return len(json.dumps(visible, sort_keys=True, separators=(",", ":")))
+
+
+def _compact_miniswe_history(
+    messages: list[dict], *, char_budget: int = MINISWE_HISTORY_CHAR_BUDGET
+) -> None:
+    """Compact provider-visible history safely toward the target budget.
+
+    Mini-SWE resends its whole message list on every call. Replace the oldest
+    tool payloads in the model view, but keep message IDs/pairing and the exact
+    raw result under ``extra`` (which LiteLLM does not send to the provider).
+    The most recent result remains intact so the model can act on it. Provider
+    reasoning metadata and tool arguments also remain intact; final request
+    admission, not this lossy-unsafe helper, owns the hard context ceiling.
+    """
+    total = sum(_provider_visible_chars(message) for message in messages)
+    if total <= char_budget:
+        return
+    last_assistant_index = max(
+        (
+            index
+            for index, row in enumerate(messages)
+            if row.get("role") == "assistant"
+        ),
+        default=len(messages),
+    )
+    tool_rows = [
+        row
+        for index, row in enumerate(messages)
+        if row.get("role") == "tool" and index < last_assistant_index
+    ]
+    for row in tool_rows:
+        content = str(row.get("content") or "")
+        if content.startswith("[truncated - "):
+            continue
+        before = _provider_visible_chars(row)
+        replacement = f"[truncated - {len(content)} chars retained in audit trajectory]"
+        row["content"] = replacement
+        total += _provider_visible_chars(row) - before
+        if total <= char_budget:
+            return
+
+class BoundedHistoryAgent(DefaultAgent):
+    """Mini-SWE 2.4.6 with bounded provider history and unchanged tools."""
+
+    def query(self) -> dict:
+        _compact_miniswe_history(self.messages)
+        return super().query()
+
+
+def _repository_head(repo: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return result.stdout.strip()
+
+
+def _write_model_patch(repo: Path, baseline: str, output: Path) -> None:
+    """Export the complete workspace delta against the runner-start commit.
+
+    ``git diff <baseline>`` includes committed, staged, and tracked working-tree
+    changes. Intent-to-add makes non-ignored untracked files visible without
+    staging their contents or requiring the model to commit before its budget
+    expires. Pier collects this exact file for the DeepSWE verifier.
+    """
+    subprocess.run(
+        ["git", "add", "--intent-to-add", "--", "."],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        ["git", "diff", "--binary", "--full-index", baseline, "--", "."],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + ".tmp")
+    temporary.write_bytes(result.stdout)
+    temporary.replace(output)
+
 
 def _is_sensitive_env_name(name: str) -> bool:
     upper = name.upper()
@@ -237,6 +343,9 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
                 "extra": {"exception_type": type(exc).__name__, "exception": str(exc)},
             }
         self._check_finished(output)
+        raw_output = str(output.get("output") or "")
+        output.setdefault("extra", {})["raw_output"] = raw_output
+        output["output"] = _truncate_tool_output(raw_output)
         return output
 
     def get_template_vars(self, **kwargs):
@@ -254,6 +363,12 @@ def _templates() -> tuple[str, str]:
 def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
     """litellm-routable model id + kwargs for the configured gateway."""
     model_kwargs: dict = {"temperature": temperature, "num_retries": 0}
+    if model.removeprefix("openai/") == "meta/muse-spark-1.2-contributor":
+        # The retained DeepSWE baseline used xhigh reasoning. OpenRouter's
+        # OpenAI-compatible contract accepts this structured field, and
+        # leaving it implicit makes GT-on vs baseline outcome comparisons
+        # invalid even when the visible model identifier is identical.
+        model_kwargs["reasoning"] = {"effort": "xhigh"}
     reserved_output = int(
         os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
     )
@@ -329,6 +444,7 @@ def build_agent(
     disabled_capabilities: tuple[str, ...] = (),
     step_limit: int = 100,
     timeout: int = 30,
+    wall_time_limit_seconds: int = 0,
 ) -> tuple[DefaultAgent, MiniSweAdapter | None, GTSession | None]:
     system_template, instance_template = _templates()
     model_name, model_kwargs = _model_and_kwargs(model, temperature)
@@ -353,12 +469,13 @@ def build_agent(
         timeout=timeout,
     )
     if gt_disabled:
-        agent = DefaultAgent(
+        agent = BoundedHistoryAgent(
             model_obj, env_obj,
             config_class=AgentConfig,
             system_template=system_template,
             instance_template=instance_template,
             step_limit=step_limit,
+            wall_time_limit_seconds=wall_time_limit_seconds,
             output_path=Path(output) if output else None,
         )
         observer = RunReceiptObserver(
@@ -371,7 +488,7 @@ def build_agent(
 
     from gt_engine.bridge import apply_profile_env
     from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
-    from gt_engine.indexer import BenchmarkGraphRequired, ensure_index
+    from gt_engine.indexer import BenchmarkGraphRequired, ensure_index_with_receipt
     from gt_engine.miniswe_controller import Predicate
     from gt_engine.miniswe_integration import MiniSweAdapter
     from gt_engine.miniswe_runtime import install_runtime_hooks
@@ -400,7 +517,12 @@ def build_agent(
     graph_db = None
     index_error: Exception | None = None
     try:
-        graph_db = ensure_index(cwd, state_dir=state_dir)
+        index_receipt = ensure_index_with_receipt(cwd, state_dir=state_dir)
+        graph_db = index_receipt.graph_db if index_receipt.success else None
+        if not index_receipt.success and index_receipt.error_type:
+            index_error = RuntimeError(
+                f"{index_receipt.error_type}: {index_receipt.error_diagnostic}"
+            )
     except BenchmarkGraphRequired:
         # Indexing is an optional observer everywhere except here. On a
         # benchmark-bound run the graph is the product under measurement, so a
@@ -430,7 +552,16 @@ def build_agent(
             repo_root=cwd,
             state_dir=state_dir,
             graph_db=graph_db,
-            capabilities=(),
+            capabilities=(
+                "exact_provider_payload",
+                "provider_response_ids",
+                "structured_actions",
+                "structured_results",
+                "workspace_deltas",
+                "filesystem_snapshots",
+                "tool_call_deferral",
+                "parsed_test_results",
+            ),
             issue_text=task,
             mode=GTMode(gt_mode),
             capability_modes=dict(capability_modes or {}),
@@ -469,12 +600,13 @@ def build_agent(
             adapter._last_delta_signature = tuple(
                 sorted((key, status.value) for key, status in adapter._status.items())
             )
-    agent = DefaultAgent(
+    agent = BoundedHistoryAgent(
         model_obj, env_obj,
         config_class=AgentConfig,
         system_template=system_template,
         instance_template=instance_template,
         step_limit=step_limit,
+        wall_time_limit_seconds=wall_time_limit_seconds,
         output_path=Path(output) if output else None,
     )
     install_runtime_hooks(agent, session)
@@ -517,6 +649,7 @@ _EXCEPTION_TERMINAL = {
     "Submitted": "submitted",
     "LifecycleError": "internal_error",
     "LimitsExceeded": "budget_exhausted",
+    "TimeExceeded": "budget_exhausted",
     "AgentTimeoutError": "timeout",
     "APIError": "provider_failed",
     "APIConnectionError": "provider_failed",
@@ -550,7 +683,7 @@ def _classify_terminal(exception: BaseException | None, result: dict) -> str:
     exit_status = str((result or {}).get("exit_status") or "")
     if "Submitted" in exit_status or (result or {}).get("submission"):
         return "submitted"
-    if "LimitsExceeded" in exit_status:
+    if "LimitsExceeded" in exit_status or "TimeExceeded" in exit_status:
         return "budget_exhausted"
     if "Lifecycle" in exit_status or "STUCK" in str((result or {}).get("content") or "").upper():
         return "stuck"
@@ -574,6 +707,7 @@ def main() -> int:
     parser.add_argument("--metrics", help="write per-run metrics JSON to this path")
     parser.add_argument("--product-receipt")
     parser.add_argument("--adapter-receipt")
+    parser.add_argument("--patch-output")
     parser.add_argument("--task-id", default="")
     parser.add_argument("--product-source-sha", default="")
     parser.add_argument("--time-budget-seconds", type=int, default=1)
@@ -581,7 +715,7 @@ def main() -> int:
     parser.add_argument("--gt-off", action="store_true")
     parser.add_argument(
         "--gt-mode",
-        choices=("off", "shadow", "advisory", "assistive", "enforced", "engine"),
+        choices=("off", "shadow", "advisory", "assistive", "enforced"),
         default="advisory",
     )
     parser.add_argument(
@@ -599,6 +733,7 @@ def main() -> int:
         help="set one capability mode: off/shadow/advisory/assistive/enforced",
     )
     args = parser.parse_args()
+    patch_baseline = ""
     capability_modes: dict[str, str] = {}
     for item in args.gt_capability_mode:
         name, separator, mode = item.partition("=")
@@ -606,6 +741,11 @@ def main() -> int:
             parser.error("--gt-capability-mode requires NAME=MODE with a valid MODE")
         capability_modes[name] = mode
     try:
+        if args.patch_output:
+            # Baseline capture is setup work. A missing/non-Git workspace must
+            # still emit the typed setup result instead of escaping before the
+            # runner's failure-conservation path is installed.
+            patch_baseline = _repository_head(Path(args.cwd))
         agent, adapter, session = build_agent(
             task=args.task,
             canonical_task_id=args.task_id,
@@ -620,6 +760,7 @@ def main() -> int:
             disabled_capabilities=tuple(args.gt_disable_capability),
             step_limit=args.step_limit,
             timeout=args.timeout,
+            wall_time_limit_seconds=args.time_budget_seconds,
         )
     except Exception as exc:  # noqa: BLE001 - setup must leave an audit artifact
         terminal = "setup_error"
@@ -678,6 +819,15 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - Submitted propagates on accept
         exception = exc
         report["exception"] = f"{type(exc).__name__}: {exc}"
+    if args.patch_output:
+        try:
+            _write_model_patch(
+                Path(args.cwd), patch_baseline, Path(args.patch_output)
+            )
+        except Exception as exc:  # noqa: BLE001 - missing patch invalidates grading
+            report["patch_export_error"] = f"{type(exc).__name__}: {exc}"
+            if exception is None:
+                exception = exc
     gt_active = (
         not args.gt_off
         and args.gt_mode != "off"

@@ -28,7 +28,6 @@ from groundtruth.runtime.adapters.miniswe import (
 )
 from groundtruth.runtime.evidence_envelope import EvidenceEnvelope
 from groundtruth.runtime.gateway import (
-    KIND_EDIT,
     KIND_SEARCH,
     KIND_SUBMIT,
     ToolEvent,
@@ -108,26 +107,31 @@ def _derive_semantic_events(
     test_outcome: str = "",
 ) -> tuple[str, ...]:
     """Derive the fine lifecycle boundary for one Mini-SWE command result."""
+    events: list[str] = []
+    # A witnessed workspace delta is authoritative regardless of the shell
+    # spelling that caused it (Python scripts, copies, build tools and heredocs
+    # are all common edit carriers). Preserve every applicable sub-boundary;
+    # the previous precedence-only returns silently discarded real edits.
+    if changed_files or edit_before_after:
+        events.append("edit_result")
     if test_outcome:
-        return (
-            ("test_result",)
+        events.append(
+            "test_result"
             if test_outcome in {"pass", "fail", "env_fail"}
-            else ("test_executed_no_tests",)
+            else "test_executed_no_tests"
         )
     if viewed_files:
-        return ("file_view",)
+        events.append("file_view")
     kind = classify_command(command or "")
     if kind == KIND_SEARCH or _SEARCH_HEAD_RE.search(command or ""):
-        return (
-            ("failed_search",)
+        events.append(
+            "failed_search"
             if _search_empty(command, output, returncode)
-            else ("search_result",)
+            else "search_result"
         )
-    if kind == KIND_EDIT and (changed_files or edit_before_after):
-        return ("edit_result",)
     if kind == KIND_SUBMIT:
-        return ("submit",)
-    return ()
+        events.append("submit")
+    return tuple(dict.fromkeys(events))
 
 
 def classify_event(

@@ -8,13 +8,30 @@ from pathlib import Path
 
 import pytest
 
-from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+from scripts.miniswe_gt_run import (
+    MAX_TOOL_OUTPUT_CHARS,
+    MINISWE_HISTORY_CHAR_BUDGET,
+    CredentialIsolatedLocalEnvironment,
+    _compact_miniswe_history,
+    _model_and_kwargs,
+    _truncate_tool_output,
+    _write_model_patch,
+)
 from scripts.miniswe_repro import (
     ResearchModelMismatch,
     RunReceiptObserver,
     build_reproducibility_manifest,
     write_reproducibility_manifest,
 )
+
+
+def test_muse_route_preserves_the_baseline_xhigh_reasoning_contract(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.invalid/api/v1")
+
+    model, kwargs = _model_and_kwargs("meta/muse-spark-1.2-contributor", 1.0)
+
+    assert model == "openai/meta/muse-spark-1.2-contributor"
+    assert kwargs["reasoning"] == {"effort": "xhigh"}
 
 
 class FakeModel:
@@ -206,6 +223,180 @@ def test_agent_shell_environment_excludes_host_credentials(monkeypatch, tmp_path
     template = env.get_template_vars()
     assert "OPENAI_API_KEY" not in template
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in template
+
+
+def test_miniswe_tool_output_is_bounded_without_losing_head_or_tail() -> None:
+    raw = "HEAD" + ("x" * (MAX_TOOL_OUTPUT_CHARS * 2)) + "TAIL"
+    bounded = _truncate_tool_output(raw)
+    assert len(bounded) < len(raw)
+    assert len(bounded) <= MAX_TOOL_OUTPUT_CHARS + 100
+    assert bounded.startswith("HEAD")
+    assert bounded.endswith("TAIL")
+    assert "truncated" in bounded
+
+
+def test_miniswe_history_drops_old_tool_payloads_before_quadratic_replay() -> None:
+    messages = [{"role": "system", "content": "policy"}]
+    for index in range(20):
+        messages.extend(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"id": f"call-{index}", "function": {"arguments": "{}"}}],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": f"call-{index}",
+                    "content": "x" * MAX_TOOL_OUTPUT_CHARS,
+                    "extra": {"raw_output": "x" * MAX_TOOL_OUTPUT_CHARS},
+                },
+            ]
+        )
+
+    _compact_miniswe_history(messages)
+
+    provider_chars = sum(
+        len(json.dumps({key: value for key, value in row.items() if key != "extra"}))
+        for row in messages
+    )
+    assert provider_chars <= MINISWE_HISTORY_CHAR_BUDGET
+    assert any(
+        str(row.get("content", "")).startswith("[truncated") for row in messages
+    )
+    assert messages[-1]["content"] == "x" * MAX_TOOL_OUTPUT_CHARS
+    assert messages[2]["extra"]["raw_output"] == "x" * MAX_TOOL_OUTPUT_CHARS
+
+
+def test_miniswe_history_preserves_reasoning_metadata_and_tool_arguments() -> None:
+    messages = [{"role": "system", "content": "policy"}]
+    for index in range(4):
+        messages.extend(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "provider_specific_fields": {
+                        "reasoning": "r" * (1_000 if index == 3 else 60_000)
+                    },
+                    "tool_calls": [
+                        {
+                            "id": f"call-{index}",
+                            "function": {
+                                "name": "bash",
+                                "arguments": json.dumps(
+                                    {"command": "x" * (1_000 if index == 3 else 60_000)}
+                                ),
+                            },
+                        }
+                    ],
+                    "extra": {"response": {"reasoning": "r" * 60_000}},
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": f"call-{index}",
+                    "content": "ok",
+                    "extra": {"raw_output": "ok"},
+                },
+            ]
+        )
+
+    newest_arguments = messages[-2]["tool_calls"][0]["function"]["arguments"]
+    _compact_miniswe_history(messages)
+
+    provider_chars = sum(
+        len(json.dumps({key: value for key, value in row.items() if key != "extra"}))
+        for row in messages
+    )
+    # Reasoning-model continuity is a provider contract. Tool output may be
+    # compacted, but assistant reasoning and action semantics remain intact
+    # even when that means this deterministic pass cannot reach its target.
+    assert provider_chars > MINISWE_HISTORY_CHAR_BUDGET
+    assert "provider_specific_fields" in messages[1]
+    assert messages[1]["tool_calls"][0]["function"]["arguments"] != "{}"
+    assert messages[-2]["tool_calls"][0]["function"]["arguments"] == newest_arguments
+    assert messages[1]["extra"]["response"]["reasoning"] == "r" * 60_000
+
+
+def test_miniswe_history_preserves_every_result_in_latest_multi_tool_turn() -> None:
+    messages = [
+        {"role": "system", "content": "policy"},
+        {
+            "role": "assistant",
+            "provider_specific_fields": {"reasoning": "r" * 2_000},
+            "tool_calls": [
+                {"id": "old", "function": {"name": "bash", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "old", "content": "x" * 80_000},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "new-1", "function": {"name": "bash", "arguments": "{}"}},
+                {"id": "new-2", "function": {"name": "bash", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "new-1", "content": "first-current-result"},
+        {"role": "tool", "tool_call_id": "new-2", "content": "second-current-result"},
+    ]
+
+    _compact_miniswe_history(messages, char_budget=1_000)
+
+    assert messages[2]["content"].startswith("[truncated")
+    assert messages[4]["content"] == "first-current-result"
+    assert messages[5]["content"] == "second-current-result"
+
+
+def test_environment_bounds_model_output_but_preserves_exact_raw_output(tmp_path) -> None:
+    raw = "HEAD" + ("x" * (MAX_TOOL_OUTPUT_CHARS * 2)) + "TAIL"
+    command = (
+        f'{sys.executable} -c "print(\'HEAD\' + \'x\' * '
+        f'{MAX_TOOL_OUTPUT_CHARS * 2} + \'TAIL\', end=\'\')"'
+    )
+    env = CredentialIsolatedLocalEnvironment(cwd=str(tmp_path), timeout=5)
+
+    result = env.execute({"command": command})
+
+    assert len(result["output"]) < len(raw)
+    assert result["extra"]["raw_output"] == raw
+
+
+def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_env = dict(os.environ)
+    git_env.update(
+        {
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "test@example.invalid",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "test@example.invalid",
+        }
+    )
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=git_env)
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True, env=git_env)
+    subprocess.run(
+        ["git", "commit", "-qm", "base"], cwd=repo, check=True, env=git_env
+    )
+    baseline = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    (repo / "new.txt").write_text("new\n", encoding="utf-8")
+    output = tmp_path / "artifacts" / "model.patch"
+
+    _write_model_patch(repo, baseline, output)
+
+    patch_text = output.read_text(encoding="utf-8")
+    assert "tracked.txt" in patch_text
+    assert "+changed" in patch_text
+    assert "new.txt" in patch_text
+    assert "+new" in patch_text
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux procfs boundary")

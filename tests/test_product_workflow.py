@@ -88,6 +88,18 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
         "- name: Verify all DeepSWE outcomes and product receipts", 1
     )[1].split("- name: Upload final DeepSWE GT Harness attestation", 1)[0]
     assert "from gt_harness.runtime_receipts import" not in paid
+    assert '"onnxruntime==1.20.1" "tokenizers==0.23.1"' in paid
+    assert "Install pinned attestation test dependencies" in paid
+    assert "--require-hashes -r config/product-requirements.lock" in paid.split(
+        "Install pinned attestation test dependencies", 1
+    )[1]
+    assert "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl" in paid
+    assert "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e" in paid
+    assert 'python -c "import groundtruth.runtime.gateway"' in paid
+    assert "max_timeout_sec=stage_timeout_cap_seconds(stage)" in paid
+    assert '"agent_timeout_multiplier": budget["timeout_multiplier"]' in paid
+    assert '--agent-timeout-multiplier "${{ matrix.agent_timeout_multiplier }}"' in paid
+    assert "--agent-timeout-multiplier 1.0" not in paid
 
 
 def test_paid_smoke_requires_all_exact_task_image_digests_before_provider_gate() -> None:

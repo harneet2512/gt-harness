@@ -10,8 +10,8 @@ from harbor.agents.installed.base import NonZeroAgentExitCodeError
 
 from eval.miniswe_agent import (
     _DEFAULT_MINISWE_AGENT_VERSION,
-    _REMOTE_LSP_BIN,
     _PYTHON_VERSION,
+    _REMOTE_LSP_BIN,
     _UV_INSTALL,
     _UV_VERSION,
     MiniSweAgent,
@@ -77,6 +77,7 @@ def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
     assert "--time-budget-seconds 3600" in command
     assert "--product-receipt /logs/agent/gt-run.json" in command
     assert "--adapter-receipt /logs/agent/benchmark-adapter.json" in command
+    assert "--patch-output /logs/artifacts/model.patch" in command
     # The installed runner must be what executes, with nothing wrapping it. The
     # only permitted prefix is the staged language-server PATH, which changes
     # lookup for the promotion servers and not the interpreter.
@@ -318,6 +319,11 @@ async def test_installer_uses_canonical_version_and_verified_uv_installer(monkey
     assert '--with "mini-swe-agent==2.4.6"' in install
     assert "m.version('mini-swe-agent') == '2.4.6'" in install
     assert "sha256sum -c -" in install
+    assert "--with 'onnxruntime==1.20.1'" in install
+    assert "--with 'tokenizers==0.23.1'" in install
+    assert "m.version('onnxruntime') == '1.20.1'" in install
+    assert "m.version('tokenizers') == '0.23.1'" in install
+    assert "onnxruntime, tokenizers" in install
     assert "curl -LsSf" not in install
     assert str(harness_wheel.name) in install
     assert "/installed-agent/miniswe" not in install

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 
 from gt_engine.runtime_observation import (
     capture_workspace,
@@ -32,6 +33,22 @@ def test_workspace_revision_changes_and_multifile_transaction_is_canonical(tmp_p
     assert transaction.transaction_sha256 == hashlib.sha256(
         transaction.canonical_bytes(include_transaction_hash=False)
     ).hexdigest()
+
+
+def test_workspace_snapshot_excludes_gitignored_generated_output(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("generated-out/\n", encoding="utf-8")
+    (tmp_path / "source.py").write_text("value = 1\n", encoding="utf-8")
+    generated = tmp_path / "generated-out"
+    generated.mkdir()
+    (generated / "source.js").write_text("compiled\n", encoding="utf-8")
+
+    snapshot = capture_workspace(tmp_path)
+
+    paths = {item.path for item in snapshot.files}
+    assert ".gitignore" in paths
+    assert "source.py" in paths
+    assert "generated-out/source.js" not in paths
 
 
 def test_workspace_revision_uses_repository_text_bytes(tmp_path):

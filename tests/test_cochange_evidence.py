@@ -73,6 +73,7 @@ class _Adapter:
 
     def __init__(self, graph_db: str, repo_root: str) -> None:
         self.graph_db = graph_db
+        self.graph_fresh = True
         self.repo_root = repo_root
         self.repository_revision = "rev0"
 
@@ -336,6 +337,14 @@ def test_the_seam_renders_a_dose_for_an_edited_or_viewed_file(tmp_path: Path):
     assert "src/a.py" in rendered
     assert "partner=src/b.py" in rendered
     assert "revision=rev0" in rendered
+
+
+def test_the_seam_never_reads_a_stale_graph(tmp_path: Path):
+    db = _graph(tmp_path / "g.db", [("src/a.py", "src/b.py", 4)])
+    adapter = _Adapter(db, str(tmp_path))
+    adapter.graph_fresh = False
+
+    assert run_cochange_prior(adapter, ("src/a.py",)) == ""
 
 
 def test_the_seam_ignores_files_outside_the_repository(tmp_path: Path):

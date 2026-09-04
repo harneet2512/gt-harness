@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType
@@ -58,7 +58,15 @@ from .runtime_observation import (
 
 _SUBMIT_REFUSED_OUTPUT = "submission withheld by the Groundtruth contract gate"
 
-_VIEW_CMD_RE = re.compile(r"(?:^|\s)(?:cat|sed|less|head|tail|nl|bat)\s+['\"]?([^\s'\"|;>&]+)")
+_VIEW_COMMANDS = frozenset({"cat", "sed", "less", "head", "tail", "nl", "bat"})
+
+# Only queries whose producer reads graph.db may demand a rebuild. The
+# currently exposed native kinds (literal search, syntax, verification status)
+# operate on the live workspace and must never pay a whole-repository rebuild
+# merely because an earlier edit made the optional graph stale.
+_GRAPH_DEPENDENT_TYPED_KINDS = frozenset({
+    "definition", "references", "callers", "patch_impact", "why_this_edge",
+})
 
 
 def _created_files_excluding_exact_renames(
@@ -117,6 +125,9 @@ def _command(action: Any) -> str:
 
 def _observation_output(result: Any) -> str:
     if isinstance(result, dict):
+        extra = result.get("extra") or {}
+        if isinstance(extra, dict) and "raw_output" in extra:
+            return str(extra.get("raw_output") or "")
         return str(result.get("output") or result.get("message") or "")
     return str(result or "")
 
@@ -199,8 +210,82 @@ def _viewed_files(command: str) -> tuple[str, ...]:
 
     if classify_command(command or "") != KIND_VIEW:
         return ()
-    match = _VIEW_CMD_RE.search(command or "")
-    return (match.group(1),) if match else ()
+    try:
+        lexer = shlex.shlex(
+            command or "", posix=True, punctuation_chars="|;&"
+        )
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return ()
+
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token and all(char in "|;&" for char in token):
+            segments.append([])
+        else:
+            segments[-1].append(token)
+
+    found: list[str] = []
+    for segment in segments:
+        if not segment:
+            continue
+        head = Path(segment[0]).name.lower()
+        if head not in _VIEW_COMMANDS:
+            continue
+        args = segment[1:]
+        operands: list[str] = []
+        if head == "sed":
+            script_seen = False
+            index = 0
+            while index < len(args):
+                value = args[index]
+                if value == "--":
+                    operands.extend(args[index + 1:])
+                    break
+                if value in {"-e", "--expression", "-f", "--file"}:
+                    script_seen = True
+                    index += 2
+                    continue
+                if value.startswith(("--expression=", "--file=")):
+                    script_seen = True
+                elif value.startswith("-"):
+                    pass
+                elif not script_seen:
+                    script_seen = True
+                else:
+                    operands.append(value)
+                index += 1
+        else:
+            option_values = {
+                "head": {"-n", "--lines", "-c", "--bytes"},
+                "tail": {"-n", "--lines", "-c", "--bytes", "-s", "--sleep-interval"},
+                "nl": {"-b", "--body-numbering", "-d", "--section-delimiter", "-f",
+                       "--footer-numbering", "-h", "--header-numbering", "-i",
+                       "--line-increment", "-l", "--join-blank-lines", "-n",
+                       "--number-format", "-s", "--number-separator", "-v",
+                       "--starting-line-number", "-w", "--number-width"},
+            }.get(head, set())
+            index = 0
+            while index < len(args):
+                value = args[index]
+                if value == "--":
+                    operands.extend(args[index + 1:])
+                    break
+                if value in option_values:
+                    index += 2
+                    continue
+                if value.startswith("-") or value.startswith((">", "<")):
+                    index += 1
+                    continue
+                operands.append(value)
+                index += 1
+        found.extend(
+            value for value in operands
+            if value and value != "-" and not value.startswith((">", "<"))
+        )
+    return tuple(dict.fromkeys(found))
 
 
 def _classify_test(command: str, output: str, returncode: int | None) -> str:
@@ -505,12 +590,10 @@ def install_runtime_hooks(
         if session.disabled:
             return prepared
         try:
-            if (
-                adapter.graph_db
-                and not adapter.graph_fresh
-                and session.capability_active("graph_refresh")
-            ):
-                adapter.refresh_graph(phase="delivery")
+            # Edits invalidate graph-derived claims, but an ordinary provider
+            # turn does not consume the graph and must not synchronously rebuild
+            # the whole repository. Explicit typed graph queries and submit are
+            # the demand boundaries that refresh stale graph state.
             batch = session.before_model(messages, iteration=adapter.iteration)
             parts = batch.context_additions
             if parts and prepared and isinstance(prepared[-1], dict):
@@ -754,6 +837,8 @@ def install_runtime_hooks(
                     })
                     continue
                 if (
+                    typed_kind in _GRAPH_DEPENDENT_TYPED_KINDS
+                    and
                     adapter.graph_db
                     and not adapter.graph_fresh
                     and session.capability_active("graph_refresh")

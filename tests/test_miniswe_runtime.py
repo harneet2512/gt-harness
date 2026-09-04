@@ -14,6 +14,20 @@ from gt_engine.provider_limits import ProviderRequestTooLarge
 from gt_engine.task_contract import extract_task_contract
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("sed -n '1,20p' src/a.py", ("src/a.py",)),
+        ("head -n 20 src/a.py", ("src/a.py",)),
+        ("nl -ba src/a.py", ("src/a.py",)),
+        ("cat src/a.py src/b.py", ("src/a.py", "src/b.py")),
+        ("cat 'src/a file.py' | head -n 20", ("src/a file.py",)),
+    ],
+)
+def test_viewed_files_parses_operands_not_options(command, expected):
+    assert rt._viewed_files(command) == expected
+
+
 class FakeModel:
     def __init__(self):
         self.calls = []
@@ -161,7 +175,9 @@ def test_native_groundtruth_action_is_routed_without_shell_execution(tmp_path):
     assert joined[0]["provider_payload_sha256"] == adapter.deliveries[-1].payload_sha256
 
 
-def test_typed_query_lazily_refreshes_a_stale_graph(monkeypatch, tmp_path):
+def test_graph_independent_typed_query_does_not_refresh_stale_graph(
+    monkeypatch, tmp_path,
+):
     (tmp_path / "mod.py").write_text("needle = 1\n", encoding="utf-8")
     agent = FakeAgent()
     adapter = MiniSweAdapter(
@@ -198,8 +214,44 @@ def test_typed_query_lazily_refreshes_a_stale_graph(monkeypatch, tmp_path):
         }
     )
 
-    assert phases == ["graph_query"]
-    assert adapter.graph_fresh is True
+    assert phases == []
+    assert adapter.graph_fresh is False
+
+
+def test_ordinary_provider_turn_does_not_rebuild_a_stale_graph(monkeypatch, tmp_path):
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(
+        task_id="t",
+        state_dir=tmp_path / "state",
+        predicates=[Predicate("p", "p")],
+        repo_root=str(tmp_path),
+        graph_db=str(tmp_path / "graph.db"),
+    )
+    adapter.graph_fresh = False
+    phases = []
+
+    def refresh_graph(*, phase="graph_query"):
+        phases.append(phase)
+        adapter.graph_fresh = True
+        return True
+
+    monkeypatch.setattr(adapter, "refresh_graph", refresh_graph)
+    install_runtime_hooks(agent, adapter)
+    agent.model._prepare_messages_for_api(
+        [{"role": "user", "content": "continue after an edit"}]
+    )
+
+    assert phases == []
+    assert adapter.graph_fresh is False
+
+
+def test_groundtruth_reads_exact_raw_output_not_bounded_model_view():
+    result = {
+        "output": "bounded",
+        "extra": {"raw_output": "exact diagnostic output"},
+    }
+
+    assert rt._observation_output(result) == "exact diagnostic output"
 
 
 def test_malformed_groundtruth_action_fails_open_without_becoming_shell(tmp_path):
@@ -234,6 +286,7 @@ def test_real_miniswe_entrypoint_builds_pinned_adapter(tmp_path):
         output=None,
         temperature=1.0,
         gt_off=False,
+        wall_time_limit_seconds=123,
     )
     assert agent._gt_runtime_hook_handle.installed is True
     assert adapter.contract is not None
@@ -241,6 +294,18 @@ def test_real_miniswe_entrypoint_builds_pinned_adapter(tmp_path):
     assert session is not None
     assert agent._gt_runtime_hook_handle.session is session
     assert session.mode is GTMode.ADVISORY
+    assert session.assurance_state.value == "FULL"
+    assert set(session.config.capabilities) == {
+        "exact_provider_payload",
+        "provider_response_ids",
+        "structured_actions",
+        "structured_results",
+        "workspace_deltas",
+        "filesystem_snapshots",
+        "tool_call_deferral",
+        "parsed_test_results",
+    }
+    assert agent.config.wall_time_limit_seconds == 123
 
 
 def test_provider_response_is_bound_to_delivery(tmp_path):
