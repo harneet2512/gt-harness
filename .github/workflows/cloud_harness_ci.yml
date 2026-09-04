@@ -1,0 +1,66 @@
+name: Cloud harness CI
+
+on:
+  push:
+    branches: [main, cloud/internal-harness]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[cloud,miniswe]"
+          pip install pytest pytest-asyncio
+
+      - name: Run cloud tests
+        run: |
+          python -m pytest tests/test_cloud_*.py -v --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint cloud server
+        run: ruff check cloud/
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install UI dependencies
+        working-directory: cloud/ui
+        run: npm ci
+
+      - name: Type check
+        working-directory: cloud/ui
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: cloud/ui
+        run: npm run build
