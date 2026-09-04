@@ -78,3 +78,11 @@ export function shortSha(sha: string | null | undefined): string {
   if (!sha) return "—";
   return sha.slice(0, 10);
 }
+
+/** "820 B" / "4.1 kB" — file sizes in the graph tooltip and the inspector. */
+export function formatBytes(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return "—";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} kB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}

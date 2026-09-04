@@ -1,0 +1,146 @@
+/* ------------------------------------------------------------------ *
+ * The toolbar and the canvas. Everything inside the canvas is painted
+ * in `graphDraw.ts`; this file only frames it.
+ * ------------------------------------------------------------------ */
+
+.bar {
+  flex: 0 0 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.bar-select {
+  width: auto;
+  min-width: 118px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.bar-search {
+  position: relative;
+  flex: 0 1 190px;
+  min-width: 110px;
+}
+.bar-search input {
+  padding: 2px 26px 2px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.bar-count {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.bar-zoom {
+  min-width: 38px;
+  text-align: right;
+}
+
+/* ---------------- legend ---------------- */
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(26, 27, 30, 0.35);
+  flex: 0 0 auto;
+}
+.legend-dot.is-read {
+  background: rgba(240, 102, 47, 0.55);
+}
+.legend-dot.is-edit {
+  background: rgba(21, 154, 135, 0.55);
+  border-color: rgba(21, 154, 135, 0.75);
+}
+.legend-dot.is-here {
+  background: var(--orange);
+  border-color: var(--orange);
+  box-shadow: 0 0 0 2px rgba(240, 102, 47, 0.25);
+}
+.legend-line {
+  width: 16px;
+  height: 0;
+  flex: 0 0 auto;
+  border-top: 1px solid rgba(26, 27, 30, 0.28);
+}
+.legend-line.is-gt {
+  border-top-width: 2px;
+  border-top-color: rgba(26, 27, 30, 0.5);
+}
+.legend-line.is-cotouch {
+  border-top-style: dashed;
+  border-top-color: rgba(21, 154, 135, 0.6);
+}
+
+/* ---------------- canvas ---------------- */
+
+.graph {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--paper);
+}
+.graph-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: default;
+  touch-action: none;
+}
+
+.graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.graph-empty .cap {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.graph-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  max-width: 240px;
+  padding: 5px 8px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(26, 27, 30, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.graph-tip-path {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.graph-tip-meta {
+  font-size: 11px;
+  color: var(--ink-2);
+}

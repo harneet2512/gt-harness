@@ -2,28 +2,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listSessions, type Session } from "../api";
 import { formatRelative, repoShort, truncate } from "../format";
-import NewExpeditionForm from "./NewExpeditionForm";
+import NewSessionForm from "./NewSessionForm";
 
 const REFRESH_MS = 5000;
 
 interface Props {
   activeId: string | null;
-  /** The open session, for the button label before the list has loaded. */
+  /** The open session, for the label before the list has loaded. */
   active: Session | null;
 }
 
 function dotClass(status: string): string {
-  if (status === "running" || status === "creating") return "is-running";
+  if (status === "running" || status === "creating") return "is-hot";
   if (status === "failed") return "is-failed";
   if (status === "closed") return "is-closed";
   return "";
 }
 
-/**
- * Every expedition, behind one control. The list used to be a permanent
- * rail; the map earns that space instead.
- */
-export default function ExpeditionMenu({ activeId, active }: Props) {
+/** Every session behind one control, at the top of the conversation. */
+export default function SessionSwitcher({ activeId, active }: Props) {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -70,10 +67,10 @@ export default function ExpeditionMenu({ activeId, active }: Props) {
   const current = active ?? sessions.find((s) => s.id === activeId) ?? null;
 
   return (
-    <div className="expo" ref={box}>
+    <div className="switch" ref={box}>
       <button
         type="button"
-        className="btn expo-btn"
+        className="switch-btn"
         aria-expanded={open}
         aria-haspopup="listbox"
         onClick={() => {
@@ -83,70 +80,70 @@ export default function ExpeditionMenu({ activeId, active }: Props) {
       >
         {current ? (
           <>
-            <span className={`dot ${dotClass(String(current.status))}`} />
-            <span className="expo-name">{repoShort(current.repo)}</span>
-            <span className="expo-ref">{current.ref}</span>
+            <span className={`status-dot ${dotClass(String(current.status))}`} />
+            <span className="switch-repo">{repoShort(current.repo)}</span>
+            <span className="switch-sep">·</span>
+            <span className="switch-ref mono">{current.ref}</span>
           </>
         ) : (
-          <span className="expo-name cap">expeditions</span>
+          <span className="switch-repo">Sessions</span>
         )}
-        <span className="expo-chev" aria-hidden="true">
+        <span className="switch-chev" aria-hidden="true">
           ▾
         </span>
       </button>
 
       {open && !creating && (
-        <ul className="expo-menu" role="listbox">
+        <ul className="switch-menu" role="listbox">
           {error && (
             <li>
-              <div className="notice" style={{ margin: 10 }}>
-                {error}
-              </div>
+              <div className="notice switch-notice">{error}</div>
             </li>
           )}
           {sessions.length === 0 && !error && (
-            <li className="expo-empty">No expeditions yet.</li>
+            <li className="switch-empty">No sessions yet.</li>
           )}
           {sessions.map((s) => (
             <li key={s.id} role="option" aria-selected={s.id === activeId}>
               <button
                 type="button"
-                className={`expo-item ${s.id === activeId ? "is-active" : ""}`}
+                className={`switch-item ${s.id === activeId ? "is-active" : ""}`}
                 onClick={() => {
                   setOpen(false);
                   navigate(`/sessions/${s.id}`);
                 }}
               >
-                <span className="expo-top">
-                  <span className={`dot ${dotClass(String(s.status))}`} />
-                  <span className="expo-repo">{repoShort(s.repo)}</span>
-                  <span className="expo-ref mono">{s.ref}</span>
+                <span className="switch-top">
+                  <span className={`status-dot ${dotClass(String(s.status))}`} />
+                  <span className="switch-repo">{repoShort(s.repo)}</span>
+                  <span className="switch-ref mono">{s.ref}</span>
+                  <span className="spacer" />
+                  <span className="cap cap-muted">
+                    {formatRelative(s.updated_at)}
+                  </span>
                 </span>
-                <span className="expo-last">
+                <span className="switch-last">
                   {s.last_message
-                    ? truncate(s.last_message, 90)
-                    : "no transmissions yet"}
-                </span>
-                <span className="cap cap-muted" style={{ marginLeft: 14 }}>
-                  {String(s.status)} · {formatRelative(s.updated_at)}
+                    ? truncate(s.last_message, 96)
+                    : "no messages yet"}
                 </span>
               </button>
             </li>
           ))}
-          <li className="expo-foot">
+          <li className="switch-foot">
             <button
               type="button"
               className="btn btn-orange btn-block"
               onClick={() => setCreating(true)}
             >
-              New expedition
+              New session
             </button>
           </li>
         </ul>
       )}
 
       {creating && (
-        <NewExpeditionForm
+        <NewSessionForm
           onCancel={() => {
             setCreating(false);
             setOpen(false);

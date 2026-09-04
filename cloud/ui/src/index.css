@@ -1,5 +1,7 @@
-/* SURVEY — the whole sheet, in four parts. */
+/* SYNAPSE — the whole sheet, in six parts. */
 @import "./styles/base.css";
-@import "./styles/log.css";
-@import "./styles/map.css";
-@import "./styles/instruments.css";
+@import "./styles/shell.css";
+@import "./styles/talk.css";
+@import "./styles/graph.css";
+@import "./styles/inspector.css";
+@import "./styles/panel.css";

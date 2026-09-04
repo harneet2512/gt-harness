@@ -6,16 +6,23 @@ interface Props {
   output: string;
   returncode: number | null;
   isError: boolean;
+  /** How much is shown before the "N more lines" affordance. */
+  clip?: number;
 }
 
-/** Command output, clipped to eight lines until asked for more. */
-export default function CommandOutput({ output, returncode, isError }: Props) {
+/** Command output, clipped until asked for more. */
+export default function CommandOutput({
+  output,
+  returncode,
+  isError,
+  clip = COLLAPSED_LINES,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const lines = output.length > 0 ? output.replace(/\n+$/, "").split("\n") : [];
-  const overflows = lines.length > COLLAPSED_LINES;
+  const overflows = lines.length > clip;
   const clipped = !expanded && overflows;
-  const shown = clipped ? lines.slice(0, COLLAPSED_LINES) : lines;
+  const shown = clipped ? lines.slice(0, clip) : lines;
   const failed = returncode !== null && returncode !== 0;
 
   if (lines.length === 0 && !failed) return null;
@@ -40,7 +47,7 @@ export default function CommandOutput({ output, returncode, isError }: Props) {
               }}
             >
               {clipped
-                ? `${lines.length - COLLAPSED_LINES} more lines`
+                ? `${lines.length - clip} more lines`
                 : "show less"}
             </button>
           )}

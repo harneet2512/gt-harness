@@ -9,17 +9,19 @@ interface Props {
   error: string | null;
   /** Resolves true when the message was accepted; false keeps the draft. */
   onSend: (content: string) => Promise<boolean>;
+  onStop: () => void;
 }
 
 const MAX_ROWS = 10;
 
-/** Your side of the radio. */
-export default function Transmitter({
+/** Your side of the conversation. */
+export default function Composer({
   locked,
   lockedReason,
   isRunning,
   error,
   onSend,
+  onStop,
 }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,8 +34,7 @@ export default function Transmitter({
     const content = text.trim();
     setBusy(true);
     try {
-      const accepted = await onSend(content);
-      if (accepted) {
+      if (await onSend(content)) {
         setText("");
         resize(areaRef.current, "");
       }
@@ -53,40 +54,51 @@ export default function Transmitter({
 
   return (
     <div className="composer">
-      {error && <div className="notice composer-error">{error}</div>}
+      {error && <div className="notice">{error}</div>}
 
-      <div className="composer-row">
-        <textarea
-          ref={areaRef}
-          className="composer-input"
-          rows={1}
-          value={text}
-          disabled={locked}
-          placeholder={locked ? lockedReason : "Radio the surveyor…"}
-          aria-label="Message to the surveyor"
-          onChange={(e) => {
-            setText(e.target.value);
-            resize(e.target, e.target.value);
-          }}
-          onKeyDown={onKeyDown}
-        />
+      <textarea
+        ref={areaRef}
+        className="composer-input"
+        rows={1}
+        value={text}
+        disabled={locked}
+        placeholder={locked ? lockedReason : "Message the agent…"}
+        aria-label="Message the agent"
+        onChange={(e) => {
+          setText(e.target.value);
+          resize(e.target, e.target.value);
+        }}
+        onKeyDown={onKeyDown}
+      />
+
+      <div className="composer-foot">
+        <span className="cap cap-muted">
+          {isRunning && !locked
+            ? "Delivered at the next step"
+            : "Enter to send · Shift+Enter newline"}
+        </span>
+        <span className="spacer" />
+        {isRunning && (
+          <button
+            type="button"
+            className="btn-text"
+            title="Ctrl/Cmd + Shift + Backspace"
+            onClick={onStop}
+          >
+            Stop
+          </button>
+        )}
         <button
           type="button"
           className="composer-send"
           disabled={!canSend}
           onClick={() => void submit()}
         >
-          {busy ? "sending…" : "transmit ▸"}
+          {busy ? "sending…" : "Send"}
+          <span className="composer-arrow" aria-hidden="true">
+            →
+          </span>
         </button>
-      </div>
-
-      <div className="composer-hints">
-        <span className="cap cap-muted">
-          enter to send · shift+enter newline
-        </span>
-        {isRunning && !locked && (
-          <span className="cap cap-orange">delivered at the next step</span>
-        )}
       </div>
     </div>
   );

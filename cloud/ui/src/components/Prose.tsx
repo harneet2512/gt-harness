@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { splitFences } from "../fences";
 
 /**
- * Deliberately not a markdown renderer. The surveyor speaks in prose with
+ * Deliberately not a markdown renderer. The agent speaks in prose with
  * the occasional fenced block, so whitespace is preserved and ``` fences
  * are lifted into <pre>. No HTML is ever injected.
  */

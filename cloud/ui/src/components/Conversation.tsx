@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { Message, Session } from "../api";
 import {
   orphanSteering,
@@ -7,20 +6,20 @@ import {
   type TurnGroup,
 } from "../chatState";
 import { formatClock, formatCost, shortSha } from "../format";
-import type { StepSteering, SurveyStep } from "../survey";
+import type { StepSteering, TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
-import ExpeditionMenu from "./ExpeditionMenu";
+import Composer from "./Composer";
 import Prose from "./Prose";
-import RadioIndicator, { type RadioMode } from "./RadioIndicator";
+import SessionSwitcher from "./SessionSwitcher";
+import StatusLine, { type StatusMode } from "./StatusLine";
 import TransmissionStrip from "./TransmissionStrip";
-import Transmitter from "./Transmitter";
 
 interface Props {
   sessionId: string | null;
   session: Session | null;
   chat: ChatState;
   groups: ThreadGroup[];
-  stepsByTurn: Record<string, SurveyStep[]>;
+  stepsByTurn: Record<string, TrailStep[]>;
   edited: ReadonlySet<string>;
   selectedTurnId: string | null;
   currentTurnId: string | null;
@@ -28,10 +27,10 @@ interface Props {
   /** Steps visible at the scrub position, for the selected turn only. */
   cutoff: number;
   running: boolean;
-  terminal: boolean;
-  radioMode: RadioMode;
+  mode: StatusMode;
   phase: string | null;
   elapsed: number | null;
+  liveSteps: number;
   /** Epoch seconds, ticking only while a turn runs. */
   now: number;
   locked: boolean;
@@ -39,15 +38,11 @@ interface Props {
   sendError: string | null;
   onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
-  onClose: () => void;
   onContinue: () => void;
-  /** Shown on narrow screens, where the field is a toggle. */
-  fieldToggle: ReactNode;
-  shrunk: boolean;
 }
 
-/** The left column: the radio, the conversation, and the transmitter. */
-export default function RadioLog({
+/** The left column: who you are talking to, what was said, and the composer. */
+export default function Conversation({
   sessionId,
   session,
   chat,
@@ -59,58 +54,42 @@ export default function RadioLog({
   onSelectTurn,
   cutoff,
   running,
-  terminal,
-  radioMode,
+  mode,
   phase,
   elapsed,
+  liveSteps,
   now,
   locked,
   lockedReason,
   sendError,
   onSend,
   onStop,
-  onClose,
   onContinue,
-  fieldToggle,
-  shrunk,
 }: Props) {
   const scroll = useAutoScroll();
-
   let turnNo = 0;
 
   return (
-    <section className={`log ${shrunk ? "is-shrunk" : ""}`}>
-      <div className="log-bar">
-        <ExpeditionMenu activeId={sessionId} active={session} />
-        {fieldToggle}
-      </div>
+    <section className="talk">
+      <header className="talk-head">
+        <SessionSwitcher activeId={sessionId} active={session} />
+        <StatusLine
+          mode={mode}
+          phase={phase}
+          elapsed={elapsed}
+          steps={liveSteps}
+        />
+      </header>
 
-      <div className="log-status">
-        <RadioIndicator mode={radioMode} phase={phase} elapsed={elapsed} />
-        <span className="spacer" />
-        {running && (
-          <button type="button" className="btn-text is-hot" onClick={onStop}>
-            cut transmission
-          </button>
-        )}
-        {sessionId && !terminal && (
-          <button type="button" className="btn-text" onClick={onClose}>
-            close
-          </button>
-        )}
-      </div>
-
-      <div className="log-wrap">
-        <div className="log-scroll" ref={scroll.ref}>
+      <div className="talk-wrap">
+        <div className="talk-scroll" ref={scroll.ref}>
           {!sessionId && (
-            <p className="log-empty">
-              Pick an expedition or start a new one.
-            </p>
+            <p className="talk-empty">Pick a session or start a new one.</p>
           )}
 
           {sessionId && groups.length === 0 && (
-            <p className="log-empty">
-              Radio the surveyor. Every message walks the terrain once.
+            <p className="talk-empty">
+              Message the agent. Every message walks the graph once.
             </p>
           )}
 
@@ -121,7 +100,7 @@ export default function RadioLog({
                   <Said message={group.message} />
                 </div>
               ) : (
-                <p className="log-note arrives" key={group.message.id}>
+                <p className="talk-note arrives" key={group.message.id}>
                   {group.message.content}
                 </p>
               );
@@ -156,14 +135,15 @@ export default function RadioLog({
         )}
       </div>
 
-      <Transmitter
+      <Composer
         locked={locked || !sessionId}
         lockedReason={
-          sessionId ? lockedReason : "Pick an expedition to start talking."
+          sessionId ? lockedReason : "Pick a session to start talking."
         }
         isRunning={running}
         error={sendError}
         onSend={onSend}
+        onStop={onStop}
       />
     </section>
   );
@@ -185,7 +165,7 @@ function Exchange({
   no: number;
   group: TurnGroup;
   chat: ChatState;
-  steps: SurveyStep[];
+  steps: TrailStep[];
   edited: ReadonlySet<string>;
   selected: boolean;
   running: boolean;
@@ -222,10 +202,10 @@ function Exchange({
       />
 
       {group.replies.map((message) => (
-        <Heard key={message.id} message={message} onContinue={onContinue} />
+        <Reply key={message.id} message={message} onContinue={onContinue} />
       ))}
       {group.notes.map((message) => (
-        <p className="log-note" key={message.id}>
+        <p className="talk-note" key={message.id}>
           {message.content}
         </p>
       ))}
@@ -235,16 +215,13 @@ function Exchange({
 
 function Said({ message }: { message: Message }) {
   return (
-    <div className={`said ${message.meta.pending ? "is-pending" : ""}`}>
-      <span className="said-mark" aria-hidden="true">
-        you ▸
-      </span>
-      <p className="said-text">{message.content}</p>
-    </div>
+    <p className={`said ${message.meta.pending ? "is-pending" : ""}`}>
+      {message.content}
+    </p>
   );
 }
 
-function Heard({
+function Reply({
   message,
   onContinue,
 }: {
@@ -255,20 +232,16 @@ function Heard({
     message.meta;
 
   return (
-    <div className="heard">
+    <div className="reply">
       <Prose text={message.content} />
 
-      <div className="heard-tail">
+      <div className="reply-tail">
         {finish_reason === "question" && (
           <span className="cap cap-orange">waiting for you</span>
         )}
-        {finish_reason === "stopped" && (
-          <span className="cap">transmission cut</span>
-        )}
+        {finish_reason === "stopped" && <span className="cap">stopped</span>}
         {finish_reason === "error" && (
-          <span className="cap" style={{ color: "var(--error)" }}>
-            turn failed
-          </span>
+          <span className="cap cap-error">turn failed</span>
         )}
         {finish_reason === "step_limit" && (
           <>

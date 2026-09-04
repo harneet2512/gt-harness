@@ -1,16 +1,15 @@
-import type { SurveyStep } from "../survey";
+import type { TrailStep } from "../trail";
 import CommandOutput from "./CommandOutput";
 
 interface Props {
-  steps: readonly SurveyStep[];
+  steps: readonly TrailStep[];
   /** Steps past this are greyed: the scrubber is holding history. */
   cutoff: number;
-  /** Step number the surveyor is standing on. */
+  /** Step number the agent is standing on. */
   hereStep: number | null;
   edited: ReadonlySet<string>;
-  focusPath: string | null;
-  onPickFile: (path: string | null) => void;
   running: boolean;
+  onPickFile: (path: string) => void;
 }
 
 /** Every step of the selected turn, in order: thought, command, output. */
@@ -19,36 +18,27 @@ export default function TrailPanel({
   cutoff,
   hereStep,
   edited,
-  focusPath,
-  onPickFile,
   running,
+  onPickFile,
 }: Props) {
-  const shown = focusPath
-    ? steps.filter((step) => step.files.includes(focusPath))
-    : steps;
-
-  if (shown.length === 0) {
+  if (steps.length === 0) {
     return (
-      <p className="inst-empty">
-        {focusPath
-          ? "The surveyor has not been here this turn."
-          : running
-            ? "Waiting for the first step…"
-            : "No steps in this turn."}
+      <p className="panel-empty">
+        {running ? "Waiting for the first step…" : "No steps in this turn."}
       </p>
     );
   }
 
   return (
     <div className="trail">
-      {shown.map((step) => (
+      {steps.map((step) => (
         <div
           key={step.key}
           className={`trail-step ${step.n > cutoff ? "is-future" : ""} ${
             step.n === hereStep ? "is-here" : ""
           }`}
         >
-          <div className="trail-n">
+          <div className="trail-n mono">
             {step.n}
             {step.n === hereStep && (
               <span className="trail-here" aria-label="current position" />
@@ -64,8 +54,10 @@ export default function TrailPanel({
                   <button
                     type="button"
                     key={path}
-                    className={`trail-file ${edited.has(path) ? "is-edit" : ""}`}
-                    onClick={() => onPickFile(path === focusPath ? null : path)}
+                    className={`trail-file mono ${
+                      edited.has(path) ? "is-edit" : ""
+                    }`}
+                    onClick={() => onPickFile(path)}
                   >
                     {path}
                   </button>

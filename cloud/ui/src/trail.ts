@@ -1,6 +1,6 @@
 /* ------------------------------------------------------------------ *
- * The survey model: what the agent did, step by step, and where on the
- * terrain it did it.
+ * The trail: what the agent did, step by step, and which files each
+ * step touched.
  *
  * The event stream never says which file a command touched, so we infer
  * it: tokens of the command are matched against the real tree. Only a
@@ -17,7 +17,7 @@ export interface StepSteering {
   content: string;
 }
 
-export interface SurveyStep {
+export interface TrailStep {
   key: string;
   /** Envelope id of the frame that opened the step; used for replay. */
   eventId: number;
@@ -134,7 +134,7 @@ function eventIdOf(key: string): number {
 
 /**
  * The thought as prose: fenced blocks belong in the command stub, not in
- * the surveyor's voice, and models like to prefix the label itself.
+ * the agent's voice, and models like to prefix the label itself.
  */
 function cleanThought(content: string): string {
   return stripFences(content)
@@ -150,13 +150,13 @@ function cleanThought(content: string): string {
 export function buildSteps(
   turn: TurnState | undefined,
   index: FileIndex,
-): SurveyStep[] {
+): TrailStep[] {
   if (!turn) return [];
-  const steps: SurveyStep[] = [];
-  let current: SurveyStep | null = null;
+  const steps: TrailStep[] = [];
+  let current: TrailStep | null = null;
 
-  const make = (item: ActivityItem): SurveyStep => {
-    const step: SurveyStep = {
+  const make = (item: ActivityItem): TrailStep => {
+    const step: TrailStep = {
       key: item.key,
       eventId: eventIdOf(item.key),
       n: steps.length + 1,
@@ -226,14 +226,15 @@ export function buildSteps(
 /**
  * Commands that write. Without this, every step that so much as `cat`s a
  * file which later changed would read as an edit, and the strip would be
- * one solid colour.
+ * one solid colour. Exported because the inspector re-reads the diff after
+ * a step that plausibly changed something.
  */
-const WRITES =
+export const WRITES =
   /(^|[\s;&|(])(tee|patch|mv|cp|rm|mkdir|touch|truncate|install)\s|>>?[^&]|sed\s+-[a-z]*i|perl\s+-[a-z]*i|git\s+(apply|checkout|restore|revert|mv|rm)|apply_patch|python3?\s+-\s*<</;
 
 /** How a step's tick reads on the transmission strip and the scrubber. */
 export function stepKind(
-  step: SurveyStep,
+  step: TrailStep,
   edited: ReadonlySet<string>,
 ): StepKind {
   if (step.isError) return "error";
@@ -267,23 +268,23 @@ export interface Waypoint {
   path: string;
 }
 
-export interface SurveyView {
+export interface TrailView {
   attention: Map<string, Attention>;
   trail: Waypoint[];
-  /** The cell the surveyor is standing on. */
+  /** The file the agent is standing on. */
   position: string | null;
   /** Steps actually included, i.e. the scrub cutoff. */
   upTo: number;
 }
 
 /**
- * Everything the map needs for a turn, replayed up to `upTo` steps
+ * Everything the graph needs for a turn, replayed up to `upTo` steps
  * (inclusive). Pass `steps.length` for live.
  */
-export function surveyView(
-  steps: readonly SurveyStep[],
+export function trailView(
+  steps: readonly TrailStep[],
   upTo: number,
-): SurveyView {
+): TrailView {
   const attention = new Map<string, Attention>();
   const trail: Waypoint[] = [];
   const limit = Math.max(0, Math.min(upTo, steps.length));
@@ -299,8 +300,8 @@ export function surveyView(
         attention.set(path, { reads: 1, last: step.n });
       }
     }
-    // One waypoint per step that landed somewhere, skipping repeats so the
-    // trail does not stack circles on a file the agent read twice in a row.
+    // One waypoint per step that landed somewhere, skipping repeats so a
+    // file read twice in a row does not fire a signal at itself.
     const head = step.files[0];
     if (head && (trail.length === 0 || trail[trail.length - 1].path !== head)) {
       trail.push({ n: step.n, path: head });

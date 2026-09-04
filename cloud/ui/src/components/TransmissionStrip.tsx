@@ -1,10 +1,10 @@
 import { formatCost, formatDuration } from "../format";
-import { stepKind, type StepSteering, type SurveyStep } from "../survey";
+import { stepKind, type StepSteering, type TrailStep } from "../trail";
 
 interface Props {
-  /** Turn ordinal in the log: № 1, № 2… */
+  /** Turn ordinal in the thread: Turn 1, Turn 2… */
   no: number;
-  steps: readonly SurveyStep[];
+  steps: readonly TrailStep[];
   edited: ReadonlySet<string>;
   running: boolean;
   selected: boolean;
@@ -18,7 +18,7 @@ interface Props {
 }
 
 /**
- * One line between what you said and what came back: how far the surveyor
+ * One line between what you said and what came back: how far the agent
  * walked, and a tick per step. Clicking it selects the turn everywhere.
  */
 export default function TransmissionStrip({
@@ -52,9 +52,9 @@ export default function TransmissionStrip({
       onClick={onSelect}
     >
       <span className="strip-line">
-        <span className="strip-no">№{no}</span>
+        <span className="strip-no">Turn {no}</span>
         {parts.map((part) => (
-          <span key={part}>
+          <span key={part} className="strip-part">
             <span className="strip-sep">·</span> {part}
           </span>
         ))}

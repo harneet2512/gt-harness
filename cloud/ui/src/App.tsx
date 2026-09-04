@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { getMe, LOGIN_URL, type User } from "./api";
-import SurveyPage from "./components/SurveyPage";
+import SynapsePage from "./components/SynapsePage";
 
 type AuthState =
   | { phase: "loading" }
@@ -12,8 +12,8 @@ function SignIn() {
   return (
     <div className="signin">
       <div className="signin-card">
-        <h1>GT Cloud Agent</h1>
-        <p>Survey your codebase with an agent you can watch.</p>
+        <h1>SYNAPSE</h1>
+        <p>Watch an agent think through your codebase.</p>
         <button
           type="button"
           className="btn"
@@ -32,7 +32,7 @@ function SignIn() {
 /** Keyed by session id so switching remounts (fresh SSE + thread state). */
 function SessionRoute() {
   const { id } = useParams<{ id: string }>();
-  return <SurveyPage key={id} />;
+  return <SynapsePage key={id} />;
 }
 
 export default function App() {
@@ -53,16 +53,12 @@ export default function App() {
     };
   }, []);
 
-  if (auth.phase === "loading") {
-    return <div className="booting">Checking the radio…</div>;
-  }
-  if (auth.phase === "anonymous") {
-    return <SignIn />;
-  }
+  if (auth.phase === "loading") return <div className="booting">…</div>;
+  if (auth.phase === "anonymous") return <SignIn />;
 
   return (
     <Routes>
-      <Route path="/" element={<SurveyPage />} />
+      <Route path="/" element={<SynapsePage />} />
       <Route path="/sessions/:id" element={<SessionRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

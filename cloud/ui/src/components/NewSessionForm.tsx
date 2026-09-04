@@ -21,8 +21,8 @@ interface Props {
   onCancel: () => void;
 }
 
-/** Clone a repository into a fresh workspace: a new stretch of terrain. */
-export default function NewExpeditionForm({ onCreated, onCancel }: Props) {
+/** Clone a repository into a fresh workspace. */
+export default function NewSessionForm({ onCreated, onCancel }: Props) {
   const [repo, setRepo] = useState("");
   const [ref, setRef] = useState(DEFAULT_REF);
   const [modelChoice, setModelChoice] = useState<string>(MODELS[0]);
@@ -50,15 +50,16 @@ export default function NewExpeditionForm({ onCreated, onCancel }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const session = await createSession({
-        repo: repo.trim(),
-        ref: ref.trim() || DEFAULT_REF,
-        model,
-        gt_mode: gtMode,
-        step_limit: parsedLimit,
-        temperature: DEFAULT_TEMPERATURE,
-      });
-      onCreated(session);
+      onCreated(
+        await createSession({
+          repo: repo.trim(),
+          ref: ref.trim() || DEFAULT_REF,
+          model,
+          gt_mode: gtMode,
+          step_limit: parsedLimit,
+          temperature: DEFAULT_TEMPERATURE,
+        }),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -67,8 +68,8 @@ export default function NewExpeditionForm({ onCreated, onCancel }: Props) {
   }
 
   return (
-    <form className="new-expo" onSubmit={handleSubmit}>
-      <h2 className="cap">new expedition</h2>
+    <form className="newsess" onSubmit={handleSubmit}>
+      <h2 className="cap">new session</h2>
 
       <div className="field">
         <label className="cap" htmlFor="repo">
@@ -114,7 +115,7 @@ export default function NewExpeditionForm({ onCreated, onCancel }: Props) {
         </select>
         {isCustom && (
           <input
-            style={{ marginTop: 8 }}
+            className="newsess-custom"
             value={customModel}
             onChange={(e) => setCustomModel(e.target.value)}
             placeholder="provider/model-id"
@@ -156,9 +157,9 @@ export default function NewExpeditionForm({ onCreated, onCancel }: Props) {
 
       {error && <div className="notice">{error}</div>}
 
-      <div className="new-expo-actions">
+      <div className="newsess-actions">
         <button type="submit" className="btn btn-orange" disabled={submitting}>
-          {submitting ? "Surveying…" : "Begin survey"}
+          {submitting ? "Cloning…" : "Start session"}
         </button>
         <button type="button" className="btn" onClick={onCancel}>
           Cancel

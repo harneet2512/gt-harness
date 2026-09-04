@@ -111,6 +111,12 @@ export interface DiffFile {
   status: DiffFileStatus | string;
   additions: number;
   deletions: number;
+  /**
+   * Not in the published contract, but the server sends it and the inspector
+   * wants a single file's patch. Optional: when absent, the whole-session
+   * `patch` is split per file instead (see `splitPatch`).
+   */
+  patch?: string;
 }
 
 export interface SessionDiff {
@@ -130,6 +136,45 @@ export interface SessionTree {
   base_sha: string;
   files: TreeFile[];
 }
+
+/* ------------------------------------------------------------------ *
+ * The relation graph: every tracked file as a node, every known relation
+ * between two of them as an edge.
+ * ------------------------------------------------------------------ */
+
+export type GraphEdgeKind = "import" | "gt_call" | "gt_ref" | "gt_import";
+
+export interface GraphNode {
+  id: string;
+  path: string;
+  size: number;
+  lang: string;
+  /** Top-level directory, "" for a file at the repository root. */
+  dir: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  kind: GraphEdgeKind | string;
+  weight: number;
+}
+
+export interface SessionGraph {
+  base_sha: string;
+  gt: boolean;
+  /** The server dropped edges to stay within its own budget. */
+  truncated?: boolean;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export const EMPTY_GRAPH: SessionGraph = {
+  base_sha: "",
+  gt: false,
+  nodes: [],
+  edges: [],
+};
 
 export interface Receipt {
   turn_id: string;
@@ -415,9 +460,14 @@ export function getDiff(id: string): Promise<SessionDiff> {
   return request(`${path(id)}/diff`);
 }
 
-/** The terrain the agent is surveying: every tracked file with its size. */
+/** Every tracked file with its size. */
 export function getTree(id: string): Promise<SessionTree> {
   return request(`${path(id)}/tree`);
+}
+
+/** The particles and the filaments: files, and how they relate. */
+export function getGraph(id: string): Promise<SessionGraph> {
+  return request(`${path(id)}/graph`);
 }
 
 export function getReceipts(id: string): Promise<Receipt[]> {

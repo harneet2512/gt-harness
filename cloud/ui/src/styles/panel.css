@@ -1,0 +1,294 @@
+/* ------------------------------------------------------------------ *
+ * The bottom panel: the trail, the changes, the receipts, and the
+ * scrubber that replays them.
+ * ------------------------------------------------------------------ */
+
+/* ---------------- the trail ---------------- */
+
+.trail-step {
+  display: flex;
+  gap: 10px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--rule);
+}
+.trail-step:first-child {
+  border-top: none;
+}
+.trail-step.is-future {
+  opacity: 0.4;
+}
+.trail-n {
+  flex: 0 0 auto;
+  width: 22px;
+  text-align: right;
+  color: var(--muted);
+  position: relative;
+}
+.trail-step.is-here .trail-n {
+  color: var(--orange);
+}
+.trail-here {
+  position: absolute;
+  right: -8px;
+  top: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--orange);
+}
+.trail-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.trail-thought {
+  font-style: italic;
+  color: var(--ink-2);
+  margin-bottom: 5px;
+}
+.trail-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.trail-file {
+  padding: 1px 6px;
+  font-size: 10.5px;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  background: var(--paper);
+}
+.trail-file:hover {
+  border-color: var(--ink-2);
+}
+.trail-file.is-edit {
+  color: var(--teal);
+  border-color: rgba(21, 154, 135, 0.35);
+  background: var(--teal-soft);
+}
+.trail-error {
+  border-left: 2px solid var(--error);
+  padding-left: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+  margin-top: 5px;
+}
+.trail-steer {
+  border-left: 2px solid var(--orange);
+  padding-left: 8px;
+  margin-top: 6px;
+}
+.trail-steer-text {
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+
+/* ---------------- commands and output ---------------- */
+
+.cmd {
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 5px 8px;
+  overflow-x: auto;
+}
+.cmd-sign {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.cmd-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.out {
+  margin-top: 5px;
+}
+.out pre {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+.out.is-error {
+  border-left: 2px solid var(--error);
+  padding-left: 8px;
+}
+.out-foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 3px;
+}
+.out-rc {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--error);
+}
+
+/* ---------------- changes ---------------- */
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 7px;
+}
+.files {
+  list-style: none;
+}
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.file-row:hover {
+  background: var(--paper);
+}
+.file-mark {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--teal);
+  flex: 0 0 auto;
+}
+.file-mark.is-bad {
+  background: var(--error);
+}
+.file-path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-status {
+  color: var(--muted);
+}
+.file-counts {
+  display: flex;
+  gap: 7px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+.file-counts .add {
+  color: var(--teal);
+}
+.file-counts .del {
+  color: var(--error);
+}
+
+/* ---------------- receipts ---------------- */
+
+.receipts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.receipt {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--paper);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 2px 16px;
+}
+.receipt-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.receipt-line dt {
+  flex: 0 0 84px;
+  color: var(--muted);
+}
+.receipt-line dd {
+  flex: 1 1 auto;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.receipt-line dd.is-ok {
+  color: var(--teal);
+}
+.receipt-line dd.is-bad {
+  color: var(--error);
+}
+
+/* ---------------- the scrubber ---------------- */
+
+.scrub {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px 5px;
+  border-bottom: 1px solid var(--rule);
+}
+.scrub-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.scrub-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--rule);
+}
+.scrub-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 0;
+  justify-content: space-between;
+  align-items: center;
+}
+.scrub-caret {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 16px;
+  background: var(--orange);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.scrub-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  opacity: 0;
+  cursor: ew-resize;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.scrub-state {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
