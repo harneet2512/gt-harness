@@ -301,6 +301,56 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     }
     assert verify_runtime_receipt(product) == []
 
+    refused_admission = {
+        "event": "provider_admission",
+        "event_hash": "9" * 64,
+        "sequence": 12,
+        "status": "refused",
+        "reason": "GT_PROVIDER_REQUEST_TOO_LARGE",
+        "request_tokens": 114_689,
+        "request_bytes": 458_756,
+        "context_window_tokens": 131_072,
+        "reserved_output_tokens": 16_384,
+        "input_budget_tokens": 114_688,
+        "metadata_source": "openrouter:/models",
+    }
+    events_with_refusal = [*events, refused_admission]
+    (task_state / "events.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in events_with_refusal),
+        encoding="utf-8",
+    )
+    completed_with_refusal = deepcopy(product_row)
+    completed_with_refusal["integrity"]["events_sha256"] = hashlib.sha256(
+        (task_state / "events.jsonl").read_bytes()
+    ).hexdigest()
+    completed_with_refusal["treatment_receipt"]["event_journal"].update(
+        event_count=len(events_with_refusal),
+        event_head=refused_admission["event_hash"],
+    )
+    completed_with_refusal["treatment_receipt"]["provider_admissions"].append(
+        {
+            "event_hash": refused_admission["event_hash"],
+            "event_sequence": refused_admission["sequence"],
+            "status": refused_admission["status"],
+            "reason": refused_admission["reason"],
+            "request_tokens": refused_admission["request_tokens"],
+            "request_bytes": refused_admission["request_bytes"],
+            "context_window_tokens": refused_admission["context_window_tokens"],
+            "reserved_output_tokens": refused_admission["reserved_output_tokens"],
+            "input_budget_tokens": refused_admission["input_budget_tokens"],
+            "metadata_source": refused_admission["metadata_source"],
+        }
+    )
+    _write_json(product, completed_with_refusal)
+    assert "treatment_provider_admission_count_mismatch" in verify_runtime_receipt(
+        product
+    )
+
+    (task_state / "events.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in events), encoding="utf-8"
+    )
+    _write_json(product, product_row)
+
     mutations = [
         (
             "treatment_delivery_limit_exceeded",

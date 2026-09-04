@@ -756,12 +756,8 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             admitted_calls = sum(
                 row["status"] == "admitted" for row in observed_admissions
             )
-            treatment_status = str(
-                (receipt.get("treatment_receipt") or {}).get("status") or ""
-            )
-            if admitted_calls != attempted_calls or (
-                treatment_status == "COMPLETED"
-                and any(row["status"] != "admitted" for row in observed_admissions)
+            if admitted_calls != attempted_calls or any(
+                row["status"] != "admitted" for row in observed_admissions
             ):
                 errors.append("treatment_provider_admission_count_mismatch")
 
