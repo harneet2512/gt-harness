@@ -42,6 +42,7 @@ jobs:
           pins = {
               "groundtruth_commit": manifest["groundtruth"]["source_commit"],
               "groundtruth_tree": manifest["groundtruth"]["source_tree"],
+              "producer_sha": manifest["groundtruth"]["producer_sha256"],
               "python_version": manifest["python_version"],
               "review_inbox_commit": manifest["groundtruth"]["lineage_exception"]["review_inbox_commit"],
           }
@@ -116,7 +117,7 @@ jobs:
           assert info["complete"] is True
           assert info["git_commit"] == os.environ["SOURCE_COMMIT"]
           assert info["go_toolchain"] == "go1.22.5"
-          assert info["build_tags"] == "sqlite_fts5"
+          assert info["build_tags"] == expected["producer_build"]["build_tags"]
           assert info["graph_schema_version"] == "v15.2-trust-tier"
           assert info["executable_sha256"] == digest
           assert digest == expected["producer_sha256"]
@@ -279,12 +280,14 @@ jobs:
           python scripts/verify_feature_matrix.py
 
       - name: Stage the verified producer outside the source closure
+        env:
+          EXPECTED_PRODUCER_SHA: ${{ steps.product-pins.outputs.producer_sha }}
         run: |
           set -euo pipefail
           PRODUCER_PATH="/opt/groundtruth/gt-index/gt-index"
           sudo install -D -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
           printf '%s  %s\n' \
-            '071fd6cb941b12adf762694c4bef1fb7f126841e4e587d56fd3b90b02002ca32' \
+            "${EXPECTED_PRODUCER_SHA}" \
             "${PRODUCER_PATH}" | sha256sum --check --strict
           "${PRODUCER_PATH}" -h >/dev/null
 

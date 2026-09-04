@@ -22,13 +22,13 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "af08545371d8ac75fdf7b82c5858a2818202c379",
-    "source_tree": "b34451a2eebae8061b9b41367de662be54b6e2c8",
+    "source_commit": "08fe997d0d5e1ef4bf00e5d990dd4907eebf8adf",
+    "source_tree": "d6082901cc3e555dbdbe76f5347bbf30db031d63",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "wheel_sha256": "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "932b6336adf0a82f7d752cbcc0a508fc357546b37eb857d45da9fc273401928d",
+    "producer_sha256": "9147cb21798774502fb4330e4c07477adff441a26b9d368081b86df925220bd1",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -45,13 +45,13 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "af08545371d8ac75fdf7b82c5858a2818202c379",
-      "source_tree": "b34451a2eebae8061b9b41367de662be54b6e2c8",
-      "binary_sha256": "932b6336adf0a82f7d752cbcc0a508fc357546b37eb857d45da9fc273401928d",
+      "source_commit": "08fe997d0d5e1ef4bf00e5d990dd4907eebf8adf",
+      "source_tree": "d6082901cc3e555dbdbe76f5347bbf30db031d63",
+      "binary_sha256": "9147cb21798774502fb4330e4c07477adff441a26b9d368081b86df925220bd1",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "c1729ba72e3f5d2c37f181f270711366471706774fa9d2ffa7a496cd73a093da",
+      "build_info_sha256": "4373030a3438bcde0e1fe4dc2de5c832cb5a32a164c743e79c26b3959069a09a",
       "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
-      "build_tags": "sqlite_fts5",
+      "build_tags": "netgo,osusergo,sqlite_fts5",
       "static_linking": true
     },
     "lineage_exception": {
@@ -61,7 +61,7 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "af08545371d8ac75fdf7b82c5858a2818202c379",
+      "source_commit": "08fe997d0d5e1ef4bf00e5d990dd4907eebf8adf",
       "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -143,7 +143,9 @@
         "c4fd8dc68f7928dcf4155688dd4d9758ba692035",
         "220f87d60d26f3a11e882ee38688c042274b8f5d",
         "761a51675784a388844ade27633692b5bf4a0788",
-        "af08545371d8ac75fdf7b82c5858a2818202c379"
+        "af08545371d8ac75fdf7b82c5858a2818202c379",
+        "0b54ccea909dfde78276a836f50ad1752c64a8d9",
+        "08fe997d0d5e1ef4bf00e5d990dd4907eebf8adf"
       ],
       "post_certification_changed_paths": [
         ".githooks/red-artifacts/content_address_parser_red.out",
@@ -172,7 +174,6 @@
         ".githooks/tests/item4_properties_fts_red.sh",
         ".github/workflows/build_producer_linux.yml",
         ".github/workflows/ci.yml",
-        "REPORT.md",
         "gt-index/cmd/gt-index/budget.go",
         "gt-index/cmd/gt-index/budget_test.go",
         "gt-index/cmd/gt-index/derived.go",
@@ -740,7 +741,7 @@
         ".githooks/tests/final_hardening_sql_constants.sh",
         "scripts/swebench/build_gt_index_linux.sh"
       ],
-      "review_inbox_commit": "9043aab7891b2ae1c14958ace866a4e167b2a637",
+      "review_inbox_commit": "80c5ee5bade386fb9a03e93dc32197b76a933654",
       "review_packets": [
         {
           "packet_id": "har70-groundtruth-db9daf9e",
@@ -778,11 +779,11 @@
           "kind": "check_outcome"
         },
         {
-          "packet_id": "har83-final-hardening-exact-build-af0854537",
-          "head_sha": "af08545371d8ac75fdf7b82c5858a2818202c379",
+          "packet_id": "har83-final-hardening-exact-build-08fe997d0",
+          "head_sha": "08fe997d0d5e1ef4bf00e5d990dd4907eebf8adf",
           "status": "PASS",
           "basis": "exact_static_build_and_focused_suites",
-          "packet_digest_sha256": "8010409bf3e572a995ee7a94e6691f40dcb416a1ba2d6c8f3b08f307845313a0",
+          "packet_digest_sha256": "9dec372a9c270615e62a12aa57a3370eb69821ab48315cb04c26a2c82c7c7ca2",
           "kind": "check_outcome"
         }
       ],
@@ -804,7 +805,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "ff54c800855cfbba71a52a1570d5329508e92c4b5163506b0dbd4571b74c807a"
+      "attestation_digest_sha256": "686d4173f118d176ab033a4c3388368132e19abc6d39c91d49ddfc4c39201300"
     },
     "build_info_sha256": "1466b4a847bb2061d53f76ff834776bc0100909aed85b80878b6a27d9df9d0f3"
   },
