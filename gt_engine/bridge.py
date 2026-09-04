@@ -2119,12 +2119,50 @@ class GTBridge:
                 {"fault_type": type(exc).__name__},
             )
 
+    def _resolve_symbol_address(
+        self, file_path: str, symbol: str, hash_cache: dict[str, str],
+    ) -> Any | None:
+        """Check one delivered symbol's stored address against the workspace.
+
+        Returns the named resolution, or None when there is nothing to check
+        against (no graph, no symbol) or the check itself faulted. A fault is
+        not a verdict, so it annotates nothing -- and because a fault also
+        yields no bytes, it cannot deliver stale ones.
+        """
+        if not self.graph_db or not file_path or not symbol:
+            return None
+        try:
+            from gt_engine.content_address import resolve_named_symbol
+
+            return resolve_named_symbol(
+                self.graph_db,
+                self.repo_root,
+                file_path,
+                symbol,
+                hash_cache=hash_cache,
+            )
+        except Exception as exc:  # noqa: BLE001 - verification is advisory
+            self._trace_record(
+                "graph.address_resolution_failed",
+                self._active_boundary,
+                {"fault_type": type(exc).__name__},
+            )
+            return None
+
     def _render_task_start_orientation(self, *, max_chars: int = 1100) -> str:
-        """Render a bounded, ranked graph slice for the model's first choice."""
+        """Render a bounded, ranked graph slice for the model's first choice.
+
+        Every rendered symbol's content address is resolved against the working
+        tree first. A symbol whose file hash no longer matches is DOWNGRADED in
+        place: its claim is replaced by the named `stale_symbol` marker carrying
+        both hashes, and its action becomes "re-read". Nothing is promoted --
+        a matching hash only confirms the bytes the claim was already built on.
+        """
         lines = [
             "Ranked work surface (inspect before broad search):",
         ]
         seen: set[tuple[str, str]] = set()
+        hash_cache: dict[str, str] = {}
         for item in self._graph_evidence:
             if not item.file_path:
                 continue
@@ -2134,11 +2172,34 @@ class GTBridge:
             seen.add(key)
             links = ",".join(item.obligation_ids) or "active-target"
             claim = " ".join(str(item.claim or "").split())
-            line = (
-                f"{item.rank}. {item.file_path}:{item.symbol or '-'}"
-                f" | {claim[:220]} | for={links}"
-                f" | action={item.intended_action}"
+            verdict = self._resolve_symbol_address(
+                item.file_path, item.symbol, hash_cache
             )
+            if verdict is not None and verdict.is_stale:
+                self._trace_record(
+                    "graph.stale_symbol",
+                    self._active_boundary,
+                    {
+                        "file_path_sha256": hashlib.sha256(
+                            item.file_path.encode("utf-8", "surrogatepass")
+                        ).hexdigest(),
+                        "stored_file_hash": verdict.stored_file_hash,
+                        "actual_file_hash": verdict.actual_file_hash,
+                        "rank": item.rank,
+                    },
+                )
+                line = (
+                    f"{item.rank}. {item.file_path}:{item.symbol or '-'}"
+                    f" | {verdict.marker()} | for={links}"
+                    " | action=re-read the file; this claim predates it"
+                )
+            else:
+                state = f" | address={verdict.state}" if verdict is not None else ""
+                line = (
+                    f"{item.rank}. {item.file_path}:{item.symbol or '-'}"
+                    f" | {claim[:220]} | for={links}"
+                    f" | action={item.intended_action}{state}"
+                )
             candidate = "\n".join([*lines, line])
             if len(candidate) > max_chars:
                 break
