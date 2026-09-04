@@ -125,41 +125,56 @@ These are real, named, and currently owned by nobody:
   emitter was removed because two writers on the same primary key with different
   support floors meant the weaker one silently won every row.
 
-## 5. The one open engineering problem: boa
+## 5. boa — SETTLED. It publishes. The claim was false.
 
-`arch_pipeline.md` and the plan both say boa's *"publication never terminates"*.
-**Treat that as unproven.** Current evidence:
+**`exit=0`, `Done in 36m02.087s` (2,162 s): 883 files, 1,353,067 nodes, 2,700,172
+edges, 66,027 properties, 3,128 assertions, 8.1 GB database.** Config
+`GT_FLOW_FACT_BUDGET=512`, `GT_VTA_ITERATION_BUDGET=64`. Log
+`scratchpad/fh/boa_long.log`; graph `boa_long.db`.
+
+**Every boa run this project ever made was capped at 1500 s. Publication takes
+2,162 s.** We stopped it ~10 minutes short every time, then reasoned about why it
+"never terminates". The claim was in the plan, in `arch_pipeline.md`, in the HAR-81
+diagnosis and on HAR-83. It was an artefact of our own timeout — and the tell was
+in stream A's own sweep the whole time: `abs-module-cache-flags` took **2,627 s and
+exited 0**, so one repository was already known to need 43 minutes while boa was
+never given more than 25.
+
+**What is actually wrong with boa** is wall-clock and disk amplification, not
+termination: 36 minutes and 8.1 GB for 883 files, yielding **1.35 M nodes — 8.5×
+arktype's nodes for 1.9× its files**. Item 1's `pass_coverage` removal attacks
+exactly that (713 MB of 845 MB of candidate-edge JSON on a 250-file sample, read by
+nothing), and it is now measurable end to end because the run completes.
+
+**Consequences for item 1:** the budget is an execution *rail*, not a rescue. It
+bounds a pathological fan-out and is provably inert on healthy repositories
+(arktype `+0.0000%` at the default; budget `0` reproduces the baseline exactly).
+`512` is now a default a *completed* boa publication actually used.
+
+**Method note worth keeping.** Three documents asserted non-termination from runs
+that were all killed by the same cap. Nobody had run it longer. The cheapest
+available experiment — raise the timeout — went unrun for weeks because the claim
+had hardened into a premise. When a claim is load-bearing, check what evidence it
+actually rests on.
+
+### The superseded evidence, kept for the record
 
 | Run | Config | Result |
 |---|---|---|
 | `fh/boa.log` | full repo, item 1's proposed default | `exit=124` @ 1501 s, WAL 6.7 GB |
 | `fh/boa_b64.log` | full repo, `GT_FLOW_FACT_BUDGET=64` (**64× tighter**) | `exit=124` @ 1501 s, WAL 4.6 GB |
 | `fh/boa_ex.log` | `-max-files 250` | **publishes**: 277,289 nodes, 66 s |
-| `fh/boa_long.log` | full repo, budget 512, **timeout 7200 s** | **in flight**, ~50 min, WAL 7.3 GB |
+| `fh/boa_long.log` | full repo, budget 512, **timeout 7200 s** | **exit=0 in 2,162 s** -- 1,353,067 nodes, 8.1 GB |
 
-Established: the flow-fact fan-out is **not** the unbounded term, and neither are
+Also established: the flow-fact fan-out is **not** the dominant cost term, and neither are
 the prepared statements — the budget-64 run used a binary already carrying the
 prepared statements, the 512 MB page cache, the hoisted SELECT cache and the
-`pass_coverage` removal. The hang is inside the resolution-graph attach: the log
-prints `Resolved 31755/68227 calls` and then nothing, where the 250-file run prints
-Pass 4d/4f/4e.
+`pass_coverage` removal. The log going quiet after `Resolved 31755/68227 calls` was a long pass with no
+progress output -- not a stall, as I wrongly read it at the time.
 
-**The live hypothesis:** boa may be *slow*, not non-terminating, and every run ever
-made was killed by our own 1500 s cap. `abs-module-cache-flags` in the same sweep
-took **2,627 s — 43 minutes — and exited 0**. `fh/boa_long.log` settles it.
+All three rows above were killed by the 1500 s cap, not by a defect. The 7200 s run settled it: boa publishes in 2,162 s.
 
-- If it **terminates**: this was never a termination defect. It is wall-clock and
-  disk amplification; the levers are item 9 and the `pass_coverage` removal, and
-  the budget is a rail, not a rescue. Rewrite the claim in `arch_pipeline.md`.
-- If it **does not**: there is a defect a budget will never fix. Stream A is
-  instrumenting `AttachResolutionGraphTx` with per-N-callsite progress, which
-  says which.
-
-**Either way there is already a working mitigation**, from item 9:
-`GT_SKIP_ANALYSIS=1` publishes a usable core graph in **19.5 s instead of 183 s, or
-instead of nothing**.
-
-**Item 1 still owes**, before it can land: defaults justified by runs that
+**Item 1 still owes**, before it can land (unchanged by the above): defaults justified by runs that
 *completed*, and the 19-repo sweep re-run **serially** (the parallel one died of
 `fork: Resource temporarily unavailable` at 3 of 19; `sweep_budget.sh` is in
 `scratchpad/fh/`). Budget-inertness on a healthy repo is already proven — arktype

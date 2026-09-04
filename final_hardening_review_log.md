@@ -399,16 +399,20 @@ for."* The correction is in the artefact, not in a summary.
 
 ---
 
-## 4. The boa investigation — open, and the plan may be wrong about it
+## 4. The boa investigation — CLOSED. The plan was wrong.
 
-`arch_pipeline.md` and the plan both say boa's *"publication never terminates"*.
-**That may be an artefact of our own timeout.**
+`arch_pipeline.md` and the plan both said boa's *"publication never terminates"*.
+**It was an artefact of our own timeout.** boa publishes: `exit=0`,
+**36m02s (2,162 s)**, 883 files, 1,353,067 nodes, 2,700,172 edges, 8.1 GB database,
+at `GT_FLOW_FACT_BUDGET=512`. Every prior run was capped at 1500 s -- roughly ten
+minutes short of the finish.
 
 | Run | Config | Result |
 |---|---|---|
 | `boa.log` | full repo, proposed default budget | `exit=124` @ 1501 s, WAL 6.7 GB |
 | `boa_b64.log` | full repo, `GT_FLOW_FACT_BUDGET=64` — **64× tighter** | `exit=124` @ 1501 s, WAL 4.6 GB |
 | `boa_ex.log` | `-max-files 250` | **publishes**: 277,289 nodes, 433,437 edges, 66 s |
+| `boa_long.log` | full repo, budget 512, **7200 s cap** | **exit=0 @ 2,162 s** -- 1,353,067 nodes, 2,700,172 edges, 8.1 GB |
 
 The budget-64 run used the binary that already carries the prepared statements, the
 512 MB page cache, the hoisted SELECT cache and the `pass_coverage` removal — I
@@ -419,18 +423,25 @@ Where it hangs is pinned: the log prints `Resolved 31755/68227 calls in 42 s` an
 then **nothing** — no Pass 4a, where the 250-file run prints Pass 4d / 4f / 4e. It
 is inside the resolution-graph attach.
 
-**The hypothesis now under test.** boa may simply be *slow*, not non-terminating.
+**Confirmed: boa was simply slow, not non-terminating.**
 Stream A's own partial sweep shows `abs-module-cache-flags` took **2,627 s — 43
 minutes — for 67 files, and exited 0**. Every boa run ever made here was capped at
-1500 s. A run at a **7200 s** timeout is in flight (`scratchpad/fh/boa_long.log`),
-and stream A is instrumenting `AttachResolutionGraphTx` with per-N-callsite
-progress, which distinguishes slow-but-linear from genuinely stuck.
+1500 s. The 7200 s run settled it. This was never a termination defect: it is a
+**wall-clock and disk-amplification** problem -- 1.35 M nodes, **8.5x arktype's
+node count for 1.9x its files**. The levers are the `pass_coverage` removal and
+two-phase publication (item 9); the budget is a **rail**, not a rescue.
 
-If boa terminates at 45–90 minutes, then this was never a termination defect: it is
-a **wall-clock and disk-amplification** problem, the levers are the `pass_coverage`
-removal and two-phase publication (item 9), and the budget is a rail rather than a
-rescue. Item 15's priority rises accordingly, and both affected streams have been
-told to assume so.
+**A correction I owe on my own earlier reading.** I wrote that the hang was "inside
+the resolution-graph attach" because the log went quiet after
+`Resolved 31755/68227 calls`. That was a long pass with no progress output, not a
+stall. The finding that the flow-fact fan-out is not the dominant cost term stands;
+the framing around it did not.
+
+**Method note.** Three separate documents asserted non-termination on the evidence
+of runs that were all killed by the same cap, and nobody had run it longer. The
+cheapest available experiment -- raise the timeout -- went unrun because the claim
+had hardened into a premise. Worth remembering the next time a load-bearing claim
+is inherited rather than tested.
 
 ---
 

@@ -124,7 +124,7 @@ worst possible failure mode, and until this session it was silent.
 | Atomic publication | **VERIFIED (the hard way)** | 4 distinct defects each destroyed a whole graph |
 | Closure | **VERIFIED** | arktype depth 1: 1402, depth 2: 1150, depth 3: 1050 |
 | `MaxDepth = 3`, `MinEdgeConfidence = 0.7` | **VERIFIED** | `internal/closure/closure.go:52,60` — the requested depth-6 change is **not done** |
-| boa | **BROKEN — fix in flight** | Publication never terminates; WAL past 11.5 GB; *not* the closure (`-closure=false` reproduces it). Root cause traced: `AnalyzeVTA` called unbounded although `AnalyzeVTAWithBudget` and a typed `budget_exhausted` abstention already exist; the per-candidate flow-fact writer does a `SELECT` per fact with no prepared statements. final_hardening item 1 (stream A) owns it |
+| boa | **PUBLISHES (36m02s)** | Measured 2026-09-03: `exit=0`, 2,162 s, 883 files, 1,353,067 nodes, 2,700,172 edges, 8.1 GB db (`GT_FLOW_FACT_BUDGET=512`). The earlier "never terminates" finding was an artefact of a 1500 s timeout that cut every run ~10 min short. The real issue is wall-clock and disk amplification -- 8.5x arktype's nodes for 1.9x its files -- which item 1's `pass_coverage` removal attacks |
 
 **Defects found and fixed this session** (all fixture-first, RED replayed in a
 clean checkout by the pre-push hook):
@@ -300,7 +300,7 @@ successful smoke would prove, and nothing short of one will.
 ### Open, ordered
 
 1. ~~Review packet for `cffca1fd2`~~ — landed (`ea2f30d3`); dispatch is unblocked and awaits typed authorisation.
-2. boa's non-terminating publication — final_hardening item 1, stream A in flight. Blocks the remaining 19, not the gate.
+2. boa's publication cost (36m02s, 8.1 GB -- NOT non-termination; that was a timeout artefact) — final_hardening item 1, stream A in flight. Blocks the remaining 19, not the gate.
 3. `MaxDepth` 3 → 6 — **deliberately not scheduled**: at 2.4% CERTIFIED edges it widens traversal over an already-thin set. Resolution rate (36%) and property density are the levers. Owner decides whether the request stands.
 4. LSP promotion and ONNX retrieval — wired but unmeasured in a run.
 5. Wiring `internal/cochange/` and `internal/process/` into `main.go` — fixture-first, after item 1.
@@ -396,7 +396,7 @@ stores nothing.
 
 - `cochanges` — **0 rows** in every graph built *from the local fixtures*, because every smoke fixture is a depth-1 clone; the producer's `mineCochanges` emitter exists and production containers clone fully. At `--depth=500` the same repo yields 23,720 pairs. `cochange_prior`, one of the
   four `GRAPH_BACKED_FEATURES` the graph-use enforcement depends on, can never
-  fire; `cochange_partner` has no emitter anywhere in the codebase.
+  fire; `cochange_partner` has an emitter as of `24d156530` (wiring); this line was true before that landed in the codebase.
 - `content_passages` — **the table does not exist**. I listed it as schema.
 
 ## Honest reading
