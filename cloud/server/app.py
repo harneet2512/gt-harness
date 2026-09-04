@@ -2,48 +2,36 @@
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+# LiteLLM aborts a run when it cannot price a model, and the free OpenRouter
+# models have no price entry. `LitellmModelConfig.cost_tracking` reads this at
+# *class definition* time, so it must be set before `minisweagent.models.*` is
+# first imported. The chain below (deps -> routes -> runner -> steerable_agent)
+# reaches `minisweagent.agents.default`, so this line has to stay above it.
+os.environ.setdefault("MSWEA_COST_TRACKING", "ignore_errors")
 
-from .auth import auth_router
-from .events import EventBus
-from .routes import router
-from .runner import SessionRunner
-from .store import SessionStore
+from collections.abc import AsyncGenerator  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
 
-_store: SessionStore | None = None
-_event_bus: EventBus | None = None
-_runner: SessionRunner | None = None
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+from . import deps  # noqa: E402
+from .auth import auth_router  # noqa: E402
+from .events import EventBus  # noqa: E402
+from .routes import router  # noqa: E402
+from .runner import SessionRunner  # noqa: E402
+from .store import SessionStore  # noqa: E402
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    global _store, _event_bus, _runner
-    db_path = os.environ.get("DB_PATH", "cloud_harness.db")
-    _store = SessionStore(db_path)
-    await _store.init()
-    _event_bus = EventBus(_store)
-    _runner = SessionRunner(_store, _event_bus)
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    store = SessionStore(os.environ.get("DB_PATH", "cloud_harness.db"))
+    await store.init()
+    event_bus = EventBus(store)
+    deps.configure(store, event_bus, SessionRunner(store, event_bus))
     yield
-    await _store.close()
-
-
-def get_store() -> SessionStore:
-    assert _store is not None
-    return _store
-
-
-def get_event_bus() -> EventBus:
-    assert _event_bus is not None
-    return _event_bus
-
-
-def get_runner() -> SessionRunner:
-    assert _runner is not None
-    return _runner
+    await store.close()
 
 
 def create_app() -> FastAPI:
@@ -53,7 +41,6 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
-
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -61,11 +48,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    app.dependency_overrides[SessionStore] = get_store
-    app.dependency_overrides[EventBus] = get_event_bus
-    app.dependency_overrides[SessionRunner] = get_runner
-
     app.include_router(auth_router)
     app.include_router(router, prefix="/api")
 

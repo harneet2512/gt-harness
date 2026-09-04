@@ -89,7 +89,10 @@ class SessionStore:
 
     async def list_sessions(self, limit: int = 50) -> list[dict]:
         cursor = await self._db.execute(
-            "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+            # rowid breaks ties: two sessions created in the same clock tick
+            # would otherwise come back in arbitrary order.
+            "SELECT * FROM sessions ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (limit,),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]

@@ -1,13 +1,8 @@
 """Tests for cloud.server.steerable_agent.SteerableAgent."""
 from __future__ import annotations
 
-import queue
-import threading
-import time
 from typing import Any
 from unittest.mock import MagicMock
-
-import pytest
 
 from cloud.server.steerable_agent import SteerableAgent
 
@@ -136,7 +131,7 @@ def test_steering_message_injected_at_step_boundary() -> None:
 
     agent._steering_queue.put("change approach: use pytest instead")
 
-    result = agent.run("do the task")
+    agent.run("do the task")
 
     steering_events = [e for e in events if e.get("type") == "steering"]
     assert len(steering_events) == 1
@@ -174,7 +169,6 @@ def test_stop_terminates_with_user_stopped() -> None:
 
 def test_stop_mid_run() -> None:
     call_count = 0
-    original_query: Any = None
 
     def on_event(event: dict) -> None:
         nonlocal call_count

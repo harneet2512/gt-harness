@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import os
 import time
-from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cloud.server.auth import _pending_states, auth_router, verify_jwt
+from cloud.server.auth import auth_router, verify_jwt
 
 
 @pytest.fixture

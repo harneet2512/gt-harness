@@ -3,13 +3,18 @@ import { useNavigate } from "react-router-dom";
 import { createSession, listSessions, type SessionStatus } from "../api";
 
 const MODELS = [
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "minimax/minimax-m3:free",
   "deepseek/deepseek-v4-flash",
-  "deepseek/deepseek-v4-pro",
-  "openai/gpt-4o",
-  "anthropic/claude-sonnet-4-20250514",
-];
+] as const;
 
-const GT_MODES = ["advisory", "engine", "off"];
+const CUSTOM_MODEL = "__custom__";
+
+const GT_MODES = ["off", "advisory", "engine"] as const;
+
+const DEFAULT_STEP_LIMIT = 100;
+const DEFAULT_TEMPERATURE = 0;
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -20,8 +25,12 @@ export default function Dashboard() {
   const [repo, setRepo] = useState("");
   const [ref, setRef] = useState("main");
   const [task, setTask] = useState("");
-  const [model, setModel] = useState(MODELS[0]);
-  const [gtMode, setGtMode] = useState("advisory");
+  const [modelChoice, setModelChoice] = useState<string>(MODELS[0]);
+  const [customModel, setCustomModel] = useState("");
+  const [gtMode, setGtMode] = useState<string>(GT_MODES[0]);
+
+  const isCustomModel = modelChoice === CUSTOM_MODEL;
+  const model = isCustomModel ? customModel.trim() : modelChoice;
 
   useEffect(() => {
     loadSessions();
@@ -39,16 +48,20 @@ export default function Dashboard() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!model) {
+      alert("Enter a model identifier.");
+      return;
+    }
     setSubmitting(true);
     try {
       const session = await createSession({
-        repo,
-        ref,
+        repo: repo.trim(),
+        ref: ref.trim() || "main",
         task,
         model,
         gt_mode: gtMode,
-        step_limit: 100,
-        temperature: 0.0,
+        step_limit: DEFAULT_STEP_LIMIT,
+        temperature: DEFAULT_TEMPERATURE,
       });
       navigate(`/sessions/${session.id}`);
     } catch (err) {
@@ -97,13 +110,26 @@ export default function Dashboard() {
             </div>
             <div className="form-group">
               <label>Model</label>
-              <select value={model} onChange={(e) => setModel(e.target.value)}>
+              <select
+                value={modelChoice}
+                onChange={(e) => setModelChoice(e.target.value)}
+              >
                 {MODELS.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
                 ))}
+                <option value={CUSTOM_MODEL}>Other (type below)...</option>
               </select>
+              {isCustomModel && (
+                <input
+                  style={{ marginTop: 8 }}
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="provider/model-id"
+                  required
+                />
+              )}
             </div>
           </div>
           <div className="form-group">

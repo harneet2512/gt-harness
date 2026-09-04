@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { getResult, type SessionResult } from "../api";
+import { ApiError, getResult, type SessionResult } from "../api";
 
 interface Props {
   sessionId: string;
 }
+
+const RETRY_MS = 2000;
 
 export default function ResultView({ sessionId }: Props) {
   const [result, setResult] = useState<SessionResult | null>(null);
@@ -11,17 +13,46 @@ export default function ResultView({ sessionId }: Props) {
   const [receiptOpen, setReceiptOpen] = useState(false);
 
   useEffect(() => {
-    getResult(sessionId)
-      .then(setResult)
-      .catch((e) => setError(String(e)));
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const load = () => {
+      getResult(sessionId)
+        .then((r) => {
+          if (!cancelled) setResult(r);
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          // 409 = the run is still finalizing; the record appears shortly.
+          if (e instanceof ApiError && (e.status === 409 || e.status === 404)) {
+            retry = setTimeout(load, RETRY_MS);
+            return;
+          }
+          setError(e instanceof Error ? e.message : String(e));
+        });
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
   }, [sessionId]);
 
   if (error) {
-    return <div className="card" style={{ color: "var(--error)" }}>{error}</div>;
+    return (
+      <div className="card" style={{ color: "var(--error)" }}>
+        {error}
+      </div>
+    );
   }
   if (!result) {
     return <div className="card">Loading result...</div>;
   }
+
+  const receipt = result.receipt;
+  const steps = receipt?.n_calls;
+  const cost = receipt?.cost;
 
   return (
     <div className="result-view">
@@ -30,15 +61,15 @@ export default function ResultView({ sessionId }: Props) {
           <span className="label">Outcome: </span>
           <strong>{result.terminal_outcome || "unknown"}</strong>
         </div>
-        {result.receipt && (
+        {receipt && (
           <>
             <div>
               <span className="label">Steps: </span>
-              {(result.receipt as Record<string, unknown>).n_calls ?? "-"}
+              {typeof steps === "number" ? steps : "-"}
             </div>
             <div>
               <span className="label">Cost: </span>$
-              {((result.receipt as Record<string, unknown>).cost as number || 0).toFixed(3)}
+              {typeof cost === "number" ? cost.toFixed(3) : "0.000"}
             </div>
           </>
         )}
@@ -55,7 +86,7 @@ export default function ResultView({ sessionId }: Props) {
         </div>
       )}
 
-      {result.receipt && (
+      {receipt && (
         <div className="card">
           <h3
             className={`collapsible-header ${receiptOpen ? "open" : ""}`}
@@ -64,9 +95,7 @@ export default function ResultView({ sessionId }: Props) {
             Receipt
           </h3>
           {receiptOpen && (
-            <pre style={{ marginTop: 8 }}>
-              {JSON.stringify(result.receipt, null, 2)}
-            </pre>
+            <pre style={{ marginTop: 8 }}>{JSON.stringify(receipt, null, 2)}</pre>
           )}
         </div>
       )}

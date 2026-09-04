@@ -9,6 +9,10 @@ build/
 .env
 results/**/raw/
 
+# cloud UI build artifacts (package-lock.json IS tracked — CI runs `npm ci`)
+cloud/ui/node_modules/
+cloud/ui/dist/
+
 # local-only artifacts (benchmark runs, editor config, scratch notes)
 results/
 .vscode/

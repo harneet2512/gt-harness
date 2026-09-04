@@ -67,7 +67,6 @@ class SteerableAgent(DefaultAgent):
                         },
                     }
                 )
-                self._emit({"type": "lifecycle", "status": "stopped"})
                 break
 
             # --- STEERING INJECTION ---
@@ -123,10 +122,13 @@ class SteerableAgent(DefaultAgent):
                 break
 
         exit_extra = self.messages[-1].get("extra", {})
+        exit_status = str(exit_extra.get("exit_status", ""))
+        # Exactly one terminal lifecycle event, and it must not contradict the
+        # reason the loop ended: a user stop is "stopped", not "completed".
         self._emit({
             "type": "lifecycle",
-            "status": "completed",
-            "exit_status": exit_extra.get("exit_status", ""),
+            "status": "stopped" if exit_status == "UserStopped" else "completed",
+            "exit_status": exit_status,
             "n_calls": self.n_calls,
             "cost": self.cost,
         })

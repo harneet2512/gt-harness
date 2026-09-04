@@ -1,14 +1,8 @@
 import { useEffect, useRef } from "react";
-
-export interface EventEntry {
-  id: number;
-  type: string;
-  data: Record<string, unknown>;
-  timestamp: number;
-}
+import type { SessionEvent } from "../api";
 
 interface Props {
-  events: EventEntry[];
+  events: SessionEvent[];
 }
 
 export default function TerminalFeed({ events }: Props) {
@@ -20,8 +14,8 @@ export default function TerminalFeed({ events }: Props) {
     const el = containerRef.current;
     if (!el) return;
     const handler = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      autoScroll.current = atBottom;
+      autoScroll.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     };
     el.addEventListener("scroll", handler);
     return () => el.removeEventListener("scroll", handler);
@@ -40,7 +34,7 @@ export default function TerminalFeed({ events }: Props) {
       )}
       {events.map((ev) => (
         <div key={ev.id} className={`event-entry ${eventClass(ev)}`}>
-          {renderEvent(ev)}
+          <EventBody event={ev} />
         </div>
       ))}
       <div ref={bottomRef} />
@@ -48,7 +42,7 @@ export default function TerminalFeed({ events }: Props) {
   );
 }
 
-function eventClass(ev: EventEntry): string {
+function eventClass(ev: SessionEvent): string {
   switch (ev.type) {
     case "assistant":
       return "event-assistant";
@@ -67,38 +61,46 @@ function eventClass(ev: EventEntry): string {
   }
 }
 
-function renderEvent(ev: EventEntry) {
-  const d = ev.data;
-  switch (ev.type) {
-    case "assistant":
+function EventBody({ event }: { event: SessionEvent }) {
+  switch (event.type) {
+    case "assistant": {
+      const { content, actions, n_calls, cost } = event.data;
       return (
         <>
           <span className="event-label">Agent</span>
-          {d.content && <div>{String(d.content)}</div>}
-          {Array.isArray(d.actions) && d.actions.length > 0 && (
-            <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              {(d.actions as string[]).length} action(s) pending
+          {content && <div>{content}</div>}
+          {Array.isArray(actions) && actions.length > 0 && (
+            <div className="event-meta">
+              {actions.length} action{actions.length === 1 ? "" : "s"}:{" "}
+              {actions.join(" ; ")}
             </div>
           )}
+          <Meta n_calls={n_calls} cost={cost} />
         </>
       );
-    case "tool_call":
+    }
+    case "tool_call": {
+      const { command, n_calls } = event.data;
       return (
         <>
           <span className="event-label">Run</span>
-          <span className="command">$ {String(d.command || "")}</span>
+          <span className="command">$ {command ?? ""}</span>
+          <Meta n_calls={n_calls} />
         </>
       );
+    }
     case "tool_result": {
-      const output = String(d.output || "");
-      const rc = d.returncode as number;
+      const { command, output, returncode, is_error } = event.data;
       return (
         <>
           <span className="event-label">
-            {d.is_error ? "Error" : "Output"}
-            {rc !== undefined && rc !== 0 && ` (rc=${rc})`}
+            {is_error ? "Error" : "Output"}
+            {typeof returncode === "number" &&
+              returncode !== 0 &&
+              ` (rc=${returncode})`}
           </span>
-          {output && <pre>{output}</pre>}
+          {command && <div className="event-meta">$ {command}</div>}
+          {output ? <pre>{output}</pre> : <pre className="event-meta">(no output)</pre>}
         </>
       );
     }
@@ -106,26 +108,40 @@ function renderEvent(ev: EventEntry) {
       return (
         <>
           <span className="event-label">You</span>
-          {String(d.content || "")}
+          {event.data.content ?? ""}
         </>
       );
-    case "lifecycle":
+    case "lifecycle": {
+      const { status, exit_status, n_calls, cost, error } = event.data;
       return (
         <>
           <span className="event-label">Status</span>
-          {String(d.status || d.data && typeof d.data === "object" ? (d.data as Record<string, unknown>).status : JSON.stringify(d))}
-          {d.exit_status && ` — ${String(d.exit_status)}`}
-          {typeof d.n_calls === "number" && ` (${d.n_calls} steps, $${(d.cost as number || 0).toFixed(3)})`}
+          {status}
+          {exit_status && ` — ${exit_status}`}
+          {error && ` — ${error}`}
+          <Meta n_calls={n_calls} cost={cost} />
         </>
       );
-    case "error":
+    }
+    case "error": {
+      const { error, traceback } = event.data;
       return (
         <>
           <span className="event-label">Error</span>
-          {String(d.error || JSON.stringify(d))}
+          {error ?? "unknown error"}
+          {traceback && <pre>{traceback}</pre>}
         </>
       );
+    }
     default:
-      return <>{JSON.stringify(d)}</>;
+      return <pre>{JSON.stringify(event.data, null, 2)}</pre>;
   }
+}
+
+function Meta({ n_calls, cost }: { n_calls?: number; cost?: number }) {
+  if (typeof n_calls !== "number" && typeof cost !== "number") return null;
+  const parts: string[] = [];
+  if (typeof n_calls === "number") parts.push(`${n_calls} steps`);
+  if (typeof cost === "number") parts.push(`$${cost.toFixed(3)}`);
+  return <div className="event-meta">{parts.join(" | ")}</div>;
 }

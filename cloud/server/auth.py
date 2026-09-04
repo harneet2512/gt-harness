@@ -127,10 +127,10 @@ def verify_jwt(token: str | None) -> dict[str, Any]:
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=["HS256"])
         return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "session expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(401, "invalid session")
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(401, "session expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(401, "invalid session") from exc
 
 
 def _cleanup_stale_states() -> None:

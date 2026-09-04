@@ -19,15 +19,15 @@ class EventBus:
         return self._queues.setdefault(session_id, [])
 
     async def publish(self, session_id: str, event: dict[str, Any]) -> None:
-        event.setdefault("timestamp", time.time())
+        normalized = _normalize(event)
         event_id = await self._store.append_event(
-            session_id, event.get("type", "unknown"), event, event["timestamp"]
+            session_id, normalized["type"], normalized["data"], normalized["timestamp"]
         )
-        event["id"] = event_id
-        event["session_id"] = session_id
+        normalized["id"] = event_id
+        normalized["session_id"] = session_id
         for q in self._get_queues(session_id):
             try:
-                q.put_nowait(event)
+                q.put_nowait(normalized)
             except asyncio.QueueFull:
                 pass
 
@@ -49,6 +49,17 @@ class EventBus:
         stored = await self._store.get_events(session_id, after_id=after_id)
         for ev in stored:
             yield _format_sse(ev)
+            if _is_terminal(ev):
+                # The session already finished: nothing more will ever be
+                # published, and finish()'s sentinel is long gone, so the live
+                # loop below would block forever.
+                return
+
+        session = await self._store.get_session(session_id)
+        if session is not None and session["status"] in _TERMINAL_STATUSES:
+            # Same reason: replaying a finished session must not park on a
+            # queue that nobody will ever push to (finish() already ran).
+            return
 
         q: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=256)
         queues = self._get_queues(session_id)
@@ -59,9 +70,7 @@ class EventBus:
                 if event is None:
                     break
                 yield _format_sse(event)
-                if event.get("type") == "lifecycle" and event.get("data", {}).get(
-                    "status"
-                ) in {"completed", "failed", "stopped"}:
+                if _is_terminal(event):
                     break
         finally:
             queues.remove(q)
@@ -74,8 +83,36 @@ class EventBus:
                 pass
 
 
+_ENVELOPE_KEYS = {"type", "timestamp", "id", "session_id", "data"}
+_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
+
+
+def _is_terminal(event: dict[str, Any]) -> bool:
+    return (
+        event.get("type") == "lifecycle"
+        and event.get("data", {}).get("status") in _TERMINAL_STATUSES
+    )
+
+
+def _normalize(event: dict[str, Any]) -> dict[str, Any]:
+    """Coerce both `{type, data:{...}}` and flat `{type, k: v}` events into one envelope."""
+    event_type = str(event.get("type", "unknown"))
+    timestamp = float(event.get("timestamp") or time.time())
+    if isinstance(event.get("data"), dict):
+        data = dict(event["data"])
+    else:
+        data = {k: v for k, v in event.items() if k not in _ENVELOPE_KEYS}
+    return {"type": event_type, "timestamp": timestamp, "data": data}
+
+
 def _format_sse(event: dict) -> str:
-    event_id = event.get("id", "")
-    event_type = event.get("type", "message")
-    data = json.dumps(event.get("data", event), default=str)
-    return f"id: {event_id}\nevent: {event_type}\ndata: {data}\n\n"
+    payload = {
+        "id": event.get("id"),
+        "type": event.get("type", "message"),
+        "timestamp": event.get("timestamp"),
+        "data": event.get("data", {}),
+    }
+    return (
+        f"id: {payload['id']}\nevent: {payload['type']}\n"
+        f"data: {json.dumps(payload, default=str)}\n\n"
+    )

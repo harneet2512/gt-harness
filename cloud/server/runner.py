@@ -14,6 +14,8 @@ from .events import EventBus
 from .steerable_agent import SteerableAgent
 from .store import SessionStore
 
+_STATE_DIRNAME = ".gt_state"
+
 
 class SessionRunner:
     def __init__(self, store: SessionStore, event_bus: EventBus) -> None:
@@ -146,7 +148,9 @@ class SessionRunner:
                 loop,
             ).result(timeout=10)
 
-            final_status = "completed" if terminal not in _FAILURE_TERMINALS else "failed"
+            final_status = _TERMINAL_TO_STATUS.get(
+                terminal, "failed" if terminal in _FAILURE_TERMINALS else "completed"
+            )
             asyncio.run_coroutine_threadsafe(
                 self._store.update_status(
                     session_id,
@@ -190,12 +194,12 @@ class SessionRunner:
         session_id: str,
         loop: asyncio.AbstractEventLoop,
     ) -> SteerableAgent:
+        import yaml
         from minisweagent.agents.default import AgentConfig
         from minisweagent.config import builtin_config_dir
-        from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentConfig
         from minisweagent.models.litellm_model import LitellmModel
 
-        import yaml
+        from .environment import CloudLocalEnvironment, LocalEnvironmentConfig
 
         config = yaml.safe_load((builtin_config_dir / "mini.yaml").read_text())
         agent_cfg = config["agent"]
@@ -224,13 +228,13 @@ class SessionRunner:
                 model_obj = LitellmModel(model_name=model_name, model_kwargs=model_kwargs)
                 gt_off = True
 
-        env_obj = LocalEnvironment(
+        env_obj = CloudLocalEnvironment(
             config_class=LocalEnvironmentConfig,
             cwd=cwd,
             timeout=30,
         )
 
-        state_dir = os.path.join(cwd, ".gt_state")
+        state_dir = os.path.join(cwd, _STATE_DIRNAME)
         os.makedirs(state_dir, exist_ok=True)
         output_path = os.path.join(state_dir, "trajectory.json")
 
@@ -252,11 +256,11 @@ class SessionRunner:
             try:
                 from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
                 from gt_engine.indexer import ensure_index_with_receipt
+                from gt_engine.miniswe_controller import Predicate
                 from gt_engine.miniswe_integration import MiniSweAdapter
                 from gt_engine.miniswe_runtime import install_runtime_hooks
                 from gt_engine.task_contract import extract_task_contract
                 from gt_engine.verification_contract import compile_obligation_predicates
-                from gt_engine.miniswe_controller import Predicate
 
                 index_receipt = ensure_index_with_receipt(cwd, state_dir=state_dir)
                 graph_db = index_receipt.graph_db if index_receipt.available else None
@@ -333,9 +337,23 @@ class SessionRunner:
 
     @staticmethod
     def _extract_patch(workdir: str) -> str | None:
+        """Diff of the workspace, including files the agent newly created.
+
+        A plain `git diff` misses untracked files, so mark everything
+        intent-to-add first. Harness scratch (`.gt_state/`) is excluded so the
+        trajectory file never leaks into the patch.
+        """
+        pathspec = [".", f":(exclude){_STATE_DIRNAME}"]
         try:
+            subprocess.run(
+                ["git", "add", "-A", "-N", "--", *pathspec],
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             result = subprocess.run(
-                ["git", "diff"],
+                ["git", "diff", "--", *pathspec],
                 cwd=workdir,
                 capture_output=True,
                 text=True,
@@ -357,6 +375,9 @@ class SessionRunner:
         except Exception:
             return {"messages": list(agent.messages)}
 
+
+# A user stop is a distinct terminal state: neither a success nor a failure.
+_TERMINAL_TO_STATUS = {"user_stopped": "stopped"}
 
 _FAILURE_TERMINALS = {
     "internal_error",

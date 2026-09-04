@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from .deps import get_event_bus, get_runner, get_store
 from .events import EventBus
 from .models import SessionCreate, SessionStatus, SteeringMessage
 from .runner import SessionRunner
@@ -40,8 +41,8 @@ def _session_to_status(row: dict) -> dict:
 @router.post("/sessions", response_model=SessionStatus, status_code=201)
 async def create_session(
     body: SessionCreate,
-    store: SessionStore = Depends(),
-    runner: SessionRunner = Depends(),
+    store: Annotated[SessionStore, Depends(get_store)],
+    runner: Annotated[SessionRunner, Depends(get_runner)],
 ) -> dict[str, Any]:
     if not _GITHUB_REPO_RE.match(body.repo):
         raise HTTPException(400, "repo must be a GitHub HTTPS URL")
@@ -75,7 +76,7 @@ async def create_session(
 
 @router.get("/sessions")
 async def list_sessions(
-    store: SessionStore = Depends(),
+    store: Annotated[SessionStore, Depends(get_store)],
 ) -> list[dict[str, Any]]:
     sessions = await store.list_sessions()
     return [_session_to_status(s) for s in sessions]
@@ -84,7 +85,7 @@ async def list_sessions(
 @router.get("/sessions/{session_id}", response_model=SessionStatus)
 async def get_session(
     session_id: str,
-    store: SessionStore = Depends(),
+    store: Annotated[SessionStore, Depends(get_store)],
 ) -> dict[str, Any]:
     session = await store.get_session(session_id)
     if session is None:
@@ -95,9 +96,9 @@ async def get_session(
 @router.get("/sessions/{session_id}/events")
 async def stream_events(
     session_id: str,
+    store: Annotated[SessionStore, Depends(get_store)],
+    event_bus: Annotated[EventBus, Depends(get_event_bus)],
     after_id: int = 0,
-    store: SessionStore = Depends(),
-    event_bus: EventBus = Depends(),
 ) -> StreamingResponse:
     session = await store.get_session(session_id)
     if session is None:
@@ -117,7 +118,7 @@ async def stream_events(
 @router.get("/sessions/{session_id}/result")
 async def get_result(
     session_id: str,
-    store: SessionStore = Depends(),
+    store: Annotated[SessionStore, Depends(get_store)],
 ) -> dict[str, Any]:
     session = await store.get_session(session_id)
     if session is None:
@@ -136,8 +137,8 @@ async def get_result(
 async def steer_session(
     session_id: str,
     body: SteeringMessage,
-    store: SessionStore = Depends(),
-    runner: SessionRunner = Depends(),
+    store: Annotated[SessionStore, Depends(get_store)],
+    runner: Annotated[SessionRunner, Depends(get_runner)],
 ) -> dict[str, str]:
     session = await store.get_session(session_id)
     if session is None:
@@ -154,8 +155,8 @@ async def steer_session(
 @router.post("/sessions/{session_id}/stop", status_code=202)
 async def stop_session(
     session_id: str,
-    store: SessionStore = Depends(),
-    runner: SessionRunner = Depends(),
+    store: Annotated[SessionStore, Depends(get_store)],
+    runner: Annotated[SessionRunner, Depends(get_runner)],
 ) -> dict[str, str]:
     session = await store.get_session(session_id)
     if session is None:
