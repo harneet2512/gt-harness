@@ -11,6 +11,7 @@ base `7b8d8183`. Prerequisite for delta row 6.
 | `617b6fee` | feat | emit `cochange_partner` and gate `cochange_prior` on real rows |
 | `fd48a642` | fix | drop whole co-change lines at the ceiling instead of cutting one |
 | `437346d1` | test | pin the runtime seam's two silence guarantees |
+| `69cd6d9c` | docs | this report |
 
 ## Files at `437346d1`
 
@@ -402,13 +403,13 @@ python -m ruff check gt_engine/cochange_evidence.py gt_engine/graph_utilisation.
   every commit. Suppressing it would need either `--no-verify` or a change to
   `core.hooksPath`, and the `pre-commit` gate refuses to run unless
   `core.hooksPath` is exactly that shared directory — so under the rules as
-  given there is no way to commit without the push. Four commits reached
+  given there is no way to commit without the push. Five commits reached
   `origin/final_hardening/item6-engine`. No merge, no PR.
 - **Attribution trailer.** The stream brief asked for
   `Co-Authored-By: Claude Fable 5.1`. A harness directive issued mid-session
   replaced it with `Co-Authored-By: Claude Opus 5 (1M context)` plus a
   `Claude-Session:` line, stating explicitly that it replaces earlier
-  attribution guidance. All four commits carry the harness trailer. Flagged
+  attribution guidance. All commits carry the harness trailer. Flagged
   rather than changed silently.
 - No GT-off run, plan or proposal. No paid dispatch. No `--no-verify`.
 - Nothing outside `D:/gt-fh-item6-engine` was modified;
