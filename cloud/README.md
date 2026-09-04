@@ -105,6 +105,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 | GET | `/api/sessions/:id/events` | SSE stream, open across turns (`?after_id=` or `Last-Event-ID:`) |
 | GET | `/api/sessions/:id/diff` | Cumulative diff vs the cloned commit, incl. untracked files |
 | GET | `/api/sessions/:id/tree` | Every file in the workspace with its byte size (`{base_sha, files:[{path,size}]}`), for the map |
+| GET | `/api/sessions/:id/graph` | File relation graph (`{base_sha, gt, nodes:[{id,path,size,lang,dir}], edges:[{source,target,kind,weight}]}`). `kind` is `import` (static imports) or `gt_call`/`gt_ref`/`gt_import` (GT symbol edges collapsed to file level, only when `gt_status` is `ready`; `gt` says whether they are in). Nodes are exactly the files `/tree` returns; over 5000 files only the busiest survive and `truncated: true` is added. |
 | GET | `/api/sessions/:id/receipts` | One receipt per turn |
 | POST | `/api/sessions/:id/stop` | Stop the running turn at the next step boundary → 202 (409 if idle) |
 | POST | `/api/sessions/:id/close` | Kill the turn, delete the workspace, status `closed` (idempotent) |

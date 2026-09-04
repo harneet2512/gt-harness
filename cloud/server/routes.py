@@ -21,6 +21,7 @@ from .models import (
     Session,
     SessionCreate,
     SessionDiff,
+    SessionGraph,
     SessionTree,
     TurnReceipt,
 )
@@ -160,6 +161,19 @@ async def get_tree(
 ) -> dict[str, Any]:
     session = await _require_session(store, session_id)
     return await manager.tree(session)
+
+
+@router.get(
+    "/sessions/{session_id}/graph",
+    response_model=SessionGraph,
+    # ``truncated`` is an optional field: absent unless the graph was capped
+    response_model_exclude_none=True,
+)
+async def get_graph(
+    session_id: str, store: StoreDep, manager: ManagerDep
+) -> dict[str, Any]:
+    session = await _require_session(store, session_id)
+    return await manager.graph(session)
 
 
 @router.get("/sessions/{session_id}/receipts", response_model=list[TurnReceipt])

@@ -12,7 +12,7 @@ import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: ``stopped`` is a lifecycle *event*, not a persisted status: after a stop the
 #: reply is written and the session goes straight back to ``idle``.
@@ -44,6 +44,8 @@ CREATE TABLE sessions (
     current_turn_id TEXT,
     workspace_path TEXT,
     base_sha TEXT,
+    -- path to the GT indexer's SQLite graph, when one was built
+    graph_db TEXT,
     config_json TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -98,6 +100,7 @@ _SESSION_FIELDS = (
     "current_turn_id",
     "workspace_path",
     "base_sha",
+    "graph_db",
 )
 
 

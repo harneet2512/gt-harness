@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .codegraph import build_graph
 from .conversational_agent import ConversationalAgent, Steering, TurnResult
 from .events import EventBus
 from .prompts import CHAT_BRIEF_TEMPLATE, CHAT_SYSTEM_TEMPLATE
@@ -46,6 +47,10 @@ class _SessionState:
     session_id: str
     workspace: str | None = None
     agent: ConversationalAgent | None = None
+    #: GT graph database built for this workspace, mirrored on the session row
+    graph_db: str | None = None
+    #: last file-relation graph, keyed by its tree signature (see ``graph``)
+    graph_cache: tuple[str, dict] | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
     turn_done: threading.Event = field(default_factory=threading.Event)
     closed: bool = False
@@ -151,12 +156,14 @@ class SessionManager:
             )
             state.workspace = workspace
 
-            gt_status = self._prepare_gt(session, workspace, loop)
+            gt_status, graph_db = self._prepare_gt(session, workspace, loop)
+            state.graph_db = graph_db
             self._call(loop, self._store.update_status(
                 session_id, "idle",
                 workspace_path=workspace,
                 base_sha=base_sha,
                 gt_status=gt_status,
+                graph_db=graph_db,
             ))
             self._emit(loop, session_id, "lifecycle", {"status": "idle"})
         except Exception as exc:  # noqa: BLE001 - any failure fails the session
@@ -173,11 +180,15 @@ class SessionManager:
 
     def _prepare_gt(
         self, session: dict, workspace: str, loop: asyncio.AbstractEventLoop
-    ) -> str:
-        """Build the GT index if the session asked for it. Never fatal."""
+    ) -> tuple[str, str | None]:
+        """Build the GT index if the session asked for it. Never fatal.
+
+        Returns the ``gt_status`` to persist and the graph database path, which
+        the session row keeps so ``graph()`` can find it later.
+        """
         session_id = str(session["id"])
         if str(session["gt_mode"]) == "off":
-            return "off"
+            return "off", None
         self._emit(loop, session_id, "lifecycle", {"status": "indexing"})
         try:
             from gt_engine.indexer import ensure_index_with_receipt
@@ -193,13 +204,13 @@ class SessionManager:
                 "gt_mode": session["gt_mode"],
                 "graph_db": str(graph_db),
             })
-            return "ready"
+            return "ready", str(graph_db)
         except Exception as exc:  # noqa: BLE001 - GT degrades, it does not fail
             self._emit(loop, session_id, "lifecycle", {
                 "status": "gt_unavailable",
                 "error": f"{type(exc).__name__}: {exc}",
             })
-            return "unavailable"
+            return "unavailable", None
 
     # -- messages / turns -----------------------------------------------------
 
@@ -480,6 +491,37 @@ class SessionManager:
         files = await asyncio.to_thread(list_tree, str(workspace))
         return {"base_sha": base_sha, "files": files}
 
+    async def graph(self, session: dict) -> dict:
+        """The file-relation graph of the workspace, cached per tree state."""
+        workspace = session.get("workspace_path")
+        base_sha = str(session.get("base_sha") or "")
+        empty = {"base_sha": base_sha, "gt": False, "nodes": [], "edges": []}
+        if not workspace or not Path(str(workspace)).is_dir():
+            return empty
+        return await asyncio.to_thread(
+            self._graph_blocking, dict(session), str(workspace), base_sha
+        )
+
+    def _graph_blocking(self, session: dict, workspace: str, base_sha: str) -> dict:
+        session_id = str(session["id"])
+        state = self._state(session_id)
+        files = list_tree(workspace)
+        signature = _tree_signature(base_sha, files)
+        cached = state.graph_cache
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        graph = build_graph(workspace, files, self._graph_db_for(session, state))
+        graph["base_sha"] = base_sha
+        state.graph_cache = (signature, graph)
+        return graph
+
+    @staticmethod
+    def _graph_db_for(session: dict, state: _SessionState) -> str | None:
+        """The GT graph database to read edges from, if GT is actually ready."""
+        if str(session.get("gt_status") or "") != "ready":
+            return None
+        return str(session.get("graph_db") or state.graph_db or "") or None
+
     # -- agent construction ---------------------------------------------------
 
     def _ensure_agent(
@@ -659,9 +701,12 @@ class SessionManager:
                 "gt_mode": gt_mode,
                 "graph_db": str(graph_db or ""),
             })
-            self._call_quietly(
-                loop, self._store.update_session(session_id, gt_status="ready")
-            )
+            self._state(session_id).graph_db = str(graph_db) if graph_db else None
+            self._call_quietly(loop, self._store.update_session(
+                session_id,
+                gt_status="ready",
+                graph_db=str(graph_db) if graph_db else None,
+            ))
         except Exception as exc:  # noqa: BLE001 - GT degrades, it does not fail
             self._emit(loop, session_id, "lifecycle", {
                 "status": "gt_unavailable",
@@ -722,6 +767,14 @@ class SessionManager:
 
 class ConcurrencyLimit(RuntimeError):
     """Raised when a new turn would exceed MAX_CONCURRENT_SESSIONS."""
+
+
+def _tree_signature(base_sha: str, files: list[dict]) -> str:
+    """Cheap identity of a tree: the base commit plus every path and size."""
+    digest = hashlib.sha256(base_sha.encode("utf-8"))
+    for entry in files:
+        digest.update(f"\0{entry['path']}\0{entry.get('size', 0)}".encode())
+    return digest.hexdigest()
 
 
 def _graph_db_of(receipt: Any) -> Any:

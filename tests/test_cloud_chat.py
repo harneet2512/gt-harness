@@ -187,7 +187,12 @@ def _make_seed_repo(root: Path) -> Path:
     _git("config", "user.email", "harness@example.invalid", cwd=repo)
     _git("config", "user.name", "HAR-84 harness", cwd=repo)
     (repo / "README.md").write_text("hello\n", encoding="utf-8")
-    _git("add", "README.md", cwd=repo)
+    # a real (tiny) Python package, so /graph has an import edge to find
+    (repo / "app.py").write_text("import pkg.util\n", encoding="utf-8")
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "pkg" / "util.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git("add", "-A", cwd=repo)
     _git("-c", "commit.gpgsign=false", "commit", "-m", "init", cwd=repo)
     return repo
 
@@ -928,6 +933,63 @@ def test_diff_reports_created_and_modified_files(harness: Harness) -> None:
 
 
 # --------------------------------------------------------------------------
+# 8b: file relation graph
+# --------------------------------------------------------------------------
+def test_graph_nodes_match_the_tree_and_carry_the_seeded_import(
+    harness: Harness,
+) -> None:
+    """FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
+    store, event bus, agent loop, bash environment, git — the graph is parsed
+    out of the real files of a real clone."""
+    session_id = _create_idle(harness)
+
+    tree = harness.client.get(
+        f"/api/sessions/{session_id}/tree", headers=harness.auth
+    ).json()
+    response = harness.client.get(
+        f"/api/sessions/{session_id}/graph", headers=harness.auth
+    )
+    assert response.status_code == 200, response.text
+    graph = response.json()
+
+    assert [n["path"] for n in graph["nodes"]] == [f["path"] for f in tree["files"]]
+    assert all(n["id"] == n["path"] for n in graph["nodes"])
+    assert graph["base_sha"] == tree["base_sha"] and len(graph["base_sha"]) == 40
+    assert graph["gt"] is False, "this session is gt_mode=off"
+    assert "truncated" not in graph, "optional field, absent below the cap"
+
+    by_path = {n["path"]: n for n in graph["nodes"]}
+    assert by_path["app.py"]["lang"] == "py" and by_path["app.py"]["dir"] == ""
+    assert by_path["pkg/util.py"]["dir"] == "pkg"
+    assert by_path["README.md"]["lang"] == "md"
+
+    assert {
+        (e["source"], e["target"], e["kind"], e["weight"]) for e in graph["edges"]
+    } == {("app.py", "pkg/util.py", "import", 1)}
+
+    # cached, and stable across calls
+    assert harness.client.get(
+        f"/api/sessions/{session_id}/graph", headers=harness.auth
+    ).json() == graph
+
+    # a file the agent writes shows up on the next call (the cache is keyed to
+    # the tree, not to the session)
+    harness.set_script([_action("echo x > brand_new.py"), _reply("Added a file.")])
+    _post_message(harness, session_id, "add a file")
+    _wait_status(harness, session_id, {"idle"})
+    refreshed = harness.client.get(
+        f"/api/sessions/{session_id}/graph", headers=harness.auth
+    ).json()
+    assert "brand_new.py" in {n["path"] for n in refreshed["nodes"]}
+    assert {n["path"] for n in refreshed["nodes"]} == {
+        f["path"]
+        for f in harness.client.get(
+            f"/api/sessions/{session_id}/tree", headers=harness.auth
+        ).json()["files"]
+    }
+
+
+# --------------------------------------------------------------------------
 # 9: close
 # --------------------------------------------------------------------------
 def test_close_removes_the_workspace_and_rejects_new_messages(
@@ -1072,7 +1134,7 @@ def test_validation_and_404s(harness: Harness) -> None:
     assert missing.status_code == 422
     assert ("body", "model") in {tuple(e["loc"]) for e in missing.json()["detail"]}
 
-    for path in ["", "/messages", "/diff", "/receipts", "/events"]:
+    for path in ["", "/messages", "/diff", "/tree", "/graph", "/receipts", "/events"]:
         assert (
             harness.client.get(
                 f"/api/sessions/nope{path}", headers=harness.auth

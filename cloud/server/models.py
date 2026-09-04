@@ -13,6 +13,7 @@ FinishReason = Literal[
 ]
 Delivery = Literal["turn_started", "queued_for_running_turn"]
 FileStatus = Literal["added", "modified", "deleted"]
+EdgeKind = Literal["import", "gt_call", "gt_ref", "gt_import"]
 
 
 class SessionCreate(BaseModel):
@@ -91,6 +92,35 @@ class TreeFile(BaseModel):
 class SessionTree(BaseModel):
     base_sha: str = ""
     files: list[TreeFile] = Field(default_factory=list)
+
+
+class GraphNode(BaseModel):
+    #: identical to ``path``; the UI keys its layout off ``id``
+    id: str
+    path: str
+    size: int = 0
+    #: file extension without the dot ("py", "tsx", …), "" when there is none
+    lang: str = ""
+    #: first path segment, "" for a file at the repo root
+    dir: str = ""
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    kind: EdgeKind
+    #: how many underlying relations (imports, or GT symbol edges) collapsed here
+    weight: int = 1
+
+
+class SessionGraph(BaseModel):
+    base_sha: str = ""
+    #: true when GT-derived edges are included
+    gt: bool = False
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+    #: only present (and true) when the graph was capped to the busiest files
+    truncated: bool | None = None
 
 
 class TurnReceipt(BaseModel):
