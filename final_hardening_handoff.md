@@ -2,7 +2,7 @@
 
 **Written for a session that has none of this context.** Read this file and
 `final_hardening_review_log.md` (what was verified and how) and you have
-everything. Last updated 2026-09-04 ~00:40 ET.
+everything. Last updated 2026-09-04 ~01:30 ET.
 
 ---
 
@@ -59,26 +59,20 @@ Head SHAs are in each stream's own worktree unless the row says LANDED.
 | 5 embeddings | 3, 5 | — | harness `d9ae30fd` (in stack) | **LANDED** |
 | 6b co-change delivery | 6b | — | harness `d9ae30fd` (in stack) | **LANDED** |
 | 11 taxonomy | 8, 9 | — | producer `16597e6cf` (in stack) | **LANDED** |
-| 1 budgeted abstention | 14 | `D:/gt-fh-budget` | `ae0c59c32` | **REWORKING** — boa publishes; stream A owes sweep + defaults |
+| 1 budgeted abstention | 14 | — | producer `fddd6b681` (in stack) | **LANDED** |
 
 ## 4. What is left to do
 
-### 4.1 Item 1 — the only remaining work
+### 4.1 Item 1 — LANDED
 
-Stream A (`D:/gt-fh-budget`, head `ae0c59c32`) hit the rate limit twice and is
-waiting for reset. When it resumes, it owes two deliverables:
-
-1. **19-repo sweep re-run serially** (the parallel one died at 3 of 19). Budget
-   hours: abs took 2,627 s and boa takes 2,162 s.
-2. **Every number in `budget.go` justified by a run that finished.** The defaults
-   must come from completed measurements.
-
-Once those are done, cherry-pick its `test(red)` + fix onto `final_hardening/producer`,
-push, and the table is 15/15.
+Cherry-picked onto `final_hardening/producer` at `fddd6b681` (pushed). The
+19-repo sweep completed serially (19/19 exit 0, boa in 788 s). The budget
+defaults are justified by completed runs. Full `go test` on the merged stack
+was exit 0. The RED fixture was re-proved on the merged parent.
 
 ### 4.2 CI on the harness
 
-Run **33837633809** triggered on `d9ae30fd`. Prior greens: 33791548818 on `50bf2655`,
+Run **33837633809** GREEN on `d9ae30fd`. Run **33840398573** triggered on `ccf4e1b1`. Prior greens: 33791548818 on `50bf2655`,
 33785370968 on `5823193a`. The workflow has no `push` trigger for this branch.
 
 ### 4.3 Follow-ups the streams surfaced — currently owned by nobody
