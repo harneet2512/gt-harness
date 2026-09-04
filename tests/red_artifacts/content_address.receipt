@@ -1,0 +1,10 @@
+format=gt.fixture-red.v1
+unit=delivery-time-content-address-verification
+base_sha=7b8d81831c9972e1de7a9e61b33c52ea72980a0e
+fixture_path=tests/red_artifacts/run_content_address_red.py
+fixture_sha256=02aa948b248be135a62110360608e86cc75b489c4b34fe804deffb8c190d2742
+command=python tests/red_artifacts/run_content_address_red.py
+exit_code=1
+output_path=tests/red_artifacts/content_address.out
+output_sha256=aef06407e7a786af1f3546eb4a7d3ad7ad73f1be35d48176eb92083785bc2bcb
+failure=ModuleNotFoundError: No module named gt_engine.content_address
