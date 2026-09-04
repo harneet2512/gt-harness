@@ -71,12 +71,15 @@ def test_graph_phase_metadata_distinguishes_core_only_and_verifies_seals(tmp_pat
 
     ok, reason = indexer._graph_schema_receipt(graph)
     assert (ok, reason) == (True, "ok")
-    assert indexer._graph_phase_metadata(graph) == {
-        "core_phase_state": "committed",
-        "analysis_state": "failed",
-        "analysis_failure_reason": "budget",
-        "cochange_rows": 2,
-    }
+    meta = indexer._graph_phase_metadata(graph)
+    assert meta["core_phase_state"] == "committed"
+    assert meta["analysis_state"] == "failed"
+    assert meta["analysis_failure_reason"] == "budget"
+    assert meta["cochange_rows"] == 2
+    # Derived-layer keys are "unrecorded" / 0 when the tables don't exist
+    assert meta["derived_layers_state"] == "unrecorded"
+    assert meta["community_rows"] == 0
+    assert meta["process_rows"] == 0
 
     with sqlite3.connect(graph) as con:
         con.execute("update project_meta set value='0' where key='analysis_phase_receipt_sha256'")
