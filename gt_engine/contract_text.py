@@ -30,7 +30,7 @@ KEY_SCHEMA = "gt.contract_embedding_key.v1"
 
 # Multiple fingerprint rows on one node have never been observed; if one ever
 # appears, every value is kept in row order rather than one being chosen.
-FINGERPRINT_JOINER = ""
+FINGERPRINT_JOINER = "\x1f"
 
 
 def _param_line(fact: Mapping[str, Any]) -> str:
