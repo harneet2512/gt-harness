@@ -1,0 +1,343 @@
+/* ------------------------------------------------------------------ *
+ * The FIELD: the map of the terrain, the scrubber, the instruments.
+ * ------------------------------------------------------------------ */
+
+.field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--cream);
+}
+
+/* ---------------- map toolbar ---------------- */
+
+.map-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--grid);
+  /* The one shadow in the interface: a hairline under the toolbar. */
+  box-shadow: 0 1px 0 rgba(20, 23, 26, 0.05);
+}
+.map-bar select {
+  width: auto;
+  min-width: 120px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.map-bar input[type="search"] {
+  width: 150px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  border: 1px solid var(--grid);
+  background: var(--surface);
+}
+.legend-swatch.is-read {
+  background: var(--orange-soft);
+  border-color: var(--orange);
+}
+.legend-swatch.is-edit {
+  background: var(--teal-soft);
+  border-color: var(--teal);
+}
+.legend-swatch.is-here {
+  border: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--orange);
+}
+
+/* ---------------- the map ---------------- */
+
+/* The frame carries the resizable height; the pane fills it. */
+.map-frame {
+  flex-shrink: 0;
+  display: flex;
+  min-height: 0;
+}
+.map-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.map-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.map-cell rect {
+  transition:
+    fill 300ms ease,
+    stroke 300ms ease;
+}
+.map-dir > rect {
+  fill: none;
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.map-file rect {
+  fill: var(--surface);
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+/* Order matters: a file the surveyor just read outranks one it edited. */
+.map-file.is-edit rect {
+  stroke: var(--teal);
+}
+.map-file.is-hit rect {
+  stroke: var(--orange);
+  stroke-width: 1.5;
+}
+.map-file.is-found rect {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+}
+.map-file.is-focused rect {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+.map-dir.is-collapsed > rect {
+  fill: var(--surface);
+}
+.map-overflow rect {
+  fill: var(--cream);
+  stroke: var(--grid);
+  stroke-dasharray: 2 2;
+}
+
+.map-file,
+.map-dir.is-collapsed {
+  cursor: pointer;
+}
+
+.map-label {
+  font-family: var(--font-ui);
+  font-variant: all-small-caps;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  fill: var(--ink-2);
+  pointer-events: none;
+  user-select: none;
+}
+.map-dir-label {
+  cursor: pointer;
+  pointer-events: auto;
+}
+.map-dir-label:hover {
+  fill: var(--ink);
+}
+.map-file-label {
+  font-family: var(--font-mono);
+  font-variant: normal;
+  letter-spacing: 0;
+  font-size: 10.5px;
+  fill: var(--ink-2);
+}
+
+/* the surveyor */
+.map-here-dot {
+  fill: var(--orange);
+}
+.map-ping {
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ping 1.6s ease-out infinite;
+}
+.trail-line {
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  animation: draw 500ms ease-out forwards;
+}
+.trail-stop circle {
+  fill: var(--cream);
+  stroke: var(--orange);
+  stroke-width: 1;
+}
+.trail-stop text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--orange);
+  text-anchor: middle;
+  user-select: none;
+}
+
+.map-blank {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 46px 46px;
+  opacity: 0.45;
+}
+.map-blank span {
+  font-family: var(--font-voice);
+  font-style: italic;
+  font-size: 16px;
+  color: var(--ink-2);
+  background: var(--cream);
+  padding: 4px 12px;
+}
+
+.map-tip {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  max-width: 300px;
+  padding: 6px 9px;
+  background: var(--surface);
+  border: 1px solid var(--grid);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.map-tip .tip-meta {
+  color: var(--ink-2);
+}
+.map-tip .tip-read {
+  color: var(--orange);
+}
+.map-tip .tip-edit {
+  color: var(--teal);
+}
+
+/* ---------------- divider + scrubber ---------------- */
+
+.field-divider {
+  height: 5px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  touch-action: none;
+}
+.field-divider:hover {
+  background: var(--orange-soft);
+}
+
+.scrubber {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 6px 16px 8px;
+  border-top: 1px solid var(--grid);
+  border-bottom: 1px solid var(--grid);
+}
+.scrub-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.scrub-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--grid);
+}
+.scrub-ticks {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.scrub-ticks .tick {
+  flex: 1;
+  min-width: 3px;
+  height: 12px;
+}
+.scrub-caret {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--orange);
+  pointer-events: none;
+}
+.scrub-caret::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--orange);
+}
+/* A real range input, invisible on top of the ticks: drag and arrow keys
+   for free, without giving up the coloured tick marks underneath. */
+.scrub-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  opacity: 0;
+  cursor: pointer;
+  accent-color: var(--orange);
+}
+.scrub-input:focus-visible + .scrub-state,
+.scrub-input:focus-visible {
+  outline-offset: 0;
+}
+
+.scrub-state {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  min-width: 92px;
+  text-align: right;
+}
+.scrub-empty {
+  flex: 1;
+  color: var(--muted);
+}

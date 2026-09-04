@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { getMe, LOGIN_URL, type User } from "./api";
-import Dashboard from "./components/Dashboard";
-import Workspace from "./components/Workspace";
+import SurveyPage from "./components/SurveyPage";
 
 type AuthState =
   | { phase: "loading" }
@@ -12,25 +11,28 @@ type AuthState =
 function SignIn() {
   return (
     <div className="signin">
-      <h1>GT Cloud Agent</h1>
-      <p>Internal harness. Access is restricted to allow-listed GitHub logins.</p>
-      <button
-        className="btn-primary"
-        onClick={() => {
-          // Full-page navigation: the OAuth redirect must leave the SPA.
-          window.location.href = LOGIN_URL;
-        }}
-      >
-        Sign in with GitHub
-      </button>
+      <div className="signin-card">
+        <h1>GT Cloud Agent</h1>
+        <p>Survey your codebase with an agent you can watch.</p>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
+            // Full-page navigation: the OAuth redirect must leave the SPA.
+            window.location.href = LOGIN_URL;
+          }}
+        >
+          Continue with GitHub
+        </button>
+      </div>
     </div>
   );
 }
 
-/** Keyed by session id so switching sessions remounts (fresh SSE + dedupe state). */
-function WorkspaceRoute() {
+/** Keyed by session id so switching remounts (fresh SSE + thread state). */
+function SessionRoute() {
   const { id } = useParams<{ id: string }>();
-  return <Workspace key={id} />;
+  return <SurveyPage key={id} />;
 }
 
 export default function App() {
@@ -52,7 +54,7 @@ export default function App() {
   }, []);
 
   if (auth.phase === "loading") {
-    return <div className="empty-state">Checking session...</div>;
+    return <div className="booting">Checking the radio…</div>;
   }
   if (auth.phase === "anonymous") {
     return <SignIn />;
@@ -60,8 +62,9 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/sessions/:id" element={<WorkspaceRoute />} />
+      <Route path="/" element={<SurveyPage />} />
+      <Route path="/sessions/:id" element={<SessionRoute />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
