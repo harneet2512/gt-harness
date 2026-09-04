@@ -22,13 +22,13 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
-    "source_tree": "7b25858b49ec7ef91cbec2e8045b0bf3f19ccd8c",
+    "source_commit": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
+    "source_tree": "24f6b4d13d7214ff1b32cbd8a68a74bbb9bc9234",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
     "wheel_sha256": "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "b4bfba37d3e7348e6b4b415b96fd06df3ed0653532b013b497a671bbe2095dfb",
+    "producer_sha256": "e9a12ff0ff2c9c09ad68ccbbaf3a550afcf6cda3a69e438f41866082f82d7934",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -61,8 +61,8 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
-      "certified_source_commit": "db9daf9ecf3a6ec1c92c40fba214ee66e4d09d14",
+      "source_commit": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
+      "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
         "7b4d70433d11b4792adf59e8fac09a063d9ada53",
@@ -82,7 +82,8 @@
         "d2dff42555c310553dfdee35b8a97307247f9e4a",
         "f2b7a2f014447223608ca57c49e89e8312d6ea8c",
         "f76936ef2b33c59671df920eef29c8c56b752a58",
-        "cffca1fd29001577bf35a3355b7238e6cedd1130"
+        "cffca1fd29001577bf35a3355b7238e6cedd1130",
+        "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6"
       ],
       "post_certification_changed_paths": [
         ".githooks/red-artifacts/har81_candidate_derivation_red.out",
@@ -110,7 +111,7 @@
         "gt-index/internal/store/sqlite.go",
         "scripts/swebench/build_gt_index_linux.sh"
       ],
-      "review_inbox_commit": "ea2f30d33ddfcf83cddb6d49eba225fd03b8c677",
+      "review_inbox_commit": "c97417ce7a592c94de3321a694ce70b49b9661f8",
       "review_packets": [
         {
           "packet_id": "har70-groundtruth-db9daf9e",
@@ -138,6 +139,14 @@
           "authority": "HAR-81_OWNER_DIRECTIVE",
           "basis": "owner_directive",
           "reviewer_verdict_present": false
+        },
+        {
+          "packet_id": "har83-final-hardening-producer-9d0d8079f",
+          "head_sha": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
+          "status": "PASS",
+          "basis": "owner_directive",
+          "packet_digest_sha256": "168a4bb0e80c67bb3dabb47b578452cf172285308f154ad7bfac155431b7545b",
+          "kind": "check_outcome"
         }
       ],
       "product_review_packets": [
@@ -158,8 +167,9 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "7619dc24ed55255004da3157169e8dfa5d9c7c7e613981451e5914b894d41e54"
-    }
+      "attestation_digest_sha256": "faf0e0fdf7e938178450ce1f4169c012bef84a33d3102097dccce88dc50c7279"
+    },
+    "build_info_sha256": "1466b4a847bb2061d53f76ff834776bc0100909aed85b80878b6a27d9df9d0f3"
   },
   "capabilities": [
     "atomic_graph_publication",
