@@ -1,0 +1,19 @@
+{
+  "basis": "owner_directive",
+  "created_at": "2026-09-04T08:40:59Z",
+  "detail": {
+    "ci_run": "33854396866",
+    "ci_status": "SUCCESS",
+    "go_test_result": "all packages ok, exit 0",
+    "python_test_result": "0 failed, 3852 passed on ubuntu 3.11",
+    "relationship_note": "Supersedes cffca1fd2; this is the 15/15 final_hardening producer with budgeted abstention, two-phase publication, content addressing, taxonomy, projections, FTS, and wiring",
+    "scope": "final_hardening producer re-pin",
+    "ticket": "HAR-83"
+  },
+  "head_sha": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "168a4bb0e80c67bb3dabb47b578452cf172285308f154ad7bfac155431b7545b",
+  "reviewer_verdict_present": false,
+  "schema": "gt.review_packet.v1",
+  "status": "PASS"
+}
