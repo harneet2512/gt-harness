@@ -64,6 +64,8 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "+refs/heads/*:refs/remotes/origin/*" in provider_free
     assert "PRODUCER_PATH=\"/opt/groundtruth/gt-index/gt-index\"" in provider_free
     assert "sha256sum --check --strict" in provider_free
+    assert 're.fullmatch(r"[0-9a-f]{64}", pins["producer_sha"])' in provider_free
+    assert 'Path("artifacts/product-closeout").mkdir(parents=True, exist_ok=True)' in provider_free
     assert "git config --global user.email \"gt-harness-ci@example.invalid\"" in provider_free
     assert "git config core.hooksPath \"${GITHUB_WORKSPACE}/.githooks\"" in provider_free
     assert "python scripts/verify_feature_matrix.py" in provider_free

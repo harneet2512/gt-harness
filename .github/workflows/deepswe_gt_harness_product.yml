@@ -46,8 +46,15 @@ jobs:
               "python_version": manifest["python_version"],
               "review_inbox_commit": manifest["groundtruth"]["lineage_exception"]["review_inbox_commit"],
           }
-          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for key, value in pins.items() if key != "python_version"):
+          git_pins = (
+              pins["groundtruth_commit"],
+              pins["groundtruth_tree"],
+              pins["review_inbox_commit"],
+          )
+          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in git_pins):
               raise SystemExit("product_manifest_git_pin_invalid")
+          if not re.fullmatch(r"[0-9a-f]{64}", pins["producer_sha"]):
+              raise SystemExit("product_manifest_producer_digest_invalid")
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               for key, value in pins.items():
                   output.write(f"{key}={value}\n")
@@ -311,6 +318,7 @@ jobs:
               "provider_calls": 0,
               "benchmark_runs": 0,
           }
+          Path("artifacts/product-closeout").mkdir(parents=True, exist_ok=True)
           Path("artifacts/product-closeout/workflow-run.json").write_text(
               json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
           )
