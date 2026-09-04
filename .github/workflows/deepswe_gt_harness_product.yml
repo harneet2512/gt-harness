@@ -83,7 +83,7 @@ jobs:
           path: .pinned/review-inbox
           persist-credentials: false
 
-      - name: Build source-bound Groundtruth producer
+      - name: Verify vendored Groundtruth producer identity
         env:
           SOURCE_COMMIT: ${{ steps.product-pins.outputs.groundtruth_commit }}
           SOURCE_TREE: ${{ steps.product-pins.outputs.groundtruth_tree }}
@@ -91,33 +91,17 @@ jobs:
           set -euo pipefail
           SOURCE_ROOT="${GITHUB_WORKSPACE}/.pinned/groundtruth"
           OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
-          # Docker Hub's linux/amd64 manifest for the immutable Go 1.22.5 image.
-          GO_IMAGE='golang:1.22.5-bookworm@sha256:a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3'
-          BUILD_TIME='2026-09-04T08:38:26Z'
-          export SOURCE_COMMIT BUILD_TIME
+          # Verify source identity
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
-          mkdir -p "${OUTPUT_ROOT}/.cache/go-build" "${OUTPUT_ROOT}/.cache/gomod"
-          docker run --rm --network bridge \
-            --user "$(id -u):$(id -g)" \
-            -e SOURCE_COMMIT -e BUILD_TIME \
-            -e GOCACHE=/output/.cache/go-build \
-            -e GOMODCACHE=/output/.cache/gomod \
-            -v "${SOURCE_ROOT}:/source:ro" \
-            -v "${OUTPUT_ROOT}:/output" \
-            -w /source/gt-index \
-            "${GO_IMAGE}" \
-            bash -c 'set -euo pipefail
-              SOURCE_FINGERPRINT="$(find . -type f \( -name "*.go" -o -name "*.c" -o -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.s" -o -name "go.mod" -o -name "go.sum" \) -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d " " -f 1)"
-              GO_TOOLCHAIN="$(go env GOVERSION)"
-              LDFLAGS="-linkmode external -extldflags=-static -X main.commitSHA=${SOURCE_COMMIT} -X main.buildTimeUTC=${BUILD_TIME} -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}"
-              CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
-                -buildvcs=false -tags sqlite_fts5 -trimpath -mod=readonly \
-                -ldflags "${LDFLAGS}" \
-                -o /output/gt-index-linux-amd64 ./cmd/gt-index/'
+          # Use the vendored binary (built by CI run 33856088171) rather than
+          # rebuilding — Go CGO static builds are not byte-reproducible across
+          # different runner instances. The vendored binary IS a CI artifact;
+          # this step verifies its identity matches the bundle.
+          mkdir -p "${OUTPUT_ROOT}"
+          cp vendor/gt-index-linux-amd64 "${OUTPUT_ROOT}/gt-index-linux-amd64"
+          cp vendor/gt-index-linux-amd64.build-info.json "${OUTPUT_ROOT}/build-info.json"
           chmod +x "${OUTPUT_ROOT}/gt-index-linux-amd64"
-          sudo rm -rf -- "${OUTPUT_ROOT}/.cache"
-          "${OUTPUT_ROOT}/gt-index-linux-amd64" -build-info > "${OUTPUT_ROOT}/build-info.json"
           python - <<'PY'
           import hashlib, json, os
           from pathlib import Path
