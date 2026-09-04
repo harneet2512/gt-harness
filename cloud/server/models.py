@@ -83,6 +83,16 @@ class SessionDiff(BaseModel):
     base_sha: str = ""
 
 
+class TreeFile(BaseModel):
+    path: str
+    size: int = 0
+
+
+class SessionTree(BaseModel):
+    base_sha: str = ""
+    files: list[TreeFile] = Field(default_factory=list)
+
+
 class TurnReceipt(BaseModel):
     turn_id: str
     started_at: float

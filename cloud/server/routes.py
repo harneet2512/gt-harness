@@ -21,6 +21,7 @@ from .models import (
     Session,
     SessionCreate,
     SessionDiff,
+    SessionTree,
     TurnReceipt,
 )
 from .runner import ConcurrencyLimit, SessionManager
@@ -151,6 +152,14 @@ async def get_diff(
 ) -> dict[str, Any]:
     session = await _require_session(store, session_id)
     return await manager.diff(session)
+
+
+@router.get("/sessions/{session_id}/tree", response_model=SessionTree)
+async def get_tree(
+    session_id: str, store: StoreDep, manager: ManagerDep
+) -> dict[str, Any]:
+    session = await _require_session(store, session_id)
+    return await manager.tree(session)
 
 
 @router.get("/sessions/{session_id}/receipts", response_model=list[TurnReceipt])

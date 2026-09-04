@@ -25,6 +25,7 @@ from .workspace import (
     TRAJECTORY_NAME,
     clone_repo,
     compute_diff,
+    list_tree,
     load_transcript,
     remove_workspace,
     save_transcript,
@@ -469,6 +470,14 @@ class SessionManager:
         return await asyncio.to_thread(
             compute_diff, str(workspace), str(session.get("base_sha") or "")
         )
+
+    async def tree(self, session: dict) -> dict:
+        workspace = session.get("workspace_path")
+        base_sha = str(session.get("base_sha") or "")
+        if not workspace or not Path(str(workspace)).is_dir():
+            return {"base_sha": base_sha, "files": []}
+        files = await asyncio.to_thread(list_tree, str(workspace))
+        return {"base_sha": base_sha, "files": files}
 
     # -- agent construction ---------------------------------------------------
 

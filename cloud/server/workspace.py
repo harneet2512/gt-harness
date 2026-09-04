@@ -115,6 +115,24 @@ def compute_diff(workspace: str, base_sha: str) -> dict:
     return {"patch": patch, "files": files, "base_sha": base_sha}
 
 
+def list_tree(workspace: str) -> list[dict]:
+    """Every tracked or untracked (non-ignored) file with its size in bytes."""
+    listing = _git_output(
+        workspace, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+    )
+    files: list[dict] = []
+    for rel in listing.split("\0"):
+        if not rel or rel.startswith(f"{STATE_DIRNAME}/") or rel.startswith(".git/"):
+            continue
+        try:
+            size = os.path.getsize(os.path.join(workspace, rel))
+        except OSError:
+            continue
+        files.append({"path": rel.replace("\\", "/"), "size": size})
+    files.sort(key=lambda f: f["path"])
+    return files
+
+
 def split_patch_by_file(patch: str) -> dict[str, str]:
     """Split a combined diff into one ``diff --git`` block per path."""
     blocks: dict[str, str] = {}

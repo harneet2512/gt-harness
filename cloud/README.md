@@ -104,6 +104,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 | POST | `/api/sessions/:id/messages` | Send a message → 202 `{message, delivery}` where delivery is `turn_started` or `queued_for_running_turn`. 409 while `creating`/`closed`/`failed`. |
 | GET | `/api/sessions/:id/events` | SSE stream, open across turns (`?after_id=` or `Last-Event-ID:`) |
 | GET | `/api/sessions/:id/diff` | Cumulative diff vs the cloned commit, incl. untracked files |
+| GET | `/api/sessions/:id/tree` | Every file in the workspace with its byte size (`{base_sha, files:[{path,size}]}`), for the map |
 | GET | `/api/sessions/:id/receipts` | One receipt per turn |
 | POST | `/api/sessions/:id/stop` | Stop the running turn at the next step boundary → 202 (409 if idle) |
 | POST | `/api/sessions/:id/close` | Kill the turn, delete the workspace, status `closed` (idempotent) |
