@@ -1,48 +1,72 @@
-"""API routes for the cloud coding agent."""
+"""API routes for the cloud coding agent.
+
+Every route here requires an authenticated user (see ``auth.require_user``),
+which is attached once at the router so no endpoint can forget it.
+"""
 from __future__ import annotations
 
-import json
 import re
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .deps import get_event_bus, get_runner, get_store
+from .auth import require_user
+from .deps import get_event_bus, get_manager, get_store
 from .events import EventBus
-from .models import SessionCreate, SessionStatus, SteeringMessage
-from .runner import SessionRunner
+from .models import (
+    Message,
+    MessageAccepted,
+    MessageCreate,
+    Session,
+    SessionCreate,
+    SessionDiff,
+    TurnReceipt,
+)
+from .runner import ConcurrencyLimit, SessionManager
 from .store import SessionStore
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_user)])
 
-_GITHUB_REPO_RE = re.compile(
-    r"^https://github\.com/[\w\-\.]+/[\w\-\.]+(?:\.git)?$"
-)
+_GITHUB_REPO_RE = re.compile(r"^https://github\.com/[\w\-\.]+/[\w\-\.]+(?:\.git)?$")
+
+#: a message cannot start or steer a turn in these states
+_CLOSED_TO_MESSAGES = {"creating", "closed", "failed"}
+
+StoreDep = Annotated[SessionStore, Depends(get_store)]
+ManagerDep = Annotated[SessionManager, Depends(get_manager)]
+BusDep = Annotated[EventBus, Depends(get_event_bus)]
 
 
-def _session_to_status(row: dict) -> dict:
+def _session_view(row: dict) -> dict[str, Any]:
     return {
         "id": row["id"],
         "status": row["status"],
         "repo": row["repo"],
         "ref": row["ref"],
-        "task": row["task"],
         "model": row["model"],
         "gt_mode": row["gt_mode"],
+        "gt_status": row["gt_status"],
         "created_at": row["created_at"],
-        "started_at": row.get("started_at"),
-        "finished_at": row.get("finished_at"),
+        "updated_at": row["updated_at"],
+        "last_message": row.get("last_message"),
+        "turns": row.get("turns", 0),
         "steps": row.get("steps", 0),
         "cost": row.get("cost", 0.0),
+        "current_turn_id": row.get("current_turn_id"),
     }
 
 
-@router.post("/sessions", response_model=SessionStatus, status_code=201)
+async def _require_session(store: SessionStore, session_id: str) -> dict:
+    session = await store.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "session not found")
+    return session
+
+
+@router.post("/sessions", response_model=Session, status_code=201)
 async def create_session(
-    body: SessionCreate,
-    store: Annotated[SessionStore, Depends(get_store)],
-    runner: Annotated[SessionRunner, Depends(get_runner)],
+    body: SessionCreate, store: StoreDep, manager: ManagerDep
 ) -> dict[str, Any]:
     if not _GITHUB_REPO_RE.match(body.repo):
         raise HTTPException(400, "repo must be a GitHub HTTPS URL")
@@ -50,59 +74,65 @@ async def create_session(
     session_id = await store.create_session(
         repo=body.repo,
         ref=body.ref,
-        task=body.task,
         model=body.model,
         gt_mode=body.gt_mode,
-        config={
-            "step_limit": body.step_limit,
-            "temperature": body.temperature,
-        },
+        config={"step_limit": body.step_limit, "temperature": body.temperature},
     )
-
-    await runner.launch(
-        session_id,
-        repo=body.repo,
-        ref=body.ref,
-        task=body.task,
-        model=body.model,
-        gt_mode=body.gt_mode,
-        step_limit=body.step_limit,
-        temperature=body.temperature,
-    )
-
+    await manager.create_workspace(session_id)
     session = await store.get_session(session_id)
-    return _session_to_status(session)  # type: ignore[arg-type]
+    return _session_view(session)  # type: ignore[arg-type]
 
 
-@router.get("/sessions")
-async def list_sessions(
-    store: Annotated[SessionStore, Depends(get_store)],
-) -> list[dict[str, Any]]:
-    sessions = await store.list_sessions()
-    return [_session_to_status(s) for s in sessions]
+@router.get("/sessions", response_model=list[Session])
+async def list_sessions(store: StoreDep) -> list[dict[str, Any]]:
+    return [_session_view(s) for s in await store.list_sessions()]
 
 
-@router.get("/sessions/{session_id}", response_model=SessionStatus)
-async def get_session(
-    session_id: str,
-    store: Annotated[SessionStore, Depends(get_store)],
+@router.get("/sessions/{session_id}", response_model=Session)
+async def get_session(session_id: str, store: StoreDep) -> dict[str, Any]:
+    return _session_view(await _require_session(store, session_id))
+
+
+@router.get("/sessions/{session_id}/messages", response_model=list[Message])
+async def list_messages(session_id: str, store: StoreDep) -> list[dict[str, Any]]:
+    await _require_session(store, session_id)
+    return await store.list_messages(session_id)
+
+
+@router.post(
+    "/sessions/{session_id}/messages",
+    response_model=MessageAccepted,
+    status_code=202,
+)
+async def post_message(
+    session_id: str, body: MessageCreate, store: StoreDep, manager: ManagerDep
 ) -> dict[str, Any]:
-    session = await store.get_session(session_id)
-    if session is None:
-        raise HTTPException(404, "session not found")
-    return _session_to_status(session)
+    session = await _require_session(store, session_id)
+    if session["status"] in _CLOSED_TO_MESSAGES:
+        raise HTTPException(
+            409, f"session is {session['status']} and cannot accept messages"
+        )
+    try:
+        message, delivery = await manager.post_message(session_id, body.content)
+    except ConcurrencyLimit as exc:
+        raise HTTPException(429, str(exc)) from exc
+    return {"message": message, "delivery": delivery}
 
 
 @router.get("/sessions/{session_id}/events")
 async def stream_events(
     session_id: str,
-    store: Annotated[SessionStore, Depends(get_store)],
-    event_bus: Annotated[EventBus, Depends(get_event_bus)],
+    store: StoreDep,
+    event_bus: BusDep,
     after_id: int = 0,
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> StreamingResponse:
-    session = await store.get_session(session_id)
-    if session is None:
-        raise HTTPException(404, "session not found")
+    await _require_session(store, session_id)
+    if not after_id and last_event_id:
+        try:
+            after_id = int(last_event_id)
+        except ValueError:
+            after_id = 0
 
     return StreamingResponse(
         event_bus.subscribe(session_id, after_id=after_id),
@@ -115,56 +145,36 @@ async def stream_events(
     )
 
 
-@router.get("/sessions/{session_id}/result")
-async def get_result(
-    session_id: str,
-    store: Annotated[SessionStore, Depends(get_store)],
+@router.get("/sessions/{session_id}/diff", response_model=SessionDiff)
+async def get_diff(
+    session_id: str, store: StoreDep, manager: ManagerDep
 ) -> dict[str, Any]:
-    session = await store.get_session(session_id)
-    if session is None:
-        raise HTTPException(404, "session not found")
-    if session["status"] not in {"completed", "failed", "stopped"}:
-        raise HTTPException(409, "session not finished yet")
-    result_raw = session.get("result_json")
-    if not result_raw:
-        raise HTTPException(404, "no result available")
-    result = json.loads(result_raw)
-    result["id"] = session_id
-    return result
+    session = await _require_session(store, session_id)
+    return await manager.diff(session)
 
 
-@router.post("/sessions/{session_id}/steer", status_code=202)
-async def steer_session(
-    session_id: str,
-    body: SteeringMessage,
-    store: Annotated[SessionStore, Depends(get_store)],
-    runner: Annotated[SessionRunner, Depends(get_runner)],
-) -> dict[str, str]:
-    session = await store.get_session(session_id)
-    if session is None:
-        raise HTTPException(404, "session not found")
-    if session["status"] != "running":
-        raise HTTPException(409, "session is not running")
-    agent = runner.get_agent(session_id)
-    if agent is None:
-        raise HTTPException(409, "agent not available")
-    agent._steering_queue.put(body.content)
-    return {"status": "queued"}
+@router.get("/sessions/{session_id}/receipts", response_model=list[TurnReceipt])
+async def get_receipts(session_id: str, store: StoreDep) -> list[dict[str, Any]]:
+    await _require_session(store, session_id)
+    return await store.list_turns(session_id)
 
 
 @router.post("/sessions/{session_id}/stop", status_code=202)
-async def stop_session(
-    session_id: str,
-    store: Annotated[SessionStore, Depends(get_store)],
-    runner: Annotated[SessionRunner, Depends(get_runner)],
+async def stop_turn(
+    session_id: str, store: StoreDep, manager: ManagerDep
 ) -> dict[str, str]:
-    session = await store.get_session(session_id)
-    if session is None:
-        raise HTTPException(404, "session not found")
+    session = await _require_session(store, session_id)
     if session["status"] != "running":
-        raise HTTPException(409, "session is not running")
-    agent = runner.get_agent(session_id)
-    if agent is None:
-        raise HTTPException(409, "agent not available")
-    agent._stop_event.set()
+        raise HTTPException(409, "session has no running turn")
+    await manager.stop(session_id)
     return {"status": "stopping"}
+
+
+@router.post("/sessions/{session_id}/close", response_model=Session, status_code=200)
+async def close_session(
+    session_id: str, store: StoreDep, manager: ManagerDep
+) -> dict[str, Any]:
+    await _require_session(store, session_id)
+    await manager.close(session_id)
+    session = await store.get_session(session_id)
+    return _session_view(session)  # type: ignore[arg-type]

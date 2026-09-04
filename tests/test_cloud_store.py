@@ -1,12 +1,18 @@
-"""Tests for cloud.server.store.SessionStore."""
+"""Tests for cloud.server.store.SessionStore (chat schema).
+
+FAKE BOUNDARY: none — this exercises a real SQLite database end to end.
+"""
 from __future__ import annotations
 
 import json
 
+import aiosqlite
 import pytest
 import pytest_asyncio
 
-from cloud.server.store import SessionStore
+from cloud.server.store import SCHEMA_VERSION, SessionStore
+
+REPO = "https://github.com/owner/repo"
 
 
 @pytest_asyncio.fixture
@@ -17,37 +23,63 @@ async def store():
     await s.close()
 
 
+async def _session(store: SessionStore, **overrides) -> str:
+    body = {"repo": REPO, "ref": "main", "model": "deepseek/deepseek-v4-flash"}
+    body.update(overrides)
+    return await store.create_session(**body)
+
+
+# --------------------------------------------------------------------------
+# schema
+# --------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_create_session_returns_id(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/owner/repo",
-        ref="main",
-        task="Fix the bug",
-        model="deepseek/deepseek-v4-flash",
-    )
-    assert isinstance(sid, str)
-    assert len(sid) == 12
+async def test_init_stamps_the_schema_version(store: SessionStore) -> None:
+    cursor = await store._db.execute("PRAGMA user_version")
+    assert (await cursor.fetchone())[0] == SCHEMA_VERSION
 
 
 @pytest.mark.asyncio
-async def test_get_session_returns_data(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/owner/repo",
-        ref="feature-branch",
-        task="Add tests",
-        model="gpt-4",
-        gt_mode="engine",
-    )
-    session = await store.get_session(sid)
-    assert session is not None
-    assert session["id"] == sid
-    assert session["repo"] == "https://github.com/owner/repo"
-    assert session["ref"] == "feature-branch"
-    assert session["task"] == "Add tests"
-    assert session["model"] == "gpt-4"
-    assert session["gt_mode"] == "engine"
-    assert session["status"] == "pending"
-    assert session["created_at"] > 0
+async def test_init_drops_and_recreates_a_stale_schema(tmp_path) -> None:
+    db_path = str(tmp_path / "old.db")
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, task TEXT)")
+        await db.execute("INSERT INTO sessions VALUES ('old', 'legacy row')")
+        await db.commit()
+
+    store = SessionStore(db_path)
+    await store.init()
+    try:
+        assert await store.get_session("old") is None
+        session_id = await _session(store)
+        assert (await store.get_session(session_id))["status"] == "creating"
+    finally:
+        await store.close()
+
+
+# --------------------------------------------------------------------------
+# sessions
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_create_session_starts_in_creating(store: SessionStore) -> None:
+    session_id = await _session(store, ref="feature", gt_mode="advisory")
+    session = await store.get_session(session_id)
+
+    assert len(session_id) == 12
+    assert session["repo"] == REPO
+    assert session["ref"] == "feature"
+    assert session["gt_mode"] == "advisory"
+    assert session["gt_status"] == "pending", "GT is pending until the index builds"
+    assert session["status"] == "creating"
+    assert session["turns"] == 0 and session["steps"] == 0 and session["cost"] == 0.0
+    assert session["current_turn_id"] is None
+    assert session["created_at"] > 0 and session["updated_at"] > 0
+    assert json.loads(session["config_json"]) == {}
+
+
+@pytest.mark.asyncio
+async def test_gt_off_sessions_report_gt_status_off(store: SessionStore) -> None:
+    session_id = await _session(store, gt_mode="off")
+    assert (await store.get_session(session_id))["gt_status"] == "off"
 
 
 @pytest.mark.asyncio
@@ -57,93 +89,151 @@ async def test_get_session_returns_none_for_unknown(store: SessionStore) -> None
 
 @pytest.mark.asyncio
 async def test_list_sessions_newest_first(store: SessionStore) -> None:
-    sid1 = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="first", model="m",
-    )
-    sid2 = await store.create_session(
-        repo="https://github.com/b/b", ref="main", task="second", model="m",
-    )
-    sessions = await store.list_sessions()
-    assert len(sessions) == 2
-    assert sessions[0]["id"] == sid2
-    assert sessions[1]["id"] == sid1
+    first = await _session(store)
+    second = await _session(store)
+    assert [s["id"] for s in await store.list_sessions()] == [second, first]
 
 
 @pytest.mark.asyncio
-async def test_update_status_pending_to_running(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="t", model="m",
-    )
-    await store.update_status(sid, "running")
-    session = await store.get_session(sid)
-    assert session["status"] == "running"
-    assert session["started_at"] is not None
+async def test_state_machine_allows_the_chat_lifecycle(store: SessionStore) -> None:
+    session_id = await _session(store)
+    await store.update_status(session_id, "idle", workspace_path="/w", base_sha="abc")
+    await store.update_status(session_id, "running", current_turn_id="t1")
+    await store.update_status(session_id, "idle", current_turn_id=None)
+    await store.update_status(session_id, "running", current_turn_id="t2")
+    await store.update_status(session_id, "closed")
+
+    session = await store.get_session(session_id)
+    assert session["status"] == "closed"
+    assert session["workspace_path"] == "/w"
+    assert session["base_sha"] == "abc"
 
 
 @pytest.mark.asyncio
-async def test_update_status_running_to_completed(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="t", model="m",
-    )
-    await store.update_status(sid, "running")
-    await store.update_status(sid, "completed", steps=5, cost=0.12)
-    session = await store.get_session(sid)
-    assert session["status"] == "completed"
-    assert session["finished_at"] is not None
+@pytest.mark.parametrize(
+    ("path", "bad"),
+    [
+        ([], "running"),          # creating -> running
+        (["idle"], "failed"),     # idle -> failed
+        (["idle", "closed"], "idle"),
+        ([], "stopped"),          # stopped is an event, never a status
+    ],
+)
+async def test_state_machine_rejects_invalid_transitions(
+    store: SessionStore, path: list[str], bad: str
+) -> None:
+    session_id = await _session(store)
+    for status in path:
+        await store.update_status(session_id, status)
+    with pytest.raises(ValueError, match="invalid transition"):
+        await store.update_status(session_id, bad)
+
+
+@pytest.mark.asyncio
+async def test_update_session_rejects_unknown_fields(store: SessionStore) -> None:
+    session_id = await _session(store)
+    with pytest.raises(ValueError, match="unknown session fields"):
+        await store.update_session(session_id, task="there is no task any more")
+
+
+@pytest.mark.asyncio
+async def test_bump_totals_accumulates(store: SessionStore) -> None:
+    session_id = await _session(store)
+    await store.bump_totals(session_id, turns=1, steps=3, cost=0.02)
+    await store.bump_totals(session_id, turns=1, steps=2, cost=0.01)
+    session = await store.get_session(session_id)
+    assert session["turns"] == 2
     assert session["steps"] == 5
-    assert session["cost"] == pytest.approx(0.12)
+    assert session["cost"] == pytest.approx(0.03)
 
 
 @pytest.mark.asyncio
-async def test_update_status_rejects_invalid_transition(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="t", model="m",
+async def test_sessions_with_status_finds_interrupted_runs(
+    store: SessionStore,
+) -> None:
+    running = await _session(store)
+    await store.update_status(running, "idle")
+    await store.update_status(running, "running", current_turn_id="t1")
+    await _session(store)
+
+    found = await store.sessions_with_status("running")
+    assert [s["id"] for s in found] == [running]
+    assert len(await store.sessions_with_status("creating")) == 1
+
+
+# --------------------------------------------------------------------------
+# messages
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_messages_keep_insertion_order_and_meta(store: SessionStore) -> None:
+    session_id = await _session(store)
+    user = await store.add_message(session_id, role="user", content="do it")
+    agent = await store.add_message(
+        session_id,
+        role="agent",
+        content="done",
+        turn_id="t1",
+        meta={"finish_reason": "reply", "n_calls": 3, "files_changed": ["a.py"]},
     )
-    await store.update_status(sid, "running")
-    await store.update_status(sid, "completed")
-    with pytest.raises(ValueError, match="invalid transition"):
-        await store.update_status(sid, "running")
+
+    messages = await store.list_messages(session_id)
+    assert [m["id"] for m in messages] == [user["id"], agent["id"]]
+    assert [m["role"] for m in messages] == ["user", "agent"]
+    assert messages[0]["turn_id"] is None
+    assert messages[1]["turn_id"] == "t1"
+    assert messages[1]["meta"]["finish_reason"] == "reply"
+    assert messages[1]["meta"]["files_changed"] == ["a.py"]
+    assert messages[0]["created_at"] <= messages[1]["created_at"]
 
 
 @pytest.mark.asyncio
-async def test_update_status_rejects_pending_to_completed(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="t", model="m",
-    )
-    with pytest.raises(ValueError, match="invalid transition"):
-        await store.update_status(sid, "completed")
+async def test_messages_are_scoped_to_their_session(store: SessionStore) -> None:
+    one, two = await _session(store), await _session(store)
+    await store.add_message(one, role="user", content="mine")
+    assert await store.list_messages(two) == []
 
 
+# --------------------------------------------------------------------------
+# turns (receipts)
+# --------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_append_and_get_events(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="t", model="m",
+async def test_turn_receipts_round_trip(store: SessionStore) -> None:
+    session_id = await _session(store)
+    await store.start_turn(session_id, "t1", model="m", gt_status="off")
+    await store.finish_turn(
+        "t1", n_calls=3, cost=0.03, finish_reason="reply", patch_sha256="deadbeef"
     )
-    eid1 = await store.append_event(sid, "assistant", {"content": "hello"}, 100.0)
-    eid2 = await store.append_event(sid, "tool_result", {"output": "ok"}, 101.0)
+    await store.start_turn(session_id, "t2", model="m", gt_status="off")
 
-    events = await store.get_events(sid)
-    assert len(events) == 2
-    assert events[0]["type"] == "assistant"
-    assert events[0]["data"] == {"content": "hello"}
-    assert events[0]["timestamp"] == 100.0
-    assert events[1]["type"] == "tool_result"
-    assert events[1]["data"] == {"output": "ok"}
-
-    events_after = await store.get_events(sid, after_id=eid1)
-    assert len(events_after) == 1
-    assert events_after[0]["id"] == eid2
+    receipts = await store.list_turns(session_id)
+    assert [r["turn_id"] for r in receipts] == ["t1", "t2"]
+    assert receipts[0]["n_calls"] == 3
+    assert receipts[0]["cost"] == pytest.approx(0.03)
+    assert receipts[0]["finish_reason"] == "reply"
+    assert receipts[0]["patch_sha256"] == "deadbeef"
+    assert receipts[0]["finished_at"] >= receipts[0]["started_at"]
+    assert receipts[1]["finished_at"] is None, "an open turn has no finish time"
 
 
+# --------------------------------------------------------------------------
+# events
+# --------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_store_result(store: SessionStore) -> None:
-    sid = await store.create_session(
-        repo="https://github.com/a/a", ref="main", task="t", model="m",
+async def test_events_are_ordered_and_carry_turn_id(store: SessionStore) -> None:
+    session_id = await _session(store)
+    first = await store.append_event(session_id, "turn_started", {"turn_id": "t1"})
+    second = await store.append_event(
+        session_id, "assistant", {"turn_id": "t1", "content": "hi"}, 101.0
     )
-    result = {"patch": "diff --git a/f.py", "receipt": {"n_calls": 3}}
-    await store.store_result(sid, result)
-    session = await store.get_session(sid)
-    assert session["result_json"] is not None
-    loaded = json.loads(session["result_json"])
-    assert loaded["patch"] == "diff --git a/f.py"
-    assert loaded["receipt"]["n_calls"] == 3
+    await store.append_event(session_id, "lifecycle", {"status": "idle"})
+
+    events = await store.get_events(session_id)
+    assert [e["id"] for e in events] == [first, second, first + 2]
+    assert events[0]["turn_id"] == "t1", "turn_id is lifted out of the payload"
+    assert events[1]["timestamp"] == 101.0
+    assert events[2]["turn_id"] is None
+    assert events[1]["data"] == {"turn_id": "t1", "content": "hi"}
+
+    tail = await store.get_events(session_id, after_id=first)
+    assert [e["id"] for e in tail] == [second, first + 2]
+    assert await store.get_events(session_id, after_id=first + 2) == []

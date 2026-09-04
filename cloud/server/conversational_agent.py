@@ -1,0 +1,487 @@
+"""ConversationalAgent — one mini-swe transcript that spans many chat turns.
+
+Subclasses mini-swe-agent's ``DefaultAgent``. The differences that matter:
+
+* **Persistent memory.** ``messages`` is built once by ``begin_session()`` and
+  then grows for the life of the session. The agent's memory is its real
+  trajectory, not a summary.
+* **A turn ends when the agent talks to the user.** A model response with no
+  command block reaches us as ``FormatError``; if it carries text, that text is
+  the reply and the turn is over (``reply``/``question``). Only an empty
+  response is treated as a genuine format error.
+* **Steering and stop** are drained/checked at the top of every step, so a user
+  message that lands mid-turn is answered in context.
+* **Bounded context.** Old tool observations are collapsed once the transcript
+  crosses ``MAX_CONTEXT_CHARS``; user messages and agent replies are never
+  touched.
+"""
+from __future__ import annotations
+
+import os
+import queue
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from minisweagent.agents.default import AgentConfig, DefaultAgent
+from minisweagent.exceptions import (
+    FormatError,
+    InterruptAgentFlow,
+    LimitsExceeded,
+    Submitted,
+)
+
+DEFAULT_MAX_CONTEXT_CHARS = 240_000
+KEEP_RECENT_OBSERVATIONS = 20
+MIN_TRUNCATABLE_CHARS = 64
+
+STOPPED_REPLY = "Stopped."
+STEP_LIMIT_REPLY = (
+    "I used the step budget for this turn without finishing. Where I am: "
+    "{thought}. Say 'continue' to keep going."
+)
+FORMAT_ERROR_REPLY = (
+    "I could not produce a valid command after several attempts, so I stopped "
+    "this turn. Tell me how you would like me to proceed."
+)
+
+#: finish reasons that end a turn (mirrors ``Message.meta.finish_reason``)
+REPLY = "reply"
+QUESTION = "question"
+STEP_LIMIT = "step_limit"
+STOPPED = "stopped"
+SUBMITTED = "submitted"
+ERROR = "error"
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    """What one agent turn produced. ``n_calls``/``cost`` are per-turn deltas."""
+
+    finish_reason: str
+    reply: str
+    n_calls: int
+    cost: float
+
+
+@dataclass(frozen=True)
+class Steering:
+    """A user message delivered while a turn was already running."""
+
+    message_id: str
+    content: str
+
+
+def _text_of(content: Any) -> str:
+    """Flatten a message body (str, or multimodal parts) to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        return "".join(parts)
+    return "" if content is None else str(content)
+
+
+def _is_observation(message: dict) -> bool:
+    """True for messages produced by ``format_observation_messages``."""
+    extra = message.get("extra") or {}
+    if message.get("role") == "tool":
+        return True
+    return message.get("role") == "user" and (
+        "raw_output" in extra or extra.get("context_truncated") is True
+    )
+
+
+def is_question(text: str) -> bool:
+    """Simple heuristic: the agent is asking the user something."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.endswith("?"):
+        return True
+    last_line = stripped.splitlines()[-1].strip()
+    return last_line.endswith("?")
+
+
+def assistant_message_from_format_error(exc: FormatError) -> dict | None:
+    """The model's text-only response, if that is why parsing failed.
+
+    ``FormatError`` is raised by the model wrapper when a response carries no
+    tool call. Two shapes are handled: a wrapper that puts the assistant
+    message in ``exc.messages`` directly, and mini-swe's stock ``LitellmModel``,
+    which puts only the format-error observation there and stashes the raw
+    provider response under ``messages[0]["extra"]["response"]``.
+
+    Returns ``None`` when the response really is malformed (no text at all, or
+    text alongside actions), which the caller must treat as a format error.
+    """
+    messages = list(getattr(exc, "messages", ()) or ())
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        extra = message.get("extra") or {}
+        content = _text_of(message.get("content"))
+        if content.strip() and not extra.get("actions"):
+            return {"role": "assistant", "content": content, "extra": dict(extra)}
+        return None
+
+    if not messages:
+        return None
+    error_extra = messages[0].get("extra") or {}
+    response = error_extra.get("response")
+    if not isinstance(response, dict):
+        return None
+    choices = response.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return None
+    raw = choices[0].get("message")
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("tool_calls"):
+        return None
+    content = _text_of(raw.get("content"))
+    if not content.strip():
+        return None
+    return {
+        "role": "assistant",
+        "content": content,
+        "extra": {"cost": error_extra.get("cost", 0.0)},
+    }
+
+
+class ConversationalAgent(DefaultAgent):
+    """A ``DefaultAgent`` whose transcript outlives a single task."""
+
+    def __init__(
+        self,
+        model: Any,
+        env: Any,
+        *,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+        config_class: type = AgentConfig,
+        max_context_chars: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(model, env, config_class=config_class, **kwargs)
+        self._steering_queue: queue.Queue[Steering] = queue.Queue()
+        self._stop_event = threading.Event()
+        self._event_callback = event_callback
+        self._session_started = False
+        self._turn_id: str | None = None
+        self._turn_start_calls = 0
+        #: step index of the assistant message currently being executed
+        self._current_step = 0
+        #: turn whose failure already produced an ``agent_error`` event
+        self.last_error_turn_id: str | None = None
+        self._max_context_chars = (
+            max_context_chars
+            if max_context_chars is not None
+            else int(os.environ.get("MAX_CONTEXT_CHARS", DEFAULT_MAX_CONTEXT_CHARS))
+        )
+
+    # -- session lifecycle ----------------------------------------------------
+
+    @property
+    def session_started(self) -> bool:
+        return self._session_started
+
+    def begin_session(self, **template_vars: Any) -> None:
+        """Seed the transcript with the system message and the session brief."""
+        if self._session_started:
+            return
+        self.extra_template_vars |= template_vars
+        self.add_messages(
+            self.model.format_message(
+                role="system",
+                content=self._render_template(self.config.system_template),
+            ),
+            self.model.format_message(
+                role="user",
+                content=self._render_template(self.config.instance_template),
+            ),
+        )
+        self._session_started = True
+
+    def restore(self, messages: list[dict], **template_vars: Any) -> None:
+        """Rebuild the agent's memory from a persisted transcript."""
+        self.extra_template_vars |= template_vars
+        self.messages = [dict(m) for m in messages]
+        self._session_started = bool(self.messages)
+
+    # -- steering / stop ------------------------------------------------------
+
+    def queue_steering(self, message_id: str, content: str) -> None:
+        self._steering_queue.put(Steering(message_id=message_id, content=content))
+
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
+    def take_pending_steering(self) -> list[Steering]:
+        """Messages that arrived after the last drain, for a follow-up turn."""
+        items: list[Steering] = []
+        while True:
+            try:
+                items.append(self._steering_queue.get_nowait())
+            except queue.Empty:
+                return items
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop_event.is_set()
+
+    # -- the turn loop --------------------------------------------------------
+
+    def run_turn(self, user_text: str, *, turn_id: str) -> TurnResult:
+        """Run one turn on the shared transcript and return how it ended."""
+        self.begin_session()
+        self._turn_id = turn_id
+        self.n_consecutive_format_errors = 0
+        self._turn_start_calls = self.n_calls
+        start_cost = self.cost
+        budget = max(0, int(self.config.step_limit))
+
+        self.add_messages(self.model.format_message(role="user", content=user_text))
+
+        finish_reason = ""
+        reply = ""
+        while True:
+            if self._stop_event.is_set():
+                finish_reason, reply = STOPPED, STOPPED_REPLY
+                break
+            self._drain_steering()
+            if budget and (self.n_calls - self._turn_start_calls) >= budget:
+                finish_reason, reply = STEP_LIMIT, self._step_limit_reply()
+                break
+
+            self._truncate_context()
+            try:
+                self.step()
+                self.n_consecutive_format_errors = 0
+            except FormatError as exc:
+                outcome = self._handle_format_error(exc)
+                if outcome is not None:
+                    finish_reason, reply = outcome
+                    break
+            except Submitted as exc:
+                finish_reason = SUBMITTED
+                reply = _text_of(exc.messages[0].get("content")) if exc.messages else ""
+                break
+            except LimitsExceeded:
+                finish_reason, reply = STEP_LIMIT, self._step_limit_reply()
+                break
+            except InterruptAgentFlow as exc:
+                self.add_messages(*exc.messages)
+            except Exception as exc:
+                self.last_error_turn_id = turn_id
+                self._emit(
+                    "agent_error", {"error": f"{type(exc).__name__}: {exc}"}
+                )
+                raise
+            finally:
+                self._save_quietly()
+
+        if finish_reason in {STOPPED, STEP_LIMIT, SUBMITTED, ERROR} and reply:
+            self.add_messages(
+                self.model.format_message(role="assistant", content=reply)
+            )
+        self._save_quietly()
+        self._turn_id = None
+        # Cleared only now, so a stop requested before the worker thread got
+        # going (or during the turn) is honoured exactly once.
+        self._stop_event.clear()
+        return TurnResult(
+            finish_reason=finish_reason,
+            reply=reply,
+            n_calls=self.n_calls - self._turn_start_calls,
+            cost=round(self.cost - start_cost, 10),
+        )
+
+    def _handle_format_error(self, exc: FormatError) -> tuple[str, str] | None:
+        """Text-only response -> the turn's reply; otherwise a real format error."""
+        # The call was billed before parsing failed, so query() never charged it.
+        self.cost += (exc.messages[0].get("extra", {}) or {}).get("cost", 0.0)
+
+        assistant = assistant_message_from_format_error(exc)
+        if assistant is not None:
+            self.add_messages(assistant)
+            content = _text_of(assistant.get("content"))
+            return (QUESTION if is_question(content) else REPLY), content
+
+        self.n_consecutive_format_errors += 1
+        self.add_messages(*exc.messages)
+        limit = self.config.max_consecutive_format_errors
+        if 0 < limit <= self.n_consecutive_format_errors:
+            return ERROR, FORMAT_ERROR_REPLY
+        return None
+
+    def _drain_steering(self) -> None:
+        while True:
+            try:
+                item = self._steering_queue.get_nowait()
+            except queue.Empty:
+                return
+            self.add_messages(
+                self.model.format_message(role="user", content=item.content)
+            )
+            self._emit(
+                "steering",
+                {"message_id": item.message_id, "content": item.content},
+            )
+
+    def _step_limit_reply(self) -> str:
+        return STEP_LIMIT_REPLY.format(thought=self._last_thought())
+
+    def _last_thought(self) -> str:
+        for message in reversed(self.messages):
+            if message.get("role") != "assistant":
+                continue
+            text = _text_of(message.get("content")).strip()
+            if text:
+                return text[:500]
+        return "no progress recorded yet"
+
+    def _save_quietly(self) -> None:
+        try:
+            self.save(self.config.output_path)
+        except Exception:  # noqa: BLE001 - trajectory writing must never fail a turn
+            pass
+
+    # -- context bounding -----------------------------------------------------
+
+    def _truncate_context(self) -> None:
+        """Collapse the oldest tool observations once the transcript is too big."""
+        limit = self._max_context_chars
+        if limit <= 0:
+            return
+        total = sum(len(_text_of(m.get("content"))) for m in self.messages)
+        if total <= limit:
+            return
+
+        indices = [i for i, m in enumerate(self.messages) if _is_observation(m)]
+        for index in indices[: max(0, len(indices) - KEEP_RECENT_OBSERVATIONS)]:
+            if total <= limit:
+                return
+            message = self.messages[index]
+            extra = dict(message.get("extra") or {})
+            if extra.get("context_truncated"):
+                continue
+            size = len(_text_of(message.get("content")))
+            if size < MIN_TRUNCATABLE_CHARS:
+                continue
+            placeholder = f"[truncated {size} chars]"
+            extra["context_truncated"] = True
+            if "raw_output" in extra:
+                extra["raw_output"] = ""
+            self.messages[index] = {
+                **message,
+                "content": placeholder,
+                "extra": extra,
+            }
+            total -= size - len(placeholder)
+
+    # -- DefaultAgent seams ---------------------------------------------------
+
+    def query(self) -> dict:
+        """Per-turn step budget, plus an ``assistant`` event for every response."""
+        limit, cost_limit = self.config.step_limit, self.config.cost_limit
+        try:
+            # DefaultAgent.query() compares against the cumulative n_calls; the
+            # budget here is per turn, so shift it. run_turn() owns the real
+            # check — this only keeps the base class from firing early.
+            self.config.step_limit = 0 if limit <= 0 else limit + self._turn_start_calls
+            self.config.cost_limit = 0
+            message = super().query()
+        finally:
+            self.config.step_limit = limit
+            self.config.cost_limit = cost_limit
+
+        self._current_step = self.n_calls
+        self._emit(
+            "assistant",
+            {
+                "content": _text_of(message.get("content")),
+                "actions": [
+                    str(a.get("command", a))
+                    for a in (message.get("extra", {}) or {}).get("actions", [])
+                ],
+                "step": self._current_step,
+                "n_calls": self.n_calls,
+                "cost": self.cost,
+            },
+        )
+        return message
+
+    def execute_actions(self, message: dict) -> list[dict]:
+        """Run each action, streaming call/result events.
+
+        ``Submitted`` (the legacy ``COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT``
+        marker) is caught so the observation messages are still appended before
+        it propagates — otherwise the transcript would end on an assistant tool
+        call with no matching result, which no provider will accept on the next
+        turn.
+        """
+        actions = (message.get("extra", {}) or {}).get("actions", [])
+        outputs: list[dict] = []
+        submitted: Submitted | None = None
+        for action in actions:
+            command = str(action.get("command", ""))
+            self._emit(
+                "tool_call",
+                {
+                    "command": command,
+                    "step": self._current_step,
+                    "n_calls": self.n_calls,
+                },
+            )
+            try:
+                output = self.env.execute(action)
+            except Submitted as exc:
+                submitted = exc
+                output = {
+                    "output": _text_of(exc.messages[0].get("content"))
+                    if exc.messages
+                    else "",
+                    "returncode": 0,
+                    "exception_info": "",
+                }
+            outputs.append(output)
+            self._emit(
+                "tool_result",
+                {
+                    "command": command,
+                    "output": _text_of(output.get("output"))[:4000],
+                    "returncode": output.get("returncode", -1),
+                    "is_error": output.get("returncode", -1) != 0,
+                    "step": self._current_step,
+                },
+            )
+            if submitted is not None:
+                break
+
+        added = self.add_messages(
+            *self.model.format_observation_messages(
+                message, outputs, self.get_template_vars()
+            )
+        )
+        if submitted is not None:
+            raise submitted
+        return added
+
+    # -- events ---------------------------------------------------------------
+
+    def _emit(self, event_type: str, data: dict[str, Any]) -> None:
+        if self._event_callback is None:
+            return
+        self._event_callback(
+            {
+                "type": event_type,
+                "timestamp": time.time(),
+                "data": {"turn_id": self._turn_id, **data},
+            }
+        )

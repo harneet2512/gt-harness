@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 from .events import EventBus
-from .runner import SessionRunner
+from .runner import SessionManager
 from .store import SessionStore
 
 _store: SessionStore | None = None
 _event_bus: EventBus | None = None
-_runner: SessionRunner | None = None
+_manager: SessionManager | None = None
 
 
-def configure(store: SessionStore, event_bus: EventBus, runner: SessionRunner) -> None:
-    global _store, _event_bus, _runner
-    _store, _event_bus, _runner = store, event_bus, runner
+def configure(
+    store: SessionStore, event_bus: EventBus, manager: SessionManager
+) -> None:
+    global _store, _event_bus, _manager
+    _store, _event_bus, _manager = store, event_bus, manager
 
 
 def get_store() -> SessionStore:
@@ -27,7 +29,7 @@ def get_event_bus() -> EventBus:
     return _event_bus
 
 
-def get_runner() -> SessionRunner:
-    if _runner is None:
+def get_manager() -> SessionManager:
+    if _manager is None:
         raise RuntimeError("app not initialised")
-    return _runner
+    return _manager

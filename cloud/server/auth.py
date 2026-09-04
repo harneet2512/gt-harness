@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import jwt
-from fastapi import APIRouter, Cookie, HTTPException, Response
+from fastapi import APIRouter, Cookie, Header, HTTPException, Response
 from fastapi.responses import RedirectResponse
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -30,6 +30,10 @@ def _client_secret() -> str:
 
 def _jwt_secret() -> str:
     return os.environ.get("JWT_SECRET", "dev-secret-change-me")
+
+
+def _ui_origin() -> str:
+    return os.environ.get("UI_ORIGIN", "").strip() or "/"
 
 
 def _allowed_logins() -> set[str] | None:
@@ -97,7 +101,7 @@ async def callback(code: str, state: str) -> RedirectResponse:
         algorithm="HS256",
     )
 
-    response = RedirectResponse("/")
+    response = RedirectResponse(_ui_origin())
     response.set_cookie(
         "session",
         app_jwt,
@@ -112,6 +116,27 @@ async def callback(code: str, state: str) -> RedirectResponse:
 async def me(session: str | None = Cookie(None)) -> dict[str, Any]:
     user = verify_jwt(session)
     return user
+
+
+def bearer_token(authorization: str | None) -> str | None:
+    """Extract the token from an ``Authorization: Bearer <jwt>`` header."""
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
+async def require_user(
+    session: str | None = Cookie(None),
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    """Auth dependency for every /api route: bearer header or session cookie.
+
+    There is no "auth disabled" mode — a request with neither credential is 401.
+    """
+    return verify_jwt(bearer_token(authorization) or session)
 
 
 @auth_router.post("/logout")

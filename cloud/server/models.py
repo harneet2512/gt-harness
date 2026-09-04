@@ -1,49 +1,102 @@
-"""Pydantic request/response schemas for the cloud coding agent API."""
+"""Pydantic request/response schemas for the cloud chat API."""
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
+
+SessionStatusName = Literal["creating", "idle", "running", "failed", "closed"]
+GtStatusName = Literal["off", "ready", "unavailable", "pending"]
+RoleName = Literal["user", "agent", "system"]
+FinishReason = Literal[
+    "reply", "question", "step_limit", "stopped", "error", "submitted"
+]
+Delivery = Literal["turn_started", "queued_for_running_turn"]
+FileStatus = Literal["added", "modified", "deleted"]
 
 
 class SessionCreate(BaseModel):
     repo: str = Field(..., description="GitHub repo URL (https://github.com/owner/repo)")
     ref: str = Field("main", description="Git ref — branch, tag, or SHA")
-    task: str = Field(..., description="Task description (like a GitHub issue body)")
-    model: str = Field("deepseek/deepseek-v4-flash", description="LiteLLM model identifier")
-    gt_mode: str = Field("advisory", description="GT mode: advisory | engine | off")
-    step_limit: int = Field(100, ge=1, le=500, description="Max agent steps")
+    model: str = Field(..., description="LiteLLM model identifier")
+    gt_mode: str = Field("off", description="GT mode: off | advisory | engine")
+    step_limit: int = Field(60, ge=1, le=500, description="Max model calls per turn")
     temperature: float = Field(0.0, ge=0.0, le=2.0)
 
 
-class SessionStatus(BaseModel):
+class Session(BaseModel):
     id: str
-    status: str  # pending | running | completed | failed | stopped
+    status: SessionStatusName
     repo: str
     ref: str
-    task: str
     model: str
     gt_mode: str
+    gt_status: GtStatusName
     created_at: float
-    started_at: float | None = None
-    finished_at: float | None = None
+    updated_at: float
+    last_message: str | None = None
+    turns: int = 0
     steps: int = 0
     cost: float = 0.0
+    current_turn_id: str | None = None
 
 
-class SessionResult(BaseModel):
+class MessageMeta(BaseModel):
+    finish_reason: FinishReason | None = None
+    n_calls: int | None = None
+    cost: float | None = None
+    patch_sha256: str | None = None
+    files_changed: list[str] | None = None
+
+
+class Message(BaseModel):
     id: str
-    patch: str | None = None
-    receipt: dict | None = None
-    trajectory: dict | None = None
-    terminal_outcome: str = ""
+    session_id: str
+    turn_id: str | None = None
+    role: RoleName
+    content: str
+    created_at: float
+    meta: MessageMeta = Field(default_factory=MessageMeta)
+
+
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=100_000)
+
+
+class MessageAccepted(BaseModel):
+    message: Message
+    delivery: Delivery
+
+
+class DiffFile(BaseModel):
+    path: str
+    status: FileStatus
+    additions: int = 0
+    deletions: int = 0
+    #: this file's own ``diff --git`` block, carved out of the combined patch
+    patch: str = ""
+
+
+class SessionDiff(BaseModel):
+    patch: str = ""
+    files: list[DiffFile] = Field(default_factory=list)
+    base_sha: str = ""
+
+
+class TurnReceipt(BaseModel):
+    turn_id: str
+    started_at: float
+    finished_at: float | None = None
+    n_calls: int = 0
+    cost: float = 0.0
+    finish_reason: str = ""
+    patch_sha256: str | None = None
+    gt_status: str = "off"
+    model: str = ""
 
 
 class SessionEvent(BaseModel):
     id: int
-    session_id: str
-    type: str  # assistant | tool_call | tool_result | steering | lifecycle | error
-    data: dict
+    type: str
     timestamp: float
-
-
-class SteeringMessage(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000)
+    data: dict[str, Any] = Field(default_factory=dict)
