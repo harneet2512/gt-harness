@@ -1042,6 +1042,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             "sqlite_quick_check": "ok",
             "indexed_file_count": _graph_scale(candidate)[0],
             "indexed_node_count": _graph_scale(candidate)[1],
+            **_graph_phase_metadata(candidate),
             "index_resource_sha256": evidence_sha256,
             **_binary_certification(),
         }
@@ -1165,6 +1166,7 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
 
 class IndexBuildStatus(StrEnum):
     BUILT = "built"
+    BUILT_CORE_ONLY = "built_core_only"
     BUILD_FAILED = "build_failed"
     INVALID_DATABASE = "invalid_database"
     NOT_APPLICABLE = "not_applicable"
@@ -1183,6 +1185,8 @@ class IndexBuildReceipt:
     memory_evidence: bool = False
     exit_code: int | None = None
     attempts: tuple[str, ...] = ()
+    analysis_state: str = "unrecorded"
+    analysis_failure_reason: str = ""
 
     @property
     def success(self) -> bool:
@@ -1197,6 +1201,8 @@ class IndexBuildReceipt:
             "resource_evidence_sha256": self.resource_evidence_sha256,
             "memory_evidence": self.memory_evidence, "exit_code": self.exit_code,
             "attempts": self.attempts,
+            "analysis_state": self.analysis_state,
+            "analysis_failure_reason": self.analysis_failure_reason,
         }
 
 
@@ -1257,6 +1263,94 @@ def _graph_publication_lock(path: Path):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _graph_phase_metadata(graph: Path) -> dict[str, object]:
+    """Read and verify producer phase state while accepting pre-contract graphs."""
+    con = sqlite3.connect(f"file:{graph.resolve().as_posix()}?mode=ro", uri=True)
+    try:
+        tables = {row[0] for row in con.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+        )}
+        meta_columns = {row[1] for row in con.execute("PRAGMA table_info(project_meta)")}
+        rows = (
+            dict(con.execute("SELECT key,value FROM project_meta"))
+            if {"key", "value"}.issubset(meta_columns) else {}
+        )
+        keys = {
+            "core_phase_state", "core_phase_receipt", "core_phase_receipt_sha256",
+            "analysis_state", "analysis_failure_reason", "analysis_phase_receipt",
+            "analysis_phase_receipt_sha256",
+        }
+        present = keys.intersection(rows)
+        if present and present != keys:
+            raise ValueError("phase_receipt_incomplete")
+        if present:
+            expected_schemas = {
+                "core": "gt-index.core-phase.v1",
+                "analysis": "gt-index.analysis-phase.v1",
+            }
+            for phase in ("core", "analysis"):
+                payload = str(rows[f"{phase}_phase_receipt"])
+                expected = str(rows[f"{phase}_phase_receipt_sha256"])
+                if hashlib.sha256(payload.encode("utf-8")).hexdigest() != expected:
+                    raise ValueError(f"{phase}_phase_receipt_sha256_mismatch")
+                try:
+                    receipt = json.loads(payload)
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"{phase}_phase_receipt_invalid") from exc
+                state_key = "core_phase_state" if phase == "core" else "analysis_state"
+                if not isinstance(receipt, dict) or receipt.get("state") != rows[state_key]:
+                    raise ValueError(f"{phase}_phase_receipt_state_mismatch")
+                if receipt.get("schema") != expected_schemas[phase]:
+                    raise ValueError(f"{phase}_phase_receipt_schema_mismatch")
+            if rows["core_phase_state"] != "committed":
+                raise ValueError("core_phase_state_invalid")
+            if rows["analysis_state"] not in {"complete", "failed", "not_run"}:
+                raise ValueError("analysis_state_invalid")
+            if rows["analysis_state"] == "complete" and rows["analysis_failure_reason"]:
+                raise ValueError("complete_analysis_has_failure_reason")
+            if rows["analysis_state"] != "complete" and not rows["analysis_failure_reason"]:
+                raise ValueError("incomplete_analysis_missing_failure_reason")
+            analysis_receipt = json.loads(str(rows["analysis_phase_receipt"]))
+            if analysis_receipt.get("failure_reason", "") != rows["analysis_failure_reason"]:
+                raise ValueError("analysis_failure_reason_mismatch")
+        cochange_rows = (
+            int(con.execute("SELECT COUNT(*) FROM cochanges").fetchone()[0])
+            if "cochanges" in tables else 0
+        )
+        # Derived-layer state keys written by Pass 4g (the wiring commit).
+        # On a pre-wiring graph every key is absent; "unrecorded" is the
+        # honest default rather than pretending nothing ran.
+        derived_state_keys = (
+            "derived_layers_state", "derived_layers_degraded",
+            "derived_cochange_state", "derived_cochange_pairs",
+            "derived_community_state", "derived_community_count",
+            "derived_community_members", "derived_community_cohesion",
+            "derived_process_state", "derived_process_count",
+            "derived_process_steps",
+        )
+        derived = {k: str(rows.get(k, "unrecorded")) for k in derived_state_keys}
+        # Derived-table row counts (absent on pre-wiring graphs).
+        for tbl, key in (
+            ("communities", "community_rows"),
+            ("community_members", "community_member_rows"),
+            ("processes", "process_rows"),
+            ("process_steps", "process_step_rows"),
+        ):
+            derived[key] = (
+                int(con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
+                if tbl in tables else 0
+            )
+    finally:
+        con.close()
+    return {
+        "core_phase_state": str(rows.get("core_phase_state", "unrecorded")),
+        "analysis_state": str(rows.get("analysis_state", "unrecorded")),
+        "analysis_failure_reason": str(rows.get("analysis_failure_reason", "")),
+        "cochange_rows": cochange_rows,
+        **derived,
+    }
+
+
 def _graph_schema_receipt(graph: Path) -> tuple[bool, str]:
     try:
         with sqlite3.connect(f"file:{graph.resolve().as_posix()}?mode=ro", uri=True) as con:
@@ -1268,8 +1362,13 @@ def _graph_schema_receipt(graph: Path) -> tuple[bool, str]:
             )}
         required = {"project_meta"}
         missing = sorted(required - tables)
-        return (False, f"missing_tables:{','.join(missing)}") if missing else (True, "ok")
-    except (sqlite3.Error, OSError) as exc:
+        if missing:
+            return False, f"missing_tables:{','.join(missing)}"
+        _graph_phase_metadata(graph)
+        return True, "ok"
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        if isinstance(exc, ValueError):
+            return False, str(exc)
         return False, f"{type(exc).__name__}:{exc}"
 
 
@@ -1332,7 +1431,13 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
     ):
         return False, "index_resource_identity_mismatch"
     valid, reason = _graph_schema_receipt(graph)
-    return (True, "ok") if valid else (False, f"graph_schema_invalid:{reason}")
+    if not valid:
+        return False, f"graph_schema_invalid:{reason}"
+    phase = _graph_phase_metadata(graph)
+    for key, value in phase.items():
+        if manifest.get(key) != value:
+            return False, f"graph_metadata_mismatch:{key}"
+    return True, "ok"
 
 
 def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None = None,
@@ -1504,8 +1609,17 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         graph_revision = str(payload.get("graph_revision", payload.get("graph_sha256", "")))
     except (OSError, ValueError):
         graph_revision = ""
-    return IndexBuildReceipt(IndexBuildStatus.BUILT, graph_db=graph,
-                             source_revision=source_revision, graph_revision=graph_revision)
+    phase = _graph_phase_metadata(graph_path)
+    analysis_state = str(phase["analysis_state"])
+    status = (
+        IndexBuildStatus.BUILT_CORE_ONLY
+        if analysis_state in {"failed", "not_run"}
+        else IndexBuildStatus.BUILT
+    )
+    return IndexBuildReceipt(status, graph_db=graph,
+                             source_revision=source_revision, graph_revision=graph_revision,
+                             analysis_state=analysis_state,
+                             analysis_failure_reason=str(phase["analysis_failure_reason"]))
 
 
 def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tuple[str, ...], *,

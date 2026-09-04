@@ -17,7 +17,10 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "gt.why_this_edge.v1"
-ALLOWED_EDGE_KINDS = {"HAS_CALLSITE", "CANDIDATE_TARGET", "SELECTED_TARGET"}
+ALLOWED_EDGE_KINDS = {
+    "HAS_CALLSITE", "CANDIDATE_TARGET", "SELECTED_TARGET",
+    "RETURNS_TYPE", "OVERRIDES", "DECLARED_IMPLEMENTS",
+}
 SUBSTRATE_SCHEMA = "gt.resolution_substrate.v1"
 
 
