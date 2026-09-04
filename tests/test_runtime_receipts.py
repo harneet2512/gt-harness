@@ -92,6 +92,13 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "request_id": "request-1",
         },
         {
+            "event": "provider_admission", "event_hash": "c" * 64, "sequence": 4,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 100, "request_bytes": 400,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        },
+        {
             "event": "provider_response",
             "event_hash": "4" * 64,
             "sequence": 4,
@@ -134,6 +141,13 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "request_id": "request-2",
         },
         {
+            "event": "provider_admission", "event_hash": "e" * 64, "sequence": 8,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 200, "request_bytes": 800,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        },
+        {
             "event": "provider_response",
             "event_hash": "8" * 64,
             "sequence": 8,
@@ -171,6 +185,13 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "index_sha256": "3" * 64,
         },
         {
+            "event": "provider_admission", "event_hash": "f" * 64, "sequence": 11,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 300, "request_bytes": 1200,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        },
+        {
             "event": "session_closed",
             "event_hash": "d" * 64,
             "sequence": 11,
@@ -189,7 +210,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "provider_receipts": {"request_count": 3, "valid": True},
             "model": {"match": True},
             "event_journal": {
-                "event_count": 11,
+                "event_count": 14,
                 "event_head": "d" * 64,
                 "valid": True,
                 "issues": [],
@@ -244,6 +265,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert treatment["evidence_deliveries"][0]["event_hash"] == "5" * 64
     assert treatment["refused_deliveries"][0]["reason"] == "delivery_byte_ceiling"
     assert treatment["refused_deliveries"][0]["event_sequence"] == 9
+    assert [row["request_tokens"] for row in treatment["provider_admissions"]] == [100, 200, 300]
     assert treatment["provider_delivery_receipts"][0]["event_sequence"] == 1
     assert treatment["provider_delivery_receipts"][1]["event_sequence"] == 5
     assert treatment["delivery_budget"] == {
@@ -341,6 +363,12 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         (
             "treatment_dense_index_not_ready",
             lambda row: row["treatment_receipt"]["dense_index_receipt"].update(query_ready=False),
+        ),
+        (
+            "treatment_graph_utilisation_mismatch",
+            lambda row: row["treatment_receipt"]["graph_utilisation"].update(
+                cochange_rows=99
+            ),
         ),
     ]
     for expected_error, mutate in mutations:

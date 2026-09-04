@@ -43,6 +43,10 @@ _NODES = [
 
 _STORED_STABLE_IDS = {6: "fact-stable-id-6"}
 
+
+def test_retrieval_accepts_all_additive_declaration_labels() -> None:
+    assert {"Element", "Table"} <= set(retrieval.SYMBOL_LABELS)
+
 # (id, node_id, kind, value, confidence)
 _PROPERTIES = [
     (1, 3, "guard_clause",

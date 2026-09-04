@@ -263,6 +263,75 @@ def _provider_usage(
     }
 
 
+def _provider_admissions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate and retain every final-boundary provider admission decision."""
+
+    admissions: list[dict[str, Any]] = []
+    for row in events:
+        if row.get("event") != "provider_admission":
+            continue
+        event_hash = str(row.get("event_hash") or "")
+        status = str(row.get("status") or "")
+        reason = str(row.get("reason") or "")
+        source = str(row.get("metadata_source") or "")
+        if not _SHA64.fullmatch(event_hash):
+            raise ValueError("invalid_provider_admission_event_hash")
+        context_refusal = (
+            status == "refused"
+            and reason == "GT_PROVIDER_CONTEXT_WINDOW_UNAVAILABLE"
+        )
+        if (
+            status not in {"admitted", "refused"}
+            or not reason
+            or (not source and not context_refusal)
+        ):
+            raise ValueError("invalid_provider_admission_status")
+        numeric: dict[str, int] = {}
+        for field in (
+            "request_tokens",
+            "request_bytes",
+            "context_window_tokens",
+            "reserved_output_tokens",
+            "input_budget_tokens",
+        ):
+            value = row.get(field)
+            if type(value) is not int or value < 0:
+                raise ValueError("invalid_provider_admission_measurement")
+            numeric[field] = value
+        if context_refusal:
+            if numeric["input_budget_tokens"] != max(
+                0,
+                numeric["context_window_tokens"]
+                - numeric["reserved_output_tokens"],
+            ):
+                raise ValueError("invalid_provider_admission_budget")
+        else:
+            if (
+                numeric["context_window_tokens"] - numeric["reserved_output_tokens"]
+                != numeric["input_budget_tokens"]
+                or numeric["reserved_output_tokens"] < 1
+            ):
+                raise ValueError("invalid_provider_admission_budget")
+            over_budget = numeric["request_tokens"] > numeric["input_budget_tokens"]
+            if (status == "admitted" and over_budget) or (
+                status == "refused"
+                and reason == "GT_PROVIDER_REQUEST_TOO_LARGE"
+                and not over_budget
+            ):
+                raise ValueError("invalid_provider_admission_decision")
+        admissions.append(
+            {
+                "event_hash": event_hash,
+                "event_sequence": int(row.get("sequence") or 0),
+                "status": status,
+                "reason": reason,
+                **numeric,
+                "metadata_source": source,
+            }
+        )
+    return admissions
+
+
 def issue_runtime_receipts(
     *,
     report_path: Path,
@@ -341,6 +410,7 @@ def issue_runtime_receipts(
         if duplicate and refusal["delivery_identity"] not in delivered_identities:
             raise ValueError("invalid_duplicate_delivery_refusal")
     provider_usage = _provider_usage(event_rows, attempted_calls=provider_calls)
+    provider_admissions = _provider_admissions(event_rows)
     repro_path, reproduction = _single_optional(state_dir, "reproducibility_manifest.json")
     graph_path, graph = _single_optional(state_dir, "graph.manifest.json")
     reproduction = reproduction or {}
@@ -376,6 +446,11 @@ def issue_runtime_receipts(
     exit_code = int(report.get("exit_code") or 0)
     terminal = str(report.get("terminal") or "internal_error")
     status = "COMPLETED" if exit_code == 0 else "ERROR"
+    if status == "COMPLETED" and (
+        len(provider_admissions) != provider_calls
+        or any(row["status"] != "admitted" for row in provider_admissions)
+    ):
+        raise ValueError("provider_admission_count_mismatch")
     usage = gt.get("usage")
     usage = usage if isinstance(usage, dict) else {}
     if int(usage.get("prompt_tokens") or 0) != provider_usage["input_tokens"]:
@@ -429,6 +504,7 @@ def issue_runtime_receipts(
         "graph_utilisation": graph_utilisation(
             deliveries, cochange_rows=graph.get("cochange_rows")
         ),
+        "provider_admissions": provider_admissions,
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
         "event_journal": event_journal,
@@ -658,6 +734,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append("product_event_journal_conservation_failed")
         try:
             observed_usage = _provider_usage(runtime_events, attempted_calls=attempted_calls)
+            observed_admissions = _provider_admissions(runtime_events)
         except ValueError as exc:
             errors.append(str(exc))
         else:
@@ -671,6 +748,22 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             ):
                 if observed_usage[field] != receipt.get(field):
                     errors.append(f"product_{field}_conservation_failed")
+            treatment_admissions = (receipt.get("treatment_receipt") or {}).get(
+                "provider_admissions"
+            )
+            if treatment_admissions != observed_admissions:
+                errors.append("treatment_provider_admission_census_mismatch")
+            admitted_calls = sum(
+                row["status"] == "admitted" for row in observed_admissions
+            )
+            treatment_status = str(
+                (receipt.get("treatment_receipt") or {}).get("status") or ""
+            )
+            if admitted_calls != attempted_calls or (
+                treatment_status == "COMPLETED"
+                and any(row["status"] != "admitted" for row in observed_admissions)
+            ):
+                errors.append("treatment_provider_admission_count_mismatch")
 
     treatment = receipt.get("treatment_receipt")
     if not isinstance(treatment, dict):
@@ -862,6 +955,11 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     utilisation = treatment.get("graph_utilisation")
     utilisation = utilisation if isinstance(utilisation, dict) else {}
     certification = graph if isinstance(graph, dict) else {}
+    expected_utilisation = graph_utilisation(
+        deliveries, cochange_rows=certification.get("cochange_rows")
+    )
+    if utilisation != expected_utilisation:
+        errors.append("treatment_graph_utilisation_mismatch")
     indexed_files = int(certification.get("indexed_file_count") or 0)
     if indexed_files > 0 and not utilisation.get("graph_backed_delivery"):
         errors.append("treatment_graph_evidence_absent")

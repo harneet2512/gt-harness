@@ -84,7 +84,27 @@ DERIVED_STABLE_ID_PREFIX = "gtsym1:"
 # it is a code symbol in the schema, even though it holds no property rows in
 # any graph built so far -- excluding it would quietly flatter the denominator
 # that `coverage()` reports.
-CODE_SYMBOL_LABELS: tuple[str, ...] = ("Function", "Class", "Method", "File")
+CODE_SYMBOL_LABELS: tuple[str, ...] = (
+    "Annotation",
+    "Class",
+    "Constant",
+    "Constructor",
+    "Enum",
+    "EnumMember",
+    "File",
+    "Function",
+    "Impl",
+    "Interface",
+    "Macro",
+    "Method",
+    "Module",
+    "Namespace",
+    "Record",
+    "Struct",
+    "Trait",
+    "TypeAlias",
+    "Union",
+)
 
 # Contract field -> the single `properties.kind` that populates it. One kind per
 # field, so no field can be assembled from a mixture whose provenance is unclear.

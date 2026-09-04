@@ -20,6 +20,7 @@ _ALLOWED_KEYS = {
     "provider",
     "base_url",
     "model",
+    "requested_output_tokens",
     "credential_env",
     "credential_source_id",
     "availability",
@@ -33,6 +34,8 @@ class ProviderPreflightError(RuntimeError):
         super().__init__(code)
         self.checks: dict[str, bool] | None = None
         self.provider_inference_attempts = 0
+        self.context_window_tokens: int | None = None
+        self.context_window_source: str | None = None
 
 
 def load_route(path: Path) -> tuple[dict[str, Any], str]:
@@ -48,6 +51,13 @@ def load_route(path: Path) -> tuple[dict[str, Any], str]:
         raise ValueError("provider_model_not_allowed")
     if route["credential_env"] != "OPENROUTER_API_KEY":
         raise ValueError("provider_credential_env_not_allowed")
+    requested_output = route["requested_output_tokens"]
+    if (
+        isinstance(requested_output, bool)
+        or not isinstance(requested_output, int)
+        or requested_output < 1
+    ):
+        raise ValueError("provider_output_reservation_invalid")
     availability = route["availability"]
     if availability != {
         "key_path": "/key",
@@ -113,7 +123,7 @@ def _post_json(url: str, api_key: str, body: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def probe(route: dict[str, Any], api_key: str) -> dict[str, bool]:
+def probe(route: dict[str, Any], api_key: str) -> tuple[dict[str, bool], int, str]:
     checks = {
         "credential_valid": False,
         "key_limit_available": False,
@@ -125,6 +135,8 @@ def probe(route: dict[str, Any], api_key: str) -> dict[str, bool]:
     base = str(route["base_url"]).rstrip("/")
     availability = route["availability"]
     attempts = 0
+    context_window: int | None = None
+    context_source: str | None = None
     try:
         key_payload = _get_json(base + availability["key_path"], api_key)
         key_data = key_payload.get("data")
@@ -141,11 +153,33 @@ def probe(route: dict[str, Any], api_key: str) -> dict[str, bool]:
         checks["key_limit_available"] = True
         models_payload = _get_json(base + availability["models_path"], api_key)
         models = models_payload.get("data")
-        if not isinstance(models, list) or route["model"] not in {
-            row.get("id") for row in models if isinstance(row, dict)
-        }:
+        matching = [
+            row
+            for row in models if isinstance(row, dict) and row.get("id") == route["model"]
+        ] if isinstance(models, list) else []
+        if len(matching) != 1:
             raise ProviderPreflightError("provider_model_unavailable")
         checks["model_visible"] = True
+        model_row = matching[0]
+        candidate_window = model_row.get("context_length")
+        top_provider = model_row.get("top_provider")
+        top_provider = top_provider if isinstance(top_provider, dict) else {}
+        max_completion = top_provider.get("max_completion_tokens")
+        requested_output = int(route["requested_output_tokens"])
+        if (
+            isinstance(candidate_window, bool)
+            or not isinstance(candidate_window, int)
+            or candidate_window <= requested_output
+        ):
+            raise ProviderPreflightError("provider_context_window_unavailable")
+        if max_completion is not None and (
+            isinstance(max_completion, bool)
+            or not isinstance(max_completion, int)
+            or max_completion < requested_output
+        ):
+            raise ProviderPreflightError("provider_output_reservation_unsupported")
+        context_window = candidate_window
+        context_source = "openrouter:/models"
         attempts = 1
         canary = _post_json(
             base + availability["inference_path"],
@@ -163,8 +197,11 @@ def probe(route: dict[str, Any], api_key: str) -> dict[str, bool]:
     except ProviderPreflightError as exc:
         exc.checks = dict(checks)
         exc.provider_inference_attempts = attempts
+        exc.context_window_tokens = context_window
+        exc.context_window_source = context_source
         raise
-    return checks
+    assert context_window is not None and context_source is not None
+    return checks, context_window, context_source
 
 
 def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[str, Any]:
@@ -173,9 +210,13 @@ def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[st
     route, digest = load_route(manifest)
     error_code = None
     provider_inference_attempts = 0
+    context_window_tokens: int | None = None
+    context_window_source: str | None = None
     if live:
         try:
-            checks = probe(route, os.environ.get(str(route["credential_env"]), ""))
+            checks, context_window_tokens, context_window_source = probe(
+                route, os.environ.get(str(route["credential_env"]), "")
+            )
             provider_inference_attempts = 1
         except ProviderPreflightError as exc:
             error_code = str(exc)
@@ -186,6 +227,8 @@ def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[st
                 "model_canary_served": False,
             }
             provider_inference_attempts = exc.provider_inference_attempts
+            context_window_tokens = exc.context_window_tokens
+            context_window_source = exc.context_window_source
     else:
         checks = {
             "credential_valid": False,
@@ -210,6 +253,9 @@ def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[st
         "account_amounts_recorded": False,
         "provider_inference_attempts": provider_inference_attempts,
         "provider_inference_calls": int(live and error_code is None),
+        "context_window_tokens": context_window_tokens,
+        "reserved_output_tokens": int(route["requested_output_tokens"]),
+        "context_window_source": context_window_source,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + ".tmp")

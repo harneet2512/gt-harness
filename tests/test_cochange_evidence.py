@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS cochanges (
     file_a TEXT NOT NULL,
     file_b TEXT NOT NULL,
     count INTEGER NOT NULL DEFAULT 1,
+    commits_a INTEGER NOT NULL DEFAULT 0,
+    commits_b INTEGER NOT NULL DEFAULT 0,
+    confidence_a_to_b REAL NOT NULL DEFAULT 0.0,
+    confidence_b_to_a REAL NOT NULL DEFAULT 0.0,
     PRIMARY KEY(file_a, file_b)
 );
 CREATE INDEX IF NOT EXISTS idx_cochanges_a ON cochanges(file_a);
@@ -145,6 +149,37 @@ def test_a_recorded_window_is_reported_when_the_caller_supplies_one(tmp_path: Pa
     partner = cochange_partners(db, "src/a.py", window="commits<=500")[0]
 
     assert partner.window == "commits<=500"
+
+
+def test_directional_confidence_and_published_window_are_read_from_graph(tmp_path: Path):
+    path = tmp_path / "g.db"
+    db = _graph(path)
+    con = sqlite3.connect(db)
+    try:
+        con.execute("CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT)")
+        con.executemany(
+            "INSERT INTO project_meta(key,value) VALUES(?,?)",
+            [
+                ("derived_cochange_window_start", "oldest"),
+                ("derived_cochange_window_end", "newest"),
+            ],
+        )
+        con.execute(
+            "INSERT INTO cochanges(file_a,file_b,count,commits_a,commits_b,confidence_a_to_b,confidence_b_to_a) VALUES(?,?,?,?,?,?,?)",
+            ("src/a.py", "src/b.py", 4, 5, 4, 0.8, 1.0),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    from_a = cochange_partners(db, "src/a.py")[0]
+    from_b = cochange_partners(db, "src/b.py")[0]
+    assert (from_a.commits_file, from_a.commits_partner, from_a.confidence) == (5, 4, 0.8)
+    assert (from_b.commits_file, from_b.commits_partner, from_b.confidence) == (4, 5, 1.0)
+    assert from_a.window == from_b.window == "oldest..newest"
+    rendered = render_cochange_prior((from_a,))
+    assert "confidence=0.80000000" in rendered
+    assert "commits_file=5 commits_partner=4" in rendered
 
 
 def test_partners_rank_by_support_then_path(tmp_path: Path):

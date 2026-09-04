@@ -4,6 +4,7 @@
   "provider": "openrouter",
   "base_url": "https://openrouter.ai/api/v1",
   "model": "meta/muse-spark-1.2-contributor",
+  "requested_output_tokens": 16384,
   "credential_env": "OPENROUTER_API_KEY",
   "credential_source_id": "final_openrouter_musecontributor",
   "availability": {

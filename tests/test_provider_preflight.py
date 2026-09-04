@@ -24,6 +24,8 @@ def test_provider_route_is_valid_without_network(tmp_path: Path) -> None:
     assert receipt["provider_inference_attempts"] == 0
     assert receipt["provider_ready"] is False
     assert receipt["account_amounts_recorded"] is False
+    assert receipt["context_window_tokens"] is None
+    assert receipt["reserved_output_tokens"] == 16_384
 
 
 def test_live_preflight_checks_key_limit_and_exact_model(
@@ -35,7 +37,15 @@ def test_live_preflight_checks_key_limit_and_exact_model(
         assert api_key == "canary-not-a-real-key"
         if url.endswith("/key"):
             return {"data": {"limit_remaining": 1}}
-        return {"data": [{"id": "meta/muse-spark-1.2-contributor"}]}
+        return {
+            "data": [
+                {
+                    "id": "meta/muse-spark-1.2-contributor",
+                    "context_length": 1_048_576,
+                    "top_provider": {"max_completion_tokens": 32_768},
+                }
+            ]
+        }
 
     monkeypatch.setattr(provider_preflight, "_get_json", fake_get)
     monkeypatch.setattr(
@@ -61,6 +71,9 @@ def test_live_preflight_checks_key_limit_and_exact_model(
     assert receipt["provider_inference_calls"] == 1
     assert receipt["provider_inference_attempts"] == 1
     assert receipt["provider_ready"] is True
+    assert receipt["context_window_tokens"] == 1_048_576
+    assert receipt["reserved_output_tokens"] == 16_384
+    assert receipt["context_window_source"] == "openrouter:/models"
     assert "canary-not-a-real-key" not in json.dumps(receipt)
 
 
@@ -108,7 +121,15 @@ def test_canary_http_failure_preserves_completed_checks_and_attempt(
     def fake_get(url: str, _api_key: str) -> dict[str, object]:
         if url.endswith("/key"):
             return {"data": {"limit_remaining": 1}}
-        return {"data": [{"id": "meta/muse-spark-1.2-contributor"}]}
+        return {
+            "data": [
+                {
+                    "id": "meta/muse-spark-1.2-contributor",
+                    "context_length": 1_048_576,
+                    "top_provider": {"max_completion_tokens": 32_768},
+                }
+            ]
+        }
 
     monkeypatch.setattr(provider_preflight, "_get_json", fake_get)
     monkeypatch.setattr(
@@ -134,3 +155,26 @@ def test_canary_http_failure_preserves_completed_checks_and_attempt(
     }
     assert receipt["provider_inference_attempts"] == 1
     assert receipt["provider_inference_calls"] == 0
+
+
+def test_live_preflight_fails_when_model_window_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "canary-not-a-real-key")
+
+    def fake_get(url: str, _api_key: str) -> dict[str, object]:
+        if url.endswith("/key"):
+            return {"data": {"limit_remaining": 1}}
+        return {"data": [{"id": "meta/muse-spark-1.2-contributor"}]}
+
+    monkeypatch.setattr(provider_preflight, "_get_json", fake_get)
+    receipt = provider_preflight.run(
+        manifest=MANIFEST,
+        output=tmp_path / "receipt.json",
+        source_sha="e" * 40,
+        live=True,
+    )
+    assert receipt["status"] == "FAIL"
+    assert receipt["error_code"] == "provider_context_window_unavailable"
+    assert receipt["provider_inference_attempts"] == 0
+    assert receipt["context_window_tokens"] is None

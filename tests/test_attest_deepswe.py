@@ -96,6 +96,9 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "account_amounts_recorded": False,
             "provider_inference_attempts": 1,
             "provider_inference_calls": 1,
+            "context_window_tokens": 131072,
+            "reserved_output_tokens": route["requested_output_tokens"],
+            "context_window_source": "openrouter:/models",
         },
     )
     job = root / "tasks" / "job"
@@ -156,6 +159,27 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "usage": {"prompt_tokens": 4, "completion_tokens": 1},
         },
         {
+            "event": "provider_admission", "event_hash": "c" * 64,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 100, "request_bytes": 400,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        },
+        {
+            "event": "provider_admission", "event_hash": "d" * 64,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 200, "request_bytes": 800,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        },
+        {
+            "event": "provider_admission", "event_hash": "e" * 64,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 300, "request_bytes": 1200,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        },
+        {
             "event": "evidence_delivery", "event_hash": "3" * 64, "sequence": 3,
             "dedup_key": "localization", "evidence_type": "localization",
             "iteration": 0, "action_index": 0, "rendered_bytes": 100,
@@ -187,7 +211,7 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "research_valid": True,
             "provider_receipts": {"request_count": 3, "valid": True},
             "event_journal": {
-                "event_count": 7, "event_head": "b" * 64, "valid": True, "issues": [],
+                "event_count": 10, "event_head": "b" * 64, "valid": True, "issues": [],
             },
         },
     )
@@ -820,6 +844,30 @@ def test_unknown_provider_gate_field_fails_without_leaking_value(
     assert receipt["status"] == "FAIL"
     assert "provider_gate_fields_invalid" in receipt["errors"]
     assert "SECRET_CANARY" not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"context_window_tokens": None},
+        {"context_window_tokens": 16384},
+        {"reserved_output_tokens": 1},
+        {"context_window_source": "untrusted"},
+    ],
+)
+def test_provider_admission_metadata_mutations_fail_closed(
+    tmp_path: Path, mutation: dict[str, object]
+) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "provider-gate.json"
+    gate = json.loads(path.read_text(encoding="utf-8"))
+    gate.update(mutation)
+    _write(path, gate)
+
+    receipt = _attest(tmp_path)
+
+    assert receipt["status"] == "FAIL"
+    assert "provider_gate_admission_invalid" in receipt["errors"]
 
 
 def test_unknown_nested_provider_check_fails_without_leaking_value(

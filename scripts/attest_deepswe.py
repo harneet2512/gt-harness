@@ -287,6 +287,7 @@ def attest_deepswe(
         "provider", "base_url", "model", "route_sha256", "checks",
         "provider_ready", "paid_run_approved", "account_amounts_recorded",
         "provider_inference_attempts", "provider_inference_calls",
+        "context_window_tokens", "reserved_output_tokens", "context_window_source",
     }
     if set(provider_gate) != provider_gate_fields:
         errors.append("provider_gate_fields_invalid")
@@ -327,6 +328,16 @@ def attest_deepswe(
         or provider_gate.get("provider_inference_calls") != 1
     ):
         errors.append("provider_gate_checks_invalid")
+    context_window = provider_gate.get("context_window_tokens")
+    reserved_output = provider_gate.get("reserved_output_tokens")
+    if (
+        type(context_window) is not int
+        or type(reserved_output) is not int
+        or context_window <= reserved_output
+        or reserved_output != trusted_route.get("requested_output_tokens")
+        or provider_gate.get("context_window_source") != "openrouter:/models"
+    ):
+        errors.append("provider_gate_admission_invalid")
 
     result_rows: list[tuple[Path, dict[str, Any]]] = []
     trial_rows: list[tuple[Path, dict[str, Any]]] = []

@@ -7,6 +7,16 @@ import sqlite3
 from gt_engine import indexer
 
 
+def test_core_only_receipt_is_a_successful_graph_build() -> None:
+    receipt = indexer.IndexBuildReceipt(
+        indexer.IndexBuildStatus.BUILT_CORE_ONLY,
+        graph_db="graph.db",
+        analysis_state="not_run",
+        analysis_failure_reason="incremental_reindex_requires_full_analysis",
+    )
+    assert receipt.success is True
+
+
 def test_source_manifest_is_ordered_and_content_addressed(tmp_path) -> None:
     (tmp_path / "b.py").write_bytes(b"b\n")
     (tmp_path / "a.py").write_bytes(b"a\n")
@@ -63,6 +73,8 @@ def test_graph_phase_metadata_distinguishes_core_only_and_verifies_seals(tmp_pat
                 ("core_phase_receipt_sha256", hashlib.sha256(core.encode()).hexdigest()),
                 ("analysis_state", "failed"),
                 ("analysis_failure_reason", "budget"),
+                ("derived_cochange_window_start", "oldest"),
+                ("derived_cochange_window_end", "newest"),
                 ("analysis_phase_receipt", analysis),
                 ("analysis_phase_receipt_sha256", hashlib.sha256(analysis.encode()).hexdigest()),
             ],
@@ -76,6 +88,8 @@ def test_graph_phase_metadata_distinguishes_core_only_and_verifies_seals(tmp_pat
     assert meta["analysis_state"] == "failed"
     assert meta["analysis_failure_reason"] == "budget"
     assert meta["cochange_rows"] == 2
+    assert meta["derived_cochange_window_start"] == "oldest"
+    assert meta["derived_cochange_window_end"] == "newest"
     # Derived-layer keys are "unrecorded" / 0 when the tables don't exist
     assert meta["derived_layers_state"] == "unrecorded"
     assert meta["community_rows"] == 0

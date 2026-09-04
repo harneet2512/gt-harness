@@ -41,9 +41,11 @@ from .miniswe_evidence import (
 )
 from .miniswe_integration import MiniSweAdapter, ProviderModelMismatch
 from .provider_limits import (
+    ProviderContextWindowUnavailable,
     ProviderRequestTooLarge,
     build_provider_request_envelope,
     enforce_provider_request_limit,
+    provider_request_tokens,
 )
 from .run_diagnostics import DiagnosticCode, DiagnosticEvent, classify_provider_failure
 from .runtime_observation import (
@@ -486,6 +488,7 @@ def install_runtime_hooks(
     if not session.disabled:
         adapter.attach_provider_boundary(model, agent)
     prepare = getattr(model, "_prepare_messages_for_api", None)
+    transport = getattr(model, "_query", None)
     execute = getattr(agent, "execute_actions", None)
     environment = getattr(agent, "env", None)
     if not callable(prepare) or not callable(execute) or environment is None:
@@ -526,19 +529,70 @@ def install_runtime_hooks(
             session.degrade("prepare_messages", exc)
         return prepared
 
+    def query_transport(_model: Any, messages: list[dict], **kwargs: Any) -> Any:
+        """Admit only the exact, already-prepared payload sent to transport."""
+        context_window = int(os.environ.get("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "0") or 0)
+        reserved_output = int(
+            os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
+        )
+        metadata_source = os.environ.get("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "")
+        config = getattr(_model, "config", None)
+        model_name = str(
+            getattr(config, "model_name", "")
+            or getattr(_model, "model_name", "")
+            or ""
+        )
+        model_kwargs = dict(
+            getattr(config, "model_kwargs", None)
+            or getattr(_model, "model_kwargs", None)
+            or {}
+        )
+        tools = getattr(_model, "tools", None)
+        if tools is None:
+            try:
+                from minisweagent.models.litellm_model import BASH_TOOL
+
+                tools = [BASH_TOOL]
+            except ImportError:
+                tools = None
+        payload = build_provider_request_envelope(
+            messages=messages,
+            model=model_name,
+            model_kwargs=model_kwargs,
+            tools=tools,
+            call_kwargs=kwargs,
+        )
+        try:
+            admission = enforce_provider_request_limit(
+                payload,
+                context_window_tokens=context_window,
+                reserved_output_tokens=reserved_output,
+                metadata_source=metadata_source,
+                token_counter=provider_request_tokens,
+            )
+        except (ProviderContextWindowUnavailable, ProviderRequestTooLarge) as exc:
+            details = (
+                exc.admission.to_dict()
+                if isinstance(exc, ProviderRequestTooLarge)
+                else exc.to_dict()
+            )
+            adapter.store.append(
+                "provider_admission",
+                status="refused",
+                reason=exc.code,
+                **details,
+            )
+            raise
+        adapter.store.append(
+            "provider_admission",
+            status="admitted",
+            reason="within_provider_window",
+            **admission.to_dict(),
+        )
+        return transport(messages, **kwargs)
+
     def query(_model: Any, messages: list[dict], **kwargs: Any) -> dict:
         try:
-            # Admission covers the complete logical envelope. This happens
-            # before original_query, so a refusal produces zero provider calls.
-            enforce_provider_request_limit(
-                build_provider_request_envelope(
-                    messages=messages,
-                    model=str(getattr(_model, "model_name", "") or ""),
-                    model_kwargs=dict(getattr(_model, "model_kwargs", {}) or {}),
-                    tools=getattr(_model, "tools", None),
-                    call_kwargs=kwargs,
-                )
-            )
             message = original_query(messages, **kwargs)
         except Exception as exc:
             if not session.disabled:
@@ -547,6 +601,11 @@ def install_runtime_hooks(
                     if isinstance(exc, ProviderRequestTooLarge):
                         code, retryable = (
                             DiagnosticCode.GT_PROVIDER_REQUEST_TOO_LARGE,
+                            False,
+                        )
+                    elif isinstance(exc, ProviderContextWindowUnavailable):
+                        code, retryable = (
+                            DiagnosticCode.GT_PROVIDER_CONTEXT_WINDOW_UNAVAILABLE,
                             False,
                         )
                     else:
@@ -985,6 +1044,8 @@ def install_runtime_hooks(
     model._prepare_messages_for_api = MethodType(prepare_messages, model)
     model._gt_original_query = original_query
     model.query = MethodType(query, model)
+    if callable(transport):
+        model._query = MethodType(query_transport, model)
     agent._gt_original_execute_actions = execute
     agent.execute_actions = MethodType(execute_actions, agent)
     handle = RuntimeHookHandle(

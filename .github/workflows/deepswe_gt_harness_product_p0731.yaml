@@ -356,6 +356,10 @@ jobs:
     needs: [plan, readiness, readiness_binding, image_digest_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      context_window_tokens: ${{ steps.preflight.outputs.context_window_tokens }}
+      reserved_output_tokens: ${{ steps.preflight.outputs.reserved_output_tokens }}
+      context_window_source: ${{ steps.preflight.outputs.context_window_source }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -366,6 +370,7 @@ jobs:
           python-version: "3.12"
 
       - name: Verify credential, account limit, and exact model before the matrix
+        id: preflight
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
@@ -375,6 +380,17 @@ jobs:
             --source-sha "${{ needs.plan.outputs.source_sha }}" \
             --output provider-gate.json \
             --live
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          receipt = json.loads(Path("provider-gate.json").read_text(encoding="utf-8"))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"context_window_tokens={receipt['context_window_tokens']}\n")
+              output.write(f"reserved_output_tokens={receipt['reserved_output_tokens']}\n")
+              output.write(f"context_window_source={receipt['context_window_source']}\n")
+          PY
 
       - name: Upload provider availability receipt
         if: always()
@@ -619,6 +635,9 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENAI_BASE_URL: ${{ needs.plan.outputs.provider_base_url }}
+          GT_PROVIDER_CONTEXT_WINDOW_TOKENS: ${{ needs.provider_gate.outputs.context_window_tokens }}
+          GT_PROVIDER_RESERVED_OUTPUT_TOKENS: ${{ needs.provider_gate.outputs.reserved_output_tokens }}
+          GT_PROVIDER_CONTEXT_WINDOW_SOURCE: ${{ needs.provider_gate.outputs.context_window_source }}
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
         run: |

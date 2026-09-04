@@ -1190,7 +1190,10 @@ class IndexBuildReceipt:
 
     @property
     def success(self) -> bool:
-        return self.status is IndexBuildStatus.BUILT and bool(self.graph_db)
+        return self.status in {
+            IndexBuildStatus.BUILT,
+            IndexBuildStatus.BUILT_CORE_ONLY,
+        } and bool(self.graph_db)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -1323,6 +1326,7 @@ def _graph_phase_metadata(graph: Path) -> dict[str, object]:
         derived_state_keys = (
             "derived_layers_state", "derived_layers_degraded",
             "derived_cochange_state", "derived_cochange_pairs",
+            "derived_cochange_window_start", "derived_cochange_window_end",
             "derived_community_state", "derived_community_count",
             "derived_community_members", "derived_community_cohesion",
             "derived_process_state", "derived_process_count",

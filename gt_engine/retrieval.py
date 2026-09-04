@@ -105,7 +105,29 @@ DEFAULT_LIMIT = 10
 # UnresolvedFact) are analysis bookkeeping and outnumber the symbols ~45:1 on
 # the reference graph, so leaving them in would drown every ranking in rows
 # nobody can open.
-SYMBOL_LABELS: tuple[str, ...] = ("Class", "File", "Function", "Method")
+SYMBOL_LABELS: tuple[str, ...] = (
+    "Annotation",
+    "Class",
+    "Constant",
+    "Constructor",
+    "Enum",
+    "EnumMember",
+    "Element",
+    "File",
+    "Function",
+    "Impl",
+    "Interface",
+    "Macro",
+    "Method",
+    "Module",
+    "Namespace",
+    "Record",
+    "Struct",
+    "Table",
+    "Trait",
+    "TypeAlias",
+    "Union",
+)
 
 # Property matching is substring-based (there is no FTS index over
 # ``properties`` today), so single characters match nearly everything and carry

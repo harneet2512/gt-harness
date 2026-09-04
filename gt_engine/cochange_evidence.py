@@ -95,6 +95,9 @@ class CochangePartner:
     support: int
     window: str
     provenance: str
+    commits_file: int | None = None
+    commits_partner: int | None = None
+    confidence: float | None = None
 
 
 def _connect(graph_db: str) -> sqlite3.Connection | None:
@@ -130,7 +133,7 @@ def cochange_partners(
     file_path: str,
     *,
     limit: int = MAX_PARTNERS_PER_FILE,
-    window: str = COCHANGE_WINDOW_UNRECORDED,
+    window: str | None = None,
 ) -> tuple[CochangePartner, ...]:
     """The recorded co-change companions of one repository-relative file.
 
@@ -145,17 +148,53 @@ def cochange_partners(
     if con is None:
         return ()
     try:
-        rows = con.execute(
-            _PARTNER_SQL, (normalized, normalized, int(limit))
-        ).fetchall()
+        columns = {row[1] for row in con.execute("PRAGMA table_info(cochanges)")}
+        has_directional = {
+            "commits_a", "commits_b", "confidence_a_to_b", "confidence_b_to_a"
+        }.issubset(columns)
+        sql = (
+            "SELECT file_a, file_b, count, commits_a, commits_b, "
+            "confidence_a_to_b, confidence_b_to_a FROM cochanges "
+            if has_directional else "SELECT file_a, file_b, count FROM cochanges "
+        ) + (
+            "WHERE (file_a = ? OR file_b = ?) AND file_a <> file_b "
+            "ORDER BY count DESC, file_a ASC, file_b ASC LIMIT ?"
+        )
+        rows = con.execute(sql, (normalized, normalized, int(limit))).fetchall()
+        resolved_window = str(window or "")
+        if not resolved_window:
+            try:
+                meta = dict(
+                    con.execute(
+                        "SELECT key,value FROM project_meta WHERE key IN (?,?)",
+                        (
+                            "derived_cochange_window_start",
+                            "derived_cochange_window_end",
+                        ),
+                    )
+                )
+                start = str(meta.get("derived_cochange_window_start") or "")
+                end = str(meta.get("derived_cochange_window_end") or "")
+                resolved_window = f"{start}..{end}" if start and end else ""
+            except sqlite3.Error:
+                resolved_window = ""
     except sqlite3.Error:
         return ()
     finally:
         con.close()
     out: list[CochangePartner] = []
-    for file_a, file_b, count in rows:
+    for row in rows:
+        file_a, file_b, count = row[:3]
         partner = str(file_b) if str(file_a) == normalized else str(file_a)
         support = int(count or 0)
+        commits_file = commits_partner = None
+        confidence = None
+        if len(row) == 7:
+            commits_a, commits_b, confidence_a_to_b, confidence_b_to_a = row[3:]
+            from_a = str(file_a) == normalized
+            commits_file = int(commits_a if from_a else commits_b)
+            commits_partner = int(commits_b if from_a else commits_a)
+            confidence = float(confidence_a_to_b if from_a else confidence_b_to_a)
         out.append(
             CochangePartner(
                 file_path=normalized,
@@ -163,8 +202,11 @@ def cochange_partners(
                 # One stored column, reported under both names it answers to.
                 count=support,
                 support=support,
-                window=str(window or COCHANGE_WINDOW_UNRECORDED),
+                window=resolved_window or COCHANGE_WINDOW_UNRECORDED,
                 provenance=f"cochanges(file_a={file_a},file_b={file_b})",
+                commits_file=commits_file,
+                commits_partner=commits_partner,
+                confidence=confidence,
             )
         )
     # SQL orders the LIMITed selection by stored key; presentation orders by
@@ -182,8 +224,16 @@ def render_cochange_prior(
         + (f" revision={revision}" if revision else "")
         + f" partner={item.partner}"
         f" count={item.count} support={item.support}"
-        f" window={item.window} provenance={item.provenance}"
-        " status=prior_not_resolution"
+        + (
+            f" confidence={item.confidence:.8f}"
+            f" commits_file={item.commits_file} commits_partner={item.commits_partner}"
+            if item.confidence is not None
+            and item.commits_file is not None
+            and item.commits_partner is not None
+            else " confidence=unrecorded"
+        )
+        + f" window={item.window} provenance={item.provenance}"
+        + " status=prior_not_resolution"
         for item in partners
     )
 
@@ -206,7 +256,7 @@ def run_cochange_prior(
         return ""
     repo_root = str(getattr(adapter, "repo_root", "") or "")
     revision = str(getattr(adapter, "repository_revision", "") or "unknown")
-    window = str(getattr(adapter, "cochange_window", "") or COCHANGE_WINDOW_UNRECORDED)
+    window = str(getattr(adapter, "cochange_window", "") or "") or None
     lines: list[str] = []
     seen: set[str] = set()
     for raw in files:

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 import gt_engine.miniswe_runtime as rt
 from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_evidence import EvidenceResult
 from gt_engine.miniswe_integration import MiniSweAdapter
 from gt_engine.miniswe_runtime import install_runtime_hooks
+from gt_engine.provider_limits import ProviderRequestTooLarge
 from gt_engine.task_contract import extract_task_contract
 
 
@@ -248,6 +253,86 @@ def test_provider_response_is_bound_to_delivery(tmp_path):
     assert not adapter.terminal_confirmed(request_id)
     agent.model.query([{"role": "user", "content": "task"}])
     assert adapter.terminal_confirmed(request_id)
+
+
+def test_provider_admission_uses_prepared_payload_and_conserves_refusal(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "100")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "20")
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "provider:/models")
+
+    class PreparedBoundaryModel(FakeModel):
+        model_name = "openai/meta/muse-spark-1.2-contributor"
+        model_kwargs = {}
+        tools = []
+
+        def __init__(self):
+            super().__init__()
+            self.transport_calls = 0
+
+        def _query(self, messages, **kwargs):
+            self.transport_calls += 1
+            return {"id": "resp", "status": "completed", "model": "m"}
+
+        def query(self, messages, **kwargs):
+            prepared = self._prepare_messages_for_api(messages)
+            response = self._query(prepared, **kwargs)
+            return {
+                "role": "assistant",
+                "content": "ok",
+                "extra": {
+                    "actions": [],
+                    "response": {
+                        "id": response["id"],
+                        "model": "meta/muse-spark-1.2-contributor",
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+                    },
+                },
+            }
+
+    agent = FakeAgent()
+    agent.model = PreparedBoundaryModel()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path, predicates=[], issue_text="Fix it."
+    )
+    install_runtime_hooks(agent, _session(adapter))
+
+    # The raw history is huge only because ``extra`` duplicates content.  The
+    # native prepare seam strips it before admission.
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _payload: 79)
+    agent.model.query(
+        [
+            {
+                "role": "tool",
+                "content": "real evidence",
+                "extra": {"duplicate": "x" * 1_000_000},
+            }
+        ]
+    )
+    assert agent.model.transport_calls == 1
+
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _payload: 81)
+    with pytest.raises(ProviderRequestTooLarge):
+        agent.model.query([{"role": "user", "content": "genuinely too large"}])
+    assert agent.model.transport_calls == 1
+    assert len(adapter.deliveries) == 2
+    assert adapter.terminal_confirmed(adapter.deliveries[-1].request_id)
+
+    monkeypatch.delenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE")
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _payload: 12)
+    with pytest.raises(rt.ProviderContextWindowUnavailable):
+        agent.model.query([{"role": "user", "content": "metadata unavailable"}])
+    assert agent.model.transport_calls == 1
+    events = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    refusal = [row for row in events if row.get("event") == "provider_admission"][-1]
+    assert refusal["reason"] == "GT_PROVIDER_CONTEXT_WINDOW_UNAVAILABLE"
+    assert refusal["request_tokens"] == 12
+    assert refusal["request_bytes"] > 0
+    assert refusal["metadata_source"] == ""
 
 
 def test_submit_magic_string_executes_when_no_red_evidence(tmp_path):

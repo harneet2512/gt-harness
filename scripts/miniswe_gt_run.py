@@ -254,6 +254,13 @@ def _templates() -> tuple[str, str]:
 def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
     """litellm-routable model id + kwargs for the configured gateway."""
     model_kwargs: dict = {"temperature": temperature, "num_retries": 0}
+    reserved_output = int(
+        os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
+    )
+    if reserved_output > 0:
+        # Admission subtracts this exact value from the provider's live window;
+        # the transport must request the same reservation.
+        model_kwargs["max_completion_tokens"] = reserved_output
     base_url = os.environ.get("OPENAI_BASE_URL")
     if base_url:
         # An OpenAI-compatible gateway owns the full catalog identifier.  A
