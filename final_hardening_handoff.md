@@ -2,7 +2,7 @@
 
 **Written for a session that has none of this context.** Read this file and
 `final_hardening_review_log.md` (what was verified and how) and you have
-everything. Last updated 2026-09-03 ~20:35 ET.
+everything. Last updated 2026-09-04 ~00:40 ET.
 
 ---
 
@@ -48,84 +48,52 @@ Head SHAs are in each stream's own worktree unless the row says LANDED.
 |---|---|---|---|---|
 | 3 contract | 2 | — | harness `fac84bcc` | **LANDED** |
 | 4 retrieval (engine) | 4 | — | harness `1122c213` | **LANDED** |
+| 4 producer FTS | 4 | — | producer `16597e6cf` (in stack) | **LANDED** |
 | 6 co-change pkg | 6a | — | producer `ce5e0370` | **LANDED** |
 | 8 processes pkg | 7 | — | producer `a2d536bf4` | **LANDED** |
 | 7 communities pkg | 6 | — | producer `43514ced1` | **LANDED** |
-| **wiring** | 6/6a/7 | `D:/gt-fh-wiring` | producer **`24d156530`** | **LANDED + PUSHED** |
-| 2 content addressing | 1 | `D:/gt-fh-item2-content`, `D:/gt-fh-item2-engine` | `64d8cc23a`, `6909e3de` | reviewed, **queued to land** |
-| 9 two-phase publication | 15 | `D:/gt-fh-item9-twophase` | `d74c8d86f` | reviewed, **queued to land** |
-| 10 projections | 10-13 | `D:/gt-fh-item10-projections` | `8ae5694ef` | reviewed, **queued to land** |
-| 5 embeddings | 3, 5 | `D:/gt-fh-item5-embeddings` | `96473d2a` | reviewed, **queued to land** |
-| 6b co-change delivery | 6b | `D:/gt-fh-item6-engine` | `24df0956` | reviewed, **queued to land** |
-| 4 producer FTS | 4 | `D:/gt-fh-item4-fts` | `3657c1516` | reviewed, **queued to land** |
-| 11 taxonomy | 8, 9 | `D:/gt-fh-item11-taxonomy`, `D:/gt-fh-item11-engine` | `3cb3aec40` | **still running** |
-| 1 budgeted abstention | 14 | `D:/gt-fh-budget` | `ae0c59c32` | **REJECTED, reworking** |
+| wiring | 6/6a/7 | — | producer `24d156530` | **LANDED** |
+| 9 two-phase publication | 15 | — | producer `16597e6cf` (in stack) | **LANDED** |
+| 2 content addressing | 1 | — | producer `16597e6cf` (in stack); harness `d9ae30fd` (in stack) | **LANDED** |
+| 10 projections | 10-13 | — | producer `16597e6cf` (in stack) | **LANDED** |
+| 5 embeddings | 3, 5 | — | harness `d9ae30fd` (in stack) | **LANDED** |
+| 6b co-change delivery | 6b | — | harness `d9ae30fd` (in stack) | **LANDED** |
+| 11 taxonomy | 8, 9 | — | producer `16597e6cf` (in stack) | **LANDED** |
+| 1 budgeted abstention | 14 | `D:/gt-fh-budget` | `ae0c59c32` | **REWORKING** — boa publishes; stream A owes sweep + defaults |
 
-## 4. What is left to do, in order
+## 4. What is left to do
 
-### 4.1 Land the four reviewed producer streams — mind the merge order
+### 4.1 Item 1 — the only remaining work
 
-All four touch `cmd/gt-index/main.go`. Land in this order; each is already
-committed fixture-first (a `test(red):` commit then a fix commit), so landing is a
-`git cherry-pick` of both onto `final_hardening/producer`, then push.
+Stream A (`D:/gt-fh-budget`, head `ae0c59c32`) hit the rate limit twice and is
+waiting for reset. When it resumes, it owes two deliverables:
 
-1. **Item 9 (two-phase)** — first, because it *restructures* the publication loop
-   into `publishCorePhase`/`publishAnalysisPhase`. Everything else re-anchors onto
-   it more easily than the reverse. It moved the phase-2 body **byte-for-byte**
-   (verified by the stream: original `main.go` 757-1019 and 1035-1054 appear
-   verbatim in `publication_phases.go`), so other streams' hunks apply to unchanged
-   text and only need re-anchoring to the new file.
-2. **Item 2 producer half** — 3 files, +74/−5, no overlap with item 9.
-3. **Item 10 (projections)** — 75 inserted lines across five files; the stream
-   checked hunk-by-hunk that none collides with stream A's.
-4. **Item 4 producer FTS** — reviewed. Its out-of-brief `incremental.go` edit is
-   **justified and should be kept**: `DeleteFileEdgesAndNodesTx` deletes properties
-   inside the reindex transaction while the FTS refresh runs after commit, so an
-   externally-maintained index can point at content rows that no longer exist — the
-   `database disk image is malformed` failure, which fired live in both of its index
-   runs. It also caught and fixed a gate of its own that could never fail
-   (`COUNT(*)` on an external-content FTS table is answered from the content table).
+1. **19-repo sweep re-run serially** (the parallel one died at 3 of 19). Budget
+   hours: abs took 2,627 s and boa takes 2,162 s.
+2. **Every number in `budget.go` justified by a run that finished.** The defaults
+   must come from completed measurements.
 
-Then rebuild and re-run the sweep, and re-measure arktype to confirm the combined
-result still matches the baseline table.
+Once those are done, cherry-pick its `test(red)` + fix onto `final_hardening/producer`,
+push, and the table is 15/15.
 
-### 4.2 Land the two reviewed harness streams
+### 4.2 CI on the harness
 
-Item 2 engine half (`6909e3de`) and item 6b (`24df0956`). Both are already on
-`origin` on their own stream branches (see §6). Item 5 (`96473d2a`) after them —
-it edits `retrieval.py`, which item 6b does not touch, so order is free.
+Run **33837633809** triggered on `d9ae30fd`. Prior greens: 33791548818 on `50bf2655`,
+33785370968 on `5823193a`. The workflow has no `push` trigger for this branch.
 
-### 4.3 Finish item 1 — the one genuinely open engineering problem
+### 4.3 Follow-ups the streams surfaced — currently owned by nobody
 
-See §5. It is **rejected**, not blocked: the work continues in `D:/gt-fh-budget`.
-
-### 4.4 Item 11 (taxonomy)
-
-Still running. It is the broadest item — 32-label-class vocabulary and new edge
-kinds across 30 grammars. Expect it to need the most review.
-
-### 4.5 Follow-ups the streams surfaced and correctly did not do
-
-These are real, named, and currently owned by nobody:
-
-- **`analysis_state` has no reader anywhere in the harness.** `indexer.py:1260`
-  (`_graph_schema_receipt`) requires exactly one table, so a core-only graph
-  certifies `BUILT`, indistinguishable from a complete one. **Item 9's split is
-  invisible to the harness until this is done.** Item 9's report ranks five more.
-- **`cochange_rows` is not wired into `gt_harness/runtime_receipts.py`**, so a
-  delivered `cochange_prior` does not currently discharge the graph-evidence
-  obligation. Item 6b chose the fail-closed direction rather than edit a shared
-  file mid-flight.
-- ~~`arch_pipeline.md` says `cochange_partner` has "no emitter anywhere"~~ —
-  **DONE** at `f5837125`, along with the boa row.
-- **Pass 4f binds 206 IMPORTS edges to `Callsite` nodes** — a pre-existing defect
-  item 9 found and did not fix. It makes a failed build show 2,347 IMPORTS vs
-  2,445.
-- **Derived layers are not wired on the `-file` incremental path** (neither is the
-  closure sidecar), so those tables go stale after an incremental reindex.
-- **`GT_DERIVED_LAYERS=off` now means no `cochanges` at all** — the old Pass 5c
-  emitter was removed because two writers on the same primary key with different
-  support floors meant the weaker one silently won every row.
+1. **`analysis_state` has no reader in the harness** — `indexer.py:1260` certifies
+   a core-only graph as `BUILT`. Item 9's two-phase split is invisible until done.
+2. **`cochange_rows` not wired into `runtime_receipts.py`** — `cochange_prior`
+   doesn't discharge the graph-evidence obligation.
+3. **`SYMBOL_LABELS` in `retrieval.py` must be extended** when item 11's declaration
+   gate is on — new labels unreachable by all three rankers.
+4. **`CODE_SYMBOL_LABELS` in `contract.py` is the same tuple** — it and row 8's
+   acceptance criterion are the same tuple.
+5. **Pass 4f binds 206 IMPORTS edges to `Callsite` nodes** — pre-existing.
+6. **lua, sql, svelte index no symbols** — pre-existing spec defects.
+7. **Derived layers not wired on the `-file` incremental path.**
 
 ## 5. boa — SETTLED. It publishes. The claim was false.
 
