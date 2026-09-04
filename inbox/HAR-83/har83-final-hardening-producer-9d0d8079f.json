@@ -12,8 +12,10 @@
   },
   "head_sha": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
   "kind": "check_outcome",
-  "packet_digest_sha256": "168a4bb0e80c67bb3dabb47b578452cf172285308f154ad7bfac155431b7545b",
+  "packet_digest_sha256": "60a97c968983186f0a99722d00499c8048739a5987d44740fb4e514fc42216e2",
+  "packet_id": "har83-final-hardening-producer-9d0d8079f",
   "reviewer_verdict_present": false,
   "schema": "gt.review_packet.v1",
-  "status": "PASS"
+  "status": "PASS",
+  "ticket": "HAR-83"
 }
