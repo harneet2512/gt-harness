@@ -702,7 +702,7 @@
         "tests/unit/test_verify_report_rate_contract.py",
         "tests/wrapper/test_router_v2_telemetry.py"
       ],
-      "review_inbox_commit": "c97417ce7a592c94de3321a694ce70b49b9661f8",
+      "review_inbox_commit": "9043aab7891b2ae1c14958ace866a4e167b2a637",
       "review_packets": [
         {
           "packet_id": "har70-groundtruth-db9daf9e",
@@ -736,7 +736,7 @@
           "head_sha": "9d0d8079f8d3db7b1bf5208c92918e6daf9d62a6",
           "status": "PASS",
           "basis": "owner_directive",
-          "packet_digest_sha256": "168a4bb0e80c67bb3dabb47b578452cf172285308f154ad7bfac155431b7545b",
+          "packet_digest_sha256": "60a97c968983186f0a99722d00499c8048739a5987d44740fb4e514fc42216e2",
           "kind": "check_outcome"
         }
       ],
@@ -758,7 +758,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "66f34fd624bf31e828d9eae93218aa91febf30f50291925a806e58ca5e075a90"
+      "attestation_digest_sha256": "6a5f7f80576a47c31e79557528930f29dc1802da92d8975482e9e3db52a85039"
     },
     "build_info_sha256": "1466b4a847bb2061d53f76ff834776bc0100909aed85b80878b6a27d9df9d0f3"
   },
