@@ -2,7 +2,7 @@
 
 **Written for a session that has none of this context.** Read this file and
 `final_hardening_review_log.md` (what was verified and how) and you have
-everything. Last updated 2026-09-03 ~20:20 ET.
+everything. Last updated 2026-09-03 ~20:35 ET.
 
 ---
 
@@ -57,7 +57,7 @@ Head SHAs are in each stream's own worktree unless the row says LANDED.
 | 10 projections | 10-13 | `D:/gt-fh-item10-projections` | `8ae5694ef` | reviewed, **queued to land** |
 | 5 embeddings | 3, 5 | `D:/gt-fh-item5-embeddings` | `96473d2a` | reviewed, **queued to land** |
 | 6b co-change delivery | 6b | `D:/gt-fh-item6-engine` | `24df0956` | reviewed, **queued to land** |
-| 4 producer FTS | 4 | `D:/gt-fh-item4-fts` | `3657c1516` | returned, **not yet reviewed** |
+| 4 producer FTS | 4 | `D:/gt-fh-item4-fts` | `3657c1516` | reviewed, **queued to land** |
 | 11 taxonomy | 8, 9 | `D:/gt-fh-item11-taxonomy`, `D:/gt-fh-item11-engine` | `3cb3aec40` | **still running** |
 | 1 budgeted abstention | 14 | `D:/gt-fh-budget` | `ae0c59c32` | **REJECTED, reworking** |
 
@@ -78,10 +78,13 @@ committed fixture-first (a `test(red):` commit then a fix commit), so landing is
 2. **Item 2 producer half** — 3 files, +74/−5, no overlap with item 9.
 3. **Item 10 (projections)** — 75 inserted lines across five files; the stream
    checked hunk-by-hunk that none collides with stream A's.
-4. **Item 4 producer FTS** — review it first; it has not been reviewed yet, and it
-   edits `internal/store/incremental.go`, which was **not** in its brief. Require a
-   test that an incremental update leaves `properties_fts` consistent with
-   `properties`, or require the edit dropped.
+4. **Item 4 producer FTS** — reviewed. Its out-of-brief `incremental.go` edit is
+   **justified and should be kept**: `DeleteFileEdgesAndNodesTx` deletes properties
+   inside the reindex transaction while the FTS refresh runs after commit, so an
+   externally-maintained index can point at content rows that no longer exist — the
+   `database disk image is malformed` failure, which fired live in both of its index
+   runs. It also caught and fixed a gate of its own that could never fail
+   (`COUNT(*)` on an external-content FTS table is answered from the content table).
 
 Then rebuild and re-run the sweep, and re-measure arktype to confirm the combined
 result still matches the baseline table.
@@ -113,9 +116,8 @@ These are real, named, and currently owned by nobody:
   delivered `cochange_prior` does not currently discharge the graph-evidence
   obligation. Item 6b chose the fail-closed direction rather than edit a shared
   file mid-flight.
-- **`arch_pipeline.md` is now wrong** in two places (~lines 306-307, 397-399): it
-  says `cochange_partner` has "no emitter anywhere". Item 6b makes that false. The
-  streams correctly refused to edit a contended file; this is the orchestrator's.
+- ~~`arch_pipeline.md` says `cochange_partner` has "no emitter anywhere"~~ —
+  **DONE** at `f5837125`, along with the boa row.
 - **Pass 4f binds 206 IMPORTS edges to `Callsite` nodes** — a pre-existing defect
   item 9 found and did not fix. It makes a failed build show 2,347 IMPORTS vs
   2,445.
