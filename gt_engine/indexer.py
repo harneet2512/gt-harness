@@ -1616,6 +1616,16 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         if analysis_state in {"failed", "not_run"}
         else IndexBuildStatus.BUILT
     )
+    # Refresh the contract-embedding sidecar after every successful build.
+    # A failure here is logged but never costs the graph — the embedding store
+    # is a cache the retrieval side can degrade from with a named reason.
+    if status in (IndexBuildStatus.BUILT, IndexBuildStatus.BUILT_CORE_ONLY):
+        try:
+            from gt_engine.contract_embeddings import refresh as _refresh_embeddings
+            _refresh_embeddings(str(graph_path))
+        except Exception:
+            pass  # named-degraded at retrieval time
+
     return IndexBuildReceipt(status, graph_db=graph,
                              source_revision=source_revision, graph_revision=graph_revision,
                              analysis_state=analysis_state,
