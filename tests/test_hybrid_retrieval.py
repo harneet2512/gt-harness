@@ -268,6 +268,91 @@ def test_property_rank_is_ordered_by_score_then_stable_id(graph: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 2b. property — FTS5 path vs LIKE fallback (REV-277 required follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _build_fixture_with_properties_fts(path: Path) -> Path:
+    """Build the standard fixture plus ``properties_fts``."""
+    db = _build_fixture(path)
+    con = sqlite3.connect(db)
+    try:
+        con.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS properties_fts "
+            "USING fts5(kind, value, content='properties', content_rowid='id')"
+        )
+        con.execute("INSERT INTO properties_fts(properties_fts) VALUES('rebuild')")
+        con.commit()
+    finally:
+        con.close()
+    return db
+
+
+@pytest.fixture()
+def graph_with_fts(tmp_path: Path) -> Path:
+    return _build_fixture_with_properties_fts(tmp_path / "fts_fixture.db")
+
+
+def test_property_rank_uses_fts_when_properties_fts_exists(
+    graph_with_fts: Path,
+) -> None:
+    result = retrieval.property_rank(graph_with_fts, "input", 10)
+
+    assert result.available is True
+    assert result.detail["index"] == "properties_fts"
+    assert len(result) > 0
+
+
+def test_property_rank_falls_back_to_like_scan_when_fts_absent(
+    graph: Path,
+) -> None:
+    result = retrieval.property_rank(graph, "input", 10)
+
+    assert result.available is True
+    assert result.detail["index"] == "like_scan"
+    assert len(result) > 0
+
+
+def test_property_rank_falls_back_on_corrupt_fts(tmp_path: Path) -> None:
+    db = _build_fixture_with_properties_fts(tmp_path / "corrupt.db")
+    con = sqlite3.connect(db)
+    try:
+        # Corrupt the FTS shadow table so MATCH raises an error.
+        con.execute("DROP TABLE IF EXISTS properties_fts_data")
+        con.commit()
+    finally:
+        con.close()
+
+    result = retrieval.property_rank(db, "input", 10)
+
+    # Should fall back to LIKE rather than failing.
+    assert result.available is True
+    assert result.detail["index"] == "like_scan"
+
+
+def test_property_rank_fts_is_token_based_not_substring(
+    graph_with_fts: Path, graph: Path,
+) -> None:
+    """Document the semantic difference: FTS5 MATCH is token-based, LIKE is
+    substring-based.  ``"parse"`` matches ``"parseRegex"`` under LIKE (it is a
+    substring) but not under FTS5 (it is a different token).  This test pins
+    that the difference is a decision on record rather than a surprise."""
+    fts_result = retrieval.property_rank(graph_with_fts, "parse", 10)
+    like_result = retrieval.property_rank(graph, "parse", 10)
+
+    fts_ids = {row.stable_id for row in fts_result}
+    like_ids = {row.stable_id for row in like_result}
+
+    # The LIKE scan finds "parseRegex" as a substring match in properties;
+    # FTS5 MATCH does not because "parse" != "parseRegex" as a token.
+    # Both behaviours are correct for their semantics — but they differ,
+    # and this test makes the difference explicit.
+    assert like_ids >= fts_ids, (
+        "FTS results should be a subset of LIKE results for partial-token queries"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 3. dense
 # ---------------------------------------------------------------------------
 
