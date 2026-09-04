@@ -46,3 +46,40 @@ def test_quick_check_rejects_corrupt_reuse_candidate(tmp_path) -> None:
     ok, reason = indexer._graph_schema_receipt(graph)
     assert ok is False
     assert reason
+
+
+def test_graph_phase_metadata_distinguishes_core_only_and_verifies_seals(tmp_path) -> None:
+    graph = tmp_path / "graph.db"
+    analysis = json.dumps({"schema": "gt-index.analysis-phase.v1", "state": "failed", "failure_reason": "budget"}, separators=(",", ":"))
+    core = json.dumps({"schema": "gt-index.core-phase.v1", "state": "committed"}, separators=(",", ":"))
+    with sqlite3.connect(graph) as con:
+        con.execute("create table project_meta (key text primary key, value text)")
+        con.execute("create table cochanges (id integer)")
+        con.executemany(
+            "insert into project_meta(key,value) values(?,?)",
+            [
+                ("core_phase_state", "committed"),
+                ("core_phase_receipt", core),
+                ("core_phase_receipt_sha256", hashlib.sha256(core.encode()).hexdigest()),
+                ("analysis_state", "failed"),
+                ("analysis_failure_reason", "budget"),
+                ("analysis_phase_receipt", analysis),
+                ("analysis_phase_receipt_sha256", hashlib.sha256(analysis.encode()).hexdigest()),
+            ],
+        )
+        con.executemany("insert into cochanges(id) values(?)", [(1,), (2,)])
+
+    ok, reason = indexer._graph_schema_receipt(graph)
+    assert (ok, reason) == (True, "ok")
+    assert indexer._graph_phase_metadata(graph) == {
+        "core_phase_state": "committed",
+        "analysis_state": "failed",
+        "analysis_failure_reason": "budget",
+        "cochange_rows": 2,
+    }
+
+    with sqlite3.connect(graph) as con:
+        con.execute("update project_meta set value='0' where key='analysis_phase_receipt_sha256'")
+    ok, reason = indexer._graph_schema_receipt(graph)
+    assert ok is False
+    assert reason == "analysis_phase_receipt_sha256_mismatch"

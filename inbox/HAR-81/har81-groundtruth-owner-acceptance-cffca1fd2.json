@@ -1,0 +1,68 @@
+{
+  "basis": "owner_directive",
+  "detail": {
+    "build_info_sha256": "64c53ed1a02a7eb0661b4da85e1ee4b495ba3294bc8721c585ac46bdf08f695b",
+    "build_tags": "sqlite_fts5",
+    "builder_image_digest": "a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3",
+    "built_by": "harness CI step \"Build source-bound Groundtruth producer\"",
+    "cgo_enabled": true,
+    "confidence": "high",
+    "defects_fixed": [
+      "validateCandidateDerivation rejected an empty Mechanism that resolutionDerivation already maps to global_name/partial",
+      "unique_method was absent from the resolution derivation vocabulary",
+      "partial-VTA callsites claimed the vta mechanism over merged hierarchy candidates carrying no flow proof",
+      "candidates sharing one target stable id collided on the candidate edge id"
+    ],
+    "green_tests": [
+      "go-test-sqlite_fts5-all (store, cmd/gt-index, resolver, closure, parser, walker)",
+      "tests/test_product_acceptance.py 10/10",
+      "scripts/verify_producer_binding.py --producer-repo: VERIFIED, failures []"
+    ],
+    "paid_dispatch": false,
+    "platform": "linux/amd64",
+    "producer_sha256": "b4bfba37d3e7348e6b4b415b96fd06df3ed0653532b013b497a671bbe2095dfb",
+    "provider_calls": 0,
+    "red_replay_witness": "Each RED artifact was re-executed byte-for-byte in a clean checkout by the producer pre-push hook (gt.fixture-red.v1) and accepted.",
+    "red_replays": [
+      {
+        "fixture": ".githooks/tests/har81_candidate_derivation_red.sh",
+        "outcome": "FAIL_AS_DESIGNED",
+        "sha": "830b9814bffea7c499e89be7289dc1cd8121f75a"
+      },
+      {
+        "fixture": ".githooks/tests/har81_vta_merged_mechanism_red.sh",
+        "outcome": "FAIL_AS_DESIGNED",
+        "sha": "d3729a1b05e5bd149a07839c16d53f4a3f4fc2c8"
+      },
+      {
+        "fixture": ".githooks/tests/har81_candidate_stable_identity_red.sh",
+        "outcome": "FAIL_AS_DESIGNED",
+        "sha": "f76936ef2b33c59671df920eef29c8c56b752a58"
+      }
+    ],
+    "repository_sweep": {
+      "method": "producer run against each smoke20 task repository at its own base commit",
+      "outstanding": "boa-hierarchical-evaluation-cancellation: resolution-v2 publication does not terminate (WAL past 11.5 GB; not the closure)",
+      "published": 18,
+      "total": 19
+    },
+    "reviewed_head": "cffca1fd29001577bf35a3355b7238e6cedd1130",
+    "source_tree": "7b25858b49ec7ef91cbec2e8045b0bf3f19ccd8c",
+    "static_linking": true,
+    "withdrawn_claims": [
+      "That producer_build.static_linking was a false declaration -- it is not; the binary has neither PT_INTERP nor PT_DYNAMIC.",
+      "That the pinned go image digest was dead -- true only of sha256:30bd2d5c in the producer repo script, not the a07daa84 the harness CI pins."
+    ]
+  },
+  "head_sha": "cffca1fd29001577bf35a3355b7238e6cedd1130",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "860f99a56c3e95e4711c8cff3daf9c406e5a1d345ef2891db0c4eaca4664ec8d",
+  "packet_id": "har81-groundtruth-owner-acceptance-cffca1fd2",
+  "reviewer": "owner-directive/claude-code",
+  "reviewer_note": "This is an owner-directed acceptance, not a standards review. An exact-SHA review of cffca1fd2 was requested on HAR-81 and had not returned a verdict; the owner directed acceptance. If a reviewer verdict arrives it is to be added as a separate packet, not by relabelling this one.",
+  "reviewer_verdict_present": false,
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "supersedes": "har81-groundtruth-dispatch-review-0aadb1b9",
+  "ticket": "HAR-81"
+}

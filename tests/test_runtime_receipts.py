@@ -204,6 +204,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "binary_certified": True,
             "graph_sha256": "e" * 64,
             "sqlite_quick_check": "ok",
+            "cochange_rows": 2,
         },
     )
 
@@ -258,6 +259,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "refused_count": 1,
     }
     assert product_row["treatment_receipt"]["graph_certification"]["graph_sha256"] == "e" * 64
+    assert product_row["treatment_receipt"]["graph_utilisation"]["cochange_rows"] == 2
     assert (
         product_row["integrity"]["trajectory_sha256"]
         == hashlib.sha256(trajectory.read_bytes()).hexdigest()

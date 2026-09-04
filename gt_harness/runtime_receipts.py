@@ -15,13 +15,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from gt_engine.graph_utilisation import graph_utilisation
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
     MAX_TASK_DELIVERIES,
     TOTAL_DELIVERY_BYTE_LIMIT,
     delivery_byte_limit,
 )
+from gt_engine.graph_utilisation import graph_utilisation
 
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 _SHA64 = re.compile(r"[0-9a-f]{64}")
@@ -426,7 +426,9 @@ def issue_runtime_receipts(
             "admitted_count": len(deliveries),
             "refused_count": len(refused_deliveries),
         },
-        "graph_utilisation": graph_utilisation(deliveries),
+        "graph_utilisation": graph_utilisation(
+            deliveries, cochange_rows=graph.get("cochange_rows")
+        ),
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
         "event_journal": event_journal,

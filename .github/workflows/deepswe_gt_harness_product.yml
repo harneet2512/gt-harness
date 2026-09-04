@@ -93,7 +93,7 @@ jobs:
           OUTPUT_ROOT="${GITHUB_WORKSPACE}/artifacts/source-bound-producer"
           # Docker Hub's linux/amd64 manifest for the immutable Go 1.22.5 image.
           GO_IMAGE='golang:1.22.5-bookworm@sha256:a07daa84ec6c320c62f1fddb40b84698de004aac1c5ceb28243d674952d536f3'
-          BUILD_TIME='2026-09-02T06:51:07Z'
+          BUILD_TIME='2026-09-04T08:38:26Z'
           export SOURCE_COMMIT BUILD_TIME
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD)" = "${SOURCE_COMMIT}"
           test "$(git -C "${SOURCE_ROOT}" rev-parse HEAD^{tree})" = "${SOURCE_TREE}"
