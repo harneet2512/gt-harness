@@ -34,8 +34,15 @@ COPY gt_harness/ ./gt_harness/
 COPY scripts/ ./scripts/
 COPY cloud/ ./cloud/
 
+# GroundTruth: the vendored gateway wheel and the prebuilt Linux indexer, so a
+# session with gt_mode != off builds a real graph instead of degrading.
+COPY vendor/groundtruth_mcp-1.0.0-py3-none-any.whl vendor/gt-index-linux-amd64 ./vendor/
+RUN install -m 0755 vendor/gt-index-linux-amd64 /usr/local/bin/gt-index
+ENV GT_INDEX_BINARY=/usr/local/bin/gt-index
+
 RUN pip install --upgrade pip \
-    && pip install -e ".[cloud,miniswe]"
+    && pip install vendor/groundtruth_mcp-1.0.0-py3-none-any.whl \
+    && pip install -e ".[cloud,miniswe,gt]"
 
 # Mount point for the SQLite session store (compose volume: db-data).
 RUN mkdir -p /app/data
