@@ -262,6 +262,91 @@ and 9 callsites; **no promotion measured** — `CALLS` 777→777, `SELECTED_TARG
    left the one-line reversal unmade because it is an evidence-policy decision.
    That is the right call.
 
+### Wiring — the three landed packages, actually published (delta rows 6, 6a, 7) — **LANDED**
+
+**Landed on `final_hardening/producer` as `95ff5a3c2` (RED) + `24d156530` (fix)**,
+pushed. Re-verified by me before landing: `go test -tags sqlite_fts5` over
+`cmd/gt-index`, `internal/community`, `internal/process`, `internal/cochange` →
+**exit 0**; the RED commit confirmed to contain only the four dedicated files the
+`fixture_files_are_dedicated` check admits; receipt validated
+(`gt.fixture-red.v1`, `base_sha=43514ced1…`, `exit_code=1`, both blob digests).
+
+Originally authored as `8b8cca3dd` (RED) → `31b661bf7` (fix). All logic in a new
+`cmd/gt-index/derived.go` (445 lines); `main.go` gained one contiguous 22-line
+block and **lost** Pass 5c plus the 57-line `mineCochanges`.
+
+**This is the item that turns three reviewed packages from dead code into
+published rows.** Before it: `communities`, `community_members`, `processes` and
+`process_steps` **did not exist at all** — their DDL lives in the packages and
+nothing called `EnsureSchema`. `cochanges` was written by `mineCochanges`, a
+second, weaker emitter with a hard-coded support floor of 3, no window record, no
+shallow-clone detection and a silent `return 0` on failure. And `project_meta`
+said nothing, so "found nothing" and "never ran" were the same observation.
+
+Measured on three repositories, layers off vs on:
+
+| | arktype (TS, 458 files) | actionlint (Go, 544 files) |
+|---|---|---|
+| nodes | 159,548 → **159,548** | 61,833 → **61,833** |
+| edges | 188,264 → **188,264** | 74,058 → **74,058** |
+| edges CERTIFIED | 4,593 → **4,593** | 2,425 → **2,425** |
+| CALLS CERTIFIED | 1,402 → **1,402** | 1,330 → **1,330** |
+| resolution_candidates | 10,820 → **10,820** | 5,514 → **5,514** |
+| `cochanges` | 0 → **23,720** | 0 → **4,643** |
+| `communities` | absent → **81** | absent → **72** |
+| `community_members` | absent → **982** | absent → **553** |
+| `processes` | absent → **95** | absent → **155** |
+| `process_steps` | absent → **276** | absent → **357** |
+| Pass 4g wall time | **10.087 s** | **3.6–4.9 s** |
+
+Every core population is **identical** across the two arms. That is the
+no-promotion proof, measured rather than asserted — and it is structural too:
+`community.Queryer` exposes `QueryContext` only (the package defines no `Exec`),
+`process` writes only tables it owns, and the coupling transaction touches only
+`cochanges`/`communities`/`community_members`.
+
+Cross-check: arktype's `assertions_scanned=105` matches the figure item 8 reported
+independently, and its 23,720 co-change pairs match item 6's `--depth=500`
+measurement exactly.
+
+**The named-abstention case, on a real repository.** bandit is a depth-1 shallow
+clone; the graph still published, exit 0:
+
+```
+derived_layers_state=degraded   derived_layers_degraded=cochange=shallow_clone
+derived_cochange_state=shallow_clone  pairs=0  commits_scanned=0  shallow=1
+derived_community_state=ok  count=3  certified_call_rows=5  excluded_call_rows=482
+derived_community_cohesion=absent:history_unavailable
+derived_process_state=ok  count=298  assertions_scanned=507  targets_without_path=48
+```
+
+Co-change abstains **and says why**; communities still form from certified CALLS
+alone; cohesion renders `absent:history_unavailable` and never `0.0`. 23
+`derived_*` keys are written on **every** path including the disabled one, so
+"did not run" and "found nothing" stay distinguishable. A layer's state is the
+producing package's own `Reason` constant verbatim; the wiring adds only five
+states of its own, for failures the packages cannot name. **No failure aborts the
+index.**
+
+Gate: `GT_REQUIRE_DERIVED=1` aborts the staged build on any non-`ok` state;
+`GT_DERIVED_LAYERS=off` skips and records `disabled_by_operator`. An unrecognised
+value of either — or both set contradictorily — is an error, not a silent default.
+
+**Honesty worth noting in its own report:** it refuses to quote a whole-build wall
+time, because whole-build time varies ~2× between identical runs on this host and
+the two arms disagreed in sign. It reports only the in-process Pass 4g timer,
+which brackets exactly the added code.
+
+Its stated gaps: switches are parsed at Pass 4g rather than startup (deliberate,
+to keep the `main.go` footprint to one block while five streams edit `main()`);
+`GT_DERIVED_LAYERS=off` now means **no** `cochanges` at all, since keeping both
+writers was impossible — same primary key, different support floors, and the
+weaker emitter ran later so it would have silently won every row; not wired on the
+`-file` incremental path, so derived tables go stale after an incremental reindex;
+`cochange.Persist` still drops the computed confidence fields because recovering
+them needs additive columns in the protected `sqlite.go`; and only three fixtures
+were run, with no claim made about the other sixteen.
+
 ---
 
 ## 3. Rejected
