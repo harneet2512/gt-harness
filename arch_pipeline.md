@@ -284,7 +284,7 @@ tripped both arms of attestation on run 33708231670.
 |---|---|
 | 0 Dispatch admission | Working as designed; **green** — packet on `gt-review-inbox` @ `ea2f30d3`, CI 33785370968 and 33791548818 |
 | 1 Task materialisation | Working |
-| 2 Producer | Working on 18/19; **boa broken**, fix in flight (item 1) |
+| 2 Producer | **19/19 publish** (boa in 788 s with pass_coverage fix); two-phase publication landed |
 | 2b Derived layers | **Measured** — contract, retrieval, co-change, processes landed; wiring of the two producer packages waits on item 1 |
 | 3 Index lifecycle | Working; LSP + ONNX **unproven in a run** |
 | 4 Agent loop | Unproven end to end |
