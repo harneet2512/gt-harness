@@ -1,0 +1,39 @@
+{
+  "created_at":"2026-09-04T20:00:27.366170Z",
+  "detail":{
+    "acceptance_evidence_remaining":[
+      "30-language built-graph measurement",
+      "19-repository +/-1% count comparison",
+      "one paid arktype corrective smoke"
+    ],
+    "binary_sha256":"9147cb21798774502fb4330e4c07477adff441a26b9d368081b86df925220bd1",
+    "build_info_sha256":"4373030a3438bcde0e1fe4dc2de5c832cb5a32a164c743e79c26b3959069a09a",
+    "build_tags":"netgo,osusergo,sqlite_fts5",
+    "producer_ci_run":33913443475,
+    "producer_ci_status":"SUCCESS",
+    "reviewer_verdict_present":true,
+    "source_tree":"d6082901cc3e555dbdbe76f5347bbf30db031d63",
+    "spec_hard_implementation_defects":0,
+    "standards_hard_violations":0,
+    "static_build_run":33913443535,
+    "static_build_status":"SUCCESS",
+    "static_linking":true
+  },
+  "file":"",
+  "head_sha":"08fe997d0d5e1ef4bf00e5d990dd4907eebf8adf",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Final producer review: no hard code or spec defects",
+  "packet_digest_sha256":"9dec372a9c270615e62a12aa57a3370eb69821ab48315cb04c26a2c82c7c7ca2",
+  "packet_id":"har83-final-hardening-exact-build-08fe997d0",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"final-two-axis-review",
+    "system":"codex-check"
+  },
+  "status":"PASS",
+  "supersedes":null,
+  "ticket":"HAR-83"
+}
