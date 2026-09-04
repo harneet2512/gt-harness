@@ -67,7 +67,7 @@ def validate_workflow(workflow: Path, *, root: Path) -> list[str]:
                 "ref: ${{ steps.product-pins.outputs.review_inbox_commit }}",
             ),
             (
-                "Build source-bound Groundtruth producer",
+                "Verify vendored Groundtruth producer identity",
                 "SOURCE_TREE: ${{ steps.product-pins.outputs.groundtruth_tree }}",
             ),
         )
