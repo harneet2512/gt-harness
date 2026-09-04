@@ -643,6 +643,9 @@ def test_dense_rank_from_the_store_ranks_but_never_promotes(
 
     assert hashlib.sha256(base_graph.read_bytes()).hexdigest() == before
     assert ranking.attribution_record()["promotes_trust"] is False
+    # hybrid_rank must actually pass store_path down, not merely accept it.
+    dense = next(s for s in ranking.sources if s.source is retrieval.RetrievalSource.DENSE)
+    assert dense.detail["vector_source"] == "contract_embedding_store"
 
 
 def test_dense_rank_keeps_its_named_degraded_reason_without_the_model(
