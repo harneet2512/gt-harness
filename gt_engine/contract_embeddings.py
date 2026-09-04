@@ -501,6 +501,11 @@ class ContractEmbeddingStore:
             dimension=self.dimension,
         )
         vectors = self._embed_plan(plan, embed_fn, batch_size)
+        # Vectors first, bindings second, in that order and not the other.  A
+        # crash between the two leaves vectors nothing claims, and the next
+        # refresh re-embeds and overwrites them -- wasted work that converges.
+        # The reverse order would leave a binding asserting a vector that is not
+        # there, and the store would then serve a claim it cannot honour.
         index_digest = self._publish(plan, vectors)
         self._write_bindings(plan, revision)
         return self._receipt(
