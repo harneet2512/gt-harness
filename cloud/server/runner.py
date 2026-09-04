@@ -185,12 +185,13 @@ class SessionManager:
             receipt = ensure_index_with_receipt(
                 workspace, state_dir=str(state_dir(workspace))
             )
-            if not getattr(receipt, "available", False):
-                raise RuntimeError("index unavailable")
+            graph_db = _graph_db_of(receipt)
+            if graph_db is None:
+                raise RuntimeError(_index_failure_reason(receipt))
             self._emit(loop, session_id, "lifecycle", {
                 "status": "gt_ready",
                 "gt_mode": session["gt_mode"],
-                "graph_db": str(getattr(receipt, "graph_db", "") or ""),
+                "graph_db": str(graph_db),
             })
             return "ready"
         except Exception as exc:  # noqa: BLE001 - GT degrades, it does not fail
@@ -224,10 +225,10 @@ class SessionManager:
                 f"max concurrent turns ({self._max_concurrent}) reached"
             )
         try:
-            message = await self._store.add_message(
-                session_id, role="user", content=content
-            )
             turn_id = new_id()
+            message = await self._store.add_message(
+                session_id, role="user", content=content, turn_id=turn_id
+            )
             await self._store.update_status(
                 session_id, "running",
                 current_turn_id=turn_id,
@@ -616,7 +617,7 @@ class SessionManager:
             from gt_engine.verification_contract import compile_obligation_predicates
 
             index_receipt = ensure_index_with_receipt(cwd, state_dir=scratch_dir)
-            graph_db = index_receipt.graph_db if index_receipt.available else None
+            graph_db = _graph_db_of(index_receipt)
 
             contract = extract_task_contract(issue_text)
             compiled = compile_obligation_predicates(contract)
@@ -721,6 +722,31 @@ class SessionManager:
 
 class ConcurrencyLimit(RuntimeError):
     """Raised when a new turn would exceed MAX_CONCURRENT_SESSIONS."""
+
+
+def _graph_db_of(receipt: Any) -> Any:
+    """The built graph database, or ``None`` if this index is not usable.
+
+    ``IndexBuildReceipt`` reports ``status`` (``built``/``build_failed``/
+    ``invalid_database``/``not_applicable``) and ``graph_db``; it has no
+    ``available`` flag, so readiness is "status is built and a db came back".
+    """
+    status = str(getattr(getattr(receipt, "status", ""), "value", "") or "")
+    graph_db = getattr(receipt, "graph_db", None)
+    return graph_db if status == "built" and graph_db else None
+
+
+def _index_failure_reason(receipt: Any) -> str:
+    """Why an index is not usable, in the indexer's own words."""
+    status = str(getattr(getattr(receipt, "status", ""), "value", "") or "unknown")
+    detail = str(
+        getattr(receipt, "error_diagnostic", "")
+        or getattr(receipt, "error_type", "")
+        or ""
+    ).strip()
+    if status == "not_applicable":
+        detail = detail or "the repository has nothing this indexer can index"
+    return f"index status {status}" + (f": {detail}" if detail else "")
 
 
 def _submission_summary(submission: str, diff: dict) -> str:

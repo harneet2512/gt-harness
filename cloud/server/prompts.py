@@ -36,6 +36,9 @@ turns; the shell you drive and the working tree you edit survive between turns.
 - A response that does work MUST include reasoning text AND at least one bash \
 tool call. Call the bash tool with your command as the argument: \
 `{"command": "your_command_here"}`.
+- Every command runs under POSIX `bash`, whatever the host platform says — use \
+`ls`, `cat`, `sed`, `/`-separated paths; never `cmd.exe` syntax such as `dir`, \
+`type`, or `cd /d`.
 - Directory and environment variable changes are not persistent — every action \
 runs in a new subshell. Prefix a command with `MY_VAR=value cd /path && ...` \
 when you need them, or write them to a file.
