@@ -101,6 +101,21 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * True when this page is already showing an un-settled copy of `content`.
+ *
+ * The sending tab appends its own message the moment you press Enter, under
+ * a local id; the server's `turn_started` can beat the POST response back.
+ * Rendering the frame's copy too would show the prompt twice for as long as
+ * the round trip takes, so the frame yields — `settle` will fold the local
+ * copy onto the real id a moment later.
+ */
+function hasPendingCopy(state: ChatState, content: string): boolean {
+  return state.messages.some(
+    (m) => m.meta.pending === true && m.content === content,
+  );
+}
+
 /** Insert or merge a message, preserving arrival order for new ids. */
 function upsert(state: ChatState, incoming: Message): ChatState {
   const at = state.index[incoming.id];
@@ -174,7 +189,27 @@ function applyEvent(state: ChatState, event: SessionEvent): ChatState {
         ...turn,
         startedAt: turn.startedAt ?? event.timestamp,
       }));
-      next = linkMessage(next, str(event.data.message_id), turnId);
+      const messageId = str(event.data.message_id);
+      next = linkMessage(next, messageId, turnId);
+
+      /* HAR-84 G-09. The frame now carries the prompt itself, so a tab that
+         did not send it has something to render. A known id merges (the
+         upsert keeps the body it already has); an unknown one is created. */
+      const content = str(event.data.content);
+      if (messageId && content) {
+        const known = next.index[messageId] !== undefined;
+        if (known || !hasPendingCopy(next, content)) {
+          next = upsert(next, {
+            id: messageId,
+            session_id: "",
+            turn_id: turnId,
+            role: str(event.data.role) || "user",
+            content,
+            created_at: event.timestamp,
+            meta: {},
+          });
+        }
+      }
       return next;
     }
 
@@ -204,10 +239,14 @@ function applyEvent(state: ChatState, event: SessionEvent): ChatState {
     case "tool_call": {
       const turnId = str(event.data.turn_id);
       if (!turnId) return state;
+      // HAR-84 G-19: GT's routing hook emits a frame with `command: ""`.
+      // A step whose command is nothing is a `$` with nothing after it.
+      const command = str(event.data.command);
+      if (!command) return state;
       return appendItem(state, turnId, {
         key,
         kind: "tool_call",
-        command: str(event.data.command),
+        command,
         nCalls: num(event.data.n_calls),
       });
     }
@@ -305,10 +344,53 @@ function applyEvent(state: ChatState, event: SessionEvent): ChatState {
       });
     }
 
+    /**
+     * A note the server wrote into the thread: a restart that interrupted a
+     * turn, and its kind. It renders where it happened rather than as a
+     * banner, because *when* is half of what it says.
+     */
+    case "system_note": {
+      const content = str(event.data.content);
+      if (!content) return state;
+      const turnId = str(event.data.turn_id);
+      const messageId = str(event.data.message_id) || key;
+      let next = turnId ? linkMessage(state, messageId, turnId) : state;
+      return upsert(next, {
+        id: messageId,
+        session_id: "",
+        turn_id: turnId || null,
+        role: "system",
+        content,
+        created_at: event.timestamp,
+        meta: {},
+      });
+    }
+
+    /**
+     * Only one lifecycle phase belongs in the thread: the sandbox being
+     * re-created underneath a live session. Everything else about a session's
+     * status is the header's job.
+     */
+    case "lifecycle": {
+      if (str(event.data.status) !== "sandbox_restarted") return state;
+      return upsert(state, {
+        id: key,
+        session_id: "",
+        turn_id: null,
+        role: "system",
+        content: SANDBOX_RESTARTED_NOTE,
+        created_at: event.timestamp,
+        meta: {},
+      });
+    }
+
     default:
       return state;
   }
 }
+
+/** What a `sandbox_restarted` frame says in the thread. */
+export const SANDBOX_RESTARTED_NOTE = "sandbox restarted";
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {

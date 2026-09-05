@@ -134,6 +134,94 @@ export function sessionClosedBlurb(
 }
 
 /**
+ * The GT badge in the header: which mode was asked for, and whether the
+ * index behind it actually exists. The mode is the half a reader cannot
+ * get anywhere else on this page — "GT: ready" never said *ready for what*
+ * (HAR-84 G-02).
+ */
+export function gtBadgeLabel(mode: string, status: string): string {
+  const named = mode && mode !== "off" ? mode : "";
+  if (!named) return "GT: off";
+  switch (status) {
+    case "pending":
+      return `GT: ${named} · indexing…`;
+    case "unavailable":
+      return `GT: ${named} · unavailable`;
+    case "off":
+      return `GT: ${named} · off`;
+    default:
+      return `GT: ${named}`;
+  }
+}
+
+/**
+ * How a turn that ended without an answer reads on its own card. A restart
+ * is not a failure and not a stop — nothing went wrong and nothing
+ * finished — and the card has to say so rather than sit on "Working"
+ * forever (HAR-84 G-08). Null for every reason that arrives with a reply
+ * to carry it, which is where the tail caps already live.
+ */
+export function turnOutcomeNote(
+  finishReason: string | null | undefined,
+): string | null {
+  switch (finishReason) {
+    case "interrupted":
+      return "interrupted by a server restart";
+    case "error":
+      return "the turn failed";
+    case "stopped":
+      return "stopped";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Why the composer is dead on a failed session. The server knows — a bad
+ * model id, a sandbox that will not start, a quota — and repeating "This
+ * session failed." at someone who can read the error is a choice
+ * (HAR-84 G-04).
+ */
+export function failedReason(error: string | null | undefined): string {
+  const text = (error ?? "").trim();
+  if (!text) return "This session failed.";
+  return `This session failed: ${truncate(text, COMPOSER_REASON_MAX)}`;
+}
+
+/** As much of a reason as the composer can hold without clipping it. */
+export const COMPOSER_REASON_MAX = 132;
+
+/** Rows the locked composer needs to show its reason whole. */
+export const COMPOSER_MAX_ROWS = 3;
+const COMPOSER_COLS = 46;
+
+export function lockedRows(reason: string): number {
+  const rows = Math.ceil(reason.length / COMPOSER_COLS);
+  return Math.min(COMPOSER_MAX_ROWS, Math.max(1, rows));
+}
+
+/**
+ * What a bare exit code meant, where the runtime says nothing else. rc 137
+ * with empty output is the container's memory cap and reads as silence
+ * otherwise (HAR-84 G-20); 128 is the docker exec that could not start at
+ * all (G-03). Null where the number speaks for itself.
+ */
+export function exitNote(returncode: number | null | undefined): string | null {
+  switch (returncode) {
+    case 137:
+      return "killed: the sandbox hit its memory limit";
+    case 143:
+      return "terminated";
+    case 124:
+      return "killed: the command timed out";
+    case 128:
+      return "the sandbox could not run the command";
+    default:
+      return null;
+  }
+}
+
+/**
  * The one-line session total: "12 steps · 4m 10s · $0.000". Parts the
  * server has not reported are left out rather than guessed at.
  */

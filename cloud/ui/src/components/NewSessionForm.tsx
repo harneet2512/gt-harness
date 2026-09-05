@@ -1,6 +1,9 @@
 import { useState } from "react";
 import {
   createSession,
+  GT_MODE_HELP,
+  GT_MODES,
+  isGtMode,
   WALL_SECONDS_MAX,
   WALL_SECONDS_MIN,
   type GtMode,
@@ -15,7 +18,6 @@ const MODELS = [
 ] as const;
 
 const CUSTOM_MODEL = "__custom__";
-const GT_MODES: readonly GtMode[] = ["off", "advisory", "engine"];
 
 const DEFAULT_REF = "main";
 const DEFAULT_STEP_LIMIT = 60;
@@ -49,6 +51,16 @@ interface Props {
   seed?: NewSessionSeed;
 }
 
+/**
+ * A mode the server would reject is not offered. Sessions created before
+ * HAR-84 G-02 carry `gt_mode: "engine"`, which was never a `GTMode` and
+ * raised on every turn; seeding a restart from one starts it at `off`
+ * rather than repeating the failure.
+ */
+function seedGtMode(mode: string | undefined): GtMode {
+  return mode && isGtMode(mode) ? mode : GT_MODES[0];
+}
+
 /** A model the picker does not list is still a model: keep it, as "Other…". */
 function seedModel(model: string | undefined): [string, string] {
   if (!model) return [MODELS[0], ""];
@@ -69,7 +81,7 @@ export default function NewSessionForm({
   const [ref, setRef] = useState(seed?.ref || DEFAULT_REF);
   const [modelChoice, setModelChoice] = useState<string>(seedChoice);
   const [customModel, setCustomModel] = useState(seedCustom);
-  const [gtMode, setGtMode] = useState<string>(seed?.gtMode ?? GT_MODES[0]);
+  const [gtMode, setGtMode] = useState<GtMode>(seedGtMode(seed?.gtMode));
   const [stepLimit, setStepLimit] = useState(
     String(seed?.stepLimit ?? DEFAULT_STEP_LIMIT),
   );
@@ -193,14 +205,22 @@ export default function NewSessionForm({
           <select
             id="gt"
             value={gtMode}
-            onChange={(e) => setGtMode(e.target.value)}
+            aria-describedby="gt-help"
+            onChange={(e) => setGtMode(seedGtMode(e.target.value))}
           >
             {GT_MODES.map((m) => (
-              <option key={m} value={m}>
+              /* The name alone: a native select shows the chosen option's
+                 whole label in a control this column cannot widen, and
+                 "enforced — GT control…" is worse than no description at
+                 all. The line below carries it, for the one that matters. */
+              <option key={m} value={m} title={GT_MODE_HELP[m]}>
                 {m}
               </option>
             ))}
           </select>
+          <p className="field-hint" id="gt-help">
+            <strong>{gtMode}</strong> — {GT_MODE_HELP[gtMode]}
+          </p>
         </div>
         <div className="field">
           <label className="cap" htmlFor="steps">

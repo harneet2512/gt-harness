@@ -28,6 +28,13 @@ import { useSessionStream } from "./useSessionStream";
 const CREATING_POLL_MS = 4000;
 /** A write settles before the diff is worth asking for again. */
 const DIFF_DEBOUNCE_MS = 800;
+/**
+ * How long a `turn_started` frame is given to carry its own prompt before
+ * the thread is re-read from `/messages`. The frame does carry it now
+ * (HAR-84 G-09) — this is the belt to that braces: a server that predates
+ * the field, a frame that lost a race, a tab that reconnected mid-turn.
+ */
+const MESSAGES_REFETCH_MS = 700;
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -63,6 +70,8 @@ export interface SessionData {
   phase: string | null;
   /** Why the GT index is unavailable, as the lifecycle frame reported it. */
   gtError: string | null;
+  /** Why the session failed, in the server's words. Null until it does. */
+  failureError: string | null;
   loadError: string | null;
   sendError: string | null;
   isRunning: boolean;
@@ -104,6 +113,9 @@ export function useSessionData(sessionId: string | null): SessionData {
   const [liveGtError, setLiveGtError] = useState<string | null | undefined>(
     undefined,
   );
+  /* What the `lifecycle failed` frame said. "This session failed." is not an
+     explanation, and the server has one. */
+  const [failureError, setFailureError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [turnEpoch, setTurnEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -247,6 +259,28 @@ export function useSessionData(sessionId: string | null): SessionData {
     [],
   );
 
+  /* ---- the thread, when a frame may not have carried it ---- */
+  const messagesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleMessages = useCallback(() => {
+    if (!sessionId) return;
+    if (messagesTimer.current) clearTimeout(messagesTimer.current);
+    messagesTimer.current = setTimeout(() => {
+      messagesTimer.current = null;
+      getMessages(sessionId)
+        .then((messages) => dispatch({ type: "hydrate", messages }))
+        .catch(() => {
+          /* the stream is the primary path; this was the fallback */
+        });
+    }, MESSAGES_REFETCH_MS);
+  }, [sessionId]);
+
+  useEffect(
+    () => () => {
+      if (messagesTimer.current) clearTimeout(messagesTimer.current);
+    },
+    [],
+  );
+
   /* ---- live stream ---- */
   const onEvent = useCallback(
     (event: SessionEvent) => {
@@ -288,6 +322,9 @@ export function useSessionData(sessionId: string | null): SessionData {
               prev ? { ...prev, gt_status: "unavailable" } : prev,
             );
           }
+          if (mapped === "failed") {
+            setFailureError(str(event.data.error) || null);
+          }
           if (raw === "gt_ready") {
             setLiveGtError(null);
             setSession((prev) =>
@@ -317,6 +354,8 @@ export function useSessionData(sessionId: string | null): SessionData {
               : prev,
           );
           setTurnEpoch((n) => n + 1);
+          // Debounced fallback for a prompt the frame did not carry.
+          scheduleMessages();
           break;
         }
 
@@ -352,7 +391,7 @@ export function useSessionData(sessionId: string | null): SessionData {
           break;
       }
     },
-    [refetchSession, scheduleDiff],
+    [refetchSession, scheduleDiff, scheduleMessages],
   );
 
   useSessionStream(sessionId ?? undefined, onEvent);
@@ -453,6 +492,7 @@ export function useSessionData(sessionId: string | null): SessionData {
     chat,
     phase,
     gtError: gtErrorOf(liveGtError, session?.gt_error),
+    failureError,
     loadError,
     sendError,
     isRunning: Boolean(isRunning),

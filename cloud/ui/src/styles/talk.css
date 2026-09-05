@@ -193,6 +193,12 @@
 .gt-warn-why {
   margin-top: 5px;
 }
+.gt-warn-detail {
+  margin-top: 5px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .gt-warn-why > summary {
   cursor: pointer;
   color: var(--muted);
@@ -245,6 +251,7 @@
   font-size: 12px;
   padding: 6px 0;
 }
+
 
 .exchange {
   margin-bottom: 22px;
@@ -349,6 +356,11 @@
 .strip-more {
   color: var(--orange);
   margin-left: 4px;
+}
+/* How a turn ended, where no reply came back to say it. */
+.strip-outcome {
+  color: var(--muted);
+  margin-left: 6px;
 }
 
 .ticks,

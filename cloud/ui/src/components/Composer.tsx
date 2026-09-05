@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { lockedRows } from "../format";
 
 interface Props {
   /** True while the session cannot accept input (creating/closed/failed). */
@@ -6,6 +7,12 @@ interface Props {
   lockedReason: string;
   /** True while a turn is in flight — the message lands mid-turn. */
   isRunning: boolean;
+  /**
+   * Stop was pressed and the turn has not reached a step boundary yet. It
+   * can take as long as the model call in flight (HAR-84 G-14), so the
+   * button has to show it was heard rather than invite a second press.
+   */
+  stopping: boolean;
   /** A sent message is queued and has not reached the agent yet. */
   steeringQueued: boolean;
   error: string | null;
@@ -21,6 +28,7 @@ export default function Composer({
   locked,
   lockedReason,
   isRunning,
+  stopping,
   steeringQueued,
   error,
   onSend,
@@ -62,10 +70,14 @@ export default function Composer({
       <textarea
         ref={areaRef}
         className="composer-input"
-        rows={1}
+        /* A locked composer's placeholder is the whole explanation — a
+           failed session's reason is a sentence, not a word — and a
+           one-row box clips it. */
+        rows={locked ? lockedRows(lockedReason) : 1}
         value={text}
         disabled={locked}
         placeholder={locked ? lockedReason : "Message the agent…"}
+        title={locked ? lockedReason : undefined}
         aria-label="Message the agent"
         onChange={(e) => {
           setText(e.target.value);
@@ -87,10 +99,15 @@ export default function Composer({
           <button
             type="button"
             className="btn-text"
-            title="Ctrl/Cmd + Shift + Backspace"
+            disabled={stopping}
+            title={
+              stopping
+                ? "Stopping at the end of the model call in flight"
+                : "Ctrl/Cmd + Shift + Backspace"
+            }
             onClick={onStop}
           >
-            Stop
+            {stopping ? "Stopping…" : "Stop"}
           </button>
         )}
         <button

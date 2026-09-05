@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { COMPOSER_LOCKED } from "../api";
+import { failedReason } from "../format";
 import { relationsFor } from "../graph";
 import {
   defaultDrawerOpen,
@@ -229,9 +230,10 @@ export default function SynapsePage() {
           liveSteps={view.calls}
           now={data.now}
           locked={COMPOSER_LOCKED.has(status)}
-          lockedReason={lockedReason(status, data.phase)}
+          lockedReason={lockedReason(status, data.phase, data.failureError)}
           sendError={data.loadError ?? data.sendError}
           gtError={data.gtError}
+          failureError={data.failureError}
           onSend={data.send}
           onStop={data.stop}
           onContinue={() => void data.send("continue")}
@@ -401,7 +403,11 @@ export default function SynapsePage() {
   );
 }
 
-function lockedReason(status: string, phase: string | null): string {
+function lockedReason(
+  status: string,
+  phase: string | null,
+  failureError: string | null,
+): string {
   switch (status) {
     case "creating":
       switch (phase) {
@@ -419,7 +425,7 @@ function lockedReason(status: string, phase: string | null): string {
     case "closed":
       return "This session is closed.";
     case "failed":
-      return "This session failed.";
+      return failedReason(failureError);
     default:
       return "";
   }

@@ -21,6 +21,11 @@ interface Props {
   elapsed: number | null;
   /** Mid-turn messages with no matching `steering` frame. */
   extraSteering: readonly StepSteering[];
+  /**
+   * How the turn ended, where nothing came back to say it — a restart, a
+   * failed turn, a stop with no reply. Null on an ordinary turn.
+   */
+  outcome: string | null;
   onSelect: () => void;
 }
 
@@ -39,6 +44,7 @@ export default function TransmissionStrip({
   cost,
   elapsed,
   extraSteering,
+  outcome,
   onSelect,
 }: Props) {
   const midTurn: StepSteering[] = [
@@ -70,6 +76,7 @@ export default function TransmissionStrip({
           </span>
         ))}
         {running && <span className="caret">▌</span>}
+        {outcome && <span className="strip-outcome cap">{outcome}</span>}
         {midTurn.length > 0 && (
           <span className="strip-more">{midTurn.length} mid-turn</span>
         )}

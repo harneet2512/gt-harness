@@ -21,7 +21,27 @@ export type SessionStatusValue =
 
 export type GtStatus = "off" | "ready" | "unavailable" | "pending";
 
-export type GtMode = "off" | "advisory" | "engine";
+/**
+ * How much ground truth the agent gets. These are the server's `GTMode`
+ * members verbatim: an unknown value is a `ValueError` on the first turn,
+ * so the picker never offers one. (`engine` was never a member — HAR-84
+ * G-02 — and has been removed.)
+ */
+export const GT_MODES = ["off", "advisory", "assistive", "enforced"] as const;
+
+export type GtMode = (typeof GT_MODES)[number];
+
+/** One line per mode, for the picker. Nothing here is a guess. */
+export const GT_MODE_HELP: Record<GtMode, string> = {
+  off: "no GroundTruth",
+  advisory: "evidence offered, agent may ignore",
+  assistive: "evidence delivered and preferred",
+  enforced: "GT controls tool routing (fail-closed)",
+};
+
+export function isGtMode(value: string): value is GtMode {
+  return (GT_MODES as readonly string[]).includes(value);
+}
 
 /** Statuses in which the composer must be disabled. */
 export const COMPOSER_LOCKED: ReadonlySet<string> = new Set([
@@ -98,6 +118,8 @@ export type FinishReason =
   | "time_limit"
   | "stopped"
   | "error"
+  /** A server restart ended the turn; nothing failed and nothing finished. */
+  | "interrupted"
   | "submitted";
 
 /** Finish reasons that stopped a turn at a cap rather than at an answer. */
@@ -259,6 +281,7 @@ export const EVENT_TYPES = [
   "agent_reply",
   "turn_finished",
   "agent_error",
+  "system_note",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -276,6 +299,8 @@ export type LifecycleStatus =
   | "indexing"
   | "gt_ready"
   | "gt_unavailable"
+  /** The sandbox container was re-created under a live session. */
+  | "sandbox_restarted"
   | "idle"
   | "running"
   | "stopped"
@@ -288,6 +313,7 @@ const TRANSIENT_LIFECYCLE: ReadonlySet<string> = new Set([
   "indexing",
   "gt_ready",
   "gt_unavailable",
+  "sandbox_restarted",
   "stopped",
 ]);
 
@@ -322,6 +348,24 @@ export interface LifecycleData {
 export interface TurnStartedData {
   turn_id: string;
   message_id: string;
+  /**
+   * The prompt that opened the turn. Added for HAR-84 G-02/G-09: without it
+   * a second tab can render the turn and the reply but never what was asked.
+   */
+  content?: string;
+  role?: MessageRole | string;
+}
+
+/**
+ * A message the *server* wrote into the thread — "Server restarted; turn
+ * interrupted" and its kind. It is not an error and not a reply; it is the
+ * product speaking in its own voice, at the point in the thread where it
+ * happened.
+ */
+export interface SystemNoteData {
+  turn_id?: string;
+  message_id?: string;
+  content?: string;
 }
 
 export interface AssistantData {
@@ -392,6 +436,7 @@ export type SessionEvent =
   | Envelope<"agent_reply", AgentReplyData>
   | Envelope<"turn_finished", TurnFinishedData>
   | Envelope<"agent_error", AgentErrorData>
+  | Envelope<"system_note", SystemNoteData>
   | Envelope<"unknown", Record<string, unknown>>;
 
 function isEventType(value: unknown): value is EventType {
@@ -550,9 +595,16 @@ export const LOGIN_URL = `${AUTH}/login`;
  * Open the event stream. `afterId` replays only events newer than the last one
  * already rendered, so a reconnect does not duplicate the whole history.
  */
+export function streamUrl(id: string, afterId: number): string {
+  /* A non-integer `after_id` is a 400 on a strict server and a full history
+     replay on a lax one (HAR-84 G-17). Neither is worth risking over a
+     value that only ever comes from our own ingest, so it is floored to a
+     positive integer here or left off entirely. */
+  const n = Math.floor(afterId);
+  const suffix = Number.isFinite(n) && n > 0 ? `?after_id=${n}` : "";
+  return `${path(id)}/events${suffix}`;
+}
+
 export function subscribeEvents(id: string, afterId = 0): EventSource {
-  const suffix = afterId > 0 ? `?after_id=${afterId}` : "";
-  return new EventSource(`${path(id)}/events${suffix}`, {
-    withCredentials: true,
-  });
+  return new EventSource(streamUrl(id, afterId), { withCredentials: true });
 }

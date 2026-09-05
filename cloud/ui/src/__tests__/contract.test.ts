@@ -2,17 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   CAP_REASONS,
   capLabel,
+  EVENT_TYPES,
+  GT_MODE_HELP,
+  GT_MODES,
+  isGtMode,
   lifecycleToSessionStatus,
+  streamUrl,
   WALL_SECONDS_MAX,
   WALL_SECONDS_MIN,
 } from "../api";
 import {
+  COMPOSER_MAX_ROWS,
   costUntracked,
+  exitNote,
+  failedReason,
+  lockedRows,
   formatDuration,
+  gtBadgeLabel,
   receiptWall,
   sessionClosedBlurb,
   sessionClosedLabel,
   sessionTotals,
+  turnOutcomeNote,
 } from "../format";
 import {
   defaultDrawerOpen,
@@ -198,5 +209,128 @@ describe("wall totals and cost", () => {
     expect(formatDuration(250)).toBe("4m 10s");
     expect(formatDuration(3725)).toBe("1h 02m");
     expect(formatDuration(-5)).toBe("0s");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * HAR-84 G-02 — `engine` was never a GTMode. Every engine session raised
+ * `ValueError: 'engine' is not a valid GTMode` on its first turn, and the
+ * UI was the thing offering it.
+ * ------------------------------------------------------------------ */
+describe("gt modes", () => {
+  it("offers exactly the four modes the server accepts", () => {
+    expect([...GT_MODES]).toEqual(["off", "advisory", "assistive", "enforced"]);
+  });
+
+  it("does not know the mode that never existed", () => {
+    expect(isGtMode("engine")).toBe(false);
+    expect(isGtMode("banana")).toBe(false);
+    expect(isGtMode("")).toBe(false);
+    for (const mode of GT_MODES) expect(isGtMode(mode)).toBe(true);
+  });
+
+  it("has one line of help for every mode, and no empty ones", () => {
+    for (const mode of GT_MODES) {
+      expect(GT_MODE_HELP[mode].length).toBeGreaterThan(0);
+    }
+    expect(GT_MODE_HELP.off).toBe("no GroundTruth");
+    expect(GT_MODE_HELP.enforced).toMatch(/fail-closed/);
+  });
+
+  it("names the mode in the header badge, not just the index status", () => {
+    expect(gtBadgeLabel("advisory", "ready")).toBe("GT: advisory");
+    expect(gtBadgeLabel("assistive", "ready")).toBe("GT: assistive");
+    expect(gtBadgeLabel("enforced", "pending")).toBe("GT: enforced · indexing…");
+    expect(gtBadgeLabel("advisory", "unavailable")).toBe(
+      "GT: advisory · unavailable",
+    );
+  });
+
+  it("says only `off` when no ground truth was asked for", () => {
+    expect(gtBadgeLabel("off", "off")).toBe("GT: off");
+    expect(gtBadgeLabel("", "off")).toBe("GT: off");
+    expect(gtBadgeLabel("off", "ready")).toBe("GT: off");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * HAR-84 G-08 / G-04 / G-20 — the words for the three failures the UI
+ * previously rendered as silence.
+ * ------------------------------------------------------------------ */
+describe("failure wording", () => {
+  it("treats an interrupted turn as neither a cap nor a failure", () => {
+    expect(CAP_REASONS.has("interrupted")).toBe(false);
+    expect(turnOutcomeNote("interrupted")).toBe(
+      "interrupted by a server restart",
+    );
+  });
+
+  it("ends a card that has no reply to end it", () => {
+    expect(turnOutcomeNote("error")).toBe("the turn failed");
+    expect(turnOutcomeNote("stopped")).toBe("stopped");
+  });
+
+  it("says nothing where the reply speaks for the turn", () => {
+    for (const reason of ["reply", "question", "step_limit", "time_limit", null]) {
+      expect(turnOutcomeNote(reason)).toBeNull();
+    }
+    expect(turnOutcomeNote(undefined)).toBeNull();
+  });
+
+  it("surfaces the server's reason for a failed session", () => {
+    expect(failedReason("BadRequestError: not a valid model ID")).toBe(
+      "This session failed: BadRequestError: not a valid model ID",
+    );
+    expect(failedReason(null)).toBe("This session failed.");
+    expect(failedReason("   ")).toBe("This session failed.");
+    expect(failedReason(undefined)).toBe("This session failed.");
+  });
+
+  it("clips a reason the composer cannot hold, and says it clipped it", () => {
+    const long = failedReason("x".repeat(400));
+    expect(long.length).toBeLessThan(180);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("gives the locked composer the rows its reason needs, and no more", () => {
+    expect(lockedRows("")).toBe(1);
+    expect(lockedRows("This session is closed.")).toBe(1);
+    expect(lockedRows(failedReason("x".repeat(400)))).toBe(COMPOSER_MAX_ROWS);
+    expect(lockedRows("y".repeat(4000))).toBe(COMPOSER_MAX_ROWS);
+  });
+
+  it("explains the exit codes the sandbox reports with no output at all", () => {
+    expect(exitNote(137)).toMatch(/memory limit/);
+    expect(exitNote(124)).toMatch(/timed out/);
+    expect(exitNote(128)).toMatch(/could not run/);
+    expect(exitNote(143)).toBe("terminated");
+    // An ordinary failing command explains itself.
+    expect(exitNote(1)).toBeNull();
+    expect(exitNote(0)).toBeNull();
+    expect(exitNote(null)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The wire: the new frame, the new phase, and a resume point that can
+ * never be malformed (HAR-84 G-17).
+ * ------------------------------------------------------------------ */
+describe("event contract", () => {
+  it("subscribes to the server-written note as a first-class frame", () => {
+    expect(EVENT_TYPES).toContain("system_note");
+    expect(EVENT_TYPES).toContain("turn_finished");
+  });
+
+  it("treats a sandbox restart as a phase, not a session status", () => {
+    expect(lifecycleToSessionStatus("sandbox_restarted")).toBeNull();
+  });
+
+  it("never puts a non-integer after_id on the stream URL", () => {
+    expect(streamUrl("s1", 0)).toBe("/api/sessions/s1/events");
+    expect(streamUrl("s1", 42)).toBe("/api/sessions/s1/events?after_id=42");
+    expect(streamUrl("s1", 42.7)).toBe("/api/sessions/s1/events?after_id=42");
+    expect(streamUrl("s1", -3)).toBe("/api/sessions/s1/events");
+    expect(streamUrl("s1", Number.NaN)).toBe("/api/sessions/s1/events");
+    expect(streamUrl("a/b", 1)).toBe("/api/sessions/a%2Fb/events?after_id=1");
   });
 });

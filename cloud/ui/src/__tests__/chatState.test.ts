@@ -329,3 +329,236 @@ describe("chatState — agent_reply", () => {
     expect(turnOf(state, "t1").replies.map((m) => m.id)).toEqual(["m5"]);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * HAR-84 G-09 — two tabs on one session disagreed: the second rendered
+ * the turn, the trail and the reply, but never the prompt, because
+ * `turn_started` carried only an id. It now carries the text.
+ * ------------------------------------------------------------------ */
+describe("chatState — the prompt on turn_started", () => {
+  it("creates the user message from a frame for an id it has never seen", () => {
+    const state = run([
+      {
+        type: "event",
+        event: ev(1, "turn_started", {
+          turn_id: "t1",
+          message_id: "m1",
+          role: "user",
+          content: "TABSYNC",
+        }),
+      },
+    ]);
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      id: "m1",
+      role: "user",
+      content: "TABSYNC",
+      turn_id: "t1",
+    });
+    expect(turnOf(state, "t1").prompt?.content).toBe("TABSYNC");
+  });
+
+  it("merges rather than duplicates a message id it already has", () => {
+    const state = run([
+      { type: "hydrate", messages: [msg({ id: "m1", content: "TABSYNC" })] },
+      {
+        type: "event",
+        event: ev(2, "turn_started", {
+          turn_id: "t1",
+          message_id: "m1",
+          role: "user",
+          content: "TABSYNC",
+        }),
+      },
+    ]);
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].content).toBe("TABSYNC");
+    // The frame is what told us which turn the message belongs to.
+    expect(state.messages[0].turn_id).toBe("t1");
+    expect(state.turnByMessage.m1).toBe("t1");
+  });
+
+  it("yields to the sending tab's own copy until the POST settles it", () => {
+    const sent = run([
+      {
+        type: "optimistic",
+        message: msg({
+          id: "local-1",
+          content: "TABSYNC",
+          meta: { pending: true },
+        }),
+      },
+      // The stream beats the HTTP response back.
+      {
+        type: "event",
+        event: ev(2, "turn_started", {
+          turn_id: "t1",
+          message_id: "m1",
+          role: "user",
+          content: "TABSYNC",
+        }),
+      },
+    ]);
+    expect(sent.messages.map((m) => m.content)).toEqual(["TABSYNC"]);
+
+    const settled = run(
+      [
+        {
+          type: "settle",
+          tempId: "local-1",
+          message: msg({ id: "m1", content: "TABSYNC", turn_id: "t1" }),
+        },
+      ],
+      sent,
+    );
+    expect(settled.messages.map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("still creates a different message while one of ours is pending", () => {
+    const state = run([
+      {
+        type: "optimistic",
+        message: msg({ id: "local-1", content: "mine", meta: { pending: true } }),
+      },
+      {
+        type: "event",
+        event: ev(2, "turn_started", {
+          turn_id: "t1",
+          message_id: "m9",
+          role: "user",
+          content: "from the other tab",
+        }),
+      },
+    ]);
+    expect(state.messages.map((m) => m.content)).toEqual([
+      "mine",
+      "from the other tab",
+    ]);
+  });
+
+  it("links the id and nothing else on a server that sends no content", () => {
+    const state = run([
+      {
+        type: "event",
+        event: ev(1, "turn_started", { turn_id: "t1", message_id: "m1" }),
+      },
+    ]);
+    expect(state.messages).toHaveLength(0);
+    expect(state.turnByMessage.m1).toBe("t1");
+    expect(state.turns.t1.startedAt).toBe(1);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * HAR-84 G-08 — a server restart left the turn card on "Working" for
+ * 300 s: no turn_finished on the wire, and the system note nowhere.
+ * ------------------------------------------------------------------ */
+describe("chatState — interrupted turns and system notes", () => {
+  it("ends the turn on an interrupted finish, with no reply to show", () => {
+    const state = run([
+      {
+        type: "event",
+        event: ev(1, "turn_started", {
+          turn_id: "t4",
+          message_id: "m1",
+          content: "sleep 240",
+        }),
+      },
+      {
+        type: "event",
+        event: ev(9, "turn_finished", {
+          turn_id: "t4",
+          finish_reason: "interrupted",
+          n_calls: 1,
+        }),
+      },
+    ]);
+    const turn = state.turns.t4;
+    expect(turn.finishedAt).toBe(9);
+    expect(turn.finishReason).toBe("interrupted");
+    expect(turnOf(state, "t4").replies).toEqual([]);
+  });
+
+  it("puts a system note in the turn it interrupted", () => {
+    const state = run([
+      {
+        type: "event",
+        event: ev(1, "turn_started", { turn_id: "t4", message_id: "m1" }),
+      },
+      {
+        type: "event",
+        event: ev(10, "system_note", {
+          turn_id: "t4",
+          message_id: "sys1",
+          content: "Server restarted; turn interrupted",
+        }),
+      },
+    ]);
+    expect(state.messages[0]).toMatchObject({
+      id: "sys1",
+      role: "system",
+      turn_id: "t4",
+      content: "Server restarted; turn interrupted",
+    });
+    expect(turnOf(state, "t4").notes.map((m) => m.content)).toEqual([
+      "Server restarted; turn interrupted",
+    ]);
+  });
+
+  it("renders a note that belongs to no turn as a standalone line", () => {
+    const state = run([
+      {
+        type: "event",
+        event: ev(5, "system_note", { content: "Server restarted" }),
+      },
+    ]);
+    expect(state.messages[0]).toMatchObject({ id: "ev-5", role: "system" });
+    expect(buildGroups(state)[0].kind).toBe("note");
+  });
+
+  it("ignores an empty note rather than printing a blank line", () => {
+    const state = run([
+      { type: "event", event: ev(5, "system_note", { turn_id: "t1" }) },
+    ]);
+    expect(state.messages).toHaveLength(0);
+  });
+
+  it("writes a muted line when the sandbox is restarted underneath", () => {
+    const state = run([
+      {
+        type: "event",
+        event: ev(7, "lifecycle", { status: "sandbox_restarted" }),
+      },
+    ]);
+    expect(state.messages[0]).toMatchObject({
+      role: "system",
+      content: "sandbox restarted",
+    });
+  });
+
+  it("keeps every other lifecycle frame out of the thread", () => {
+    for (const status of ["idle", "running", "indexing", "failed", "closed"]) {
+      const state = run([
+        { type: "event", event: ev(1, "lifecycle", { status }) },
+      ]);
+      expect(state.messages).toHaveLength(0);
+    }
+  });
+});
+
+/* HAR-84 G-19 — GT's routing hook emitted a tool_call with `command: ""`. */
+describe("chatState — empty commands", () => {
+  it("drops a tool_call frame carrying no command", () => {
+    const state = run([
+      { type: "event", event: ev(1, "tool_call", { turn_id: "t1" }) },
+      {
+        type: "event",
+        event: ev(2, "tool_call", { turn_id: "t1", command: "ls" }),
+      },
+    ]);
+    expect(state.turns.t1.items.map((i) => i.kind)).toEqual(["tool_call"]);
+    expect(state.turns.t1.commands).toBe(1);
+  });
+});

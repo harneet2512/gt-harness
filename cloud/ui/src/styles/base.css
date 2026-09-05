@@ -203,6 +203,18 @@ textarea {
   gap: 9px;
 }
 
+/* The one-line "what this setting means" under a form control. */
+.field-hint {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.field-hint > strong {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
 .notice {
   border: 1px solid var(--rule);
   border-left: 2px solid var(--error);

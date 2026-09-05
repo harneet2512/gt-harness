@@ -10,10 +10,12 @@ import {
 import {
   formatClock,
   formatCost,
+  gtBadgeLabel,
   sessionClosedBlurb,
   sessionClosedLabel,
   sessionTotals,
   shortSha,
+  turnOutcomeNote,
 } from "../format";
 import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
@@ -52,6 +54,8 @@ interface Props {
   sendError: string | null;
   /** Why the GT index is unavailable, when it is. */
   gtError: string | null;
+  /** Why the session failed, in the server's words, when it has. */
+  failureError: string | null;
   onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
   onContinue: () => void;
@@ -64,19 +68,14 @@ interface Props {
   onCollapse?: (() => void) | null;
 }
 
-/** GT in four words, in the header, at all times. */
-function GtBadge({ status }: { status: string }) {
-  const label =
-    status === "ready"
-      ? "GT: ready"
-      : status === "pending"
-        ? "GT: indexing…"
-        : status === "unavailable"
-          ? "GT: unavailable"
-          : "GT: off";
+/** GT in four words, in the header, at all times: which mode, and is it up. */
+function GtBadge({ mode, status }: { mode: string; status: string }) {
   return (
-    <span className={`gt-badge is-${status}`} title={`ground truth: ${status}`}>
-      {label}
+    <span
+      className={`gt-badge is-${status}`}
+      title={`ground truth: mode ${mode || "off"}, index ${status}`}
+    >
+      {gtBadgeLabel(mode, status)}
     </span>
   );
 }
@@ -105,6 +104,7 @@ export default function Conversation({
   lockedReason,
   sendError,
   gtError,
+  failureError,
   onSend,
   onStop,
   onContinue,
@@ -114,6 +114,7 @@ export default function Conversation({
   const navigate = useNavigate();
   const scroll = useAutoScroll();
   const [gtDismissed, setGtDismissed] = useState(false);
+  const [failDismissed, setFailDismissed] = useState(false);
   const [restarting, setRestarting] = useState(false);
   let turnNo = 0;
 
@@ -136,6 +137,8 @@ export default function Conversation({
     session?.closed_reason,
   );
   const totals = session ? sessionTotals(session) : "";
+  const failNotice =
+    sessionStatus === "failed" && Boolean(failureError) && !failDismissed;
 
   return (
     <section className="talk">
@@ -150,7 +153,7 @@ export default function Conversation({
             steps={liveSteps}
           />
           <span className="spacer" />
-          {session && <GtBadge status={gtStatus} />}
+          {session && <GtBadge mode={gtMode} status={gtStatus} />}
           {onClose && (
             <button
               type="button"
@@ -210,6 +213,26 @@ export default function Conversation({
 
       <div className="talk-wrap">
         <div className="talk-scroll" ref={scroll.ref}>
+          {/* The server said why. Saying it is the difference between a
+              dead end and something the reader can act on. While it stands
+              it speaks for the failure; the terse blurb below stands down. */}
+          {failNotice && (
+            <div className="gt-warn is-fail">
+              <div className="gt-warn-line">
+                <span>This session failed.</span>
+                <button
+                  type="button"
+                  className="btn-text"
+                  aria-label="Dismiss this notice"
+                  onClick={() => setFailDismissed(true)}
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="mono gt-warn-detail">{failureError}</p>
+            </div>
+          )}
+
           {gtFailed && !gtDismissed && (
             <div className="gt-warn">
               <div className="gt-warn-line">
@@ -235,11 +258,13 @@ export default function Conversation({
             </div>
           )}
 
-          {closedBlurb !== null && session && (
+          {closedBlurb !== null && session && (!failNotice || restarting) && (
             <div className="closed-note">
-              <div className="closed-note-line">
-                <span>{closedBlurb}</span>
-              </div>
+              {!failNotice && (
+                <div className="closed-note-line">
+                  <span>{closedBlurb}</span>
+                </div>
+              )}
               {restarting && (
                 <NewSessionForm
                   title={null}
@@ -312,6 +337,7 @@ export default function Conversation({
       </div>
 
       <Composer
+        stopping={stopping}
         locked={locked || !sessionId}
         lockedReason={
           sessionId ? lockedReason : "Pick a session to start talking."
@@ -356,6 +382,10 @@ function Exchange({
   const elapsed =
     turn?.startedAt != null && endedAt != null ? endedAt - turn.startedAt : null;
 
+  /* A turn that ended without an answer still has to end on screen.
+     HAR-84 G-08: a restart left the card reading "Working" for 300 s. */
+  const outcome = turnOutcomeNote(turn?.finishReason ?? null);
+
   const extraSteering: StepSteering[] = orphanSteering(group, turn).map((m) => ({
     key: m.id,
     content: m.content,
@@ -376,6 +406,7 @@ function Exchange({
         cost={turn?.cost ?? null}
         elapsed={elapsed}
         extraSteering={extraSteering}
+        outcome={group.replies.length === 0 ? outcome : null}
         onSelect={onSelect}
       />
 
@@ -418,6 +449,9 @@ function Reply({
           <span className="cap cap-orange">waiting for you</span>
         )}
         {finish_reason === "stopped" && <span className="cap">stopped</span>}
+        {finish_reason === "interrupted" && (
+          <span className="cap">interrupted by a server restart</span>
+        )}
         {finish_reason === "error" && (
           <span className="cap cap-error">turn failed</span>
         )}
