@@ -591,10 +591,15 @@ class SessionManager:
             model_obj = LitellmModel(model_name=model_name, model_kwargs=model_kwargs)
         else:
             try:
-                from gt_engine.miniswe_typed_actions import GroundTruthLitellmModel
+                from .typed_scopes import build_scope_normalizing_model
 
-                model_obj = GroundTruthLitellmModel(
-                    model_name=model_name, model_kwargs=model_kwargs
+                # HAR-85: planners write glob scopes ("src/click/**"), which the
+                # deterministic literal-search producer stats as a literal path
+                # and then abstains on. Make them concrete before dispatch.
+                model_obj = build_scope_normalizing_model(
+                    repo_root=cwd,
+                    model_name=model_name,
+                    model_kwargs=model_kwargs,
                 )
             except ImportError:
                 model_obj = LitellmModel(
