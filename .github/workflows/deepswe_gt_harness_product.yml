@@ -281,11 +281,6 @@ jobs:
           path: ${{ runner.temp }}/deepswe-task-image.tar.zst
           key: deepswe-task-image-v1-3a4d47f5281269305343c83729836ac2f3172811aee72681e472a4196178eda1
 
-      - name: Verify the complete feature proof matrix
-        run: |
-          python scripts/issue_feature_matrix.py
-          python scripts/verify_feature_matrix.py
-
       - name: Stage the verified producer outside the source closure
         env:
           EXPECTED_PRODUCER_SHA: ${{ steps.product-pins.outputs.producer_sha }}
@@ -297,6 +292,11 @@ jobs:
             "${EXPECTED_PRODUCER_SHA}" \
             "${PRODUCER_PATH}" | sha256sum --check --strict
           "${PRODUCER_PATH}" -h >/dev/null
+
+      - name: Verify the complete feature proof matrix
+        run: |
+          python scripts/issue_feature_matrix.py
+          python scripts/verify_feature_matrix.py
 
       - name: Run the full Python suite serially
         run: |

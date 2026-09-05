@@ -731,9 +731,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check \
             --require-hashes -r config/product-requirements.lock
-          echo "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e  vendor/groundtruth_mcp-1.0.0-py3-none-any.whl" | sha256sum --check --strict
-          python -m pip install --disable-pip-version-check --no-deps \
-            vendor/groundtruth_mcp-1.0.0-py3-none-any.whl
+          python -c "import subprocess, sys; from eval.miniswe_agent import MiniSweAgent; subprocess.run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', str(MiniSweAgent._gt_wheel())], check=True)"
           python -c "import groundtruth.runtime.gateway"
 
       - name: Download immutable plan

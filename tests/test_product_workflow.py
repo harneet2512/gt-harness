@@ -94,8 +94,7 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
     assert "--require-hashes -r config/product-requirements.lock" in paid.split(
         "Install pinned attestation test dependencies", 1
     )[1]
-    assert "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl" in paid
-    assert "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e" in paid
+    assert "str(MiniSweAgent._gt_wheel())" in paid
     assert 'python -c "import groundtruth.runtime.gateway"' in paid
     assert "max_timeout_sec=stage_timeout_cap_seconds(stage)" in paid
     assert '"agent_timeout_multiplier": budget["timeout_multiplier"]' in paid
