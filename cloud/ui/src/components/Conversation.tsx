@@ -332,7 +332,9 @@ function Reply({
         <span className="spacer" />
         <span className="mono muted">
           {[
-            typeof n_calls === "number" ? `${n_calls} steps` : null,
+            typeof n_calls === "number"
+              ? `${n_calls} step${n_calls === 1 ? "" : "s"}`
+              : null,
             typeof cost === "number" ? formatCost(cost) : null,
             Array.isArray(files_changed) && files_changed.length > 0
               ? `${files_changed.length} file${files_changed.length === 1 ? "" : "s"}`

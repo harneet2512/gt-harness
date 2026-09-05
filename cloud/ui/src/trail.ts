@@ -28,6 +28,8 @@ export interface TrailStep {
    * model call. See `callCount` for why that is the unit we count in.
    */
   isCall: boolean;
+  /** A call that produced the reply: it earns a tick, and nothing else. */
+  isReply: boolean;
   thought: string;
   actions: string[];
   command: string | null;
@@ -166,6 +168,7 @@ export function buildSteps(
       eventId: eventIdOf(item.key),
       n: steps.length + 1,
       isCall: item.kind === "assistant",
+      isReply: item.kind === "assistant" && item.isReply,
       thought: "",
       actions: [],
       command: null,

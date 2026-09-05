@@ -46,6 +46,9 @@ export default function TrailPanel({
           </div>
 
           <div className="trail-main">
+            {step.isReply && (
+              <p className="cap cap-muted">replied</p>
+            )}
             {step.thought && <p className="trail-thought">{step.thought}</p>}
 
             {step.files.length > 0 && (

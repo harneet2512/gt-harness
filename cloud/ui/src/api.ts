@@ -285,6 +285,13 @@ export interface AssistantData {
   actions?: string[];
   n_calls?: number;
   cost?: number;
+  /**
+   * The model call that produced the turn's text reply, rather than a call
+   * that chose actions. It counts as a step — without it the live count is
+   * one short of `turn_finished.n_calls` — but its content arrives again as
+   * `agent_reply`, so nothing may render it twice.
+   */
+  is_reply?: boolean;
 }
 
 export interface ToolCallData {

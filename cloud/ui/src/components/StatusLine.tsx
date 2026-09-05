@@ -57,6 +57,10 @@ function phaseLabel(phase: string | null): string {
   switch (phase) {
     case "cloning":
       return "Cloning…";
+    case "sandbox_starting":
+      return "Starting the sandbox…";
+    case "sandbox_ready":
+      return "Sandbox ready…";
     case "indexing":
       return "Indexing…";
     default:

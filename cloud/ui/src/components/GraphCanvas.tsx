@@ -169,14 +169,22 @@ export default function GraphCanvas(props: Props) {
     /* A field arrives with positions when it was carried across a refetch or
        restored from the last visit; only a genuinely new one is worth
        settling hard. Continuing one gets just enough alpha to open a gap for
-       whatever was added — anything more is the reshuffle we are fixing. */
-    const carried = field.particles.some(
-      (particle) => particle.x !== undefined && Number.isFinite(particle.x),
-    );
+       whatever was added — anything more is the reshuffle we are fixing.
+       When *every* particle already has a place there is no gap to open, so
+       the picture is left exactly as it was found: that is the case a reload
+       hits, and relaxing it again is the drift this is meant to prevent. */
+    let carried = 0;
+    for (const particle of field.particles) {
+      if (particle.x !== undefined && Number.isFinite(particle.x)) carried += 1;
+    }
+    const complete = carried > 0 && carried === field.particles.length;
 
     const sim = createSim(field, clusterAnchors(field.clusters));
     simRef.current = sim;
-    if (carried) {
+    if (complete) {
+      // Below alphaMin, so the render loop never ticks it.
+      sim.alpha(0);
+    } else if (carried > 0) {
       sim.alpha(GENTLE_ALPHA);
     } else {
       for (let i = 0; i < PRESETTLE; i += 1) sim.tick();

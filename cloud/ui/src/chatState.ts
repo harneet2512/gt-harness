@@ -12,6 +12,8 @@ export type ActivityItem =
       kind: "assistant";
       content: string;
       actions: string[];
+      /** The call that produced the reply: a step, but nothing to show. */
+      isReply: boolean;
       nCalls: number | null;
       cost: number | null;
     }
@@ -183,12 +185,17 @@ function applyEvent(state: ChatState, event: SessionEvent): ChatState {
       const actions = Array.isArray(event.data.actions)
         ? event.data.actions.filter((a): a is string => typeof a === "string")
         : [];
-      if (!content && actions.length === 0) return state;
+      const isReply = event.data.is_reply === true;
+      // The reply frame is kept — it is the model call the step count is
+      // missing — but emptied: `agent_reply` already carries that text, and
+      // showing it here would print the reply twice.
+      if (!isReply && !content && actions.length === 0) return state;
       return appendItem(state, turnId, {
         key,
         kind: "assistant",
-        content,
-        actions,
+        content: isReply ? "" : content,
+        actions: isReply ? [] : actions,
+        isReply,
         nCalls: num(event.data.n_calls),
         cost: num(event.data.cost),
       });

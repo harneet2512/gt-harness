@@ -306,11 +306,18 @@ export default function SynapsePage() {
 function lockedReason(status: string, phase: string | null): string {
   switch (status) {
     case "creating":
-      return phase === "cloning"
-        ? "Cloning the repository…"
-        : phase === "indexing"
-          ? "Indexing the workspace…"
-          : "Preparing the workspace…";
+      switch (phase) {
+        case "cloning":
+          return "Cloning the repository…";
+        case "sandbox_starting":
+          return "Starting the sandbox…";
+        case "sandbox_ready":
+          return "Sandbox ready — indexing next…";
+        case "indexing":
+          return "Indexing the workspace…";
+        default:
+          return "Preparing the workspace…";
+      }
     case "closed":
       return "This session is closed.";
     case "failed":
