@@ -427,3 +427,10 @@ the edit; the original index is untouched; journal hash/byte count match; both
 receipts are ERROR; provider counts remain unknown. Nine supervisor checks
 passed in 14.29s. This is actual supervisor-main finalization proof with a
 controlled worker, not paid Mini-SWE or official-verifier execution.
+
+Corrected full Windows harness rerun completed: **1,336 passed, 94 skipped**
+in 353.35s with pytest-asyncio explicitly loaded. Skips are not acceptance
+witnesses. Production code under test is the 8ac9f813 checkpoint; subsequent
+commit `45d99c7b0dc13722e0a46defa136fcbe71e9e260` adds only the stronger Linux
+tests and this ledger. Canonical release acceptance remains RED on the pinned
+source/wheel mismatch despite the passing source regression suite.
