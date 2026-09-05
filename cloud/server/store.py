@@ -12,7 +12,7 @@ import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: ``stopped`` is a lifecycle *event*, not a persisted status: after a stop the
 #: reply is written and the session goes straight back to ``idle``.
@@ -24,7 +24,7 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
     "closed": {"closed"},
 }
 
-_TABLES = ("events", "turns", "messages", "sessions")
+_TABLES = ("diff_snapshots", "events", "turns", "messages", "sessions")
 
 _SCHEMA = """
 CREATE TABLE sessions (
@@ -34,6 +34,8 @@ CREATE TABLE sessions (
     model TEXT NOT NULL,
     gt_mode TEXT NOT NULL DEFAULT 'off',
     gt_status TEXT NOT NULL DEFAULT 'off',
+    -- why GT is unavailable, in the indexer's own words; NULL when it is not
+    gt_error TEXT,
     status TEXT NOT NULL DEFAULT 'creating',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
@@ -86,13 +88,32 @@ CREATE TABLE events (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+CREATE TABLE diff_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    -- id of the ``tool_result`` event this snapshot was taken after
+    event_id INTEGER NOT NULL,
+    turn_id TEXT,
+    step INTEGER NOT NULL DEFAULT 0,
+    -- sha of the FULL patch, even when the stored text was capped
+    patch_sha256 TEXT,
+    files_json TEXT NOT NULL DEFAULT '[]',
+    patch TEXT NOT NULL DEFAULT '',
+    truncated INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
 CREATE INDEX idx_events_session ON events(session_id, id);
+CREATE INDEX idx_diff_snapshots_session
+    ON diff_snapshots(session_id, event_id);
 CREATE INDEX idx_messages_session ON messages(session_id, seq);
 CREATE INDEX idx_turns_session ON turns(session_id, seq);
 """
 
 _SESSION_FIELDS = (
     "gt_status",
+    "gt_error",
     "last_message",
     "turns",
     "steps",
@@ -333,6 +354,61 @@ class SessionStore:
             for r in await cursor.fetchall()
         ]
 
+    # -- diff snapshots -------------------------------------------------------
+
+    async def add_diff_snapshot(
+        self,
+        session_id: str,
+        *,
+        event_id: int,
+        turn_id: str | None,
+        step: int,
+        patch_sha256: str | None,
+        files: list[dict],
+        patch: str,
+        truncated: bool,
+    ) -> int:
+        """Record the workspace diff as of ``event_id`` (a ``tool_result``)."""
+        cursor = await self._db.execute(
+            """INSERT INTO diff_snapshots
+               (session_id, event_id, turn_id, step, patch_sha256, files_json,
+                patch, truncated, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id,
+                int(event_id),
+                turn_id,
+                int(step),
+                patch_sha256,
+                json.dumps(files),
+                patch,
+                1 if truncated else 0,
+                time.time(),
+            ),
+        )
+        await self._db.commit()
+        return int(cursor.lastrowid or 0)
+
+    async def latest_diff_snapshot(
+        self, session_id: str, through_event: int
+    ) -> dict | None:
+        """The newest snapshot at or before ``through_event``, if there is one."""
+        cursor = await self._db.execute(
+            """SELECT * FROM diff_snapshots
+               WHERE session_id = ? AND event_id <= ?
+               ORDER BY event_id DESC, id DESC LIMIT 1""",
+            (session_id, int(through_event)),
+        )
+        row = await cursor.fetchone()
+        return _diff_snapshot_row(row) if row is not None else None
+
+    async def count_diff_snapshots(self, session_id: str) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM diff_snapshots WHERE session_id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
     # -- events ---------------------------------------------------------------
 
     async def append_event(
@@ -376,6 +452,21 @@ class SessionStore:
             }
             for r in await cursor.fetchall()
         ]
+
+
+def _diff_snapshot_row(row: aiosqlite.Row) -> dict:
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "event_id": row["event_id"],
+        "turn_id": row["turn_id"],
+        "step": row["step"],
+        "patch_sha256": row["patch_sha256"],
+        "files": json.loads(row["files_json"] or "[]"),
+        "patch": row["patch"] or "",
+        "truncated": bool(row["truncated"]),
+        "created_at": row["created_at"],
+    }
 
 
 def _message_row(row: aiosqlite.Row) -> dict:

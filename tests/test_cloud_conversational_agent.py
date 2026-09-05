@@ -178,7 +178,16 @@ def test_text_only_response_is_a_reply_not_a_format_error() -> None:
     assert not any(
         "No tool calls found" in str(m.get("content")) for m in agent.messages
     )
-    assert [e["type"] for e in events] == ["assistant", "tool_call", "tool_result"]
+    # the reply is a model call too, so it gets its own assistant frame
+    assert [e["type"] for e in events] == [
+        "assistant", "tool_call", "tool_result", "assistant",
+    ]
+    reply_frame = events[-1]["data"]
+    assert reply_frame["is_reply"] is True
+    assert reply_frame["content"] == "Done. I appended a line to README.md."
+    assert reply_frame["actions"] == []
+    assert reply_frame["step"] == reply_frame["n_calls"] == 2
+    assert reply_frame["cost"] == pytest.approx(0.02)
 
 
 def test_trailing_question_mark_classifies_as_question() -> None:

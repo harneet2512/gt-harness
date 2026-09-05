@@ -103,7 +103,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 | GET | `/api/sessions/:id/messages` | Full conversation, in order |
 | POST | `/api/sessions/:id/messages` | Send a message → 202 `{message, delivery}` where delivery is `turn_started` or `queued_for_running_turn`. 409 while `creating`/`closed`/`failed`. |
 | GET | `/api/sessions/:id/events` | SSE stream, open across turns (`?after_id=` or `Last-Event-ID:`) |
-| GET | `/api/sessions/:id/diff` | Cumulative diff vs the cloned commit, incl. untracked files |
+| GET | `/api/sessions/:id/diff` | Cumulative diff vs the cloned commit, incl. untracked files. With `?through_event=N` it returns the stored snapshot taken at the latest write **at or before** event `N` instead — same shape plus `{as_of_event, approximate: false}` (and `truncated: true` when the stored patch hit the 512 KB cap). `as_of_event: 0` means nothing had been written yet. |
 | GET | `/api/sessions/:id/tree` | Every file in the workspace with its byte size (`{base_sha, files:[{path,size}]}`), for the map |
 | GET | `/api/sessions/:id/graph` | File relation graph (`{base_sha, gt, nodes:[{id,path,size,lang,dir}], edges:[{source,target,kind,weight}]}`). `kind` is `import` (static imports) or `gt_call`/`gt_ref`/`gt_import` (GT symbol edges collapsed to file level, only when `gt_status` is `ready`; `gt` says whether they are in). Nodes are exactly the files `/tree` returns; over 5000 files only the busiest survive and `truncated: true` is added. |
 | GET | `/api/sessions/:id/receipts` | One receipt per turn |
@@ -116,9 +116,15 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 
 ```
 {id, status: creating|idle|running|failed|closed, repo, ref, model, gt_mode,
- gt_status: off|ready|unavailable|pending, created_at, updated_at,
+ gt_status: off|ready|unavailable|pending, gt_error, created_at, updated_at,
  last_message, turns, steps, cost, current_turn_id}
 ```
+
+`gt_error` is the reason GT is unavailable, in the indexer's own words (e.g.
+`RuntimeError: index status build_failed: nonzero_exit`), and `null` whenever
+`gt_status` is not `unavailable`. It lives on the row, not only in the
+`gt_unavailable` lifecycle event, so a client that reloads after the event
+scrolled past can still say *why* a session is running without GT.
 
 `stopped` is a lifecycle **event**, not a status: after a stop the reply is
 written and the session goes straight back to `idle`.
@@ -130,9 +136,9 @@ plus a `: ping` comment heartbeat every 15s.
 
 | Type | `data` |
 |---|---|
-| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `failed{error}`, `closed` |
+| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `diff_snapshots_disabled{reason}`, `failed{error}`, `closed` |
 | `turn_started` | `{turn_id, message_id}` |
-| `assistant` | `{turn_id, content, actions[], step, n_calls, cost}` |
+| `assistant` | `{turn_id, content, actions[], step, n_calls, cost, is_reply?}` — one per model call. `is_reply: true` marks the text-only response that *ends* the turn: it has no `actions`, and it is emitted just before `agent_reply` so a client counting `assistant` frames always matches `turn_finished.n_calls` instead of trailing it by one. The field is absent on every other frame. |
 | `tool_call` | `{turn_id, command, step, n_calls}` |
 | `tool_result` | `{turn_id, command, output (≤4000 chars), returncode, is_error, step}` |
 | `steering` | `{turn_id, message_id, content}` |
@@ -153,13 +159,29 @@ Browser (React) ←→ FastAPI ←→ ConversationalAgent (mini-SWE) + GT engine
   boundaries, observation truncation past `MAX_CONTEXT_CHARS`.
 - `runner.py` — `SessionManager`: workspaces, turn scheduling under a per-session
   lock, receipts, diffs, restart recovery.
-- `store.py` — SQLite: `sessions`, `messages`, `turns`, `events`. The schema is
-  drop-and-recreate on version change (dev tool).
+- `store.py` — SQLite: `sessions`, `messages`, `turns`, `events`,
+  `diff_snapshots`. The schema is drop-and-recreate on version change (dev
+  tool).
 - `prompts.py` — chat system prompt + session brief, derived from mini-SWE's
   `mini.yaml` action format.
 - `environment.py` — `CloudLocalEnvironment`: credential-scrubbed, real bash.
 - `sandbox.py` — `DockerSandboxEnvironment` and the sandbox lifecycle: one
   container per session, an internal network, an allow-listed egress proxy.
+
+### Per-step diffs
+
+The turn worker takes a real `git diff` right after every command that looks
+like a write (`workspace.looks_like_write`, the regex ported from the UI's
+`trail.ts` — **the two must stay in sync**, and a test compares them), keyed by
+the id of the `tool_result` event it followed. That is what
+`/diff?through_event=N` serves, so "the tree at step N" is a recorded fact
+rather than something the client reconstructs from the files a step touched.
+
+Snapshots are a convenience and never a tax on the agent: the patch text is
+capped at 512 KB (`truncated: true` past that, and the per-file bodies are
+dropped), and if a single `compute_diff` takes longer than 2 s the rest of that
+turn runs without snapshots and a `lifecycle {status:
+"diff_snapshots_disabled", reason}` event says so.
 
 ## Sandboxing (`SANDBOX_MODE`)
 

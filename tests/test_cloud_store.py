@@ -237,3 +237,87 @@ async def test_events_are_ordered_and_carry_turn_id(store: SessionStore) -> None
     tail = await store.get_events(session_id, after_id=first)
     assert [e["id"] for e in tail] == [second, first + 2]
     assert await store.get_events(session_id, after_id=first + 2) == []
+
+
+# --------------------------------------------------------------------------
+# gt_error
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_gt_error_is_persisted_and_cleared(store: SessionStore) -> None:
+    session_id = await _session(store, gt_mode="advisory")
+    assert (await store.get_session(session_id))["gt_error"] is None
+
+    await store.update_status(
+        session_id, "idle", gt_status="unavailable", gt_error="RuntimeError: nope"
+    )
+    session = await store.get_session(session_id)
+    assert session["gt_status"] == "unavailable"
+    assert session["gt_error"] == "RuntimeError: nope"
+
+    # a later successful index clears it rather than leaving a stale reason
+    await store.update_session(session_id, gt_status="ready", gt_error=None)
+    session = await store.get_session(session_id)
+    assert session["gt_status"] == "ready" and session["gt_error"] is None
+
+
+# --------------------------------------------------------------------------
+# diff snapshots
+# --------------------------------------------------------------------------
+async def _snapshot(store: SessionStore, session_id: str, event_id: int, **over):
+    body = {
+        "event_id": event_id,
+        "turn_id": "t1",
+        "step": 1,
+        "patch_sha256": "a" * 64,
+        "files": [{"path": "README.md", "status": "modified"}],
+        "patch": "diff --git a/README.md b/README.md\n",
+        "truncated": False,
+    }
+    body.update(over)
+    return await store.add_diff_snapshot(session_id, **body)
+
+
+@pytest.mark.asyncio
+async def test_latest_diff_snapshot_resolves_at_or_before_an_event(
+    store: SessionStore,
+) -> None:
+    session_id = await _session(store)
+    await _snapshot(store, session_id, 10, step=1)
+    await _snapshot(
+        store, session_id, 20, step=2,
+        files=[{"path": "new.txt", "status": "added"}],
+    )
+
+    assert await store.latest_diff_snapshot(session_id, 9) is None
+    assert (await store.latest_diff_snapshot(session_id, 10))["event_id"] == 10
+    # an event between the two writes still resolves to the earlier snapshot
+    assert (await store.latest_diff_snapshot(session_id, 19))["event_id"] == 10
+    latest = await store.latest_diff_snapshot(session_id, 999)
+    assert latest["event_id"] == 20
+    assert latest["step"] == 2
+    assert latest["files"] == [{"path": "new.txt", "status": "added"}]
+    assert latest["truncated"] is False
+    assert await store.count_diff_snapshots(session_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_diff_snapshots_are_scoped_to_their_session(
+    store: SessionStore,
+) -> None:
+    first = await _session(store)
+    second = await _session(store)
+    await _snapshot(store, first, 10)
+
+    assert await store.latest_diff_snapshot(second, 999) is None
+    assert await store.count_diff_snapshots(second) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_snapshot_round_trips_its_flag(
+    store: SessionStore,
+) -> None:
+    session_id = await _session(store)
+    await _snapshot(store, session_id, 10, patch="x" * 100, truncated=True)
+    snapshot = await store.latest_diff_snapshot(session_id, 10)
+    assert snapshot["truncated"] is True
+    assert snapshot["patch"] == "x" * 100

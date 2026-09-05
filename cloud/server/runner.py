@@ -32,10 +32,12 @@ from .sandbox import (
 from .store import SessionStore, new_id
 from .workspace import (
     TRAJECTORY_NAME,
+    cap_diff,
     clone_repo,
     compute_diff,
     list_tree,
     load_transcript,
+    looks_like_write,
     remove_workspace,
     save_transcript,
     state_dir,
@@ -45,6 +47,10 @@ from .workspace import (
 _STORE_TIMEOUT = 30
 #: how long close() waits for a running turn to notice the stop request
 _CLOSE_WAIT_SECONDS = 30.0
+
+#: a single per-step ``compute_diff`` may take this long before snapshots are
+#: switched off for the rest of the turn (a huge tree must not slow the agent)
+DIFF_SNAPSHOT_BUDGET_SECONDS = 2.0
 
 RESTART_NOTICE = "Server restarted; turn interrupted"
 SUBMIT_REPLY_FALLBACK = "Done — I submitted my changes."
@@ -57,8 +63,12 @@ class _SessionState:
     agent: ConversationalAgent | None = None
     #: name of this session's sandbox container (SANDBOX_MODE=docker only)
     sandbox: str | None = None
+    #: commit the workspace was cloned at, for per-step diff snapshots
+    base_sha: str = ""
     #: GT graph database built for this workspace, mirrored on the session row
     graph_db: str | None = None
+    #: set when a per-step ``compute_diff`` blew its budget; reset each turn
+    snapshots_disabled: bool = False
     #: last file-relation graph, keyed by its tree signature (see ``graph``)
     graph_cache: tuple[str, dict] | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -165,15 +175,17 @@ class SessionManager:
                 str(session["repo"]), str(session["ref"]), workspace
             )
             state.workspace = workspace
+            state.base_sha = base_sha
             state.sandbox = self._start_sandbox(session_id, workspace, loop)
 
-            gt_status, graph_db = self._prepare_gt(session, workspace, loop)
+            gt_status, graph_db, gt_error = self._prepare_gt(session, workspace, loop)
             state.graph_db = graph_db
             self._call(loop, self._store.update_status(
                 session_id, "idle",
                 workspace_path=workspace,
                 base_sha=base_sha,
                 gt_status=gt_status,
+                gt_error=gt_error,
                 graph_db=graph_db,
             ))
             self._emit(loop, session_id, "lifecycle", {"status": "idle"})
@@ -214,15 +226,17 @@ class SessionManager:
 
     def _prepare_gt(
         self, session: dict, workspace: str, loop: asyncio.AbstractEventLoop
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, str | None]:
         """Build the GT index if the session asked for it. Never fatal.
 
-        Returns the ``gt_status`` to persist and the graph database path, which
-        the session row keeps so ``graph()`` can find it later.
+        Returns the ``gt_status`` to persist, the graph database path (which
+        the session row keeps so ``graph()`` can find it later) and the failure
+        text, so a reload can still say *why* GT is unavailable rather than
+        only that it is — the ``gt_unavailable`` event scrolls away.
         """
         session_id = str(session["id"])
         if str(session["gt_mode"]) == "off":
-            return "off", None
+            return "off", None, None
         self._emit(loop, session_id, "lifecycle", {"status": "indexing"})
         try:
             from gt_engine.indexer import ensure_index_with_receipt
@@ -238,13 +252,14 @@ class SessionManager:
                 "gt_mode": session["gt_mode"],
                 "graph_db": str(graph_db),
             })
-            return "ready", str(graph_db)
+            return "ready", str(graph_db), None
         except Exception as exc:  # noqa: BLE001 - GT degrades, it does not fail
-            self._emit(loop, session_id, "lifecycle", {
-                "status": "gt_unavailable",
-                "error": f"{type(exc).__name__}: {exc}",
-            })
-            return "unavailable", None
+            error = f"{type(exc).__name__}: {exc}"
+            self._emit(
+                loop, session_id, "lifecycle",
+                {"status": "gt_unavailable", "error": error},
+            )
+            return "unavailable", None, error
 
     # -- messages / turns -----------------------------------------------------
 
@@ -322,6 +337,8 @@ class SessionManager:
                     state.pending_stop = False
                     agent.request_stop()
                 while True:
+                    # the budget switch is per turn, not per session
+                    state.snapshots_disabled = False
                     result = agent.run_turn(user_text, turn_id=turn_id)
                     self._finish_turn(session, state, turn_id, result, loop)
                     pending = agent.take_pending_steering()
@@ -539,6 +556,33 @@ class SessionManager:
             compute_diff, str(workspace), str(session.get("base_sha") or "")
         )
 
+    async def diff_at(self, session: dict, through_event: int) -> dict:
+        """The stored diff as of event ``through_event`` — the scrubber's diff.
+
+        Exact, not an approximation: it is the snapshot taken on the worker
+        thread right after the write, keyed by the ``tool_result`` event id.
+        """
+        base_sha = str(session.get("base_sha") or "")
+        snapshot = await self._store.latest_diff_snapshot(
+            str(session["id"]), through_event
+        )
+        if snapshot is None:
+            return {
+                "patch": "",
+                "files": [],
+                "base_sha": base_sha,
+                "as_of_event": 0,
+                "approximate": False,
+            }
+        return {
+            "patch": snapshot["patch"],
+            "files": snapshot["files"],
+            "base_sha": base_sha,
+            "as_of_event": snapshot["event_id"],
+            "approximate": False,
+            "truncated": True if snapshot["truncated"] else None,
+        }
+
     async def tree(self, session: dict) -> dict:
         workspace = session.get("workspace_path")
         base_sha = str(session.get("base_sha") or "")
@@ -593,6 +637,7 @@ class SessionManager:
         if not workspace:
             raise RuntimeError("session has no workspace")
         state.workspace = workspace
+        state.base_sha = state.base_sha or str(session.get("base_sha") or "")
         # After a restart the container is still there but `state` is fresh, so
         # the name is re-derived and checked rather than trusted.
         sandbox = ensure_running(str(session["id"])) if is_docker_mode() else None
@@ -786,16 +831,18 @@ class SessionManager:
             self._call_quietly(loop, self._store.update_session(
                 session_id,
                 gt_status="ready",
+                gt_error=None,
                 graph_db=str(graph_db) if graph_db else None,
             ))
         except Exception as exc:  # noqa: BLE001 - GT degrades, it does not fail
-            self._emit(loop, session_id, "lifecycle", {
-                "status": "gt_unavailable",
-                "error": f"{type(exc).__name__}: {exc}",
-            })
-            self._call_quietly(
-                loop, self._store.update_session(session_id, gt_status="unavailable")
+            error = f"{type(exc).__name__}: {exc}"
+            self._emit(
+                loop, session_id, "lifecycle",
+                {"status": "gt_unavailable", "error": error},
             )
+            self._call_quietly(loop, self._store.update_session(
+                session_id, gt_status="unavailable", gt_error=error
+            ))
 
     # -- persistence / plumbing -----------------------------------------------
 
@@ -821,7 +868,64 @@ class SessionManager:
         self, loop: asyncio.AbstractEventLoop, session_id: str, event: dict
     ) -> None:
         event.setdefault("timestamp", time.time())
-        self._call_quietly(loop, self._bus.publish(session_id, event))
+        published = self._call_quietly(loop, self._bus.publish(session_id, event))
+        if event.get("type") != "tool_result" or not isinstance(published, dict):
+            return
+        event_id = int(published.get("id") or 0)
+        if event_id:
+            self._snapshot_diff(loop, session_id, event_id, event.get("data") or {})
+
+    def _snapshot_diff(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        session_id: str,
+        event_id: int,
+        data: dict,
+    ) -> None:
+        """Store the workspace diff as of a write, for ``/diff?through_event=``.
+
+        Runs inline on the turn worker thread — already off the event loop, and
+        between the command and the next model call, so the tree is quiet. If
+        one ``compute_diff`` overruns :data:`DIFF_SNAPSHOT_BUDGET_SECONDS` the
+        rest of the turn goes without snapshots rather than paying it again.
+        """
+        state = self._state(session_id)
+        workspace = state.workspace
+        if state.snapshots_disabled or not workspace:
+            return
+        if not looks_like_write(str(data.get("command") or "")):
+            return
+        started = time.monotonic()
+        try:
+            diff = compute_diff(workspace, state.base_sha)
+        except Exception:  # noqa: BLE001 - a snapshot is never worth a turn
+            return
+        elapsed = time.monotonic() - started
+        patch, files, truncated = cap_diff(diff)
+        full_patch = str(diff.get("patch") or "")
+        self._call_quietly(loop, self._store.add_diff_snapshot(
+            session_id,
+            event_id=event_id,
+            turn_id=data.get("turn_id"),
+            step=int(data.get("step") or 0),
+            patch_sha256=(
+                hashlib.sha256(full_patch.encode("utf-8")).hexdigest()
+                if full_patch
+                else None
+            ),
+            files=files,
+            patch=patch,
+            truncated=truncated,
+        ))
+        if elapsed > DIFF_SNAPSHOT_BUDGET_SECONDS:
+            state.snapshots_disabled = True
+            self._emit(loop, session_id, "lifecycle", {
+                "status": "diff_snapshots_disabled",
+                "reason": (
+                    f"compute_diff took {elapsed:.1f}s, over the "
+                    f"{DIFF_SNAPSHOT_BUDGET_SECONDS:g}s budget"
+                ),
+            })
 
     def _emit(
         self,
@@ -839,11 +943,14 @@ class SessionManager:
         )
 
     @staticmethod
-    def _call_quietly(loop: asyncio.AbstractEventLoop, coro: Any) -> None:
+    def _call_quietly(loop: asyncio.AbstractEventLoop, coro: Any) -> Any:
+        """``_call`` that swallows failures. Returns ``None`` when it swallowed."""
         try:
-            asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=_STORE_TIMEOUT)
+            return asyncio.run_coroutine_threadsafe(coro, loop).result(
+                timeout=_STORE_TIMEOUT
+            )
         except Exception:  # noqa: BLE001 - never let bookkeeping kill a turn
-            pass
+            return None
 
 
 class ConcurrencyLimit(RuntimeError):

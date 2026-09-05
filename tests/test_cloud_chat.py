@@ -40,11 +40,13 @@ import uvicorn
 from minisweagent.exceptions import FormatError
 
 from cloud.server import deps
+from cloud.server import runner as runner_module
 from cloud.server import workspace as workspace_module
 from cloud.server.app import create_app
 from cloud.server.conversational_agent import ConversationalAgent
 from cloud.server.environment import CloudLocalEnvironment
 from cloud.server.runner import SessionManager
+from cloud.server.workspace import DIFF_PATCH_CAP
 
 # Hard timeouts everywhere: a stuck run must fail fast, never hang CI.
 GATE_TIMEOUT = 10.0
@@ -62,6 +64,8 @@ INSTANCE_TEMPLATE = "Workspace ready."
 
 TOUCH_TRACKED = "echo patched >> README.md"
 MAKE_UNTRACKED = "echo brand-new > newfile.txt"
+#: ~760 KB of real patch, comfortably past the 512 KB snapshot cap
+BIG_WRITE = "yes 0123456789abcdefghijklmnopqrstuvwxyz | head -20000 > big.txt"
 
 
 # --------------------------------------------------------------------------
@@ -459,6 +463,16 @@ def _post_message(h: Harness, session_id: str, content: str):
     )
 
 
+def _diff(h: Harness, session_id: str, **params: Any) -> dict:
+    response = h.client.get(
+        f"/api/sessions/{session_id}/diff",
+        params=params or None,
+        headers=h.auth,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def _parse_block(block: str) -> dict | None:
     frame: dict[str, Any] = {}
     for line in block.split("\n"):
@@ -608,6 +622,7 @@ def test_create_session_clones_then_goes_idle(harness: Harness) -> None:
     assert body["model"] == MODEL_NAME
     assert body["gt_mode"] == "off"
     assert body["gt_status"] == "off"
+    assert body["gt_error"] is None
     assert body["turns"] == 0 and body["steps"] == 0 and body["cost"] == 0.0
     assert body["last_message"] is None
     assert body["current_turn_id"] is None
@@ -654,10 +669,13 @@ def test_message_runs_a_turn_and_streams_it(harness: Harness) -> None:
         in {"turn_started", "assistant", "tool_call", "tool_result",
             "agent_reply", "turn_finished"}
     ]
+    # the third `assistant` is the text-only reply: it is a model call like
+    # the other two, so it gets a frame and the live step count never jumps
     assert order == [
         "turn_started",
         "assistant", "tool_call", "tool_result",
         "assistant", "tool_call", "tool_result",
+        "assistant",
         "agent_reply", "turn_finished",
     ]
     assert _index(frames, "turn_finished") < _index(
@@ -671,7 +689,14 @@ def test_message_runs_a_turn_and_streams_it(harness: Harness) -> None:
         if f["event"] in {"assistant", "tool_call", "tool_result", "agent_reply"}
     )
     assistants = [f for f in frames if f["event"] == "assistant"]
-    assert [f["payload"]["data"]["step"] for f in assistants] == [1, 2]
+    assert [f["payload"]["data"]["step"] for f in assistants] == [1, 2, 3]
+    # the reply frame carries the same n_calls the turn reports, so a client
+    # counting assistant frames is never behind at the end of a turn
+    assert [f["payload"]["data"].get("is_reply") for f in assistants] == [
+        None, None, True
+    ]
+    assert assistants[-1]["payload"]["data"]["n_calls"] == 3
+    assert assistants[-1]["payload"]["data"]["actions"] == []
     tool_calls = [f for f in frames if f["event"] == "tool_call"]
     assert [f["payload"]["data"]["step"] for f in tool_calls] == [1, 2]
     assert tool_calls[0]["payload"]["data"]["command"] == TOUCH_TRACKED
@@ -936,6 +961,140 @@ def test_diff_reports_created_and_modified_files(harness: Harness) -> None:
 
 
 # --------------------------------------------------------------------------
+# 8a: per-step diff snapshots
+# --------------------------------------------------------------------------
+def test_diff_through_event_returns_the_snapshot_taken_at_that_write(
+    harness: Harness,
+) -> None:
+    """FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
+    store, event bus + SSE, agent loop, bash environment, git — every snapshot
+    below is a real ``git diff`` taken on the turn worker after a real write.
+
+    The scrubber asks "what did the tree look like at step N"; this is the
+    exact answer, not the UI's reconstruction from the files a step touched.
+    """
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "make some changes")
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+
+    writes = [f for f in frames if f["event"] == "tool_result"]
+    assert [f["payload"]["data"]["command"] for f in writes] == [
+        TOUCH_TRACKED,
+        MAKE_UNTRACKED,
+    ]
+    first, second = writes[0]["id"], writes[1]["id"]
+
+    # before any write (the tool_call that preceded it): the empty diff
+    early = _diff(harness, session_id, through_event=first - 1)
+    assert early["patch"] == "" and early["files"] == []
+    assert early["as_of_event"] == 0 and early["approximate"] is False
+    assert "truncated" not in early
+
+    at_first = _diff(harness, session_id, through_event=first)
+    assert at_first["as_of_event"] == first
+    assert at_first["approximate"] is False
+    assert [f["path"] for f in at_first["files"]] == ["README.md"]
+    assert "patched" in at_first["patch"]
+    assert "newfile.txt" not in at_first["patch"]
+    assert len(at_first["base_sha"]) == 40
+
+    # an event id between the two writes still resolves to the first snapshot
+    between = _diff(harness, session_id, through_event=second - 1)
+    assert between["as_of_event"] == first
+    assert [f["path"] for f in between["files"]] == ["README.md"]
+
+    at_second = _diff(harness, session_id, through_event=second)
+    assert at_second["as_of_event"] == second
+    assert sorted(f["path"] for f in at_second["files"]) == [
+        "README.md", "newfile.txt"
+    ]
+
+    # the last snapshot of the turn is the live diff, and the live diff is
+    # unchanged by any of this
+    live = _diff(harness, session_id)
+    assert at_second["patch"] == live["patch"]
+    assert "as_of_event" not in live and "approximate" not in live
+
+
+def test_reads_do_not_produce_snapshots(harness: Harness) -> None:
+    """FAKE BOUNDARY: model provider (LLM). Real: everything else.
+
+    Only commands the write regex recognises cost a ``git diff``; a `cat` in
+    the middle of a turn must not add a snapshot of its own.
+    """
+    harness.set_script([
+        _action("cat README.md"),
+        _action(TOUCH_TRACKED),
+        _action("cat README.md"),
+        _reply("Read, wrote, read."),
+    ])
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "look then write")
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+
+    results = [f for f in frames if f["event"] == "tool_result"]
+    assert len(results) == 3
+    read_before, write, read_after = (f["id"] for f in results)
+
+    assert _diff(harness, session_id, through_event=read_before)["as_of_event"] == 0
+    assert _diff(harness, session_id, through_event=write)["as_of_event"] == write
+    # the trailing read did not take one, so it still resolves to the write
+    assert _diff(harness, session_id, through_event=read_after)["as_of_event"] == write
+
+
+def test_a_slow_snapshot_disables_the_rest_of_the_turn(
+    harness: Harness, monkeypatch
+) -> None:
+    """FAKE BOUNDARY: model provider (LLM), plus the snapshot time budget,
+    lowered to zero so the first real ``compute_diff`` overruns it. Real:
+    everything else.
+
+    Snapshots are a convenience; on a tree where the diff is expensive they
+    must get out of the agent's way and say so, not slow every step.
+    """
+    monkeypatch.setattr(runner_module, "DIFF_SNAPSHOT_BUDGET_SECONDS", 0.0)
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "make some changes")
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+
+    disabled = frames[
+        _index(frames, "lifecycle", status="diff_snapshots_disabled")
+    ]["payload"]["data"]
+    assert "budget" in disabled["reason"]
+
+    writes = [f for f in frames if f["event"] == "tool_result"]
+    # the one that blew the budget was still stored; the next one was skipped
+    assert _diff(
+        harness, session_id, through_event=writes[0]["id"]
+    )["as_of_event"] == writes[0]["id"]
+    assert _diff(
+        harness, session_id, through_event=writes[1]["id"]
+    )["as_of_event"] == writes[0]["id"]
+
+
+def test_a_snapshot_patch_over_the_cap_is_truncated(harness: Harness) -> None:
+    """FAKE BOUNDARY: model provider (LLM). Real: everything else — bash really
+    writes ~760 KB into the clone and git really diffs it."""
+    harness.set_script([_action(BIG_WRITE), _reply("Wrote a big file.")])
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "write a big file")
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+
+    write = [f for f in frames if f["event"] == "tool_result"][0]
+    snapshot = _diff(harness, session_id, through_event=write["id"])
+    assert snapshot["truncated"] is True
+    assert len(snapshot["patch"].encode("utf-8")) <= DIFF_PATCH_CAP
+    assert [f["path"] for f in snapshot["files"]] == ["big.txt"]
+    # per-file bodies are dropped once the combined patch is already cut
+    assert snapshot["files"][0]["patch"] == ""
+    assert snapshot["files"][0]["additions"] == 20000
+
+    live = _diff(harness, session_id)
+    assert "truncated" not in live
+    assert len(live["patch"].encode("utf-8")) > DIFF_PATCH_CAP
+
+
+# --------------------------------------------------------------------------
 # 8b: file relation graph
 # --------------------------------------------------------------------------
 def test_graph_nodes_match_the_tree_and_carry_the_seeded_import(
@@ -1090,6 +1249,43 @@ def test_environment_failure_emits_agent_error_and_fails_the_session(
     assert error["turn_id"]
 
     assert _post_message(harness, session_id, "again?").status_code == 409
+
+
+# --------------------------------------------------------------------------
+# 11b: GT degradation
+# --------------------------------------------------------------------------
+def test_gt_index_failure_persists_its_reason_on_the_session(
+    harness: Harness, monkeypatch
+) -> None:
+    """FAKE BOUNDARY: model provider (LLM), plus the GT indexer, which is made
+    to raise the way a real build failure does. Real: FastAPI app, JWT auth,
+    SQLite store, event bus, workspace creation, git.
+
+    GT degrading must not fail the session, and the reason must outlive the
+    ``gt_unavailable`` event — after a reload the row is all the UI has.
+    """
+    import gt_engine.indexer as indexer
+
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("index status build_failed: nonzero_exit")
+
+    monkeypatch.setattr(indexer, "ensure_index_with_receipt", _fail)
+
+    session_id = _create_idle(harness, gt_mode="advisory")
+    session = _session(harness, session_id)
+    assert session["status"] == "idle"
+    assert session["gt_status"] == "unavailable"
+    assert "nonzero_exit" in session["gt_error"]
+
+    # and it is on the listing too, not just the detail route
+    listed = harness.client.get("/api/sessions", headers=harness.auth).json()
+    assert listed[0]["gt_error"] == session["gt_error"]
+
+    frames = _read_sse(
+        harness, session_id, until=_has("lifecycle", status="idle")
+    )
+    unavailable = frames[_index(frames, "lifecycle", status="gt_unavailable")]
+    assert unavailable["payload"]["data"]["error"] == session["gt_error"]
 
 
 # --------------------------------------------------------------------------

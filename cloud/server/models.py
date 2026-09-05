@@ -33,6 +33,9 @@ class Session(BaseModel):
     model: str
     gt_mode: str
     gt_status: GtStatusName
+    #: why GT is unavailable, in the indexer's own words; null when it is not.
+    #: Survives a reload, unlike the ``gt_unavailable`` lifecycle event.
+    gt_error: str | None = None
     created_at: float
     updated_at: float
     last_message: str | None = None
@@ -82,6 +85,13 @@ class SessionDiff(BaseModel):
     patch: str = ""
     files: list[DiffFile] = Field(default_factory=list)
     base_sha: str = ""
+    #: the three below are present only for ``/diff?through_event=N``
+    #: id of the ``tool_result`` event this diff is the state after (0: none yet)
+    as_of_event: int | None = None
+    #: always false — this is a stored snapshot, not the UI's reconstruction
+    approximate: bool | None = None
+    #: only present (and true) when the stored patch hit the 512 KB cap
+    truncated: bool | None = None
 
 
 class TreeFile(BaseModel):

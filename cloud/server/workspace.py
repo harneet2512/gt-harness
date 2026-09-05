@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -23,6 +24,52 @@ GIT_TIMEOUT = 60
 _STATUS_NAMES = {"A": "added", "D": "deleted"}
 #: harness scratch is never part of a patch
 _PATHSPEC = [".", f":(exclude){STATE_DIRNAME}"]
+
+#: biggest patch text a stored diff snapshot may carry, in bytes
+DIFF_PATCH_CAP = 512 * 1024
+
+#: Commands that plausibly wrote something.
+#:
+#: PORTED VERBATIM from ``cloud/ui/src/trail.ts`` (``export const WRITES``).
+#: THE TWO MUST STAY IN SYNC: the UI paints a step as an edit with this test,
+#: and the server takes a per-step diff snapshot with it, so a divergence
+#: would give the scrubber ticks with no snapshot behind them (or the other
+#: way round). Change one, change the other, and update both tests.
+_WRITES = re.compile(
+    r"(^|[\s;&|(])(tee|patch|mv|cp|rm|mkdir|touch|truncate|install)\s"
+    r"|>>?[^&]"
+    r"|sed\s+-[a-z]*i"
+    r"|perl\s+-[a-z]*i"
+    r"|git\s+(apply|checkout|restore|revert|mv|rm)"
+    r"|apply_patch"
+    r"|python3?\s+-\s*<<"
+)
+
+
+def looks_like_write(command: str) -> bool:
+    """True when ``command`` is the kind of thing that changes the tree.
+
+    Deliberately generous — a false positive costs one extra ``git diff``, a
+    false negative costs a missing snapshot.
+    """
+    return bool(command) and _WRITES.search(command) is not None
+
+
+def cap_diff(diff: dict) -> tuple[str, list[dict], bool]:
+    """Bound a diff for storage: ``(patch, files, truncated)``.
+
+    Past :data:`DIFF_PATCH_CAP` the combined patch is cut at a byte boundary
+    and the per-file bodies are dropped — they are the same bytes again, and
+    a truncated snapshot is a summary, not a patch anyone can apply.
+    """
+    patch = str(diff.get("patch") or "")
+    files = [dict(f) for f in (diff.get("files") or [])]
+    encoded = patch.encode("utf-8")
+    if len(encoded) <= DIFF_PATCH_CAP:
+        return patch, files, False
+    for entry in files:
+        entry["patch"] = ""
+    return encoded[:DIFF_PATCH_CAP].decode("utf-8", errors="ignore"), files, True
 
 
 def workspaces_root() -> str:

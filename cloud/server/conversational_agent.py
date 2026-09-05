@@ -311,6 +311,24 @@ class ConversationalAgent(DefaultAgent):
         if assistant is not None:
             self.add_messages(assistant)
             content = _text_of(assistant.get("content"))
+            # The reply is a model call like any other, but it never reached
+            # query() — FormatError is how a text-only response arrives. Emit
+            # the frame query() would have emitted, so a UI counting assistant
+            # frames matches turn_finished.n_calls instead of trailing it by
+            # one. n_calls was already incremented by DefaultAgent.query()
+            # before the model raised, and the cost was just added above.
+            self._current_step = self.n_calls
+            self._emit(
+                "assistant",
+                {
+                    "content": content,
+                    "actions": [],
+                    "step": self._current_step,
+                    "n_calls": self.n_calls,
+                    "cost": self.cost,
+                    "is_reply": True,
+                },
+            )
             return (QUESTION if is_question(content) else REPLY), content
 
         self.n_consecutive_format_errors += 1

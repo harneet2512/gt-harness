@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from .auth import require_user
@@ -49,6 +49,7 @@ def _session_view(row: dict) -> dict[str, Any]:
         "model": row["model"],
         "gt_mode": row["gt_mode"],
         "gt_status": row["gt_status"],
+        "gt_error": row.get("gt_error"),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "last_message": row.get("last_message"),
@@ -147,12 +148,24 @@ async def stream_events(
     )
 
 
-@router.get("/sessions/{session_id}/diff", response_model=SessionDiff)
+@router.get(
+    "/sessions/{session_id}/diff",
+    response_model=SessionDiff,
+    # ``as_of_event``/``approximate``/``truncated`` are optional: absent unless
+    # the caller asked for a point-in-time diff (or the patch was capped)
+    response_model_exclude_none=True,
+)
 async def get_diff(
-    session_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str,
+    store: StoreDep,
+    manager: ManagerDep,
+    through_event: Annotated[int | None, Query(ge=0)] = None,
 ) -> dict[str, Any]:
+    """The workspace diff — live, or as of a ``tool_result`` event id."""
     session = await _require_session(store, session_id)
-    return await manager.diff(session)
+    if through_event is None:
+        return await manager.diff(session)
+    return await manager.diff_at(session, through_event)
 
 
 @router.get("/sessions/{session_id}/tree", response_model=SessionTree)
