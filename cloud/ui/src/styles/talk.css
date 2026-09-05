@@ -67,7 +67,8 @@
 }
 
 .switch-menu,
-.newsess {
+/* Only a popover inside the switcher; the empty state renders it inline. */
+.switch .newsess {
   position: absolute;
   z-index: 20;
   top: calc(100% + 6px);
@@ -145,6 +146,60 @@
   margin-top: 12px;
 }
 
+/* ---------------- ground truth ---------------- */
+
+/* Always present, never loud: what the graph evidence is doing. */
+.gt-badge {
+  font-family: var(--font-ui);
+  font-variant: all-small-caps;
+  font-weight: 500;
+  letter-spacing: 0.045em;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.gt-badge.is-ready {
+  color: var(--teal);
+}
+.gt-badge.is-pending {
+  color: var(--ink-2);
+}
+.gt-badge.is-unavailable {
+  color: rgba(192, 57, 43, 0.72);
+}
+
+.gt-warn {
+  border: 1px solid var(--rule);
+  border-left: 2px solid rgba(192, 57, 43, 0.72);
+  background: var(--surface);
+  border-radius: 0 4px 4px 0;
+  padding: 7px 6px 7px 10px;
+  margin-bottom: 14px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.gt-warn-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.gt-warn-line > span {
+  flex: 1 1 auto;
+}
+.gt-warn-why {
+  margin-top: 5px;
+}
+.gt-warn-why > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.gt-warn-why > p {
+  margin-top: 4px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* ---------------- status line ---------------- */
 
 .status {
@@ -205,7 +260,6 @@
 .reply {
   margin-top: 10px;
 }
-.reply-prose,
 .heard-prose {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

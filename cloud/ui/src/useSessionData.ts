@@ -32,6 +32,10 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 /** A graph with no relations, so a server without `/graph` still draws. */
 function fromTree(files: readonly TreeFile[]): SessionGraph {
   return {
@@ -56,6 +60,8 @@ export interface SessionData {
   session: Session | null;
   chat: ChatState;
   phase: string | null;
+  /** Why the GT index is unavailable, as the lifecycle frame reported it. */
+  gtError: string | null;
   loadError: string | null;
   sendError: string | null;
   isRunning: boolean;
@@ -88,6 +94,7 @@ export function useSessionData(sessionId: string | null): SessionData {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [phase, setPhase] = useState<string | null>(null);
+  const [gtError, setGtError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [turnEpoch, setTurnEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -251,6 +258,22 @@ export function useSessionData(sessionId: string | null): SessionData {
                 : prev,
             );
           }
+          /* GT never reaches the session row through the stream, only
+             through a refetch that may be seconds away — and when the index
+             fails the reader deserves to know before the first turn ends.
+             The frame is therefore applied to the session directly. */
+          if (raw === "gt_unavailable") {
+            setGtError(str(event.data.error) || null);
+            setSession((prev) =>
+              prev ? { ...prev, gt_status: "unavailable" } : prev,
+            );
+          }
+          if (raw === "gt_ready") {
+            setGtError(null);
+            setSession((prev) =>
+              prev ? { ...prev, gt_status: "ready" } : prev,
+            );
+          }
           if (raw === "stopped" || raw.startsWith("gt_")) refetchSession();
           if (raw === "indexing" || raw === "idle") {
             setRefreshKey((k) => k + 1);
@@ -388,6 +411,7 @@ export function useSessionData(sessionId: string | null): SessionData {
     session,
     chat,
     phase,
+    gtError,
     loadError,
     sendError,
     isRunning: Boolean(isRunning),

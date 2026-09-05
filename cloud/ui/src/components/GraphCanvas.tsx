@@ -3,7 +3,13 @@ import type { Simulation } from "d3-force";
 import type { DiffFile } from "../api";
 import type { Filament, Particle, ParticleField } from "../graph";
 import { draw } from "../graphDraw";
-import { clusterAnchors, createSim, hitTest, RESTART_ALPHA } from "../graphSim";
+import {
+  clusterAnchors,
+  createSim,
+  GENTLE_ALPHA,
+  hitTest,
+  RESTART_ALPHA,
+} from "../graphSim";
 import { SignalQueue } from "../signals";
 import type { Attention } from "../trail";
 import { useGraphCamera } from "../useGraphCamera";
@@ -15,6 +21,8 @@ const CLICK_SLOP = 3;
 const PRESETTLE = 90;
 
 interface Props {
+  /** Persistence key for the camera; null outside a session. */
+  sessionId: string | null;
   field: ParticleField;
   neighbours: ReadonlyMap<string, ReadonlySet<string>>;
   /** Keyed by particle id. */
@@ -67,7 +75,7 @@ export default function GraphCanvas(props: Props) {
   }, []);
 
   const getParticles = useCallback(() => live.current.field.particles, []);
-  const camera = useGraphCamera(getParticles, onZoom, kick);
+  const camera = useGraphCamera(getParticles, onZoom, kick, props.sessionId);
   const { canvasRef, transform } = camera;
 
   tick.current = (now: number) => {
@@ -158,10 +166,22 @@ export default function GraphCanvas(props: Props) {
       return;
     }
 
+    /* A field arrives with positions when it was carried across a refetch or
+       restored from the last visit; only a genuinely new one is worth
+       settling hard. Continuing one gets just enough alpha to open a gap for
+       whatever was added — anything more is the reshuffle we are fixing. */
+    const carried = field.particles.some(
+      (particle) => particle.x !== undefined && Number.isFinite(particle.x),
+    );
+
     const sim = createSim(field, clusterAnchors(field.clusters));
     simRef.current = sim;
-    for (let i = 0; i < PRESETTLE; i += 1) sim.tick();
-    sim.alpha(RESTART_ALPHA);
+    if (carried) {
+      sim.alpha(GENTLE_ALPHA);
+    } else {
+      for (let i = 0; i < PRESETTLE; i += 1) sim.tick();
+      sim.alpha(RESTART_ALPHA);
+    }
     if (!camera.framed.current) fitRef.current();
     kick();
 

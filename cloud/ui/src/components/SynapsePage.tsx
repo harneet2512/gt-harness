@@ -28,6 +28,7 @@ export default function SynapsePage() {
   const { session, chat, graph, diff } = data;
 
   const view = useGraphView({
+    sessionId,
     chat,
     tree: data.tree,
     graph,
@@ -158,11 +159,12 @@ export default function SynapsePage() {
           mode={mode}
           phase={data.phase}
           elapsed={elapsed}
-          liveSteps={view.steps.length}
+          liveSteps={view.calls}
           now={data.now}
           locked={COMPOSER_LOCKED.has(status)}
           lockedReason={lockedReason(status, data.phase)}
           sendError={data.loadError ?? data.sendError}
+          gtError={data.gtError}
           onSend={data.send}
           onStop={data.stop}
           onContinue={() => void data.send("continue")}
@@ -207,6 +209,7 @@ export default function SynapsePage() {
 
         <div className="synapse-stage">
           <GraphCanvas
+            sessionId={sessionId}
             field={view.field}
             neighbours={view.neighbours}
             attention={view.attentionById}
@@ -246,6 +249,8 @@ export default function SynapsePage() {
               steps={view.steps}
               edited={view.editedPaths}
               position={view.cutoff}
+              calls={view.calls}
+              hereCall={view.hereCall}
               live={view.live}
               onScrub={view.setScrub}
               onLive={() => view.setScrub(null)}
@@ -257,7 +262,8 @@ export default function SynapsePage() {
               edited={view.editedPaths}
               running={data.isRunning}
               onPickFile={selectPath}
-              diff={diff}
+              diff={view.diffAtCutoff}
+              diffNote={view.diffNote}
               diffError={data.diffError}
               diffLoading={data.diffLoading}
               onRefreshDiff={data.reloadDiff}
@@ -280,8 +286,9 @@ export default function SynapsePage() {
           setInspectedId(null);
           setSelectedId(null);
         }}
-        diff={diff}
-        diffFile={view.editedFiles.get(inspectedPath)}
+        diff={view.diffAtCutoff}
+        diffFile={view.editedAtCutoff.get(inspectedPath)}
+        diffNote={view.diffNote}
         diffLoading={data.diffLoading}
         diffError={data.diffError}
         relations={relationsFor(view.relations, inspectedPath)}

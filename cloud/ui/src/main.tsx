@@ -6,7 +6,11 @@ import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    {/* Opt in to the v7 behaviours now: they are the defaults there, and
+        without the flags every page logs two deprecation warnings. */}
+    <BrowserRouter
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <App />
     </BrowserRouter>
   </React.StrictMode>

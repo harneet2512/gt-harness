@@ -1,10 +1,17 @@
-import { stepKind, type TrailStep } from "../trail";
+import { callSteps, stepKind, type TrailStep } from "../trail";
 
 interface Props {
   steps: readonly TrailStep[];
   edited: ReadonlySet<string>;
   /** 1-based step being shown; equals steps.length while live. */
   position: number;
+  /**
+   * Model calls in the turn, and the one `position` lands on. The slider
+   * moves over replayable steps; the label counts in the only unit this UI
+   * has — see the rule at the top of `trail.ts`.
+   */
+  calls: number;
+  hereCall: number;
   live: boolean;
   onScrub: (position: number) => void;
   onLive: () => void;
@@ -18,6 +25,8 @@ export default function Scrubber({
   steps,
   edited,
   position,
+  calls,
+  hereCall,
   live,
   onScrub,
   onLive,
@@ -39,7 +48,7 @@ export default function Scrubber({
       <div className="scrub-track">
         <span className="scrub-rule" aria-hidden="true" />
         <span className="scrub-ticks" aria-hidden="true">
-          {steps.map((step) => (
+          {callSteps(steps).map((step) => (
             <span
               key={step.key}
               className={`tick is-${stepKind(step, edited)} ${
@@ -61,7 +70,7 @@ export default function Scrubber({
           step={1}
           value={position}
           aria-label="Replay position"
-          aria-valuetext={`step ${position} of ${total}`}
+          aria-valuetext={`step ${hereCall} of ${calls}`}
           onChange={(e) => {
             const next = Number.parseInt(e.target.value, 10);
             if (next >= total) onLive();
@@ -71,7 +80,7 @@ export default function Scrubber({
       </div>
 
       <span className="scrub-state mono">
-        {live ? `step ${total} · live` : `step ${position} of ${total}`}
+        {live ? `step ${calls} · live` : `step ${hereCall} of ${calls}`}
       </span>
       {!live && (
         <button type="button" className="btn-text is-hot" onClick={onLive}>

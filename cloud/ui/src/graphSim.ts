@@ -16,7 +16,13 @@ import {
   type Simulation,
 } from "d3-force";
 import { zoomIdentity, type ZoomTransform } from "d3-zoom";
-import type { Filament, FilamentKind, Particle, ParticleField } from "./graph";
+import {
+  idOf,
+  type Filament,
+  type FilamentKind,
+  type Particle,
+  type ParticleField,
+} from "./graph";
 
 const DISTANCE: Record<FilamentKind, number> = {
   import: 28,
@@ -34,7 +40,15 @@ const STRENGTH: Record<FilamentKind, number> = {
   cotouch: 0.25,
 };
 
+/** A field with no positions yet: settle it hard, once. */
 export const RESTART_ALPHA = 0.35;
+
+/**
+ * A field that already has positions — a refetch that added or dropped a
+ * file. Enough energy to make room for the newcomers, not enough to move
+ * anything the reader was looking at.
+ */
+export const GENTLE_ALPHA = 0.08;
 
 /** Where each top-level directory pulls its files. */
 export type Anchors = Map<string, { x: number; y: number }>;
@@ -63,15 +77,49 @@ function anchorOf(anchors: Anchors, particle: Particle): { x: number; y: number 
   return anchors.get(particle.cluster) ?? { x: 0, y: 0 };
 }
 
-/** Seed unplaced particles inside their own region so it forms at once. */
+/**
+ * Seed unplaced particles. A newcomer with a placed neighbour is dropped
+ * beside the strongest one it is joined to — a file the agent just wrote
+ * belongs next to what it relates to, not at the origin, and starting it
+ * there is what stops the rest of the field from being shoved aside to
+ * make room. Everything else falls back to its own cluster region.
+ */
 function seed(field: ParticleField, anchors: Anchors): void {
+  const placed = (particle: Particle | undefined): boolean =>
+    particle !== undefined &&
+    particle.x !== undefined &&
+    Number.isFinite(particle.x);
+
+  // Strongest placed neighbour per unplaced particle, in one pass.
+  const beside = new Map<string, { at: Particle; weight: number }>();
+  const offer = (id: string, other: Particle, weight: number) => {
+    const target = field.byId.get(id);
+    if (placed(target) || !placed(other)) return;
+    const best = beside.get(id);
+    if (!best || weight > best.weight) beside.set(id, { at: other, weight });
+  };
+  for (const filament of field.filaments) {
+    const a = field.byId.get(idOf(filament.source));
+    const b = field.byId.get(idOf(filament.target));
+    if (!a || !b) continue;
+    offer(a.id, b, filament.weight);
+    offer(b.id, a, filament.weight);
+  }
+
   field.particles.forEach((particle, i) => {
-    if (particle.x !== undefined && Number.isFinite(particle.x)) return;
-    const anchor = anchorOf(anchors, particle);
+    if (placed(particle)) return;
     const angle = i * 2.399963; // golden angle: no two seeds land together
-    const spread = 8 + Math.sqrt(i) * 4;
-    particle.x = anchor.x + Math.cos(angle) * spread;
-    particle.y = anchor.y + Math.sin(angle) * spread;
+    const near = beside.get(particle.id);
+    if (near) {
+      const reach = near.at.r + particle.r + 6;
+      particle.x = (near.at.x ?? 0) + Math.cos(angle) * reach;
+      particle.y = (near.at.y ?? 0) + Math.sin(angle) * reach;
+    } else {
+      const anchor = anchorOf(anchors, particle);
+      const spread = 8 + Math.sqrt(i) * 4;
+      particle.x = anchor.x + Math.cos(angle) * spread;
+      particle.y = anchor.y + Math.sin(angle) * spread;
+    }
     particle.vx = 0;
     particle.vy = 0;
   });

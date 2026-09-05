@@ -16,13 +16,23 @@ const DEFAULT_STEP_LIMIT = 60;
 /** Not exposed in the form; the backend defaults it, we still send the field. */
 const DEFAULT_TEMPERATURE = 0;
 
+/** `https://host/owner/repo`, which is as much as the client can know. */
+const REPO_URL = /^https:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/?$/;
+
 interface Props {
   onCreated: (session: Session) => void;
-  onCancel: () => void;
+  /** Omitted where there is nothing to go back to, e.g. the empty state. */
+  onCancel?: () => void;
+  /** The form's own heading; pass null where the page already has one. */
+  title?: string | null;
 }
 
 /** Clone a repository into a fresh workspace. */
-export default function NewSessionForm({ onCreated, onCancel }: Props) {
+export default function NewSessionForm({
+  onCreated,
+  onCancel,
+  title = "new session",
+}: Props) {
   const [repo, setRepo] = useState("");
   const [ref, setRef] = useState(DEFAULT_REF);
   const [modelChoice, setModelChoice] = useState<string>(MODELS[0]);
@@ -41,9 +51,14 @@ export default function NewSessionForm({ onCreated, onCancel }: Props) {
       setError("Enter a model identifier.");
       return;
     }
+    // The step limit is `type=number required min=1`, so the browser has
+    // already refused anything this could re-check.
     const parsedLimit = Number.parseInt(stepLimit, 10);
-    if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
-      setError("Step limit must be a positive integer.");
+
+    if (!REPO_URL.test(repo.trim())) {
+      setError(
+        "Repository must be an https:// URL of the form https://github.com/owner/repo.",
+      );
       return;
     }
 
@@ -69,7 +84,7 @@ export default function NewSessionForm({ onCreated, onCancel }: Props) {
 
   return (
     <form className="newsess" onSubmit={handleSubmit}>
-      <h2 className="cap">new session</h2>
+      {title && <h2 className="cap">{title}</h2>}
 
       <div className="field">
         <label className="cap" htmlFor="repo">
@@ -77,9 +92,12 @@ export default function NewSessionForm({ onCreated, onCancel }: Props) {
         </label>
         <input
           id="repo"
+          type="url"
+          inputMode="url"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
           placeholder="https://github.com/owner/repo"
+          title="An https:// URL, like https://github.com/owner/repo"
           required
           autoFocus
         />
@@ -149,6 +167,8 @@ export default function NewSessionForm({ onCreated, onCancel }: Props) {
             id="steps"
             type="number"
             min={1}
+            step={1}
+            required
             value={stepLimit}
             onChange={(e) => setStepLimit(e.target.value)}
           />
@@ -161,9 +181,11 @@ export default function NewSessionForm({ onCreated, onCancel }: Props) {
         <button type="submit" className="btn btn-orange" disabled={submitting}>
           {submitting ? "Cloning…" : "Start session"}
         </button>
-        <button type="button" className="btn" onClick={onCancel}>
-          Cancel
-        </button>
+        {onCancel && (
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
       </div>
     </form>
   );

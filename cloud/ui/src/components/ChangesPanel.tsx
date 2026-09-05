@@ -3,6 +3,8 @@ import { shortSha } from "../format";
 
 interface Props {
   diff: SessionDiff | null;
+  /** Replay caveat, when the diff is the approximation rather than truth. */
+  note: string | null;
   error: string | null;
   loading: boolean;
   onRefresh: () => void;
@@ -12,6 +14,7 @@ interface Props {
 /** What the agent has changed so far. Each row opens the inspector. */
 export default function ChangesPanel({
   diff,
+  note,
   error,
   loading,
   onRefresh,
@@ -39,8 +42,14 @@ export default function ChangesPanel({
 
       {error && <div className="notice">{error}</div>}
 
+      {note && <p className="approx cap">{note}</p>}
+
       {!error && files.length === 0 && (
-        <p className="panel-empty">Nothing has changed yet.</p>
+        <p className="panel-empty">
+          {note
+            ? "Nothing had been written by this step."
+            : "Nothing has changed yet."}
+        </p>
       )}
 
       {files.length > 0 && (

@@ -6,12 +6,21 @@ interface Props {
   path: string;
   diff: SessionDiff | null;
   file: DiffFile | undefined;
+  /** Replay caveat, when the diff is the approximation rather than truth. */
+  note: string | null;
   loading: boolean;
   error: string | null;
 }
 
 /** One file's patch, refetched while the agent is still writing to it. */
-export default function DiffView({ path, diff, file, loading, error }: Props) {
+export default function DiffView({
+  path,
+  diff,
+  file,
+  note,
+  loading,
+  error,
+}: Props) {
   const lines = useMemo(
     () => patchFor(path, diff?.patch ?? "", file?.patch),
     [path, diff?.patch, file?.patch],
@@ -21,14 +30,22 @@ export default function DiffView({ path, diff, file, loading, error }: Props) {
 
   if (lines.length === 0) {
     return (
-      <p className="ins-empty">
-        {loading ? "reading the workspace…" : "No changes yet."}
-      </p>
+      <>
+        {note && <p className="approx cap">{note}</p>}
+        <p className="ins-empty">
+          {loading
+            ? "reading the workspace…"
+            : note
+              ? "This file had not been written by this step."
+              : "No changes yet."}
+        </p>
+      </>
     );
   }
 
   return (
     <div className="diff">
+      {note && <p className="approx cap">{note}</p>}
       {loading && <div className="diff-live cap cap-muted">refreshing…</div>}
       <pre>
         {lines.map((line, i) => (

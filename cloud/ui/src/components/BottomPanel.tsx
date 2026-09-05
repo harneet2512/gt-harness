@@ -16,6 +16,8 @@ interface Props {
   running: boolean;
   onPickFile: (path: string) => void;
   diff: SessionDiff | null;
+  /** Set while scrubbing: the diff shown is an approximation, and says so. */
+  diffNote: string | null;
   diffError: string | null;
   diffLoading: boolean;
   onRefreshDiff: () => void;
@@ -34,6 +36,7 @@ export default function BottomPanel({
   running,
   onPickFile,
   diff,
+  diffNote,
   diffError,
   diffLoading,
   onRefreshDiff,
@@ -94,6 +97,7 @@ export default function BottomPanel({
         {tab === "changes" && (
           <ChangesPanel
             diff={diff}
+            note={diffNote}
             error={diffError}
             loading={diffLoading}
             onRefresh={onRefreshDiff}

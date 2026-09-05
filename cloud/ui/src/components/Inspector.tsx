@@ -18,6 +18,8 @@ interface Props {
   onClose: () => void;
   diff: SessionDiff | null;
   diffFile: DiffFile | undefined;
+  /** Replay caveat, when the diff is the approximation rather than truth. */
+  diffNote: string | null;
   diffLoading: boolean;
   diffError: string | null;
   relations: Relations;
@@ -38,6 +40,7 @@ export default function Inspector({
   onClose,
   diff,
   diffFile,
+  diffNote,
   diffLoading,
   diffError,
   relations,
@@ -133,6 +136,7 @@ export default function Inspector({
                 path={path}
                 diff={diff}
                 file={diffFile}
+                note={diffNote}
                 loading={diffLoading}
                 error={diffError}
               />

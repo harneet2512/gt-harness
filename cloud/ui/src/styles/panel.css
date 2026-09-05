@@ -169,6 +169,11 @@
 .file-mark.is-bad {
   background: var(--error);
 }
+/* An added file is not a modified one, and must not look like it. */
+.file-mark.is-new {
+  background: var(--surface);
+  border: 1px solid var(--teal);
+}
 .file-path {
   flex: 1 1 auto;
   overflow: hidden;

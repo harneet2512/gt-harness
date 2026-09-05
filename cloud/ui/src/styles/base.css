@@ -182,6 +182,10 @@ select:focus {
   outline: none;
   border-color: var(--orange);
 }
+/* Only once the reader has actually typed something wrong. */
+input:user-invalid {
+  border-color: var(--error);
+}
 textarea {
   resize: none;
 }
@@ -302,6 +306,58 @@ textarea {
   justify-content: center;
   height: 100%;
   color: var(--ink-2);
+}
+
+/* A replayed diff is an approximation and has to say so wherever it shows. */
+.approx {
+  color: var(--muted);
+  font-size: 11.5px;
+  padding: 2px 0 7px;
+  white-space: normal;
+}
+
+/* ---------------- the empty state ---------------- */
+
+.start {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--paper);
+  overflow-y: auto;
+}
+.start-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 26px 26px 20px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.start-card h1 {
+  font-weight: 600;
+  font-size: 19px;
+  margin-bottom: 4px;
+}
+.start-sub {
+  color: var(--ink-2);
+  margin-bottom: 18px;
+}
+.start-card .newsess {
+  padding: 0;
+}
+.start-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.start-foot .switch {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .signin {

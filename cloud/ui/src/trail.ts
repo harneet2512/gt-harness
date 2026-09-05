@@ -23,6 +23,11 @@ export interface TrailStep {
   eventId: number;
   /** 1-based position within the turn. */
   n: number;
+  /**
+   * True when an `assistant` frame opened this step, i.e. it stands for one
+   * model call. See `callCount` for why that is the unit we count in.
+   */
+  isCall: boolean;
   thought: string;
   actions: string[];
   command: string | null;
@@ -160,6 +165,7 @@ export function buildSteps(
       key: item.key,
       eventId: eventIdOf(item.key),
       n: steps.length + 1,
+      isCall: item.kind === "assistant",
       thought: "",
       actions: [],
       command: null,
@@ -221,6 +227,50 @@ export function buildSteps(
   }
 
   return steps;
+}
+
+/* ------------------------------------------------------------------ *
+ * Counting steps
+ *
+ * THE RULE — one word, one meaning: **a step is a model call.** Every
+ * number labelled "steps" in this UI counts model calls and nothing else.
+ *
+ *   · Once a turn has ended, the count is the server's `n_calls`
+ *     (`turn_finished.n_calls`, echoed by the reply meta and the receipt).
+ *     That is the authority.
+ *   · While the turn is still running there is no `n_calls` yet, so the
+ *     count is the number of `assistant` frames seen — one per model call.
+ *   · The tick row draws one tick per `assistant` frame, so what you count
+ *     on screen is what the label says.
+ *
+ * The final model call of a turn produces the reply and issues no command,
+ * so it emits no `assistant` frame: expect the live count to settle one
+ * higher when `n_calls` lands. Steps opened by a stray `tool_call` with no
+ * `assistant` frame of its own are continuations of the call before them —
+ * they appear in the trail, and they are not counted twice.
+ * ------------------------------------------------------------------ */
+
+/** Steps that stand for a model call — the ones the tick rows draw. */
+export function callSteps(steps: readonly TrailStep[]): TrailStep[] {
+  return steps.filter((step) => step.isCall);
+}
+
+/** Which model call a trail-step cutoff is standing on. 1-based. */
+export function callAt(steps: readonly TrailStep[], cutoff: number): number {
+  let n = 0;
+  for (const step of steps) {
+    if (step.n > cutoff) break;
+    if (step.isCall) n += 1;
+  }
+  return Math.max(1, n);
+}
+
+/** Model calls seen so far. `nCalls` from the server wins once it exists. */
+export function callCount(
+  steps: readonly TrailStep[],
+  nCalls: number | null,
+): number {
+  return nCalls ?? callSteps(steps).length;
 }
 
 /**

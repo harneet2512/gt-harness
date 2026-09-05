@@ -9,16 +9,26 @@ import {
   type ParticleField,
   type Relations,
 } from "./graph";
+import { applySavedLayout, saveLayout } from "./layoutStore";
+import { splitPatch } from "./patch";
 import {
   buildSteps,
+  callAt,
+  callCount,
   EMPTY_INDEX,
   indexFiles,
   trailView,
+  WRITES,
   type Attention,
   type TrailStep,
 } from "./trail";
 
+/** How often a settled layout is written back to localStorage. */
+const LAYOUT_SAVE_MS = 5000;
+
 interface Input {
+  /** Persistence key for the layout and the camera. */
+  sessionId: string | null;
   chat: ChatState;
   tree: readonly TreeFile[];
   graph: SessionGraph;
@@ -41,6 +51,10 @@ export interface GraphView {
   cutoff: number;
   hereStep: number | null;
   setScrub: (n: number | null) => void;
+  /** Model calls in the selected turn. See the rule in `trail.ts`. */
+  calls: number;
+  /** The model call the scrub position is standing on. */
+  hereCall: number;
 
   field: ParticleField;
   neighbours: ReadonlyMap<string, ReadonlySet<string>>;
@@ -51,6 +65,13 @@ export interface GraphView {
 
   editedFiles: ReadonlyMap<string, DiffFile>;
   editedPaths: ReadonlySet<string>;
+  /**
+   * The diff as of the scrub position — the server's own answer while live,
+   * an approximation behind it. `diffNote` says which, and is null at live.
+   */
+  diffAtCutoff: SessionDiff | null;
+  editedAtCutoff: ReadonlyMap<string, DiffFile>;
+  diffNote: string | null;
   editedById: ReadonlyMap<string, DiffFile>;
   attentionById: ReadonlyMap<string, Attention>;
   trailIds: readonly string[];
@@ -64,7 +85,7 @@ export interface GraphView {
  * new event must not rebuild the layout unless the graph really changed.
  */
 export function useGraphView(input: Input): GraphView {
-  const { chat, tree, graph, diff, currentTurnId, turnEpoch } = input;
+  const { sessionId, chat, tree, graph, diff, currentTurnId, turnEpoch } = input;
 
   const [pickedTurnId, setPickedTurnId] = useState<string | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
@@ -157,9 +178,27 @@ export function useGraphView(input: Input): GraphView {
   const fieldRef = useRef<ParticleField | undefined>(undefined);
   const field = useMemo(() => {
     const next = buildField(graph, cotouch, fieldRef.current);
+    // Whatever the rebuild could not carry over is looked up in the layout
+    // this session last left behind, so a reload opens on the same picture.
+    if (next !== fieldRef.current) applySavedLayout(sessionId, next);
     fieldRef.current = next;
     return next;
-  }, [graph, cotouch]);
+  }, [graph, cotouch, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const save = () => {
+      const current = fieldRef.current;
+      if (current) saveLayout(sessionId, current);
+    };
+    const timer = setInterval(save, LAYOUT_SAVE_MS);
+    window.addEventListener("pagehide", save);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("pagehide", save);
+      save();
+    };
+  }, [sessionId]);
 
   const neighbours = useMemo(() => neighboursOf(field), [field]);
   const relations = useMemo(() => buildRelations(graph), [graph]);
@@ -199,6 +238,57 @@ export function useGraphView(input: Input): GraphView {
     return out;
   }, [view.trail, particleId]);
 
+  /* ---- the diff, replayed ------------------------------------------- *
+   * The server has no per-step diff, so behind the live position we show
+   * the files a write-shaped command had touched by then, intersected with
+   * the patch we do have. It is an approximation and it says so: a file
+   * written and then reverted never appears, and a file written twice
+   * shows its final patch, not the one that existed at step N.
+   * ------------------------------------------------------------------- */
+  const writtenUpTo = useMemo(() => {
+    const out = new Set<string>();
+    if (live) return out;
+    const collect = (list: readonly TrailStep[], upTo: number) => {
+      for (let i = 0; i < Math.min(upTo, list.length); i += 1) {
+        const step = list[i];
+        if (!step.command || !WRITES.test(step.command)) continue;
+        for (const path of step.files) out.add(path);
+      }
+    };
+    // Earlier turns wrote into the same workspace, so they count in full.
+    for (const turnId of turnIds) {
+      if (turnId === selectedTurnId) break;
+      collect(stepsByTurn[turnId] ?? [], Number.MAX_SAFE_INTEGER);
+    }
+    collect(steps, cutoff);
+    return out;
+  }, [live, cutoff, steps, turnIds, selectedTurnId, stepsByTurn]);
+
+  const diffAtCutoff = useMemo(() => {
+    if (live || !diff) return diff;
+    const files = diff.files.filter((file) => writtenUpTo.has(file.path));
+    if (files.length === diff.files.length) return diff;
+    const keep = new Set(files.map((file) => file.path));
+    const patch = splitPatch(diff.patch)
+      .filter((section) => keep.has(section.path))
+      .map((section) => section.lines.join("\n"))
+      .join("\n");
+    return { ...diff, files, patch };
+  }, [live, diff, writtenUpTo]);
+
+  const editedAtCutoff = useMemo(() => {
+    if (diffAtCutoff === diff) return editedFiles;
+    const out = new Map<string, DiffFile>();
+    for (const file of diffAtCutoff?.files ?? []) out.set(file.path, file);
+    return out;
+  }, [diffAtCutoff, diff, editedFiles]);
+
+  const hereCall = callAt(steps, cutoff);
+  const diffNote = live
+    ? null
+    : `diff at step ${hereCall} is approximate — showing files ` +
+      "written up to this step";
+
   const pickTurn = useCallback((turnId: string) => {
     setPickedTurnId(turnId);
     setScrub(null);
@@ -215,6 +305,8 @@ export function useGraphView(input: Input): GraphView {
     cutoff,
     hereStep,
     setScrub,
+    calls: callCount(steps, chat.turns[selectedTurnId ?? ""]?.nCalls ?? null),
+    hereCall,
     field,
     neighbours,
     relations,
@@ -222,6 +314,9 @@ export function useGraphView(input: Input): GraphView {
     particleId,
     editedFiles,
     editedPaths,
+    diffAtCutoff,
+    editedAtCutoff,
+    diffNote,
     editedById,
     attentionById,
     trailIds,

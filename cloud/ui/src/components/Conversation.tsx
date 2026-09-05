@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Message, Session } from "../api";
 import {
   orphanSteering,
@@ -6,7 +7,7 @@ import {
   type TurnGroup,
 } from "../chatState";
 import { formatClock, formatCost, shortSha } from "../format";
-import type { StepSteering, TrailStep } from "../trail";
+import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
 import Composer from "./Composer";
 import Prose from "./Prose";
@@ -36,11 +37,30 @@ interface Props {
   locked: boolean;
   lockedReason: string;
   sendError: string | null;
+  /** Why the GT index is unavailable, when it is. */
+  gtError: string | null;
   onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
   onContinue: () => void;
   /** Discard the workspace. Absent once the session is already closed. */
   onClose: (() => void) | null;
+}
+
+/** GT in four words, in the header, at all times. */
+function GtBadge({ status }: { status: string }) {
+  const label =
+    status === "ready"
+      ? "GT: ready"
+      : status === "pending"
+        ? "GT: indexing…"
+        : status === "unavailable"
+          ? "GT: unavailable"
+          : "GT: off";
+  return (
+    <span className={`gt-badge is-${status}`} title={`ground truth: ${status}`}>
+      {label}
+    </span>
+  );
 }
 
 /** The left column: who you are talking to, what was said, and the composer. */
@@ -64,13 +84,20 @@ export default function Conversation({
   locked,
   lockedReason,
   sendError,
+  gtError,
   onSend,
   onStop,
   onContinue,
   onClose,
 }: Props) {
   const scroll = useAutoScroll();
+  const [gtDismissed, setGtDismissed] = useState(false);
   let turnNo = 0;
+
+  const gtMode = String(session?.gt_mode ?? "off");
+  const gtStatus = String(session?.gt_status ?? "off");
+  // Asked for ground truth and did not get it: say so, once, until dismissed.
+  const gtFailed = gtStatus === "unavailable" && gtMode !== "off";
 
   return (
     <section className="talk">
@@ -84,6 +111,7 @@ export default function Conversation({
             steps={liveSteps}
           />
           <span className="spacer" />
+          {session && <GtBadge status={gtStatus} />}
           {onClose && (
             <button
               type="button"
@@ -99,6 +127,31 @@ export default function Conversation({
 
       <div className="talk-wrap">
         <div className="talk-scroll" ref={scroll.ref}>
+          {gtFailed && !gtDismissed && (
+            <div className="gt-warn">
+              <div className="gt-warn-line">
+                <span>
+                  GroundTruth index unavailable for this session — running
+                  without graph evidence
+                </span>
+                <button
+                  type="button"
+                  className="btn-text"
+                  aria-label="Dismiss this notice"
+                  onClick={() => setGtDismissed(true)}
+                >
+                  ✕
+                </button>
+              </div>
+              {gtError && (
+                <details className="gt-warn-why">
+                  <summary className="cap">why</summary>
+                  <p className="mono">{gtError}</p>
+                </details>
+              )}
+            </div>
+          )}
+
           {!sessionId && (
             <p className="talk-empty">Pick a session or start a new one.</p>
           )}
@@ -207,6 +260,7 @@ function Exchange({
       <TransmissionStrip
         no={no}
         steps={steps}
+        calls={callCount(steps, turn?.nCalls ?? null)}
         edited={edited}
         running={running}
         selected={selected}
