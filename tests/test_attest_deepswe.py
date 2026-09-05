@@ -16,8 +16,8 @@ from scripts.gt_audit import artifact_corpus_sha256, audit_digest_sha256
 from scripts.provider_preflight import load_route
 
 TASK = "abs-module-cache-flags"
-REQUESTED = "meta/muse-spark-1.2-contributor"
-EFFECTIVE = "openai/meta/muse-spark-1.2-contributor"
+REQUESTED = "deepseek/deepseek-v4-flash-0731"
+EFFECTIVE = "openai/deepseek/deepseek-v4-flash-0731"
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +68,7 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
         "provider_route_sha256": route_digest,
         "provider": route["provider"],
         "provider_base_url": route["base_url"],
+        "provider_routing": route["provider_routing"],
         "paid_run_approval": {"approved": True, "input": "approve_paid_run"},
         "baseline": None,
     }
@@ -85,6 +86,7 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "provider": route["provider"],
             "base_url": route["base_url"],
             "model": REQUESTED,
+            "provider_routing": route["provider_routing"],
             "route_sha256": route_digest,
             "error_code": None,
             "checks": {
@@ -287,7 +289,17 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "kind": spec["kind"],
             "disposition": "WITNESSED",
             "trigger_source": "tests/provider_free.py",
-            "evidence": {"exit_code": 0},
+            "evidence": {
+                "positive": {"exit_code": 0, "node_ids": ["tests/provider_free.py"]},
+                "negative": {"exit_code": 0, "node_ids": ["tests/provider_free.py"]},
+            },
+            "proof_dimensions": {
+                "produced": "tests/provider_free.py",
+                "admitted": "tests/provider_free.py",
+                "sent_or_correct_quiet": "tests/provider_free.py",
+                "behaviorally_relevant": "tests/provider_free.py",
+                "negative_or_stale": "tests/provider_free.py",
+            },
             "freshness_pins": {"source_revision": source_sha},
             "receipt_digest_sha256": None,
         }
@@ -296,7 +308,7 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
         )
         feature_rows.append(feature)
     feature_matrix = {
-        "schema": "gt.feature_matrix.v1",
+        "schema": "gt.feature_matrix.v2",
         "source_revision": source_sha,
         "generated_at": "2026-09-02T00:00:00Z",
         "identity_count": len(feature_rows),
@@ -766,6 +778,11 @@ def test_official_verifier_cannot_claim_arbitrary_in_root_file(tmp_path: Path) -
         ),
         (
             "gate",
+            lambda row: row["provider_routing"].update(allow_fallbacks=True),
+            "provider_gate_route_mismatch",
+        ),
+        (
+            "gate",
             lambda row: row["checks"].update(model_canary_served=False),
             "provider_gate_checks_invalid",
         ),
@@ -782,6 +799,11 @@ def test_official_verifier_cannot_claim_arbitrary_in_root_file(tmp_path: Path) -
         (
             "plan",
             lambda row: row.update(provider_route_sha256="0" * 64),
+            "planned_provider_route_mismatch",
+        ),
+        (
+            "plan",
+            lambda row: row["provider_routing"].update(only=["openinference"]),
             "planned_provider_route_mismatch",
         ),
     ],

@@ -11,8 +11,8 @@ from typing import Any
 
 from gt_engine.attribution import DIRECT_FEATURES
 
-SCHEMA = "gt.feature_matrix.v1"
-MARKDOWN_SCHEMA = "gt.feature_matrix.md.v1"
+SCHEMA = "gt.feature_matrix.v2"
+MARKDOWN_SCHEMA = "gt.feature_matrix.md.v2"
 
 # Curated pytest nodes that exercise each attribution identity.
 FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
@@ -79,6 +79,69 @@ FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Every identity also needs an abstention/ineligibility/staleness witness. A
+# positive firing test alone cannot show that the feature is deterministic or
+# safe for Mini-SWE when its prerequisites are absent.
+FEATURE_NEGATIVE_EVIDENCE: dict[str, tuple[str, ...]] = {
+    "caller_contract": (
+        "tests/test_gt_engine.py::test_bridge_records_gateway_no_candidate_reason",
+    ),
+    "cochange_prior": (
+        "tests/test_gt_attribution.py::test_authority_abstention_is_named_suppression_not_triggered_dark",
+    ),
+    "covering_red": (
+        "tests/test_gt_engine.py::test_covering_green_stays_quiet_and_rechecks_after_later_edit",
+    ),
+    "def_partition": (
+        "tests/test_gt_engine.py::test_smart_truncate_byte_identical_when_no_deliveries",
+    ),
+    "localization": (
+        "tests/test_gt_engine.py::test_task_start_abstains_without_issue_text",
+    ),
+    "newfile_precedent": (
+        "tests/test_miniswe_runtime.py::test_newfile_precedent_is_quiet_without_inspectable_sibling",
+    ),
+    "obligations": (
+        "tests/test_miniswe_runtime.py::test_submit_magic_string_executes_when_no_red_evidence",
+    ),
+    "recovery": (
+        "tests/test_gt_engine.py::test_recovery_quiet_on_different_failure",
+    ),
+    "signature_delta": (
+        "tests/test_runtime_observation.py::test_python_signature_delta_distinguishes_body_and_signature_edits",
+    ),
+    "submit_refusal": (
+        "tests/test_miniswe_runtime.py::test_submit_magic_string_executes_when_no_red_evidence",
+    ),
+    "syntax_result": (
+        "tests/test_miniswe_runtime.py::test_newfile_precedent_does_not_preempt_executed_syntax_failure",
+    ),
+    "select_catalog": (
+        "tests/test_persistent_execution_state.py::test_feature18_rejects_duplicate_and_out_of_catalog_ids_without_consumption",
+    ),
+    "GT_CERT_DELIVERY": (
+        "tests/test_miniswe_runtime.py::test_final_provider_refusal_does_not_consume_gt_delivery",
+    ),
+    "GT_CHANGE_SURFACE": (
+        "tests/test_gt_engine.py::test_new_file_change_surface_records_correct_quiet_execution",
+    ),
+    "GT_EDIT_CHECK": (
+        "tests/test_gt_attribution.py::test_executed_clean_edit_check_is_witnessed_but_no_target_is_ineligible",
+    ),
+    "GT_HYPOTHESIS": (
+        "tests/test_gt_engine.py::test_recovery_quiet_without_intervening_edit",
+    ),
+    "GT_LOC_RESLOT": (
+        "tests/test_gt_engine.py::test_task_start_empty_brief_is_named_correct_quiet",
+    ),
+    "GT_PATCH_DELTA": (
+        "tests/test_runtime_observation.py::test_python_signature_delta_distinguishes_body_and_signature_edits",
+    ),
+    "GT_SS_SUBMIT_RED": (
+        "tests/test_gt_engine.py::test_submit_red_quiet_when_no_test_ever_observed",
+    ),
+}
+
 
 def canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -119,8 +182,9 @@ def _run_evidence(nodes: tuple[str, ...], *, repo_root: Path) -> dict[str, Any]:
 
 
 def _disposition_from_evidence(evidence: dict[str, Any]) -> str:
-    exit_code = int(evidence.get("exit_code", 1))
-    if exit_code == 0:
+    positive = evidence.get("positive") or {}
+    negative = evidence.get("negative") or {}
+    if positive.get("exit_code") == 0 and negative.get("exit_code") == 0:
         return "WITNESSED"
     return "not_run"
 
@@ -133,18 +197,16 @@ def build_cell(
 ) -> dict[str, Any]:
     spec = DIRECT_FEATURES[identity]
     nodes = FEATURE_EVIDENCE.get(identity, ())
-    if not nodes:
+    negative_nodes = FEATURE_NEGATIVE_EVIDENCE.get(identity, ())
+    if not nodes or not negative_nodes:
         body: dict[str, Any] = {
             "identity": identity,
             "kind": spec["kind"],
             "disposition": "not_run",
             "trigger_source": "",
             "evidence": {
-                "command": [],
-                "exit_code": None,
-                "stdout_digest_sha256": "",
-                "stderr_digest_sha256": "",
-                "node_ids": [],
+                "positive": {"node_ids": []},
+                "negative": {"node_ids": []},
                 "reason": "no_evidence_binding",
             },
             "freshness_pins": {
@@ -155,14 +217,25 @@ def build_cell(
         body["cell_digest_sha256"] = digest_body(body, field="cell_digest_sha256")
         return body
 
-    evidence = _run_evidence(nodes, repo_root=repo_root) if execute else {
-        "command": [sys.executable, "-m", "pytest", "-q", *nodes],
-        "exit_code": None,
-        "stdout_digest_sha256": "",
-        "stderr_digest_sha256": "",
-        "node_ids": list(nodes),
-        "reason": "execution_skipped",
-    }
+    if execute:
+        evidence = {
+            "positive": _run_evidence(nodes, repo_root=repo_root),
+            "negative": _run_evidence(negative_nodes, repo_root=repo_root),
+        }
+    else:
+        evidence = {
+            "positive": {
+                "command": [sys.executable, "-m", "pytest", "-q", *nodes],
+                "exit_code": None,
+                "node_ids": list(nodes),
+            },
+            "negative": {
+                "command": [sys.executable, "-m", "pytest", "-q", *negative_nodes],
+                "exit_code": None,
+                "node_ids": list(negative_nodes),
+            },
+            "reason": "execution_skipped",
+        }
     disposition = _disposition_from_evidence(evidence) if execute else "not_run"
     body = {
         "identity": identity,
@@ -170,6 +243,13 @@ def build_cell(
         "disposition": disposition,
         "trigger_source": nodes[0],
         "evidence": evidence,
+        "proof_dimensions": {
+            "produced": nodes[0],
+            "admitted": nodes[0],
+            "sent_or_correct_quiet": nodes[0],
+            "behaviorally_relevant": nodes[0],
+            "negative_or_stale": negative_nodes[0],
+        },
         "freshness_pins": {
             "source_revision": _git_head(repo_root),
         },
@@ -200,6 +280,7 @@ def verify_matrix(
     matrix: dict[str, Any],
     *,
     expected_source_revision: str | None = None,
+    require_witnessed: bool = False,
 ) -> list[str]:
     errors: list[str] = []
     if matrix.get("schema") != SCHEMA:
@@ -240,6 +321,33 @@ def verify_matrix(
             continue
         if digest_body(row, field="cell_digest_sha256") != cell_digest:
             errors.append(f"{row.get('identity')}: cell_digest_sha256 mismatch")
+        evidence = row.get("evidence")
+        if not isinstance(evidence, dict):
+            errors.append(f"{row.get('identity')}: evidence object required")
+            continue
+        for polarity in ("positive", "negative"):
+            witness = evidence.get(polarity)
+            if (
+                not isinstance(witness, dict)
+                or not isinstance(witness.get("node_ids"), list)
+                or not witness.get("node_ids")
+            ):
+                errors.append(f"{row.get('identity')}: {polarity} witness required")
+        dimensions = row.get("proof_dimensions")
+        required = {
+            "produced", "admitted", "sent_or_correct_quiet",
+            "behaviorally_relevant", "negative_or_stale",
+        }
+        if not isinstance(dimensions, dict) or set(dimensions) != required:
+            errors.append(f"{row.get('identity')}: proof dimensions incomplete")
+        if require_witnessed:
+            identity = row.get("identity")
+            if row.get("disposition") != "WITNESSED":
+                errors.append(f"{identity}: disposition is not WITNESSED")
+            for polarity in ("positive", "negative"):
+                witness = evidence.get(polarity)
+                if not isinstance(witness, dict) or witness.get("exit_code") != 0:
+                    errors.append(f"{identity}: {polarity} witness did not pass")
     return errors
 
 
@@ -259,13 +367,15 @@ def render_markdown(matrix: dict[str, Any]) -> str:
         if not isinstance(row, dict):
             continue
         evidence = row.get("evidence") or {}
+        positive = evidence.get("positive") or {}
+        negative = evidence.get("negative") or {}
         lines.append(
             "| {identity} | {kind} | {disposition} | `{trigger}` | {exit_code} | `{digest}` |".format(
                 identity=row.get("identity", ""),
                 kind=row.get("kind", ""),
                 disposition=row.get("disposition", ""),
                 trigger=row.get("trigger_source", ""),
-                exit_code=evidence.get("exit_code", ""),
+                exit_code=f"{positive.get('exit_code', '')}/{negative.get('exit_code', '')}",
                 digest=row.get("cell_digest_sha256", ""),
             )
         )

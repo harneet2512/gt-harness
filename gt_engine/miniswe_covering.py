@@ -182,7 +182,8 @@ def run_covering_lane(adapter, changed_files: tuple[str, ...]):
     """
     if os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1":
         return None
-    if not adapter.graph_db:
+    snapshot = adapter.graph_query_snapshot()
+    if not snapshot.graph_current:
         return None
     src = [
         path for path in changed_files
@@ -200,12 +201,12 @@ def run_covering_lane(adapter, changed_files: tuple[str, ...]):
     except Exception:  # noqa: BLE001 - covering absent -> feature quiet
         return None
 
-    symbols = _symbols_for_files(adapter.graph_db, tuple(src), repo_root)
+    symbols = _symbols_for_files(snapshot.graph_path, tuple(src), repo_root)
     if not symbols:
         return None
     try:
         selected = select_covering_tests(
-            adapter.graph_db, symbols, limit=2, repo_root=repo_root
+            snapshot.graph_path, symbols, limit=2, repo_root=repo_root
         )
         files = [c["file"] for c in (selected or []) if c.get("file")]
     except Exception:  # noqa: BLE001

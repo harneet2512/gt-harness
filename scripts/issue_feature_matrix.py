@@ -42,6 +42,7 @@ def main() -> int:
     errors = verify_matrix(
         matrix,
         expected_source_revision=checkout_head,
+        require_witnessed=not args.dry_run,
     )
     if errors:
         for issue in errors:

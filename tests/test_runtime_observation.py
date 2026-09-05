@@ -4,6 +4,8 @@ import hashlib
 import json
 import subprocess
 
+import pytest
+
 from gt_engine.runtime_observation import (
     capture_workspace,
     certify_observation_equivalence,
@@ -104,6 +106,27 @@ def test_non_build_or_test_command_is_not_structured():
         action_id=1,
         repository_revision="b" * 64,
     ) is None
+
+
+@pytest.mark.parametrize(("command", "output", "returncode", "expected"), [
+    ("pytest -q | tee test.log", "1 failed", 0, "unknown"),
+    ("npm test; echo done", "Tests: 1 failed", 0, "unknown"),
+    ("pytest -q", "no tests ran", 0, "executed_no_tests"),
+    ("pytest -q", "", 0, "unknown"),
+    ("pytest -q", "1 passed", None, "unknown"),
+    ("pytest -q", "1 passed", 0, "pass"),
+    ("pytest -q", "1 failed", 1, "fail"),
+    ("pytest -q", "ModuleNotFoundError: no module named missing", 1, "env_fail"),
+    ("cargo test", "running 0 tests\ntest result: ok. 0 passed", 0, "executed_no_tests"),
+    ("go test ./...", "ok example.com/test 0.013s", 0, "pass"),
+    ("pytest -q", "", 124, "timeout"),
+    ("pytest -q", "", -9, "interrupted"),
+])
+def test_execution_result_does_not_invent_test_success(command, output, returncode, expected):
+    evidence = compile_execution_evidence(command=command, output=output,
+        returncode=returncode, action_id=1, repository_revision="r1")
+    assert evidence is not None
+    assert evidence.outcome == expected
 
 
 def test_transaction_artifacts_bind_patch_syntax_and_recorded_callers(tmp_path):
@@ -220,3 +243,77 @@ def test_python_signature_delta_distinguishes_body_and_signature_edits(tmp_path)
         diff_workspace(body_after, signature_after, action_id=2, command="signature edit")
     )
     assert signature_artifact["signatures"][0]["changed"] == ["compute"]
+
+
+def test_parser_signature_delta_handles_create_and_delete(tmp_path, monkeypatch):
+    removed = tmp_path / "removed.go"
+    removed.write_text("package p\nfunc Removed() {}\n", encoding="utf-8")
+    before = capture_workspace(tmp_path)
+    removed.unlink()
+    (tmp_path / "added.go").write_text(
+        "package p\nfunc Added(value int) {}\n", encoding="utf-8"
+    )
+    after = capture_workspace(tmp_path)
+
+    def inspect(requests):
+        rows = []
+        for request in requests:
+            name = "Added" if b"Added" in request.content else "Removed"
+            rows.append({
+                "schema": "gt.parser_inspection.v1",
+                "request_id": request.request_id,
+                "content_sha256": hashlib.sha256(request.content).hexdigest(),
+                "language": "go",
+                "parser_identity": "fixture/parser",
+                "complete": True,
+                "diagnostics": [],
+                "declarations": [{
+                    "name": name,
+                    "qualified_name": name,
+                    "signature": name,
+                }],
+            })
+        return tuple(rows)
+
+    monkeypatch.setattr("gt_engine.parser_inspection.inspect_sources", inspect)
+    artifact = compile_transaction_artifacts(
+        diff_workspace(before, after, action_id=3, command="replace API")
+    )
+    signatures = {row["path"]: row for row in artifact["signatures"]}
+    assert signatures["added.go"]["added"] == ["Added"]
+    assert signatures["added.go"]["removed"] == []
+    assert signatures["removed.go"]["added"] == []
+    assert signatures["removed.go"]["removed"] == ["Removed"]
+
+
+def test_parser_signature_delta_rejects_duplicate_qualified_names(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "api.ts"
+    target.write_text("function f(value: string): void {}\n", encoding="utf-8")
+    before = capture_workspace(tmp_path)
+    target.write_text("function f(value: number): void {}\n", encoding="utf-8")
+    after = capture_workspace(tmp_path)
+
+    def inspect(requests):
+        return tuple({
+            "schema": "gt.parser_inspection.v1",
+            "request_id": request.request_id,
+            "content_sha256": hashlib.sha256(request.content).hexdigest(),
+            "language": "typescript",
+            "parser_identity": "fixture/parser",
+            "complete": True,
+            "diagnostics": [],
+            "declarations": [
+                {"qualified_name": "f", "signature": "first"},
+                {"qualified_name": "f", "signature": "second"},
+            ],
+        } for request in requests)
+
+    monkeypatch.setattr("gt_engine.parser_inspection.inspect_sources", inspect)
+    artifact = compile_transaction_artifacts(
+        diff_workspace(before, after, action_id=4, command="edit overload")
+    )
+    assert artifact["signatures"][0]["status"] == (
+        "unavailable_ambiguous_declaration_identity"
+    )

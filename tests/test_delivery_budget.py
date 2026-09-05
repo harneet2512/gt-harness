@@ -121,7 +121,7 @@ def test_five_distinct_legitimate_deliveries_are_admitted(tmp_path) -> None:
     assert admitted == [True] * 5
 
 
-def test_pathological_twenty_fifth_delivery_is_refused_and_journaled(
+def test_fifth_same_boundary_claim_is_refused_and_journaled(
     tmp_path,
 ) -> None:
     adapter = _adapter(tmp_path)
@@ -131,18 +131,18 @@ def test_pathological_twenty_fifth_delivery_is_refused_and_journaled(
             kind="recovery",
             rendered=f"{ordinal:02d}:" + ("x" * 296),
             action_index=ordinal,
-            iteration=ordinal,
+            iteration=0,
             dedup_key=f"storm-{ordinal}",
         )
-        for ordinal in range(25)
+        for ordinal in range(5)
     ]
 
-    assert admitted == ([True] * 24) + [False]
+    assert admitted == ([True] * 4) + [False]
     refusals = [row for row in _events(adapter) if row["event"] == "delivery_refused"]
     assert len(refusals) == 1
-    assert refusals[0]["reason"] == "task_delivery_storm_backstop"
-    assert refusals[0]["candidate_ordinal"] == 25
-    assert refusals[0]["task_delivery_limit"] == 24
+    assert refusals[0]["reason"] == "boundary_claim_ceiling"
+    assert refusals[0]["candidate_ordinal"] == 5
+    assert refusals[0]["boundary_claim_limit"] == 4
 
 
 def test_prompt_lane_drops_identical_bytes_across_iterations(tmp_path) -> None:
@@ -155,6 +155,9 @@ def test_prompt_lane_drops_identical_bytes_across_iterations(tmp_path) -> None:
         iteration=1,
         dedup_key="prompt:iteration:1",
     )
+    adapter.bind_provider_payload({
+        "messages": [{"role": "user", "content": "identical prompt bytes"}]
+    })
     second = adapter.admit_model_visible_delivery(
         lane="prompt",
         kind="context_delta",
@@ -176,7 +179,9 @@ def test_prompt_lane_drops_identical_bytes_across_iterations(tmp_path) -> None:
     assert refused[-1]["reason"] == "duplicate_delivery_identity"
 
 
-def test_total_budget_refusal_is_journaled_with_conservation_fields(tmp_path) -> None:
+def test_total_budget_refusal_is_journaled_with_conservation_fields(tmp_path, monkeypatch) -> None:
+    # Isolate byte accounting from the independently tested four-claim policy.
+    monkeypatch.setattr("gt_engine.miniswe_integration.MAX_BOUNDARY_CLAIMS", 24)
     adapter = _adapter(tmp_path)
     admitted = [
         adapter.admit_model_visible_delivery(
@@ -184,7 +189,7 @@ def test_total_budget_refusal_is_journaled_with_conservation_fields(tmp_path) ->
             kind="recovery",
             rendered=f"{ordinal}:" + (chr(65 + ordinal) * 1_298),
             action_index=ordinal,
-            iteration=ordinal,
+            iteration=0,
             dedup_key=f"budget-{ordinal}",
         )
         for ordinal in range(8)
@@ -192,7 +197,7 @@ def test_total_budget_refusal_is_journaled_with_conservation_fields(tmp_path) ->
 
     assert admitted == ([True] * 7) + [False]
     refusal = [row for row in _events(adapter) if row["event"] == "delivery_refused"][0]
-    assert refusal["reason"] == "task_delivery_byte_ceiling"
+    assert refusal["reason"] == "request_delivery_byte_ceiling"
     assert refusal["admitted_count"] == 7
     assert refusal["admitted_bytes"] == 9_100
-    assert refusal["task_byte_limit"] == 9_600
+    assert refusal["request_byte_limit"] == 9_600

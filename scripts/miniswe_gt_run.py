@@ -17,8 +17,10 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -160,23 +162,20 @@ def _repository_head(repo: Path) -> str:
 def _write_model_patch(repo: Path, baseline: str, output: Path) -> None:
     """Export the complete workspace delta against the runner-start commit.
 
-    ``git diff <baseline>`` includes committed, staged, and tracked working-tree
-    changes. Intent-to-add makes non-ignored untracked files visible without
-    staging their contents or requiring the model to commit before its budget
-    expires. Pier collects this exact file for the DeepSWE verifier.
+    Build an isolated index from the baseline, then include the final workspace.
+    The model's real index (including partial staging) is never modified.
     """
-    subprocess.run(
-        ["git", "add", "--intent-to-add", "--", "."],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    result = subprocess.run(
-        ["git", "diff", "--binary", "--full-index", baseline, "--", "."],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
+    with tempfile.TemporaryDirectory(prefix="gt-patch-index-") as scratch:
+        git_env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        for command in (
+            ["git", "read-tree", baseline],
+            ["git", "add", "--all", "--", "."],
+        ):
+            subprocess.run(command, cwd=repo, env=git_env, check=True, capture_output=True)
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--binary", "--full-index", baseline, "--", "."],
+            cwd=repo, env=git_env, check=True, capture_output=True,
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".tmp")
     temporary.write_bytes(result.stdout)
@@ -385,6 +384,20 @@ def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
         if not model.startswith("openai/"):
             model = f"openai/{model}"
         model_kwargs["api_base"] = base_url
+        if model == "openai/deepseek/deepseek-v4-flash-0731":
+            raw_routing = os.environ.get("GT_PROVIDER_ROUTING_JSON", "")
+            try:
+                routing = json.loads(raw_routing)
+            except json.JSONDecodeError as exc:
+                raise ValueError("provider_routing_env_invalid") from exc
+            expected_routing = {
+                "only": ["relace"],
+                "allow_fallbacks": False,
+                "require_parameters": True,
+            }
+            if routing != expected_routing:
+                raise ValueError("provider_routing_env_not_allowed")
+            model_kwargs["extra_body"] = {"provider": routing}
     return model, model_kwargs
 
 
@@ -657,7 +670,33 @@ _EXCEPTION_TERMINAL = {
     "BadRequestError": "provider_failed",
     "ProviderModelMismatch": "provider_model_mismatch",
     "ResearchModelMismatch": "provider_model_mismatch",
+    "RunnerTerminationRequested": "timeout",
 }
+
+
+class RunnerTerminationRequested(RuntimeError):
+    """A supervisor requested shutdown while the protected finalizer is pending."""
+
+
+def _install_termination_guard():
+    """Turn the first SIGTERM into a catchable timeout and protect finalization.
+
+    The workflow retains an outer hard-kill reserve.  Ignoring subsequent
+    SIGTERM after the first request gives patch/receipt publication that reserve
+    instead of interrupting it a second time.
+    """
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def request_termination(signum, _frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise RunnerTerminationRequested(f"signal {signum}")
+
+    signal.signal(signal.SIGTERM, request_termination)
+
+    def restore() -> None:
+        signal.signal(signal.SIGTERM, previous)
+
+    return restore
 
 
 def _classify_terminal(exception: BaseException | None, result: dict) -> str:
@@ -814,6 +853,7 @@ def main() -> int:
     exception: BaseException | None = None
     gt_state: dict | None = None
     terminal = "internal_error"
+    restore_termination_handler = _install_termination_guard()
     try:
         result = agent.run(args.task)
     except Exception as exc:  # noqa: BLE001 - Submitted propagates on accept
@@ -1003,6 +1043,7 @@ def main() -> int:
                     f"{type(fallback_exc).__name__}: {fallback_exc}",
                     file=sys.stderr,
                 )
+    restore_termination_handler()
     print(json.dumps(report, sort_keys=True))
     return native_exit_code
 

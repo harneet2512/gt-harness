@@ -12,6 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from gt_engine.request_history import load_provider_request
+
 SCHEMA = "gt.delivery_efficiency_measurement.v1"
 _PROMPT_PATTERN = re.compile(
     r"(?P<body>\[(?P<tag>GT_TASK_CONTRACT|GT_OBLIGATION_DELTA)\]\n.*?)"
@@ -58,14 +60,12 @@ def _prompt_additions(
         (row for row in events if row.get("event") == "provider_delivery"),
         key=lambda row: int(row.get("sequence") or 0),
     ):
-        request_blob = str(event.get("request_blob") or "")
-        if not request_blob:
+        if not event.get("request_blob") and not event.get("request_manifest"):
             continue
-        request_path = state_dir / request_blob
-        request = json.loads(request_path.read_text(encoding="utf-8"))
+        request = load_provider_request(state_dir, event)
         messages = request.get("messages") if isinstance(request, dict) else None
         if not isinstance(messages, list):
-            raise ValueError(f"provider_messages_required:{request_path}")
+            raise ValueError("provider_messages_required")
         for message in messages:
             content = message.get("content") if isinstance(message, dict) else None
             if not isinstance(content, str):

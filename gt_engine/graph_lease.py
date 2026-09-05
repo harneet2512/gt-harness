@@ -107,7 +107,9 @@ class GraphLease:
         self.operations: tuple[str, ...] = ()
         self._supported_file_count = 0
         self._dependency_closure_size = 0
-        self._adapter_can_incremental = True
+        self._adapter_can_incremental = False
+        self._edit_generation = 0
+        self._build_in_flight = False
         self._refreshed_workspace_revision = ""
         self._attempts: dict[str, int] = {}
         self.last_error = ""
@@ -128,14 +130,20 @@ class GraphLease:
     def mark_edit(self, *, workspace_revision: str, dirty_paths: tuple[str, ...],
                   operations: tuple[str, ...], supported_file_count: int,
                   dependency_closure_size: int | None = None,
-                  adapter_can_incremental: bool = True) -> None:
+                  adapter_can_incremental: bool = False) -> None:
         if not workspace_revision:
             raise ValueError("workspace_revision is required")
         self.workspace_revision = workspace_revision
-        self.dirty_paths = tuple(dict.fromkeys(str(p) for p in dirty_paths if p))
-        self.operations = tuple(str(o) for o in operations)
+        self._edit_generation += 1
+        self.dirty_paths = tuple(dict.fromkeys(
+            (*self.dirty_paths, *(str(p) for p in dirty_paths if p))
+        ))
+        self.operations = tuple(dict.fromkeys((*self.operations, *(str(o) for o in operations))))
         self._supported_file_count = max(0, int(supported_file_count))
-        self._dependency_closure_size = max(0, int(dependency_closure_size or len(self.dirty_paths)))
+        self._dependency_closure_size = max(
+            self._dependency_closure_size, len(self.dirty_paths),
+            int(dependency_closure_size or 0),
+        )
         self._adapter_can_incremental = bool(adapter_can_incremental)
         self.freshness = GraphFreshness.STALE
         self.last_error = ""
@@ -165,7 +173,8 @@ class GraphLease:
     def refresh_for_boundary(self, boundary: DecisionBoundary, *, repository_revision: str,
                              refresh: Callable[[GraphRefreshRequest], GraphBuildResult]
                              ) -> GraphRefreshReceipt | None:
-        if boundary not in _GRAPH_BOUNDARIES or self.freshness is GraphFreshness.CURRENT:
+        if (boundary not in _GRAPH_BOUNDARIES or self.freshness is GraphFreshness.CURRENT
+                or self._build_in_flight):
             return None
         if not repository_revision:
             raise ValueError("repository_revision is required")
@@ -175,20 +184,49 @@ class GraphLease:
         self._refreshed_workspace_revision = self.workspace_revision
         mode = self._mode()
         request = self._request(repository_revision, mode, f"{boundary.value}: refresh")
-        result = refresh(request)
+        generation = self._edit_generation
+        self._build_in_flight = True
+        try:
+            return self._refresh(request, refresh, generation)
+        finally:
+            self._build_in_flight = False
+
+    @staticmethod
+    def _invoke_refresh(request: GraphRefreshRequest,
+                        refresh: Callable[[GraphRefreshRequest], GraphBuildResult]
+                        ) -> GraphBuildResult:
+        try:
+            result = refresh(request)
+            if not isinstance(result, GraphBuildResult):
+                raise TypeError("invalid graph build result")
+            return result
+        except Exception as exc:
+            return GraphBuildResult(False, request.repository_revision, "", "", 0.0,
+                                    False, request.mode, f"refresh_exception:{type(exc).__name__}")
+
+    def _refresh(self, request: GraphRefreshRequest,
+                 refresh: Callable[[GraphRefreshRequest], GraphBuildResult],
+                 generation: int) -> GraphRefreshReceipt:
+        result = self._invoke_refresh(request, refresh)
         receipt = GraphRefreshReceipt(request, result)
+        if self._edit_generation != generation:
+            self.freshness = GraphFreshness.STALE
+            return receipt
         if (not result.success or not result.health_valid
-                or result.graph_repository_revision != repository_revision
-                or not result.graph_revision):
-            if mode is GraphRefreshMode.INCREMENTAL:
-                full_request = self._request(repository_revision, GraphRefreshMode.FULL,
-                                             f"{boundary.value}: incremental fallback")
-                full_result = refresh(full_request)
+                or result.graph_repository_revision != request.repository_revision
+                or not result.graph_revision or not result.graph_path):
+            if request.mode is GraphRefreshMode.INCREMENTAL:
+                full_request = self._request(request.repository_revision, GraphRefreshMode.FULL,
+                                             f"{request.reason}: incremental fallback")
+                full_result = self._invoke_refresh(full_request, refresh)
                 receipt = GraphRefreshReceipt(full_request, full_result)
                 result = full_result
+                if self._edit_generation != generation:
+                    self.freshness = GraphFreshness.STALE
+                    return receipt
             if (not result.success or not result.health_valid
-                    or result.graph_repository_revision != repository_revision
-                    or not result.graph_revision):
+                    or result.graph_repository_revision != request.repository_revision
+                    or not result.graph_revision or not result.graph_path):
                 self.freshness = GraphFreshness.FAILED
                 self.last_error = result.error or "graph refresh failed validation"
                 return receipt
@@ -199,6 +237,7 @@ class GraphLease:
         self.freshness = GraphFreshness.CURRENT
         self.dirty_paths = ()
         self.operations = ()
+        self._dependency_closure_size = 0
         self.last_error = ""
         return receipt
 

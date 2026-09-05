@@ -2045,6 +2045,8 @@ def _node_count(db: str) -> int:
 def test_l6_wake_from_dormant_on_source_edit(tmp_path, monkeypatch):
     """A task that STARTS non-code becomes code: the dormant bridge wakes on
     the first source-file edit and the new module's symbols are in the graph."""
+    if os.name == "nt":
+        pytest.skip("Windows index process-tree guard is intentionally unavailable")
     monkeypatch.setenv("GT_GATEWAY", "1")
     monkeypatch.setenv("GT_GATEWAY_NATIVE", "1")
     monkeypatch.setenv("GT_L6_FRESH", "1")
@@ -2071,6 +2073,8 @@ def test_l6_wake_from_dormant_on_source_edit(tmp_path, monkeypatch):
 @requires_gt
 def test_l6_wake_rebuilds_task_projection_and_router(tmp_path, monkeypatch):
     """A graph wake publishes its db, projection, and router as one context."""
+    if os.name == "nt":
+        pytest.skip("Windows index process-tree guard is intentionally unavailable")
     monkeypatch.setenv("GT_GATEWAY", "1")
     monkeypatch.setenv("GT_GATEWAY_NATIVE", "1")
     monkeypatch.setenv("GT_L6_FRESH", "1")

@@ -96,6 +96,31 @@ def test_shipping_adapter_and_every_manifest_task_are_reachable() -> None:
         assert len(row["task_config_sha256"]) == 64
 
 
+def test_product_source_closure_contains_every_shipped_engine_module() -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    closure = set(manifest["source_closure"])
+    shipped_engine_modules = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "gt_engine").glob("*.py")
+    }
+    assert shipped_engine_modules <= closure
+
+
+def test_product_source_closure_contains_paid_route_and_attestors() -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    closure = set(manifest["source_closure"])
+    assert {
+        "config/provider_route.v1.json",
+        "scripts/attest_deepswe.py",
+        "scripts/diagnose_benchmark_run.py",
+        "scripts/gt_audit.py",
+        "scripts/gt_live_gate.py",
+        "scripts/issue_feature_matrix.py",
+        "scripts/provider_preflight.py",
+        "scripts/verify_feature_matrix.py",
+    } <= closure
+
+
 def test_groundtruth_route_b_provenance_and_lineage_exception_fail_closed() -> None:
     groundtruth = json.loads(MANIFEST.read_text(encoding="utf-8"))["groundtruth"]
     assert _groundtruth_release_blockers(groundtruth, root=ROOT) == []

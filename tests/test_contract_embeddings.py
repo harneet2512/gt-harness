@@ -384,12 +384,42 @@ def test_a_reformat_only_change_re_embeds_nothing(tmp_path: Path) -> None:
 
     embedder = RecordingEmbedder()
     receipt = store.refresh(shifted, embed_fn=embedder)
+    assert store.bindings()["sym-3"].start_line == 12 + _LINE_SHIFT
     store.close()
 
     assert embedder.embedded == 0
     assert receipt["embedded"] == 0
     assert receipt["unchanged"] == 5
     assert receipt["deleted"] == 0
+
+
+def test_binding_publication_failure_rolls_back_vectors(tmp_path, monkeypatch):
+    base = build_graph(tmp_path / "base.db", "base")
+    changed = build_graph(tmp_path / "changed.db", "guard_change")
+    store = _store(tmp_path / "vectors.sqlite")
+    try:
+        store.refresh(base, embed_fn=RecordingEmbedder())
+        before_vectors = store.vectors()
+        before_bindings = store.bindings()
+        def fail(*args, **kwargs):
+            raise OSError("fixture binding publication failure")
+        monkeypatch.setattr(store, "_write_bindings", fail)
+        with pytest.raises(OSError):
+            store.refresh(changed, embed_fn=RecordingEmbedder())
+        assert store.vectors() == before_vectors
+        assert store.bindings() == before_bindings
+    finally:
+        store.close()
+
+
+def test_ambiguous_stable_identity_does_not_choose_first_contract(base_graph, monkeypatch):
+    rows = list(contract.contracts_with_node_ids(base_graph))
+    first = rows[0][1]
+    conflicting = json.loads(json.dumps(first))
+    conflicting["symbol"]["qualified_name"] = "different_symbol"
+    monkeypatch.setattr(contract, "contracts_with_node_ids", lambda _: [(1, first), (2, conflicting)])
+    with pytest.raises(ValueError, match="ambiguous_stable_identity"):
+        contract_embeddings.embedding_inputs(base_graph)
 
 
 def test_a_semantic_change_re_embeds_exactly_the_changed_symbol(
@@ -592,11 +622,42 @@ def _install_query_embedder(monkeypatch: pytest.MonkeyPatch, model_dir: Path) ->
         lambda _root: (model_dir / "model.onnx", model_dir / "tokenizer.json"),
     )
     monkeypatch.setattr(dense_runtime, "_DIMENSION", 8)
+    identity = {**dense_runtime.model_identity(), "model_id": "test-embedder",
+                "tokenizer_sha256": "test-tokenizer", "dimension": 8}
+    monkeypatch.setattr(dense_runtime, "model_identity", lambda: identity)
     monkeypatch.setattr(
         dense_runtime,
         "_embed",
-        lambda _m, _t, texts: [RecordingEmbedder.vector(text) for text in texts],
+        lambda _m, _t, texts: [RecordingEmbedder.vector(text.removeprefix(dense_runtime.QUERY_PREFIX))
+                              for text in texts],
     )
+
+
+def test_lookup_rejects_stale_content_for_same_stable_id(tmp_path):
+    base = build_graph(tmp_path / "base.db", "base")
+    changed = build_graph(tmp_path / "changed.db", "return_change")
+    path = tmp_path / "vectors.sqlite"
+    store = _store(path)
+    store.refresh(base, embed_fn=RecordingEmbedder())
+    store.close()
+    lookup = contract_embeddings.lookup_vectors(path, contract.symbol_node_ids(changed), [4],
+        expected_inputs=contract_embeddings.embedding_inputs(changed),
+        model_id="test-embedder", tokenizer_id="test-tokenizer", dimension=8)
+    assert not lookup.vectors
+    assert lookup.reason
+
+
+def test_lookup_rejects_old_model_recipe(tmp_path):
+    base = build_graph(tmp_path / "base.db", "base")
+    path = tmp_path / "vectors.sqlite"
+    store = _store(path)
+    store.refresh(base, embed_fn=RecordingEmbedder())
+    store.close()
+    lookup = contract_embeddings.lookup_vectors(path, contract.symbol_node_ids(base), [4],
+        expected_inputs=contract_embeddings.embedding_inputs(base),
+        model_id="corrected-recipe", tokenizer_id="test-tokenizer", dimension=8)
+    assert not lookup.vectors
+    assert lookup.reason
 
 
 def test_dense_rank_consumes_the_stored_contract_vectors(
@@ -731,3 +792,4 @@ def test_dense_rank_reports_a_partially_covered_pool(
     assert result.detail["store_hits"] == 4
     assert result.detail["store_misses"] == 1
     assert result.detail["missing_stable_ids"] == ["sym-5"]
+    assert len(result.ranking) == 5

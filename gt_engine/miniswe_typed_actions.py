@@ -187,7 +187,12 @@ def parse_groundtruth_toolcalls(
 class GroundTruthLitellmModel(LitellmModel):
     """LiteLLM Mini-SWE model advertising Bash and GroundTruth side by side."""
 
-    tools = (BASH_TOOL, GROUNDTRUTH_TOOL)
+    @property
+    def tools(self):
+        session = getattr(self, "_gt_session", None)
+        if session is not None and (session.disabled or not session.capability_active("typed_actions")):
+            return (BASH_TOOL,)
+        return (BASH_TOOL, GROUNDTRUTH_TOOL)
 
     def _query(self, messages: list[dict[str, str]], **kwargs: Any):
         try:

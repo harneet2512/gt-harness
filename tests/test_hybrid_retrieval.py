@@ -479,6 +479,36 @@ def test_dense_rank_honours_restrict_to(
     assert set(row.stable_id for row in result) <= {_identity(2), _identity(4)}
 
 
+def test_hybrid_dense_discovers_without_lexical_or_property_overlap(graph, tmp_path, monkeypatch):
+    model_dir = _stub_model_dir(tmp_path)
+    _install_fake_embedder(monkeypatch, model_dir)
+    monkeypatch.setattr(dense_runtime, "_embed", lambda _m, _t, texts: [
+        (1.0, 0.0) if text.startswith(dense_runtime.QUERY_PREFIX) or "empty" in text
+        else (0.0, 1.0) for text in texts
+    ])
+    query = "rejects vacant collections"
+    assert not retrieval.lexical_rank(graph, query)
+    assert not retrieval.property_rank(graph, query)
+    result = retrieval.hybrid_rank(graph, query, model_dir=model_dir,
+                                   index_path=tmp_path / "independent.sqlite")
+    assert result.fused
+    assert result.fused[0].stable_id == _identity(3)
+
+
+def test_default_dense_pool_has_no_first_256_cutoff(graph):
+    with sqlite3.connect(graph) as con:
+        con.executemany(
+            "INSERT INTO nodes(id,label,name,qualified_name,file_path,language,start_line,end_line) "
+            "VALUES(?,'Function',?,?,'large.py','python',1,2)",
+            [(1000 + i, f"symbol_{i}", f"symbol_{i}") for i in range(300)],
+        )
+        provenance = {}
+        documents = retrieval._dense_pool(con, limit=None, labels=retrieval.SYMBOL_LABELS,
+                                          restrict_to=None, provenance=provenance)
+    assert len(documents) >= 300
+    assert any(item.node_id == 1299 for item in provenance.values())
+
+
 # ---------------------------------------------------------------------------
 # 4. fusion
 # ---------------------------------------------------------------------------

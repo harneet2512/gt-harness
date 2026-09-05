@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -219,14 +220,8 @@ def embedding_inputs(
     so two runs over one graph produce the same sequence and a diff of a whole
     repository's inputs is readable.
 
-    Two nodes could in principle derive the same stable id when the producer
-    minted none for either, since the derived form drops line numbers on
-    purpose.  Measured on the arktype reference graph that does not happen --
-    3,511 symbols yield 3,511 distinct ids, 3,509 minted and 2 derived -- but
-    the collapse is handled rather than assumed away: the first in the above
-    order wins, so the result is a function of the graph and not of row
-    arrival, and :meth:`ContractEmbeddingStore.refresh` reports how many were
-    dropped rather than losing them silently.
+    Stable ids are identity, not a grouping hint. Conflicting rows are rejected
+    because choosing the first would bind one vector to an arbitrary symbol.
     """
     by_node = fingerprints(db_path)
     seen: set[str] = set()
@@ -235,7 +230,7 @@ def embedding_inputs(
         symbol = symbol_contract["symbol"]
         stable_id = str(symbol["stable_id"])
         if stable_id in seen:
-            continue
+            raise ValueError(f"ambiguous_stable_identity:{stable_id}")
         seen.add(stable_id)
         text = contract_text(symbol_contract)
         fingerprint = by_node.get(node_id, "")
@@ -379,6 +374,14 @@ def plan_embeddings(
 Embedder = Callable[[Sequence[str]], Sequence[Sequence[float]]]
 
 
+def default_store_path(graph_path: str | Path) -> Path:
+    """New recipes get a new cache namespace; old certified bytes stay intact."""
+    identity = dense_runtime.model_identity()
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+    graph = Path(graph_path)
+    return graph.with_name(f"{graph.stem}.contract-{digest}.sqlite")
+
+
 def onnx_embedder(model_dir: str | Path) -> Embedder:
     """The production embedder: the verified local ONNX arctic-embed-m runtime.
 
@@ -501,13 +504,10 @@ class ContractEmbeddingStore:
             dimension=self.dimension,
         )
         vectors = self._embed_plan(plan, embed_fn, batch_size)
-        # Vectors first, bindings second, in that order and not the other.  A
-        # crash between the two leaves vectors nothing claims, and the next
-        # refresh re-embeds and overwrites them -- wasted work that converges.
-        # The reverse order would leave a binding asserting a vector that is not
-        # there, and the store would then serve a claim it cannot honour.
-        index_digest = self._publish(plan, vectors)
-        self._write_bindings(plan, revision)
+        # Vector bytes and their current graph bindings are one SQLite commit.
+        # A crash or callback failure rolls both back, so readers never observe
+        # a new vector with an old source location (or the inverse).
+        index_digest = self._publish(plan, vectors, inputs, revision)
         return self._receipt(
             db_path, revision, inputs, plan, index_digest, symbol_rows=symbol_rows
         )
@@ -525,10 +525,9 @@ class ContractEmbeddingStore:
         return vectors
 
     def _publish(
-        self, plan: EmbeddingPlan, vectors: Mapping[str, tuple[float, ...]]
+        self, plan: EmbeddingPlan, vectors: Mapping[str, tuple[float, ...]],
+        inputs: Sequence[SymbolEmbeddingInput], revision: str,
     ) -> str:
-        if not plan.to_embed and not plan.to_delete:
-            return _file_digest(self.path)
         # The vector index owns the write; this connection stays out of its way
         # so the two never contend for the same file lock.
         self._connection.commit()
@@ -556,22 +555,23 @@ class ContractEmbeddingStore:
                     for item in plan.to_embed
                 ],
                 delete_ids=plan.to_delete,
+                transaction_hook=lambda connection: self._write_bindings(
+                    inputs, plan.to_delete, revision, connection=connection
+                ),
             )
         finally:
             index.close()
         return _file_digest(self.path)
 
-    def _write_bindings(self, plan: EmbeddingPlan, revision: str) -> None:
-        if not plan.to_embed and not plan.to_delete:
-            return
-        connection = self._connection
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            for stable_id in plan.to_delete:
-                connection.execute(
-                    f"DELETE FROM {BINDING_TABLE} WHERE stable_id = ?", (stable_id,)
-                )
-            connection.executemany(
+    def _write_bindings(
+        self, inputs: Sequence[SymbolEmbeddingInput], to_delete: Sequence[str],
+        revision: str, *, connection: sqlite3.Connection,
+    ) -> None:
+        for stable_id in to_delete:
+            connection.execute(
+                f"DELETE FROM {BINDING_TABLE} WHERE stable_id = ?", (stable_id,)
+            )
+        connection.executemany(
                 f"INSERT OR REPLACE INTO {BINDING_TABLE} ({_BINDING_COLUMNS}) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
@@ -592,13 +592,9 @@ class ContractEmbeddingStore:
                         self.dimension,
                         revision,
                     )
-                    for item in plan.to_embed
+                    for item in inputs
                 ],
             )
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
 
     def _receipt(
         self,
@@ -672,6 +668,11 @@ def lookup_vectors(
     store_path: str | Path,
     node_to_stable: Mapping[int, str],
     node_ids: Iterable[int],
+    *,
+    expected_inputs: Sequence[SymbolEmbeddingInput] | None = None,
+    model_id: str | None = None,
+    tokenizer_id: str | None = None,
+    dimension: int | None = None,
 ) -> StoreLookup:
     """Fetch stored vectors for a pool of graph nodes, keyed back by node id.
 
@@ -691,18 +692,56 @@ def lookup_vectors(
     wanted = list(dict.fromkeys(int(node_id) for node_id in node_ids))
     if not wanted:
         return _empty_lookup("contract_embedding_store_pool_empty")
+    if expected_inputs is None:
+        return _empty_lookup("contract_embedding_binding_unavailable")
+    expected = {item.stable_id: item for item in expected_inputs}
+    if len(expected) != len(expected_inputs):
+        return _empty_lookup("contract_embedding_ambiguous_identity")
+    identity = dense_runtime.model_identity()
+    expected_model = model_id or str(identity["model_id"])
+    expected_tokenizer = tokenizer_id or str(identity["tokenizer_sha256"])
+    expected_dimension = dimension or int(identity["dimension"])
     try:
-        store = ContractEmbeddingStore(path)
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         try:
-            if store.document_count() == 0:
+            connection.execute("BEGIN")
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                  "AND name='gt_vector_documents'").fetchone() is None:
                 return _empty_lookup("contract_embedding_store_empty")
-            stable_ids = [
+            stable_ids = sorted({
                 node_to_stable[node_id] for node_id in wanted if node_id in node_to_stable
-            ]
-            found = store.vectors(stable_ids)
+            })
+            found = {}
+            for start in range(0, len(stable_ids), 400):
+                batch = stable_ids[start:start + 400]
+                slots = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    "SELECT d.document_id,d.embedding_json,d.embedding_hash,d.content_hash,"
+                    "d.model_id,d.tokenizer_id,d.dimension,b.invalidation_key,b.model_id,"
+                    "b.dimension,b.contract_schema FROM gt_vector_documents d "
+                    f"JOIN {BINDING_TABLE} b ON b.stable_id=d.document_id "
+                    f"WHERE d.document_id IN ({slots})", batch,
+                )
+                for row in rows:
+                    item = expected.get(row[0])
+                    if (item is None or row[3] != item.invalidation_key
+                            or row[7] != item.invalidation_key
+                            or row[4] != expected_model or row[8] != expected_model
+                            or row[5] != expected_tokenizer
+                            or row[6] != expected_dimension or row[9] != expected_dimension
+                            or row[10] != contract.CONTRACT_SCHEMA):
+                        continue
+                    vector = tuple(float(value) for value in json.loads(row[1]))
+                    encoded = json.dumps(vector, separators=(",", ":")).encode()
+                    if (len(vector) != expected_dimension
+                            or any(not math.isfinite(value) for value in vector)
+                            or not any(vector)
+                            or hashlib.sha256(encoded).hexdigest() != row[2]):
+                        continue
+                    found[row[0]] = vector
         finally:
-            store.close()
-    except sqlite3.Error as exc:
+            connection.close()
+    except (sqlite3.Error, TypeError, ValueError) as exc:
         return _empty_lookup(f"contract_embedding_store_unreadable:{type(exc).__name__}")
 
     vectors: dict[int, tuple[float, ...]] = {}

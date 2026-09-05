@@ -20,6 +20,7 @@ _ALLOWED_KEYS = {
     "provider",
     "base_url",
     "model",
+    "provider_routing",
     "requested_output_tokens",
     "credential_env",
     "credential_source_id",
@@ -47,8 +48,14 @@ def load_route(path: Path) -> tuple[dict[str, Any], str]:
         raise ValueError("provider_route_identity_invalid")
     if route["base_url"] != "https://openrouter.ai/api/v1":
         raise ValueError("provider_base_url_not_allowed")
-    if route["model"] != "meta/muse-spark-1.2-contributor":
+    if route["model"] != "deepseek/deepseek-v4-flash-0731":
         raise ValueError("provider_model_not_allowed")
+    if route["provider_routing"] != {
+        "only": ["relace"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    }:
+        raise ValueError("provider_routing_not_allowed")
     if route["credential_env"] != "OPENROUTER_API_KEY":
         raise ValueError("provider_credential_env_not_allowed")
     requested_output = route["requested_output_tokens"]
@@ -189,6 +196,7 @@ def probe(route: dict[str, Any], api_key: str) -> tuple[dict[str, bool], int, st
                 "messages": [{"role": "user", "content": "Reply OK."}],
                 "max_completion_tokens": 16,
                 "temperature": 0,
+                "provider": route["provider_routing"],
             },
         )
         if not isinstance(canary.get("choices"), list) or not canary["choices"]:
@@ -246,6 +254,7 @@ def run(*, manifest: Path, output: Path, source_sha: str, live: bool) -> dict[st
         "provider": route["provider"],
         "base_url": route["base_url"],
         "model": route["model"],
+        "provider_routing": route["provider_routing"],
         "route_sha256": digest,
         "checks": checks,
         "provider_ready": live and error_code is None,

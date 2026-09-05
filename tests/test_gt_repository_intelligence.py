@@ -569,6 +569,10 @@ def _execute_questions(
                 state_dir=state_dir / "graph",
                 source_revision=expected.source_revision,
             )
+        if receipt.error_type == "GT_INDEX_RESOURCE_GUARD_UNAVAILABLE":
+            pytest.skip(
+                "production index process-tree guard is unavailable on this platform"
+            )
         if receipt.status is not IndexBuildStatus.BUILT or not receipt.graph_db:
             raise SourceProofError(
                 f"production index entrypoint did not build: {receipt}"

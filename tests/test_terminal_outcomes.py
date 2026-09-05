@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import signal
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -167,3 +169,63 @@ def test_receipt_issuance_failure_preserves_native_exit_and_writes_error_receipt
     assert adapter_receipt["status"] == "ERROR"
     assert adapter_receipt["effective_model"] == "deepseek-v4-flash"
     assert adapter_receipt["receipt_issuance"] == product_receipt["receipt_issuance"]
+
+
+def test_sigterm_during_agent_run_conserves_patch_and_terminal_artifacts(
+    monkeypatch, tmp_path
+):
+    import scripts.miniswe_gt_run as runner
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "GT Test"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "gt-test@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
+    source = tmp_path / "source.py"
+    source.write_text("before = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+
+    class FakeAgent:
+        model = SimpleNamespace()
+        n_calls = 0
+        cost = 0
+
+        def run(self, _task):
+            source.write_text("after = 2\n", encoding="utf-8")
+            signal.raise_signal(signal.SIGTERM)
+            raise AssertionError("SIGTERM handler did not interrupt the run")
+
+    monkeypatch.setattr(
+        runner, "build_agent", lambda **_kwargs: (FakeAgent(), None, None)
+    )
+    metrics = tmp_path / "metrics.json"
+    manifest = tmp_path / "manifest.json"
+    patch = tmp_path / "model.patch"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "miniswe_gt_run.py",
+            "--task",
+            "fix it",
+            "--cwd",
+            str(tmp_path),
+            "--state-dir",
+            str(tmp_path / "state"),
+            "--metrics",
+            str(metrics),
+            "--manifest",
+            str(manifest),
+            "--patch-output",
+            str(patch),
+            "--gt-off",
+        ],
+    )
+
+    assert runner.main() == TERMINAL_EXIT_CODES["timeout"]
+    assert "after = 2" in patch.read_text(encoding="utf-8")
+    assert json.loads(metrics.read_text(encoding="utf-8"))["terminal"] == "timeout"
+    assert json.loads(manifest.read_text(encoding="utf-8"))["research_valid"] is False

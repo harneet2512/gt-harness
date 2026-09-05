@@ -1,0 +1,23 @@
+# GT engine repair progress
+
+Updated: 2026-09-04. Base: `9010199412dd1cb4fb5cd60e9ebd63000cc2132f`.
+Status: implementation in progress; not benchmark-ready; no paid smoke authorized here.
+
+| Package | State | Current evidence | Remaining gate |
+|---|---|---|---|
+| P0 regression truth | implemented | Adversarial tests cover lease races, payload identity, admission retry, dense recipe/cache, stale covering, new-file priority and outcomes; captured-byte Python/Go/TS/JS/Rust parser witnesses are green. | Final immutable-source full-suite proof. |
+| P1 Mini-SWE preservation | implemented locally | Stock/disabled/failure parity, isolated Git-index patch export, and real SIGTERM patch/receipt conservation are green. | Clean installed Linux proof. |
+| P2 observations | implemented locally | Exact snapshots, transactions, raw execution bytes, conservative outcomes, and no-download five-language parser inspection; create/delete deltas and ambiguous identity refusal tested. | Ship and bind the revised producer artifact; installed transaction proof. |
+| P3 graph/overlay | implemented locally | Single EngineState, masking overlay, revision leases, current-source publication, frozen-input async one-running/one-pending coordinator, and source-specific completeness tests. | Installed Linux build/publication proof; Windows resource guard remains intentionally unavailable. |
+| P4 context/admission | implemented | Packet v2, strict request budget, structural localization compaction, rejected-request retry, collect/rank candidates, final-transport-only commit/rollback, and co-change quotas are covered. | Final immutable-source full-suite proof. |
+| P5 provider/history | implemented locally | Refusal cannot dispatch; ordered manifests deduplicate repeated message bodies in CAS and reconstruct exact request hashes. | Installed-runtime proof. |
+| P6 retrieval/cache | implemented locally | CLS/query-prefix/L2 recipe, independent complete dense corpus, revision/recipe validation, atomic vector+binding commit, and revision-bound lexical fallback. | Installed encoder proof. |
+| P7 verification/recovery | implemented | Verification uses the pre-edit graph revision, changed-path stable IDs, bounded whole checks, explicit advisory semantics, deterministic priority, and conservative newer-epoch recovery. | Final immutable-source full-suite proof. |
+| P8 producer size | implemented in source; not shipped | The retained 2,679,271,424-byte graph transforms to 1,236,512,768 bytes with exact canonical semantic hashes (53.85% smaller). A fresh exact-upstream arktype rebuild produced 458,552 nodes, 743,471 edges, 19,095 callsites and 281,842 canonical candidates with zero legacy candidate rows/edges; VACUUM size 1,266,917,376 bytes (52.71% smaller than retained input). Full `sqlite_fts5` Go suite is green. | Build, bind, and vendor a clean Linux producer from an immutable revised producer commit. The fresh upstream checkout differs from the retained benchmark input, so it is not claimed as exact row equivalence. |
+| P9 LSP | explicitly non-shipping | The product capability manifest does not claim LSP. Runtime returns an explicit unavailable/not-scheduled result and does not launch an unbound global scheduler. | None for benchmark readiness unless LSP is newly claimed; adding it would require source/graph-bound jobs, cancellation, and immutable proposals. |
+| P10 native feature proof | implemented | Feature matrix v2 has 19 positive and 19 negative native witness groups; all 38 groups pass. Verification now rejects every non-witnessed or nonzero-exit cell. | Reissue as an ephemeral attestation from the final published source identity. |
+| Acceptance/review | provider-free accepted; DeepSeek gate-one pending | Complete clean Python suite and six-family engine acceptance pass; explicit product closeout is release-eligible with zero blockers and `provider_calls: 0`; full tagged Go passes on Windows and Linux; source-bound static Linux producer and clean installed Linux graph/parser/request/preservation proof pass; all six `review_me_gt` mutations turn their witnesses RED and are restored. OpenRouter is fail-closed to `deepseek/deepseek-v4-flash-0731` on Relace only with fallback disabled across manifest, canary, runtime and attestation. | Publish the immutable source, execute gate-one, inspect it, then run remaining-19 only if it passes. Report this cross-model cohort by absolute outcomes, not as causal uplift against the retained Muse baseline. |
+
+The next paid action is not part of engine implementation. After engine and clean
+installed Linux acceptance are green, request explicit approval for exactly one
+GT-on task using the configured route. Never rerun the GT-off baseline.

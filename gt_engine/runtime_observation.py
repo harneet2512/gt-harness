@@ -1,7 +1,8 @@
 """Snapshot-bound observation contracts for the Mini-SWE runtime seam.
 
-The module is intentionally independent of GroundTruth's installed wheel.  It
-records what the harness itself can observe exactly: a repository snapshot at
+Snapshot capture is independent of GroundTruth's installed wheel; test outcome
+classification reuses its protocol classifier and abstains when unavailable.
+This module records what the harness itself can observe: a repository snapshot at
 an action boundary, one multi-file transaction for one selected action, and
 the exact bytes returned by an executed build or test.  Semantic analyzers may
 consume these records, but cannot weaken their byte identity.
@@ -344,7 +345,7 @@ def compile_execution_evidence(
     kind = "test" if _TEST_RE.search(command) else "build" if _BUILD_RE.search(command) else ""
     if not kind:
         return None
-    outcome = "unknown" if returncode is None else "pass" if returncode == 0 else "fail"
+    outcome = classify_execution_outcome(command, output, returncode, kind=kind)
     return ExecutionEvidence(
         action_id=action_id,
         kind=kind,
@@ -355,6 +356,32 @@ def compile_execution_evidence(
         repository_revision=repository_revision,
         raw_output=output.encode("utf-8"),
     )
+
+
+def classify_execution_outcome(command: str, output: str, returncode: int | None,
+                               *, kind: str = "test") -> str:
+    """Conservative outcome shared by context and verification consumers.
+
+    A shell's aggregate exit cannot attribute a pipeline/compound result to one
+    check. Do not rewrite commands or guess segment status from their output.
+    Protocol parsing uses the certified producer; missing parsing means unknown.
+    """
+    if returncode is None:
+        return "unknown"
+    if returncode < 0:
+        return "interrupted"
+    if returncode == 124:
+        return "timeout"
+    if re.search(r"[;&|`\n]|\$\(", command):
+        return "unknown"
+    if kind == "build":
+        return "pass" if returncode == 0 else "fail"
+    try:
+        from groundtruth.runtime.patterns import classify_test_observation
+    except ImportError:
+        return "unknown"
+    outcome, _ = classify_test_observation(command, output, returncode)
+    return outcome or "unknown"
 
 
 def compile_transaction_artifacts(
@@ -417,6 +444,25 @@ def compile_transaction_artifacts(
     patches: list[dict[str, object]] = []
     syntax: list[dict[str, object]] = []
     signatures: list[dict[str, object]] = []
+    parser_rows: dict[str, dict] = {}
+    try:
+        from .parser_inspection import ParserInspectionRequest, inspect_sources
+
+        inspection_requests = []
+        for change in transaction.changes:
+            for side, content in (("before", change.before), ("after", change.after)):
+                if content is not None and Path(change.path).suffix.lower() in {
+                    ".py", ".pyi", ".go", ".ts", ".tsx", ".js", ".jsx", ".rs",
+                }:
+                    inspection_requests.append(ParserInspectionRequest(
+                        f"{transaction.transaction_sha256}:{side}:{change.path}",
+                        change.path, content,
+                    ))
+        parser_rows = {
+            str(row["request_id"]): row for row in inspect_sources(inspection_requests)
+        }
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        parser_rows = {}
     for change in transaction.changes:
         before_text = (
             change.before.decode("utf-8", "replace").splitlines(keepends=True)
@@ -456,38 +502,104 @@ def compile_transaction_artifacts(
                 "status": "not_applicable_deleted",
                 "post_revision": transaction.post_revision,
             })
-        elif change.path.endswith((".py", ".pyi")):
-            try:
-                ast.parse(change.after.decode("utf-8"), filename=change.path)
-                syntax.append({
-                    "path": change.path,
-                    "language": "python",
-                    "status": "exact",
-                    "valid": True,
-                    "post_revision": transaction.post_revision,
-                    "producer": "python.ast.parse",
-                })
-            except (SyntaxError, UnicodeDecodeError) as exc:
-                syntax.append({
-                    "path": change.path,
-                    "language": "python",
-                    "status": "exact",
-                    "valid": False,
-                    "line": int(getattr(exc, "lineno", 0) or 0),
-                    "column": int(getattr(exc, "offset", 0) or 0),
-                    "error": type(exc).__name__,
-                    "post_revision": transaction.post_revision,
-                    "producer": "python.ast.parse",
-                })
         else:
-            syntax.append({
-                "path": change.path,
-                "language": "unknown",
-                "status": "unsupported",
-                "reason": "no_harness_certified_postimage_parser",
-                "post_revision": transaction.post_revision,
-            })
-        if change.path.endswith((".py", ".pyi")):
+            after_key = f"{transaction.transaction_sha256}:after:{change.path}"
+            parsed_after = parser_rows.get(after_key)
+            if parsed_after is not None:
+                syntax.append({
+                    "path": change.path,
+                    "language": str(parsed_after.get("language") or "unknown"),
+                    "status": "exact" if parsed_after.get("complete") else "incomplete",
+                    "valid": bool(parsed_after.get("complete")),
+                    "diagnostics": list(parsed_after.get("diagnostics") or ()),
+                    "post_revision": transaction.post_revision,
+                    "producer": str(parsed_after.get("parser_identity") or ""),
+                    "content_sha256": str(parsed_after.get("content_sha256") or ""),
+                })
+            elif change.path.endswith((".py", ".pyi")):
+                try:
+                    ast.parse(change.after.decode("utf-8"), filename=change.path)
+                    syntax.append({
+                        "path": change.path,
+                        "language": "python",
+                        "status": "exact",
+                        "valid": True,
+                        "post_revision": transaction.post_revision,
+                        "producer": "python.ast.parse",
+                    })
+                except (SyntaxError, UnicodeDecodeError) as exc:
+                    syntax.append({
+                        "path": change.path,
+                        "language": "python",
+                        "status": "exact",
+                        "valid": False,
+                        "line": int(getattr(exc, "lineno", 0) or 0),
+                        "column": int(getattr(exc, "offset", 0) or 0),
+                        "error": type(exc).__name__,
+                        "post_revision": transaction.post_revision,
+                        "producer": "python.ast.parse",
+                    })
+            else:
+                syntax.append({
+                    "path": change.path,
+                    "language": "unknown",
+                    "status": "unsupported",
+                    "reason": "no_harness_certified_postimage_parser",
+                    "post_revision": transaction.post_revision,
+                })
+        before_key = f"{transaction.transaction_sha256}:before:{change.path}"
+        after_key = f"{transaction.transaction_sha256}:after:{change.path}"
+        parsed_before, parsed_after = parser_rows.get(before_key), parser_rows.get(after_key)
+        parser_side_available = (
+            (parsed_before is not None or change.before is None)
+            and (parsed_after is not None or change.after is None)
+            and (parsed_before is not None or parsed_after is not None)
+        )
+        if parser_side_available:
+            parser_complete = (
+                (parsed_before is None or bool(parsed_before.get("complete")))
+                and (parsed_after is None or bool(parsed_after.get("complete")))
+            )
+            if not parser_complete:
+                signatures.append({"path": change.path, "status": "unavailable_invalid_syntax",
+                                   "post_revision": transaction.post_revision})
+            else:
+                def signature_map(row: dict | None) -> tuple[dict[str, str], bool]:
+                    found: dict[str, str] = {}
+                    ambiguous = False
+                    for item in (row or {}).get("declarations") or ():
+                        name = str(
+                            item.get("qualified_name") or item.get("name") or ""
+                        )
+                        signature = str(item.get("signature") or "")
+                        if not name or name in found:
+                            ambiguous = True
+                        else:
+                            found[name] = signature
+                    return found, ambiguous
+
+                before_signatures, before_ambiguous = signature_map(parsed_before)
+                after_signatures, after_ambiguous = signature_map(parsed_after)
+                if before_ambiguous or after_ambiguous:
+                    signatures.append({
+                        "path": change.path,
+                        "status": "unavailable_ambiguous_declaration_identity",
+                        "post_revision": transaction.post_revision,
+                    })
+                    continue
+                before_names, after_names = set(before_signatures), set(after_signatures)
+                signatures.append({
+                    "path": change.path, "status": "exact",
+                    "added": sorted(after_names - before_names),
+                    "removed": sorted(before_names - after_names),
+                    "changed": sorted(name for name in before_names & after_names
+                                      if before_signatures[name] != after_signatures[name]),
+                    "post_revision": transaction.post_revision,
+                    "producer": str(
+                        (parsed_after or parsed_before or {}).get("parser_identity") or ""
+                    ),
+                })
+        elif change.path.endswith((".py", ".pyi")):
             before_signatures = python_signatures(change.before, change.path)
             after_signatures = python_signatures(change.after, change.path)
             if before_signatures is None or after_signatures is None:

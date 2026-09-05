@@ -1189,6 +1189,8 @@ class IndexBuildReceipt:
     attempts: tuple[str, ...] = ()
     analysis_state: str = "unrecorded"
     analysis_failure_reason: str = ""
+    embedding_state: str = "not_requested"
+    embedding_failure_reason: str = ""
 
     @property
     def success(self) -> bool:
@@ -1208,6 +1210,8 @@ class IndexBuildReceipt:
             "attempts": self.attempts,
             "analysis_state": self.analysis_state,
             "analysis_failure_reason": self.analysis_failure_reason,
+            "embedding_state": self.embedding_state,
+            "embedding_failure_reason": self.embedding_failure_reason,
         }
 
 
@@ -1625,16 +1629,33 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
     # Refresh the contract-embedding sidecar after every successful build.
     # A failure here is logged but never costs the graph — the embedding store
     # is a cache the retrieval side can degrade from with a named reason.
-    if status in (IndexBuildStatus.BUILT, IndexBuildStatus.BUILT_CORE_ONLY):
+    embedding_state = "unconfigured"
+    embedding_failure = ""
+    model_dir = os.environ.get("GT_DENSE_MODEL_DIR", "").strip()
+    if model_dir and status in (IndexBuildStatus.BUILT, IndexBuildStatus.BUILT_CORE_ONLY):
         try:
-            from gt_engine.contract_embeddings import refresh as _refresh_embeddings
-            _refresh_embeddings(str(graph_path))
-        except Exception:
-            pass  # named-degraded at retrieval time
+            from gt_engine.contract_embeddings import (
+                ContractEmbeddingStore,
+                default_store_path,
+                onnx_embedder,
+            )
+
+            store_path = os.environ.get("GT_CONTRACT_EMBEDDING_INDEX") or default_store_path(graph_path)
+            store = ContractEmbeddingStore(store_path)
+            try:
+                store.refresh(graph_path, embed_fn=onnx_embedder(model_dir))
+            finally:
+                store.close()
+            embedding_state = "refreshed"
+        except Exception as exc:
+            embedding_state = "failed"
+            embedding_failure = type(exc).__name__
 
     return IndexBuildReceipt(status, graph_db=graph,
                              source_revision=source_revision, graph_revision=graph_revision,
                              analysis_state=analysis_state,
+                             embedding_state=embedding_state,
+                             embedding_failure_reason=embedding_failure,
                              analysis_failure_reason=str(phase["analysis_failure_reason"]))
 
 

@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import sqlite3
 import tempfile
 import threading
 from collections.abc import Iterable, Mapping
@@ -14,12 +16,16 @@ from pathlib import Path
 from typing import Any
 
 from .delivery_budget import (
-    MAX_TASK_DELIVERIES,
+    MAX_BOUNDARY_CLAIMS,
     TOTAL_DELIVERY_BYTE_LIMIT,
+    compact_localization,
     delivery_byte_limit,
 )
+from .engine_state import EngineState, GraphQuerySnapshot
 from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash
+from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
+from .request_history import store_provider_request
 from .run_diagnostics import DiagnosticCode, DiagnosticEvent, DiagnosticJournal
 from .task_contract import (
     TaskContract,
@@ -34,6 +40,23 @@ from .verification_contract import (
 )
 
 
+def _initial_graph_revision(graph_db: str | None) -> str:
+    if not graph_db:
+        return ""
+    graph = Path(graph_db)
+    manifest = graph.with_suffix(".manifest.json")
+    try:
+        row = json.loads(manifest.read_text(encoding="utf-8"))
+        revision = str(row.get("graph_revision") or row.get("graph_sha256") or "")
+        if revision:
+            return revision
+    except (OSError, TypeError, ValueError):
+        pass
+    from .graph_context import graph_revision
+
+    return graph_revision(str(graph))
+
+
 @dataclass(frozen=True)
 class ProviderDelivery:
     request_id: str
@@ -43,6 +66,21 @@ class ProviderDelivery:
     suffix: str
     model_visible_sha256: str = ""
     delivery_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PendingModelDelivery:
+    identity: str
+    rendered: str
+    lane: str
+    kind: str
+    action_index: int
+    iteration: int
+    dedup_key: str
+    target: str
+    semantics: str
+    artifact_sha256: str
+    ordinal: int
 
 
 class ProviderModelMismatch(RuntimeError):
@@ -130,6 +168,15 @@ class ExternalStateStore:
                 temporary.unlink()
         return target
 
+    def blob_exists(self, namespace: str, digest: str) -> bool:
+        """Return whether the exact immutable CAS object already exists."""
+        if not namespace.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("invalid blob namespace")
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("invalid sha256 digest")
+        target = self.root / namespace / f"{digest}.json"
+        return target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == digest
+
 
 class MiniSweAdapter(GroundtruthController):
     """Controller plus external state/provider-bound request witness.
@@ -166,6 +213,10 @@ class MiniSweAdapter(GroundtruthController):
         self._last_control_state: tuple[str, int, tuple[str, ...]] | None = None
         self.repo_root = str(repo_root or "")
         self.graph_db = graph_db or None
+        self.engine_state = EngineState(
+            graph_path=str(self.graph_db or ""),
+            graph_revision=_initial_graph_revision(self.graph_db),
+        )
         self.issue_text = issue_text or ""
         self.requested_model = requested_model or ""
         self.resolved_model = resolved_model or requested_model or ""
@@ -179,20 +230,32 @@ class MiniSweAdapter(GroundtruthController):
         self._terminal_request_ids: set[str] = set()
         self._contract_shipped = False
         self._last_delta_signature: tuple[tuple[str, str], ...] = ()
+        self._prepared_contract_delta: tuple[str, tuple[tuple[str, str], ...]] | None = None
         self._edited_files: set[str] = set()
         self._failure_first_epoch: dict[str, int] = {}
         self._failure_recurrences: dict[str, int] = {}
         self._recovery_delivered = 0
         self._model_visible_delivery_count = 0
         self._model_visible_delivery_bytes = 0
+        self._admission_iteration: int | None = None
+        self._boundary_delivery_count = 0
+        self._boundary_delivery_bytes = 0
+        self._localization_cache_key: tuple | None = None
+        self._localization_candidate = ""
+        self._localization_metadata: dict[str, str] = {}
+        self._localization_chain: set[str] = set()
+        self._localization_head = ""
+        self._pending_verification_candidate = ""
+        self._pending_verification_metadata: dict[str, str] = {}
         self._model_visible_delivery_identities: set[str] = set()
         self._accepted_sealed_delivery_count = 0
+        self._cochange_delivery_count = 0
         self._pending_delivery_metadata: dict[str, str] = {}
         # Exact admitted bytes awaiting the immediate provider-final request.
         # This is deliberately per-request transient state, not carried chat
         # history: attribution asks which decision boundary first exposed a
         # delivery, not every later request that still contains it.
-        self._pending_provider_deliveries: list[tuple[str, str]] = []
+        self._pending_provider_deliveries: list[PendingModelDelivery] = []
         self.pending_transient = ""
         self.pending_directives: list[str] = []
         self._refusal_count = 0
@@ -213,13 +276,34 @@ class MiniSweAdapter(GroundtruthController):
         # is fresh at task start only when an index actually exists; any edit
         # makes it stale until a successful deterministic rebuild.
         self.repository_revision = ""
-        self.graph_fresh = bool(self.graph_db)
         self.graph_stale_since_revision = ""
         self._latest_transaction_sha256 = ""
         self.terminal_evidence_session: Any | None = None
         self.provider_boundary: Any | None = None
         self._closed_blockers: Any | None = None
         self._submit_invalidation_keys: dict[str, str] = {}
+        self._latest_workspace_snapshot: Any | None = None
+        self._graph_coordinator: GraphBuildCoordinator | None = None
+
+    @property
+    def graph_fresh(self) -> bool:
+        return self.engine_state.graph_current
+
+    @graph_fresh.setter
+    def graph_fresh(self, value: bool) -> None:
+        if value and self.graph_db:
+            self.engine_state.publish_graph(
+                graph_path=str(self.graph_db),
+                graph_revision=(self.engine_state.graph_revision
+                                or hashlib.sha256(str(self.graph_db).encode()).hexdigest()),
+                source_revision=self.engine_state.source_revision,
+            )
+        elif not value:
+            self.engine_state.mark_graph_failed()
+
+    def graph_query_snapshot(self) -> GraphQuerySnapshot:
+        """The only supported graph identity consumed by native features."""
+        return self.engine_state.query_snapshot()
 
     def _record_state(self) -> None:
         self.store.append(
@@ -420,7 +504,11 @@ class MiniSweAdapter(GroundtruthController):
             )
         self._edited_files.update(normalized_paths)
         if normalized_paths and self.graph_db:
-            self.graph_fresh = False
+            if not self.engine_state.query_snapshot().overlay:
+                self.engine_state.mark_paths_dirty(
+                    normalized_paths,
+                    revision=self.repository_revision or f"epoch:{self.workspace_epoch}",
+                )
             # GatewayState captures graph_db at construction. Drop the cached
             # wrapper immediately so automatic evidence cannot keep reading a
             # pre-edit graph while the adapter correctly reports it stale.
@@ -443,6 +531,8 @@ class MiniSweAdapter(GroundtruthController):
         digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("repository_snapshots", digest, encoded)
         self.repository_revision = str(snapshot.revision)
+        self._latest_workspace_snapshot = snapshot
+        self.engine_state.bind_initial_source(self.repository_revision)
         self.store.append(
             "repository_snapshot",
             boundary=boundary,
@@ -458,6 +548,7 @@ class MiniSweAdapter(GroundtruthController):
         digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("edit_transactions", digest, encoded)
         self.repository_revision = str(transaction.post_revision)
+        self.engine_state.apply_transaction(transaction)
         self._latest_transaction_sha256 = str(transaction.transaction_sha256)
         self.store.append(
             "edit_transaction",
@@ -490,6 +581,126 @@ class MiniSweAdapter(GroundtruthController):
         )
         return digest
 
+    def prepare_verification_candidate(
+        self, transaction: Any, graph_snapshot: GraphQuerySnapshot
+    ) -> str:
+        """Prepare revision-bound check advice from the usable pre-edit graph.
+
+        The planner is pure and the result remains advisory.  The pre-edit
+        graph may identify changed entities and covering tests, but it cannot
+        establish facts about edited bytes or execute a check on Mini-SWE's
+        behalf.
+        """
+        self._pending_verification_candidate = ""
+        self._pending_verification_metadata = {}
+        if (
+            not self.repo_root
+            or not graph_snapshot.graph_current
+            or not graph_snapshot.graph_path
+        ):
+            return ""
+        paths = tuple(sorted({str(path) for path in transaction.changed_paths if path}))
+        if not paths:
+            return ""
+        try:
+            placeholders = ",".join("?" for _ in paths)
+            uri = Path(graph_snapshot.graph_path).resolve().as_uri() + "?mode=ro"
+            with sqlite3.connect(uri, uri=True) as connection:
+                entities = tuple(
+                    row[0]
+                    for row in connection.execute(
+                        f"SELECT DISTINCT stable_id FROM resolution_symbols "
+                        f"WHERE path IN ({placeholders}) ORDER BY stable_id",
+                        paths,
+                    )
+                    if row[0]
+                )
+            if not entities:
+                return ""
+            from groundtruth.runtime.verification_plan import build_verification_plan
+
+            obligations = tuple(
+                sorted(
+                    obligation_id
+                    for obligation_id, predicate_id in self._predicate_by_obligation.items()
+                    if predicate_id in self.unmet_predicates
+                )
+            )
+            plan = build_verification_plan(
+                graph_snapshot.graph_path,
+                self.repo_root,
+                entities,
+                obligations,
+                patch_revision=str(transaction.post_revision),
+                graph_revision=graph_snapshot.graph_revision,
+            )
+            encoded = plan.canonical_json().encode("utf-8")
+            digest = hashlib.sha256(encoded).hexdigest()
+            self.store.put_blob("verification_plans", digest, encoded)
+            lines: list[str] = []
+            for check in plan.checks:
+                command = (
+                    shlex.join(check.command)
+                    if check.command
+                    else "edit_check " + " ".join(check.targets)
+                ).strip()
+                if not command:
+                    continue
+                line = (
+                    f"{check.kind}: {command} "
+                    f"basis={check.selection_basis} cost={check.expected_cost}"
+                )
+                if sum(len(item.encode("utf-8")) + 1 for item in (*lines, line)) > 960:
+                    break
+                lines.append(line)
+                if len(lines) == 3:
+                    break
+            if not lines:
+                return ""
+            rendered = "[GT_EVIDENCE:verification_plan]\n" + "\n".join(lines)
+            dedup_key = f"verification:{transaction.transaction_sha256}:{digest}"
+            self._pending_verification_candidate = rendered
+            self._pending_verification_metadata = {
+                "kind": "verification_plan",
+                "dedup_key": dedup_key,
+                "target": paths[0],
+                "semantics": "advisory_pre_edit_dependency_graph",
+                "artifact_sha256": digest,
+            }
+            self.store.append(
+                "verification_plan_prepared",
+                artifact_sha256=digest,
+                artifact_blob=f"verification_plans/{digest}.json",
+                transaction_sha256=str(transaction.transaction_sha256),
+                source_revision=str(transaction.post_revision),
+                dependency_source_revision=graph_snapshot.source_revision,
+                graph_revision=graph_snapshot.graph_revision,
+                changed_paths=list(paths),
+                changed_entities=list(entities),
+                check_count=len(plan.checks),
+                semantics="advisory_pre_edit_dependency_graph",
+            )
+            return rendered
+        except Exception as exc:  # noqa: BLE001 - selection is correct-or-quiet
+            self.store.append(
+                "verification_plan_unavailable",
+                transaction_sha256=str(transaction.transaction_sha256),
+                error_type=type(exc).__name__,
+            )
+            return ""
+
+    def verification_candidate(self) -> tuple[str, dict[str, str]]:
+        return (
+            self._pending_verification_candidate,
+            dict(self._pending_verification_metadata),
+        )
+
+    def consume_verification_candidate(self) -> tuple[str, dict[str, str]]:
+        candidate = self.verification_candidate()
+        self._pending_verification_candidate = ""
+        self._pending_verification_metadata = {}
+        return candidate
+
     def record_execution_evidence(self, artifact: Any) -> str:
         """Store exact raw diagnostics and return a structured augmentation."""
         raw_digest = artifact.raw_output_sha256
@@ -509,44 +720,94 @@ class MiniSweAdapter(GroundtruthController):
         )
 
     def refresh_graph(self, *, phase: str = "graph_query") -> bool:
-        """Try one full rebuild; failure leaves graph queries unavailable."""
-        if not self.repo_root:
+        """Poll or schedule a frozen-input rebuild without blocking Mini-SWE."""
+        if self._graph_coordinator is not None:
+            self._graph_coordinator.poll()
+            if self.engine_state.graph_current:
+                self.graph_db = self.engine_state.graph_path
+                self._gateway_state = None
+                self.graph_stale_since_revision = ""
+                return True
+        if not self.repo_root or self._latest_workspace_snapshot is None:
+            self._record_graph_refresh_failure("frozen_source_unavailable", phase=phase)
             return False
         try:
-            from .indexer import ensure_index_with_receipt
-
-            receipt = ensure_index_with_receipt(
-                self.repo_root, state_dir=str(self.store.root.parent)
-            )
+            request = self._frozen_graph_input(self._latest_workspace_snapshot)
+            if self._graph_coordinator is None:
+                self._graph_coordinator = GraphBuildCoordinator(
+                    self.engine_state, self._build_frozen_graph
+                )
+            disposition = self._graph_coordinator.schedule(request)
         except Exception as exc:  # noqa: BLE001 - freshness is fail-open
             self.store.append(
                 "graph_refresh_failed", error_type=type(exc).__name__
             )
             self._record_graph_refresh_failure(type(exc).__name__, phase=phase)
             return False
-        if not receipt.success or not receipt.graph_db:
-            cause = receipt.error_type or "index_unavailable"
-            self.store.append(
-                "graph_refresh_failed",
-                error_type=cause,
-                index_receipt=receipt.as_dict(),
-            )
-            self._record_graph_refresh_failure(cause, phase=phase)
-            return False
-        rebuilt = receipt.graph_db
-        self.graph_db = rebuilt
-        self.graph_fresh = True
-        self._gateway_state = None
-        self.graph_stale_since_revision = ""
         self.store.append(
-            "graph_refreshed",
+            "graph_refresh_scheduled",
+            disposition=disposition,
             repository_revision=self.repository_revision,
-            graph_db_sha256=hashlib.sha256(rebuilt.encode("utf-8")).hexdigest(),
+            dirty_paths=list(request.dirty_paths),
         )
-        return True
+        return False
+
+    def _frozen_graph_input(self, snapshot: Any) -> FrozenBuildInput:
+        from .indexer import SOURCE_EXTS
+
+        files: list[tuple[str, bytes]] = []
+        missing: list[str] = []
+        for item in snapshot.files:
+            if Path(item.path).suffix.lower() not in SOURCE_EXTS:
+                continue
+            if item.kind != "file" or item.captured is None:
+                missing.append(str(item.path))
+            else:
+                files.append((str(item.path), bytes(item.captured)))
+        source_omissions = []
+        for omission in snapshot.omissions:
+            kind, separator, value = str(omission).partition(":")
+            if kind == "unreadable" and separator:
+                if Path(value).suffix.lower() in SOURCE_EXTS:
+                    source_omissions.append(str(omission))
+            else:
+                # Unknown omission types remain conservative until their
+                # relationship to source completeness is explicitly known.
+                source_omissions.append(str(omission))
+        if missing or source_omissions:
+            raise ValueError("frozen_source_incomplete")
+        return FrozenBuildInput(
+            str(snapshot.revision),
+            self.engine_state.query_snapshot().masked_paths,
+            tuple(sorted(files)),
+        )
+
+    def _build_frozen_graph(self, request: FrozenBuildInput) -> GraphBuildArtifact:
+        from .indexer import ensure_index_with_receipt
+
+        with tempfile.TemporaryDirectory(prefix="gt-frozen-source-") as temporary:
+            root = Path(temporary)
+            for relative, payload in request.files:
+                target = (root / relative).resolve()
+                if root.resolve() not in target.parents:
+                    return GraphBuildArtifact(False, "", "", "unsafe_source_path")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(payload)
+            receipt = ensure_index_with_receipt(
+                root, state_dir=str(self.store.root.parent),
+                source_revision=request.source_revision,
+            )
+        return GraphBuildArtifact(
+            bool(receipt.success and receipt.graph_db), str(receipt.graph_db or ""),
+            str(receipt.graph_revision or ""), receipt.error_type or "",
+        )
+
+    def close_graph_coordinator(self) -> None:
+        if self._graph_coordinator is not None:
+            self._graph_coordinator.close(wait=False)
 
     def _record_graph_refresh_failure(self, cause: str, *, phase: str) -> None:
-        self.graph_fresh = False
+        self.engine_state.mark_graph_failed()
         self.diagnostics.record(
             DiagnosticEvent.create(
                 code=DiagnosticCode.GT_GRAPH_REFRESH_FAILED,
@@ -618,14 +879,18 @@ class MiniSweAdapter(GroundtruthController):
 
         pending = tuple(self._pending_provider_deliveries)
         matched = tuple(
-            identity for identity, rendered in pending
-            if contains_text(messages, rendered)
+            item.identity for item in pending
+            if contains_text(messages, item.rendered)
         )
         unmatched = tuple(
-            identity for identity, rendered in pending
-            if not contains_text(messages, rendered)
+            item.identity for item in pending
+            if not contains_text(messages, item.rendered)
         )
-        self.store.put_blob("provider_requests", digest, encoded)
+        request_sha256, request_manifest, request_manifest_sha256, storage = (
+            store_provider_request(self.store, payload)
+        )
+        if request_sha256 != digest:
+            raise RuntimeError("provider request CAS identity mismatch")
         self.iteration += 1
         request_id = f"{self.task_id}-{self.iteration}-{digest[:16]}"
         suffix = self.provider_suffix()
@@ -641,6 +906,35 @@ class MiniSweAdapter(GroundtruthController):
         self.deliveries.append(delivery)
         self._last_payload_hash = digest
         self._latest_delivery = delivery
+        for item in pending:
+            if item.identity not in matched:
+                continue
+            event = (
+                "context_addition_delivery" if item.lane == "prompt"
+                else "evidence_delivery"
+            )
+            self.store.append(
+                event, lane=item.lane, kind=item.kind,
+                action_index=item.action_index, iteration=item.iteration,
+                evidence_type=item.kind, dedup_key=item.dedup_key,
+                target=item.target, rendered_bytes=len(item.rendered.encode("utf-8")),
+                payload_sha256=item.identity, delivery_identity=item.identity,
+                delivery_blob=f"deliveries/{item.identity}.json",
+                semantics=item.semantics, artifact_sha256=item.artifact_sha256,
+                delivery_ordinal=item.ordinal, request_id=request_id,
+            )
+            self.record_delivery_receipt(
+                evidence_type=item.kind, dedup_key=item.dedup_key,
+                target=item.target, payload_hash=item.identity,
+                action_index=item.action_index, iteration=item.iteration,
+            )
+            self._model_visible_delivery_count += 1
+            self._model_visible_delivery_bytes += len(item.rendered.encode("utf-8"))
+            self._model_visible_delivery_identities.add(item.identity)
+            if item.lane == "sealed":
+                self._accepted_sealed_delivery_count += 1
+            if item.kind == "cochange_partner":
+                self._cochange_delivery_count += 1
         self.store.append(
             "provider_delivery",
             request_id=request_id,
@@ -651,7 +945,10 @@ class MiniSweAdapter(GroundtruthController):
             model_visible_sha256=model_visible_digest,
             requested_model=self.requested_model,
             resolved_model=self.resolved_model,
-            request_blob=f"provider_requests/{digest}.json",
+            request_manifest=request_manifest,
+            request_manifest_sha256=request_manifest_sha256,
+            request_storage="message_cas",
+            **storage,
             delivery_ids=list(matched),
             matches=[
                 {"delivery_id": identity, "rendered_sha256": identity}
@@ -670,6 +967,18 @@ class MiniSweAdapter(GroundtruthController):
             )
         self._pending_typed_observations.clear()
         return delivery
+
+    def discard_pending_provider_deliveries(self, *, reason: str) -> None:
+        """Roll back prepared delivery accounting after final-request refusal."""
+        pending = tuple(self._pending_provider_deliveries)
+        if pending:
+            self.store.append(
+                "prepared_deliveries_discarded", reason=reason,
+                delivery_ids=[item.identity for item in pending],
+            )
+        self._pending_provider_deliveries.clear()
+        self._boundary_delivery_count = 0
+        self._boundary_delivery_bytes = 0
 
     def record_typed_observation(
         self,
@@ -729,6 +1038,13 @@ class MiniSweAdapter(GroundtruthController):
         if self.contract is None:
             return ()
         if returncode != 0:
+            return ()
+        from .runtime_observation import compile_execution_evidence
+
+        execution = compile_execution_evidence(command=command, output=output,
+            returncode=returncode, action_id=action_index,
+            repository_revision=self.repository_revision)
+        if execution is not None and execution.outcome != "pass":
             return ()
         receipts = evaluate_passing_observation(
             self.contract,
@@ -949,7 +1265,7 @@ class MiniSweAdapter(GroundtruthController):
     ) -> bool:
         """Admit one model-visible dose or record a typed refusal.
 
-        Prompt context and sealed evidence share one task-level ceiling. A
+        Prompt context and sealed evidence share one request-level ceiling. A
         refusal is durable journal evidence and never a process exception.
         """
 
@@ -962,18 +1278,27 @@ class MiniSweAdapter(GroundtruthController):
         effective_dedup_key = (
             f"prompt:{delivery_identity}" if lane == "prompt" else dedup_key
         )
-        candidate_ordinal = self._model_visible_delivery_count + 1
+        if iteration != self._admission_iteration:
+            self._admission_iteration = iteration
+            self._boundary_delivery_count = 0
+            self._boundary_delivery_bytes = 0
+        candidate_ordinal = self._boundary_delivery_count + 1
         per_delivery_limit = delivery_byte_limit(lane=lane, kind=kind)
 
+        pending_identities = {item.identity for item in self._pending_provider_deliveries}
+        if delivery_identity in pending_identities:
+            return True
         reason = ""
         if delivery_identity in self._model_visible_delivery_identities:
             reason = "duplicate_delivery_identity"
-        elif candidate_ordinal > MAX_TASK_DELIVERIES:
-            reason = "task_delivery_storm_backstop"
+        elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
+            reason = "boundary_claim_ceiling"
+        elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
+            reason = "cochange_task_ceiling"
         elif rendered_bytes > per_delivery_limit:
             reason = "delivery_byte_ceiling"
-        elif self._model_visible_delivery_bytes + rendered_bytes > TOTAL_DELIVERY_BYTE_LIMIT:
-            reason = "task_delivery_byte_ceiling"
+        elif self._boundary_delivery_bytes + rendered_bytes > TOTAL_DELIVERY_BYTE_LIMIT:
+            reason = "request_delivery_byte_ceiling"
         if reason:
             self.store.append(
                 "delivery_refused",
@@ -986,27 +1311,20 @@ class MiniSweAdapter(GroundtruthController):
                 payload_sha256=payload_sha256,
                 delivery_identity=delivery_identity,
                 per_delivery_limit=per_delivery_limit,
-                admitted_count=self._model_visible_delivery_count,
-                admitted_bytes=self._model_visible_delivery_bytes,
-                task_delivery_limit=MAX_TASK_DELIVERIES,
-                task_byte_limit=TOTAL_DELIVERY_BYTE_LIMIT,
+                admitted_count=self._boundary_delivery_count,
+                admitted_bytes=self._boundary_delivery_bytes,
+                boundary_claim_limit=MAX_BOUNDARY_CLAIMS,
+                request_byte_limit=TOTAL_DELIVERY_BYTE_LIMIT,
                 action_index=action_index,
                 iteration=iteration,
             )
             return False
 
-        self._model_visible_delivery_count = candidate_ordinal
-        self._model_visible_delivery_bytes += rendered_bytes
-        self._model_visible_delivery_identities.add(delivery_identity)
-        self._pending_provider_deliveries.append((delivery_identity, rendered))
         self.store.put_blob(
             "deliveries", delivery_identity, rendered.encode("utf-8")
         )
-        if lane == "sealed":
-            self._accepted_sealed_delivery_count += 1
-        event = "context_addition_delivery" if lane == "prompt" else "evidence_delivery"
         self.store.append(
-            event,
+            "delivery_prepared",
             lane=lane,
             kind=kind,
             action_index=action_index,
@@ -1022,14 +1340,12 @@ class MiniSweAdapter(GroundtruthController):
             artifact_sha256=artifact_sha256,
             delivery_ordinal=candidate_ordinal,
         )
-        self.record_delivery_receipt(
-            evidence_type=kind,
-            dedup_key=effective_dedup_key,
-            target=target,
-            payload_hash=payload_sha256,
-            action_index=action_index,
-            iteration=iteration,
-        )
+        self._boundary_delivery_count = candidate_ordinal
+        self._boundary_delivery_bytes += rendered_bytes
+        self._pending_provider_deliveries.append(PendingModelDelivery(
+            delivery_identity, rendered, lane, kind, action_index, iteration,
+            effective_dedup_key, target, semantics, artifact_sha256, candidate_ordinal,
+        ))
         return True
 
     def stage_model_visible_delivery(
@@ -1101,7 +1417,37 @@ class MiniSweAdapter(GroundtruthController):
             out.append(text if text else predicate_id)
         return tuple(dict.fromkeys(out))
 
-    def task_start_localization(self) -> str:
+    def task_start_localization(self, *, commit: bool = True) -> str:
+        """Prepare once per source state; legacy callers may admit immediately."""
+        key = (self.issue_text, self.workspace_epoch, self.repository_revision,
+               self.graph_db, self.graph_fresh)
+        if key != self._localization_cache_key:
+            self._localization_metadata = {}
+            self._localization_chain = set(self._dedup_chain)
+            self._localization_head = self._chain_head
+            self._localization_candidate = self._prepare_task_start_localization()
+            self._localization_cache_key = key
+        rendered = compact_localization(self._localization_candidate)
+        if commit and rendered:
+            if not self.admit_model_visible_delivery(
+                lane="sealed", rendered=rendered, action_index=0,
+                iteration=self.iteration, **self.localization_delivery_metadata(),
+            ):
+                return ""
+            self.acknowledge_localization(rendered)
+        return rendered
+
+    def localization_delivery_metadata(self) -> dict[str, str]:
+        return dict(self._localization_metadata or {
+            "kind": "localization", "dedup_key": "task-start-localization",
+        })
+
+    def acknowledge_localization(self, rendered: str) -> None:
+        if rendered and rendered == compact_localization(self._localization_candidate):
+            self._dedup_chain.update(self._localization_chain)
+            self._chain_head = self._localization_head
+
+    def _prepare_task_start_localization(self) -> str:
         """Ranked issue-keyed localization for the iteration-1 request.
 
         Reframed trigger: the ranked files are delivered at TASK START, not
@@ -1111,6 +1457,9 @@ class MiniSweAdapter(GroundtruthController):
         if not self.issue_text:
             return ""
         if self.graph_db and self.graph_fresh:
+            semantic = self._semantic_task_start_localization()
+            if semantic:
+                return semantic
             try:
                 from groundtruth.runtime.adapters.miniswe import normalize_event
 
@@ -1128,7 +1477,7 @@ class MiniSweAdapter(GroundtruthController):
                 result = run_evidence_pipeline(
                     self.gateway_state(),
                     event,
-                    dedup_chain=self._dedup_chain,
+                    dedup_chain=self._localization_chain,
                     chain_head=self._chain_head,
                     episode_id=self.task_id,
                     event_id=f"{self.task_id}:task_start",
@@ -1137,22 +1486,104 @@ class MiniSweAdapter(GroundtruthController):
                     max_chars=600,
                 )
                 if result.chain_head:
-                    self._chain_head = result.chain_head
+                    self._localization_head = result.chain_head
                 if result.sealed and result.envelope is not None:
-                    if not self.admit_model_visible_delivery(
-                        lane="sealed",
-                        kind=str(result.envelope.evidence_type or ""),
-                        rendered=result.rendered,
-                        action_index=0,
-                        iteration=0,
-                        dedup_key=str(result.envelope.dedup_key or ""),
-                        target=str(getattr(result.envelope, "target", "") or ""),
-                    ):
-                        return ""
+                    self._localization_metadata = {
+                        "kind": str(result.envelope.evidence_type or "localization"),
+                        "dedup_key": str(result.envelope.dedup_key or ""),
+                        "target": str(getattr(result.envelope, "target", "") or ""),
+                    }
                     return result.rendered
             except Exception:  # noqa: BLE001 - deterministic lexical fallback follows
                 pass
         return self._lexical_task_localization()
+
+    def _semantic_task_start_localization(self) -> str:
+        """Use the independent dense corpus when verified assets are configured."""
+        model_dir = os.environ.get("GT_DENSE_MODEL_DIR", "").strip()
+        snapshot = self.graph_query_snapshot()
+        if not model_dir or not snapshot.graph_current or not snapshot.graph_path:
+            return ""
+        try:
+            from .retrieval import RetrievalSource, hybrid_rank
+
+            ranking = hybrid_rank(
+                snapshot.graph_path,
+                self.issue_text,
+                k=8,
+                use_dense=True,
+                model_dir=model_dir,
+                store_path=os.environ.get("GT_CONTRACT_EMBEDDING_INDEX") or None,
+            )
+            dense = next(
+                source for source in ranking.sources
+                if source.source is RetrievalSource.DENSE
+            )
+            if not dense.available or not dense.ranking:
+                self.store.append(
+                    "semantic_localization_unavailable",
+                    reason=dense.reason or "dense_result_empty",
+                    source_revision=snapshot.source_revision,
+                    graph_revision=snapshot.graph_revision,
+                )
+                return ""
+            items = []
+            seen_paths: set[str] = set()
+            for fused in ranking.fused:
+                provenance = ranking.provenance.get(fused.stable_id)
+                if provenance is None or not provenance.file_path:
+                    continue
+                path = provenance.file_path.replace("\\", "/")
+                if path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                sources = ranking.contributing_sources(fused.stable_id)
+                items.append({
+                    "path": path,
+                    "line": max(1, provenance.start_line),
+                    "anchor": f"{path}:{max(1, provenance.start_line)}",
+                    "score": fused.score,
+                    "reasons": [f"retrieval:{source}" for source in sources],
+                    "stable_id": fused.stable_id,
+                })
+                if len(items) == 4:
+                    break
+            if not items:
+                return ""
+            artifact = {
+                "schema": "gt.semantic_localization.v1",
+                "source_revision": snapshot.source_revision,
+                "graph_revision": snapshot.graph_revision,
+                "ranking": ranking.attribution_record(),
+                "items": items,
+                "semantics": "advisory_ranking_not_verification",
+            }
+            encoded = json.dumps(
+                artifact, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            digest = hashlib.sha256(encoded).hexdigest()
+            self.store.put_blob("localization_advisory", digest, encoded)
+            rendered = "[GT_EVIDENCE:localization]\n" + "\n".join(
+                f"{item['anchor']} score={item['score']:.8f} "
+                f"reasons={','.join(item['reasons'])}"
+                for item in items
+            )
+            self._localization_metadata = {
+                "kind": "localization",
+                "dedup_key": f"semantic-localization:{digest}",
+                "target": str(items[0]["path"]),
+                "semantics": "advisory",
+                "artifact_sha256": digest,
+            }
+            return rendered
+        except Exception as exc:  # noqa: BLE001 - graph/gateway fallback follows
+            self.store.append(
+                "semantic_localization_unavailable",
+                reason=f"{type(exc).__name__}:{str(exc)[:160]}",
+                source_revision=snapshot.source_revision,
+                graph_revision=snapshot.graph_revision,
+            )
+            return ""
 
     def _lexical_task_localization(self) -> str:
         """Bounded advisory fallback with stable anchors and score reasons."""
@@ -1223,11 +1654,9 @@ class MiniSweAdapter(GroundtruthController):
             try:
                 from .dense_runtime import rank_documents
 
-                graph_revision = (
-                    hashlib.sha256(Path(self.graph_db).read_bytes()).hexdigest()
-                    if self.graph_db and Path(self.graph_db).is_file()
-                    else "graph-unavailable"
-                )
+                snapshot = self.graph_query_snapshot()
+                if not snapshot.graph_current:
+                    raise RuntimeError("graph_snapshot_not_current")
                 dense_order, dense_receipt = rank_documents(
                     query_text=self.issue_text,
                     documents={str(row["path"]): str(row["text"]) for row in candidates},
@@ -1237,7 +1666,7 @@ class MiniSweAdapter(GroundtruthController):
                     model_dir=Path(os.environ["GT_DENSE_MODEL_DIR"]),
                     index_path=self.store.root / "dense-index.sqlite",
                     source_revision=self.repository_revision or "repository-start",
-                    graph_revision=graph_revision,
+                    graph_revision=snapshot.graph_revision,
                     limit=4,
                 )
                 by_path = {str(row["path"]): row for row in candidates}
@@ -1281,21 +1710,14 @@ class MiniSweAdapter(GroundtruthController):
             for row in ranked
         )
         rendered = "[GT_EVIDENCE:localization]\n" + rendered
-        if not self.admit_model_visible_delivery(
-            lane="sealed",
-            kind="localization",
-            rendered=rendered,
-            action_index=0,
-            iteration=0,
-            dedup_key=f"lexical-localization:{digest}",
-            target=str(ranked[0]["path"]),
-            semantics="advisory",
-            artifact_sha256=digest,
-        ):
-            return ""
+        self._localization_metadata = {
+            "kind": "localization", "dedup_key": f"lexical-localization:{digest}",
+            "target": str(ranked[0]["path"]), "semantics": "advisory",
+            "artifact_sha256": digest,
+        }
         return rendered
 
-    def next_contract_delta(self, *, max_chars: int = 2400) -> str:
+    def next_contract_delta(self, *, max_chars: int = 2400, commit: bool = True) -> str:
         """One full contract dose at task start, then obligation deltas only.
 
         E1: the full typed task contract is rendered once (into the first
@@ -1309,19 +1731,31 @@ class MiniSweAdapter(GroundtruthController):
         )
         if not self._contract_shipped:
             text, _ = render_task_contract(self.contract, max_chars=max_chars)
-            self._contract_shipped = True
-            self._last_delta_signature = signature
-            return text
-        if signature == self._last_delta_signature:
-            return ""
-        self._last_delta_signature = signature
-        shipped = tuple(
-            obligation_id
-            for obligation_id, predicate_id in self._predicate_by_obligation.items()
-            if self.predicate_status(predicate_id) is PredicateStatus.GREEN
-        )
-        text, _ = render_obligation_delta(self.contract, shipped, max_chars=max_chars)
+        else:
+            if signature == self._last_delta_signature:
+                return ""
+            shipped = tuple(
+                obligation_id
+                for obligation_id, predicate_id in self._predicate_by_obligation.items()
+                if self.predicate_status(predicate_id) is PredicateStatus.GREEN
+            )
+            text, _ = render_obligation_delta(self.contract, shipped, max_chars=max_chars)
+        self._prepared_contract_delta = (text, signature)
+        if commit:
+            self.acknowledge_contract_delta(text)
         return text
+
+    def acknowledge_contract_delta(self, text: str) -> None:
+        """Commit only the state represented by an admitted prepared delta.
+
+        Legacy callers may consume next_contract_delta directly; the native
+        session previews with commit=False so refusal cannot lose the delta.
+        """
+        prepared = self._prepared_contract_delta
+        if prepared is not None and prepared[0] == text:
+            self._contract_shipped = True
+            self._last_delta_signature = prepared[1]
+            self._prepared_contract_delta = None
 
     def evaluate_failing_observation(
         self,
@@ -1372,14 +1806,15 @@ class MiniSweAdapter(GroundtruthController):
             return False
         recurrences = self._failure_recurrences.get(fingerprint, 1) + 1
         self._failure_recurrences[fingerprint] = recurrences
-        # C6: the SAME failure recurring (with or without an edit between) is a
-        # stuck loop - fire the steer on recurrence, not only on epoch change.
-        if recurrences >= 2 and self._recovery_delivered < 2:
+        # Repeated output in the same epoch cannot establish post-edit evidence.
+        # Advance the comparison epoch after each steer to prevent duplicates.
+        if epoch > first and recurrences >= 2 and self._recovery_delivered < 2:
+            self._failure_first_epoch[fingerprint] = epoch
             self._recovery_delivered += 1
             self.pending_transient = (
                 "GT_RECOVERY: the same test failure has recurred after your last "
-                "edit. The previous approach is falsified - change the hypothesis "
-                "or the edited surface rather than repeating it."
+                "observed edit. That change has not cleared this failure; inspect "
+                "the check and changed surface before repeating the same action."
             )
             self.store.append(
                 "recovery_steer",

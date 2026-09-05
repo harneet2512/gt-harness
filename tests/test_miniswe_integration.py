@@ -2,13 +2,100 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
+from dataclasses import replace
+from types import SimpleNamespace
+
+import pytest
 
 from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter, ProviderModelMismatch
+from gt_engine.request_history import load_provider_request
 from gt_engine.run_diagnostics import DiagnosticCode
+from gt_engine.runtime_observation import capture_workspace
 from gt_engine.task_contract import Obligation, TaskContract, extract_task_contract
 from gt_engine.verification_contract import compile_obligation_predicates
+
+
+def test_verification_candidate_is_bound_to_pre_edit_graph(tmp_path, monkeypatch):
+    graph = tmp_path / "graph.db"
+    with sqlite3.connect(graph) as db:
+        db.execute("CREATE TABLE resolution_symbols (stable_id TEXT, path TEXT)")
+        db.execute(
+            "INSERT INTO resolution_symbols VALUES (?, ?)",
+            ("symbol:parser", "src/parser.py"),
+        )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MiniSweAdapter(
+        task_id="verify-plan",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        contract=extract_task_contract("Fix the parser."),
+        repo_root=repo,
+        graph_db=str(graph),
+    )
+    adapter.engine_state.bind_initial_source("before")
+    snapshot = adapter.graph_query_snapshot()
+
+    class Check:
+        kind = "unit"
+        command = ("pytest", "tests/test_parser.py")
+        selection_basis = "fact_covering"
+        covered_entities = ("symbol:parser",)
+        covered_obligations = ()
+        expected_cost = "low"
+        confidence = "high"
+        attribution_requirement = "edit_attributed"
+        targets = ("tests/test_parser.py",)
+        reason = ""
+
+    class Plan:
+        checks = (Check(),)
+
+        def canonical_json(self):
+            return '{"checks":[]}'
+
+    captured = {}
+
+    def build(graph_db, repo_root, entities, obligations, **revisions):
+        captured.update(
+            graph_db=graph_db,
+            repo_root=repo_root,
+            entities=tuple(entities),
+            obligations=tuple(obligations),
+            revisions=revisions,
+        )
+        return Plan()
+
+    import groundtruth.runtime.verification_plan as verification_plan
+
+    monkeypatch.setattr(verification_plan, "build_verification_plan", build)
+    transaction = type(
+        "Transaction",
+        (),
+        {
+            "transaction_sha256": "tx-1",
+            "post_revision": "after",
+            "changed_paths": ("src/parser.py",),
+        },
+    )()
+
+    rendered = adapter.prepare_verification_candidate(transaction, snapshot)
+
+    assert captured == {
+        "graph_db": str(graph),
+        "repo_root": str(repo),
+        "entities": ("symbol:parser",),
+        "obligations": (),
+        "revisions": {
+            "patch_revision": "after",
+            "graph_revision": snapshot.graph_revision,
+        },
+    }
+    assert "pytest tests/test_parser.py" in rendered
+    assert adapter.consume_verification_candidate()[0] == rendered
 
 
 def test_lexical_localization_is_stable_advisory_and_includes_dirty_files(tmp_path):
@@ -45,14 +132,61 @@ def test_lexical_localization_is_stable_advisory_and_includes_dirty_files(tmp_pa
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    delivery = next(row for row in rows if row["event"] == "evidence_delivery")
-    receipt = next(row for row in rows if row["event"] == "receipt")
+    delivery = next(row for row in rows if row["event"] == "delivery_prepared")
     shipped = outputs[0]
     assert delivery["rendered_bytes"] == len(shipped.encode("utf-8"))
-    assert delivery["payload_sha256"] == receipt["payload_hash"]
-    assert receipt["payload_hash"] == __import__("hashlib").sha256(
+    assert delivery["payload_sha256"] == __import__("hashlib").sha256(
         shipped.encode("utf-8")
     ).hexdigest()
+    assert not any(row["event"] in {"evidence_delivery", "receipt"} for row in rows)
+
+
+def test_task_start_uses_independent_dense_graph_retrieval(
+    tmp_path, monkeypatch
+):
+    from gt_engine.retrieval import RankedSymbol, RetrievalSource
+
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"fixture")
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(model_dir))
+    stable_id = "s" * 64
+    dense = SimpleNamespace(
+        source=RetrievalSource.DENSE,
+        available=True,
+        ranking=(RankedSymbol(stable_id, 1.0, "semantic"),),
+        reason=None,
+    )
+    ranking = SimpleNamespace(
+        sources=(dense,),
+        fused=(RankedSymbol(stable_id, 0.5, "semantic"),),
+        provenance={stable_id: SimpleNamespace(
+            file_path="src/semantic.py", start_line=17
+        )},
+        contributing_sources=lambda _stable_id: ("dense",),
+        attribution_record=lambda: {
+            "schema": "gt.hybrid_retrieval.v1",
+            "promotes_trust": False,
+        },
+    )
+    monkeypatch.setattr("gt_engine.retrieval.hybrid_rank", lambda *a, **k: ranking)
+    adapter = MiniSweAdapter(
+        task_id="semantic",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(tmp_path),
+        graph_db=str(graph),
+        issue_text="behavior phrased without an identifier",
+    )
+
+    rendered = adapter.task_start_localization(commit=False)
+
+    assert "src/semantic.py:17" in rendered
+    assert "retrieval:dense" in rendered
+    assert adapter.localization_delivery_metadata()["dedup_key"].startswith(
+        "semantic-localization:"
+    )
 
 
 def test_lexical_localization_is_quiet_on_no_match(tmp_path):
@@ -326,11 +460,12 @@ def test_provider_request_commits_exact_logical_payload_and_model_identity(tmp_p
         "messages": [{"role": "user", "content": "exact final bytes"}],
     }
     delivery = a.bind_provider_payload(payload)
-    blob = a.store.root / "provider_requests" / f"{delivery.payload_sha256}.json"
-    assert blob.is_file()
     assert delivery.model_visible_sha256
     rows = [json.loads(x) for x in a.store.path.read_text().splitlines()]
     event = [row for row in rows if row["event"] == "provider_delivery"][-1]
+    assert load_provider_request(a.store.root, event) == payload
+    assert event["request_storage"] == "message_cas"
+    assert len(tuple((a.store.root / "provider_messages").glob("*.json"))) == 1
     assert event["requested_model"] == "deepseek-v4-flash"
     assert event["resolved_model"] == "openai/deepseek-v4-flash"
     assert event["model_visible_sha256"] == delivery.model_visible_sha256
@@ -388,6 +523,17 @@ def test_recovery_steer_scheduled_on_recurring_failure_after_edit(tmp_path):
     a.pending_transient = ""
     a.note_edit(["src/mod.py"])
     assert a.note_failure_fingerprint("fp-1", epoch=3) is False  # budget exhausted
+
+
+def test_same_epoch_repetition_is_not_post_edit_falsification(tmp_path):
+    adapter = MiniSweAdapter(task_id="repeat", state_dir=tmp_path, predicates=[])
+    assert not adapter.note_failure_fingerprint("fp", epoch=0)
+    assert not adapter.note_failure_fingerprint("fp", epoch=0)
+    assert not adapter.pending_transient
+    assert adapter.note_failure_fingerprint("fp", epoch=1)
+    adapter.pending_transient = ""
+    assert not adapter.note_failure_fingerprint("fp", epoch=1)
+    assert not adapter.pending_transient
 
 
 def test_submit_refused_on_verified_red(tmp_path):
@@ -573,6 +719,7 @@ def test_generic_passing_test_file_does_not_clear_unrelated_behavior_reds(tmp_pa
 def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
     graph = tmp_path / "graph.db"
     graph.write_bytes(b"old")
     a = MiniSweAdapter(
@@ -581,7 +728,8 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     )
     a.start_task()
     assert a.gateway_state().graph_db == str(graph)
-    a.repository_revision = "a" * 64
+    snapshot = capture_workspace(repo)
+    a.record_repository_snapshot(snapshot, boundary="after_action")
     a.note_edit(["mod.py"])
     assert a.graph_fresh is False
     assert a.gateway_state().graph_db is None
@@ -590,17 +738,48 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     rebuilt.write_bytes(b"new")
     monkeypatch.setattr(
         "gt_engine.indexer.ensure_index_with_receipt",
-        lambda root, state_dir=None: IndexBuildReceipt(
+        lambda root, state_dir=None, source_revision="": IndexBuildReceipt(
             IndexBuildStatus.BUILT,
             graph_db=str(rebuilt),
             graph_revision="b" * 64,
             analysis_state="complete",
         ),
     )
+    assert a.refresh_graph() is False
+    assert a._graph_coordinator.wait_idle(timeout=3)
     assert a.refresh_graph() is True
     assert a.graph_fresh is True
     assert a.graph_db == str(rebuilt)
     assert a.gateway_state().graph_db == str(rebuilt)
+
+
+def test_frozen_graph_input_ignores_only_known_non_source_omissions(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    snapshot = capture_workspace(repo)
+    adapter = MiniSweAdapter(
+        task_id="task",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+    )
+
+    unrelated = replace(
+        snapshot,
+        complete=False,
+        omissions=("unreadable:asset.bin",),
+    )
+    request = adapter._frozen_graph_input(unrelated)
+    assert request.files == (("mod.py", (repo / "mod.py").read_bytes()),)
+
+    source_missing = replace(
+        snapshot,
+        complete=False,
+        omissions=("unreadable:other.py",),
+    )
+    with pytest.raises(ValueError, match="frozen_source_incomplete"):
+        adapter._frozen_graph_input(source_missing)
 
 
 def test_graph_rebuild_failure_keeps_graph_stale(monkeypatch, tmp_path):

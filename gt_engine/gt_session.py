@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from .delivery_budget import PROMPT_CONTEXT_BYTE_LIMIT, truncate_utf8
+from .delivery_budget import PROMPT_CONTEXT_BYTE_LIMIT, compact_localization, truncate_utf8
 from .run_diagnostics import CapabilityState, DiagnosticCode, DiagnosticEvent
 
 # Capabilities a host can declare (see the verdict's negotiation list).
@@ -40,17 +40,8 @@ HOST_CAPABILITIES = (
 
 
 def _compress_context(value: str, limit: int) -> str:
-    """Keep a useful UTF-8 prefix and bind omitted localization by digest."""
-
-    encoded = value.encode("utf-8")
-    if len(encoded) <= limit:
-        return value
-    digest = hashlib.sha256(encoded).hexdigest()[:16]
-    marker = f"\n[compressed sha256={digest}]"
-    budget = max(0, int(limit) - len(marker.encode("utf-8")))
-    prefix = encoded[:budget].decode("utf-8", "ignore").rstrip()
-    result = prefix + marker
-    return result if len(result.encode("utf-8")) <= limit else marker.lstrip()
+    """Shorten only at certified independent localization item boundaries."""
+    return compact_localization(value, limit)
 
 
 class Assurance(StrEnum):
@@ -140,6 +131,9 @@ class GTSession:
         )
         self._terminal: str | None = None
         self._task_start_shipped = False
+        self._pending_contract_delta = ""
+        self._pending_contract_rendered = ""
+        self._pending_localization = ""
         self._capability_check()
 
     @property
@@ -258,12 +252,13 @@ class GTSession:
         additions: list[str] = []
         contract_was_shipped = bool(self._engine.contract_shipped)
         delta = self._engine.next_contract_delta(
+            commit=False,
             max_chars=min(
                 self.config.context_budget_bytes, PROMPT_CONTEXT_BYTE_LIMIT
             )
         )
         if delta:
-            tag = "GT_TASK_CONTRACT" if iteration == 0 else "GT_OBLIGATION_DELTA"
+            tag = "GT_TASK_CONTRACT" if not contract_was_shipped else "GT_OBLIGATION_DELTA"
             rendered = truncate_utf8(
                 f"[{tag}]\n{delta}", PROMPT_CONTEXT_BYTE_LIMIT
             )
@@ -279,6 +274,8 @@ class GTSession:
                     dedup_key=f"prompt:{payload_hash}",
                     target="provider_prompt",
                 ):
+                    self._pending_contract_delta = delta
+                    self._pending_contract_rendered = rendered
                     additions.append(rendered)
             else:
                 self._engine.store.append(
@@ -287,12 +284,10 @@ class GTSession:
                     rendered_bytes=len(rendered.encode("utf-8")),
                 )
         if (
-            iteration == 0
-            and not self._task_start_shipped
+            not self._task_start_shipped
             and self.config.delivery_path == "compiled"
         ):
-            self._task_start_shipped = True
-            localization = self._engine.task_start_localization()
+            localization = self._engine.task_start_localization(commit=False)
             if localization:
                 original_bytes = len(localization.encode("utf-8"))
                 localization = _compress_context(localization, 1_400)
@@ -324,14 +319,34 @@ class GTSession:
                                 ),
                             )
                         )
-                if self.model_visible:
+                if self.model_visible and localization and self._engine.admit_model_visible_delivery(
+                    lane="sealed", rendered=localization, action_index=0,
+                    iteration=iteration, **self._engine.localization_delivery_metadata(),
+                ):
+                    self._pending_localization = localization
                     additions.append(localization)
-                else:
+                elif not self.model_visible:
                     self._engine.store.append(
                         "shadow_task_start_localization",
                         rendered_bytes=len(localization.encode("utf-8")),
                     )
         return GTDecisionBatch(context_additions=additions)
+
+    def provider_request_admitted(self, delivery_ids: tuple[str, ...]) -> None:
+        """Commit shipped latches only for bytes in an admitted final request."""
+        identities = set(delivery_ids)
+        if (self._pending_contract_rendered
+                and hashlib.sha256(self._pending_contract_rendered.encode()).hexdigest()
+                in identities):
+            self._engine.acknowledge_contract_delta(self._pending_contract_delta)
+            self._pending_contract_delta = ""
+            self._pending_contract_rendered = ""
+        if (self._pending_localization
+                and hashlib.sha256(self._pending_localization.encode()).hexdigest()
+                in identities):
+            self._engine.acknowledge_localization(self._pending_localization)
+            self._pending_localization = ""
+            self._task_start_shipped = True
 
     def after_action(
         self,
@@ -386,6 +401,10 @@ class GTSession:
 
     def close(self, terminal: str) -> None:
         self._terminal = terminal
+        if self._engine is not None:
+            closer = getattr(self._engine, "close_graph_coordinator", None)
+            if callable(closer):
+                closer()
         if self._engine is not None:
             self._engine.store.append("session_closed", terminal=terminal)
             diagnostics = getattr(self._engine, "diagnostics", None)

@@ -34,6 +34,39 @@ def test_muse_route_preserves_the_baseline_xhigh_reasoning_contract(monkeypatch)
     assert kwargs["reasoning"] == {"effort": "xhigh"}
 
 
+def test_deepseek_route_forwards_relace_only_without_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.invalid/api/v1")
+    monkeypatch.setenv(
+        "GT_PROVIDER_ROUTING_JSON",
+        json.dumps(
+            {
+                "only": ["relace"],
+                "allow_fallbacks": False,
+                "require_parameters": True,
+            }
+        ),
+    )
+
+    model, kwargs = _model_and_kwargs("deepseek/deepseek-v4-flash-0731", 1.0)
+
+    assert model == "openai/deepseek/deepseek-v4-flash-0731"
+    assert kwargs["extra_body"] == {
+        "provider": {
+            "only": ["relace"],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        }
+    }
+
+
+def test_deepseek_openrouter_route_refuses_missing_provider_lock(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.invalid/api/v1")
+    monkeypatch.delenv("GT_PROVIDER_ROUTING_JSON", raising=False)
+
+    with pytest.raises(ValueError, match="provider_routing_env_invalid"):
+        _model_and_kwargs("deepseek/deepseek-v4-flash-0731", 1.0)
+
+
 class FakeModel:
     model_name = "openai/deepseek-v4-flash"
     model_kwargs = {"temperature": 1.0, "api_base": "https://gateway.invalid"}
@@ -389,6 +422,7 @@ def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -
     (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
     (repo / "new.txt").write_text("new\n", encoding="utf-8")
     output = tmp_path / "artifacts" / "model.patch"
+    index_before = (repo / ".git" / "index").read_bytes()
 
     _write_model_patch(repo, baseline, output)
 
@@ -397,6 +431,7 @@ def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -
     assert "+changed" in patch_text
     assert "new.txt" in patch_text
     assert "+new" in patch_text
+    assert (repo / ".git" / "index").read_bytes() == index_before
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux procfs boundary")

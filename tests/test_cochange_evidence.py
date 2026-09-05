@@ -444,19 +444,23 @@ def test_a_line_that_cannot_fit_at_all_stages_nothing(tmp_path: Path):
 # --- the seam never lets a prior outrank a resolution ----------------------
 
 
-def test_the_seam_hook_is_the_last_resort_not_a_competitor(tmp_path: Path):
-    """`_run_evidence` reaches the prior only after the pipeline says nothing."""
+def test_the_seam_collects_the_prior_but_ranks_it_below_current_evidence(
+    tmp_path: Path,
+):
+    """Candidate collection must precede one deterministic ranked selection."""
 
     import inspect
 
     from gt_engine import miniswe_runtime
 
     source = inspect.getsource(miniswe_runtime._run_evidence)
-    rendered_at = source.index("rendered = cap_evidence(result.rendered)")
+    pipeline_at = source.index("result = run_evidence_pipeline(")
     prior_at = source.index("_cochange_prior(adapter")
+    selection_at = source.index("winner = sorted(candidates")
 
-    assert rendered_at < prior_at
-    assert "if rendered:" in source[rendered_at:prior_at]
+    assert pipeline_at < prior_at < selection_at
+    assert '10, cochange_metadata.get("kind", "cochange_partner")' in source
+    assert "100 if event.test_outcome" in source
 
 
 def test_the_seam_hook_is_quiet_when_the_action_touched_no_file(tmp_path: Path):

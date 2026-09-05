@@ -80,3 +80,11 @@ def test_issue_and_verify_round_trip(repo_root):
     encoded = json.dumps(matrix, sort_keys=True, separators=(",", ":"))
     roundtrip = json.loads(encoded)
     assert not verify_matrix(roundtrip)
+
+
+def test_benchmark_verification_rejects_unexecuted_witnesses(repo_root):
+    matrix = build_matrix(repo_root=repo_root, execute=False)
+    errors = verify_matrix(matrix, require_witnessed=True)
+    assert any("disposition is not WITNESSED" in error for error in errors)
+    assert any("positive witness did not pass" in error for error in errors)
+    assert any("negative witness did not pass" in error for error in errors)

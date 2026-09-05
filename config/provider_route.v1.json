@@ -1,9 +1,14 @@
 {
   "schema": "gt.provider_route.v1",
-  "route_id": "openrouter-muse-spark-1.2-contributor",
+  "route_id": "openrouter-deepseek-v4-flash-0731-relace-only",
   "provider": "openrouter",
   "base_url": "https://openrouter.ai/api/v1",
-  "model": "meta/muse-spark-1.2-contributor",
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "provider_routing": {
+    "only": ["relace"],
+    "allow_fallbacks": false,
+    "require_parameters": true
+  },
   "requested_output_tokens": 16384,
   "credential_env": "OPENROUTER_API_KEY",
   "credential_source_id": "final_openrouter_musecontributor",

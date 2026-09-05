@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from gt_engine.request_history import load_provider_request
 from gt_harness.canonical_io import atomic_json
 
 RUN_IDS = ("33563173631", "33565965241", "33567358689")
@@ -170,13 +171,16 @@ def freeze(source: Path, output: Path, harness_repository: Path) -> dict[str, An
                 if row.get("event") == "provider_delivery"
                 and int(row["sequence"]) > int(receipt["sequence"])
             )
-            request_source = state / provider["request_blob"]
-            request_bytes = request_source.read_bytes()
-            if _sha256(request_bytes) != provider["payload_sha256"]:
+            request = load_provider_request(state, provider)
+            request_bytes = json.dumps(
+                request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            if hashlib.sha256(request_bytes).hexdigest() != provider["payload_sha256"]:
                 raise ValueError(f"provider request digest mismatch in run {run_id}")
-            request = json.loads(request_bytes)
             message_index, body = _shipped_body(request, kind)
-            request_target = run_output / "provider_requests" / request_source.name
+            request_target = (
+                run_output / "provider_requests" / f"{provider['payload_sha256']}.json"
+            )
             _atomic_bytes(request_target, request_bytes)
             artifact_path = ""
             derivation_path = ""

@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-SCHEMA = "gt.context_packet.v1"
+SCHEMA = "gt.context_packet.v2"
+LEGACY_SCHEMA = "gt.context_packet.v1"
 BOUNDARIES = frozenset({"open", "view", "edit"})
 
 
@@ -30,7 +32,8 @@ class ContextPacketAbstention(ContextPacketError):
 
 
 def _canonical(value: Mapping[str, Any]) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
 def _digest(value: Mapping[str, Any]) -> str:
@@ -41,6 +44,39 @@ def _normalise_claim(claim: Mapping[str, Any], source_revision: str, graph_revis
     required = ("claim_id", "kind", "confidence")
     if any(key not in claim for key in required):
         raise ContextPacketError("claim_missing_identity")
+    if any(not isinstance(claim[key], str) or not claim[key].strip()
+           for key in ("claim_id", "kind")):
+        raise ContextPacketError("claim_invalid_identity")
+    payload = claim.get("payload")
+    if not isinstance(payload, dict) or not payload:
+        raise ContextPacketError("claim_missing_payload")
+    try:
+        payload = json.loads(_canonical(payload))
+    except (TypeError, ValueError) as exc:
+        raise ContextPacketError("claim_invalid_payload") from exc
+    refs = claim.get("evidence_refs")
+    if (not isinstance(refs, list) or not refs
+            or any(not isinstance(ref, str) or not ref.strip() for ref in refs)):
+        raise ContextPacketError("claim_missing_evidence_refs")
+    sources = claim.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise ContextPacketError("claim_missing_sources")
+    source_rows = []
+    for source in sources:
+        if not isinstance(source, dict):
+            raise ContextPacketError("claim_invalid_source")
+        path = source.get("path")
+        start, end = source.get("start_line"), source.get("end_line")
+        digest = source.get("content_sha256")
+        if (not isinstance(path, str) or not path or "\\" in path
+                or path.startswith("/") or ":" in path
+                or any(part in {"", ".", ".."} for part in path.split("/"))
+                or type(start) is not int or type(end) is not int
+                or start < 1 or end < start
+                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ContextPacketError("claim_invalid_source")
+        source_rows.append({"path": path, "start_line": start, "end_line": end,
+                            "content_sha256": digest})
     confidence = claim["confidence"]
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise ContextPacketError("claim_confidence_not_numeric")
@@ -52,6 +88,10 @@ def _normalise_claim(claim: Mapping[str, Any], source_revision: str, graph_revis
         "confidence": float(confidence),
         "source_revision": str(claim.get("source_revision", source_revision)),
         "graph_revision": str(claim.get("graph_revision", graph_revision)),
+        "payload": payload,
+        "evidence_refs": sorted(set(refs)),
+        "sources": sorted(source_rows, key=lambda item: (item["path"], item["start_line"],
+                                                         item["end_line"], item["content_sha256"])),
     }
     if "digest" in claim:
         row["digest"] = str(claim["digest"])
@@ -87,7 +127,7 @@ def build_context_packet(
         raise ContextPacketAbstention("unsupported_boundary")
     if not source_revision or not graph_revision or not file_path:
         raise ContextPacketAbstention("missing_freshness_identity")
-    if not isinstance(byte_budget, int) or byte_budget <= 0:
+    if type(byte_budget) is not int or byte_budget <= 0:
         raise ContextPacketError("invalid_byte_budget")
     claim_rows = sorted(
         (_normalise_claim(row, source_revision, graph_revision) for row in claims),
@@ -97,6 +137,14 @@ def build_context_packet(
         (_normalise_edge(row, source_revision, graph_revision) for row in edges),
         key=lambda row: row["edge_id"],
     )
+    claim_ids = {row["claim_id"] for row in claim_rows}
+    if len(claim_ids) != len(claim_rows):
+        raise ContextPacketError("duplicate_claim_identity")
+    if len({row["edge_id"] for row in edge_rows}) != len(edge_rows):
+        raise ContextPacketError("duplicate_edge_identity")
+    if any(row["from_claim"] not in claim_ids or row["to_claim"] not in claim_ids
+           for row in edge_rows):
+        raise ContextPacketError("dangling_claim_reference")
     if any(row["source_revision"] != source_revision or row["graph_revision"] != graph_revision for row in (*claim_rows, *edge_rows)):
         raise ContextPacketAbstention("stale_graph_revision")
     body: dict[str, Any] = {
@@ -110,17 +158,40 @@ def build_context_packet(
         "edges": edge_rows,
         "byte_budget": byte_budget,
     }
-    identity = {key: body[key] for key in ("schema", "file_path", "boundary", "source_revision", "graph_revision")}
+    identity = {key: body[key] for key in ("schema", "file_path", "boundary", "source_revision",
+                                         "graph_revision", "claims", "edges")}
     body["packet_id"] = "ctx-" + _digest(identity)[:24]
+    body["packet_digest_sha256"] = _digest(body)
     if len(_canonical(body)) > byte_budget:
         raise ContextPacketAbstention("byte_budget_exceeded")
-    body["packet_digest_sha256"] = _digest(body)
     return body
 
 
-def verify_context_packet(packet: Mapping[str, Any]) -> bool:
-    """Verify schema, identity, ordering, freshness, and canonical digest."""
-    if packet.get("schema") != SCHEMA or packet.get("boundary") not in BOUNDARIES:
+def verify_context_packet(packet: Mapping[str, Any], *, allow_legacy: bool = False) -> bool:
+    """Validate v2 content structure, not the truth of caller-supplied evidence.
+
+    Historical v1 integrity is opt-in; it never certifies substantive content.
+    Dependency/source validation remains the responsibility of the query service.
+    """
+    if not isinstance(packet, Mapping):
+        return False
+    try:
+        if allow_legacy and packet.get("schema") == LEGACY_SCHEMA:
+            return _verify_legacy_context_packet(packet)
+        if packet.get("schema") != SCHEMA:
+            return False
+        expected = build_context_packet(
+            source_revision=packet["source_revision"], graph_revision=packet["graph_revision"],
+            file_path=packet["file_path"], boundary=packet["boundary"],
+            claims=packet["claims"], edges=packet["edges"], byte_budget=packet["byte_budget"],
+        )
+        return _canonical(expected) == _canonical(packet)
+    except (ContextPacketError, KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+
+def _verify_legacy_context_packet(packet: Mapping[str, Any]) -> bool:
+    if packet.get("schema") != LEGACY_SCHEMA or packet.get("boundary") not in BOUNDARIES:
         return False
     digest = packet.get("packet_digest_sha256")
     if not isinstance(digest, str):
@@ -165,11 +236,11 @@ def serve_context_packet(
     decision_id: str,
     iteration_id: str,
     baseline_request: Any | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     """Build and seal one packet through the existing admission boundary.
 
-    No sidecar transport is allowed: the canonical packet bytes are the sole
-    admitted claim and the returned receipt is the authority for delivery.
+    Return the router's actual transported request and receipt, never an
+    unadmitted packet that a caller could accidentally splice into the request.
     """
     packet = build_context_packet(
         source_revision=source_revision,
@@ -184,7 +255,7 @@ def serve_context_packet(
         raise ContextPacketAbstention("packet_verification_failed")
     baseline = baseline_request if baseline_request is not None else {"messages": [{"content": ""}]}
     rendered = _canonical(packet).decode("utf-8")
-    _transported, receipt = eligibility_router.admit_decision(
+    transported, receipt = eligibility_router.admit_decision(
         decision_id=decision_id,
         iteration_id=iteration_id,
         candidates=[
@@ -196,7 +267,7 @@ def serve_context_packet(
         ],
         baseline_request=baseline,
     )
-    return packet, receipt
+    return transported, receipt
 
 
 def build_fixture_matrix(*, source_revision: str, graph_revision: str) -> tuple[ContextPacketFixture, ...]:
@@ -211,8 +282,13 @@ def build_fixture_matrix(*, source_revision: str, graph_revision: str) -> tuple[
                 file_path=file_path,
                 boundary=boundary,
                 claims=(
-                    {"claim_id": f"{file_path}:definition", "kind": "definition", "confidence": 0.9},
-                    {"claim_id": f"{file_path}:obligation", "kind": "obligation", "confidence": 0.8},
+                    {
+                        "claim_id": f"{file_path}:fixture", "kind": "fixture", "confidence": 0.0,
+                        "payload": {"statement": "Synthetic packet-shape fixture; not a repository fact"},
+                        "evidence_refs": [f"fixture:{file_path}"],
+                        "sources": [{"path": file_path, "start_line": 1, "end_line": 1,
+                                     "content_sha256": hashlib.sha256(b"fixture\n").hexdigest()}],
+                    },
                 ),
                 edges=(),
             )

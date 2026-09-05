@@ -415,6 +415,7 @@ class SQLiteVectorIndex:
         records: Sequence[EmbeddingRecord],
         *,
         delete_ids: Sequence[str] = (),
+        transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
     ) -> None:
         if self._metadata_mismatch:
             raise ValueError("metadata_mismatch")
@@ -506,6 +507,8 @@ class SQLiteVectorIndex:
                             "INSERT INTO gt_vector_vec0(rowid, embedding) VALUES (?, ?)",
                             (mapping[0], self._vector_blob(record.embedding)),
                         )
+            if transaction_hook is not None:
+                transaction_hook(connection)
             connection.commit()
         except Exception:
             connection.rollback()

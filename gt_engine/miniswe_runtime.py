@@ -69,6 +69,16 @@ _GRAPH_DEPENDENT_TYPED_KINDS = frozenset({
 })
 
 
+@dataclass(frozen=True)
+class _EvidenceCandidate:
+    priority: int
+    kind: str
+    rendered: str
+    metadata: dict[str, str]
+    chain_head: str = ""
+    dedup_key: str = ""
+
+
 def _created_files_excluding_exact_renames(
     transaction: EditTransaction,
 ) -> tuple[str, ...]:
@@ -289,15 +299,10 @@ def _viewed_files(command: str) -> tuple[str, ...]:
 
 
 def _classify_test(command: str, output: str, returncode: int | None) -> str:
-    try:
-        from groundtruth.runtime.patterns import classify_test_observation
+    from .runtime_observation import classify_execution_outcome
 
-        outcome, _protocol = classify_test_observation(
-            command or "", output or "", returncode
-        )
-        return outcome or ""
-    except Exception:  # noqa: BLE001 - test classification is correct-or-quiet
-        return ""
+    outcome = classify_execution_outcome(command or "", output or "", returncode)
+    return outcome if outcome in {"pass", "fail", "env_fail", "executed_no_tests"} else ""
 
 
 def _workspace_fingerprint(repo_root: str) -> dict[str, tuple[int, int] | str]:
@@ -406,26 +411,11 @@ def _run_evidence(
     *,
     allow_live_probes: bool = False,
 ) -> str:
-    """One-dose GT evidence for an executed action; returns rendered bytes."""
+    """Collect all eligible producers, then deterministically select one dose."""
     if adapter.contract is None:
         return ""
-    if created_files:
-        from .miniswe_covering import run_newfile_precedent
-
-        precedent = run_newfile_precedent(adapter, tuple(created_files))
-        if precedent:
-            precedent = (
-                "[GT_EVIDENCE:new_file_destination]\n"
-                + cap_evidence(precedent, 600)
-            )
-            adapter.stage_model_visible_delivery(
-                kind="new_file_destination",
-                dedup_key=f"newfile-{adapter._latest_transaction_sha256}",
-                target=created_files[0],
-                semantics="advisory",
-            )
-            return precedent
     covering = None
+    candidates: list[_EvidenceCandidate] = []
     if changed_files and allow_live_probes:
         from .miniswe_covering import run_covering_lane
 
@@ -472,7 +462,7 @@ def _run_evidence(
         test_outcome=_classify_test(command, output, returncode),
     )
     if changed_files and allow_live_probes:
-        from .miniswe_covering import run_newfile_precedent, run_syntax_probe
+        from .miniswe_covering import run_syntax_probe
 
         syntax = run_syntax_probe(adapter, changed_files)
         if syntax:
@@ -485,12 +475,11 @@ def _run_evidence(
                  if ": syntax error" in line),
                 fallback,
             )
-            adapter.stage_model_visible_delivery(
-                kind="syntax_result",
-                dedup_key=f"syntax-{adapter.iteration}",
-                target=first_file,
-            )
-            return syntax
+            candidates.append(_EvidenceCandidate(
+                90, "syntax_result", syntax,
+                {"kind": "syntax_result", "dedup_key": f"syntax-{adapter.iteration}",
+                 "target": first_file},
+            ))
     result = run_evidence_pipeline(
         adapter.gateway_state(),
         event,
@@ -500,25 +489,62 @@ def _run_evidence(
         event_id=f"{adapter.task_id}:{adapter.iteration}:{action_index}",
         native=os.environ.get("GT_GATEWAY_NATIVE") == "1",
         model_prefix=True,
+        commit=False,
     )
-    if result.chain_head:
-        adapter._chain_head = result.chain_head
     if result.sealed and result.envelope is not None:
-        adapter.stage_model_visible_delivery(
-            kind=str(result.envelope.evidence_type or ""),
+        kind = str(result.envelope.evidence_type or "")
+        candidates.append(_EvidenceCandidate(
+            100 if event.test_outcome in {"fail", "env_fail"} else 80,
+            kind, result.rendered,
+            {"kind": kind, "dedup_key": str(result.envelope.dedup_key or ""),
+             "target": str(getattr(result.envelope, "target", "") or "")},
+            chain_head=result.chain_head,
             dedup_key=str(result.envelope.dedup_key or ""),
-            target=str(getattr(result.envelope, "target", "") or ""),
+        ))
+    verification, verification_metadata = adapter.verification_candidate()
+    if verification:
+        candidates.append(
+            _EvidenceCandidate(
+                70,
+                "verification_plan",
+                verification,
+                verification_metadata,
+                dedup_key=verification_metadata.get("dedup_key", ""),
+            )
         )
-        # Self-diagnosing splice: the trajectory tool messages carry the exact
-        # evidence type so a post-run census is exact, not heuristic.
-        return result.rendered
-    rendered = cap_evidence(result.rendered)
-    if rendered:
-        return rendered
-    # Last, and only into silence. A co-change prior is the weakest signal GT
-    # delivers and must never displace a covering RED, a syntax error or any
-    # arbitrated envelope; it speaks only when nothing stronger did.
-    return _cochange_prior(adapter, command, changed_files)
+    # A nearby example must not suppress an executed failure or current graph
+    # evidence merely because this transaction also created a file.
+    if created_files:
+        from .miniswe_covering import run_newfile_precedent
+
+        precedent = run_newfile_precedent(adapter, tuple(created_files))
+        if precedent:
+            candidates.append(_EvidenceCandidate(
+                20, "new_file_destination",
+                "[GT_EVIDENCE:new_file_destination]\n" + cap_evidence(precedent, 600),
+                {"kind": "new_file_destination",
+                 "dedup_key": f"newfile-{adapter._latest_transaction_sha256}",
+                 "target": created_files[0], "semantics": "advisory"},
+            ))
+    cochange = _cochange_prior(adapter, command, changed_files)
+    cochange_metadata = adapter.consume_model_visible_delivery_metadata()
+    if cochange:
+        candidates.append(_EvidenceCandidate(
+            10, cochange_metadata.get("kind", "cochange_partner"), cochange,
+            cochange_metadata or {"kind": "cochange_partner",
+                                  "dedup_key": "cochange-unbound"},
+        ))
+    if not candidates:
+        return ""
+    winner = sorted(candidates, key=lambda item: (-item.priority, item.kind,
+                                                   hashlib.sha256(item.rendered.encode()).hexdigest()))[0]
+    if winner.kind == "verification_plan":
+        adapter.consume_verification_candidate()
+    adapter.stage_model_visible_delivery(**winner.metadata)
+    if winner.dedup_key:
+        adapter._dedup_chain.add(winner.dedup_key)
+        adapter._chain_head = winner.chain_head
+    return winner.rendered
 
 
 def _cochange_prior(
@@ -566,6 +592,7 @@ def install_runtime_hooks(
     if adapter is None:
         raise TypeError("GTSession requires an integration engine")
     model = getattr(agent, "model", None)
+    model._gt_session = session
     native_prepare = getattr(model, "_prepare_messages_for_api", None)
     native_query = getattr(model, "query", None)
     native_transport = getattr(model, "_query", None)
@@ -586,9 +613,12 @@ def install_runtime_hooks(
             session.degrade("session_start", exc)
 
     def prepare_messages(_model: Any, messages: list[dict]) -> list[dict]:
-        prepared = prepare(messages)
         if session.disabled:
-            return prepared
+            if native_add_messages is not None:
+                agent.add_messages = native_add_messages
+            return native_prepare(messages)
+        prepared = prepare(messages)
+        baseline_prepared = prepared
         try:
             # Edits invalidate graph-derived claims, but an ordinary provider
             # turn does not consume the graph and must not synchronously rebuild
@@ -602,18 +632,21 @@ def install_runtime_hooks(
                 if isinstance(content, str):
                     last["content"] = f"{content}\n\n" + "\n\n".join(parts)
                     prepared = [*prepared[:-1], last]
-            adapter.bind_provider_payload({
-                "messages": prepared,
-                "model": str(getattr(_model, "model_name", "") or ""),
-                "model_kwargs": dict(getattr(_model, "model_kwargs", {}) or {}),
-                "tools": getattr(_model, "tools", None),
-            })
         except Exception as exc:  # noqa: BLE001 - prompt augmentation is fail-open
+            adapter.discard_pending_provider_deliveries(
+                reason="prepare_messages_error"
+            )
             session.degrade("prepare_messages", exc)
+            prepared = baseline_prepared
         return prepared
 
     def query_transport(_model: Any, messages: list[dict], **kwargs: Any) -> Any:
         """Admit only the exact, already-prepared payload sent to transport."""
+        if session.disabled:
+            adapter.discard_pending_provider_deliveries(
+                reason="gt_disabled_before_transport"
+            )
+            return native_transport(messages, **kwargs)
         context_window = int(os.environ.get("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "0") or 0)
         reserved_output = int(
             os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
@@ -665,6 +698,10 @@ def install_runtime_hooks(
                 reason=exc.code,
                 **details,
             )
+            adapter.discard_pending_provider_deliveries(reason=exc.code)
+            raise
+        except Exception:
+            adapter.discard_pending_provider_deliveries(reason="provider_admission_error")
             raise
         adapter.store.append(
             "provider_admission",
@@ -672,9 +709,17 @@ def install_runtime_hooks(
             reason="within_provider_window",
             **admission.to_dict(),
         )
+        try:
+            delivery = adapter.bind_provider_payload(payload)
+        except Exception:
+            adapter.discard_pending_provider_deliveries(reason="request_receipt_error")
+            raise
+        session.provider_request_admitted(delivery.delivery_ids)
         return transport(messages, **kwargs)
 
     def query(_model: Any, messages: list[dict], **kwargs: Any) -> dict:
+        if session.disabled:
+            return native_query(messages, **kwargs)
         try:
             message = original_query(messages, **kwargs)
         except Exception as exc:
@@ -845,18 +890,19 @@ def install_runtime_hooks(
                     and session.capability_active("graph_queries")
                 ):
                     adapter.refresh_graph(phase="graph_query")
+                graph_snapshot = adapter.graph_query_snapshot()
                 request, result = execute_typed_action_fail_open(
                     action,
                     repo_root=adapter.repo_root or os.getcwd(),
                     configuration={
                         "graph_db": (
-                            adapter.graph_db
-                            if adapter.graph_fresh
+                            graph_snapshot.graph_path
+                            if graph_snapshot.graph_current
                             and session.capability_active("graph_queries")
                             else ""
                         ),
-                        "graph_fresh": adapter.graph_fresh,
-                        "repository_revision": adapter.repository_revision,
+                        "graph_fresh": graph_snapshot.graph_current,
+                        "repository_revision": graph_snapshot.source_revision,
                         "gt_mode": session.mode.value,
                     },
                 )
@@ -977,6 +1023,7 @@ def install_runtime_hooks(
                         adapter.repo_root,
                         excluded_roots=(_state_exclusion(adapter),),
                     )
+                    pre_graph_snapshot = adapter.graph_query_snapshot()
                     transaction = diff_workspace(
                         pre_snapshot,
                         post_snapshot,
@@ -987,14 +1034,18 @@ def install_runtime_hooks(
                         post_snapshot, boundary="after_action"
                     )
                     if transaction.changes:
+                        transaction_artifacts = compile_transaction_artifacts(
+                            transaction,
+                            graph_db=(
+                                pre_graph_snapshot.graph_path
+                                if pre_graph_snapshot.graph_current
+                                else None
+                            ),
+                        )
                         adapter.record_edit_transaction(transaction)
-                        adapter.record_transaction_artifacts(
-                            compile_transaction_artifacts(
-                                transaction,
-                                graph_db=(
-                                    adapter.graph_db if adapter.graph_fresh else None
-                                ),
-                            )
+                        adapter.record_transaction_artifacts(transaction_artifacts)
+                        adapter.prepare_verification_candidate(
+                            transaction, pre_graph_snapshot
                         )
                         changed_files = transaction.changed_paths
                         created_files = _created_files_excluding_exact_renames(transaction)
@@ -1089,6 +1140,8 @@ def install_runtime_hooks(
                 directives.append({"role": "user", "content": directive})
         adapter.pending_directives = []
         formatter = getattr(model, "format_observation_messages", None)
+        if session.disabled and native_add_messages is not None:
+            agent.add_messages = native_add_messages
         if callable(formatter):
             formatted = list(formatter(message, outputs, agent.get_template_vars()))
             if not session.disabled:

@@ -25,7 +25,7 @@ def main() -> int:
         nargs="?",
         type=Path,
         default=DEFAULT_MATRIX,
-        help="Path to gt.feature_matrix.v1 JSON",
+        help="Path to gt.feature_matrix.v2 JSON",
     )
     args = parser.parse_args()
     matrix = json.loads(args.matrix.read_text(encoding="utf-8"))
@@ -36,7 +36,11 @@ def main() -> int:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    errors = verify_matrix(matrix, expected_source_revision=checkout_head)
+    errors = verify_matrix(
+        matrix,
+        expected_source_revision=checkout_head,
+        require_witnessed=True,
+    )
     if errors:
         for issue in errors:
             print(issue, file=sys.stderr)

@@ -385,7 +385,8 @@ def _open(db: str | Path | sqlite3.Connection) -> tuple[sqlite3.Connection, bool
 
 def _database_path(db: str | Path | sqlite3.Connection) -> str:
     if isinstance(db, sqlite3.Connection):
-        return ""
+        return next((str(row[2]) for row in db.execute("PRAGMA database_list")
+                     if row[1] == "main"), "")
     return os.fspath(db)
 
 
@@ -454,7 +455,7 @@ def _provenance_from_row(row: Sequence[Any]) -> SymbolProvenance:
 def _collapse(
     scored: Iterable[tuple[SymbolProvenance, float, str]],
     *,
-    limit: int,
+    limit: int | None,
     provenance: dict[str, SymbolProvenance],
 ) -> tuple[RankedSymbol, ...]:
     """Best row per identity, then a total order with no ties left over.
@@ -785,19 +786,21 @@ def _dense_pool(
         node_ids[prov.node_id] = prov
         documents[prov.stable_id] = ""
         provenance.setdefault(prov.stable_id, prov)
-        if wanted is None and len(documents) >= limit:
+        if wanted is None and limit is not None and len(documents) >= limit:
             break
     if not node_ids:
         return {}
     facts: dict[int, list[tuple[str, str]]] = {}
     if "properties" in _tables(con):
-        slots = ",".join("?" for _ in node_ids)
-        for node_id, kind, value in con.execute(
-            f"SELECT node_id, kind, value FROM properties WHERE node_id IN ({slots}) "
-            "ORDER BY id",
-            list(node_ids),
-        ):
-            facts.setdefault(int(node_id), []).append((str(kind), str(value)))
+        ordered_ids = list(node_ids)
+        for start in range(0, len(ordered_ids), 400):
+            batch = ordered_ids[start:start + 400]
+            slots = ",".join("?" for _ in batch)
+            for node_id, kind, value in con.execute(
+                f"SELECT node_id, kind, value FROM properties WHERE node_id IN ({slots}) ORDER BY id",
+                batch,
+            ):
+                facts.setdefault(int(node_id), []).append((str(kind), str(value)))
     for node_id, prov in node_ids.items():
         documents[prov.stable_id] = _symbol_document_text(prov, facts.get(node_id, []))
     return documents
@@ -824,9 +827,15 @@ def _rank_from_store(
     named reasons as the uncached path rather than returning a cached order.
     """
     try:
-        from gt_engine.dense_runtime import embed_texts
+        from gt_engine.dense_runtime import embed_queries, embed_texts
 
-        query_vector = embed_texts(model_root, [query])[0]
+        query_vector = embed_queries(model_root, [query])[0]
+        vectors = dict(lookup.vectors)
+        missing = [node_id for node_id in node_stable_ids if node_id not in vectors]
+        for start in range(0, len(missing), 32):
+            batch = missing[start:start + 32]
+            encoded = embed_texts(model_root, [documents[node_stable_ids[node_id]] for node_id in batch])
+            vectors.update(zip(batch, encoded, strict=True))
     except Exception as exc:  # noqa: BLE001 - dense fails closed, never loudly
         return SourceRanking(
             RetrievalSource.DENSE,
@@ -845,7 +854,8 @@ def _rank_from_store(
                 "store_dimension": lookup.dimension,
             },
         )
-    scored = contract_embeddings.score_pool(query_vector, lookup.vectors)
+    scored = sorted(contract_embeddings.score_pool(query_vector, vectors),
+                    key=lambda item: (-item[1], node_stable_ids[item[0]]))
     ranking = tuple(
         RankedSymbol(
             node_stable_ids[node_id],
@@ -865,6 +875,7 @@ def _rank_from_store(
             "pool_size": len(documents),
             "store_hits": lookup.hits,
             "store_misses": lookup.misses,
+            "runtime_embedded_missing": len(missing),
             "missing_stable_ids": list(lookup.missing_stable_ids),
             "dimension": lookup.dimension,
         },
@@ -888,7 +899,7 @@ def dense_rank(
     store_path: str | Path | None = None,
     labels: Sequence[str] = SYMBOL_LABELS,
     restrict_to: Sequence[str] | None = None,
-    pool_limit: int = DENSE_POOL_LIMIT,
+    pool_limit: int | None = None,
     provenance: dict[str, SymbolProvenance] | None = None,
 ) -> SourceRanking:
     """Rank symbols by ONNX embedding similarity via :mod:`gt_engine.dense_runtime`.
@@ -900,10 +911,8 @@ def dense_rank(
     degraded run indistinguishable from a healthy one, which is precisely the
     failure this project exists to avoid.
 
-    ``restrict_to`` narrows the pool to an existing candidate set (what
-    :func:`hybrid_rank` passes) so the common path costs one forward pass per
-    candidate instead of per symbol; with it unset the ranker is standalone and
-    pools up to ``pool_limit`` symbols in ``nodes.id`` order.
+    By default search every eligible source symbol. Explicit ``restrict_to`` or
+    ``pool_limit`` is a caller-requested partial search, never the hybrid default.
 
     ``dense_runtime.rank_documents`` returns an order and not scores, so the
     reported score is ``1/rank`` -- a monotone stand-in, used only for display.
@@ -938,11 +947,16 @@ def dense_rank(
         )
 
     resolved_store = _resolved_store_path(store_path)
+    source_path = _database_path(db)
+    if resolved_store is None and source_path:
+        default_store = contract_embeddings.default_store_path(source_path)
+        if default_store.is_file():
+            resolved_store = default_store
     con, owned = _open(db)
     try:
         documents = _dense_pool(
             con,
-            limit=max(1, int(pool_limit)),
+            limit=max(1, int(pool_limit)) if pool_limit is not None else None,
             labels=labels,
             restrict_to=restrict_to,
             provenance=collected,
@@ -954,6 +968,9 @@ def dense_rank(
         contract_ids: dict[int, str] = (
             contract.symbol_node_ids(con) if resolved_store is not None else {}
         )
+        graph_path = _database_path(con)
+        expected_inputs = (contract_embeddings.embedding_inputs(graph_path)
+                           if resolved_store is not None and graph_path else None)
         source_revision = "unknown-source-revision"
         row = con.execute(
             "SELECT source_revision FROM nodes WHERE source_revision IS NOT NULL "
@@ -985,7 +1002,7 @@ def dense_rank(
     store_detail: dict[str, Any] = {"vector_source": "dense_runtime_pool"}
     if resolved_store is not None:
         lookup = contract_embeddings.lookup_vectors(
-            resolved_store, contract_ids, node_stable_ids
+            resolved_store, contract_ids, node_stable_ids, expected_inputs=expected_inputs,
         )
         if lookup.reason is None:
             return _rank_from_store(
@@ -1004,9 +1021,12 @@ def dense_rank(
     revision = graph_revision(path) if path else ""
 
     with tempfile.TemporaryDirectory(prefix="gt-dense-") as scratch:
-        target = (
-            Path(index_path) if index_path else Path(scratch) / "dense-index.sqlite"
-        )
+        if index_path:
+            target = Path(index_path)
+        elif path:
+            target = Path(path).with_name(Path(path).stem + ".dense-v2.sqlite")
+        else:
+            target = Path(scratch) / "dense-index.sqlite"
         try:
             from gt_engine.dense_runtime import rank_documents
 
@@ -1047,7 +1067,8 @@ def dense_rank(
         detail={
             **store_detail,
             "pool_size": len(documents),
-            "pool_bounded": restrict_to is None and len(documents) >= pool_limit,
+            "pool_bounded": restrict_to is not None or (
+                pool_limit is not None and len(documents) >= pool_limit),
             "model_sha256": receipt.get("model_sha256"),
             "index_sha256": receipt.get("index_sha256"),
         },
@@ -1125,12 +1146,8 @@ def hybrid_rank(
     takes its snippet from the first source that produced a symbol, so a stable
     order is part of determinism, not a stylistic choice.
 
-    The dense pool is restricted to the union of the lexical and property
-    candidates.  That is a real trade and it is recorded: dense reorders the
-    lexical/property candidate set rather than contributing candidates of its
-    own, in exchange for a cost proportional to the candidates instead of to
-    the symbol table.  Call :func:`dense_rank` directly with ``restrict_to=None``
-    for an independent dense pool.
+    Dense retrieval searches independently, including when neither lexical nor
+    property retrieval finds a candidate. Ranking never promotes trust.
 
     Returns a :class:`HybridRanking`.  It never writes to ``db``, never touches
     a trust tier, and never creates an edge.
@@ -1145,19 +1162,12 @@ def hybrid_rank(
             con, query, source_k, labels=labels, provenance=provenance
         )
         properties = property_rank(con, query, source_k, provenance=provenance)
-        candidates = [row.stable_id for row in lexical] + [
-            row.stable_id for row in properties
-        ]
         if not use_dense:
             dense = SourceRanking(
                 RetrievalSource.DENSE,
                 (),
                 available=False,
                 reason="dense_disabled_by_caller",
-            )
-        elif not candidates:
-            dense = SourceRanking(
-                RetrievalSource.DENSE, (), available=False, reason="dense_pool_empty"
             )
         else:
             dense = dense_rank(
@@ -1168,7 +1178,7 @@ def hybrid_rank(
                 index_path=index_path,
                 store_path=store_path,
                 labels=labels,
-                restrict_to=candidates,
+                restrict_to=None,
                 provenance=provenance,
             )
         path = _database_path(db)

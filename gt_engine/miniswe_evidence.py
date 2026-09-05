@@ -189,6 +189,7 @@ def run_evidence_pipeline(
     native: bool = False,
     model_prefix: bool = False,
     max_chars: int = 1200,
+    commit: bool = True,
 ) -> EvidenceResult:
     """The one-dose evidence call: ``augment`` -> ``arbitrate`` -> render -> seal.
 
@@ -218,6 +219,7 @@ def run_evidence_pipeline(
     rendered = cap_evidence(rendered, max_chars)
     if model_prefix:
         rendered = f"[GT_EVIDENCE:{winner.evidence_type}]\n{rendered}"
+    target_chain = dedup_chain if commit else set(dedup_chain)
     sealed, new_head = seal_delivery(
         winner,
         episode_id=episode_id,
@@ -225,7 +227,7 @@ def run_evidence_pipeline(
         parent_hash=chain_head or _CHAIN_GENESIS,
         rendered_bytes=rendered.encode("utf-8"),
         renderer_id="miniswe.native" if native else "miniswe.generic",
-        dedup_chain=dedup_chain,
+        dedup_chain=target_chain,
     )
     return EvidenceResult(
         rendered=rendered,

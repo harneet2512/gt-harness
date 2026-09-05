@@ -109,6 +109,7 @@ from gt_engine.event_journal import (  # noqa: E402
     verify_event_journal,
 )
 from gt_engine.replay import build_iteration_replay  # noqa: E402
+from gt_engine.request_history import load_provider_request  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # transcript parsing (nano CLI rich-panel format, tee'd without ANSI)
@@ -1200,16 +1201,15 @@ def _audit_native_miniswe_task(
                 a.attribution_issues.append(
                     f"provider request {request_id}: delivery_ids/matches mismatch"
                 )
-            a.attribution_issues.extend(_verify_native_blob(
-                state_dir, row, path_key="request_blob",
-                digest_key="payload_sha256", label="provider request",
-            ))
+            if row.get("request_blob"):
+                a.attribution_issues.extend(_verify_native_blob(
+                    state_dir, row, path_key="request_blob",
+                    digest_key="payload_sha256", label="provider request",
+                ))
             request: dict = {}
             request_messages: list = []
             try:
-                parsed_request = json.loads(
-                    (state_dir / str(row["request_blob"])).read_text(encoding="utf-8")
-                )
+                parsed_request = load_provider_request(state_dir, row)
                 if not isinstance(parsed_request, dict):
                     a.attribution_issues.append(
                         f"provider request {request_id}: provider request JSON object required"
@@ -1235,10 +1235,16 @@ def _audit_native_miniswe_task(
                     a.attribution_issues.append(
                         f"provider request {request_id}: model-visible hash mismatch"
                     )
-            except (OSError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
-                a.attribution_issues.append(
-                    f"provider request {request_id}: unreadable JSON ({type(exc).__name__})"
-                )
+            except (OSError, KeyError, UnicodeError, ValueError) as exc:
+                if str(exc) == "provider_request_object_required":
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: provider request JSON object required"
+                    )
+                else:
+                    a.attribution_issues.append(
+                        f"provider request {request_id}: unreadable JSON "
+                        f"({type(exc).__name__})"
+                    )
 
             def contains_text(value: object, needle: str) -> bool:
                 if isinstance(value, str):

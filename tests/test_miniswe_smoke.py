@@ -85,10 +85,13 @@ class ScriptedModel:
     def _prepare_messages_for_api(self, messages):
         return [{k: v for k, v in item.items() if k != "extra"} for item in messages]
 
-    def query(self, messages, **kwargs):
-        self._prepare_messages_for_api(messages)
+    def _query(self, messages, **kwargs):
         self.index += 1
         return self.outputs[self.index]
+
+    def query(self, messages, **kwargs):
+        prepared = self._prepare_messages_for_api(messages)
+        return self._query(prepared, **kwargs)
 
     def format_message(self, **kwargs):
         return dict(kwargs)
@@ -111,8 +114,11 @@ class ScriptedModel:
         return {}
 
 
-def _build_agent(tmp_path):
+def _build_agent(tmp_path, monkeypatch):
     apply_profile_env()
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "1000000")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "4096")
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "fixture")
     root = Path(tempfile.mkdtemp(prefix="miniswe-gt-smoke-"))
     (root / "src").mkdir()
     (root / "tests").mkdir()
@@ -203,8 +209,8 @@ def _build_agent(tmp_path):
     return agent, adapter, graph_db
 
 
-def test_miniswe_gt_smoke_runs_to_submitted(tmp_path):
-    agent, adapter, graph_db = _build_agent(tmp_path)
+def test_miniswe_gt_smoke_runs_to_submitted(tmp_path, monkeypatch):
+    agent, adapter, graph_db = _build_agent(tmp_path, monkeypatch)
     result = agent.run(TASK)
 
     assert result.get("exit_status") == "Submitted"
@@ -218,8 +224,8 @@ def test_miniswe_gt_smoke_runs_to_submitted(tmp_path):
     assert adapter.workspace_epoch == 1
 
 
-def test_miniswe_gt_smoke_delivers_evidence_and_receipts(tmp_path):
-    agent, adapter, graph_db = _build_agent(tmp_path)
+def test_miniswe_gt_smoke_delivers_evidence_and_receipts(tmp_path, monkeypatch):
+    agent, adapter, graph_db = _build_agent(tmp_path, monkeypatch)
     agent.run(TASK)
 
     import json
@@ -237,10 +243,10 @@ def test_miniswe_gt_smoke_delivers_evidence_and_receipts(tmp_path):
     assert any(row["event"] == "submit_decision" and row["accepted"] for row in rows)
 
 
-def test_task_start_localization_delivered_with_graph(tmp_path):
+def test_task_start_localization_delivered_with_graph(tmp_path, monkeypatch):
     import os
 
-    agent, adapter, graph_db = _build_agent(tmp_path)
+    agent, adapter, graph_db = _build_agent(tmp_path, monkeypatch)
     if graph_db is None:
         import pytest
 
@@ -257,9 +263,9 @@ def test_task_start_localization_delivered_with_graph(tmp_path):
         if line.strip()
     ]
     first = next(row for row in rows if row.get("event") == "provider_delivery")
-    request = json.loads((adapter.store.root / first["request_blob"]).read_text(
-        encoding="utf-8"
-    ))
+    from gt_engine.request_history import load_provider_request
+
+    request = load_provider_request(adapter.store.root, first)
     rendered = json.dumps(request["messages"], ensure_ascii=False)
     assert rendered.count("GT_TASK_CONTRACT") == 1
     loc_rows = [r for r in rows if r.get("event") == "evidence_delivery"
@@ -267,11 +273,11 @@ def test_task_start_localization_delivered_with_graph(tmp_path):
     assert len(loc_rows) <= 1
 
 
-def test_miniswe_gt_smoke_localization_requires_graph(tmp_path):
+def test_miniswe_gt_smoke_localization_requires_graph(tmp_path, monkeypatch):
     # Without a graph the pipeline still runs, but the graph-backed
     # localization feature is dormant (correct-or-quiet) - the run must not
     # crash and the submit gate must still work.
-    agent, adapter, graph_db = _build_agent(tmp_path)
+    agent, adapter, graph_db = _build_agent(tmp_path, monkeypatch)
     if graph_db is not None:
         pytest.skip("graph available; covered by the full-smoke test")
     result = agent.run(TASK)

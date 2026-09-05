@@ -44,6 +44,38 @@ def test_session_start_and_context_delta(tmp_path):
     assert batch.empty  # no contract on a plain adapter
 
 
+def test_rejected_contract_is_available_on_later_request(tmp_path, monkeypatch):
+    from gt_engine.task_contract import extract_task_contract
+    from gt_engine.verification_contract import compile_obligation_predicates
+
+    contract = extract_task_contract("compute() must return an empty list for empty input.")
+    compiled = compile_obligation_predicates(contract)
+    adapter = MiniSweAdapter(task_id="retry", state_dir=tmp_path, contract=contract,
+        predicates=[Predicate(compiled[o.obligation_id].predicate_id, o.text)
+                    for o in contract.obligations])
+    session = GTSession(GTSessionConfig(task_id="retry", delivery_path="legacy"), engine=adapter)
+    admit = adapter.admit_model_visible_delivery
+    monkeypatch.setattr(adapter, "admit_model_visible_delivery", lambda **_: False)
+    assert session.before_model([], iteration=0).empty
+    assert not adapter.contract_shipped
+    monkeypatch.setattr(adapter, "admit_model_visible_delivery", admit)
+    rendered = session.before_model([], iteration=1).context_additions[0]
+    delivery = adapter.bind_provider_payload({
+        "messages": [{"role": "user", "content": rendered}]
+    })
+    session.provider_request_admitted(delivery.delivery_ids)
+    assert adapter.contract_shipped
+
+
+def test_unadmitted_localization_can_retry_after_initial_boundary(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    results = iter(["", "[GT_EVIDENCE:localization]\nsource.py:1"])
+    monkeypatch.setattr(adapter, "task_start_localization", lambda **_: next(results))
+    session = GTSession(GTSessionConfig(task_id="retry"), engine=adapter)
+    assert not session.before_model([], iteration=0).context_additions
+    assert session.before_model([], iteration=1).context_additions
+
+
 def test_session_completion_state_reports_unverified_when_unknown(tmp_path):
     a = _adapter(tmp_path)
     a.start_task()
@@ -56,16 +88,12 @@ def test_session_completion_state_reports_unverified_when_unknown(tmp_path):
     assert state["phase"] == "IMPLEMENT"
 
 
-def test_task_start_localization_is_compressed_into_1400_byte_lane(tmp_path, monkeypatch):
+def test_opaque_oversized_localization_is_not_sliced_into_a_claim(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
-    monkeypatch.setattr(a, "task_start_localization", lambda: "header\n" + "x" * 5000)
+    monkeypatch.setattr(a, "task_start_localization", lambda **_: "header\n" + "x" * 5000)
     s = GTSession(GTSessionConfig(task_id="t", delivery_path="compiled"), engine=a)
 
-    rendered = s.before_model([], iteration=0).context_additions[0]
-
-    assert len(rendered.encode("utf-8")) <= 1400
-    assert "compressed sha256=" in rendered
-    assert rendered.startswith("header\nxxx")
+    assert not s.before_model([], iteration=0).context_additions
 
 
 def test_session_close_records_terminal_event(tmp_path):
@@ -138,7 +166,7 @@ def test_compiled_delivery_places_task_start_evidence_in_first_request_once(
     a = _adapter(tmp_path)
     calls = []
 
-    def localization():
+    def localization(**_):
         calls.append(True)
         return "[GT_EVIDENCE:localization]\nsrc/mod.py"
 
@@ -147,6 +175,10 @@ def test_compiled_delivery_places_task_start_evidence_in_first_request_once(
         GTSessionConfig(task_id="t", delivery_path="compiled"), engine=a
     )
     first = s.before_model([{"role": "user", "content": "x"}], iteration=0)
+    delivery = a.bind_provider_payload({
+        "messages": [{"role": "user", "content": first.context_additions[0]}]
+    })
+    s.provider_request_admitted(delivery.delivery_ids)
     second = s.before_model([{"role": "user", "content": "x"}], iteration=0)
     assert first.context_additions == [
         "[GT_EVIDENCE:localization]\nsrc/mod.py"
@@ -182,6 +214,7 @@ def test_prompt_context_addition_is_bounded_and_receipt_visible(
     rendered = batch.context_additions[0]
     encoded = rendered.encode("utf-8")
     assert len(encoded) <= 1_400
+    a.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     rows = [
         json.loads(line)
         for line in a.store.path.read_text(encoding="utf-8").splitlines()
@@ -194,7 +227,7 @@ def test_prompt_context_addition_is_bounded_and_receipt_visible(
     assert census[0]["payload_sha256"] == hashlib.sha256(encoded).hexdigest()
 
 
-def test_runtime_storm_backstop_refuses_twenty_fifth_prompt_dose_without_raising(
+def test_runtime_allows_current_deltas_beyond_twenty_four_requests(
     tmp_path, monkeypatch
 ):
     a = _adapter(tmp_path)
@@ -202,19 +235,20 @@ def test_runtime_storm_backstop_refuses_twenty_fifth_prompt_dose_without_raising
     monkeypatch.setattr(a, "next_contract_delta", lambda **_kwargs: next(deltas))
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)
 
-    delivered = [
-        s.before_model([], iteration=index).context_additions
-        for index in range(25)
-    ]
+    delivered = []
+    for index in range(25):
+        additions = s.before_model([], iteration=index).context_additions
+        delivered.append(additions)
+        delivery = a.bind_provider_payload({
+            "messages": [{"role": "user", "content": additions[0]}]
+        })
+        s.provider_request_admitted(delivery.delivery_ids)
 
-    assert all(delivered[index] for index in range(24))
-    assert delivered[24] == []
+    assert all(delivered)
     rows = [
         json.loads(line)
         for line in a.store.path.read_text(encoding="utf-8").splitlines()
     ]
-    assert len([row for row in rows if row["event"] == "context_addition_delivery"]) == 24
+    assert len([row for row in rows if row["event"] == "context_addition_delivery"]) == 25
     refused = [row for row in rows if row["event"] == "delivery_refused"]
-    assert len(refused) == 1
-    assert refused[0]["reason"] == "task_delivery_storm_backstop"
-    assert refused[0]["candidate_ordinal"] == 25
+    assert not refused

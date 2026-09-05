@@ -267,6 +267,7 @@ def attest_deepswe(
         or plan.get("provider_route_sha256") != trusted_route_digest
         or plan.get("provider") != trusted_route.get("provider")
         or plan.get("provider_base_url") != trusted_route.get("base_url")
+        or plan.get("provider_routing") != trusted_route.get("provider_routing")
         or plan.get("requested_model") != trusted_route.get("model")
         or plan.get("effective_model") != f"openai/{trusted_route.get('model')}"
     ):
@@ -284,7 +285,7 @@ def attest_deepswe(
         errors.append("provider_gate_schema_mismatch")
     provider_gate_fields = {
         "schema", "status", "error_code", "mode", "source_sha", "route_id",
-        "provider", "base_url", "model", "route_sha256", "checks",
+        "provider", "base_url", "model", "provider_routing", "route_sha256", "checks",
         "provider_ready", "paid_run_approved", "account_amounts_recorded",
         "provider_inference_attempts", "provider_inference_calls",
         "context_window_tokens", "reserved_output_tokens", "context_window_source",
@@ -306,6 +307,8 @@ def attest_deepswe(
         or provider_gate.get("provider") != trusted_route.get("provider")
         or provider_gate.get("base_url") != trusted_route.get("base_url")
         or provider_gate.get("model") != trusted_route.get("model")
+        or provider_gate.get("provider_routing")
+        != trusted_route.get("provider_routing")
         or provider_gate.get("route_sha256") != trusted_route_digest
     ):
         errors.append("provider_gate_route_mismatch")
@@ -671,10 +674,14 @@ def attest_deepswe(
                     continue
                 evidence = row.get("evidence")
                 freshness = row.get("freshness_pins")
+                positive = evidence.get("positive") if isinstance(evidence, dict) else None
+                negative = evidence.get("negative") if isinstance(evidence, dict) else None
                 witnessed = witnessed and (
                     row.get("disposition") == "WITNESSED"
-                    and isinstance(evidence, dict)
-                    and evidence.get("exit_code") == 0
+                    and isinstance(positive, dict)
+                    and positive.get("exit_code") == 0
+                    and isinstance(negative, dict)
+                    and negative.get("exit_code") == 0
                     and isinstance(freshness, dict)
                     and freshness.get("source_revision") == source_sha
                 )
