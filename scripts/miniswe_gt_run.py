@@ -872,12 +872,9 @@ def main() -> int:
             report["patch_export_error"] = f"{type(exc).__name__}: {exc}"
             if exception is None:
                 exception = exc
-    gt_active = (
-        not args.gt_off
-        and args.gt_mode != "off"
-        and os.environ.get("GT_KILL_SWITCH", "").strip().lower()
-        not in {"1", "true", "yes", "on"}
-    )
+    # Treatment identity is the requested mode, not effective engine health.
+    # A kill switch may preserve native execution but cannot relabel ON as OFF.
+    gt_active = not args.gt_off and args.gt_mode != "off"
     if gt_active and session is not None:
         try:
             gt_state = session.completion_state()

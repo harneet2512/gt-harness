@@ -818,12 +818,12 @@ def install_runtime_hooks(
                 return True
 
         for action_index, action in enumerate(actions, start=1):
+            adapter.global_action += 1
             if is_typed_action(action):
                 # The planner explicitly selected this typed action. It never
                 # reaches the shell environment, and it is never inferred from
                 # Bash text. A router/analyzer fault produces an INCOMPLETE
                 # observation so Mini-SWE can select Bash on its next turn.
-                adapter.global_action += 1
                 typed_kind = str((action.get("gt_action") or {}).get("kind") or "")
                 typed_arguments = (action.get("gt_action") or {}).get("arguments") or {}
                 scopes = typed_arguments.get("paths", ["."])
@@ -996,7 +996,6 @@ def install_runtime_hooks(
             pre_snapshot = None
             if not session.disabled:
                 try:
-                    adapter.global_action += 1
                     adapter.before_action("bash", command)
                     preimage = _capture_edit_preimage(adapter, command)
                     if (

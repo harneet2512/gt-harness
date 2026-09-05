@@ -476,3 +476,26 @@ with only wheels and tests mounted. Broad regression: 1,345 passed, 96 skipped,
 two failures solely `source_closure_differs_from_head` before committing this
 increment. Ruff and diff whitespace checks passed. Skips and synthetic provider
 fixtures do not establish full capability or benchmark efficacy.
+
+Post-checkpoint verification at `f68227dd`: 80 tests passed, including both
+source-closure tests that failed before commit. Independent review passed 29
+focused checks and found two additional integration gaps. Reproduced requested
+GT-on being relabeled OFF under the global kill switch, and native normal/empty/
+submit actions sharing action index 1. Requested treatment now survives engine
+disablement, and every native action gets its index before branch selection.
+Host regression: 113 passed, one skipped. The rebuilt installed Linux wheel
+passed all 114 checks with no checkout imports or network access.
+
+A third reproduced gap was downstream acceptance trusting research_valid=true
+after engine integrity was removed. Runtime receipt verification now independently
+requires healthy typed engine integrity matching the requested GT-on mode.
+Receipt tests cover removal, mode mismatch and a nonempty disabled stage; both
+receipt tests pass. This intentionally rejects old uncertified receipts lacking
+engine evidence; it does not upgrade or rewrite historical runs. Whole-product
+certification, suppressed-action accounting and the remaining work packages are
+still open. No paid/provider calls were made.
+
+Final rebuilt wheel including downstream integrity verification: 116 tests
+passed in 15.61s in network-disabled Linux, installed artifacts only, pytest
+cache disabled. Ruff and diff checks passed. This is component/runtime proof,
+not the certified release bundle or evidence of benchmark solve-rate uplift.

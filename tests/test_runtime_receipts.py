@@ -207,6 +207,9 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         {
             "schema": "gt.repro.v1",
             "research_valid": True,
+            "gt_mode": "advisory",
+            "engine_integrity": {"schema": "gt.engine_integrity.v1", "valid": True,
+                                 "mode": "advisory", "issues": [], "disabled_stage": ""},
             "provider_receipts": {"request_count": 3, "valid": True},
             "model": {"match": True},
             "event_journal": {
@@ -352,6 +355,24 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     _write_json(product, product_row)
 
     mutations = [
+        (
+            "treatment_engine_integrity_invalid",
+            lambda row: row["treatment_receipt"]["reproducibility_manifest"].pop(
+                "engine_integrity"
+            ),
+        ),
+        (
+            "treatment_engine_integrity_invalid",
+            lambda row: row["treatment_receipt"]["reproducibility_manifest"][
+                "engine_integrity"
+            ].update(mode="off"),
+        ),
+        (
+            "treatment_engine_integrity_invalid",
+            lambda row: row["treatment_receipt"]["reproducibility_manifest"][
+                "engine_integrity"
+            ].update(disabled_stage="global_kill_switch"),
+        ),
         (
             "treatment_delivery_limit_exceeded",
             lambda row: row["treatment_receipt"]["provider_delivery_receipts"].extend(

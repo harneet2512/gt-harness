@@ -321,6 +321,19 @@ def test_native_action_batch_has_session_owned_execution_receipts(tmp_path, monk
     assert all(row["result_sha256"] for row in finishes)
 
 
+def test_fast_paths_have_distinct_native_action_indices(tmp_path):
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(task_id="fast-paths", state_dir=tmp_path, predicates=[])
+    install_runtime_hooks(agent, _session(adapter))
+    actions = [{"command": "echo hello"}, {"command": ""},
+               {"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"}]
+    agent.execute_actions({"extra": {"actions": actions}})
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    starts = [row for row in rows if row["event"] == "execution_started"]
+    assert [row["action_index"] for row in starts] == [1, 2, 3]
+    assert agent.env.executed == [action["command"] for action in actions]
+
+
 def test_external_edit_cannot_dirty_repository(tmp_path, monkeypatch):
     repository = tmp_path / "repo"
     repository.mkdir()

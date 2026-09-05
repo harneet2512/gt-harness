@@ -102,6 +102,26 @@ def test_setup_failure_writes_report_and_manifest_and_returns_nonzero(
     assert repro["research_valid"] is False
 
 
+def test_killed_requested_gt_on_cannot_be_reported_as_intentional_off(monkeypatch, tmp_path):
+    import scripts.miniswe_gt_run as runner
+
+    agent = SimpleNamespace(model=SimpleNamespace(), n_calls=0, cost=0,
+                            run=lambda task: {"submission": False})
+    monkeypatch.setattr(runner, "build_agent", lambda **kwargs: (agent, None, None))
+    monkeypatch.setenv("GT_KILL_SWITCH", "1")
+    metrics = tmp_path / "report.json"
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(sys, "argv", ["miniswe_gt_run.py", "--task", "fix it",
+        "--cwd", str(tmp_path), "--state-dir", str(tmp_path / "state"),
+        "--metrics", str(metrics), "--manifest", str(manifest), "--gt-mode", "assistive"])
+    assert runner.main() == TERMINAL_EXIT_CODES["task_failed"]
+    report = json.loads(metrics.read_text())
+    repro = json.loads(manifest.read_text())
+    assert report["gt_mode"] == "assistive"
+    assert repro["gt_mode"] == "assistive"
+    assert repro["research_valid"] is False
+
+
 def test_receipt_issuance_failure_preserves_native_exit_and_writes_error_receipts(
     monkeypatch, tmp_path, capsys
 ):

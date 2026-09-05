@@ -929,6 +929,20 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     reproduction = treatment.get("reproducibility_manifest")
     if not isinstance(reproduction, dict) or reproduction.get("research_valid") is not True:
         errors.append("treatment_reproducibility_invalid")
+    engine = reproduction.get("engine_integrity") if isinstance(reproduction, dict) else None
+    requested_mode = treatment.get("gt_mode")
+    if not (
+        isinstance(requested_mode, str)
+        and requested_mode in {"shadow", "advisory", "assistive", "enforced"}
+        and isinstance(engine, dict)
+        and engine.get("schema") == "gt.engine_integrity.v1"
+        and engine.get("valid") is True
+        and engine.get("mode") == requested_mode
+        and reproduction.get("gt_mode") == requested_mode
+        and engine.get("issues") == []
+        and engine.get("disabled_stage") == ""
+    ):
+        errors.append("treatment_engine_integrity_invalid")
     provider = reproduction.get("provider_receipts") if isinstance(reproduction, dict) else None
     if not isinstance(provider, dict) or provider.get("valid") is not True:
         errors.append("treatment_provider_receipts_invalid")
