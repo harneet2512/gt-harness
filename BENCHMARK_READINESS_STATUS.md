@@ -82,6 +82,13 @@ is committed in `bea8d59adbf481d8254428fdcf719af4e97cf3de`. Independent review
 and successor CI remain required. This repair alone does not establish complete
 state exclusion from every index-build input.
 
+Independent review found a follow-up interruption gap: the atomic writer uses
+`.model.patch.tmp.<random>`, while the first repair excluded the former
+`model.patch.tmp` name. An orphan-file reproduction failed for that exact reason.
+The exporter now enumerates and excludes the atomic writer's output-specific
+temporary namespace, without excluding unrelated dotfiles. It does not delete
+those files or follow artifact-file symlinks when constructing exclusions.
+
 ## Capability reference
 
 The canonical census is `gt_engine.attribution.DIRECT_FEATURES`.

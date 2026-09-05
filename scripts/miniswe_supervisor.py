@@ -140,8 +140,18 @@ def export_patch(
     """Conserve the workspace using a disposable index, never the agent index."""
     root = repo.resolve()
     pathspecs = ["."]
-    for excluded in (*excluded_roots, output, output.with_name(output.name + ".tmp")):
-        resolved = excluded.resolve()
+    # atomic_write owns this exact output-specific temporary namespace.
+    # A killed publisher can leave files there after its children are reaped.
+    publication_temporaries = tuple(
+        path for path in output.parent.iterdir()
+        if path.name.startswith(f".{output.name}.tmp.")
+    ) if output.parent.is_dir() else ()
+    state_exclusions = tuple(path.resolve() for path in excluded_roots)
+    artifact_exclusions = tuple(
+        path.parent.resolve() / path.name
+        for path in (output, output.with_name(output.name + ".tmp"), *publication_temporaries)
+    )
+    for resolved in (*state_exclusions, *artifact_exclusions):
         if resolved == root or resolved in root.parents:
             raise ValueError("patch_exclusion_contains_repository")
         try:

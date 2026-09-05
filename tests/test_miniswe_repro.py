@@ -452,7 +452,9 @@ def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -
     ).stdout.strip()
     (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
     (repo / "new.txt").write_text("new\n", encoding="utf-8")
-    output = tmp_path / "artifacts" / "model.patch"
+    output = repo / "model.patch"
+    (repo / ".model.patch.tmp.abcdefgh").write_text("orphaned_internal_patch", encoding="utf-8")
+    (repo / ".task-owned").write_text("legitimate_dotfile", encoding="utf-8")
     index_before = (repo / ".git" / "index").read_bytes()
 
     state = repo / "runtime-records"
@@ -467,6 +469,8 @@ def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -
     assert "+new" in patch_text
     assert "internal_state" not in patch_text
     assert "runtime-records/" not in patch_text
+    assert "orphaned_internal_patch" not in patch_text
+    assert "legitimate_dotfile" in patch_text
     assert (repo / ".git" / "index").read_bytes() == index_before
 
 
