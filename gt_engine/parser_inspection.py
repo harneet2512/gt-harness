@@ -18,6 +18,8 @@ _LANGUAGE = {
     ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".rs": "rust",
 }
 
+_PARSER_IDENTITY_PREFIX = "gt-index/"
+
 
 @dataclass(frozen=True, slots=True)
 class ParserInspectionRequest:
@@ -64,12 +66,24 @@ def inspect_sources(requests: Iterable[ParserInspectionRequest], *,
         raise RuntimeError("parser_inspection_response_invalid") from exc
     if len(rows) != len(items):
         raise RuntimeError("parser_inspection_response_count_mismatch")
+    parser_identity = ""
     for request, row in zip(items, rows, strict=True):
         expected = request.as_dict()
         if (row.get("schema") != "gt.parser_inspection.v1"
                 or row.get("request_id") != request.request_id
                 or row.get("content_sha256") != expected["content_sha256"]):
             raise RuntimeError("parser_inspection_response_identity_mismatch")
+        identity = row.get("parser_identity")
+        if (row.get("parser_identity_complete") is not True
+                or not isinstance(identity, str)
+                or not identity.startswith(_PARSER_IDENTITY_PREFIX)
+                or len(identity) != len(_PARSER_IDENTITY_PREFIX) + 64
+                or any(character not in "0123456789abcdef"
+                       for character in identity[len(_PARSER_IDENTITY_PREFIX):])):
+            raise RuntimeError("parser_inspection_producer_identity_unbound")
+        if parser_identity and identity != parser_identity:
+            raise RuntimeError("parser_inspection_producer_identity_changed")
+        parser_identity = identity
     return rows
 
 

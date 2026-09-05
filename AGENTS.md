@@ -2,6 +2,9 @@
 
 For HAR-83, Mini-SWE integration, GT architecture, benchmark hardening, or
 performance work, read `GT_HARNESS_SESSION_HANDOFF.md` before acting.
+Before any benchmark dispatch, also read and execute
+`BENCHMARK_DISPATCH_CHECKLIST.md` in priority order. A later green check never
+overrides an earlier red or missing check.
 
 The shipping product is the canonical DeepSWE path:
 
