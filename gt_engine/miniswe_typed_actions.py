@@ -222,8 +222,49 @@ def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+#: harness scratch directory basename, when nothing more specific is known
+STATE_DIRNAME = ".gt_state"
+
+
+def _snapshot_excluded(
+    repo_root: Path, state_dir: str | Path | None = None
+) -> tuple[str, ...]:
+    """Repository-relative directories the working-tree walk must never hash.
+
+    ``.git`` is git's own store.  The second is the harness state directory:
+    GT writes receipts and the trajectory there *while a turn is running*, so
+    hashing it makes the working tree differ from the snapshot the request was
+    built against, and every typed action taken mid-turn reports
+    ``repository_revision_mismatch`` + ``working_tree_sha256_mismatch``
+    against changes only GT itself made (HAR-86).
+
+    The directory is taken from the caller's configuration (``state_dir``,
+    which is what ``MiniSweAdapter`` is constructed with), then ``GT_STATE_DIR``
+    — the same variable the indexer reads — and falls back to the ``.gt_state``
+    basename, which is where the harness puts it inside a workspace.  A state
+    directory outside ``repo_root`` needs no exclusion: the walk never reaches
+    it.
+    """
+    excluded = [".git"]
+    configured = str(state_dir or os.environ.get("GT_STATE_DIR") or "").strip()
+    relative = STATE_DIRNAME
+    if configured:
+        relative = ""
+        try:
+            path = Path(configured)
+            if not path.is_absolute():
+                path = repo_root / path
+            relative = path.resolve().relative_to(repo_root).as_posix()
+        except (OSError, ValueError):
+            relative = ""
+    if relative and relative not in excluded:
+        excluded.append(relative)
+    return tuple(excluded)
+
+
 def _snapshot_authority(
     repo_root: Path,
+    state_dir: str | Path | None = None,
 ) -> tuple[str, tuple[tuple[str, str], ...], bool]:
     """Capture one complete file manifest and its working-tree identity.
 
@@ -234,6 +275,7 @@ def _snapshot_authority(
     digest = hashlib.sha256(b"gt.repository_snapshot.v1\0")
     if not repo_root.is_dir():
         return digest.hexdigest(), (), False
+    excluded = _snapshot_excluded(repo_root, state_dir)
     files: list[tuple[str, str]] = []
     complete = True
     try:
@@ -246,7 +288,9 @@ def _snapshot_authority(
             relative = path.relative_to(repo_root).as_posix()
         except ValueError:
             continue
-        if relative == ".git" or relative.startswith(".git/"):
+        if any(
+            relative == name or relative.startswith(f"{name}/") for name in excluded
+        ):
             continue
         try:
             if path.is_symlink():
@@ -270,9 +314,9 @@ def _snapshot_authority(
     return digest.hexdigest(), tuple(sorted(files)), complete
 
 
-def _file_snapshot(repo_root: Path) -> str:
+def _file_snapshot(repo_root: Path, state_dir: str | Path | None = None) -> str:
     """Content-address all working files, including untracked files and symlinks."""
-    return _snapshot_authority(repo_root)[0]
+    return _snapshot_authority(repo_root, state_dir)[0]
 
 
 def _graph_revision(path: str | Path | None, root: Path, fallback: str) -> str:
@@ -402,7 +446,7 @@ def build_action_request(
         "action_id": request_id,
         "kind": str(payload.get("kind") or ""),
         "arguments": args,
-        "repository_snapshot": _file_snapshot(root),
+        "repository_snapshot": _file_snapshot(root, config.get("state_dir")),
         "configuration": config,
         "configuration_sha256": hashlib.sha256(_canonical_bytes(config)).hexdigest(),
         "requested_fidelity": str(payload.get("requested_fidelity") or "exact"),
@@ -562,6 +606,14 @@ def _deterministic_query_api() -> tuple[type, Any] | None:
         raise
 
 
+def _configured_state_dir(wire: Mapping[str, Any]) -> str:
+    """The state directory named by a built request's configuration, if any."""
+    configuration = wire.get("configuration")
+    if not isinstance(configuration, Mapping):
+        return ""
+    return str(configuration.get("state_dir") or "")
+
+
 def execute_typed_action(
     request: Any,
     *,
@@ -683,7 +735,7 @@ def execute_typed_action(
             if graph_path is not None and not graph_path.is_absolute():
                 graph_path = root / graph_path
             snapshot_revision, snapshot_files, snapshot_complete = (
-                _snapshot_authority(root)
+                _snapshot_authority(root, _configured_state_dir(wire))
             )
             artifact = execute_query(
                 request,
@@ -785,7 +837,7 @@ def execute_typed_action(
         or wire.get("repository_snapshot")
         or ""
     )
-    workspace_revision = _file_snapshot(root)
+    workspace_revision = _file_snapshot(root, _configured_state_dir(wire))
     if isinstance(direct_answer, list):
         returned_count = len(direct_answer)
     elif isinstance(direct_answer, Mapping):
