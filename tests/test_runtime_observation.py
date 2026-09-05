@@ -186,7 +186,17 @@ def test_observation_equivalence_rejects_raw_sentinel_leak():
 
 def test_every_changed_file_gets_revision_bound_syntax_status_and_exact_postimage(
     tmp_path,
+    monkeypatch,
 ):
+    # This test covers the deterministic fallback path, independent of whether
+    # the host can execute the vendored Linux parser. Exact parser integration
+    # and identity binding have dedicated real-binary tests.
+    def unavailable_parser(*_args, **_kwargs):
+        raise RuntimeError("parser unavailable in fallback-path test")
+
+    monkeypatch.setattr(
+        "gt_engine.parser_inspection.inspect_sources", unavailable_parser
+    )
     (tmp_path / "valid.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "asset.bin").write_bytes(b"\x00old")
     before = capture_workspace(tmp_path)
