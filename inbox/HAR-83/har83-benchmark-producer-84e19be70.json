@@ -1,0 +1,60 @@
+{
+  "created_at":"2026-09-05T06:41:00Z",
+  "detail":{
+    "acceptance_evidence_remaining":[
+      "exact-harness provider-free clean Linux acceptance",
+      "one paid DeepSeek/Relace gate-one smoke"
+    ],
+    "binary_sha256":"86975d2463eb85c7bbae284da0a18393d4412b6b00ed0ab9e0681b9c1d922827",
+    "build_id":"c1c73f30dec4cab222a6072296e0ac33d9a4633c5d3f479201a4f9e28c0c3c03",
+    "build_info_sha256":"1a1a3aa578952f14d170629c745ac12e22592f317dff8a56c10838da814b93b7",
+    "build_tags":"netgo,osusergo,sqlite_fts5",
+    "graph_measurement":{
+      "callsite_count":19095,
+      "candidate_count":281842,
+      "completeness_fact_count":134819,
+      "composes_count":40,
+      "edge_count":461622,
+      "graph_a_bytes":853037056,
+      "graph_b_bytes":853024768,
+      "legacy_candidate_edges":0,
+      "legacy_candidate_rows":0,
+      "materialized_ordinary_derivation_links":0,
+      "materialized_ordinary_derivation_nodes":0,
+      "node_count":176710,
+      "quick_check":"ok",
+      "retained_graph_bytes":2679271424,
+      "selected_target_count":82,
+      "semantic_relationship_sha256":"66143032d0d537adce52233520b319ede1d3ec28091cd32ae1eaa804f5c29bc7",
+      "semantic_rows_match":true,
+      "size_reduction_pct_min":68.1616
+    },
+    "producer_ci_run":33950014767,
+    "producer_ci_status":"SUCCESS",
+    "reviewer_verdict_present":true,
+    "source_fingerprint":"05ac96f41fd09a4b803f83ab003fc28515cf39dd8a109a9fbddcb5e515ee10b3",
+    "source_tree":"ae7954c586a000e4f79439191256448840bab26b",
+    "spec_hard_implementation_defects":0,
+    "standards_hard_violations":0,
+    "static_build_run":33950014652,
+    "static_build_status":"SUCCESS",
+    "static_linking":true
+  },
+  "file":"",
+  "head_sha":"84e19be7011fd3b94d8e28616402898e73849bc0",
+  "kind":"check_outcome",
+  "line":0,
+  "message":"Exact producer review: deterministic context and artifact gates pass",
+  "packet_digest_sha256":"cb24a092ed17c9fd4fd3f4743e51b86ea0b862189a589a3d64b8f261542ddd2e",
+  "packet_id":"har83-benchmark-producer-84e19be70",
+  "pr":0,
+  "schema":"gt.review_packet.v1",
+  "severity":"info",
+  "source":{
+    "check":"final-two-axis-review",
+    "system":"codex-check"
+  },
+  "status":"PASS",
+  "supersedes":null,
+  "ticket":"HAR-83"
+}

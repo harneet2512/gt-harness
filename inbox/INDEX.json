@@ -133,6 +133,7 @@
     "har81-groundtruth-dispatch-review-0aadb1b9",
     "har81-groundtruth-owner-acceptance-cffca1fd2",
     "har81-smoke20-run-33646776586-outcome",
+    "har83-benchmark-producer-84e19be70",
     "har83-final-hardening-exact-build-08fe997d0",
     "har83-final-hardening-producer-9d0d8079f",
     "merge-har70-ff578719",
@@ -388,6 +389,7 @@
       "merge-har81-resource-c6e5a47d"
     ],
     "HAR-83":[
+      "har83-benchmark-producer-84e19be70",
       "har83-final-hardening-exact-build-08fe997d0",
       "har83-final-hardening-producer-9d0d8079f"
     ]
