@@ -53,6 +53,19 @@ Harness acceptance: `_binary_certification()` only fails closed when
 `GT_TASK_ID` + `GT_PRODUCT_SOURCE_SHA`. None are set for the cloud service, so
 no harness change was needed (documented in `cloud/.env.example`).
 
+**Update (2026-09-05, `cloud.2`):** the hand-written one-hunk patch above was
+replaced by the port of upstream PR
+[harneet2512/groundtruth#6](https://github.com/harneet2512/groundtruth/pull/6),
+which partitions candidates *before* `prepareResolutionV2` — so an abstained
+candidate no longer leaves a `CANDIDATE_TARGET` edge, `DerivationFact` node or
+VTA flow facts behind for `QueryAttachedCandidates` to join — and persists the
+drop count to `project_meta` under `graph_resolution_skipped_candidates`
+(`store.GraphSkippedCandidatesKey`, read back by `(*DB).GraphSkippedCandidates()`),
+so the abstention count is an auditable receipt rather than only a `stderr_tail`
+log line. `gt-index/internal/store/` is byte-identical at `0aadb1b9` and the
+PR's base `gt-trial`, so the upstream diff applies verbatim; the stamp becomes
+`0aadb1b9…+cloud.2`. See `cloud/producer/README.md`.
+
 ## 3. Result with the patched producer
 
 | repo | gt_status | `/graph` gt | nodes | edges | kinds |

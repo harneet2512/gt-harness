@@ -23,7 +23,8 @@ FROM golang:1.22.5-bookworm AS producer
 ARG PRODUCER_REPO=https://github.com/harneet2512/groundtruth
 # Stamped into main.commitSHA so `gt-index -build-info` can never be mistaken
 # for the certified benchmark producer.
-ARG PRODUCER_VARIANT=cloud.1
+# Stamp value lives in cloud/producer/PRODUCER_VARIANT (bumped with the patch).
+ARG PRODUCER_VARIANT=
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

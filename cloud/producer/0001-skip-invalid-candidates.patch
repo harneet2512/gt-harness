@@ -1,32 +1,261 @@
+diff --git a/gt-index/internal/store/candidate_abstention_test.go b/gt-index/internal/store/candidate_abstention_test.go
+new file mode 100644
+index 00000000..6249a314
+--- /dev/null
++++ b/gt-index/internal/store/candidate_abstention_test.go
+@@ -0,0 +1,115 @@
++package store
++
++import (
++	"path/filepath"
++	"testing"
++)
++
++// A derivation-invalid candidate is an abstention: the producer has no
++// publishable facts for it. It must be dropped from the graph without taking
++// the rest of the successfully derived resolution evidence down with it.
++func TestAttachResolutionGraphSkipsDerivationInvalidCandidateAsAbstention(t *testing.T) {
++	db, err := Open(filepath.Join(t.TempDir(), "graph.db"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	sourceID, err := db.InsertNode(&Node{Label: "Function", Name: "caller", QualifiedName: "caller", FilePath: "main.go", Language: "go"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	derivableTargetID, err := db.InsertNode(&Node{Label: "Method", Name: "Run", QualifiedName: "ImplA.Run", FilePath: "a.go", Language: "go"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	abstainedTargetID, err := db.InsertNode(&Node{Label: "Method", Name: "Run", QualifiedName: "ImplB.Run", FilePath: "b.go", Language: "go"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	const sourceFactID = "vta_source_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++	const edgeFactID = "vta_edge_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
++	row := AttachedResolution{
++		Source: &Node{ID: sourceID, Label: "Function", Name: "caller", QualifiedName: "caller", FilePath: "main.go", Language: "go"},
++		Callsite: &ResolutionCallsite{
++			CallsiteID: "vta-abstention", SourceID: sourceID, SourceFile: "main.go", SourceLine: 8,
++			Callee: "Run", DispatchState: "ambiguous", DispatchForm: "interface", CandidateCount: 2, Mechanism: "vta",
++			PassCoverage: []ResolutionPassCoverage{{PassKind: "vta", Status: "partial", Reason: "candidate_only_flow_evidence"}},
++		},
++		Candidates: []*ResolutionCandidate{
++			{
++				TargetID: derivableTargetID, TargetStableID: "a", TargetNativeID: "a", Ordinal: 0, Mechanism: "vta",
++				FlowSourceStableIDs: []string{sourceFactID}, FlowEdgeStableIDs: []string{edgeFactID},
++				FlowSourceFacts: []ResolutionFlowFact{{StableID: sourceFactID, Kind: "source", CallsiteID: "vta-abstention", TargetStableID: "a", Payload: "runner=ImplA"}},
++				FlowEdgeFacts:   []ResolutionFlowFact{{StableID: edgeFactID, Kind: "edge", CallsiteID: "vta-abstention", TargetStableID: "a", Payload: "caller->runner"}},
++			},
++			// No typed source or propagation facts: variable_type_flow cannot be
++			// derived for this candidate, so it must be abstained, not aborted on.
++			{TargetID: abstainedTargetID, TargetStableID: "b", TargetNativeID: "b", Ordinal: 1, Mechanism: "vta"},
++		},
++	}
++	if err := db.AttachResolutionGraph(testGraphIdentity("rev"), []AttachedResolution{row}); err != nil {
++		t.Fatalf("derivation-invalid candidate aborted the whole resolution graph: %v", err)
++	}
++
++	evidence, err := db.QueryAttachedCandidates("Run")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(evidence) != 1 || evidence[0].TargetStableID != "a" || evidence[0].TargetID != derivableTargetID {
++		t.Fatalf("expected only the derivable candidate to be published, got %+v", evidence)
++	}
++
++	var abstainedEdges int
++	if err := db.db.QueryRow(`SELECT COUNT(*) FROM edges WHERE target_id=? AND type IN ('CANDIDATE','CANDIDATE_TARGET')`, abstainedTargetID).Scan(&abstainedEdges); err != nil {
++		t.Fatal(err)
++	}
++	if abstainedEdges != 0 {
++		t.Fatalf("abstained candidate was still published as %d candidate edges", abstainedEdges)
++	}
++
++	skipped, recorded, err := db.GraphSkippedCandidates()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !recorded || skipped != 1 {
++		t.Fatalf("graph receipt skip counter = (%d, recorded=%t), want (1, true)", skipped, recorded)
++	}
++}
++
++// A build that drops nothing still records the counter, so a consumer can tell
++// "no abstentions" apart from "produced before the counter existed".
++func TestAttachResolutionGraphRecordsZeroSkippedCandidates(t *testing.T) {
++	db, err := Open(filepath.Join(t.TempDir(), "graph.db"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	sourceID, err := db.InsertNode(&Node{Label: "Function", Name: "caller", QualifiedName: "caller", FilePath: "main.go", Language: "go"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	targetID, err := db.InsertNode(&Node{Label: "Method", Name: "Run", QualifiedName: "ImplA.Run", FilePath: "a.go", Language: "go"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	selected := "a"
++	row := AttachedResolution{
++		Source: &Node{ID: sourceID, Label: "Function", Name: "caller", QualifiedName: "caller", FilePath: "main.go", Language: "go"},
++		Callsite: &ResolutionCallsite{
++			CallsiteID: "same-file", SourceID: sourceID, SourceFile: "main.go", SourceLine: 8,
++			Callee: "Run", DispatchState: "unique", DispatchForm: "static", CandidateCount: 1, Mechanism: "same_file",
++			SelectedTargetStableID: &selected, SelectedTargetNativeID: &selected,
++		},
++		Candidates: []*ResolutionCandidate{{TargetID: targetID, TargetStableID: "a", TargetNativeID: "a", Ordinal: 0, Mechanism: "same_file", Selected: true}},
++	}
++	if err := db.AttachResolutionGraph(testGraphIdentity("rev"), []AttachedResolution{row}); err != nil {
++		t.Fatal(err)
++	}
++	skipped, recorded, err := db.GraphSkippedCandidates()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !recorded || skipped != 0 {
++		t.Fatalf("graph receipt skip counter = (%d, recorded=%t), want (0, true)", skipped, recorded)
++	}
++}
+diff --git a/gt-index/internal/store/resolution_contract_test.go b/gt-index/internal/store/resolution_contract_test.go
+index 2ccbcd13..e4250cdd 100644
+--- a/gt-index/internal/store/resolution_contract_test.go
++++ b/gt-index/internal/store/resolution_contract_test.go
+@@ -578,7 +578,7 @@ func TestAttachResolutionGraphRejectsUnknownDerivationKindAtomically(t *testing.
+ 	}
+ }
+ 
+-func TestAttachResolutionGraphRejectsKnownDerivationMissingTypedDetails(t *testing.T) {
++func TestAttachResolutionGraphAbstainsKnownDerivationMissingTypedDetails(t *testing.T) {
+ 	db, err := Open(filepath.Join(t.TempDir(), "graph.db"))
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -591,8 +591,24 @@ func TestAttachResolutionGraphRejectsKnownDerivationMissingTypedDetails(t *testi
+ 		Callsite:   &ResolutionCallsite{CallsiteID: "missing-details", SourceID: sourceID, SourceFile: "main.py", Callee: "run", DispatchState: "candidate_only", CandidateCount: 1, Mechanism: "type_flow"},
+ 		Candidates: []*ResolutionCandidate{{TargetID: targetID, TargetStableID: "target", TargetNativeID: "target", Ordinal: 0, Mechanism: "type_flow"}},
+ 	}
+-	if err := db.AttachResolutionGraph(testGraphIdentity("rev"), []AttachedResolution{row}); err == nil {
+-		t.Fatal("known derivation missing receiver details was accepted")
++	// A candidate the producer cannot derive is dropped as an abstention, and
++	// the rest of the graph is still published (see GraphSkippedCandidatesKey).
++	if err := db.AttachResolutionGraph(testGraphIdentity("rev"), []AttachedResolution{row}); err != nil {
++		t.Fatalf("known derivation missing receiver details aborted the graph: %v", err)
++	}
++	var candidateEdges int
++	if err := db.db.QueryRow(`SELECT COUNT(*) FROM edges WHERE target_id=? AND type IN ('CANDIDATE','CANDIDATE_TARGET')`, targetID).Scan(&candidateEdges); err != nil {
++		t.Fatal(err)
++	}
++	if candidateEdges != 0 {
++		t.Fatalf("candidate missing receiver details was published as %d candidate edges", candidateEdges)
++	}
++	skipped, recorded, err := db.GraphSkippedCandidates()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !recorded || skipped != 1 {
++		t.Fatalf("graph receipt skip counter = (%d, recorded=%t), want (1, true)", skipped, recorded)
+ 	}
+ }
+ 
 diff --git a/gt-index/internal/store/sqlite.go b/gt-index/internal/store/sqlite.go
-index e5f9684..68e8244 100644
+index e5f96848..6e87b718 100644
 --- a/gt-index/internal/store/sqlite.go
 +++ b/gt-index/internal/store/sqlite.go
-@@ -1218,6 +1218,7 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
+@@ -194,6 +194,14 @@ type AttachedCandidate struct {
+ }
+ 
+ const GraphCompletionSchema = "gt-index.graph-completion.v1"
++
++// GraphSkippedCandidatesKey is the project_meta receipt key holding how many
++// resolution candidates were dropped as derivation abstentions by the build
++// that produced the current graph. It is written next to the graph completion
++// receipt on every attach, including when nothing was skipped, so that "0" and
++// "not recorded" stay distinguishable to consumers.
++const GraphSkippedCandidatesKey = "graph_resolution_skipped_candidates"
++
+ const ResolutionDerivationContract = "gt-index.call-resolution.derivation.v2"
+ const CallResolutionSchemaVersion = 2
+ 
+@@ -448,6 +456,25 @@ func (g GraphCompletionIdentity) receipt() (string, string, error) {
+ 	return string(payload), hex.EncodeToString(sum[:]), nil
+ }
+ 
++// GraphSkippedCandidates reports how many resolution candidates the producing
++// build dropped as derivation abstentions. It returns false when the graph was
++// written by a producer that did not record the counter.
++func (d *DB) GraphSkippedCandidates() (int, bool, error) {
++	var value string
++	err := d.db.QueryRow(`SELECT value FROM project_meta WHERE key=?`, GraphSkippedCandidatesKey).Scan(&value)
++	if err == sql.ErrNoRows {
++		return 0, false, nil
++	}
++	if err != nil {
++		return 0, false, fmt.Errorf("read %s: %w", GraphSkippedCandidatesKey, err)
++	}
++	skipped, err := strconv.Atoi(value)
++	if err != nil {
++		return 0, false, fmt.Errorf("malformed %s %q: %w", GraphSkippedCandidatesKey, value, err)
++	}
++	return skipped, true, nil
++}
++
+ func BindGraphCompletionTx(tx *sql.Tx, identity GraphCompletionIdentity) error {
+ 	payload, receiptSHA, err := identity.receipt()
+ 	if err != nil {
+@@ -1218,6 +1245,11 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
  		return fmt.Errorf("insert inspection query policy: %w", err)
  	}
  	revision := identity.RepositoryRevision
-+	skipped := 0
++	// A candidate that fails derivation validation is an abstention, not a
++	// corrupt graph: the producer has no publishable facts for it. Skip it,
++	// keep the candidates that do carry complete provenance, and record the
++	// count in the graph receipt so consumers can audit what was dropped.
++	skippedCandidates := 0
  	for _, row := range rows {
  		if row.Callsite == nil || row.Source == nil {
  			return fmt.Errorf("graph resolution row missing callsite or source")
-@@ -1355,7 +1356,9 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
+@@ -1299,7 +1331,16 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
  		}
- 		for _, candidate := range row.Candidates {
- 			if err := validateCandidateDerivation(derivationKind, candidate); err != nil {
--				return fmt.Errorf("callsite %s candidate %d: %w", c.CallsiteID, candidate.Ordinal, err)
+ 		coverageJSON, _ := json.Marshal(coverage)
+ 		stepsJSON, _ := json.Marshal(steps)
+-		v2, err := prepareResolutionV2(identity, c, row.Candidates)
++		derivable := make([]*ResolutionCandidate, 0, len(row.Candidates))
++		for _, candidate := range row.Candidates {
++			if err := validateCandidateDerivation(derivationKind, candidate); err != nil {
 +				log.Printf("[WARN] callsite %s candidate %d skipped as abstention: %v", c.CallsiteID, candidate.Ordinal, err)
-+				skipped++
++				skippedCandidates++
 +				continue
- 			}
++			}
++			derivable = append(derivable, candidate)
++		}
++		v2, err := prepareResolutionV2(identity, c, derivable)
+ 		if err != nil {
+ 			return fmt.Errorf("prepare callsite %s v2: %w", c.CallsiteID, err)
+ 		}
+@@ -1353,10 +1394,7 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
+ 			identity.BuildID, identity.SourceFingerprint, string(coverageJSON), string(stepsJSON)); err != nil {
+ 			return fmt.Errorf("link callsite %s: %w", c.CallsiteID, err)
+ 		}
+-		for _, candidate := range row.Candidates {
+-			if err := validateCandidateDerivation(derivationKind, candidate); err != nil {
+-				return fmt.Errorf("callsite %s candidate %d: %w", c.CallsiteID, candidate.Ordinal, err)
+-			}
++		for _, candidate := range derivable {
  			candidateStepsJSON, _ := json.Marshal(candidateProvenance(steps, candidate))
  			candidateMeta, _ := json.Marshal(map[string]any{
-@@ -1396,6 +1399,9 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
+ 				"callsite_id": c.CallsiteID, "candidate_ordinal": candidate.Ordinal,
+@@ -1396,6 +1434,13 @@ func AttachResolutionGraphTx(tx *sql.Tx, identity GraphCompletionIdentity, rows
  			}
  		}
  	}
-+	if skipped > 0 {
-+		log.Printf("[WARN] %d resolution candidates skipped as abstentions", skipped)
++	if skippedCandidates > 0 {
++		log.Printf("[WARN] %d resolution candidates skipped as abstentions", skippedCandidates)
++	}
++	if _, err := tx.Exec(`INSERT INTO project_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
++		GraphSkippedCandidatesKey, strconv.Itoa(skippedCandidates)); err != nil {
++		return fmt.Errorf("record skipped candidate abstentions: %w", err)
 +	}
  	return nil
  }
