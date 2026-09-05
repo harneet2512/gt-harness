@@ -506,3 +506,12 @@ generated test fixture; 65 attestation/runtime-receipt tests now pass in 11.09s.
 Historical artifacts remain unchanged. Canonical CI `33987550605` at `0953bbb8`
 failed exclusively at the existing wheel/source correspondence gate; no release
 pin or review requirement was weakened.
+
+Broad run completed: 1,344 passed, 96 skipped, six failures in the already-loaded
+old attestation fixture, 325.78s. All six reran successfully at `66c8ef55` in
+1.35s after the fixture repair; this is not represented as one immutable green
+full-suite run. Independent follow-up: 67 checks passed in 23.92s, both prior
+findings closed with high confidence and no new narrow regression. The reviewer
+did not certify full lifecycle coverage, the installed release, or benchmark
+readiness. Rollback is by reverting the isolated implementation commits, not
+resetting user worktrees or changing historical evidence.
