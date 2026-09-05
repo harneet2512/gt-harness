@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -10,7 +12,7 @@ import pytest
 
 from scripts.miniswe_gt_run import (
     MAX_TOOL_OUTPUT_CHARS,
-    MINISWE_HISTORY_CHAR_BUDGET,
+    BoundedHistoryAgent,
     CredentialIsolatedLocalEnvironment,
     _compact_miniswe_history,
     _model_and_kwargs,
@@ -299,6 +301,118 @@ def test_miniswe_tool_output_is_bounded_without_losing_head_or_tail() -> None:
     assert "truncated" in bounded
 
 
+def test_miniswe_history_references_duplicates_below_old_size_threshold() -> None:
+    payload = "verified output\n" * 1000
+    messages = [
+        {"role": "assistant", "tool_calls": [{"id": "old"}]},
+        {"role": "tool", "tool_call_id": "old", "content": payload},
+        {"role": "assistant", "tool_calls": [{"id": "new"}]},
+        {"role": "tool", "tool_call_id": "new", "content": payload},
+    ]
+    _compact_miniswe_history(messages)
+    assert messages[1]["content"].startswith("[GT_HISTORY_REF ")
+    assert messages[1]["extra"]["gt_history_reference"]["original_content"] == payload
+    assert messages[-1]["content"] == payload
+
+
+def test_miniswe_history_preserves_distinct_old_evidence_above_old_size_threshold() -> None:
+    payload = "unique old failure evidence\n" * 6000
+    messages = [
+        {"role": "assistant", "tool_calls": [{"id": "old"}]},
+        {"role": "tool", "tool_call_id": "old", "content": payload},
+        {"role": "assistant", "tool_calls": [{"id": "new"}]},
+        {"role": "tool", "tool_call_id": "new", "content": "different current output"},
+    ]
+    _compact_miniswe_history(messages)
+    assert messages[1]["content"] == payload
+
+
+def _repeated_history(payload: str) -> list[dict]:
+    return [row for name in ("old", "new") for row in (
+        {"role": "assistant", "tool_calls": [{"id": name}]},
+        {"role": "tool", "tool_call_id": name, "content": payload,
+         "extra": {"raw_output": payload, "returncode": 0}},
+    )]
+
+
+def test_history_reference_is_idempotent_and_recovers_without_anchor() -> None:
+    payload = "unicode evidence: 漢字\n" * 1000
+    messages = _repeated_history(payload)
+    _compact_miniswe_history(messages)
+    reference = messages[1]["extra"]["gt_history_reference"]
+    assert reference["sha256"] == hashlib.sha256(payload.encode()).hexdigest()
+    assert reference["utf8_bytes"] == len(payload.encode())
+    snapshot = copy.deepcopy(messages)
+    _compact_miniswe_history(messages)
+    assert messages == snapshot
+    del messages[2:]
+    _compact_miniswe_history(messages)
+    assert messages[1]["content"] == payload
+    assert "gt_history_reference" not in messages[1]["extra"]
+
+
+def test_history_reference_rebinds_directly_to_newest_full_result() -> None:
+    payload = "evidence\n" * 1000
+    messages = _repeated_history(payload)
+    _compact_miniswe_history(messages)
+    messages.extend([
+        {"role": "assistant", "tool_calls": [{"id": "latest"}]},
+        {"role": "tool", "tool_call_id": "latest", "content": payload,
+         "extra": {"raw_output": payload, "returncode": 0}},
+    ])
+    _compact_miniswe_history(messages)
+    for index in (1, 3):
+        assert messages[index]["extra"]["gt_history_reference"]["tool_call_id"] == "latest"
+    assert messages[-1]["content"] == payload
+
+
+@pytest.mark.parametrize("field,value", [
+    ("raw_output", "different hidden middle"), ("returncode", 1),
+    ("exception_info", {"type": "Timeout"}),
+])
+def test_history_keeps_equal_visible_output_with_distinct_provenance(field, value) -> None:
+    messages = _repeated_history("same visible output\n" * 1000)
+    messages[1]["extra"][field] = value
+    snapshot = copy.deepcopy(messages)
+    _compact_miniswe_history(messages)
+    assert messages == snapshot
+
+
+def test_history_rejects_corrupted_reference() -> None:
+    messages = _repeated_history("evidence\n" * 1000)
+    _compact_miniswe_history(messages)
+    messages[1]["extra"]["gt_history_reference"]["original_content"] += "corruption"
+    with pytest.raises(ValueError, match="history_reference_digest_mismatch"):
+        _compact_miniswe_history(messages)
+
+
+def test_real_agent_query_sends_references_and_retains_audit_content(tmp_path) -> None:
+    class CapturingModel:
+        def query(self, messages):
+            self.received = copy.deepcopy(messages)
+            return {"role": "assistant", "content": "done"}
+
+    model = CapturingModel()
+    env = CredentialIsolatedLocalEnvironment(cwd=str(tmp_path), timeout=5)
+    agent = BoundedHistoryAgent(model, env, system_template="policy", instance_template="{{task}}")
+    payload = "verified tool result\n" * 1000
+    agent.messages = _repeated_history(payload)
+    agent.query()
+    assert model.received[1]["content"].startswith("[GT_HISTORY_REF ")
+    assert model.received[-1]["content"] == payload
+    assert agent.messages[1]["extra"]["gt_history_reference"]["original_content"] == payload
+    assert agent.n_calls == 1
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_history_preserves_unpaired_or_ambiguous_results(duplicate) -> None:
+    messages = _repeated_history("evidence\n" * 1000)
+    messages[0]["tool_calls"] = [{"id": "old"}, {"id": "old"}] if duplicate else []
+    snapshot = copy.deepcopy(messages)
+    _compact_miniswe_history(messages)
+    assert messages == snapshot
+
+
 def test_miniswe_history_drops_old_tool_payloads_before_quadratic_replay() -> None:
     messages = [{"role": "system", "content": "policy"}]
     for index in range(20):
@@ -324,10 +438,10 @@ def test_miniswe_history_drops_old_tool_payloads_before_quadratic_replay() -> No
         len(json.dumps({key: value for key, value in row.items() if key != "extra"}))
         for row in messages
     )
-    assert provider_chars <= MINISWE_HISTORY_CHAR_BUDGET
-    assert any(
-        str(row.get("content", "")).startswith("[truncated") for row in messages
-    )
+    assert provider_chars < 30_000
+    assert sum(
+        str(row.get("content", "")).startswith("[GT_HISTORY_REF ") for row in messages
+    ) == 19
     assert messages[-1]["content"] == "x" * MAX_TOOL_OUTPUT_CHARS
     assert messages[2]["extra"]["raw_output"] == "x" * MAX_TOOL_OUTPUT_CHARS
 
@@ -375,7 +489,7 @@ def test_miniswe_history_preserves_reasoning_metadata_and_tool_arguments() -> No
     # Reasoning-model continuity is a provider contract. Tool output may be
     # compacted, but assistant reasoning and action semantics remain intact
     # even when that means this deterministic pass cannot reach its target.
-    assert provider_chars > MINISWE_HISTORY_CHAR_BUDGET
+    assert provider_chars > 120_000
     assert "provider_specific_fields" in messages[1]
     assert messages[1]["tool_calls"][0]["function"]["arguments"] != "{}"
     assert messages[-2]["tool_calls"][0]["function"]["arguments"] == newest_arguments
@@ -404,9 +518,9 @@ def test_miniswe_history_preserves_every_result_in_latest_multi_tool_turn() -> N
         {"role": "tool", "tool_call_id": "new-2", "content": "second-current-result"},
     ]
 
-    _compact_miniswe_history(messages, char_budget=1_000)
+    _compact_miniswe_history(messages)
 
-    assert messages[2]["content"].startswith("[truncated")
+    assert messages[2]["content"] == "x" * 80_000
     assert messages[4]["content"] == "first-current-result"
     assert messages[5]["content"] == "second-current-result"
 

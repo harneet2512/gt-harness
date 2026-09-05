@@ -127,12 +127,50 @@ non-enforcing policy and Mini-SWE's action authority.
 
 ## Remaining pre-smoke evidence
 
+### Repeated-history repair
+
+The state-export follow-up at `7d79f4fbbc1e9510520c213bfe8de5372422811f`
+passed canonical [CI 33992784333](https://github.com/harneet2512/gt-harness/actions/runs/33992784333).
+
+The next runner change replaces the 120,000-character history target with
+digest-based references for identical older tool results. Two regressions failed
+before the repair: duplicates below the target replayed in full, and unique older
+evidence above the target was deleted from the model request.
+
+Each reference names a full tool result still present in the request. The runner
+retains original content under `extra`, validates its UTF-8 digest on reuse, and
+restores it if the full result disappears. Different raw output, return codes,
+or exception metadata prevent deduplication. Assistant messages and the latest
+tool batch remain intact. References assert content equality, not freshness.
+
+A rebuilt harness wheel and the pinned Groundtruth wheel passed 39 targeted
+checks in network-disabled Linux. Only wheels, tests, and pytest configuration
+were mounted. The checks include the real `BoundedHistoryAgent.query` entry point,
+reference recovery and corruption rejection, and normal and timeout patch export.
+The command was `python -m pytest -o addopts= -p no:cacheprovider -q -ra
+tests/test_miniswe_supervisor.py tests/test_miniswe_repro.py` after offline installation.
+
+This is not a complete evidence-retrieval implementation. The separate
+16,000-character output truncation remains. Unique history is preserved and may
+reach the final context gate. No token, solve-rate, or end-to-end speedup claim
+follows from the targeted checks.
+
+Independent review found no blocking compactor defect and passed 14 focused
+checks. The review also confirmed that Mini-SWE 2.4.6 removes audit-only `extra`
+before provider dispatch. The entry-point test itself captures messages before
+that provider preparation step.
+
+A synthetic request containing twenty identical 16,000-character tool results
+shrank from 322,060 to 20,777 serialized UTF-8 bytes after removing audit metadata,
+a 93.55% reduction. This measures one repetitive fixture, not provider tokens or
+benchmark efficiency.
+
 HAR-83 review REV-356 independently confirms green acceptance and leaves these
 items open:
 
 | Item | Required evidence | Current disposition |
 |---|---|---|
-| Digest-based repetition control | Repeated evidence has stable content references; raw bytes remain recoverable; reasoning, action pairing, current failures, and fresh results survive | Open. The shipping runner still uses 16,000-character output truncation and a 120,000-character history target |
+| Digest-based repetition control | Repeated evidence has stable content references; raw bytes remain recoverable; reasoning, action pairing, current failures, and fresh results survive | Partial. Installed history-reference checks pass. Model-readable retrieval for the separate 16,000-character output truncation remains open |
 | State-directory exclusion | Writes to the configured GT state directory do not change workspace revisions, trigger graph rebuilds, or enter the exported task patch; legitimate source edits remain visible | Requires caller-level audit and installed proof |
 | Unpaid full-flow rehearsal | The paid installation and orchestration path runs with a deterministic provider substitute, real file edits and subprocesses, final patch export, verifier binding, and typed receipts | Not established by the matrix or local lifecycle suite alone |
 | Forced-timeout rehearsal | Timeout during active work preserves the latest patch, terminates children, and emits truthful failure receipts without score invention | Local cases pass; whole paid-path rehearsal remains open |

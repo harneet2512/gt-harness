@@ -20,6 +20,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -83,7 +84,6 @@ _SENSITIVE_SHELL_ENV = {
 # provider call; one 430k-character grep result caused 117k extra prompt tokens
 # per subsequent call in paid run 33915825554.
 MAX_TOOL_OUTPUT_CHARS = 16_000
-MINISWE_HISTORY_CHAR_BUDGET = 120_000
 
 
 def _truncate_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
@@ -94,26 +94,19 @@ def _truncate_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
     return f"{text[:half]}\n... [truncated {dropped} chars] ...\n{text[-half:]}"
 
 
-def _provider_visible_chars(message: dict) -> int:
-    visible = {key: value for key, value in message.items() if key != "extra"}
-    return len(json.dumps(visible, sort_keys=True, separators=(",", ":")))
+def _history_reference_marker(digest: str, size: int, tool_call_id: str) -> str:
+    reference = {"sha256": digest, "utf8_bytes": size, "tool_call_id": tool_call_id}
+    return "[GT_HISTORY_REF " + json.dumps(reference, sort_keys=True, separators=(",", ":")) + "]"
 
 
-def _compact_miniswe_history(
-    messages: list[dict], *, char_budget: int = MINISWE_HISTORY_CHAR_BUDGET
-) -> None:
-    """Compact provider-visible history safely toward the target budget.
+def _compact_miniswe_history(messages: list[dict]) -> None:
+    """Reference byte-identical older tool results, never discard unique evidence.
 
-    Mini-SWE resends its whole message list on every call. Replace the oldest
-    tool payloads in the model view, but keep message IDs/pairing and the exact
-    raw result under ``extra`` (which LiteLLM does not send to the provider).
-    The most recent result remains intact so the model can act on it. Provider
-    reasoning metadata and tool arguments also remain intact; final request
-    admission, not this lossy-unsafe helper, owns the hard context ceiling.
+    Each reference points directly to a full result in this request. The most
+    recent action batch, assistant reasoning, and tool-call pairing stay intact.
+    Original content stays under extra for exact recovery if an anchor leaves
+    the history. Equality does not certify that an old observation is current.
     """
-    total = sum(_provider_visible_chars(message) for message in messages)
-    if total <= char_budget:
-        return
     last_assistant_index = max(
         (
             index
@@ -122,24 +115,74 @@ def _compact_miniswe_history(
         ),
         default=len(messages),
     )
-    tool_rows = [
-        row
-        for index, row in enumerate(messages)
-        if row.get("role") == "tool" and index < last_assistant_index
-    ]
-    for row in tool_rows:
-        content = str(row.get("content") or "")
-        if content.startswith("[truncated - "):
+    results = Counter(
+        row.get("tool_call_id") for row in messages
+        if row.get("role") == "tool" and isinstance(row.get("tool_call_id"), str)
+    )
+    calls = Counter(
+        call.get("id") for row in messages if row.get("role") == "assistant"
+        if isinstance(row.get("tool_calls"), list)
+        for call in (row.get("tool_calls") or [])
+        if isinstance(call, dict) and isinstance(call.get("id"), str)
+    )
+    anchors: dict[str, str] = {}
+    for index in range(len(messages) - 1, -1, -1):
+        row = messages[index]
+        if row.get("role") != "tool" or not isinstance(row.get("content"), str):
             continue
-        before = _provider_visible_chars(row)
-        replacement = f"[truncated - {len(content)} chars retained in audit trajectory]"
-        row["content"] = replacement
-        total += _provider_visible_chars(row) - before
-        if total <= char_budget:
-            return
+        extra = row.get("extra", {})
+        if not isinstance(extra, dict):
+            continue
+        previous = extra.get("gt_history_reference")
+        content = row["content"]
+        if previous is not None:
+            if not isinstance(previous, dict) or previous.get("schema") != "gt.history_reference.v1":
+                raise ValueError("history_reference_invalid")
+            content = previous.get("original_content")
+            if not isinstance(content, str):
+                raise ValueError("history_reference_original_missing")
+        encoded = content.encode("utf-8")
+        digest = hashlib.sha256(encoded).hexdigest()
+        if previous is not None:
+            if (
+                previous.get("sha256") != digest
+                or previous.get("utf8_bytes") != len(encoded)
+                or not isinstance(previous.get("tool_call_id"), str)
+                or row["content"] != _history_reference_marker(digest, len(encoded), previous["tool_call_id"])
+            ):
+                raise ValueError("history_reference_digest_mismatch")
+            row["content"] = content
+            extra.pop("gt_history_reference")
+        tool_call_id = row.get("tool_call_id")
+        if not isinstance(tool_call_id, str) or not tool_call_id or results[tool_call_id] != 1 or calls[tool_call_id] != 1:
+            continue
+        raw = extra.get("raw_output")
+        if raw is not None and not isinstance(raw, str):
+            continue
+        try:
+            identity = json.dumps({
+                "content_sha256": digest,
+                "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest() if raw is not None else None,
+                "returncode": extra.get("returncode"),
+                "exception_info": extra.get("exception_info"),
+            }, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError):
+            continue
+        anchor = anchors.setdefault(identity, tool_call_id)
+        if index >= last_assistant_index or anchor == tool_call_id:
+            continue
+        marker = _history_reference_marker(digest, len(encoded), anchor)
+        if len(marker.encode("utf-8")) >= len(encoded):
+            continue
+        row.setdefault("extra", {})["gt_history_reference"] = {
+            "schema": "gt.history_reference.v1", "sha256": digest,
+            "utf8_bytes": len(encoded), "tool_call_id": anchor,
+            "original_content": content,
+        }
+        row["content"] = marker
 
 class BoundedHistoryAgent(DefaultAgent):
-    """Mini-SWE 2.4.6 with bounded provider history and unchanged tools."""
+    """Mini-SWE 2.4.6 with lossless repeated-output references and unchanged tools."""
 
     def query(self) -> dict:
         _compact_miniswe_history(self.messages)
