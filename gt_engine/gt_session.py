@@ -420,6 +420,26 @@ class GTSession:
                 "mode": self.mode.value, "disabled_stage": self.disabled_stage,
                 "issues": issues}
 
+    def suppress(self, action: Mapping[str, Any], result: Any, *, reason: str) -> Any:
+        """Account for a policy refusal without claiming that an executor ran."""
+        if self.mode is GTMode.OFF:
+            return result
+        try:
+            def digest(value: Any) -> str:
+                return hashlib.sha256(json.dumps(
+                    value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                ).encode()).hexdigest()
+            head = self._engine.store.receipt()["event_head"]
+            self._engine.store.append(
+                "action_suppressed", action_index=self._engine.global_action,
+                action_id=f"{self.config.task_id}:suppressed:{head}",
+                action_sha256=digest(dict(action)), result_sha256=digest(result),
+                reason=reason, executed=False,
+            )
+        except Exception as exc:
+            self.degrade("suppression_receipt", exc)
+        return result
+
     def execute(self, action: Mapping[str, Any], executor: Callable[[], Any]) -> Any:
         """Own execution accounting without replacing the model's chosen action."""
         if self.mode is GTMode.OFF:

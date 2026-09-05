@@ -60,6 +60,9 @@ def test_off_mode_keeps_native_result_without_gt_execution_records(tmp_path):
     result = object()
     assert session.execute({}, lambda: result) is result
     assert session._execution_sequence == 0
+    before = session.engine.store.receipt()
+    assert session.suppress({}, result, reason="fixture") is result
+    assert session.engine.store.receipt() == before
 
 
 def test_reopened_journal_does_not_reuse_execution_identity(tmp_path):
@@ -69,3 +72,21 @@ def test_reopened_journal_does_not_reuse_execution_identity(tmp_path):
     rows = [json.loads(line) for line in session.engine.store.path.read_text().splitlines()]
     ids = [row["execution_id"] for row in rows if row["event"] == "execution_started"]
     assert len(ids) == len(set(ids)) == 2
+
+
+def test_suppression_has_receipt_without_claiming_execution(tmp_path, monkeypatch):
+    session = session_at(tmp_path)
+    result = {"output": "refused", "returncode": 2}
+    assert session.suppress({"command": "fixture"}, result, reason="fixture_policy") is result
+    rows = [json.loads(line) for line in session.engine.store.path.read_text().splitlines()]
+    assert rows[-1]["event"] == "action_suppressed"
+    assert rows[-1]["reason"] == "fixture_policy"
+    assert rows[-1]["executed"] is False
+    assert rows[-1]["result_sha256"]
+    assert not any(row["event"] == "execution_started" for row in rows)
+    assert session.suppress({"command": "fixture"}, result, reason="fixture_policy") is result
+    repeated = [json.loads(line) for line in session.engine.store.path.read_text().splitlines()]
+    assert rows[-1]["action_id"] != repeated[-1]["action_id"]
+    monkeypatch.setattr(session.engine.store, "append", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert session.suppress({}, result, reason="fixture_policy") is result
+    assert session.integrity_receipt()["valid"] is False

@@ -48,6 +48,7 @@ os.environ.setdefault("MSWEA_COST_TRACKING", "ignore_errors")
 from minisweagent.agents.default import AgentConfig, DefaultAgent  # noqa: E402
 from minisweagent.config import builtin_config_dir  # noqa: E402
 from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentConfig  # noqa: E402
+from minisweagent.exceptions import Submitted  # noqa: E402
 from minisweagent.models.litellm_model import LitellmModel  # noqa: E402
 
 try:  # standalone remote runner first; package import for local tests second
@@ -341,7 +342,17 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
                 "exception_info": f"An error occurred while executing the command: {exc}",
                 "extra": {"exception_type": type(exc).__name__, "exception": str(exc)},
             }
-        self._check_finished(output)
+        try:
+            self._check_finished(output)
+        except Submitted as exc:
+            # Keep the native terminal message intact and retain the actual
+            # environment result if the runtime refuses only submission.
+            raw = str(output.get("output") or "")
+            exc.gt_execution_result = {
+                **output, "output": _truncate_tool_output(raw),
+                "extra": {**output.get("extra", {}), "raw_output": raw},
+            }
+            raise
         raw_output = str(output.get("output") or "")
         output.setdefault("extra", {})["raw_output"] = raw_output
         output["output"] = _truncate_tool_output(raw_output)

@@ -166,6 +166,8 @@ def _refusal_directive(adapter: MiniSweAdapter) -> dict:
         command_sha256=None,
         iteration=adapter.iteration,
         reasons=list(adapter.blocking_reasons),
+        action_index=adapter.global_action,
+        executed=False,
     )
     unmet = adapter.blocking_obligation_texts()
     delta = adapter.next_contract_delta(max_chars=1000)
@@ -183,26 +185,31 @@ def _refusal_directive(adapter: MiniSweAdapter) -> dict:
     return {"role": "user", "content": "\n".join(lines)}
 
 
-def _run_submit_gate(session: GTSession, command: str) -> bool:
+def _run_submit_gate(session: GTSession, command: str, *, pre_execution: bool = False) -> bool:
     """Run the submit gate; True = accepted (let the submission through)."""
     adapter = session.engine
     if adapter is None or session.disabled:
         return True
-    if adapter.phase in {"IMPLEMENT", "VERIFY"}:
+    if not pre_execution and adapter.phase in {"IMPLEMENT", "VERIFY"}:
         if adapter.phase == "IMPLEMENT":
             adapter.begin_verify()
         adapter.begin_submit()
-    if session.can_enforce:
+    if pre_execution and session.can_enforce:
         receipt = adapter.authorize_submit_suppression(command)
         if receipt is not None:
             adapter.begin_implement()
             return False
+    if pre_execution:
+        return True
     accepted, _batch = session.request_submit()
     if accepted or not session.can_enforce:
         return accepted
     # A policy decision alone cannot suppress native Mini-SWE. Suppression is
     # authorized only by the canonical provider boundary's durable proof that
     # zero action/provider bytes were dispatched. Missing authority fails open.
+    session.degrade("terminal_refusal_authority", RuntimeError(
+        "pre-execution suppression authority cannot refuse an executed action"
+    ))
     return True
 
 
@@ -808,11 +815,11 @@ def install_runtime_hooks(
         rendered_by_index: dict[int, str] = {}
         typed_by_index: dict[int, dict[str, Any]] = {}
         directives: list[dict] = []
-        def submit_allowed() -> bool:
+        def submit_allowed(*, pre_execution: bool = False) -> bool:
             if session.disabled:
                 return True
             try:
-                return _run_submit_gate(session, command)
+                return _run_submit_gate(session, command, pre_execution=pre_execution)
             except Exception as exc:  # noqa: BLE001 - GT policy is fail-open
                 session.degrade("submit_gate", exc)
                 return True
@@ -851,14 +858,14 @@ def install_runtime_hooks(
                         sort_keys=True,
                         separators=(",", ":"),
                     )
-                    outputs.append(
+                    outputs.append(session.suppress(action,
                         {
                             "output": output,
                             "returncode": 2,
                             "exception_info": "repository-wide query fanout refused",
                             "extra": {"gt_typed_action": True},
-                        }
-                    )
+                        }, reason="query_fanout_refused"
+                    ))
                     continue
                 repository_wide_queries += int(repository_wide)
                 capability = f"typed_{typed_kind}"
@@ -885,7 +892,7 @@ def install_runtime_hooks(
                         payload, ensure_ascii=False, sort_keys=True,
                         separators=(",", ":"),
                     )
-                    outputs.append({
+                    outputs.append(session.suppress(action, {
                         "output": output,
                         "returncode": 2,
                         "exception_info": "GroundTruth typed capability disabled",
@@ -896,7 +903,7 @@ def install_runtime_hooks(
                             ).hexdigest(),
                             "interception_decision": "PASS_THROUGH",
                         },
-                    })
+                    }, reason="capability_disabled"))
                     continue
                 if (
                     typed_kind in _GRAPH_DEPENDENT_TYPED_KINDS
@@ -985,12 +992,9 @@ def install_runtime_hooks(
                 except Exception as exc:  # noqa: BLE001 - detection is fail-open
                     session.degrade("submit_detection", exc)
             # Command-level fast path: the marker is literally in the command.
-            if is_submit:
-                if submit_allowed():
-                    outputs.append(session.execute(action, partial(environment.execute, action)))
-                else:
-                    outputs.append(dict(_NOT_EXECUTED))
-                    directives.append(_refusal_directive(adapter))
+            if is_submit and not submit_allowed(pre_execution=True):
+                outputs.append(session.suppress(action, dict(_NOT_EXECUTED), reason="submit_refused"))
+                directives.append(_refusal_directive(adapter))
                 continue
             preimage = None
             pre_snapshot = None
@@ -1011,23 +1015,27 @@ def install_runtime_hooks(
                         )
                 except Exception as exc:  # noqa: BLE001 - observation is fail-open
                     session.degrade("before_action", exc)
+            pending_submission = None
             try:
                 result = session.execute(action, partial(environment.execute, action))
-            except Submitted:
+            except Submitted as exc:
                 # RESULT-level submit interception: the command's OUTPUT began
                 # with the magic string even though the command text did not
-                # (an adversarial shell-joined bypass). The gate is the
-                # authority here, exactly as Mini-SWE's own _check_finished is
-                # for a legitimate submit. Refused -> instruction-channel
-                # directive; accepted -> let the run exit via the raised
-                # Submitted.
-                if submit_allowed():
+                # Preserve the terminal while normal post-action processing
+                # captures its workspace effects. A pre-execution suppression
+                # receipt cannot authorize refusal after this command ran.
+                pending_submission = exc
+                result = getattr(exc, "gt_execution_result", None)
+                if not isinstance(result, dict):
+                    # Third-party environments may discard the raw result when
+                    # raising Submitted. Preserve native termination and mark
+                    # incomplete observation instead of inventing a result.
+                    session.degrade("submitted_result_missing", RuntimeError("original result unavailable"))
                     raise
-                outputs.append(dict(_NOT_EXECUTED))
-                directives.append(_refusal_directive(adapter))
-                continue
             outputs.append(result)
             if session.disabled:
+                if pending_submission is not None:
+                    raise pending_submission
                 continue
             output = _observation_output(result)
             returncode = _returncode(result)
@@ -1151,6 +1159,11 @@ def install_runtime_hooks(
                 session.degrade("after_action", exc)
                 rendered_by_index.clear()
                 directives.clear()
+            if pending_submission is not None:
+                # Observe the policy outcome, but pre-execution authority cannot
+                # suppress an already executed action or its native terminal.
+                submit_allowed()
+                raise pending_submission
         if not session.disabled and session.model_visible:
             for directive in adapter.pending_directives:
                 directives.append({"role": "user", "content": directive})

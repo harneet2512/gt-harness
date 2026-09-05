@@ -515,3 +515,41 @@ findings closed with high confidence and no new narrow regression. The reviewer
 did not certify full lifecycle coverage, the installed release, or benchmark
 readiness. Rollback is by reverting the isolated implementation commits, not
 resetting user worktrees or changing historical evidence.
+
+### Work package A: submission observation and suppression accounting
+
+Reproduced three lifecycle defects: result-level submission replaced real output
+with a fabricated non-execution observation; its file edits bypassed transaction
+capture; and accepted literal-marker commands also skipped capture. Preflight
+additionally finalized GT from command text even when the environment returned
+ordinary output rather than a native terminal. The canonical environment now
+retains its bounded and raw result on the original Submitted exception. Native
+submission results undergo normal workspace observation before final policy
+evaluation. Preflight checks suppression authority only, never completion.
+
+GTSession.suppress now accounts for command suppression, disabled typed actions
+and refused query fanout with action/result hashes, stable journal-bound identity
+and executed=false, without emitting a fictitious execution-start record.
+Accounting failure preserves the result and invalidates GT integrity.
+
+Independent review identified an authority mismatch: existing provider-boundary
+suppression receipts promise the action was not dispatched. They cannot refuse
+a terminal after that action executed. Post-execution reuse is removed. Native
+termination is conserved, and an enforcing policy rejection without terminal
+authority degrades integrity explicitly. A distinct execution/result-bound
+terminal-refusal contract remains open; initial assistive/non-enforcing mode
+does not require that authority. Missing raw results also preserve the original
+exception and invalidate integrity, rather than inventing complete observation.
+
+Real subprocess tests cover changed and unchanged workspaces, output retention,
+post-action gate epochs, accepted literal-marker edits, and partial versus
+complete terminal results. Three legacy fake-environment assertions now expect
+IMPLEMENT, not FINISHED, when only command text suggests submission but the
+environment actually returns ordinary output. Historical artifacts are untouched.
+
+Verification: 100 host checks passed with one platform skip; the rebuilt installed
+wheel passed 120 checks in network-disabled Linux in 21.12s, tests/wheels only,
+no checkout imports. Independent follow-up passed 12 selected tests in 14.15s
+and closed the authority finding with high confidence. Ruff and diff checks
+passed. This proves the safe fail-open boundary, not post-execution refusal
+authority, all-capability operation, release certification or benchmark uplift.

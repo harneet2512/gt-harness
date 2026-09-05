@@ -874,8 +874,11 @@ def test_submit_magic_string_executes_when_no_red_evidence(tmp_path):
         {"cmd": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
     ]}})
     # D3-G: with no RED receipt, UNKNOWN predicates no longer block submission.
-    assert adapter.phase == "FINISHED"
+    # This environment returns ordinary "ok", not Submitted. Command text alone
+    # must not declare completion before a native terminal result exists.
+    assert adapter.phase == "IMPLEMENT"
     assert agent.env.executed
+
     assert not any(m.get("role") == "user" and "GT REQUIRES" in str(m.get("content"))
                    for m in msgs)
 
@@ -891,7 +894,7 @@ def test_advisory_mode_never_blocks_submit_on_red_evidence(tmp_path):
     msgs = agent.execute_actions({"extra": {"actions": [
         {"cmd": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
     ]}})
-    assert adapter.phase == "FINISHED"
+    assert adapter.phase == "IMPLEMENT"  # FakeEnv returned ok, not Submitted.
     assert agent.env.executed
     assert not any(m.get("role") == "user" and "GT ADVISORY" in str(m.get("content"))
                    for m in msgs)
@@ -926,7 +929,7 @@ def test_submit_magic_string_executes_when_contract_proven(tmp_path):
     agent.execute_actions({"extra": {"actions": [
         {"cmd": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
     ]}})
-    assert adapter.phase == "FINISHED"
+    assert adapter.phase == "IMPLEMENT"  # FakeEnv returned ok, not Submitted.
     assert agent.env.executed
 
 
@@ -973,7 +976,7 @@ def test_git_based_edit_detection_catches_heredoc_write(tmp_path):
     assert adapter.workspace_epoch == 1
 
 
-def test_result_level_submit_interception_refuses_bypass(monkeypatch, tmp_path):
+def test_result_level_submit_cannot_reuse_preexecution_authority(monkeypatch, tmp_path):
     from minisweagent.exceptions import Submitted
 
     class BypassEnv:
@@ -984,11 +987,14 @@ def test_result_level_submit_interception_refuses_bypass(monkeypatch, tmp_path):
             self.executed.append(action.get("command", ""))
             # The command text has no marker, but its OUTPUT begins with the
             # magic string - Mini-SWE's _check_finished would raise Submitted.
-            raise Submitted({
+            error = Submitted({
                 "role": "exit",
                 "content": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\nfake",
                 "extra": {"exit_status": "Submitted", "submission": "fake"},
             })
+            error.gt_execution_result = {"output": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\nfake",
+                                         "returncode": 0, "exception_info": ""}
+            raise error
 
     agent = FakeAgent()
     agent.env = BypassEnv()
@@ -1000,28 +1006,83 @@ def test_result_level_submit_interception_refuses_bypass(monkeypatch, tmp_path):
     agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
     adapter.record_receipt("p", "pytest", 1, "1 failed", epoch=0, status="RED",
                            semantic=True)
-    msgs = agent.execute_actions({"extra": {"actions": [
-        {"command": "python -c \"print('COMPLETE_' 'TASK_AND_SUBMIT_FINAL_OUTPUT')\"",
-         "tool_call_id": "c1"},
-    ]}})
-    # The gate refused at the RESULT level: the run continues (no Submitted
-    # propagates) and the model sees an explicit, nonterminal GT advisory.
-    assert adapter.phase == "IMPLEMENT"
-    assert any(m.get("role") == "user" and "GT ENFORCED" in str(m.get("content"))
-               for m in msgs)
+    with pytest.raises(Submitted):
+        agent.execute_actions({"extra": {"actions": [
+            {"command": "python -c \"print('COMPLETE_' 'TASK_AND_SUBMIT_FINAL_OUTPUT')\"",
+             "tool_call_id": "c1"},
+        ]}})
     assert agent.env.executed
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    assert not any(row["event"] in {"submit_refusal", "action_suppressed"} for row in rows)
+    assert agent._gt_runtime_hook_handle.session.disabled_stage == "terminal_refusal_authority"
 
 
-def test_result_level_submit_interception_accepts_when_proven(tmp_path):
+@pytest.mark.parametrize("edit", [False, True])
+def test_real_submission_preserves_output_and_edit(monkeypatch, tmp_path, edit):
+    import subprocess
+    import sys
+
+    from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    (tmp_path / "changed.py").write_text("x = 1\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "changed.py"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "fixture"],
+                   check=True, capture_output=True)
+    agent = FakeAgent()
+    agent.env = CredentialIsolatedLocalEnvironment(cwd=str(tmp_path))
+    monkeypatch.setenv("GT_SUBMIT_SUPPRESSION_ENFORCE", "1")
+    adapter = MiniSweAdapter(task_id="real-refusal", state_dir=tmp_path / "state",
+                             repo_root=str(tmp_path), predicates=[Predicate("p", "p")])
+    adapter.provider_boundary = AlwaysSuppressBoundary()
+    install_runtime_hooks(agent, _session(adapter, GTMode.ENFORCED))
+    adapter.record_receipt("p", "pytest", 1, "1 failed", epoch=0, status="RED", semantic=True)
+    gate_epochs = []
+    native_gate = rt._run_submit_gate
+    def observe_gate(session, command, **kwargs):
+        gate_epochs.append(adapter.workspace_epoch)
+        return native_gate(session, command, **kwargs)
+    monkeypatch.setattr(rt, "_run_submit_gate", observe_gate)
+    change = "Path('changed.py').write_text('x = 2'); " if edit else ""
+    command = (f'"{sys.executable}" -c "from pathlib import Path; ' + change +
+               "print('COMPLETE_' + 'TASK_AND_SUBMIT_FINAL_OUTPUT'); print('actual submission')\"")
+    message = {"extra": {"actions": [{"command": command, "tool_call_id": "c1"}]}}
+    from minisweagent.exceptions import Submitted
+    with pytest.raises(Submitted) as caught:
+        agent.execute_actions(message)
+    assert "actual submission" in str(caught.value.messages)
+    assert "actual submission" in caught.value.gt_execution_result["output"]
+    assert gate_epochs == [int(edit)]
+    assert adapter.workspace_epoch == int(edit)
+    assert (tmp_path / "changed.py").read_text() == ("x = 2" if edit else "x = 1\n")
+
+    # An accepted literal-marker action must also pass through observation.
+    agent._gt_runtime_hook_handle.restore()
+    session = _session(adapter, GTMode.ASSISTIVE)
+    install_runtime_hooks(agent, session)
+    accepted_command = (f'"{sys.executable}" -c "from pathlib import Path; '
+                        "Path('changed.py').write_text('x = 3'); "
+                        "print('COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'); print('accepted')\"")
+    with pytest.raises(Submitted) as caught:
+        agent.execute_actions({"extra": {"actions": [{"command": accepted_command}]}})
+    assert "accepted" in str(caught.value.messages)
+    assert adapter.workspace_epoch == int(edit) + 1
+
+
+@pytest.mark.parametrize("has_result", [False, True])
+def test_result_level_submit_interception_accepts_when_proven(tmp_path, has_result):
     from minisweagent.exceptions import Submitted
 
     class BypassEnv:
         def execute(self, action):
-            raise Submitted({
+            self.error = Submitted({
                 "role": "exit",
                 "content": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\nfinal",
                 "extra": {"exit_status": "Submitted", "submission": "final"},
             })
+            if has_result:
+                self.error.gt_execution_result = {"output": "final", "returncode": 0}
+            raise self.error
 
     agent = FakeAgent()
     agent.env = BypassEnv()
@@ -1032,11 +1093,17 @@ def test_result_level_submit_interception_accepts_when_proven(tmp_path):
     adapter.record_receipt("p", "check", 0, "ok", epoch=0, semantic=True)
     import pytest
 
-    with pytest.raises(Submitted):
+    with pytest.raises(Submitted) as caught:
         agent.execute_actions({"extra": {"actions": [
             {"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "tool_call_id": "c1"},
         ]}})
-    assert adapter.phase == "FINISHED"
+    assert caught.value is agent.env.error
+    session = agent._gt_runtime_hook_handle.session
+    if has_result:
+        assert adapter.phase == "FINISHED"
+    else:
+        assert session.disabled_stage == "submitted_result_missing"
+        assert session.integrity_receipt()["valid"] is False
 
 
 def test_failing_test_attributed_to_edited_surface(monkeypatch, tmp_path):
@@ -1551,6 +1618,11 @@ def test_disabled_typed_capability_never_reaches_shell(tmp_path):
     }]}})
     assert agent.env.executed == []
     assert "capability_disabled" in messages[0]["content"]
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    suppressed = [row for row in rows if row["event"] == "action_suppressed"]
+    assert len(suppressed) == 1
+    assert suppressed[0]["reason"] == "capability_disabled"
+    assert not any(row["event"] == "execution_started" for row in rows)
 
 
 def test_gt_on_binds_terminal_failure_and_authorizes_zero_delivery_suppression(
@@ -1757,3 +1829,7 @@ def test_gt_on_real_boundary_suppresses_fresh_recorded_failure_end_to_end(
     task_bytes = b"Fix exact failure."
     assert bound["task_bytes"] == len(task_bytes)
     assert bound["task_bytes_sha256"] == __import__("hashlib").sha256(task_bytes).hexdigest()
+    suppressed = [row for row in rows if row["event"] == "action_suppressed"]
+    assert len(suppressed) == 1
+    assert suppressed[0]["reason"] == "submit_refused"
+    assert suppressed[0]["action_index"] == 2
