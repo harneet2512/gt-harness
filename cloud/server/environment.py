@@ -32,7 +32,9 @@ from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentCo
 __all__ = [
     "CloudLocalEnvironment",
     "LocalEnvironmentConfig",
+    "is_sensitive_env_name",
     "resolve_bash",
+    "scrub_sensitive_mapping",
 ]
 
 
@@ -65,20 +67,20 @@ _WINDOWS_BASH_FALLBACKS = (
 )
 
 
-def _is_sensitive_env_name(name: str) -> bool:
+def is_sensitive_env_name(name: str) -> bool:
     upper = name.upper()
     return upper in _SENSITIVE_SHELL_ENV or upper.endswith(_SENSITIVE_SUFFIXES)
 
 
-def _scrub_sensitive_mapping(value: Any) -> Any:
+def scrub_sensitive_mapping(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: _scrub_sensitive_mapping(item)
+            key: scrub_sensitive_mapping(item)
             for key, item in value.items()
-            if not _is_sensitive_env_name(str(key))
+            if not is_sensitive_env_name(str(key))
         }
     if isinstance(value, list):
-        return [_scrub_sensitive_mapping(item) for item in value]
+        return [scrub_sensitive_mapping(item) for item in value]
     return value
 
 
@@ -114,11 +116,11 @@ class CloudLocalEnvironment(LocalEnvironment):
         return {
             key: value
             for key, value in combined.items()
-            if not _is_sensitive_env_name(key)
+            if not is_sensitive_env_name(key)
         }
 
     def get_template_vars(self, **kwargs: Any) -> dict[str, Any]:
-        return _scrub_sensitive_mapping(super().get_template_vars(**kwargs))
+        return scrub_sensitive_mapping(super().get_template_vars(**kwargs))
 
     # -- execution ------------------------------------------------------------
 

@@ -81,12 +81,34 @@ ENV PYTHONUNBUFFERED=1 \
 
 # git: the runner clones target repositories.
 # bash: mini-swe-agent shells out to bash for every tool call.
+# curl: fetches the Docker CLI below.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         bash \
+        curl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Docker CLI only — no daemon. With SANDBOX_MODE=docker the server drives the
+# HOST daemon through the bind-mounted socket (see cloud/docker-compose.yml) to
+# start, exec into and remove one sandbox container per session. The static
+# binary avoids adding Docker's apt repository and its key to this image; the
+# CLI negotiates its API version down to whatever the host daemon speaks.
+ARG DOCKER_CLI_VERSION=27.5.1
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) dl_arch=x86_64 ;; \
+        arm64) dl_arch=aarch64 ;; \
+        *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://download.docker.com/linux/static/stable/${dl_arch}/docker-${DOCKER_CLI_VERSION}.tgz" \
+        -o /tmp/docker.tgz; \
+    tar -xzf /tmp/docker.tgz -C /tmp docker/docker; \
+    install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
+    rm -rf /tmp/docker /tmp/docker.tgz; \
+    docker --version
 
 WORKDIR /app
 

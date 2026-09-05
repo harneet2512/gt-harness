@@ -314,6 +314,9 @@ def _patched_build_agent(harness: Harness):
         model: str,
         cwd: str,
         gt_mode: str,
+        # SANDBOX_MODE=local in these tests, so this is always None; the
+        # parameter exists so the fake keeps matching the real signature.
+        sandbox: str | None = None,
         step_limit: int,
         temperature: float,
         issue_text: str,

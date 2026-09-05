@@ -21,6 +21,14 @@ from .codegraph import build_graph
 from .conversational_agent import ConversationalAgent, Steering, TurnResult
 from .events import EventBus
 from .prompts import CHAT_BRIEF_TEMPLATE, CHAT_SYSTEM_TEMPLATE
+from .sandbox import (
+    SANDBOX_WORKDIR,
+    ensure_running,
+    is_docker_mode,
+    reap_sandboxes,
+    remove_sandbox,
+    start_sandbox,
+)
 from .store import SessionStore, new_id
 from .workspace import (
     TRAJECTORY_NAME,
@@ -47,6 +55,8 @@ class _SessionState:
     session_id: str
     workspace: str | None = None
     agent: ConversationalAgent | None = None
+    #: name of this session's sandbox container (SANDBOX_MODE=docker only)
+    sandbox: str | None = None
     #: GT graph database built for this workspace, mirrored on the session row
     graph_db: str | None = None
     #: last file-relation graph, keyed by its tree signature (see ``graph``)
@@ -155,6 +165,7 @@ class SessionManager:
                 str(session["repo"]), str(session["ref"]), workspace
             )
             state.workspace = workspace
+            state.sandbox = self._start_sandbox(session_id, workspace, loop)
 
             gt_status, graph_db = self._prepare_gt(session, workspace, loop)
             state.graph_db = graph_db
@@ -177,6 +188,29 @@ class SessionManager:
                 loop, session_id, "lifecycle", {"status": "failed", "error": error}
             )
             self._bus.finish(session_id)
+
+    def _start_sandbox(
+        self, session_id: str, workspace: str, loop: asyncio.AbstractEventLoop
+    ) -> str | None:
+        """Bring up this session's container. Fails the session if it cannot.
+
+        Fail closed: there is no fallback to local execution, because that
+        would silently drop both the isolation and the egress policy the
+        sandbox exists to enforce.
+        """
+        if not is_docker_mode():
+            return None
+        self._emit(loop, session_id, "lifecycle", {"status": "sandbox_starting"})
+        try:
+            info = start_sandbox(session_id, workspace)
+        except Exception as exc:  # noqa: BLE001 - re-raised, the caller fails
+            self._emit(loop, session_id, "lifecycle", {
+                "status": "sandbox_failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            raise
+        self._emit(loop, session_id, "lifecycle", {"status": "sandbox_ready", **info})
+        return info["container"]
 
     def _prepare_gt(
         self, session: dict, workspace: str, loop: asyncio.AbstractEventLoop
@@ -437,6 +471,9 @@ class SessionManager:
         if session["status"] == "running":
             await asyncio.to_thread(state.turn_done.wait, _CLOSE_WAIT_SECONDS)
 
+        if is_docker_mode():
+            # Before the workspace: the container bind-mounts it.
+            await asyncio.to_thread(remove_sandbox, session_id)
         workspace = state.workspace or session.get("workspace_path")
         if workspace:
             remove_workspace(str(workspace))
@@ -472,6 +509,25 @@ class SessionManager:
                 "type": "lifecycle",
                 "data": {"status": "failed", "error": error},
             })
+        await self._reap_sandboxes()
+
+    async def _reap_sandboxes(self) -> None:
+        """Drop containers whose session is gone; keep the ones still usable.
+
+        A sandbox outlives a server restart on purpose — the workspace is still
+        on disk and the session is still ``idle``, so the same container keeps
+        serving it. Only sessions that no longer exist (or are closed/failed)
+        lose theirs.
+        """
+        if not is_docker_mode():
+            return
+        sessions = await self._store.list_sessions(limit=10_000)
+        keep = {
+            str(session["id"])
+            for session in sessions
+            if str(session["status"]) not in {"closed", "failed"}
+        }
+        await asyncio.to_thread(reap_sandboxes, keep)
 
     # -- diff -----------------------------------------------------------------
 
@@ -537,6 +593,10 @@ class SessionManager:
         if not workspace:
             raise RuntimeError("session has no workspace")
         state.workspace = workspace
+        # After a restart the container is still there but `state` is fresh, so
+        # the name is re-derived and checked rather than trusted.
+        sandbox = ensure_running(str(session["id"])) if is_docker_mode() else None
+        state.sandbox = sandbox
         config = _session_config(session)
         agent = self._build_agent(
             session_id=str(session["id"]),
@@ -544,6 +604,7 @@ class SessionManager:
             ref=str(session["ref"]),
             model=str(session["model"]),
             cwd=workspace,
+            sandbox=sandbox,
             gt_mode=str(session["gt_mode"]),
             step_limit=int(config.get("step_limit", 60)),
             temperature=float(config.get("temperature", 0.0)),
@@ -566,6 +627,7 @@ class SessionManager:
         ref: str,
         model: str,
         cwd: str,
+        sandbox: str | None,
         gt_mode: str,
         step_limit: int,
         temperature: float,
@@ -607,9 +669,23 @@ class SessionManager:
                 )
                 gt_off = True
 
-        env_obj = CloudLocalEnvironment(
-            config_class=LocalEnvironmentConfig, cwd=cwd, timeout=30
-        )
+        # The sandbox sees the workspace at /workspace, the server sees it at
+        # its host path. GT indexing, the scratch dir and the diff stay on the
+        # host path; only the agent's shell and its brief move.
+        env_obj: Any
+        if sandbox:
+            from .sandbox import DockerSandboxEnvironment
+
+            env_obj = DockerSandboxEnvironment(
+                container=sandbox, image=os.environ.get("SANDBOX_IMAGE", ""),
+                cwd=SANDBOX_WORKDIR, timeout=30,
+            )
+            env_cwd = SANDBOX_WORKDIR
+        else:
+            env_obj = CloudLocalEnvironment(
+                config_class=LocalEnvironmentConfig, cwd=cwd, timeout=30
+            )
+            env_cwd = cwd
         scratch = state_dir(cwd)
         scratch.mkdir(parents=True, exist_ok=True)
 
@@ -624,7 +700,7 @@ class SessionManager:
             cost_limit=0.0,
             output_path=scratch / TRAJECTORY_NAME,
         )
-        agent.extra_template_vars |= {"repo": repo, "ref": ref, "cwd": cwd}
+        agent.extra_template_vars |= {"repo": repo, "ref": ref, "cwd": env_cwd}
 
         if not gt_off:
             self._install_gt(

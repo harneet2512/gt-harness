@@ -130,7 +130,7 @@ plus a `: ping` comment heartbeat every 15s.
 
 | Type | `data` |
 |---|---|
-| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `failed{error}`, `closed` |
+| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `failed{error}`, `closed` |
 | `turn_started` | `{turn_id, message_id}` |
 | `assistant` | `{turn_id, content, actions[], step, n_calls, cost}` |
 | `tool_call` | `{turn_id, command, step, n_calls}` |
@@ -158,11 +158,120 @@ Browser (React) ←→ FastAPI ←→ ConversationalAgent (mini-SWE) + GT engine
 - `prompts.py` — chat system prompt + session brief, derived from mini-SWE's
   `mini.yaml` action format.
 - `environment.py` — `CloudLocalEnvironment`: credential-scrubbed, real bash.
+- `sandbox.py` — `DockerSandboxEnvironment` and the sandbox lifecycle: one
+  container per session, an internal network, an allow-listed egress proxy.
+
+## Sandboxing (`SANDBOX_MODE`)
+
+`SANDBOX_MODE=local` (the default) runs agent commands in the server process's
+own machine account, as before. `SANDBOX_MODE=docker` gives every session its
+own container:
+
+- `gt-sandbox-<session_id>`, started right after the clone and removed on
+  `close()`; orphans are reaped at startup. The workspace is **bind-mounted** at
+  `/workspace`, so the server keeps writing `.gt_state/` and indexing the same
+  files the agent edits.
+- uid 1000 (`agent`), `--memory 2g --cpus 2 --pids-limit 512`, tmpfs `/tmp`,
+  `no-new-privileges`, `--cap-drop ALL`, and **no Docker socket**.
+- Egress: the sandbox network is `--internal` (no route off-host, no external
+  DNS). The only way out is the `gt-egress-proxy` container, which serves
+  github.com/\*.github.com/codeload/objects.githubusercontent.com, plus
+  pypi/files.pythonhosted/registry.npmjs while `SANDBOX_ALLOW_REGISTRIES=1`.
+  Everything else gets 403 — **including the model API**, which the server
+  calls, not the sandbox.
+- Fail closed: a sandbox that will not start fails the session. There is no
+  silent fallback to local execution.
+
+Build the images and run it:
+
+```bash
+docker compose -f cloud/docker-compose.yml --profile build build
+docker compose -f cloud/docker-compose.yml up -d
+```
+
+Lifecycle events: `sandbox_starting`, `sandbox_ready{container, image,
+image_digest}`, `sandbox_failed{error}`. Full design, commands and evidence:
+[docs/cloud-sandbox.md](../docs/cloud-sandbox.md).
+
+## Deploy to a Codespace
+
+The internal deployment runs on GitHub Codespaces: no infrastructure, and a
+public HTTPS origin with a certificate for free. Rationale, cost and the plain-VM
+differences: [docs/cloud-vm-substrate.md](../docs/cloud-vm-substrate.md).
+
+**1. Create the codespace on this branch.** `.devcontainer/devcontainer.json`
+asks for 4 cores, docker-in-docker (the server needs a Docker daemon to run
+sandboxes) and `forwardPorts: [80, 8000]`.
+
+```bash
+gh codespace create -R harneet2512/gt-harness -b cloud/internal-harness    -m standardLinux32gb
+NAME=$(gh codespace list --json name,repository -q '.[0].name')
+gh codespace ssh -c "$NAME"
+```
+
+**2. Write `cloud/.env`** inside the codespace. Same keys as
+`cloud/.env.example`, with two that matter here:
+
+```bash
+UI_ORIGIN=/                       # the UI is same-origin behind nginx
+WORKSPACES_HOST_DIR=/srv/gt-workspaces
+```
+
+Leave `CORS_ORIGINS` empty — cross-origin is exactly what port 80 avoids.
+
+**3. Bring the stack up.**
+
+```bash
+docker compose -f cloud/docker-compose.yml --profile build build   # sandbox image
+docker compose -f cloud/docker-compose.yml up -d --build
+curl -s localhost/health
+```
+
+`ui` (nginx) listens on **80** and proxies `/api`, `/auth` and `/health` to
+`server:8000`; nothing but port 80 needs to be reachable.
+
+**4. Make port 80 public.**
+
+```bash
+gh codespace ports visibility 80:public -c "$NAME"
+gh codespace ports -c "$NAME"          # confirm it is listed
+```
+
+If `https://$NAME-80.app.github.dev` returns a **404 with an empty body**, that
+is the Codespaces edge saying the port is not registered, not the app failing:
+a codespace only auto-registers ports it observes, and a stack started over SSH
+with no VS Code client attached is not observed. `forwardPorts` in the
+devcontainer fixes it at creation; for a codespace already running, hold a
+tunnel from your workstation as an interim —
+
+```bash
+gh codespace ports forward 80:18080 -c "$NAME" &   # then use localhost:18080
+```
+
+— and expect it to drop (`websocket: close 1006`) on a flaky link.
+
+**5. Point the OAuth App at that origin.** In
+[GitHub → Developer settings → OAuth Apps](https://github.com/settings/developers):
+
+| Field | Value |
+|-------|-------|
+| Homepage URL | `https://<codespace-name>-80.app.github.dev` |
+| Authorization callback URL | `https://<codespace-name>-80.app.github.dev/auth/callback` |
+
+The callback host must match the forwarded origin exactly. A codespace rebuilt
+under a new name gets a new hostname, so the OAuth App has to be updated with
+it — one more reason a plain VM with a stable DNS name is the end state.
+Restrict who can log in with `ALLOWED_GITHUB_LOGINS`.
+
+**6. Open it**, sign in with GitHub, and start a session. Stop the codespace
+when you are done (`gh codespace stop -c "$NAME"`): compute billing stops,
+storage does not.
 
 ## Known Limitations
 
-- No container isolation per session — the agent runs shell commands in the
-  server process's machine account.
+- `SANDBOX_MODE=local` (the default) has no container isolation — the agent
+  runs shell commands in the server process's machine account. Set
+  `SANDBOX_MODE=docker` for per-session isolation and the egress policy.
 - Single server, SQLite, no horizontal scaling.
 - Sessions found `running` after a restart become `idle` with a system note; the
   interrupted turn is not resumed.
