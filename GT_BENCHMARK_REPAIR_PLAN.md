@@ -569,3 +569,19 @@ Its executed Linux build identity matches the artifact metadata, including build
 ID. The actual binary parsed a TSX component completely with Widget declaration
 and rejected a wrong content hash as incomplete. These are candidate component
 checks, not an exact-source review certificate or a certified installed bundle.
+
+Immutable full regression at `66f99c240aa738465cfad5ae5dd699ed5f2956d2`:
+**1,354 passed, 96 skipped in 309.26s**. Source was unchanged during the run.
+Canonical CI 33989219342 remains FAIL solely on wheel_source_correspondence_mismatch.
+
+Exact pin dependency verified: remote gt-review-inbox is still
+`c86d7d515f9178ef138dbaeb46ce53440d13a727`; its entire inbox contains neither
+the unified source SHA 1ecd0367 nor reconstruction SHA 473ebdb8. The lineage
+verifier requires a live digest-bound check_outcome/PASS packet for the exact
+source. Repinning without that packet merely changes the failure to
+exact_source_review_packet_missing. Requested genuine publication from the
+review/inbox owner in HAR-83 comment d0a41e59-6774-411a-ae3e-e9558e77d9ab.
+No certificate was fabricated and no certified pins were changed. The next
+release step is coherent rebinding once that exact-source packet is available;
+the broader capability, context, graph, retrieval and unpaid-rehearsal work
+remains open. No paid dispatch was authorized or performed.
