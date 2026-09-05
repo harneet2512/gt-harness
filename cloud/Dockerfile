@@ -56,7 +56,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     SOURCE_FINGERPRINT="$(find . -type f \( -name '*.go' -o -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.s' -o -name 'go.mod' -o -name 'go.sum' \) -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)"; \
     GO_TOOLCHAIN="$(go env GOVERSION)"; \
     BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
-    LDFLAGS="-linkmode external -extldflags=-static -X main.commitSHA=${SHA}+${PRODUCER_VARIANT} -X main.buildTimeUTC=${BUILD_TIME} -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}"; \
+    VARIANT="${PRODUCER_VARIANT:-$(tr -d '[:space:]' < /producer/PRODUCER_VARIANT)}"; \n    LDFLAGS="-linkmode external -extldflags=-static -X main.commitSHA=${SHA}+${VARIANT} -X main.buildTimeUTC=${BUILD_TIME} -X main.sourceFingerprint=${SOURCE_FINGERPRINT} -X main.compiledBuildTags=sqlite_fts5 -X main.goToolchain=${GO_TOOLCHAIN}"; \
     mkdir -p /out; \
     CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
         -buildvcs=false -tags sqlite_fts5 -trimpath -mod=readonly \
