@@ -5,16 +5,21 @@ which is attached once at the router so no endpoint can forget it.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .auth import require_user
 from .deps import get_event_bus, get_manager, get_store
 from .events import EventBus
 from .models import (
+    MAX_TASKS_PER_SPAWN,
+    AgentApplied,
+    AgentSpawn,
+    AgentsSpawned,
     Message,
     MessageAccepted,
     MessageCreate,
@@ -25,7 +30,14 @@ from .models import (
     SessionTree,
     TurnReceipt,
 )
-from .runner import ConcurrencyLimit, ModelUnavailable, SessionManager
+from .runner import (
+    PRIMARY_ROLE,
+    ApplyConflict,
+    ApplyRefused,
+    ConcurrencyLimit,
+    ModelUnavailable,
+    SessionManager,
+)
 from .store import SessionStore
 
 router = APIRouter(dependencies=[Depends(require_user)])
@@ -35,9 +47,28 @@ _GITHUB_REPO_RE = re.compile(r"^https://github\.com/[\w\-\.]+/[\w\-\.]+(?:\.git)
 #: a message cannot start or steer a turn in these states
 _CLOSED_TO_MESSAGES = {"creating", "closed", "failed"}
 
+#: one worker per line: ``/spawn <task>``. A message whose first non-blank
+#: line is one of these is a spawn command and never reaches a model.
+_SPAWN_LINE = re.compile(r"^\s*/spawn\s+(?P<task>\S.*?)\s*$")
+
 StoreDep = Annotated[SessionStore, Depends(get_store)]
 ManagerDep = Annotated[SessionManager, Depends(get_manager)]
 BusDep = Annotated[EventBus, Depends(get_event_bus)]
+
+
+def _worker_report(row: dict) -> dict[str, Any] | None:
+    """A worker's stored report, with ``applied`` read off the row itself."""
+    raw = row.get("report_json")
+    if not raw:
+        return None
+    try:
+        report = json.loads(str(raw))
+    except ValueError:
+        return None
+    if not isinstance(report, dict):
+        return None
+    report["applied"] = bool(row.get("applied_at"))
+    return report
 
 
 def _session_view(row: dict) -> dict[str, Any]:
@@ -59,7 +90,58 @@ def _session_view(row: dict) -> dict[str, Any]:
         "total_wall_seconds": row.get("total_wall_seconds", 0.0),
         "current_turn_id": row.get("current_turn_id"),
         "closed_reason": row.get("closed_reason"),
+        "parent_id": row.get("parent_id"),
+        "role": row.get("role") or PRIMARY_ROLE,
+        "task": row.get("task"),
+        "report": _worker_report(row),
+        "applied_at": row.get("applied_at"),
     }
+
+
+def _spawn_tasks(content: str) -> list[str] | None:
+    """The tasks a ``/spawn`` message asks for, or ``None`` if it is a message.
+
+    A message either *is* a spawn command — every non-blank line a
+    ``/spawn <task>`` — or it is not one at all. Half a command is a 400
+    rather than a turn that quietly runs the word "/spawn" past a model.
+    """
+    lines = [line for line in content.splitlines() if line.strip()]
+    if not lines or _SPAWN_LINE.match(lines[0]) is None:
+        return None
+    tasks: list[str] = []
+    for line in lines:
+        match = _SPAWN_LINE.match(line)
+        if match is None:
+            raise HTTPException(
+                400,
+                "a /spawn message may only contain /spawn lines "
+                "(one task per line)",
+            )
+        tasks.append(match.group("task"))
+    if len(tasks) > MAX_TASKS_PER_SPAWN:
+        raise HTTPException(
+            400, f"at most {MAX_TASKS_PER_SPAWN} tasks per /spawn message"
+        )
+    return tasks
+
+
+async def _require_worker(
+    store: SessionStore, session_id: str, worker_id: str
+) -> dict:
+    worker = await store.get_session(worker_id)
+    if worker is None or str(worker.get("parent_id") or "") != session_id:
+        raise HTTPException(404, "worker not found for this session")
+    return worker
+
+
+def _spawnable(session: dict) -> None:
+    """Raise unless this session may spawn workers right now."""
+    if str(session.get("role") or PRIMARY_ROLE) != PRIMARY_ROLE:
+        raise HTTPException(409, "a worker cannot spawn workers")
+    if session["status"] in _CLOSED_TO_MESSAGES:
+        raise HTTPException(
+            409, f"session is {session['status']} and cannot spawn workers"
+        )
 
 
 def _session_config(body: SessionCreate) -> dict[str, Any]:
@@ -106,7 +188,9 @@ async def create_session(
         config=_session_config(body),
     )
     try:
-        await manager.create_workspace(session_id)
+        await manager.create_workspace(
+            session_id, first_message=body.first_message
+        )
     except ConcurrencyLimit as exc:
         # The row exists, so the failure is visible rather than a silent 500.
         await store.update_status(session_id, "failed", closed_reason="failed")
@@ -144,11 +228,93 @@ async def post_message(
         raise HTTPException(
             409, f"session is {session['status']} and cannot accept messages"
         )
+    tasks = _spawn_tasks(body.content)
+    if tasks is not None:
+        _spawnable(session)
+        try:
+            message = await manager.spawn_from_chat(session, tasks, body.content)
+        except ModelUnavailable as exc:
+            raise HTTPException(400, f"model not available: {exc}") from exc
+        except ConcurrencyLimit as exc:
+            raise HTTPException(429, str(exc)) from exc
+        return {"message": message, "delivery": "spawned"}
     try:
         message, delivery = await manager.post_message(session_id, body.content)
     except ConcurrencyLimit as exc:
         raise HTTPException(429, str(exc)) from exc
     return {"message": message, "delivery": delivery}
+
+
+@router.post(
+    "/sessions/{session_id}/agents",
+    response_model=AgentsSpawned,
+    status_code=202,
+)
+async def spawn_agents(
+    session_id: str, body: AgentSpawn, store: StoreDep, manager: ManagerDep
+) -> dict[str, Any]:
+    """Spawn one worker agent per task. All of them, or none at all."""
+    session = await _require_session(store, session_id)
+    _spawnable(session)
+    try:
+        workers = await manager.spawn_agents(
+            session, body.tasks, model=body.model, gt_mode=body.gt_mode
+        )
+    except ModelUnavailable as exc:
+        raise HTTPException(400, f"model not available: {exc}") from exc
+    except ConcurrencyLimit as exc:
+        raise HTTPException(429, str(exc)) from exc
+    return {"workers": [_session_view(worker) for worker in workers]}
+
+
+@router.get("/sessions/{session_id}/agents", response_model=list[Session])
+async def list_agents(
+    session_id: str, store: StoreDep, manager: ManagerDep
+) -> list[dict[str, Any]]:
+    await _require_session(store, session_id)
+    return [_session_view(w) for w in await manager.list_workers(session_id)]
+
+
+@router.post(
+    "/sessions/{session_id}/agents/{worker_id}/apply",
+    response_model=AgentApplied,
+)
+async def apply_agent(
+    session_id: str, worker_id: str, store: StoreDep, manager: ManagerDep
+) -> Any:
+    """Merge a worker's cumulative diff into this session's workspace."""
+    session = await _require_session(store, session_id)
+    worker = await _require_worker(store, session_id, worker_id)
+    if session["status"] != "idle":
+        raise HTTPException(
+            409,
+            f"session is {session['status']}; a worker's changes can only be "
+            "applied while it is idle",
+        )
+    try:
+        return await manager.apply_worker(session, worker)
+    except ApplyRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ApplyConflict as exc:
+        # `conflicts` is top level, not buried in `detail`: it is the answer,
+        # not a decoration on the error string.
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(exc), "conflicts": exc.conflicts},
+        )
+
+
+@router.post(
+    "/sessions/{session_id}/agents/{worker_id}/close", response_model=Session
+)
+async def close_agent(
+    session_id: str, worker_id: str, store: StoreDep, manager: ManagerDep
+) -> dict[str, Any]:
+    """Close one worker. The same thing as `/sessions/{worker_id}/close`."""
+    await _require_session(store, session_id)
+    await _require_worker(store, session_id, worker_id)
+    await manager.close(worker_id)
+    return _session_view(await store.get_session(worker_id))  # type: ignore[arg-type]
 
 
 @router.get("/sessions/{session_id}/events")

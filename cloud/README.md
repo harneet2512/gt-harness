@@ -114,7 +114,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/sessions` | Create a session (`repo`, `ref`, `model`, `gt_mode`, `step_limit`, `wall_seconds` (60–3600, default `TURN_WALL_SECONDS`), `temperature`) → 201 `Session`. **400** on a non-GitHub URL, or `model not available: <reason>` when the creation preflight (`MODEL_PREFLIGHT`) cannot get a 1-token completion out of the provider. **422** on an unknown `gt_mode`, a blank `model`, or a `ref` that is blank, has control characters or starts with `-`. **429** when `MAX_CONCURRENT_CREATIONS` clones are already in flight. |
+| POST | `/api/sessions` | Create a session (`repo`, `ref`, `model`, `gt_mode`, `step_limit`, `wall_seconds` (60–3600, default `TURN_WALL_SECONDS`), `temperature`, `first_message`) → 201 `Session`. `first_message` starts the first turn by itself as soon as the workspace is ready — create-and-send in one call, no polling for `idle` (**422** if it is blank). **400** on a non-GitHub URL, or `model not available: <reason>` when the creation preflight (`MODEL_PREFLIGHT`) cannot get a 1-token completion out of the provider. **422** on an unknown `gt_mode`, a blank `model`, or a `ref` that is blank, has control characters or starts with `-`. **429** when `MAX_CONCURRENT_CREATIONS` clones are already in flight. |
 | GET | `/api/sessions` | List sessions, newest first |
 | GET | `/api/sessions/:id` | One session |
 | GET | `/api/sessions/:id/messages` | Full conversation, in order |
@@ -125,7 +125,11 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 | GET | `/api/sessions/:id/graph` | File relation graph (`{base_sha, gt, nodes:[{id,path,size,lang,dir}], edges:[{source,target,kind,weight}]}`). `kind` is `import` (static imports) or `gt_call`/`gt_ref`/`gt_import` (GT symbol edges collapsed to file level, only when `gt_status` is `ready`; `gt` says whether they are in). Nodes are exactly the files `/tree` returns; over 5000 files only the busiest survive and `truncated: true` is added. |
 | GET | `/api/sessions/:id/receipts` | One receipt per turn |
 | POST | `/api/sessions/:id/stop` | Stop the running turn at the next step boundary → 202 (409 if idle) |
-| POST | `/api/sessions/:id/close` | Kill the turn, delete the workspace, status `closed`, `closed_reason: "user"` (idempotent) |
+| POST | `/api/sessions/:id/close` | Kill the turn, delete the workspace, status `closed`, `closed_reason: "user"` (idempotent). **Cascades**: every live worker of the session is closed the same way first. |
+| POST | `/api/sessions/:id/agents` | Spawn worker agents: `{tasks: [str] (1–4), model?, gt_mode?}` → 202 `{workers: [Session]}`. All of them or none: **429** when `MAX_CONCURRENT_CREATIONS`, `MAX_CONCURRENT_SESSIONS` or `MAX_WORKERS_PER_SESSION` cannot cover the whole set, and nothing is created. **409** on a worker (workers do not spawn workers) or a session that is `creating`/`closed`/`failed`; **400** on a `model` the provider will not serve; **422** on an empty, blank or over-long (>4) task list. |
+| GET | `/api/sessions/:id/agents` | This session's workers, oldest first — `Session` objects, so `task`, `report`, `applied_at` and `status` come with them |
+| POST | `/api/sessions/:id/agents/:worker/apply` | 3-way merge the worker's cumulative diff into this session's workspace → 200 `{worker_id, files, patch_sha256}`. **409** `{detail, conflicts: [paths]}` when it does not merge — and the workspace is then byte-for-byte what it was. **409** unless the session is `idle`; **400** when the worker changed nothing (a closed worker has no workspace left, so apply before closing); **404** when the worker is not this session's. |
+| POST | `/api/sessions/:id/agents/:worker/close` | Close one worker → 200 `Session`. Exactly the same thing as `POST /api/sessions/:worker/close`. |
 | GET | `/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logout` | GitHub OAuth |
 | GET | `/health` | Public liveness probe |
 
@@ -135,8 +139,14 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 {id, status: creating|idle|running|failed|closed, repo, ref, model, gt_mode,
  gt_status: off|ready|unavailable|pending, gt_error, created_at, updated_at,
  last_message, turns, steps, cost, total_wall_seconds, current_turn_id,
- closed_reason: user|expired|failed|null}
+ closed_reason: user|expired|failed|null,
+ parent_id: str|null, role: primary|worker, task: str|null, applied_at: float|null,
+ report: {finish_reason, reply_excerpt, patch_sha256, files_changed, applied}|null}
 ```
+
+`parent_id`, `role`, `task`, `report` and `applied_at` are the worker-agent
+fields — see [Worker agents](#worker-agents). On a session a user created they
+are `null` / `"primary"`.
 
 `gt_error` is the reason GT is unavailable, in the indexer's own words (e.g.
 `RuntimeError: index status build_failed: nonzero_exit`), and `null` whenever
@@ -234,7 +244,125 @@ plus a `: ping` comment heartbeat every 15s.
 | `agent_reply` | `{turn_id, message_id, content, finish_reason, n_calls, cost, patch_sha256, files_changed}` |
 | `turn_finished` | `{turn_id, finish_reason, n_calls, cost, patch_sha256, files_changed}` — `finish_reason` is one of `reply`, `question`, `step_limit`, `time_limit`, `stopped`, `submitted`, `error`, `interrupted`. The `interrupted` one comes from `recover()` and carries no patch fields. |
 | `agent_error` | `{turn_id?, error}` — named `agent_error`, never `error`, which collides with `EventSource`'s native error event |
-| `system_note` | `{turn_id, message_id, content}` — a message from the *server*, not the agent. Currently only *"Server restarted; turn interrupted"*, published by `recover()` alongside the `turn_finished {finish_reason: "interrupted"}` for that turn. |
+| `system_note` | `{turn_id?, message_id, content}` — a message from the *server*, not the agent: *"Server restarted; turn interrupted"* (from `recover()`, alongside that turn's `turn_finished {finish_reason: "interrupted"}`), the answer to a `/spawn` message, and *"applied worker &lt;id&gt;: N files"*. |
+| `agent_spawned` | `{worker_id, task}` — on the **parent's** stream, one per worker, as it is created |
+| `agent_report` | `{worker_id, message_id, finish_reason, content, patch_sha256, files_changed, n_calls, cost}` — on the parent's stream when a worker's turn ends. `content` is the worker's whole reply; the same text is in the parent's `messages` as a `role: "agent"` message with `meta.agent_id`. |
+| `agent_applied` | `{worker_id, files, patch_sha256}` — a worker's patch landed in the parent's workspace |
+| `agent_closed` | `{worker_id, reason}` — a worker closed, whether by its own `/close`, the parent's, or the idle reaper |
+
+## Worker agents
+
+A session can spawn **worker agents** and watch them work: one task in, one
+child session out, each with its own clone, sandbox, transcript and receipts.
+
+### The model
+
+A worker **is a session**. It carries its parent's `repo`, `ref`, `model`,
+`gt_mode` and per-session knobs (`step_limit`, `wall_seconds`, `temperature`),
+plus `parent_id`, `role: "worker"` and the `task` it was spawned with. That
+task is its opening message: the first turn starts by itself the moment the
+clone is `idle` — spawning and sending are one action, not two calls with a
+poll in between. `POST /api/sessions` takes the same path through
+`first_message`.
+
+Workers are autonomous but not disposable. When a worker's turn ends — with
+**any** `finish_reason` — it *reports* to its parent and goes back to `idle`.
+It is a normal session while it sits there: `POST
+/api/sessions/:worker/messages` gives it another turn (and another report),
+`/diff`, `/tree`, `/graph`, `/receipts` and `/events` all work on it, and the
+idle-session reaper treats it like anything else. Closing the parent closes
+every live worker first.
+
+> A worker cannot spawn workers (409). One level keeps the parent's stream the
+> only stream a client has to watch.
+
+### Spawning
+
+```bash
+curl -s -X POST $API/sessions/$ID/agents -H "$AUTH" \
+     -H 'Content-Type: application/json' \
+     -d '{"tasks":["port the parser to the new AST","write the tests for it"]}'
+```
+
+1–4 tasks, one worker each, **all of them or none**: the creation slots for the
+whole set are taken up front, and if `MAX_CONCURRENT_CREATIONS`,
+`MAX_CONCURRENT_SESSIONS` or `MAX_WORKERS_PER_SESSION` (default 4 live workers
+per session) cannot cover it the call is a 429 and nothing is created. `model`
+and `gt_mode` may be overridden per spawn; a `model` the provider will not
+serve is a 400 from the same preflight session creation uses.
+
+> **The defaults are smaller than four.** `MAX_CONCURRENT_CREATIONS` and
+> `MAX_CONCURRENT_SESSIONS` are both 3, so a four-task spawn is a 429 out of
+> the box. Raise both to `1 + MAX_WORKERS_PER_SESSION` (5) if you want a
+> session and a full set of workers all working at once.
+
+The chat box does it too. A message to a primary session whose **first
+non-blank line** is `/spawn <task>` is the spawn call: no turn is started, no
+model sees it, and the 202 comes back as `{message, delivery: "spawned"}` where
+`message` is the server's `system_note` listing the new workers.
+
+```
+/spawn port the parser to the new AST
+/spawn write the tests for it
+```
+
+Every non-blank line has to be a `/spawn` line: `/spawn fix it` followed by
+prose is a **400**, not a turn that quietly runs the word `/spawn` past a
+model. A message that merely mentions `/spawn` later on is an ordinary turn.
+
+### Watching them: one stream
+
+The parent's `/events` stream carries everything:
+
+* `agent_spawned` when each worker is created,
+* the worker's own `turn_started`, `assistant`, `tool_call`, `tool_result` and
+  `turn_finished` frames, **mirrored** onto the parent's stream with an extra
+  `agent_id: "<worker id>"` field — so a graph can draw each worker's trail in
+  its own colour from one subscription,
+* `agent_report` when a worker's turn ends,
+* `agent_applied` and `agent_closed`.
+
+`agent_id` is the whole protocol: a frame that has it belongs to that worker, a
+frame without it is the primary session's own. It is **absent** (not `null`) on
+primary-session frames, and only the five frame types above are mirrored —
+`lifecycle`, `agent_reply`, `agent_error`, `steering` and `system_note` stay on
+the worker's own stream. Mirrored frames are re-published, so they have their
+own event ids on the parent's stream; the worker's `/events` still has the
+originals, and the two id spaces are unrelated.
+
+A stream is not a record: the report is also written into the parent's
+`messages` as a `role: "agent"` message with `meta.agent_id`,
+`meta.finish_reason`, `meta.patch_sha256` and `meta.files_changed`, so a reload
+shows it, and onto the worker's own row as `report`.
+
+### Taking the work
+
+```bash
+curl -s -X POST $API/sessions/$ID/agents/$WORKER/apply -H "$AUTH"
+```
+
+This 3-way merges the worker's cumulative diff (the same patch its `/diff`
+serves) into the **parent's** workspace, which must be `idle`. On success the
+parent's own `/diff` contains the worker's files, an `agent_applied` event and
+a `system_note` *"applied worker &lt;id&gt;: N files"* land on its stream, and
+the worker row keeps `applied_at` + `applied_sha256` (and `report.applied`
+becomes `true`).
+
+On conflict the answer is **409 `{detail, conflicts: ["path", ...]}`** and the
+parent's workspace is untouched — no conflict markers, no half-applied tree.
+Both halves of that are deliberate:
+
+* `git apply --3way` implies `--index`, and after `compute_diff`'s `add -N`
+  every file the session has edited differs from the index, so the parent's own
+  work is fully staged first and the index is put back (`reset` + `add -N`)
+  afterwards. Neither step touches a file on disk.
+* `git apply --3way --check` exits **0** for a patch it would only apply *with
+  conflict markers*, so the pre-apply tree is recorded with `write-tree` and
+  restored with `read-tree -u --reset` if the real apply still conflicts.
+
+Applying does not tell the parent's *agent* anything — the system note is for
+the human. If the parent should reason about the merged code, say so in the
+next message.
 
 ## Architecture
 
@@ -249,7 +377,8 @@ Browser (React) ←→ FastAPI ←→ ConversationalAgent (mini-SWE) + GT engine
   boundaries, per-turn step and wall-clock budgets, observation truncation past
   `MAX_CONTEXT_CHARS`.
 - `runner.py` — `SessionManager`: workspaces, turn scheduling under a per-session
-  lock, receipts, diffs, restart recovery, the idle-session TTL reaper.
+  lock, receipts, diffs, restart recovery, the idle-session TTL reaper, and
+  worker agents (spawn, report, mirror, apply, cascading close).
 - `store.py` — SQLite: `sessions`, `messages`, `turns`, `events`,
   `diff_snapshots`. The schema is drop-and-recreate on version change (dev
   tool).
@@ -419,6 +548,13 @@ storage does not.
 - `SANDBOX_WORKSPACE_MAX_MB` is a watermark checked between commands, not a
   kernel quota: a single write larger than the cap still lands on disk and is
   caught immediately afterwards.
+- A worker's patch can only be applied while its workspace still exists, so
+  `apply` before `close` — closing a worker deletes its clone like any other
+  session's. Applying is also not transactional against the parent's *agent*: it
+  changes files, not the transcript.
+- Workers are one level deep (a worker cannot spawn workers), and `apply` merges
+  one worker at a time; applying two workers that touched the same lines gives
+  the second one a 409.
 - GT evidence artifacts (`gt.evidence_artifact.v1`) are not persisted into the
   session transcript, so GT's contribution is visible in `/graph` but not
   receipted in the trajectory.

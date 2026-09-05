@@ -54,6 +54,18 @@ _CLONE_ERRORS = (
     ("permission denied", "the server is not allowed to read this repository"),
 )
 
+#: git's own words when a 3-way apply did not merge a path cleanly. `git apply
+#: --3way --check` exits **0** for a patch it can only apply with conflict
+#: markers, so the text is the only signal there is.
+_APPLY_CONFLICTS = (
+    re.compile(r"Applied patch to '(?P<path>.+?)' with conflicts"),
+    re.compile(r"error: patch failed: (?P<path>.+?):\d+"),
+    re.compile(
+        r"error: (?P<path>.+?): (?:patch does not apply|does not match index"
+        r"|already exists in working directory|No such file or directory)"
+    ),
+)
+
 #: `git diff --name-status` codes we map to the API's file statuses
 _STATUS_NAMES = {"A": "added", "D": "deleted"}
 #: harness scratch is never part of a patch
@@ -351,6 +363,68 @@ def compute_diff(workspace: str, base_sha: str) -> dict:
     return {"patch": patch, "files": files, "base_sha": base_sha}
 
 
+def apply_patch(workspace: str, patch: str) -> tuple[bool, list[str]]:
+    """3-way merge ``patch`` into ``workspace``. ``(applied, conflicting paths)``.
+
+    Either the whole patch lands or the workspace is exactly as it was — a
+    half-applied tree with conflict markers in it is never a result anybody
+    asked for.
+
+    Two things make that true. ``git apply --3way`` implies ``--index``, so it
+    refuses every path whose worktree differs from the index — which, after
+    ``compute_diff``'s ``add -N``, is *every* file the session has edited. So
+    the parent's own work is staged first (index == worktree), the patch is
+    checked, applied, and the index is put back the way ``compute_diff`` leaves
+    it (``reset`` + ``add -N``), which changes no file on disk. And because
+    ``--3way --check`` exits 0 for a patch it would apply *with conflict
+    markers*, the pre-staged tree is recorded with ``write-tree`` and restored
+    with ``read-tree -u --reset`` if the real apply still ends in conflicts.
+    """
+    if not patch.strip():
+        return True, []
+    if not patch.endswith("\n"):
+        patch += "\n"
+    if not workspace or not Path(workspace).is_dir():
+        return False, []
+    try:
+        _git(workspace, ["add", "-A", "--", *_PATHSPEC])
+        tree = _git_output(workspace, ["write-tree"])
+        check = _git_input(workspace, ["apply", "--3way", "--check", "-"], patch)
+        conflicts = _conflict_paths(check)
+        if check.returncode != 0 or conflicts:
+            return False, conflicts
+        if not tree:
+            # No restore point, so the real apply is not attempted: a failure
+            # would leave conflict markers nobody asked for.
+            return False, []
+        applied = _git_input(workspace, ["apply", "--3way", "-"], patch)
+        conflicts = _conflict_paths(applied)
+        if applied.returncode != 0 or conflicts:
+            _git(workspace, ["read-tree", "-u", "--reset", tree])
+            return False, conflicts
+        return True, []
+    finally:
+        # back to what compute_diff expects: index at HEAD, untracked files
+        # marked intent-to-add. Neither command touches a file on disk.
+        _git(workspace, ["reset", "-q"])
+        _git(workspace, ["add", "-A", "-N", "--", *_PATHSPEC])
+
+
+def _conflict_paths(result: subprocess.CompletedProcess) -> list[str]:
+    """The paths git named as unmergeable, in the order it named them."""
+    paths: list[str] = []
+    for line in f"{result.stderr or ''}\n{result.stdout or ''}".splitlines():
+        for pattern in _APPLY_CONFLICTS:
+            match = pattern.search(line)
+            if match is None:
+                continue
+            path = match.group("path")
+            if path not in paths:
+                paths.append(path)
+            break
+    return paths
+
+
 def list_tree(workspace: str) -> list[dict]:
     """Every tracked or untracked (non-ignored) file with its size in bytes."""
     listing = _git_output(
@@ -417,6 +491,20 @@ def _git(workspace: str, args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
         cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=GIT_TIMEOUT,
+    )
+
+
+def _git_input(
+    workspace: str, args: list[str], text: str
+) -> subprocess.CompletedProcess:
+    """``_git`` with something on stdin (a patch)."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=workspace,
+        input=text,
         capture_output=True,
         text=True,
         timeout=GIT_TIMEOUT,

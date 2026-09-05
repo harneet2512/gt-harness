@@ -41,6 +41,7 @@ from .sandbox import (
 from .store import SessionStore, new_id
 from .workspace import (
     TRAJECTORY_NAME,
+    apply_patch,
     cap_diff,
     clone_repo,
     compute_diff,
@@ -94,6 +95,31 @@ QUOTA_CHECK_EVERY = 10
 #: how long one model call may take, so litellm cannot retry a dead model for
 #: four minutes behind a user who is watching a spinner (HAR-84 G-11/G-14)
 DEFAULT_MODEL_REQUEST_TIMEOUT = 300
+
+#: ``Session.role`` values
+PRIMARY_ROLE = "primary"
+WORKER_ROLE = "worker"
+#: how many live workers one session may have at a time
+DEFAULT_MAX_WORKERS_PER_SESSION = 4
+#: worker frames copied onto the parent's stream, with ``agent_id`` added, so
+#: the parent's graph can draw every trail from one subscription
+MIRRORED_EVENT_TYPES = frozenset({
+    "assistant", "tool_call", "tool_result", "turn_started", "turn_finished",
+})
+#: how much of a worker's reply the stored report keeps
+REPORT_EXCERPT_CHARS = 400
+#: what a worker says when its opening turn could not get a concurrency slot
+FIRST_TURN_BUSY_NOTE = (
+    "The opening turn could not start ({reason}). The task is in the "
+    "transcript; send a message to run it."
+)
+
+
+def max_workers_per_session() -> int:
+    """Live workers one session may have (``MAX_WORKERS_PER_SESSION``)."""
+    return _positive_int_env(
+        "MAX_WORKERS_PER_SESSION", DEFAULT_MAX_WORKERS_PER_SESSION
+    ) or DEFAULT_MAX_WORKERS_PER_SESSION
 
 
 class ModelUnavailable(RuntimeError):
@@ -198,6 +224,13 @@ class _SessionState:
     closed: bool = False
     pending_stop: bool = False
     creation_task: Any = None
+    #: the session that spawned this one (workers only). Set from the row
+    #: wherever one is read, and the reason a worker's frames reach the
+    #: parent's stream at all — see ``_mirror``.
+    parent_id: str | None = None
+    #: opening message that starts its own first turn once the workspace is
+    #: idle: a worker's task, or ``SessionCreate.first_message``
+    first_message: str | None = None
     #: steering delivered after the turn was accepted but before the worker
     #: thread finished building the agent
     deferred: list[tuple[str, str]] = field(default_factory=list)
@@ -279,15 +312,32 @@ class SessionManager:
             return self._creating_count
 
     def _acquire_creation_slot(self) -> bool:
+        return self._acquire_creation_slots(1)
+
+    def _acquire_creation_slots(self, count: int) -> bool:
+        """Take ``count`` creation slots, or none at all.
+
+        All-or-nothing because a spawn of four workers that half succeeds is
+        worse than one that is refused: the caller asked for a set.
+        """
         with self._count_lock:
-            if self._creating_count >= self._max_creations:
+            if self._creating_count + count > self._max_creations:
                 return False
-            self._creating_count += 1
+            self._creating_count += count
             return True
 
     def _release_creation_slot(self) -> None:
+        self._release_creation_slots(1)
+
+    def _release_creation_slots(self, count: int) -> None:
+        if count <= 0:
+            return
         with self._count_lock:
-            self._creating_count = max(0, self._creating_count - 1)
+            self._creating_count = max(0, self._creating_count - count)
+
+    @property
+    def max_concurrent(self) -> int:
+        return self._max_concurrent
 
     # -- model preflight ------------------------------------------------------
 
@@ -307,22 +357,48 @@ class SessionManager:
 
     # -- workspace creation ---------------------------------------------------
 
-    async def create_workspace(self, session_id: str) -> None:
-        """Clone the repo (and build the GT index) in the background."""
+    async def create_workspace(
+        self,
+        session_id: str,
+        *,
+        first_message: str | None = None,
+        reserved: bool = False,
+    ) -> None:
+        """Clone the repo (and build the GT index) in the background.
+
+        ``first_message`` makes creation and the first turn one action: the
+        turn starts by itself the moment the workspace is ``idle``, so a
+        caller never has to poll for it. ``reserved`` says the creation slot
+        was already taken by the caller (a spawn takes one per worker, all or
+        nothing, before any row exists).
+        """
         session = await self._store.get_session(session_id)
         if session is None:
             raise ValueError(f"session {session_id} not found")
-        if not self._acquire_creation_slot():
+        if not reserved and not self._acquire_creation_slot():
             raise ConcurrencyLimit(
                 f"max concurrent session creations ({self._max_creations}) reached"
             )
+        state = self._bind(session)
+        state.first_message = first_message
         await self._bus.publish(
             session_id, {"type": "lifecycle", "data": {"status": "creating"}}
         )
         loop = asyncio.get_running_loop()
-        self._state(session_id).creation_task = asyncio.ensure_future(
+        state.creation_task = asyncio.ensure_future(
             asyncio.to_thread(self._create_blocking, dict(session), loop)
         )
+
+    def _bind(self, session: dict) -> _SessionState:
+        """Cache the row's parentage on the in-memory state and return it.
+
+        Every path that reads a session row calls this, because ``_publish``
+        runs on a worker thread and cannot go to the store to ask whether the
+        frame it is about to emit belongs to a worker.
+        """
+        state = self._state(str(session["id"]))
+        state.parent_id = str(session.get("parent_id") or "") or None
+        return state
 
     def _create_blocking(self, session: dict, loop: asyncio.AbstractEventLoop) -> None:
         session_id = str(session["id"])
@@ -355,6 +431,11 @@ class SessionManager:
                 graph_db=graph_db,
             ))
             self._emit(loop, session_id, "lifecycle", {"status": "idle"})
+            opening, state.first_message = state.first_message, None
+            if opening:
+                self._call_quietly(
+                    loop, self.start_first_turn(session_id, opening)
+                )
         except Exception as exc:  # noqa: BLE001 - any failure fails the session
             error = f"{type(exc).__name__}: {exc}"
             self._emit(loop, session_id, "agent_error", {"error": error})
@@ -433,6 +514,29 @@ class SessionManager:
 
     # -- messages / turns -----------------------------------------------------
 
+    async def start_first_turn(self, session_id: str, content: str) -> None:
+        """Run an opening message as the session's own first turn.
+
+        A refused slot is not a lost task: the message is written to the
+        transcript anyway and a system note says the turn has to be asked for.
+        """
+        try:
+            await self.post_message(session_id, content)
+            return
+        except ConcurrencyLimit as exc:
+            note = FIRST_TURN_BUSY_NOTE.format(reason=exc)
+        except Exception as exc:  # noqa: BLE001 - the session stays usable
+            note = FIRST_TURN_BUSY_NOTE.format(reason=f"{type(exc).__name__}: {exc}")
+        with contextlib.suppress(Exception):
+            await self._store.add_message(session_id, role="user", content=content)
+            message = await self._store.add_message(
+                session_id, role="system", content=note
+            )
+            await self._bus.publish(session_id, {
+                "type": "system_note",
+                "data": {"message_id": message["id"], "content": note},
+            })
+
     async def post_message(self, session_id: str, content: str) -> tuple[dict, str]:
         """Deliver a user message: start a turn, or steer the running one."""
         state = self._state(session_id)
@@ -445,6 +549,7 @@ class SessionManager:
             session = await self._store.get_session(session_id)
             if session is None:
                 raise ValueError(f"session {session_id} not found")
+            self._bind(session)
 
             if session["status"] == "running":
                 message = await self._store.add_message(
@@ -480,7 +585,7 @@ class SessionManager:
             await self._bus.publish(
                 session_id, {"type": "lifecycle", "data": {"status": "running"}}
             )
-            await self._bus.publish(session_id, {
+            await self._publish_async(session_id, {
                 "type": "turn_started",
                 # `content` and `role` so every subscriber can render the
                 # prompt. With only `message_id`, a second tab showed the turn
@@ -706,6 +811,263 @@ class SessionManager:
             "files_changed": files_changed,
         })
         self._persist_transcript(state)
+        if str(session.get("role") or PRIMARY_ROLE) == WORKER_ROLE:
+            self._report_to_parent(
+                session, result, reply, patch_sha256, files_changed, loop
+            )
+
+    # -- worker agents --------------------------------------------------------
+
+    def _report_to_parent(
+        self,
+        session: dict,
+        result: TurnResult,
+        reply: str,
+        patch_sha256: str | None,
+        files_changed: list[str],
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """Hand a finished worker turn back to the session that spawned it.
+
+        Three places, because a stream is not a record: the report goes onto
+        the worker's row (so a list view has it), into the parent's
+        ``messages`` (so a reload still shows it) and onto the parent's stream
+        as ``agent_report`` (so a client watching sees it happen).
+        """
+        worker_id = str(session["id"])
+        parent_id = str(session.get("parent_id") or "")
+        if not parent_id:
+            return
+        row = self._call_quietly(loop, self._store.get_session(worker_id)) or {}
+        report = {
+            "finish_reason": result.finish_reason,
+            "reply_excerpt": reply[:REPORT_EXCERPT_CHARS],
+            "patch_sha256": patch_sha256,
+            "files_changed": files_changed,
+            "applied": bool(row.get("applied_at")),
+        }
+        self._call_quietly(loop, self._store.update_session(
+            worker_id, report_json=json.dumps(report)
+        ))
+        message = self._call_quietly(loop, self._store.add_message(
+            parent_id,
+            role="agent",
+            content=reply,
+            meta={
+                "agent_id": worker_id,
+                "finish_reason": result.finish_reason,
+                "patch_sha256": patch_sha256,
+                "files_changed": files_changed,
+            },
+        )) or {}
+        self._call_quietly(loop, self._bus.publish(parent_id, {
+            "type": "agent_report",
+            "data": {
+                "worker_id": worker_id,
+                "message_id": message.get("id"),
+                "finish_reason": result.finish_reason,
+                "content": reply,
+                "patch_sha256": patch_sha256,
+                "files_changed": files_changed,
+                "n_calls": result.n_calls,
+                "cost": result.cost,
+            },
+        }))
+
+    async def spawn_agents(
+        self,
+        parent: dict,
+        tasks: list[str],
+        *,
+        model: str | None = None,
+        gt_mode: str | None = None,
+    ) -> list[dict]:
+        """Spawn one worker session per task. All of them, or none.
+
+        A worker is a child session: the parent's repo, ref, model, GT mode and
+        per-session knobs, its own workspace, sandbox and transcript, and the
+        task as an opening message that runs by itself once the clone is done.
+
+        The caller (the route) has already checked that ``parent`` is a primary
+        session in a state that can spawn.
+        """
+        parent_id = str(parent["id"])
+        model = (model or str(parent["model"])).strip()
+        gt_mode = gt_mode or str(parent["gt_mode"])
+        if model != str(parent["model"]):
+            await self.check_model(model)
+
+        live = [
+            child for child in await self._store.list_children(parent_id)
+            if str(child["status"]) not in {"closed", "failed"}
+        ]
+        cap = max_workers_per_session()
+        if len(live) + len(tasks) > cap:
+            raise ConcurrencyLimit(
+                f"a session may have at most {cap} live workers "
+                f"(MAX_WORKERS_PER_SESSION); {len(live)} already running and "
+                f"{len(tasks)} more were asked for"
+            )
+        if not self._acquire_creation_slots(len(tasks)):
+            raise ConcurrencyLimit(
+                f"max concurrent session creations ({self._max_creations}) "
+                f"reached; {len(tasks)} workers need one each"
+            )
+        # A worker whose clone finishes with no turn slot free would sit idle
+        # holding a workspace, which is not what "spawn" means. Check the turn
+        # budget here, where the whole set can still be refused.
+        if self.running_count + len(tasks) > self._max_concurrent:
+            self._release_creation_slots(len(tasks))
+            raise ConcurrencyLimit(
+                f"max concurrent turns ({self._max_concurrent}) reached; "
+                f"{len(tasks)} workers need one each"
+            )
+
+        config = _session_config(parent)
+        workers: list[dict] = []
+        #: creations that took over one of the reserved slots; the rest are
+        #: given back below, and only ``_create_blocking`` releases these
+        started = 0
+        try:
+            for task in tasks:
+                worker_id = await self._store.create_session(
+                    repo=str(parent["repo"]),
+                    ref=str(parent["ref"]),
+                    model=model,
+                    gt_mode=gt_mode,
+                    config=config,
+                    parent_id=parent_id,
+                    role=WORKER_ROLE,
+                    task=task,
+                )
+                self._state(worker_id).parent_id = parent_id
+                await self._bus.publish(parent_id, {
+                    "type": "agent_spawned",
+                    "data": {"worker_id": worker_id, "task": task},
+                })
+                await self.create_workspace(
+                    worker_id, first_message=task, reserved=True
+                )
+                started += 1
+                row = await self._store.get_session(worker_id)
+                if row is not None:
+                    workers.append(row)
+        finally:
+            self._release_creation_slots(len(tasks) - started)
+        return workers
+
+    async def spawn_from_chat(
+        self, parent: dict, tasks: list[str], content: str
+    ) -> dict:
+        """``/spawn`` in the chat box: the API call, answered with a note.
+
+        The user's own message is recorded (so the transcript says what was
+        asked) and the answer is a ``system_note``, not an agent turn — the
+        message never reaches a model.
+        """
+        workers = await self.spawn_agents(parent, tasks)
+        parent_id = str(parent["id"])
+        await self._store.add_message(parent_id, role="user", content=content)
+        lines = [f"Spawned {len(workers)} worker agent(s):"]
+        lines += [
+            f"- {worker['id']}: {worker['task']}" for worker in workers
+        ]
+        note = "\n".join(lines)
+        message = await self._store.add_message(
+            parent_id, role="system", content=note
+        )
+        await self._bus.publish(parent_id, {
+            "type": "system_note",
+            "data": {"message_id": message["id"], "content": note},
+        })
+        await self._store.update_session(parent_id, last_message=note)
+        return message
+
+    async def list_workers(self, parent_id: str) -> list[dict]:
+        """Every session spawned by ``parent_id``, oldest first."""
+        return await self._store.list_children(parent_id)
+
+    async def apply_worker(self, parent: dict, worker: dict) -> dict:
+        """Merge a worker's cumulative diff into the parent's workspace.
+
+        All or nothing: on conflict :class:`ApplyConflict` names the paths and
+        the parent's workspace is byte-for-byte what it was.
+        """
+        parent_id = str(parent["id"])
+        worker_id = str(worker["id"])
+        diff = await self.diff(worker)
+        patch = str(diff.get("patch") or "")
+        if not patch.strip():
+            raise ApplyRefused(f"worker {worker_id} has no changes to apply")
+        workspace = str(parent.get("workspace_path") or "")
+        if not workspace or not Path(workspace).is_dir():
+            raise ApplyRefused("the session has no workspace to apply into")
+
+        applied, conflicts = await asyncio.to_thread(
+            apply_patch, workspace, patch
+        )
+        if not applied:
+            raise ApplyConflict(conflicts)
+
+        files = [f["path"] for f in (diff.get("files") or [])]
+        patch_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+        await self._store.update_session(
+            worker_id, applied_at=time.time(), applied_sha256=patch_sha256
+        )
+        await self._mark_report_applied(worker_id)
+        # The workspace changed under the cached graph, and its signature is
+        # tree-shaped, so a stale entry cannot survive — but drop it anyway.
+        self._state(parent_id).graph_cache = None
+        note = f"applied worker {worker_id}: {len(files)} files"
+        message = await self._store.add_message(
+            parent_id, role="system", content=note
+        )
+        await self._bus.publish(parent_id, {
+            "type": "system_note",
+            "data": {"message_id": message["id"], "content": note},
+        })
+        await self._bus.publish(parent_id, {
+            "type": "agent_applied",
+            "data": {
+                "worker_id": worker_id,
+                "files": files,
+                "patch_sha256": patch_sha256,
+            },
+        })
+        return {
+            "worker_id": worker_id,
+            "files": files,
+            "patch_sha256": patch_sha256,
+        }
+
+    async def _mark_report_applied(self, worker_id: str) -> None:
+        """Flip ``applied`` on the worker's stored report, if it has one."""
+        row = await self._store.get_session(worker_id)
+        if row is None or not row.get("report_json"):
+            return
+        try:
+            report = json.loads(str(row["report_json"]))
+        except Exception:  # noqa: BLE001 - a corrupt report is not fatal
+            return
+        report["applied"] = True
+        await self._store.update_session(
+            worker_id, report_json=json.dumps(report)
+        )
+
+    async def _close_workers(self, parent_id: str, reason: str) -> None:
+        """Close every live worker of a session that is going away."""
+        try:
+            children = await self._store.list_children(parent_id)
+        except Exception:  # noqa: BLE001 - a store hiccup must not block a close
+            log.exception("could not list the workers of %s", parent_id)
+            return
+        for child in children:
+            if str(child["status"]) == "closed":
+                continue
+            try:
+                await self.close(str(child["id"]), reason=reason)
+            except Exception:  # noqa: BLE001 - one worker, not the close
+                log.exception("could not close worker %s", child["id"])
 
     # -- stop / close ---------------------------------------------------------
 
@@ -738,6 +1100,9 @@ class SessionManager:
         # A session that already died of something keeps that cause: closing a
         # failed session is bookkeeping, not the reason it ended.
         reason = str(session.get("closed_reason") or "") or reason
+        # Workers first, while this session's stream is still open: each of
+        # them publishes `agent_closed` onto it on the way out.
+        await self._close_workers(session_id, reason)
         state = self._state(session_id)
         state.closed = True
         agent = self.get_agent(session_id)
@@ -758,6 +1123,12 @@ class SessionManager:
             await self._store.update_status(
                 session_id, "closed", current_turn_id=None, closed_reason=reason
             )
+            parent_id = str(session.get("parent_id") or "")
+            if parent_id:
+                await self._bus.publish(parent_id, {
+                    "type": "agent_closed",
+                    "data": {"worker_id": session_id, "reason": reason},
+                })
             await self._bus.publish(
                 session_id,
                 {"type": "lifecycle", "data": {"status": "closed", "reason": reason}},
@@ -859,6 +1230,9 @@ class SessionManager:
         still running (HAR-84 G-08 / E-02 / E-03).
         """
         session_id = str(session["id"])
+        # so an interrupted WORKER turn still closes out on its parent's
+        # stream: the in-memory state is empty after a restart
+        self._bind(session)
         turn_id = session.get("current_turn_id")
         await self._store.update_status(session_id, "idle", current_turn_id=None)
         message = await self._store.add_message(
@@ -874,7 +1248,7 @@ class SessionManager:
                 patch_sha256=receipt.get("patch_sha256"),
                 wall_seconds=float(receipt.get("wall_seconds") or 0.0),
             )
-            await self._bus.publish(session_id, {
+            await self._publish_async(session_id, {
                 "type": "turn_finished",
                 "data": {
                     "turn_id": turn_id,
@@ -1279,11 +1653,41 @@ class SessionManager:
             # The session was closed underneath us; the close path owns the row.
             pass
 
+    async def _publish_async(self, session_id: str, event: dict) -> dict:
+        """Publish on the event loop, mirroring a worker frame to its parent."""
+        published = await self._bus.publish(session_id, event)
+        await self._mirror(session_id, published)
+        return published
+
+    async def _mirror(self, session_id: str, published: dict) -> None:
+        """Copy a worker's frame onto its parent's stream, tagged ``agent_id``.
+
+        The parent's stream is the only one the UI has to watch: every worker's
+        trail arrives on it, and ``agent_id`` says whose it is. A frame from a
+        primary session carries no ``agent_id`` at all.
+        """
+        if not isinstance(published, dict):
+            return
+        if published.get("type") not in MIRRORED_EVENT_TYPES:
+            return
+        parent_id = self._state(session_id).parent_id
+        if not parent_id:
+            return
+        data = dict(published.get("data") or {})
+        data["agent_id"] = session_id
+        await self._bus.publish(parent_id, {
+            "type": published["type"],
+            "timestamp": published.get("timestamp"),
+            "data": data,
+        })
+
     def _publish(
         self, loop: asyncio.AbstractEventLoop, session_id: str, event: dict
     ) -> None:
         event.setdefault("timestamp", time.time())
         published = self._call_quietly(loop, self._bus.publish(session_id, event))
+        if isinstance(published, dict):
+            self._call_quietly(loop, self._mirror(session_id, published))
         if event.get("type") != "tool_result" or not isinstance(published, dict):
             return
         data = event.get("data") or {}
@@ -1414,6 +1818,22 @@ class SessionManager:
 
 class ConcurrencyLimit(RuntimeError):
     """Raised when a new turn or creation would exceed its concurrency cap."""
+
+
+class ApplyRefused(RuntimeError):
+    """A worker's patch cannot be applied: there is none, or nowhere to put it."""
+
+
+class ApplyConflict(RuntimeError):
+    """A worker's patch does not merge into the parent workspace.
+
+    ``conflicts`` names the paths git could not merge. The parent's workspace
+    is exactly what it was before the attempt.
+    """
+
+    def __init__(self, conflicts: list[str]) -> None:
+        super().__init__("the worker's changes conflict with this workspace")
+        self.conflicts = list(conflicts)
 
 
 #: longest failure text quoted back to the user in a turn's error reply

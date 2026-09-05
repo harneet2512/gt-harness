@@ -21,6 +21,11 @@ GtStatusName = Literal["off", "ready", "unavailable", "pending"]
 #: more — an unknown mode is a 422 at creation instead of a broken session.
 GtModeName = Literal["off", "advisory", "assistive", "enforced"]
 RoleName = Literal["user", "agent", "system"]
+#: ``primary`` is a session a user created; ``worker`` is one a session
+#: spawned with ``POST /api/sessions/{id}/agents`` (see ``Session.parent_id``).
+SessionRole = Literal["primary", "worker"]
+#: how many tasks one spawn call may carry
+MAX_TASKS_PER_SPAWN = 4
 FinishReason = Literal[
     "reply", "question", "step_limit", "time_limit", "stopped", "error",
     "submitted",
@@ -48,7 +53,9 @@ def _clean_ref(value: str) -> str:
 #: why a session is ``closed``: an explicit close, the idle TTL reaper, or a
 #: failure. ``null`` while the session is still alive.
 ClosedReason = Literal["user", "expired", "failed"]
-Delivery = Literal["turn_started", "queued_for_running_turn"]
+#: ``spawned`` means the message was a ``/spawn`` command: no turn was
+#: started and the message in the response is the server's system note.
+Delivery = Literal["turn_started", "queued_for_running_turn", "spawned"]
 FileStatus = Literal["added", "modified", "deleted"]
 EdgeKind = Literal["import", "gt_call", "gt_ref", "gt_import"]
 
@@ -69,6 +76,22 @@ class SessionCreate(BaseModel):
         None, ge=60, le=3600, description="Per-turn wall-clock budget in seconds"
     )
     temperature: float = Field(0.0, ge=0.0, le=2.0)
+    #: an opening message. When set, the first turn starts by itself as soon
+    #: as the workspace is ready — no second call, no polling for ``idle``.
+    first_message: str | None = Field(
+        None,
+        max_length=100_000,
+        description="Optional opening message; starts the first turn itself",
+    )
+
+    @field_validator("first_message")
+    @classmethod
+    def _check_first_message(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError("first_message must not be blank")
+        return value
 
     @field_validator("ref")
     @classmethod
@@ -84,6 +107,18 @@ class SessionCreate(BaseModel):
         if not value.strip():
             raise ValueError("model must not be blank")
         return value
+
+
+class WorkerReport(BaseModel):
+    """What a worker told its parent when a turn of its own ended."""
+
+    finish_reason: FinishReason | str
+    #: the opening of the worker's reply, bounded for a list view
+    reply_excerpt: str = ""
+    patch_sha256: str | None = None
+    files_changed: list[str] = Field(default_factory=list)
+    #: whether this worker's patch has been applied to the parent workspace
+    applied: bool = False
 
 
 class Session(BaseModel):
@@ -108,6 +143,15 @@ class Session(BaseModel):
     total_wall_seconds: float = 0.0
     current_turn_id: str | None = None
     closed_reason: ClosedReason | None = None
+    #: the session that spawned this one; null for a primary session
+    parent_id: str | None = None
+    role: SessionRole = "primary"
+    #: the task a worker was spawned with; null on a primary session
+    task: str | None = None
+    #: a worker's last report to its parent; null until it has finished a turn
+    report: WorkerReport | None = None
+    #: when this worker's patch was applied to the parent workspace
+    applied_at: float | None = None
 
 
 class MessageMeta(BaseModel):
@@ -116,6 +160,9 @@ class MessageMeta(BaseModel):
     cost: float | None = None
     patch_sha256: str | None = None
     files_changed: list[str] | None = None
+    #: set on a ``role: "agent"`` message a WORKER reported into its parent's
+    #: conversation; absent on the parent's own agent replies
+    agent_id: str | None = None
 
 
 class Message(BaseModel):
@@ -147,6 +194,37 @@ class MessageCreate(BaseModel):
 class MessageAccepted(BaseModel):
     message: Message
     delivery: Delivery
+
+
+class AgentSpawn(BaseModel):
+    """``POST /api/sessions/{id}/agents`` — one worker per task."""
+
+    tasks: list[str] = Field(..., min_length=1, max_length=MAX_TASKS_PER_SPAWN)
+    #: default: the parent's model / gt_mode
+    model: str | None = None
+    gt_mode: GtModeName | None = None
+
+    @field_validator("tasks")
+    @classmethod
+    def _check_tasks(cls, value: list[str]) -> list[str]:
+        cleaned = [task for task in value if task and task.strip()]
+        if len(cleaned) != len(value):
+            raise ValueError("a task must not be blank")
+        if any(len(task) > 100_000 for task in cleaned):
+            raise ValueError("a task must be at most 100000 characters")
+        return cleaned
+
+
+class AgentsSpawned(BaseModel):
+    workers: list[Session] = Field(default_factory=list)
+
+
+class AgentApplied(BaseModel):
+    """The result of merging a worker's diff into the parent workspace."""
+
+    worker_id: str
+    files: list[str] = Field(default_factory=list)
+    patch_sha256: str | None = None
 
 
 class DiffFile(BaseModel):

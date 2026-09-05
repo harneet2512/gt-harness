@@ -12,7 +12,7 @@ import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: ``stopped`` is a lifecycle *event*, not a persisted status: after a stop the
 #: reply is written and the session goes straight back to ``idle``.
@@ -54,7 +54,19 @@ CREATE TABLE sessions (
     base_sha TEXT,
     -- path to the GT indexer's SQLite graph, when one was built
     graph_db TEXT,
-    config_json TEXT NOT NULL DEFAULT '{}'
+    config_json TEXT NOT NULL DEFAULT '{}',
+    -- worker agents: a worker is a child session of the session that spawned
+    -- it. NULL/'primary' for a session a user created directly.
+    parent_id TEXT,
+    role TEXT NOT NULL DEFAULT 'primary',
+    -- the task a worker was spawned with (its first turn); NULL on a primary
+    task TEXT,
+    -- the worker's last report to its parent, as JSON; NULL until it reports
+    report_json TEXT,
+    -- when this worker's patch was applied to the parent workspace, and the
+    -- sha256 of the patch that was applied
+    applied_at REAL,
+    applied_sha256 TEXT
 );
 
 CREATE TABLE messages (
@@ -113,6 +125,7 @@ CREATE TABLE diff_snapshots (
 );
 
 CREATE INDEX idx_events_session ON events(session_id, id);
+CREATE INDEX idx_sessions_parent ON sessions(parent_id, created_at);
 CREATE INDEX idx_diff_snapshots_session
     ON diff_snapshots(session_id, event_id);
 CREATE INDEX idx_messages_session ON messages(session_id, seq);
@@ -131,6 +144,9 @@ _SESSION_FIELDS = (
     "workspace_path",
     "base_sha",
     "graph_db",
+    "report_json",
+    "applied_at",
+    "applied_sha256",
 )
 
 
@@ -170,14 +186,17 @@ class SessionStore:
         model: str,
         gt_mode: str = "off",
         config: dict | None = None,
+        parent_id: str | None = None,
+        role: str = "primary",
+        task: str | None = None,
     ) -> str:
         session_id = new_id()
         now = time.time()
         await self._db.execute(
             """INSERT INTO sessions
                (id, repo, ref, model, gt_mode, gt_status, status,
-                created_at, updated_at, config_json)
-               VALUES (?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?)""",
+                created_at, updated_at, config_json, parent_id, role, task)
+               VALUES (?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 repo,
@@ -188,6 +207,9 @@ class SessionStore:
                 now,
                 now,
                 json.dumps(config or {}),
+                parent_id,
+                role,
+                task,
             ),
         )
         await self._db.commit()
@@ -206,6 +228,15 @@ class SessionStore:
             # would otherwise come back in arbitrary order.
             "SELECT * FROM sessions ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (limit,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+    async def list_children(self, parent_id: str) -> list[dict]:
+        """Every worker session spawned by ``parent_id``, oldest first."""
+        cursor = await self._db.execute(
+            "SELECT * FROM sessions WHERE parent_id = ?"
+            " ORDER BY created_at, rowid",
+            (parent_id,),
         )
         return [dict(r) for r in await cursor.fetchall()]
 
