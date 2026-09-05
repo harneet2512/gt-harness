@@ -94,3 +94,8 @@ EVIDENCE_HAS_OMISSIONS`) for `exact_literal_search "class Command"` scoped to
 `src/click/**`; the agent answered from plain file reads. Filed as HAR-85.
 
 Both sessions were closed afterwards (`/close`).
+
+> The abstention was diagnosed and fixed in
+> [`har85-literal-search.md`](har85-literal-search.md); the typed actions
+> themselves are now visible on the session's `/events` stream as `gt_action`
+> frames — see [`har84-gt-action-events.md`](har84-gt-action-events.md).

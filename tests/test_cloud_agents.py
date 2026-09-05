@@ -250,6 +250,35 @@ def test_worker_frames_are_mirrored_onto_the_parent_stream(harness: Harness) -> 
     assert all("agent_id" not in f["payload"]["data"] for f in own)
 
 
+def test_a_workers_gt_actions_are_mirrored_too(harness: Harness) -> None:
+    """A worker's GroundTruth evidence belongs on the parent's one stream."""
+    harness.install_gt_hook = True
+    harness.set_script([chat._typed_action(), _reply("pkg/util.py defines it.")])
+    parent_id = _create_idle(harness)
+    worker_id = _spawn_ok(harness, parent_id, "find where VALUE is defined")[0]["id"]
+
+    frames = _wait_reports(harness, parent_id, 1)
+
+    mirrored = [
+        f for f in frames
+        if f["event"] == "gt_action"
+        and f["payload"]["data"].get("agent_id") == worker_id
+    ]
+    assert len(mirrored) == 1, "the worker's typed action reached the parent"
+    event = mirrored[0]["payload"]["data"]
+    assert event["kind"] == "exact_literal_search"
+    assert event["semantics"] == "exact"
+    assert event["match_count"] == 1
+
+    # and it is on the worker's own stream, without an agent_id
+    own = [
+        f for f in _read_sse(harness, worker_id, until=_turn_complete)
+        if f["event"] == "gt_action"
+    ]
+    assert len(own) == 1
+    assert "agent_id" not in own[0]["payload"]["data"]
+
+
 # --------------------------------------------------------------------------
 # 3: applying a worker's patch
 # --------------------------------------------------------------------------

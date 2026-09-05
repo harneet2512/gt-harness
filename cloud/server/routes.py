@@ -88,6 +88,7 @@ def _session_view(row: dict) -> dict[str, Any]:
         "steps": row.get("steps", 0),
         "cost": row.get("cost", 0.0),
         "total_wall_seconds": row.get("total_wall_seconds", 0.0),
+        "gt_actions": row.get("gt_actions", 0),
         "current_turn_id": row.get("current_turn_id"),
         "closed_reason": row.get("closed_reason"),
         "parent_id": row.get("parent_id"),

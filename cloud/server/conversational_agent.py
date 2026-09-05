@@ -115,6 +115,10 @@ class TurnResult:
     cost: float
     #: how long this turn took, start to finish
     wall_seconds: float = 0.0
+    #: GroundTruth typed actions this turn ran (``gt_action`` frames emitted)
+    gt_actions: int = 0
+    #: of those, the ones that answered: ``semantics: exact`` with a match
+    gt_exact_matches: int = 0
 
 
 @dataclass(frozen=True)
@@ -384,6 +388,11 @@ class ConversationalAgent(DefaultAgent):
         self._last_assistant_text = ""
         #: turn whose failure already produced an ``agent_error`` event
         self.last_error_turn_id: str | None = None
+        #: per-turn GT typed-action tallies, reset by :meth:`run_turn`. Filled
+        #: by :meth:`note_gt_action`, which ``gt_events`` calls for every
+        #: ``gt_action`` frame it emits.
+        self._gt_actions = 0
+        self._gt_exact_matches = 0
         self._max_context_chars = (
             max_context_chars
             if max_context_chars is not None
@@ -531,6 +540,8 @@ class ConversationalAgent(DefaultAgent):
         self.n_consecutive_format_errors = 0
         self._turn_start_calls = self.n_calls
         self._turn_error = None
+        self._gt_actions = 0
+        self._gt_exact_matches = 0
         start_cost = self.cost
         started = time.monotonic()
         budget = max(0, int(self.config.step_limit))
@@ -605,6 +616,8 @@ class ConversationalAgent(DefaultAgent):
             n_calls=self.n_calls - self._turn_start_calls,
             cost=round(self.cost - start_cost, 10),
             wall_seconds=round(time.monotonic() - started, 3),
+            gt_actions=self._gt_actions,
+            gt_exact_matches=self._gt_exact_matches,
         )
 
     def _out_of_time(self, started: float) -> bool:
@@ -809,6 +822,16 @@ class ConversationalAgent(DefaultAgent):
     # -- events ---------------------------------------------------------------
 
     @property
+    def gt_actions(self) -> int:
+        """GT typed actions run so far in the current turn."""
+        return self._gt_actions
+
+    @property
+    def gt_exact_matches(self) -> int:
+        """Of those, the ones that answered exactly with at least one match."""
+        return self._gt_exact_matches
+
+    @property
     def current_step(self) -> int:
         """Step index of the assistant message currently being executed."""
         return self._current_step
@@ -816,6 +839,19 @@ class ConversationalAgent(DefaultAgent):
     def emit_event(self, event_type: str, data: dict[str, Any]) -> None:
         """Publish one frame. Public so :class:`_EmittingEnvironment` can use it."""
         self._emit(event_type, data)
+
+    def note_gt_action(self, event: dict[str, Any]) -> None:
+        """Tally one GT typed action for this turn's receipt.
+
+        ``gt_exact_matches`` counts the actions that actually answered:
+        ``semantics: exact`` *and* at least one match. An exact abstention over
+        an empty scope is a GT action, not an answer.
+        """
+        self._gt_actions += 1
+        if str(event.get("semantics") or "") == "exact" and int(
+            event.get("match_count") or 0
+        ) > 0:
+            self._gt_exact_matches += 1
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         if event_type == "assistant":

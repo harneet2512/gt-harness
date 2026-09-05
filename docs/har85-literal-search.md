@@ -236,3 +236,11 @@ second turn, which pinned the glob, is.
 
 
 Sessions `2e25f7e3208e` and `62f5f89249fb` were closed afterwards.
+
+## 6. Follow-up
+
+A typed action still produced no frame on the session's event stream, because
+it never reaches `env.execute` and therefore never reaches the emitting
+environment proxy. `gt_action` events, and the `gt_actions` /
+`gt_exact_matches` receipt counters, are
+[`har84-gt-action-events.md`](har84-gt-action-events.md).

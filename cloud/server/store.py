@@ -12,7 +12,7 @@ import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: ``stopped`` is a lifecycle *event*, not a persisted status: after a stop the
 #: reply is written and the session goes straight back to ``idle``.
@@ -49,6 +49,8 @@ CREATE TABLE sessions (
     -- wall-clock seconds summed over finished turns; the only budget signal
     -- that survives MSWEA_COST_TRACKING=ignore_errors pricing every turn at $0
     total_wall_seconds REAL NOT NULL DEFAULT 0.0,
+    -- GroundTruth typed actions this session has run, summed over its turns
+    gt_actions INTEGER NOT NULL DEFAULT 0,
     current_turn_id TEXT,
     workspace_path TEXT,
     base_sha TEXT,
@@ -92,6 +94,10 @@ CREATE TABLE turns (
     finish_reason TEXT,
     -- wall-clock seconds this turn took, start to finish
     wall_seconds REAL NOT NULL DEFAULT 0.0,
+    -- GroundTruth typed actions this turn ran, and how many of those answered
+    -- (semantics 'exact' with at least one match)
+    gt_actions INTEGER NOT NULL DEFAULT 0,
+    gt_exact_matches INTEGER NOT NULL DEFAULT 0,
     patch_sha256 TEXT,
     gt_status TEXT NOT NULL DEFAULT 'off',
     model TEXT NOT NULL DEFAULT '',
@@ -290,13 +296,15 @@ class SessionStore:
         steps: int = 0,
         cost: float = 0.0,
         wall_seconds: float = 0.0,
+        gt_actions: int = 0,
     ) -> None:
         await self._db.execute(
             """UPDATE sessions
                SET turns = turns + ?, steps = steps + ?, cost = cost + ?,
-                   total_wall_seconds = total_wall_seconds + ?, updated_at = ?
+                   total_wall_seconds = total_wall_seconds + ?,
+                   gt_actions = gt_actions + ?, updated_at = ?
                WHERE id = ?""",
-            (turns, steps, cost, wall_seconds, time.time(), session_id),
+            (turns, steps, cost, wall_seconds, gt_actions, time.time(), session_id),
         )
         await self._db.commit()
 
@@ -399,11 +407,14 @@ class SessionStore:
         finish_reason: str,
         patch_sha256: str | None,
         wall_seconds: float = 0.0,
+        gt_actions: int = 0,
+        gt_exact_matches: int = 0,
     ) -> None:
         await self._db.execute(
             """UPDATE turns
                SET finished_at = ?, n_calls = ?, cost = ?, finish_reason = ?,
-                   wall_seconds = ?, patch_sha256 = ?
+                   wall_seconds = ?, gt_actions = ?, gt_exact_matches = ?,
+                   patch_sha256 = ?
                WHERE turn_id = ?""",
             (
                 time.time(),
@@ -411,6 +422,8 @@ class SessionStore:
                 cost,
                 finish_reason,
                 wall_seconds,
+                gt_actions,
+                gt_exact_matches,
                 patch_sha256,
                 turn_id,
             ),
@@ -429,6 +442,8 @@ class SessionStore:
                 "n_calls": r["n_calls"],
                 "cost": r["cost"],
                 "wall_seconds": r["wall_seconds"],
+                "gt_actions": r["gt_actions"],
+                "gt_exact_matches": r["gt_exact_matches"],
                 "finish_reason": r["finish_reason"] or "",
                 "patch_sha256": r["patch_sha256"],
                 "gt_status": r["gt_status"],

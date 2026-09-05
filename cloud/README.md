@@ -138,7 +138,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 ```
 {id, status: creating|idle|running|failed|closed, repo, ref, model, gt_mode,
  gt_status: off|ready|unavailable|pending, gt_error, created_at, updated_at,
- last_message, turns, steps, cost, total_wall_seconds, current_turn_id,
+ last_message, turns, steps, cost, total_wall_seconds, gt_actions, current_turn_id,
  closed_reason: user|expired|failed|null,
  parent_id: str|null, role: primary|worker, task: str|null, applied_at: float|null,
  report: {finish_reason, reply_excerpt, patch_sha256, files_changed, applied}|null}
@@ -181,6 +181,10 @@ written and the session goes straight back to `idle`.
 `user` (someone pressed close), `expired` (the idle TTL reaper), `failed` (a
 clone, sandbox or agent failure — recorded when the session goes `failed`, and
 kept if it is closed later). It is `null` while the session is alive.
+
+`gt_actions` is how many GroundTruth **typed actions** this session has run,
+summed over its turns — see [GroundTruth typed actions](#groundtruth-typed-actions).
+It stays `0` for a `gt_mode: off` session.
 
 `total_wall_seconds` is the sum of the finished turns' durations. Under
 `MSWEA_COST_TRACKING=ignore_errors` — which the server sets, because LiteLLM
@@ -240,6 +244,7 @@ plus a `: ping` comment heartbeat every 15s.
 | `assistant` | `{turn_id, content, actions[], step, n_calls, cost, is_reply?}` — one per model call. `is_reply: true` marks the text-only response that *ends* the turn: it has no `actions`, and it is emitted just before `agent_reply` so a client counting `assistant` frames always matches `turn_finished.n_calls` instead of trailing it by one. The field is absent on every other frame. |
 | `tool_call` | `{turn_id, command, step, n_calls}` |
 | `tool_result` | `{turn_id, command, output (≤4000 chars), returncode, is_error, step}` |
+| `gt_action` | `{turn_id, step, kind, arguments, scope[], returncode, semantics, coverage, match_count, omissions[], reason_codes[], duration_ms, evidence_artifact_id?}` — one per GroundTruth **typed action**. A typed action is not a shell command, so it has no `tool_call`/`tool_result` pair. See [GroundTruth typed actions](#groundtruth-typed-actions). |
 | `steering` | `{turn_id, message_id, content}` |
 | `agent_reply` | `{turn_id, message_id, content, finish_reason, n_calls, cost, patch_sha256, files_changed}` |
 | `turn_finished` | `{turn_id, finish_reason, n_calls, cost, patch_sha256, files_changed}` — `finish_reason` is one of `reply`, `question`, `step_limit`, `time_limit`, `stopped`, `submitted`, `error`, `interrupted`. The `interrupted` one comes from `recover()` and carries no patch fields. |
@@ -249,6 +254,72 @@ plus a `: ping` comment heartbeat every 15s.
 | `agent_report` | `{worker_id, message_id, finish_reason, content, patch_sha256, files_changed, n_calls, cost}` — on the parent's stream when a worker's turn ends. `content` is the worker's whole reply; the same text is in the parent's `messages` as a `role: "agent"` message with `meta.agent_id`. |
 | `agent_applied` | `{worker_id, files, patch_sha256}` — a worker's patch landed in the parent's workspace |
 | `agent_closed` | `{worker_id, reason}` — a worker closed, whether by its own `/close`, the parent's, or the idle reaper |
+
+### GroundTruth typed actions
+
+With `gt_mode` on, the model gets a second tool beside `bash`: `groundtruth`,
+whose calls are **typed actions** (`exact_literal_search`, `find_callers`,
+`why_this_edge`, …). A typed action is answered by a deterministic producer,
+not by a shell: `gt_engine.miniswe_runtime.install_runtime_hooks` replaces
+`agent.execute_actions` and dispatches the typed branch through
+`execute_typed_action_fail_open`, which **never** calls `env.execute`. That is
+why a typed action produces no `tool_call`/`tool_result` pair — the environment
+proxy those come from is not on its path — and why the trail used to show a
+model call with nothing under it.
+
+Each one now emits exactly one `gt_action` frame instead:
+
+```json
+{"turn_id": "…", "step": 2, "kind": "exact_literal_search",
+ "arguments": {"literal": "class Command", "paths": ["src/click"]},
+ "scope": ["src/click"], "returncode": 0,
+ "semantics": "exact", "coverage": "complete", "match_count": 2,
+ "omissions": [], "reason_codes": ["EXACT_COMPLETE_EQUIVALENCE"],
+ "duration_ms": 41.2, "evidence_artifact_id": "call_ab12"}
+```
+
+renderable as
+`⏺ GroundTruth(exact_literal_search "class Command" in src/click) ⎿ 2 matches · exact · complete`.
+
+| Field | Meaning |
+|---|---|
+| `step` | the model call that asked for it — the same `step` its `assistant` frame carries. A typed action is **part of** that call, so it never adds an `assistant` frame of its own. |
+| `arguments` | the action's arguments *as dispatched*, i.e. after `typed_scopes` made a glob scope concrete. Every string is truncated to 200 characters. |
+| `scope` | what the producer says it **actually searched**, echoed from `answer["scope"]` (or `coverage["scope"]` on the compatibility producer). Empty when the producer did not say — a request is not evidence of coverage, so the requested paths are never echoed back here. They are in `arguments`. |
+| `semantics` / `coverage` | `exact`/`incomplete` and `complete`/`partial`, from `gt.evidence_artifact.v1`. `coverage` is `""` when the producer put a mapping there instead of a verdict. |
+| `match_count` | rows in the answer, counted the way GT counts its own `returned_count`. |
+| `omissions` | why the evidence is not complete (`missing_scope:src/click/**`, `capability_disabled`, `query_result_byte_limit`, …), capped at 10. |
+| `reason_codes` | from `gt.interception_decision.v1` — `EXACT_COMPLETE_EQUIVALENCE` on an answer, `SEMANTICS_NOT_EXACT`/`COVERAGE_NOT_COMPLETE`/`EVIDENCE_HAS_OMISSIONS` on an abstention. |
+| `duration_ms` | wall clock of the action batch this action belonged to. A model call almost always carries one action, in which case it is that action's own time. |
+| `evidence_artifact_id` | the evidence artifact's `action_id`, or the compiled observation's sha256 when it has none. Absent when neither is available. |
+
+The frame is emitted after the action ran and **before the next model call**,
+from `cloud/server/gt_events.py`. Nothing under `gt_engine/` is modified: the
+seam is `model.format_observation_messages(message, outputs, …)`, which GT's
+own `execute_actions` calls once at the end of the batch with the normalised
+action requests on one side and their results on the other. Wrapping that
+rather than `execute_typed_action_fail_open` also covers the three answers GT
+synthesises without calling the router at all (`query_fanout_refused`,
+`capability_disabled`, `query_turn_budget_exceeded`).
+
+A frame that cannot be built never breaks the turn: the emitter swallows its
+own failures, and the observation still reaches the model unchanged.
+
+### Receipts
+
+`GET /api/sessions/:id/receipts` — one per turn, oldest first:
+
+```
+{turn_id, started_at, finished_at, n_calls, cost, wall_seconds,
+ gt_actions, gt_exact_matches, finish_reason, patch_sha256, gt_status, model}
+```
+
+`gt_actions` counts the `gt_action` frames that turn emitted.
+`gt_exact_matches` counts the subset that actually **answered** —
+`semantics == "exact"` *and* `match_count > 0`. An exact abstention over an
+empty scope is a GT action, not an answer, so the two numbers together say
+whether GT was used *and* whether it paid. The session row carries the
+`gt_actions` total.
 
 ## Worker agents
 
@@ -315,16 +386,16 @@ model. A message that merely mentions `/spawn` later on is an ordinary turn.
 The parent's `/events` stream carries everything:
 
 * `agent_spawned` when each worker is created,
-* the worker's own `turn_started`, `assistant`, `tool_call`, `tool_result` and
-  `turn_finished` frames, **mirrored** onto the parent's stream with an extra
-  `agent_id: "<worker id>"` field — so a graph can draw each worker's trail in
-  its own colour from one subscription,
+* the worker's own `turn_started`, `assistant`, `tool_call`, `tool_result`,
+  `gt_action` and `turn_finished` frames, **mirrored** onto the parent's stream
+  with an extra `agent_id: "<worker id>"` field — so a graph can draw each
+  worker's trail in its own colour from one subscription,
 * `agent_report` when a worker's turn ends,
 * `agent_applied` and `agent_closed`.
 
 `agent_id` is the whole protocol: a frame that has it belongs to that worker, a
 frame without it is the primary session's own. It is **absent** (not `null`) on
-primary-session frames, and only the five frame types above are mirrored —
+primary-session frames, and only the six frame types above are mirrored —
 `lifecycle`, `agent_reply`, `agent_error`, `steering` and `system_note` stay on
 the worker's own stream. Mirrored frames are re-published, so they have their
 own event ids on the parent's stream; the worker's `/events` still has the
@@ -379,6 +450,10 @@ Browser (React) ←→ FastAPI ←→ ConversationalAgent (mini-SWE) + GT engine
 - `runner.py` — `SessionManager`: workspaces, turn scheduling under a per-session
   lock, receipts, diffs, restart recovery, the idle-session TTL reaper, and
   worker agents (spawn, report, mirror, apply, cascading close).
+- `gt_events.py` — GroundTruth typed actions as `gt_action` frames: the wrapper
+  the runner installs after `install_runtime_hooks`, and the payload builder.
+- `typed_scopes.py` — makes a planner's glob scope (`src/click/**`) concrete
+  before the deterministic producer stats it as a literal path (HAR-85).
 - `store.py` — SQLite: `sessions`, `messages`, `turns`, `events`,
   `diff_snapshots`. The schema is drop-and-recreate on version change (dev
   tool).

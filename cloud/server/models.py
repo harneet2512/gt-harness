@@ -141,6 +141,8 @@ class Session(BaseModel):
     #: wall-clock seconds summed over finished turns. Cost is always 0.0 with
     #: ``MSWEA_COST_TRACKING=ignore_errors``, so this is the honest budget line.
     total_wall_seconds: float = 0.0
+    #: GroundTruth typed actions this session has run, summed over its turns
+    gt_actions: int = 0
     current_turn_id: str | None = None
     closed_reason: ClosedReason | None = None
     #: the session that spawned this one; null for a primary session
@@ -296,6 +298,12 @@ class TurnReceipt(BaseModel):
     cost: float = 0.0
     #: how long the turn actually took, start to finish
     wall_seconds: float = 0.0
+    #: GroundTruth typed actions this turn ran (one ``gt_action`` frame each)
+    gt_actions: int = 0
+    #: of those, the ones that answered: ``semantics == "exact"`` and
+    #: ``match_count > 0``. An exact abstention over an empty scope is a GT
+    #: action, not an answer.
+    gt_exact_matches: int = 0
     finish_reason: str = ""
     patch_sha256: str | None = None
     gt_status: str = "off"

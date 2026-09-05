@@ -104,7 +104,8 @@ DEFAULT_MAX_WORKERS_PER_SESSION = 4
 #: worker frames copied onto the parent's stream, with ``agent_id`` added, so
 #: the parent's graph can draw every trail from one subscription
 MIRRORED_EVENT_TYPES = frozenset({
-    "assistant", "tool_call", "tool_result", "turn_started", "turn_finished",
+    "assistant", "tool_call", "tool_result", "gt_action",
+    "turn_started", "turn_finished",
 })
 #: how much of a worker's reply the stored report keeps
 REPORT_EXCERPT_CHARS = 400
@@ -697,6 +698,12 @@ class SessionManager:
             reply=TURN_ERROR_REPLY.format(reason=_short_error(exc)),
             n_calls=0,
             cost=0.0,
+            # the GT work this turn really did still belongs on its receipt,
+            # even though the turn ended in an exception
+            gt_actions=getattr(agent, "gt_actions", 0) if agent else 0,
+            gt_exact_matches=(
+                getattr(agent, "gt_exact_matches", 0) if agent else 0
+            ),
         )
         try:
             self._finish_turn(session, state, turn_id, result, loop)
@@ -777,6 +784,8 @@ class SessionManager:
             finish_reason=result.finish_reason,
             patch_sha256=patch_sha256,
             wall_seconds=result.wall_seconds,
+            gt_actions=result.gt_actions,
+            gt_exact_matches=result.gt_exact_matches,
         ))
         self._call(loop, self._store.bump_totals(
             session_id,
@@ -784,6 +793,7 @@ class SessionManager:
             steps=result.n_calls,
             cost=result.cost,
             wall_seconds=result.wall_seconds,
+            gt_actions=result.gt_actions,
         ))
         self._call(loop, self._store.update_session(
             session_id, last_message=reply
@@ -1573,6 +1583,8 @@ class SessionManager:
             from gt_engine.task_contract import extract_task_contract
             from gt_engine.verification_contract import compile_obligation_predicates
 
+            from .gt_events import install_gt_action_events
+
             index_receipt = ensure_index_with_receipt(cwd, state_dir=scratch_dir)
             graph_db = _graph_db_of(index_receipt)
 
@@ -1611,6 +1623,11 @@ class SessionManager:
                 engine=adapter,
             )
             install_runtime_hooks(agent, gt_session)
+            # After the hooks, never before: the timer has to wrap GT's own
+            # ``execute_actions`` replacement, which is what dispatches a typed
+            # action (it never reaches ``env.execute``, so the environment
+            # proxy that emits ``tool_call``/``tool_result`` never sees one).
+            install_gt_action_events(agent)
             self._emit(loop, session_id, "lifecycle", {
                 "status": "gt_ready",
                 "gt_mode": gt_mode,

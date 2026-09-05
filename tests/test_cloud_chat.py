@@ -49,6 +49,7 @@ from cloud.server import workspace as workspace_module
 from cloud.server.app import create_app
 from cloud.server.conversational_agent import ConversationalAgent
 from cloud.server.environment import CloudLocalEnvironment
+from cloud.server.gt_events import install_gt_action_events
 from cloud.server.runner import SessionManager
 from cloud.server.workspace import DIFF_PATCH_CAP
 
@@ -98,6 +99,75 @@ def _reply(content: str, cost: float = 0.01) -> FormatError:
             },
         }
     )
+
+
+#: HAR-84: a GroundTruth typed action. It is NOT a shell command — GT dispatches
+#: it through ``execute_typed_action_fail_open`` and never touches
+#: ``env.execute`` — so the ``groundtruth`` wheel is the one thing that has to
+#: be stubbed here (it ships only in the server image). ``_typed_result``
+#: reproduces its real ``gt.compiled_observation.v1`` return shape.
+TYPED_LITERAL = "class Command"
+TYPED_SCOPE = "pkg"
+
+
+def _typed_action(cost: float = 0.01) -> dict:
+    return {
+        "role": "assistant",
+        "content": "Asking GroundTruth where VALUE is defined.",
+        "extra": {
+            "actions": [
+                {
+                    "tool_name": "groundtruth",
+                    "tool_call_id": "call_gt_1",
+                    "gt_action": {
+                        "kind": "exact_literal_search",
+                        "arguments": {
+                            "literal": TYPED_LITERAL,
+                            "paths": [TYPED_SCOPE],
+                        },
+                    },
+                }
+            ],
+            "cost": cost,
+        },
+    }
+
+
+def _typed_result(action: dict) -> dict:
+    """FAKE BOUNDARY: ``execute_typed_action_fail_open`` (the vendored wheel)."""
+    arguments = (action.get("gt_action") or {}).get("arguments") or {}
+    scopes = list(arguments.get("paths") or [])
+    matches = [{"path": "pkg/util.py", "line": 1, "preview": "VALUE = 1"}]
+    payload = {
+        "schema": "gt.compiled_observation.v1",
+        "action_request": {"schema": "gt.action_request.v1"},
+        "evidence": {
+            "schema": "gt.evidence_artifact.v1",
+            "action_id": str(action.get("tool_call_id") or ""),
+            "answer": {"scope": scopes, "matches": matches},
+            "producer": "groundtruth.deterministic_queries.v1",
+            "semantics": "exact",
+            "coverage": "complete",
+            "omissions": [],
+        },
+        "direct_answer": matches,
+        "decision": {
+            "schema": "gt.interception_decision.v1",
+            "mode": "REPLACE",
+            "reason_codes": ["EXACT_COMPLETE_EQUIVALENCE"],
+        },
+    }
+    output = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return {
+        "output": output,
+        "returncode": 0,
+        "exception_info": "",
+        "extra": {
+            "gt_typed_action": True,
+            "compiled_observation_sha256": "c" * 64,
+            "interception_decision": "REPLACE",
+        },
+    }
 
 
 DEFAULT_SCRIPT: list[Any] = [
@@ -359,10 +429,13 @@ def _gt_style_execute_actions(agent: ConversationalAgent, message: dict) -> list
     exercised end to end without importing the engine.
     """
     environment = agent.env
-    outputs = [
-        environment.execute(action)
-        for action in (message.get("extra", {}) or {}).get("actions", [])
-    ]
+    outputs = []
+    for action in (message.get("extra", {}) or {}).get("actions", []):
+        if isinstance(action, dict) and action.get("tool_name") == "groundtruth":
+            # the typed branch: dispatched by GT, never seen by the shell
+            outputs.append(_typed_result(action))
+            continue
+        outputs.append(environment.execute(action))
     return agent.add_messages(
         *agent.model.format_observation_messages(
             message, outputs, agent.get_template_vars()
@@ -405,6 +478,8 @@ def _patched_build_agent(harness: Harness):
         if harness.install_gt_hook:
             agent._gt_original_execute_actions = agent.execute_actions
             agent.execute_actions = MethodType(_gt_style_execute_actions, agent)
+            # exactly what SessionManager._install_gt does, in the same order
+            install_gt_action_events(agent)
         harness.agents[session_id] = agent
         return agent
 
@@ -802,6 +877,82 @@ def test_gt_style_hook_still_streams_tool_frames(harness: Harness) -> None:
     assert snapshot["as_of_event"] == writes[0]["id"]
     assert [f["path"] for f in snapshot["files"]] == ["README.md"]
     assert "patched" in snapshot["patch"], "no per-step diff snapshot was stored"
+
+
+def test_a_typed_gt_action_becomes_one_gt_action_frame(harness: Harness) -> None:
+    """HAR-84: GroundTruth typed actions are first-class on the stream.
+
+    A typed action never reaches ``env.execute``, so it produced no
+    ``tool_call``/``tool_result`` and the UI showed a model call with nothing
+    under it. It now emits exactly one ``gt_action`` frame, after the
+    ``assistant`` frame that asked for it and before the next one, and the turn
+    receipt counts it.
+    """
+    harness.install_gt_hook = True
+    harness.set_script([
+        _typed_action(),
+        _action(TOUCH_TRACKED),
+        _reply("VALUE is defined in pkg/util.py."),
+    ])
+    session_id = _create_idle(harness, gt_mode="advisory")
+
+    accepted = _post_message(harness, session_id, "where is VALUE defined?")
+    assert accepted.status_code == 202, accepted.text
+
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+    order = [
+        f["event"]
+        for f in frames
+        if f["event"] in {"assistant", "gt_action", "tool_call", "tool_result"}
+    ]
+    # the typed action is part of the same model call: no extra assistant frame
+    assert order == [
+        "assistant", "gt_action",
+        "assistant", "tool_call", "tool_result",
+        "assistant",
+    ]
+
+    gt_frames = [f for f in frames if f["event"] == "gt_action"]
+    assert len(gt_frames) == 1
+    event = gt_frames[0]["payload"]["data"]
+    assert event["kind"] == "exact_literal_search"
+    assert event["arguments"] == {
+        "literal": TYPED_LITERAL, "paths": [TYPED_SCOPE]
+    }
+    assert event["scope"] == [TYPED_SCOPE]
+    assert event["semantics"] == "exact"
+    assert event["coverage"] == "complete"
+    assert event["match_count"] == 1
+    assert event["returncode"] == 0
+    assert event["omissions"] == []
+    assert event["reason_codes"] == ["EXACT_COMPLETE_EQUIVALENCE"]
+    assert event["step"] == 1
+    assert event["duration_ms"] >= 0.0
+    assert event["evidence_artifact_id"] == "call_gt_1"
+    assert event["turn_id"] == gt_frames[0]["payload"]["data"]["turn_id"]
+
+    receipts = harness.client.get(
+        f"/api/sessions/{session_id}/receipts", headers=harness.auth
+    ).json()
+    assert receipts[0]["gt_actions"] == 1
+    assert receipts[0]["gt_exact_matches"] == 1
+
+    session = harness.client.get(
+        f"/api/sessions/{session_id}", headers=harness.auth
+    ).json()
+    assert session["gt_actions"] == 1
+
+
+def test_a_gt_off_turn_reports_no_gt_actions(harness: Harness) -> None:
+    session_id = _create_idle(harness)
+    assert _post_message(harness, session_id, "append a line").status_code == 202
+    _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+
+    receipts = harness.client.get(
+        f"/api/sessions/{session_id}/receipts", headers=harness.auth
+    ).json()
+    assert receipts[0]["gt_actions"] == 0
+    assert receipts[0]["gt_exact_matches"] == 0
 
 
 def test_message_runs_a_turn_and_streams_it(harness: Harness) -> None:
