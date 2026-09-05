@@ -433,3 +433,65 @@
 .composer-arrow {
   font-size: 13px;
 }
+
+/* ---------------- session totals and the closed note ---------------- */
+
+/* Steps, wall clock and cost, under the status line. Quiet: it is a
+   footnote to the session, not a headline. */
+.talk-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+.talk-head-meta .mono {
+  font-size: 11px;
+}
+
+/* Why a session is over. Never green, never red — it is a fact, and only
+   one of the three is a failure. */
+.closed-why {
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 11.5px;
+}
+
+.closed-note {
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--muted);
+  background: var(--surface);
+  border-radius: 0 4px 4px 0;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  color: var(--ink-2);
+}
+.closed-note-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.closed-note-line > span {
+  flex: 1 1 220px;
+}
+.closed-note .newsess {
+  padding: 12px 0 0;
+}
+
+/* The switcher's own copy of the closed marker: it has to read at 11px
+   inside a row that is already three facts wide. */
+.switch-closed {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* The one thing left to do with a closed session, in the header, sized for
+   a row that already holds a status line and a marker. */
+.btn-restart {
+  padding: 3px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}

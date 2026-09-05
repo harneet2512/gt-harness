@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listSessions, type Session } from "../api";
 import { BUILD_SHA } from "../build";
-import { formatRelative, repoShort, truncate } from "../format";
+import {
+  formatRelative,
+  repoShort,
+  sessionClosedLabel,
+  truncate,
+} from "../format";
 import NewSessionForm from "./NewSessionForm";
 
 const REFRESH_MS = 5000;
@@ -11,6 +16,17 @@ interface Props {
   activeId: string | null;
   /** The open session, for the label before the list has loaded. */
   active: Session | null;
+}
+
+/** "closed · expired" and friends, as the row's second line. */
+function closedNote(session: Session): JSX.Element | null {
+  const label = sessionClosedLabel(
+    String(session.status),
+    session.closed_reason,
+  );
+  return label === null ? null : (
+    <span className="cap switch-closed">{label}</span>
+  );
 }
 
 function dotClass(status: string): string {
@@ -124,9 +140,15 @@ export default function SessionSwitcher({ activeId, active }: Props) {
                   </span>
                 </span>
                 <span className="switch-last">
-                  {s.last_message
-                    ? truncate(s.last_message, 96)
-                    : "no messages yet"}
+                  {/* A session you cannot talk to has to say so where you
+                      pick it, not after you have opened it. */}
+                  {closedNote(s) ?? (
+                    <>
+                      {s.last_message
+                        ? truncate(s.last_message, 96)
+                        : "no messages yet"}
+                    </>
+                  )}
                 </span>
               </button>
             </li>

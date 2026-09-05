@@ -149,3 +149,12 @@
   font-size: 11px;
   color: var(--ink-2);
 }
+
+/* The conversation-drawer toggle, first thing in the toolbar on a narrow
+   screen. It is the only way back to the thread there, so it never wraps. */
+.bar-drawer {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 7px;
+}

@@ -62,6 +62,10 @@ jobs:
         working-directory: cloud/ui
         run: npx tsc --noEmit
 
+      - name: Unit tests
+        working-directory: cloud/ui
+        run: npm test
+
       - name: Build
         working-directory: cloud/ui
         run: npm run build

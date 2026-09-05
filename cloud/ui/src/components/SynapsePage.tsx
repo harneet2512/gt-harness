@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { COMPOSER_LOCKED } from "../api";
 import { relationsFor } from "../graph";
+import {
+  defaultDrawerOpen,
+  defaultPanelCollapsed,
+  isOverlayMode,
+  useLayoutMode,
+} from "../layoutMode";
 import { useDragSize } from "../useDragSize";
 import { useGraphView } from "../useGraphView";
 import { useSessionData } from "../useSessionData";
@@ -37,10 +43,19 @@ export default function SynapsePage() {
     turnEpoch: data.turnEpoch,
   });
 
-  /* ---- layout ---- */
+  /* ---- layout ----
+     Three modes, one decision. Wide is three columns. Narrow turns the
+     conversation into a drawer and the inspector into a slide-over, because
+     below ~1100px a third column leaves the graph nothing. Stacked drops the
+     row entirely: conversation over graph, with sheets for the rest. */
+  const layout = useLayoutMode();
+  const overlay = isOverlayMode(layout);
+
   const left = useDragSize(LEFT_DEFAULT, LEFT_MIN, LEFT_MAX, "x");
   const panel = useDragSize(PANEL_DEFAULT, PANEL_MIN, PANEL_MAX, "y");
   const [panelOpen, setPanelOpen] = useState(true);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(true);
   const [labels, setLabels] = useState(false);
   const [fitToken, setFitToken] = useState(0);
   const [zoomK, setZoomK] = useState(1);
@@ -56,6 +71,28 @@ export default function SynapsePage() {
     }
     return out;
   }, [search, view.field]);
+
+  /* The drawer's default depends on what there is to look at: with a graph
+     on screen the graph is why you are here, with nothing drawn yet the
+     conversation is all there is. It keeps re-deciding until the reader
+     touches the toggle, and forgets that the moment the mode changes. */
+  const drawerTouched = useRef(false);
+  const hasGraph = view.field.particles.length > 0;
+
+  useEffect(() => {
+    drawerTouched.current = false;
+    setPanelCollapsed(defaultPanelCollapsed(layout));
+  }, [layout]);
+
+  useEffect(() => {
+    if (drawerTouched.current) return;
+    setDrawerOpen(defaultDrawerOpen(layout, hasGraph));
+  }, [layout, hasGraph]);
+
+  const toggleDrawer = useCallback(() => {
+    drawerTouched.current = true;
+    setDrawerOpen((open) => !open);
+  }, []);
 
   /* ---- selection ---- */
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -81,6 +118,26 @@ export default function SynapsePage() {
     ? (view.field.byId.get(inspectedId) ?? null)
     : null;
   const inspectedPath = inspected?.path ?? "";
+
+  const closeInspector = useCallback(() => {
+    setPinned(false);
+    setInspectedId(null);
+    setSelectedId(null);
+  }, []);
+
+  /* A slide-over with a scrim over it is modal enough to owe the reader an
+     Escape. The drawer is not: the toolbar toggle is always in reach, and
+     the session switcher already answers Escape from inside the drawer. */
+  const inspectorOpen = inspected !== null;
+  useEffect(() => {
+    if (!overlay || !inspectorOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      closeInspector();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overlay, inspectorOpen, closeInspector]);
 
   const inspectedCotouch = useMemo(() => {
     if (!inspectedPath) return [];
@@ -142,8 +199,16 @@ export default function SynapsePage() {
   );
 
   return (
-    <div className="synapse">
-      <div className="synapse-left" style={{ width: left.size }}>
+    <div
+      className={`synapse ${layout === "wide" ? "" : `is-${layout}`} ${
+        drawerOpen ? "drawer-open" : ""
+      }`}
+    >
+      <div
+        className={`synapse-left ${drawerOpen ? "is-open" : ""}`}
+        style={layout === "wide" ? { width: left.size } : undefined}
+        aria-hidden={!drawerOpen}
+      >
         <Conversation
           sessionId={sessionId}
           session={session}
@@ -175,16 +240,27 @@ export default function SynapsePage() {
               ? data.close
               : null
           }
+          onCollapse={layout === "narrow" ? toggleDrawer : null}
         />
       </div>
 
-      <div
-        className="grip is-x"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the conversation"
-        {...left.handlers}
-      />
+      {layout === "narrow" && drawerOpen && (
+        <div
+          className="scrim is-drawer"
+          role="presentation"
+          onClick={toggleDrawer}
+        />
+      )}
+
+      {layout === "wide" && (
+        <div
+          className="grip is-x"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the conversation"
+          {...left.handlers}
+        />
+      )}
 
       <div className="synapse-main">
         <GraphToolbar
@@ -207,6 +283,8 @@ export default function SynapsePage() {
           onTogglePanel={() => setPanelOpen(!panelOpen)}
           gt={graph.gt}
           folded={view.field.folded}
+          drawerOpen={drawerOpen}
+          onToggleDrawer={layout === "narrow" ? toggleDrawer : null}
         />
 
         <div className="synapse-stage">
@@ -239,24 +317,35 @@ export default function SynapsePage() {
         </div>
 
         {panelOpen && (
-          <div className="synapse-bottom" style={{ height: panel.size }}>
-            <div
-              className="grip is-y"
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="Resize the panel"
-              {...panel.handlers}
-            />
-            <Scrubber
-              steps={view.steps}
-              edited={view.editedPaths}
-              position={view.cutoff}
-              calls={view.calls}
-              hereCall={view.hereCall}
-              live={view.live}
-              onScrub={view.setScrub}
-              onLive={() => view.setScrub(null)}
-            />
+          <div
+            className={`synapse-bottom ${panelCollapsed ? "is-collapsed" : ""}`}
+            style={
+              !panelCollapsed && layout !== "stacked"
+                ? { height: panel.size }
+                : undefined
+            }
+          >
+            {!panelCollapsed && layout !== "stacked" && (
+              <div
+                className="grip is-y"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize the panel"
+                {...panel.handlers}
+              />
+            )}
+            {!panelCollapsed && (
+              <Scrubber
+                steps={view.steps}
+                edited={view.editedPaths}
+                position={view.cutoff}
+                calls={view.calls}
+                hereCall={view.hereCall}
+                live={view.live}
+                onScrub={view.setScrub}
+                onLive={() => view.setScrub(null)}
+              />
+            )}
             <BottomPanel
               steps={view.steps}
               cutoff={view.cutoff}
@@ -273,21 +362,28 @@ export default function SynapsePage() {
               receiptsError={data.receiptsError}
               receiptsLoading={data.receiptsLoading}
               onRefreshReceipts={data.reloadReceipts}
+              collapsed={panelCollapsed}
+              onExpand={overlay ? () => setPanelCollapsed(false) : null}
+              onCollapse={overlay ? () => setPanelCollapsed(true) : null}
             />
           </div>
         )}
       </div>
 
+      {overlay && inspectorOpen && (
+        <div
+          className="scrim is-inspector"
+          role="presentation"
+          onClick={closeInspector}
+        />
+      )}
+
       <Inspector
         particle={inspected}
-        open={inspected !== null}
+        open={inspectorOpen}
         pinned={pinned}
         onTogglePin={() => setPinned(!pinned)}
-        onClose={() => {
-          setPinned(false);
-          setInspectedId(null);
-          setSelectedId(null);
-        }}
+        onClose={closeInspector}
         diff={view.diffAtCutoff}
         diffFile={view.editedAtCutoff.get(inspectedPath)}
         diffNote={view.diffNote}

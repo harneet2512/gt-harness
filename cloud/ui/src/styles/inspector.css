@@ -269,3 +269,29 @@
     box-shadow: -10px 0 28px rgba(26, 27, 30, 0.1);
   }
 }
+
+/* Narrow (below 1100px, see `src/layoutMode.ts`): a floating panel with a
+   scrim behind it is a slide-over, and a slide-over has a ceiling. 88vw so
+   there is always a strip of graph left to tap on, and never more than the
+   viewport less 48px so the close button cannot be pushed off the edge. */
+@media (max-width: 1099.98px) {
+  .ins {
+    --ins-w: min(400px, 88vw, calc(100vw - 48px));
+  }
+}
+
+/* Stacked (below 760px): a full sheet. There is nothing behind it worth
+   keeping a strip of. */
+@media (max-width: 759.98px) {
+  .ins {
+    --ins-w: 100%;
+    left: 0;
+    box-shadow: none;
+    border-left: none;
+  }
+  /* `width` is what animates, and `min-width` on the children is what stops
+     them reflowing mid-transition; both have to be the sheet width. */
+  .ins.is-open {
+    width: 100%;
+  }
+}

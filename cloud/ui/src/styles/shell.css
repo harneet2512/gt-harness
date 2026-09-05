@@ -75,3 +75,119 @@
 .grip:active {
   background: var(--orange);
 }
+
+/* ------------------------------------------------------------------ *
+ * Narrow and stacked.
+ *
+ * The two breakpoints below are `NARROW_MAX_PX` and `STACK_MAX_PX` in
+ * `src/layoutMode.ts` — the shell reads the same numbers through
+ * `useLayoutMode()`, so a change here is a change there. Both are written
+ * as `max-width: N - 0.02px` so that `width < N` in JS and the media query
+ * agree on the boundary itself.
+ * ------------------------------------------------------------------ */
+
+/* The dimming sheet under an overlay. Its own element rather than a
+   pseudo-element, because it is a click target: tapping beside a slide-over
+   is how a slide-over is closed. */
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  background: rgba(26, 27, 30, 0.28);
+  animation: scrim-in 140ms ease-out;
+}
+.scrim.is-inspector {
+  z-index: 14;
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrim {
+    animation: none;
+  }
+}
+
+/* ---------------- narrow: below 1100px ---------------- */
+
+@media (max-width: 1099.98px) {
+  .synapse {
+    position: relative;
+  }
+
+  /* The conversation stops being a column and becomes a drawer over the
+     graph. It keeps its own width rather than filling the viewport: the
+     graph underneath is the thing the drawer is a detour from. */
+  .synapse.is-narrow .synapse-left {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 13;
+    width: min(420px, calc(100vw - 48px));
+    box-shadow: 6px 0 28px rgba(26, 27, 30, 0.12);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 160ms ease,
+      visibility 0s linear 160ms;
+  }
+  .synapse.is-narrow .synapse-left.is-open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform 160ms ease,
+      visibility 0s;
+  }
+}
+
+/* ---------------- stacked: below 760px ---------------- */
+
+@media (max-width: 759.98px) {
+  .synapse.is-stacked {
+    flex-direction: column;
+  }
+
+  /* Back to a column, at the top, at a height that leaves the graph a
+     usable half of the screen. */
+  .synapse.is-stacked .synapse-left {
+    position: static;
+    width: 100%;
+    height: 60vh;
+    flex: 0 0 auto;
+    transform: none;
+    visibility: visible;
+    box-shadow: none;
+    border-bottom: 1px solid var(--rule);
+  }
+  .synapse.is-stacked .talk {
+    border-right: none;
+  }
+
+  .synapse.is-stacked .synapse-main {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Expanded, the panel is a sheet over everything; collapsed, it is the
+     tab strip it always was, pinned to the bottom of the graph. */
+  .synapse.is-stacked .synapse-bottom {
+    position: absolute;
+    inset: 0;
+    z-index: 16;
+    height: auto;
+    border-top: none;
+  }
+  .synapse.is-stacked .synapse-bottom.is-collapsed {
+    position: static;
+    inset: auto;
+    z-index: auto;
+    border-top: 1px solid var(--rule);
+  }
+}

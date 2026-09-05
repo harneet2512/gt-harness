@@ -297,3 +297,22 @@
   font-size: 11px;
   white-space: nowrap;
 }
+
+/* ---------------- the collapsed strip ---------------- */
+
+/* Collapsed, the panel is its own tab strip: it still says how many steps,
+   changes and receipts are down here, which is the whole reason to open it. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.panel.is-collapsed {
+  height: auto;
+}
+.panel-fold {
+  font-size: 11px;
+  padding: 3px 8px;
+  align-self: center;
+}

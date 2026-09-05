@@ -1,4 +1,4 @@
-import type { Timestamp } from "./api";
+import type { Receipt, Session, Timestamp } from "./api";
 
 /** Epoch seconds, whether the server sent seconds, millis, or an ISO string. */
 export function toEpochSeconds(value: Timestamp | null | undefined): number | null {
@@ -85,4 +85,107 @@ export function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} kB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Session-level labels
+ * ------------------------------------------------------------------ */
+
+/**
+ * Why a session is no longer open, in the words the reader needs: not the
+ * enum, and never a bare "closed" where the server told us more.
+ * Null while the session is still open.
+ */
+export function sessionClosedLabel(
+  status: string,
+  reason?: string | null,
+): string | null {
+  if (status === "failed") return "failed";
+  if (status !== "closed") return null;
+  switch (reason) {
+    case "expired":
+      return "closed · expired";
+    case "user":
+      return "closed · by you";
+    case "failed":
+      return "closed · failed";
+    default:
+      return "closed";
+  }
+}
+
+/** The longer form, for the banner that offers a way out. */
+export function sessionClosedBlurb(
+  status: string,
+  reason?: string | null,
+): string | null {
+  if (status === "failed") return "This session failed.";
+  if (status !== "closed") return null;
+  switch (reason) {
+    case "expired":
+      return "This session expired and its workspace was discarded.";
+    case "user":
+      return "You closed this session; its workspace was discarded.";
+    case "failed":
+      return "This session failed and was closed.";
+    default:
+      return "This session is closed; its workspace was discarded.";
+  }
+}
+
+/**
+ * The one-line session total: "12 steps · 4m 10s · $0.000". Parts the
+ * server has not reported are left out rather than guessed at.
+ */
+export function sessionTotals(
+  session: Pick<Session, "steps" | "cost"> & {
+    total_wall_seconds?: number | null;
+  },
+): string {
+  const parts: string[] = [];
+  if (Number.isFinite(session.steps) && session.steps > 0) {
+    parts.push(`${session.steps} step${session.steps === 1 ? "" : "s"}`);
+  }
+  const wall = session.total_wall_seconds;
+  if (typeof wall === "number" && Number.isFinite(wall) && wall > 0) {
+    parts.push(formatDuration(wall));
+  }
+  if (typeof session.cost === "number" && Number.isFinite(session.cost)) {
+    parts.push(formatCost(session.cost));
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * True when every cost we have is exactly zero. A provider that reports no
+ * cost and a run that genuinely cost nothing are indistinguishable from
+ * "$0.000", so the column has to say which it is.
+ */
+export function costUntracked(
+  values: readonly (number | null | undefined)[],
+): boolean {
+  let seen = 0;
+  for (const value of values) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (value !== 0) return false;
+    seen += 1;
+  }
+  return seen > 0;
+}
+
+/**
+ * How long a turn took: the server's own measure first, the clock second.
+ * The column is `NOT NULL DEFAULT 0.0`, so a zero is a turn the server did
+ * not time rather than a turn that took no time — fall back rather than
+ * claim "0s" over a minute of work.
+ */
+export function receiptWall(receipt: Receipt): string {
+  const wall = receipt.wall_seconds;
+  if (typeof wall === "number" && Number.isFinite(wall) && wall > 0) {
+    return formatDuration(wall);
+  }
+  const start = toEpochSeconds(receipt.started_at);
+  const end = toEpochSeconds(receipt.finished_at);
+  if (start === null || end === null) return "—";
+  return formatDuration(end - start);
 }

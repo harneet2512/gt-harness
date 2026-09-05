@@ -36,6 +36,14 @@ export const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   "failed",
 ]);
 
+/**
+ * Why a session is no longer open. `user` is a close from the UI, `expired`
+ * is the reaper collecting an idle workspace, `failed` is a session that
+ * broke. Null on an open session, and absent from a server that predates
+ * the field — treat "closed with no reason" as simply closed.
+ */
+export type ClosedReason = "user" | "expired" | "failed";
+
 export interface Session {
   id: string;
   status: SessionStatusValue | string;
@@ -44,6 +52,12 @@ export interface Session {
   model: string;
   gt_mode: string;
   gt_status: GtStatus | string;
+  /**
+   * Why the GT index is unavailable, in the indexer's own words. Unlike the
+   * `gt_unavailable` lifecycle frame — fired once, at index time — this
+   * survives a reload. Null when GT is fine, absent on an older server.
+   */
+  gt_error?: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
   last_message: string | null;
@@ -51,6 +65,10 @@ export interface Session {
   steps: number;
   cost: number;
   current_turn_id: string | null;
+  /** Why it closed. Optional: older servers do not send it. */
+  closed_reason?: ClosedReason | string | null;
+  /** Wall-clock seconds spent across every turn of the session. */
+  total_wall_seconds?: number | null;
 }
 
 export interface SessionCreate {
@@ -60,15 +78,38 @@ export interface SessionCreate {
   gt_mode: string;
   step_limit: number;
   temperature: number;
+  /**
+   * Per-turn wall-clock budget in seconds, 60..3600. Omitted means "use the
+   * server's TURN_WALL_SECONDS", which is the only place that default should
+   * live. Running past it ends the turn with `finish_reason: "time_limit"`.
+   */
+  wall_seconds?: number;
 }
+
+/** The bounds the server enforces on `SessionCreate.wall_seconds`. */
+export const WALL_SECONDS_MIN = 60;
+export const WALL_SECONDS_MAX = 3600;
 
 export type FinishReason =
   | "reply"
   | "question"
   | "step_limit"
+  /** The turn ran out of wall-clock budget, as `step_limit` runs out of steps. */
+  | "time_limit"
   | "stopped"
   | "error"
   | "submitted";
+
+/** Finish reasons that stopped a turn at a cap rather than at an answer. */
+export const CAP_REASONS: ReadonlySet<string> = new Set([
+  "step_limit",
+  "time_limit",
+]);
+
+/** What the cap was, in the reader's words. */
+export function capLabel(reason: string): string {
+  return reason === "time_limit" ? "time budget" : "step limit";
+}
 
 export type MessageRole = "user" | "agent" | "system";
 
@@ -186,6 +227,8 @@ export interface Receipt {
   patch_sha256: string | null;
   gt_status: string;
   model: string;
+  /** Wall-clock seconds the turn took, as the server measured it. */
+  wall_seconds?: number | null;
 }
 
 export interface User {
@@ -271,6 +314,8 @@ export function lifecycleToSessionStatus(
 export interface LifecycleData {
   status: LifecycleStatus | string;
   error?: string;
+  /** On `closed`/`failed`: why. Mirrors `Session.closed_reason`. */
+  reason?: ClosedReason | string;
   [key: string]: unknown;
 }
 

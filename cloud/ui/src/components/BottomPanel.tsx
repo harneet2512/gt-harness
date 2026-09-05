@@ -25,6 +25,14 @@ interface Props {
   receiptsError: string | null;
   receiptsLoading: boolean;
   onRefreshReceipts: () => void;
+  /**
+   * Collapsed to its tab strip. A narrow screen opens this way: the tabs
+   * say what is down here without spending a third of the viewport on it,
+   * and picking one opens the drawer.
+   */
+  collapsed?: boolean;
+  onExpand?: (() => void) | null;
+  onCollapse?: (() => void) | null;
 }
 
 /** The IDE drawer under the graph: steps, changes, receipts. */
@@ -44,6 +52,9 @@ export default function BottomPanel({
   receiptsError,
   receiptsLoading,
   onRefreshReceipts,
+  collapsed = false,
+  onExpand = null,
+  onCollapse = null,
 }: Props) {
   const [tab, setTab] = useState<TabId>("trail");
   const chosen = useRef(false);
@@ -63,26 +74,46 @@ export default function BottomPanel({
   };
 
   return (
-    <div className="panel">
+    <div className={`panel ${collapsed ? "is-collapsed" : ""}`}>
       <div className="panel-tabs" role="tablist">
         {TABS.map((id) => (
           <button
             key={id}
             type="button"
             role="tab"
-            aria-selected={tab === id}
-            className={`panel-tab ${tab === id ? "is-active" : ""}`}
+            aria-selected={!collapsed && tab === id}
+            className={`panel-tab ${
+              !collapsed && tab === id ? "is-active" : ""
+            }`}
             onClick={() => {
               chosen.current = true;
               setTab(id);
+              // Picking a tab on a collapsed strip is a request to read it.
+              if (collapsed) onExpand?.();
             }}
           >
             {id}
             <span className="panel-tab-n">{count(id)}</span>
           </button>
         ))}
+        {(onExpand || onCollapse) && (
+          <>
+            <span className="spacer" />
+            <button
+              type="button"
+              className="btn-text panel-fold"
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? "Open the panel" : "Collapse the panel"}
+              title={collapsed ? "Open the panel" : "Collapse the panel"}
+              onClick={() => (collapsed ? onExpand?.() : onCollapse?.())}
+            >
+              <span aria-hidden="true">{collapsed ? "▴" : "▾"}</span>
+            </button>
+          </>
+        )}
       </div>
 
+      {!collapsed && (
       <div className="panel-body">
         {tab === "trail" && (
           <TrailPanel
@@ -113,6 +144,7 @@ export default function BottomPanel({
           />
         )}
       </div>
+      )}
     </div>
   );
 }

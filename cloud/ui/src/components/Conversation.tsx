@@ -1,15 +1,24 @@
 import { useState } from "react";
-import type { Message, Session } from "../api";
+import { useNavigate } from "react-router-dom";
+import { CAP_REASONS, capLabel, type Message, type Session } from "../api";
 import {
   orphanSteering,
   type ChatState,
   type ThreadGroup,
   type TurnGroup,
 } from "../chatState";
-import { formatClock, formatCost, shortSha } from "../format";
+import {
+  formatClock,
+  formatCost,
+  sessionClosedBlurb,
+  sessionClosedLabel,
+  sessionTotals,
+  shortSha,
+} from "../format";
 import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
 import Composer from "./Composer";
+import NewSessionForm from "./NewSessionForm";
 import Prose from "./Prose";
 import SessionSwitcher from "./SessionSwitcher";
 import StatusLine, { type StatusMode } from "./StatusLine";
@@ -48,6 +57,11 @@ interface Props {
   onContinue: () => void;
   /** Discard the workspace. Absent once the session is already closed. */
   onClose: (() => void) | null;
+  /**
+   * Dismiss the conversation drawer. Only set on a narrow screen, where
+   * the column is an overlay and needs a way out that is not the toolbar.
+   */
+  onCollapse?: (() => void) | null;
 }
 
 /** GT in four words, in the header, at all times. */
@@ -95,15 +109,33 @@ export default function Conversation({
   onStop,
   onContinue,
   onClose,
+  onCollapse = null,
 }: Props) {
+  const navigate = useNavigate();
   const scroll = useAutoScroll();
   const [gtDismissed, setGtDismissed] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   let turnNo = 0;
 
   const gtMode = String(session?.gt_mode ?? "off");
   const gtStatus = String(session?.gt_status ?? "off");
   // Asked for ground truth and did not get it: say so, once, until dismissed.
   const gtFailed = gtStatus === "unavailable" && gtMode !== "off";
+
+  /* A closed session is read-only for good: the workspace behind it is
+     gone. Saying *why* — you closed it, it expired, it failed — is the
+     difference between an explanation and a dead end, and the only useful
+     next move is the same repository again. */
+  const sessionStatus = String(session?.status ?? "");
+  const closedLabel = sessionClosedLabel(
+    sessionStatus,
+    session?.closed_reason,
+  );
+  const closedBlurb = sessionClosedBlurb(
+    sessionStatus,
+    session?.closed_reason,
+  );
+  const totals = session ? sessionTotals(session) : "";
 
   return (
     <section className="talk">
@@ -129,7 +161,51 @@ export default function Conversation({
               close session
             </button>
           )}
+          {onCollapse && (
+            <button
+              type="button"
+              className="btn-text"
+              aria-label="Hide the conversation"
+              title="Hide the conversation"
+              onClick={onCollapse}
+            >
+              ✕
+            </button>
+          )}
         </div>
+
+        {session && (totals !== "" || closedLabel !== null) && (
+          <div className="talk-head-meta">
+            {totals !== "" && (
+              <span
+                className="mono muted"
+                title={
+                  session.cost === 0
+                    ? "the provider reported no cost for this session"
+                    : undefined
+                }
+              >
+                {totals}
+              </span>
+            )}
+            {closedLabel !== null && (
+              <span className="cap closed-why">{closedLabel}</span>
+            )}
+            <span className="spacer" />
+            {/* Offered until it is taken: once the form is open, the form
+                is the interface and carries its own Cancel. */}
+            {closedBlurb !== null && !restarting && (
+              <button
+                type="button"
+                className="btn btn-orange btn-restart"
+                aria-expanded={false}
+                onClick={() => setRestarting(true)}
+              >
+                Start a new session on this repo
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       <div className="talk-wrap">
@@ -155,6 +231,30 @@ export default function Conversation({
                   <summary className="cap">why</summary>
                   <p className="mono">{gtError}</p>
                 </details>
+              )}
+            </div>
+          )}
+
+          {closedBlurb !== null && session && (
+            <div className="closed-note">
+              <div className="closed-note-line">
+                <span>{closedBlurb}</span>
+              </div>
+              {restarting && (
+                <NewSessionForm
+                  title={null}
+                  seed={{
+                    repo: session.repo,
+                    ref: session.ref,
+                    model: session.model,
+                    gtMode: String(session.gt_mode),
+                  }}
+                  onCancel={() => setRestarting(false)}
+                  onCreated={(next) => {
+                    setRestarting(false);
+                    navigate(`/sessions/${next.id}`);
+                  }}
+                />
               )}
             </div>
           )}
@@ -321,21 +421,25 @@ function Reply({
         {finish_reason === "error" && (
           <span className="cap cap-error">turn failed</span>
         )}
-        {finish_reason === "step_limit" && (
-          <>
-            <span className="cap">step limit reached</span>
-            <button
-              type="button"
-              className="link"
-              onClick={(e) => {
-                e.stopPropagation();
-                onContinue();
-              }}
-            >
-              keep going
-            </button>
-          </>
-        )}
+        {/* Out of steps and out of time are the same event to the reader:
+            the agent stopped at a cap, not at an answer, and the only
+            question is whether to spend another one. */}
+        {typeof finish_reason === "string" &&
+          CAP_REASONS.has(finish_reason) && (
+            <>
+              <span className="cap">{capLabel(finish_reason)} reached</span>
+              <button
+                type="button"
+                className="link"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onContinue();
+                }}
+              >
+                continue
+              </button>
+            </>
+          )}
 
         <span className="spacer" />
         <span className="mono muted">

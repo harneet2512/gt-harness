@@ -1,10 +1,10 @@
 import type { Receipt } from "../api";
 import {
+  costUntracked,
   formatClock,
   formatCost,
-  formatDuration,
+  receiptWall,
   shortSha,
-  toEpochSeconds,
 } from "../format";
 
 interface Props {
@@ -22,6 +22,10 @@ export default function ReceiptsPanel({
   onRefresh,
 }: Props) {
   const newestFirst = [...receipts].reverse();
+  /* Every turn costing exactly $0.000 is not a bargain, it is a provider
+     that reports no price. Saying "cost" over that column invites the
+     reader to conclude the run was free. */
+  const untracked = costUntracked(receipts.map((r) => r.cost));
 
   return (
     <>
@@ -51,8 +55,11 @@ export default function ReceiptsPanel({
               <Line term="turn" value={`${newestFirst.length - i}`} />
               <Line term="model" value={receipt.model} />
               <Line term="steps" value={String(receipt.n_calls)} />
-              <Line term="cost" value={formatCost(receipt.cost)} />
-              <Line term="took" value={duration(receipt)} />
+              <Line
+                term={untracked ? "cost (untracked)" : "cost"}
+                value={formatCost(receipt.cost)}
+              />
+              <Line term="took" value={receiptWall(receipt)} />
               <Line
                 term="finish"
                 value={String(receipt.finish_reason)}
@@ -106,11 +113,4 @@ function Line({
       </dd>
     </div>
   );
-}
-
-function duration(receipt: Receipt): string {
-  const start = toEpochSeconds(receipt.started_at);
-  const end = toEpochSeconds(receipt.finished_at);
-  if (start === null || end === null) return "—";
-  return formatDuration(end - start);
 }

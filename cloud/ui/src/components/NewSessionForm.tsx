@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { createSession, type GtMode, type Session } from "../api";
+import {
+  createSession,
+  WALL_SECONDS_MAX,
+  WALL_SECONDS_MIN,
+  type GtMode,
+  type Session,
+} from "../api";
 
 const MODELS = [
   "google/gemma-4-31b-it:free",
@@ -19,12 +25,36 @@ const DEFAULT_TEMPERATURE = 0;
 /** `https://host/owner/repo`, which is as much as the client can know. */
 const REPO_URL = /^https:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/?$/;
 
+/**
+ * Values to open the form with. Used to start a fresh session on the repo a
+ * closed one was working — retyping the URL, the ref and the model is the
+ * whole cost of an expired workspace, and it is avoidable.
+ */
+export interface NewSessionSeed {
+  repo?: string;
+  ref?: string;
+  model?: string;
+  gtMode?: string;
+  stepLimit?: number;
+  wallSeconds?: number;
+}
+
 interface Props {
   onCreated: (session: Session) => void;
   /** Omitted where there is nothing to go back to, e.g. the empty state. */
   onCancel?: () => void;
   /** The form's own heading; pass null where the page already has one. */
   title?: string | null;
+  /** Pre-filled values; anything omitted keeps the form's own default. */
+  seed?: NewSessionSeed;
+}
+
+/** A model the picker does not list is still a model: keep it, as "Other…". */
+function seedModel(model: string | undefined): [string, string] {
+  if (!model) return [MODELS[0], ""];
+  return (MODELS as readonly string[]).includes(model)
+    ? [model, ""]
+    : [CUSTOM_MODEL, model];
 }
 
 /** Clone a repository into a fresh workspace. */
@@ -32,13 +62,22 @@ export default function NewSessionForm({
   onCreated,
   onCancel,
   title = "new session",
+  seed,
 }: Props) {
-  const [repo, setRepo] = useState("");
-  const [ref, setRef] = useState(DEFAULT_REF);
-  const [modelChoice, setModelChoice] = useState<string>(MODELS[0]);
-  const [customModel, setCustomModel] = useState("");
-  const [gtMode, setGtMode] = useState<string>(GT_MODES[0]);
-  const [stepLimit, setStepLimit] = useState(String(DEFAULT_STEP_LIMIT));
+  const [seedChoice, seedCustom] = seedModel(seed?.model);
+  const [repo, setRepo] = useState(seed?.repo ?? "");
+  const [ref, setRef] = useState(seed?.ref || DEFAULT_REF);
+  const [modelChoice, setModelChoice] = useState<string>(seedChoice);
+  const [customModel, setCustomModel] = useState(seedCustom);
+  const [gtMode, setGtMode] = useState<string>(seed?.gtMode ?? GT_MODES[0]);
+  const [stepLimit, setStepLimit] = useState(
+    String(seed?.stepLimit ?? DEFAULT_STEP_LIMIT),
+  );
+  /* Blank on purpose: the server owns the default (TURN_WALL_SECONDS),
+     and repeating it here is how the two drift apart. */
+  const [wallSeconds, setWallSeconds] = useState(
+    seed?.wallSeconds ? String(seed.wallSeconds) : "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,6 +104,7 @@ export default function NewSessionForm({
     setSubmitting(true);
     setError(null);
     try {
+      const parsedWall = Number.parseInt(wallSeconds, 10);
       onCreated(
         await createSession({
           repo: repo.trim(),
@@ -73,6 +113,9 @@ export default function NewSessionForm({
           gt_mode: gtMode,
           step_limit: parsedLimit,
           temperature: DEFAULT_TEMPERATURE,
+          ...(Number.isFinite(parsedWall) && wallSeconds.trim() !== ""
+            ? { wall_seconds: parsedWall }
+            : {}),
         }),
       );
     } catch (err) {
@@ -173,6 +216,23 @@ export default function NewSessionForm({
             onChange={(e) => setStepLimit(e.target.value)}
           />
         </div>
+      </div>
+
+      <div className="field">
+        <label className="cap" htmlFor="wall">
+          time per turn — seconds, blank for the server default
+        </label>
+        <input
+          id="wall"
+          type="number"
+          min={WALL_SECONDS_MIN}
+          max={WALL_SECONDS_MAX}
+          step={30}
+          placeholder="server default"
+          title={`Between ${WALL_SECONDS_MIN} and ${WALL_SECONDS_MAX} seconds`}
+          value={wallSeconds}
+          onChange={(e) => setWallSeconds(e.target.value)}
+        />
       </div>
 
       {error && <div className="notice">{error}</div>}

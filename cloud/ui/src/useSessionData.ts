@@ -21,6 +21,7 @@ import {
   type TreeFile,
 } from "./api";
 import { chatReducer, emptyChat, type ChatState } from "./chatState";
+import { gtErrorOf, nextSession, shouldApply } from "./sessionSync";
 import { WRITES } from "./trail";
 import { useSessionStream } from "./useSessionStream";
 
@@ -98,7 +99,11 @@ export function useSessionData(sessionId: string | null): SessionData {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [phase, setPhase] = useState<string | null>(null);
-  const [gtError, setGtError] = useState<string | null>(null);
+  /* `undefined` until the stream says something about GT; the session
+     row answers for it until then. See `gtErrorOf`. */
+  const [liveGtError, setLiveGtError] = useState<string | null | undefined>(
+    undefined,
+  );
   const [refreshKey, setRefreshKey] = useState(0);
   const [turnEpoch, setTurnEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -136,13 +141,9 @@ export function useSessionData(sessionId: string | null): SessionData {
     const seq = (fetchSeq.current += 1);
     getSession(sessionId)
       .then((next) => {
-        if (seq < appliedSeq.current) return;
+        if (!shouldApply(appliedSeq.current, seq)) return;
         appliedSeq.current = seq;
-        setSession((prev) => {
-          const turn = next.current_turn_id;
-          if (prev && turn && finishedTurns.current.has(turn)) return prev;
-          return next;
-        });
+        setSession((prev) => nextSession(prev, next, finishedTurns.current));
       })
       .catch(() => {
         /* transient — the stream or the next action will refresh it */
@@ -257,11 +258,20 @@ export function useSessionData(sessionId: string | null): SessionData {
           setPhase(raw);
           const mapped = lifecycleToSessionStatus(raw);
           if (mapped) {
+            /* A session can end while you are watching it — the reaper
+               collects an idle workspace and the frame is the only notice
+               anyone gets. `reason` travels with it so the page can say
+               *why* it went, not just that it did. */
+            const reason = str(event.data.reason) || null;
             setSession((prev) =>
               prev
                 ? {
                     ...prev,
                     status: mapped,
+                    closed_reason:
+                      mapped === "closed" || mapped === "failed"
+                        ? (reason ?? prev.closed_reason ?? null)
+                        : prev.closed_reason,
                     current_turn_id:
                       mapped === "running" ? prev.current_turn_id : null,
                   }
@@ -273,13 +283,13 @@ export function useSessionData(sessionId: string | null): SessionData {
              fails the reader deserves to know before the first turn ends.
              The frame is therefore applied to the session directly. */
           if (raw === "gt_unavailable") {
-            setGtError(str(event.data.error) || null);
+            setLiveGtError(str(event.data.error) || null);
             setSession((prev) =>
               prev ? { ...prev, gt_status: "unavailable" } : prev,
             );
           }
           if (raw === "gt_ready") {
-            setGtError(null);
+            setLiveGtError(null);
             setSession((prev) =>
               prev ? { ...prev, gt_status: "ready" } : prev,
             );
@@ -442,7 +452,7 @@ export function useSessionData(sessionId: string | null): SessionData {
     session,
     chat,
     phase,
-    gtError,
+    gtError: gtErrorOf(liveGtError, session?.gt_error),
     loadError,
     sendError,
     isRunning: Boolean(isRunning),

@@ -3,11 +3,11 @@ import {
   ApiError,
   EVENT_TYPES,
   getSession,
-  parseEventFrame,
   subscribeEvents,
   TERMINAL_STATUSES,
   type SessionEvent,
 } from "./api";
+import { createIngest, ingestFrame } from "./streamSync";
 
 const RECONNECT_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -39,9 +39,9 @@ export function useSessionStream(
   const handler = useRef(onEvent);
   handler.current = onEvent;
 
-  const lastEventId = useRef(0);
-  const seenIds = useRef<Set<number>>(new Set());
-  const synthId = useRef(0);
+  /* De-duplication, the resume point and the terminal test all live in
+     `streamSync.ts` so they can be tested without a browser. */
+  const ingest = useRef(createIngest());
   const done = useRef(false);
   const attempts = useRef(0);
   const esRef = useRef<EventSource | null>(null);
@@ -58,25 +58,13 @@ export function useSessionStream(
       setStream(next);
     };
 
-    const ingest = (raw: unknown) => {
-      const event = parseEventFrame(raw);
+    const take = (raw: unknown) => {
+      const { event, terminal } = ingestFrame(ingest.current, raw);
       if (!event) return;
-
-      if (Number.isFinite(event.id)) {
-        if (seenIds.current.has(event.id)) return;
-        seenIds.current.add(event.id);
-        if (event.id > lastEventId.current) lastEventId.current = event.id;
-      } else {
-        // Server omitted an id; keep it renderable with a synthetic key.
-        event.id = -++synthId.current;
-      }
 
       handler.current(event);
 
-      if (
-        event.type === "lifecycle" &&
-        TERMINAL_STATUSES.has(String(event.data.status))
-      ) {
+      if (terminal) {
         // The server ends the generator on closed/failed.
         done.current = true;
         teardown("closed");
@@ -101,10 +89,10 @@ export function useSessionStream(
 
     const connect = () => {
       if (cancelled || done.current) return;
-      const es = subscribeEvents(sessionId, lastEventId.current);
+      const es = subscribeEvents(sessionId, ingest.current.lastEventId);
       esRef.current = es;
 
-      const onFrame = (e: Event) => ingest((e as MessageEvent).data);
+      const onFrame = (e: Event) => take((e as MessageEvent).data);
       for (const type of EVENT_TYPES) es.addEventListener(type, onFrame);
 
       es.onopen = () => {
