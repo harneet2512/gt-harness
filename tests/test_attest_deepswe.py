@@ -211,6 +211,9 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
         state / "reproducibility_manifest.json",
         {
             "research_valid": True,
+            "gt_mode": "advisory",
+            "engine_integrity": {"schema": "gt.engine_integrity.v1", "valid": True,
+                                 "mode": "advisory", "issues": [], "disabled_stage": ""},
             "provider_receipts": {"request_count": 3, "valid": True},
             "event_journal": {
                 "event_count": 10, "event_head": "b" * 64, "valid": True, "issues": [],

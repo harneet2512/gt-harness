@@ -499,3 +499,10 @@ Final rebuilt wheel including downstream integrity verification: 116 tests
 passed in 15.61s in network-disabled Linux, installed artifacts only, pytest
 cache disabled. Ruff and diff checks passed. This is component/runtime proof,
 not the certified release bundle or evidence of benchmark solve-rate uplift.
+
+Broad-suite integration exposed six synthetic attestation failures: their shared
+positive fixture omitted newly mandatory engine integrity. Updated only that
+generated test fixture; 65 attestation/runtime-receipt tests now pass in 11.09s.
+Historical artifacts remain unchanged. Canonical CI `33987550605` at `0953bbb8`
+failed exclusively at the existing wheel/source correspondence gate; no release
+pin or review requirement was weakened.
