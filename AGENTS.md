@@ -1,5 +1,8 @@
 # Project operating context
 
+For HAR-83, Mini-SWE integration, GT architecture, benchmark hardening, or
+performance work, read `GT_HARNESS_SESSION_HANDOFF.md` before acting.
+
 The shipping product is the canonical DeepSWE path:
 
 `GitHub Actions -> pinned DeepSWE task images -> Harbor -> Mini-SWE-Agent 2.4.6 -> gt-harness -> certified Groundtruth wheel and Go producer -> task execution -> official verifier -> typed receipts`
