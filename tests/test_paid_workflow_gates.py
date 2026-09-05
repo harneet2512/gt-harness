@@ -50,3 +50,15 @@ def test_paid_workflow_stages_and_installs_the_exact_treatment_bundle() -> None:
     assert '"GT_HARNESS_WHEEL_SHA256":' in source
     assert 'Path(os.environ["GITHUB_ENV"]).open' in source
     assert 'python -m pip install --disable-pip-version-check --no-deps "$GT_HARNESS_WHEEL_HOST"' in source
+
+
+def test_paid_workflow_masks_attestation_key_and_archives_container_evidence() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'print(f"::add-mask::{key}")' in source
+    assert "Normalize task evidence ownership for archival" in source
+    assert 'sudo chown -R --no-dereference "$(id -u):$(id -g)" results/deepswe' in source
+    assert "chmod -R u+rwX results/deepswe" in source
+    assert source.index("Normalize task evidence ownership for archival") < source.index(
+        "Upload DeepSWE verifier and GT Harness product evidence"
+    )

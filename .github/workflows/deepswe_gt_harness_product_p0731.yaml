@@ -649,7 +649,15 @@ jobs:
 
       - name: Mint the host-only resource attestation key
         run: |
-          python -c "import os, secrets; open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write('GT_RESOURCE_ATTESTATION_KEY=' + secrets.token_hex(32) + '\n')"
+          python - <<'PY'
+          import os
+          import secrets
+
+          key = secrets.token_hex(32)
+          print(f"::add-mask::{key}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"GT_RESOURCE_ATTESTATION_KEY={key}\n")
+          PY
 
       - name: Run DeepSWE through the released gt-harness run boundary
         env:
@@ -688,6 +696,14 @@ jobs:
             --suite deepswe \
             --task-id "$TASK" \
             --source-sha "${{ needs.plan.outputs.source_sha }}"
+
+      - name: Normalize task evidence ownership for archival
+        if: always()
+        run: |
+          set -euo pipefail
+          test -d results/deepswe
+          sudo chown -R --no-dereference "$(id -u):$(id -g)" results/deepswe
+          chmod -R u+rwX results/deepswe
 
       - name: Upload DeepSWE verifier and GT Harness product evidence
         if: always()
