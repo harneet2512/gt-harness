@@ -78,16 +78,28 @@ def test_provider_env_sanitizes_and_drops_empty(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", BOM + "sk-open\n")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-abc ")
     monkeypatch.setenv("OPENAI_BASE_URL", BOM)  # cleans to empty -> omitted
+    monkeypatch.setenv(
+        "GT_PROVIDER_ROUTING_JSON",
+        ' {"only":["relace"],"allow_fallbacks":false,"require_parameters":true}\n',
+    )
     env = provider_env()
     assert env["OPENAI_API_KEY"] == "sk-open"
     assert env["ANTHROPIC_API_KEY"] == "sk-ant-abc"
+    assert env["GT_PROVIDER_ROUTING_JSON"] == (
+        '{"only":["relace"],"allow_fallbacks":false,"require_parameters":true}'
+    )
     assert "OPENAI_BASE_URL" not in env
     for v in env.values():
         v.encode("ascii")  # every forwarded value must be header-safe
 
 
 def test_provider_env_omits_unset_vars(monkeypatch):
-    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "GT_PROVIDER_ROUTING_JSON",
+    ):
         monkeypatch.delenv(name, raising=False)
     assert provider_env() == {}
 

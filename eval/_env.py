@@ -45,6 +45,9 @@ _PROVIDER_VARS = (
     "GT_PROVIDER_CONTEXT_WINDOW_TOKENS",
     "GT_PROVIDER_RESERVED_OUTPUT_TOKENS",
     "GT_PROVIDER_CONTEXT_WINDOW_SOURCE",
+    # Non-secret, exact provider policy. The runner rejects DeepSeek startup
+    # when this is absent or differs from the Relace-only fail-closed route.
+    "GT_PROVIDER_ROUTING_JSON",
 )
 
 
