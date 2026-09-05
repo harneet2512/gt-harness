@@ -194,7 +194,11 @@ def probe(route: dict[str, Any], api_key: str) -> tuple[dict[str, bool], int, st
             {
                 "model": route["model"],
                 "messages": [{"role": "user", "content": "Reply OK."}],
-                "max_completion_tokens": 16,
+                # OpenRouter's Relace endpoint advertises the OpenAI-compatible
+                # request parameter ``max_tokens``. Using the catalog metadata
+                # field name (``max_completion_tokens``) here makes
+                # require_parameters=true reject the otherwise valid endpoint.
+                "max_tokens": 16,
                 "temperature": 0,
                 "provider": route["provider_routing"],
             },

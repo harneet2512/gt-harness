@@ -36,6 +36,7 @@ def test_muse_route_preserves_the_baseline_xhigh_reasoning_contract(monkeypatch)
 
 def test_deepseek_route_forwards_relace_only_without_fallback(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.invalid/api/v1")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "16384")
     monkeypatch.setenv(
         "GT_PROVIDER_ROUTING_JSON",
         json.dumps(
@@ -50,6 +51,8 @@ def test_deepseek_route_forwards_relace_only_without_fallback(monkeypatch) -> No
     model, kwargs = _model_and_kwargs("deepseek/deepseek-v4-flash-0731", 1.0)
 
     assert model == "openai/deepseek/deepseek-v4-flash-0731"
+    assert kwargs["max_tokens"] == 16_384
+    assert "max_completion_tokens" not in kwargs
     assert kwargs["extra_body"] == {
         "provider": {
             "only": ["relace"],

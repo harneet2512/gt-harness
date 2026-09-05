@@ -374,7 +374,11 @@ def _model_and_kwargs(model: str, temperature: float) -> tuple[str, dict]:
     if reserved_output > 0:
         # Admission subtracts this exact value from the provider's live window;
         # the transport must request the same reservation.
-        model_kwargs["max_completion_tokens"] = reserved_output
+        # Relace advertises ``max_tokens`` as its supported request parameter.
+        # ``max_completion_tokens`` is the catalog metadata field, not a
+        # request parameter accepted by this locked endpoint. Keeping
+        # require_parameters=true means the wrong spelling fails with a 404.
+        model_kwargs["max_tokens"] = reserved_output
     base_url = os.environ.get("OPENAI_BASE_URL")
     if base_url:
         # An OpenAI-compatible gateway owns the full catalog identifier.  A

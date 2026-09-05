@@ -46,7 +46,9 @@ The only authorized HAR-83 paid route is:
 - model: `deepseek/deepseek-v4-flash-0731`;
 - provider allow-list: `relace` only;
 - `allow_fallbacks`: `false`;
-- `require_parameters`: `true`.
+- `require_parameters`: `true`;
+- request output cap: `max_tokens` (Relace-supported request parameter; never
+  substitute the catalog metadata field `max_completion_tokens`).
 
 `config/provider_route.v1.json` is the sole route authority. The preflight,
 immutable run plan, Mini-SWE request body, provider-gate receipt, and final

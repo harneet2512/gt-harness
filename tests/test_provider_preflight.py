@@ -66,13 +66,13 @@ def test_live_preflight_checks_key_limit_and_exact_model(
             if url.endswith("/chat/completions")
             and key == "canary-not-a-real-key"
             and body["model"] == "deepseek/deepseek-v4-flash-0731"
-            and body["max_completion_tokens"] == 16
+            and body["max_tokens"] == 16
             and body["provider"] == {
                 "only": ["relace"],
                 "allow_fallbacks": False,
                 "require_parameters": True,
             }
-            and "max_tokens" not in body
+            and "max_completion_tokens" not in body
             else {}
         ),
     )
