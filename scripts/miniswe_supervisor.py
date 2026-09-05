@@ -134,13 +134,26 @@ def _git(repo: Path, arguments: list[str], *, env: dict | None = None) -> bytes:
                           capture_output=True, timeout=10).stdout
 
 
-def export_patch(repo: Path, baseline: str, output: Path) -> None:
+def export_patch(
+    repo: Path, baseline: str, output: Path, *, excluded_roots: tuple[Path, ...] = ()
+) -> None:
     """Conserve the workspace using a disposable index, never the agent index."""
+    root = repo.resolve()
+    pathspecs = ["."]
+    for excluded in (*excluded_roots, output, output.with_name(output.name + ".tmp")):
+        resolved = excluded.resolve()
+        if resolved == root or resolved in root.parents:
+            raise ValueError("patch_exclusion_contains_repository")
+        try:
+            relative = resolved.relative_to(root)
+        except ValueError:
+            continue
+        pathspecs.append(f":(top,exclude,literal){relative.as_posix()}")
     with tempfile.TemporaryDirectory(prefix="gt-supervisor-index-") as scratch:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
         _git(repo, ["read-tree", baseline], env=env)
-        _git(repo, ["add", "--all", "--", "."], env=env)
-        patch = _git(repo, ["diff", "--cached", "--binary", "--full-index", baseline, "--", "."], env=env)
+        _git(repo, ["add", "--all", "--", *pathspecs], env=env)
+        patch = _git(repo, ["diff", "--cached", "--binary", "--full-index", baseline, "--", *pathspecs], env=env)
     atomic_write(output, patch)
 
 
@@ -169,7 +182,10 @@ def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baselin
         try:
             if not baseline:
                 raise ValueError("baseline_unavailable")
-            export_patch(Path(args.cwd), baseline, Path(args.patch_output))
+            export_patch(
+                Path(args.cwd), baseline, Path(args.patch_output),
+                excluded_roots=(Path(args.state_dir),),
+            )
         except Exception as exc:
             report["patch_export_error"] = {"type": type(exc).__name__}
     # Do not append a synthetic response or fabricate an acknowledged action.

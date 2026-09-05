@@ -36,7 +36,10 @@ weaken the verifier or bypass the fixture-first hook.
    product identity.
 4. Use that exact successful readiness run ID in the paid plan. Never substitute
    an older green run after the source, producer, review packet, route, or
-   workflow changes.
+workflow changes.
+
+5. Read `BENCHMARK_READINESS_STATUS.md` for the recorded user authorization and
+   unresolved runtime gates. Green CI alone does not clear those gates.
 
 ## P0 — exact paid route
 
@@ -72,5 +75,10 @@ Dispatch `cohort_stage=remaining-19` only after the one-task run completes and
 its artifacts pass the gate. Bind `prior_gate_run_id` to that exact run. A
 failed, timed-out, setup-failed, provider-failed, route-divergent, unverified, or
 missing gate-one result stops the remaining cohort.
+
+The user recorded conditional approval for the remaining 19 on 2026-09-05.
+That approval applies only after the successful one-task result and all required
+receipts are verified, with the same source and bundle and explicit spending
+limits. It does not authorize paid retries or a changed experiment.
 
 Never rerun GT-off. Never start the remaining nineteen while repairing a smoke.

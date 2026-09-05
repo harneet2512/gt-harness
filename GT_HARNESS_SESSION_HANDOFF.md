@@ -1,5 +1,21 @@
 # GT Harness current-session handoff
 
+## Current status, 2026-09-05
+
+Read [Benchmark readiness evidence and approval](BENCHMARK_READINESS_STATUS.md)
+for the current exact artifacts, green CI run, capability census, removed release
+defects, remaining proof, and the user's one-smoke plus conditional-19 approval.
+Canonical acceptance passed at `4df7ab9c042b8cc1dd6708ec46b431646f3b7d1d`, run
+`33990917733`. The stale installation and feature-matrix ordering blockers are
+resolved. The unpaid full-flow rehearsal and remaining runtime gates are open.
+
+The material below records the earlier 2026-09-04 architecture and failure
+analysis. Its old CI blocker and approval state are historical, not the next
+action. The new status reference supersedes those statements, while preserving
+the unresolved architecture findings and historical evidence.
+
+## Historical architecture and failure analysis
+
 Read this first when continuing HAR-83, the Mini-SWE integration, benchmark
 hardening, or GT performance work. This document records the current operating
 state at commit `1b81dca204f52f86190491707930cd4d2f56ee20` on

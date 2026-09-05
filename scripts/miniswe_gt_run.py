@@ -20,7 +20,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -160,27 +159,13 @@ def _repository_head(repo: Path) -> str:
     return result.stdout.strip()
 
 
-def _write_model_patch(repo: Path, baseline: str, output: Path) -> None:
-    """Export the complete workspace delta against the runner-start commit.
+def _write_model_patch(
+    repo: Path, baseline: str, output: Path, *, excluded_roots: tuple[Path, ...] = ()
+) -> None:
+    """Use the same task-only patch export on normal and interrupted exits."""
+    from scripts.miniswe_supervisor import export_patch
 
-    Build an isolated index from the baseline, then include the final workspace.
-    The model's real index (including partial staging) is never modified.
-    """
-    with tempfile.TemporaryDirectory(prefix="gt-patch-index-") as scratch:
-        git_env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
-        for command in (
-            ["git", "read-tree", baseline],
-            ["git", "add", "--all", "--", "."],
-        ):
-            subprocess.run(command, cwd=repo, env=git_env, check=True, capture_output=True)
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--binary", "--full-index", baseline, "--", "."],
-            cwd=repo, env=git_env, check=True, capture_output=True,
-        )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(output.name + ".tmp")
-    temporary.write_bytes(result.stdout)
-    temporary.replace(output)
+    export_patch(repo, baseline, output, excluded_roots=excluded_roots)
 
 
 def _is_sensitive_env_name(name: str) -> bool:
@@ -877,7 +862,8 @@ def main() -> int:
     if args.patch_output:
         try:
             _write_model_patch(
-                Path(args.cwd), patch_baseline, Path(args.patch_output)
+                Path(args.cwd), patch_baseline, Path(args.patch_output),
+                excluded_roots=(Path(args.state_dir),),
             )
         except Exception as exc:  # noqa: BLE001 - missing patch invalidates grading
             report["patch_export_error"] = f"{type(exc).__name__}: {exc}"

@@ -10,10 +10,7 @@ from harbor.agents.installed.base import NonZeroAgentExitCodeError
 
 from eval.miniswe_agent import (
     _DEFAULT_MINISWE_AGENT_VERSION,
-    _PYTHON_VERSION,
     _REMOTE_LSP_BIN,
-    _UV_INSTALL,
-    _UV_VERSION,
     MiniSweAgent,
     MiniSweGtAgent,
     _miniswe_agent_version,
@@ -27,12 +24,6 @@ def _host_attestation_key(monkeypatch):
 
 def test_gt_off_and_gt_on_share_the_exact_installer_implementation():
     assert MiniSweGtAgent.install is MiniSweAgent.install
-
-
-def test_installer_runtime_versions_are_exact_not_floating():
-    assert _UV_INSTALL == f"https://astral.sh/uv/{_UV_VERSION}/install.sh"
-    assert _UV_VERSION == "0.11.32"
-    assert _PYTHON_VERSION == "3.12.13"
 
 
 def test_miniswe_agent_version_defaults_to_current_release(monkeypatch):

@@ -455,13 +455,18 @@ def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -
     output = tmp_path / "artifacts" / "model.patch"
     index_before = (repo / ".git" / "index").read_bytes()
 
-    _write_model_patch(repo, baseline, output)
+    state = repo / "runtime-records"
+    state.mkdir()
+    (state / "internal.json").write_text('{"internal_state": true}', encoding="utf-8")
+    _write_model_patch(repo, baseline, output, excluded_roots=(state,))
 
     patch_text = output.read_text(encoding="utf-8")
     assert "tracked.txt" in patch_text
     assert "+changed" in patch_text
     assert "new.txt" in patch_text
     assert "+new" in patch_text
+    assert "internal_state" not in patch_text
+    assert "runtime-records/" not in patch_text
     assert (repo / ".git" / "index").read_bytes() == index_before
 
 
