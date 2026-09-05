@@ -139,6 +139,12 @@ RUN pip install --upgrade pip \
 # Mount point for the SQLite session store (compose volume: db-data).
 RUN mkdir -p /app/data
 
+# The commit this image was built from. `/health` returns it, so a stale image
+# is visible from the outside instead of being mistaken for the live one.
+# Declared last so a new SHA never invalidates the layers above it.
+ARG BUILD_SHA=unknown
+ENV BUILD_SHA=${BUILD_SHA}
+
 EXPOSE 8000
 
 CMD ["uvicorn", "cloud.server.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -207,9 +207,15 @@ own container:
 Build the images and run it:
 
 ```bash
-docker compose -f cloud/docker-compose.yml --profile build build
-docker compose -f cloud/docker-compose.yml up -d
+export BUILD_SHA="$(git rev-parse --short HEAD)"
+docker compose -f cloud/docker-compose.yml up -d --build
+docker compose -f cloud/docker-compose.yml --profile build build sandbox-image
 ```
+
+`--build` is not optional. Without it compose reuses whatever image is already
+tagged, which is how a round of QA ended up testing a UI two commits behind the
+server. `bash cloud/deploy.sh` does all of the above and then prints the commit,
+the served bundle name and `/health` — use it instead of typing the commands.
 
 Lifecycle events: `sandbox_starting`, `sandbox_ready{container, image,
 image_digest}`, `sandbox_failed{error}`. Full design, commands and evidence:
@@ -244,10 +250,27 @@ Leave `CORS_ORIGINS` empty — cross-origin is exactly what port 80 avoids.
 **3. Bring the stack up.**
 
 ```bash
-docker compose -f cloud/docker-compose.yml --profile build build   # sandbox image
-docker compose -f cloud/docker-compose.yml up -d --build
-curl -s localhost/health
+bash cloud/deploy.sh --sandbox      # first deploy: build the sandbox image too
 ```
+
+`cloud/deploy.sh` pulls (`--no-pull` skips it, for a dirty tree), rebuilds with
+`BUILD_SHA` stamped into both images, restarts, and then prints the commit, the
+served JS bundle name and `GET /health`. Later deploys are just
+`bash cloud/deploy.sh` — add `--sandbox` whenever `cloud/sandbox/Dockerfile`
+changes. By hand it is:
+
+```bash
+export BUILD_SHA="$(git rev-parse --short HEAD)"
+docker compose -f cloud/docker-compose.yml up -d --build
+docker compose -f cloud/docker-compose.yml --profile build build sandbox-image
+curl -s localhost/health         # {"status":"ok","commit":"<sha>"}
+```
+
+The commit is the check that matters: `/health`'s `commit`, the `build <sha>`
+line on the sign-in card and in the session switcher, and the `SYNAPSE ui build
+<sha>` line the SPA logs on boot must all agree. If the bundle filename under
+`/usr/share/nginx/html/assets/` did not change after a UI edit, the browser or
+compose is serving a stale image.
 
 `ui` (nginx) listens on **80** and proxies `/api`, `/auth` and `/health` to
 `server:8000`; nothing but port 80 needs to be reachable.

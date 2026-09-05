@@ -41,7 +41,12 @@ from typing import Any
 
 from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentConfig
 
-from .environment import is_sensitive_env_name, scrub_sensitive_mapping
+from .environment import (
+    InterruptGuard,
+    interrupted_observation,
+    is_sensitive_env_name,
+    scrub_sensitive_mapping,
+)
 
 __all__ = [
     "DockerSandboxEnvironment",
@@ -544,6 +549,16 @@ class DockerSandboxEnvironment(LocalEnvironment):
             config_class=config_class, container=container, image=image, **kwargs
         )
         self._uname_cache: tuple[str, str, str] | None = None
+        # Killing the local `docker exec` client is not enough: the process it
+        # started keeps running inside the container. The guard therefore kills
+        # the client *and* reaps the agent user's processes in the container.
+        self._guard = InterruptGuard(on_interrupt=self._kill_agent_processes)
+
+    # -- stop -----------------------------------------------------------------
+
+    def interrupt(self) -> None:
+        """Kill the command in flight inside the container. Never raises."""
+        self._guard.request()
 
     # -- credential isolation -------------------------------------------------
 
@@ -595,6 +610,7 @@ class DockerSandboxEnvironment(LocalEnvironment):
     ) -> dict[str, Any]:
         command = action.get("command", "")
         limit = int(timeout or self.config.timeout)
+        self._guard.arm()
         try:
             result = self._run(command, cwd, limit)
             output = {
@@ -620,6 +636,10 @@ class DockerSandboxEnvironment(LocalEnvironment):
                     "exception": str(exc),
                 },
             }
+        finally:
+            interrupted = self._guard.disarm()
+        if interrupted:
+            output = interrupted_observation(str(output.get("output") or ""))
         self._check_finished(output)
         return output
 
@@ -637,6 +657,7 @@ class DockerSandboxEnvironment(LocalEnvironment):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
+        self._guard.adopt(process)
         try:
             stdout, _ = process.communicate(timeout=timeout + TIMEOUT_GRACE_SECONDS)
         except subprocess.TimeoutExpired as exc:

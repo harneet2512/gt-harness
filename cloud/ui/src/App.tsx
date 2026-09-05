@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { getMe, LOGIN_URL, type User } from "./api";
+import { BUILD_SHA } from "./build";
 import StartPage from "./components/StartPage";
 import SynapsePage from "./components/SynapsePage";
 
@@ -25,6 +26,7 @@ function SignIn() {
         >
           Continue with GitHub
         </button>
+        <p className="build-stamp mono">build {BUILD_SHA}</p>
       </div>
     </div>
   );

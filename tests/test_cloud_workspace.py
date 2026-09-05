@@ -76,6 +76,10 @@ def test_list_tree_includes_untracked_but_not_harness_state(tmp_path: Path) -> N
         "git checkout -- src",
         "apply_patch <<'EOF'",
         "python3 - <<'EOF'",
+        # observed on the live codespace: the model edited src/click/core.py
+        # with an inline script and the write went unrecorded (HAR-84 round 2)
+        'python3 -c "open(\'f.py\', \'w\').write(text)"',
+        'python -c "import pathlib; pathlib.Path(\'f\').write_text(\'x\')"',
         "cat x.py | tee y.py",
         "cd src && mv a.py b.py",
     ],

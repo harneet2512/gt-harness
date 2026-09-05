@@ -14,6 +14,13 @@ Subclasses mini-swe-agent's ``DefaultAgent``. The differences that matter:
 * **Bounded context.** Old tool observations are collapsed once the transcript
   crosses ``MAX_CONTEXT_CHARS``; user messages and agent replies are never
   touched.
+* **Tool frames come from the environment boundary.** ``env`` is wrapped in
+  :class:`_EmittingEnvironment`, so ``tool_call``/``tool_result`` fire for every
+  command no matter who runs it. That matters because
+  ``gt_engine.miniswe_runtime.install_runtime_hooks`` *replaces*
+  ``agent.execute_actions`` with a GT version that calls ``env.execute`` itself
+  and never delegates back — emission anchored in ``execute_actions`` would
+  never be reached under GT.
 """
 from __future__ import annotations
 
@@ -155,6 +162,83 @@ def assistant_message_from_format_error(exc: FormatError) -> dict | None:
     }
 
 
+def _submitted_output(exc: Submitted) -> dict[str, Any]:
+    """The observation a ``Submitted`` marker leaves in place of a command run."""
+    return {
+        "output": _text_of(exc.messages[0].get("content")) if exc.messages else "",
+        "returncode": 0,
+        "exception_info": "",
+    }
+
+
+class _EmittingEnvironment:
+    """The session environment, with ``tool_call``/``tool_result`` around it.
+
+    Every attribute other than ``execute`` is delegated to the real
+    environment — including ``serialize`` and ``get_template_vars``, which
+    ``DefaultAgent`` calls and which must return the real environment's data,
+    not the proxy's.
+
+    Emission lives here rather than in ``execute_actions`` because GT's runtime
+    hook replaces ``execute_actions`` wholesale and drives ``env.execute``
+    directly. The environment is the one seam both paths share.
+    """
+
+    __slots__ = ("_agent", "_env")
+
+    def __init__(self, env: Any, agent: ConversationalAgent) -> None:
+        object.__setattr__(self, "_env", env)
+        object.__setattr__(self, "_agent", agent)
+
+    @property
+    def wrapped(self) -> Any:
+        """The real environment, for callers that must bypass the proxy."""
+        return self._env
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._env, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._env, name, value)
+
+    def __repr__(self) -> str:
+        return f"_EmittingEnvironment({self._env!r})"
+
+    def execute(self, action: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        agent = self._agent
+        command = (
+            str(action.get("command", "")) if isinstance(action, dict) else str(action)
+        )
+        step = agent.current_step
+        agent.emit_event(
+            "tool_call",
+            {"command": command, "step": step, "n_calls": agent.n_calls},
+        )
+        submitted: Submitted | None = None
+        try:
+            output = self._env.execute(action, *args, **kwargs)
+        except Submitted as exc:
+            # The result frame is emitted first and the marker propagates after,
+            # or a submitting turn would leave a call with no matching result.
+            submitted = exc
+            output = _submitted_output(exc)
+        if not isinstance(output, dict):  # pragma: no cover - defensive
+            output = {"output": str(output), "returncode": 0, "exception_info": ""}
+        agent.emit_event(
+            "tool_result",
+            {
+                "command": command,
+                "output": _text_of(output.get("output"))[:4000],
+                "returncode": output.get("returncode", -1),
+                "is_error": output.get("returncode", -1) != 0,
+                "step": step,
+            },
+        )
+        if submitted is not None:
+            raise submitted
+        return output
+
+
 class ConversationalAgent(DefaultAgent):
     """A ``DefaultAgent`` whose transcript outlives a single task."""
 
@@ -169,14 +253,16 @@ class ConversationalAgent(DefaultAgent):
         **kwargs: Any,
     ) -> None:
         super().__init__(model, env, config_class=config_class, **kwargs)
+        # Set before the wrap: the proxy reads `_event_callback` and
+        # `_current_step` off this instance on its very first call.
+        self._event_callback = event_callback
+        self._current_step = 0
+        self.env = _EmittingEnvironment(env, self)
         self._steering_queue: queue.Queue[Steering] = queue.Queue()
         self._stop_event = threading.Event()
-        self._event_callback = event_callback
         self._session_started = False
         self._turn_id: str | None = None
         self._turn_start_calls = 0
-        #: step index of the assistant message currently being executed
-        self._current_step = 0
         #: turn whose failure already produced an ``agent_error`` event
         self.last_error_turn_id: str | None = None
         self._max_context_chars = (
@@ -220,7 +306,20 @@ class ConversationalAgent(DefaultAgent):
         self._steering_queue.put(Steering(message_id=message_id, content=content))
 
     def request_stop(self) -> None:
+        """End the turn at the next boundary, and kill the command in flight.
+
+        Without the interrupt a stop is only honoured once the running command
+        returns, so ``sleep 120`` keeps the user waiting two minutes for a
+        button they already pressed. The killed command yields a
+        returncode-137 observation and the loop reaches the boundary at once.
+        """
         self._stop_event.set()
+        interrupt = getattr(self.env, "interrupt", None)
+        if callable(interrupt):
+            try:
+                interrupt()
+            except Exception:  # noqa: BLE001 - a stop must never raise
+                pass
 
     def take_pending_steering(self) -> list[Steering]:
         """Messages that arrived after the last drain, for a follow-up turn."""
@@ -436,7 +535,11 @@ class ConversationalAgent(DefaultAgent):
         return message
 
     def execute_actions(self, message: dict) -> list[dict]:
-        """Run each action, streaming call/result events.
+        """Run each action against the environment and keep the observations.
+
+        The ``tool_call``/``tool_result`` frames are *not* emitted here — they
+        come from :class:`_EmittingEnvironment`, which fires for GT's own
+        ``execute_actions`` replacement too.
 
         ``Submitted`` (the legacy ``COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT``
         marker) is caught so the observation messages are still appended before
@@ -448,37 +551,12 @@ class ConversationalAgent(DefaultAgent):
         outputs: list[dict] = []
         submitted: Submitted | None = None
         for action in actions:
-            command = str(action.get("command", ""))
-            self._emit(
-                "tool_call",
-                {
-                    "command": command,
-                    "step": self._current_step,
-                    "n_calls": self.n_calls,
-                },
-            )
             try:
                 output = self.env.execute(action)
             except Submitted as exc:
                 submitted = exc
-                output = {
-                    "output": _text_of(exc.messages[0].get("content"))
-                    if exc.messages
-                    else "",
-                    "returncode": 0,
-                    "exception_info": "",
-                }
+                output = _submitted_output(exc)
             outputs.append(output)
-            self._emit(
-                "tool_result",
-                {
-                    "command": command,
-                    "output": _text_of(output.get("output"))[:4000],
-                    "returncode": output.get("returncode", -1),
-                    "is_error": output.get("returncode", -1) != 0,
-                    "step": self._current_step,
-                },
-            )
             if submitted is not None:
                 break
 
@@ -492,6 +570,15 @@ class ConversationalAgent(DefaultAgent):
         return added
 
     # -- events ---------------------------------------------------------------
+
+    @property
+    def current_step(self) -> int:
+        """Step index of the assistant message currently being executed."""
+        return self._current_step
+
+    def emit_event(self, event_type: str, data: dict[str, Any]) -> None:
+        """Publish one frame. Public so :class:`_EmittingEnvironment` can use it."""
+        self._emit(event_type, data)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         if self._event_callback is None:

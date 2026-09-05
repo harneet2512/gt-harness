@@ -283,7 +283,7 @@ export function callCount(
  * a step that plausibly changed something.
  */
 export const WRITES =
-  /(^|[\s;&|(])(tee|patch|mv|cp|rm|mkdir|touch|truncate|install)\s|>>?[^&]|sed\s+-[a-z]*i|perl\s+-[a-z]*i|git\s+(apply|checkout|restore|revert|mv|rm)|apply_patch|python3?\s+-\s*<</;
+  /(^|[\s;&|(])(tee|patch|mv|cp|rm|mkdir|touch|truncate|install)\s|>>?[^&]|sed\s+-[a-z]*i|perl\s+-[a-z]*i|git\s+(apply|checkout|restore|revert|mv|rm)|apply_patch|python3?\s+-\s*<<|python3?\s+-c\b/;
 
 /** How a step's tick reads on the transmission strip and the scrubber. */
 export function stepKind(

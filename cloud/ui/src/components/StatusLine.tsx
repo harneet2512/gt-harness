@@ -15,6 +15,8 @@ interface Props {
   /** Seconds into the running turn. */
   elapsed: number | null;
   steps: number;
+  /** Stop was pressed and the turn has not ended yet. */
+  stopping?: boolean;
 }
 
 const LABEL: Record<StatusMode, string> = {
@@ -27,9 +29,22 @@ const LABEL: Record<StatusMode, string> = {
 };
 
 /** A dot and three words: what the agent is doing right now. */
-export default function StatusLine({ mode, phase, elapsed, steps }: Props) {
+export default function StatusLine({
+  mode,
+  phase,
+  elapsed,
+  steps,
+  stopping = false,
+}: Props) {
+  // A stop kills the command in flight, but the turn still has to reach its
+  // boundary. Saying so is the difference between "it is ending" and "the
+  // button did nothing".
   const label =
-    mode === "preparing" ? phaseLabel(phase) : LABEL[mode];
+    stopping && mode === "working"
+      ? "Stopping…"
+      : mode === "preparing"
+        ? phaseLabel(phase)
+        : LABEL[mode];
   const hot = mode === "working" || mode === "waiting";
 
   return (

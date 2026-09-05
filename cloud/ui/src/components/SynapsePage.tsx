@@ -156,6 +156,8 @@ export default function SynapsePage() {
           onSelectTurn={view.pickTurn}
           cutoff={view.cutoff}
           running={data.isRunning}
+          stopping={data.isStopping}
+          steeringQueued={data.steeringQueued}
           mode={mode}
           phase={data.phase}
           elapsed={elapsed}

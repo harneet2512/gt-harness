@@ -25,6 +25,17 @@ from .runner import SessionManager  # noqa: E402
 from .store import SessionStore  # noqa: E402
 
 
+def build_sha() -> str:
+    """The commit this image was built from, stamped in by the Dockerfile.
+
+    ``cloud/deploy.sh`` exports ``BUILD_SHA`` from ``git rev-parse --short
+    HEAD`` and compose passes it as a build arg. Without it there is no way to
+    tell a running deployment from a stale image, which is exactly how the
+    round-2 QA ran against a UI two commits behind the server.
+    """
+    return os.environ.get("BUILD_SHA", "") or "unknown"
+
+
 def cors_origins() -> list[str]:
     """Explicit allow-list from ``CORS_ORIGINS``; empty by default.
 
@@ -68,7 +79,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return {"status": "ok"}
+        return {"status": "ok", "commit": build_sha()}
 
     return app
 

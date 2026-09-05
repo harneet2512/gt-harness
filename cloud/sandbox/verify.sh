@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end sandbox verification against a running compose deployment.
 # Usage: bash cloud/sandbox/verify.sh [off|advisory]   (run on the deployment host)
+#
+# Deploy first, or this verifies a stale image:
+#   bash cloud/deploy.sh              # pull, rebuild with --build, stamp, check
+#   bash cloud/deploy.sh --sandbox    # ...and rebuild the sandbox image
 set -uo pipefail
 cd /workspaces/gt-harness
 DC="docker compose -f cloud/docker-compose.yml"
@@ -14,6 +18,9 @@ TOKEN=$($DC exec -T server python -c "import jwt,os,time;print(jwt.encode({'sub'
 [ -n "$TOKEN" ] || { echo "no token"; exit 1; }
 api() { $DC exec -T server curl -sS -H "Authorization: Bearer $TOKEN" "$@"; }
 jqp() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }
+
+say "deployment under test"
+$DC exec -T server curl -sS http://127.0.0.1:8000/health | tee -a "$OUT"; echo | tee -a "$OUT"
 
 say "creating session gt_mode=$MODE model=$MODEL"
 ID=$(api -X POST http://127.0.0.1:8000/api/sessions -H 'Content-Type: application/json' \

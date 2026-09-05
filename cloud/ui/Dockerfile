@@ -16,6 +16,12 @@ RUN npm ci
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src/ ./src/
 
+# Baked into the bundle by vite (`define: __BUILD_SHA__`), so the served SPA
+# says which commit it is — the check that would have caught the stale
+# `cloud-ui` image in round-2 QA.
+ARG BUILD_SHA=dev
+ENV BUILD_SHA=${BUILD_SHA}
+
 RUN npm run build
 
 # ---------- stage 2: serve ----------

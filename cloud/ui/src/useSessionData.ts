@@ -65,6 +65,10 @@ export interface SessionData {
   loadError: string | null;
   sendError: string | null;
   isRunning: boolean;
+  /** Stop was pressed and the turn has not reported back yet. */
+  isStopping: boolean;
+  /** A sent message is queued and the agent has not picked it up yet. */
+  steeringQueued: boolean;
   /** Bumped on every `turn_started`, so views can follow the live turn. */
   turnEpoch: number;
   now: number;
@@ -98,6 +102,12 @@ export function useSessionData(sessionId: string | null): SessionData {
   const [refreshKey, setRefreshKey] = useState(0);
   const [turnEpoch, setTurnEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now() / 1000);
+  const [stopping, setStopping] = useState(false);
+  /* Messages accepted while a turn was running, not yet delivered. The
+     composer's "delivered at the next step" hint is bound to this rather than
+     to `isRunning`, so it disappears the moment the agent picks the message
+     up instead of lingering for the rest of the turn. */
+  const [queuedIds, setQueuedIds] = useState<readonly string[]>([]);
 
   const [chat, dispatch] = useReducer(chatReducer, emptyChat);
   const tempCounter = useRef(0);
@@ -281,6 +291,14 @@ export function useSessionData(sessionId: string | null): SessionData {
           break;
         }
 
+        case "steering": {
+          const delivered = String(event.data.message_id ?? "");
+          if (delivered) {
+            setQueuedIds((ids) => ids.filter((id) => id !== delivered));
+          }
+          break;
+        }
+
         case "turn_started": {
           const turnId = String(event.data.turn_id ?? "");
           setSession((prev) =>
@@ -310,6 +328,10 @@ export function useSessionData(sessionId: string | null): SessionData {
                 }
               : prev,
           );
+          setStopping(false);
+          // Anything still queued was folded into the turn that just ended,
+          // or will start a new one; either way nothing is waiting now.
+          setQueuedIds([]);
           // New files may exist now: the graph is refetched with everything.
           setRefreshKey((k) => k + 1);
           refetchSession();
@@ -360,6 +382,9 @@ export function useSessionData(sessionId: string | null): SessionData {
       try {
         const result = await sendMessage(sessionId, content);
         dispatch({ type: "settle", tempId, message: result.message });
+        if (result.delivery === "queued_for_running_turn") {
+          setQueuedIds((ids) => [...ids, result.message.id]);
+        }
         if (result.delivery === "turn_started") {
           setTurnEpoch((n) => n + 1);
           setSession((prev) =>
@@ -392,8 +417,14 @@ export function useSessionData(sessionId: string | null): SessionData {
 
   const stop = useCallback(() => {
     if (!sessionId) return;
+    // The client knows it pressed Stop before any frame says so; the status
+    // line reads "Stopping…" from here until `turn_finished` lands.
+    setStopping(true);
     stopSession(sessionId)
-      .catch((err: unknown) => setSendError(message(err)))
+      .catch((err: unknown) => {
+        setStopping(false);
+        setSendError(message(err));
+      })
       .finally(refetchSession);
   }, [sessionId, refetchSession]);
 
@@ -415,6 +446,8 @@ export function useSessionData(sessionId: string | null): SessionData {
     loadError,
     sendError,
     isRunning: Boolean(isRunning),
+    isStopping: Boolean(isRunning) && stopping,
+    steeringQueued: queuedIds.length > 0,
     turnEpoch,
     now,
     tree,

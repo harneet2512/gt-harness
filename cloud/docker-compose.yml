@@ -1,7 +1,13 @@
 # GT cloud coding agent.
 #
-#   docker compose -f cloud/docker-compose.yml --profile build build   # + sandbox image
-#   docker compose -f cloud/docker-compose.yml up -d
+#   bash cloud/deploy.sh            # pull, rebuild, stamp, verify — use this
+#
+# By hand (--build is NOT optional: without it compose happily reuses a stale
+# image and serves a UI several commits behind the server):
+#
+#   export BUILD_SHA="$(git rev-parse --short HEAD)"
+#   docker compose -f cloud/docker-compose.yml up -d --build
+#   docker compose -f cloud/docker-compose.yml --profile build build sandbox-image
 #
 # Sandboxing (SANDBOX_MODE=docker) is on by default here. The server manages
 # one `gt-sandbox-<session_id>` container per session through the host's Docker
@@ -12,6 +18,8 @@ services:
     build:
       context: ..
       dockerfile: cloud/Dockerfile
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     ports:
       - "8000:8000"
     env_file:
@@ -71,6 +79,8 @@ services:
     build:
       context: ui
       dockerfile: Dockerfile
+      args:
+        BUILD_SHA: ${BUILD_SHA:-dev}
     ports:
       - "80:80"
     depends_on:

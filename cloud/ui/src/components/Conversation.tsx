@@ -28,6 +28,10 @@ interface Props {
   /** Steps visible at the scrub position, for the selected turn only. */
   cutoff: number;
   running: boolean;
+  /** Stop was pressed; the turn is winding down. */
+  stopping: boolean;
+  /** A sent message is queued and undelivered. */
+  steeringQueued: boolean;
   mode: StatusMode;
   phase: string | null;
   elapsed: number | null;
@@ -76,6 +80,8 @@ export default function Conversation({
   onSelectTurn,
   cutoff,
   running,
+  stopping,
+  steeringQueued,
   mode,
   phase,
   elapsed,
@@ -105,6 +111,7 @@ export default function Conversation({
         <SessionSwitcher activeId={sessionId} active={session} />
         <div className="talk-head-foot">
           <StatusLine
+            stopping={stopping}
             mode={mode}
             phase={phase}
             elapsed={elapsed}
@@ -210,6 +217,7 @@ export default function Conversation({
           sessionId ? lockedReason : "Pick a session to start talking."
         }
         isRunning={running}
+        steeringQueued={steeringQueued}
         error={sendError}
         onSend={onSend}
         onStop={onStop}

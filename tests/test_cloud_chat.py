@@ -27,10 +27,12 @@ Run: ``python -m pytest tests/test_cloud_chat.py -q`` from the repo root.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 import httpx
@@ -244,6 +246,9 @@ class Harness:
         self.models: dict[str, ScriptedModel] = {}
         self.agents: dict[str, ConversationalAgent] = {}
         self.env_class: type[CloudLocalEnvironment] = CloudLocalEnvironment
+        #: mimic `SessionManager._install_gt`: replace `agent.execute_actions`
+        #: the way `gt_engine.miniswe_runtime.install_runtime_hooks` does
+        self.install_gt_hook = False
         self._gate_call = 0
         self.model_gate = threading.Event()
         self.model_gate.set()
@@ -308,6 +313,27 @@ class Harness:
             time.sleep(POLL_INTERVAL)
 
 
+def _gt_style_execute_actions(agent: ConversationalAgent, message: dict) -> list[dict]:
+    """The shape ``gt_engine.miniswe_runtime.install_runtime_hooks`` installs.
+
+    The real hook binds ``environment = agent.env`` at install time and drives
+    ``environment.execute(action)`` itself; the agent's own ``execute_actions``
+    is kept only as ``_gt_original_execute_actions`` and never called. This
+    stand-in reproduces exactly that, so the frames a GT session emits are
+    exercised end to end without importing the engine.
+    """
+    environment = agent.env
+    outputs = [
+        environment.execute(action)
+        for action in (message.get("extra", {}) or {}).get("actions", [])
+    ]
+    return agent.add_messages(
+        *agent.model.format_observation_messages(
+            message, outputs, agent.get_template_vars()
+        )
+    )
+
+
 def _patched_build_agent(harness: Harness):
     def _build_agent(
         self: SessionManager,
@@ -338,6 +364,9 @@ def _patched_build_agent(harness: Harness):
             cost_limit=0.0,
             output_path=state_dir / "trajectory.json",
         )
+        if harness.install_gt_hook:
+            agent._gt_original_execute_actions = agent.execute_actions
+            agent.execute_actions = MethodType(_gt_style_execute_actions, agent)
         harness.agents[session_id] = agent
         return agent
 
@@ -599,8 +628,32 @@ def test_api_requires_authentication(harness: Harness) -> None:
 
     # ...and the bearer token the other tests use does work
     assert harness.client.get("/api/sessions", headers=harness.auth).status_code == 200
-    # /health stays public
-    assert harness.client.get("/health").json() == {"status": "ok"}
+    # /health stays public, and names the build it is serving
+    health = harness.client.get("/health")
+    assert health.status_code == 200
+    body = health.json()
+    assert body["status"] == "ok"
+    # `commit` is the stamp `cloud/deploy.sh` passes as BUILD_SHA; without a
+    # build it is the literal "unknown", never missing or empty.
+    assert body["commit"] == (os.environ.get("BUILD_SHA") or "unknown")
+    assert set(body) == {"status", "commit"}
+
+
+def test_health_reports_the_stamped_build_commit(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0-0: a deployment must be identifiable from the outside.
+
+    Round-2 QA ran against a UI image two commits behind the server because
+    nothing in the artefacts named a commit. `/health` now does.
+    """
+    monkeypatch.setenv("BUILD_SHA", "abc1234")
+    assert harness.client.get("/health").json() == {
+        "status": "ok",
+        "commit": "abc1234",
+    }
+    monkeypatch.delenv("BUILD_SHA")
+    assert harness.client.get("/health").json()["commit"] == "unknown"
 
 
 # --------------------------------------------------------------------------
@@ -647,6 +700,54 @@ def test_create_session_clones_then_goes_idle(harness: Harness) -> None:
 # --------------------------------------------------------------------------
 # 3: a turn
 # --------------------------------------------------------------------------
+def test_gt_style_hook_still_streams_tool_frames(harness: Harness) -> None:
+    """P0-1 at the manager level: GT replaces ``execute_actions`` wholesale.
+
+    Before the fix the replacement silently dropped every ``tool_call`` /
+    ``tool_result`` — which also starved ``_snapshot_diff``, since it keys off
+    ``tool_result`` event ids. Emission now lives on the environment, so the
+    same stream comes out either way.
+    """
+    harness.install_gt_hook = True
+    session_id = _create_idle(harness)
+
+    accepted = _post_message(harness, session_id, "append a line to the README")
+    assert accepted.status_code == 202, accepted.text
+
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+    order = [
+        f["event"]
+        for f in frames
+        if f["event"]
+        in {"turn_started", "assistant", "tool_call", "tool_result",
+            "agent_reply", "turn_finished"}
+    ]
+    assert order == [
+        "turn_started",
+        "assistant", "tool_call", "tool_result",
+        "assistant", "tool_call", "tool_result",
+        "assistant",
+        "agent_reply", "turn_finished",
+    ]
+    calls = [f["payload"]["data"] for f in frames if f["event"] == "tool_call"]
+    results = [f["payload"]["data"] for f in frames if f["event"] == "tool_result"]
+    assert len(calls) == len(results) == 2
+    assert [c["step"] for c in calls] == [1, 2]
+    assert [r["step"] for r in results] == [1, 2]
+    assert calls[0]["command"] == TOUCH_TRACKED
+    assert all(r["returncode"] == 0 for r in results)
+
+    # the agent really ran the commands, through the hook
+    assert (harness.workspaces / session_id / "newfile.txt").is_file()
+
+    # ...and the per-step diff snapshot the scrubber reads exists again
+    writes = [f for f in frames if f["event"] == "tool_result"]
+    snapshot = _diff(harness, session_id, through_event=writes[0]["id"])
+    assert snapshot["as_of_event"] == writes[0]["id"]
+    assert [f["path"] for f in snapshot["files"]] == ["README.md"]
+    assert "patched" in snapshot["patch"], "no per-step diff snapshot was stored"
+
+
 def test_message_runs_a_turn_and_streams_it(harness: Harness) -> None:
     """FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
     store, event bus + SSE, agent loop, bash environment, git — the agent's

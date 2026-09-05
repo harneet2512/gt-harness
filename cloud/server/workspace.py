@@ -43,6 +43,11 @@ _WRITES = re.compile(
     r"|git\s+(apply|checkout|restore|revert|mv|rm)"
     r"|apply_patch"
     r"|python3?\s+-\s*<<"
+    # `python -c "open(...,'w').write(...)"` is how a model edits a file when
+    # it does not want to fight heredoc quoting. Without this the write is
+    # invisible: no diff snapshot, no edit tick, and the live diff panel never
+    # refreshes (observed on the live codespace, HAR-84 round 2).
+    r"|python3?\s+-c\b"
 )
 
 

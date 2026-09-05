@@ -20,6 +20,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -27,6 +28,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cloud.server import environment as sb_env
 from cloud.server import sandbox as sb
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -683,6 +685,34 @@ def test_resource_limits_are_really_applied(sandbox) -> None:
     memory, pids = inspected.stdout.split()
     assert int(memory) == 2 * 1024**3
     assert int(pids) == 512
+
+
+@needs_docker
+def test_interrupt_kills_the_command_in_flight(sandbox) -> None:
+    """P2-4: a Stop must not wait for `sleep 120` to finish on its own."""
+    result: dict[str, dict] = {}
+    running = threading.Event()
+
+    def run() -> None:
+        running.set()
+        result["out"] = sandbox.env.execute({"command": "sleep 120"}, timeout=300)
+
+    worker = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    assert running.wait(5.0)
+    time.sleep(1.0)
+    sandbox.env.interrupt()
+    worker.join(30.0)
+    elapsed = time.monotonic() - started
+
+    assert not worker.is_alive(), "execute() never returned after interrupt()"
+    assert elapsed < 20.0, f"the interrupt took {elapsed:.1f}s"
+    assert result["out"]["returncode"] == sb_env.INTERRUPT_RETURNCODE
+    assert result["out"]["exception_info"] == sb_env.INTERRUPT_MESSAGE
+
+    # The container is still usable for the rest of the session.
+    assert sandbox.env.execute({"command": "echo alive"})["output"].strip() == "alive"
 
 
 @needs_docker

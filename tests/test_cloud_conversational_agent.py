@@ -10,6 +10,9 @@ Run: ``python -m pytest tests/test_cloud_conversational_agent.py -q``.
 """
 from __future__ import annotations
 
+import threading
+import time
+from types import MethodType
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -430,3 +433,198 @@ def test_chat_prompts_render_with_the_real_template_vars() -> None:
     assert "NO command block" in system
     assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in system
     assert "https://github.com/o/r" in brief and "/work" in brief
+
+
+# --------------------------------------------------------------------------
+# tool frames come from the environment, not from execute_actions
+# --------------------------------------------------------------------------
+def _gt_style_execute_actions(agent: ConversationalAgent, message: dict) -> list[dict]:
+    """What ``gt_engine.miniswe_runtime.install_runtime_hooks`` installs.
+
+    The real hook replaces ``agent.execute_actions`` with a GT implementation
+    that drives ``env.execute`` itself and never calls the agent's original.
+    This stand-in reproduces exactly that shape.
+    """
+    outputs = [
+        agent.env.execute(action)
+        for action in (message.get("extra", {}) or {}).get("actions", [])
+    ]
+    return agent.add_messages(
+        *agent.model.format_observation_messages(
+            message, outputs, agent.get_template_vars()
+        )
+    )
+
+
+def test_tool_frames_survive_a_replaced_execute_actions() -> None:
+    """P0-1: under GT the agent's execute_actions never runs, but frames must."""
+    events: list[dict] = []
+    agent = _agent(
+        [_action("echo one"), _action("echo two"), _text_reply("done")],
+        events=events,
+    )
+    agent.execute_actions = MethodType(_gt_style_execute_actions, agent)
+
+    result = agent.run_turn("go", turn_id="t1")
+
+    assert result.finish_reason == "reply"
+    assert [e["type"] for e in events] == [
+        "assistant", "tool_call", "tool_result",
+        "assistant", "tool_call", "tool_result",
+        "assistant",
+    ]
+    calls = [e["data"] for e in events if e["type"] == "tool_call"]
+    results = [e["data"] for e in events if e["type"] == "tool_result"]
+    assert [c["command"] for c in calls] == ["echo one", "echo two"]
+    assert [c["step"] for c in calls] == [1, 2]
+    assert [r["step"] for r in results] == [1, 2]
+    assert [r["turn_id"] for r in results] == ["t1", "t1"]
+    assert all(r["is_error"] is False for r in results)
+
+
+def test_direct_env_execute_emits_one_call_and_one_result() -> None:
+    """Any caller of ``agent.env.execute`` gets the frames, mid-turn included."""
+    events: list[dict] = []
+    agent = _agent([_text_reply("done")], events=events)
+    agent._turn_id = "t9"
+    agent._current_step = 4
+
+    output = agent.env.execute({"command": "ls -la"})
+
+    assert output["returncode"] == 0
+    assert [e["type"] for e in events] == ["tool_call", "tool_result"]
+    assert events[0]["data"] == {
+        "turn_id": "t9", "command": "ls -la", "step": 4, "n_calls": 0,
+    }
+    assert events[1]["data"]["step"] == 4
+    assert events[1]["data"]["output"] == "executed: ls -la"
+
+
+def test_environment_proxy_delegates_serialize_and_template_vars() -> None:
+    """DefaultAgent.serialize()/get_template_vars() must see the real env."""
+    env = FakeEnv()
+    agent = _agent([_text_reply("hi")], env=env)
+
+    assert agent.env is not env
+    assert agent.env.wrapped is env
+    assert agent.env.serialize() == env.serialize()
+    assert agent.env.get_template_vars() == env.get_template_vars()
+    assert agent.get_template_vars()["system"] == "Linux"
+    assert agent.serialize()["info"]["config"]["agent"]["step_limit"] == 10
+
+
+def test_tool_result_is_emitted_before_submitted_propagates() -> None:
+    submitted = Submitted(
+        {
+            "role": "exit",
+            "content": "final output",
+            "extra": {"exit_status": "Submitted", "submission": "final output"},
+        }
+    )
+    events: list[dict] = []
+    agent = _agent(
+        [_action("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")],
+        env=FakeEnv(raises=submitted),
+        events=events,
+    )
+    result = agent.run_turn("finish up", turn_id="t1")
+
+    assert result.finish_reason == "submitted"
+    assert [e["type"] for e in events] == ["assistant", "tool_call", "tool_result"]
+    assert events[-1]["data"]["output"] == "final output"
+    assert events[-1]["data"]["returncode"] == 0
+
+
+def test_submitted_from_a_replaced_execute_actions_still_emits_a_result() -> None:
+    """The GT hook re-raises ``Submitted`` from env.execute; the frame is ours."""
+    submitted = Submitted({"role": "exit", "content": "final", "extra": {}})
+    events: list[dict] = []
+    agent = _agent(
+        [_action("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")],
+        env=FakeEnv(raises=submitted),
+        events=events,
+    )
+    agent.execute_actions = MethodType(_gt_style_execute_actions, agent)
+
+    result = agent.run_turn("finish up", turn_id="t1")
+
+    assert result.finish_reason == "submitted"
+    assert [e["type"] for e in events] == ["assistant", "tool_call", "tool_result"]
+
+
+# --------------------------------------------------------------------------
+# stop interrupts the running command (P2-4)
+# --------------------------------------------------------------------------
+class SlowEnv(FakeEnv):
+    """FAKE BOUNDARY: a shell whose second command blocks until interrupted."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self._released = threading.Event()
+        self.interrupts = 0
+        self.calls = 0
+
+    def execute(self, action: dict, cwd: str = "") -> dict:
+        self.calls += 1
+        if self.calls < 2:
+            return super().execute(action, cwd)
+        self.started.set()
+        if not self._released.wait(10.0):
+            raise AssertionError("interrupt() never arrived")
+        return {
+            "output": "partial",
+            "returncode": 137,
+            "exception_info": "interrupted by user stop",
+        }
+
+    def interrupt(self) -> None:
+        self.interrupts += 1
+        self._released.set()
+
+
+def test_request_stop_interrupts_the_command_in_flight() -> None:
+    events: list[dict] = []
+    env = SlowEnv()
+    agent = _agent(
+        [_action("echo one"), _action("sleep 120"), _text_reply("done")],
+        env=env,
+        events=events,
+    )
+    result: dict[str, Any] = {}
+
+    def run() -> None:
+        result["turn"] = agent.run_turn("go", turn_id="t1")
+
+    worker = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    assert env.started.wait(10.0), "the long command never started"
+    agent.request_stop()
+    worker.join(10.0)
+    elapsed = time.monotonic() - started
+
+    assert not worker.is_alive()
+    assert env.interrupts == 1
+    assert result["turn"].finish_reason == "stopped"
+    assert result["turn"].reply == "Stopped."
+    assert elapsed < 5.0, f"the stop took {elapsed:.1f}s"
+
+    interrupted = [
+        e for e in events
+        if e["type"] == "tool_result" and e["data"]["returncode"] == 137
+    ]
+    assert len(interrupted) == 1
+    assert interrupted[0]["data"]["is_error"] is True
+    assert any(
+        "interrupted by user stop" in str(m.get("content"))
+        or "partial" in str(m.get("content"))
+        for m in agent.messages
+    )
+
+
+def test_request_stop_without_an_interruptible_env_still_stops() -> None:
+    """A bare environment (no ``interrupt``) must not break the stop path."""
+    agent = _agent([_action("echo one"), _text_reply("done")], env=FakeEnv())
+    agent.request_stop()
+    assert agent.run_turn("go", turn_id="t1").finish_reason == "stopped"

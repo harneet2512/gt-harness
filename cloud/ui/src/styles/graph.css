@@ -5,14 +5,16 @@
 
 .bar {
   flex: 0 0 auto;
-  height: 36px;
+  min-height: 36px;
   display: flex;
+  /* The toolbar wraps rather than clips. A legend whose last entry is sliced
+     in half (`CO-TOUC`) is worse than a second row. */
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 6px 10px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--rule);
   background: var(--surface);
-  overflow: hidden;
 }
 
 .bar-select {
@@ -50,18 +52,12 @@
 
 .legend {
   display: flex;
+  /* Wraps within the (wrapping) toolbar, so every entry is always readable —
+     no mask, no clipped tail. */
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
   min-width: 0;
-  overflow: hidden;
-  /* The toolbar is the first thing to run out of room. Fade the tail rather
-     than guillotining a word in half. */
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - 18px),
-    transparent
-  );
-  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
 }
 .legend-item {
   display: inline-flex;

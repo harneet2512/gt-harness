@@ -387,3 +387,12 @@ textarea {
   color: var(--ink-2);
   margin-bottom: 26px;
 }
+
+/* Which commit this bundle is. Quiet on purpose — it is evidence, not chrome. */
+.build-stamp {
+  display: block;
+  margin-top: 18px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}

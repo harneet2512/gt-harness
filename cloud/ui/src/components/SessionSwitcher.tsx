@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listSessions, type Session } from "../api";
+import { BUILD_SHA } from "../build";
 import { formatRelative, repoShort, truncate } from "../format";
 import NewSessionForm from "./NewSessionForm";
 
@@ -138,6 +139,7 @@ export default function SessionSwitcher({ activeId, active }: Props) {
             >
               New session
             </button>
+            <span className="build-stamp mono">build {BUILD_SHA}</span>
           </li>
         </ul>
       )}

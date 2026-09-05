@@ -6,6 +6,8 @@ interface Props {
   lockedReason: string;
   /** True while a turn is in flight — the message lands mid-turn. */
   isRunning: boolean;
+  /** A sent message is queued and has not reached the agent yet. */
+  steeringQueued: boolean;
   error: string | null;
   /** Resolves true when the message was accepted; false keeps the draft. */
   onSend: (content: string) => Promise<boolean>;
@@ -19,6 +21,7 @@ export default function Composer({
   locked,
   lockedReason,
   isRunning,
+  steeringQueued,
   error,
   onSend,
   onStop,
@@ -73,7 +76,9 @@ export default function Composer({
 
       <div className="composer-foot">
         <span className="cap cap-muted">
-          {isRunning && !locked
+          {/* Only while something is actually waiting. Bound to `isRunning`
+              alone it kept claiming a delivery that had already happened. */}
+          {steeringQueued && !locked
             ? "Delivered at the next step"
             : "Enter to send · Shift+Enter newline"}
         </span>

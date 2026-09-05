@@ -129,6 +129,10 @@
   bottom: 0;
   background: var(--surface);
 }
+.switch-foot .build-stamp {
+  margin-top: 6px;
+  text-align: center;
+}
 
 .newsess {
   padding: 14px;
