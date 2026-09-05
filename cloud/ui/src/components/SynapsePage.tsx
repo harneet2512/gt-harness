@@ -1,38 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { COMPOSER_LOCKED } from "../api";
 import { failedReason } from "../format";
-import { relationsFor } from "../graph";
-import {
-  defaultDrawerOpen,
-  defaultPanelCollapsed,
-  isOverlayMode,
-  useLayoutMode,
-} from "../layoutMode";
+import { shouldAutoOpenGraph, turnFileCount } from "../launch";
+import { isOverlayMode, useLayoutMode } from "../layoutMode";
+import { loadGraphOpen, loadPrefs, savePrefs, saveGraphOpen, type Prefs } from "../prefs";
+import { helpText, type ParsedSlash } from "../slash";
 import { useDragSize } from "../useDragSize";
 import { useGraphView } from "../useGraphView";
 import { useSessionData } from "../useSessionData";
-import BottomPanel from "./BottomPanel";
-import Conversation from "./Conversation";
-import GraphCanvas from "./GraphCanvas";
-import GraphToolbar, { type TurnOption } from "./GraphToolbar";
-import Inspector from "./Inspector";
-import Scrubber from "./Scrubber";
+import { useSessions } from "../useSessions";
+import Conversation, { type LocalNote } from "./Conversation";
+import GraphPanel from "./GraphPanel";
+import ResumeRail from "./ResumeRail";
+import SessionHeader from "./SessionHeader";
 import type { StatusMode } from "./StatusLine";
 
-const LEFT_DEFAULT = 400;
-const LEFT_MIN = 340;
-const LEFT_MAX = 640;
-const PANEL_DEFAULT = 220;
-const PANEL_MIN = 120;
-const PANEL_MAX = 560;
+const GRAPH_DEFAULT = 560;
+const GRAPH_MIN = 360;
+const GRAPH_MAX = 900;
 
-/** SYNAPSE — the conversation, the particle graph, and what it is changing. */
+const SPAWN_SOON =
+  "spawning worker agents is coming — the server side is being built";
+
+/** SYNAPSE — a transcript, with the graph a keystroke away. */
 export default function SynapsePage() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? null;
+  const location = useLocation();
   const data = useSessionData(sessionId);
   const { session, chat, graph, diff } = data;
+  const { sessions, error: listError } = useSessions();
 
   const view = useGraphView({
     sessionId,
@@ -44,56 +42,53 @@ export default function SynapsePage() {
     turnEpoch: data.turnEpoch,
   });
 
-  /* ---- layout ----
-     Three modes, one decision. Wide is three columns. Narrow turns the
-     conversation into a drawer and the inspector into a slide-over, because
-     below ~1100px a third column leaves the graph nothing. Stacked drops the
-     row entirely: conversation over graph, with sheets for the rest. */
+  /* ---- the first message, typed on the landing page ----
+     The session was created a moment ago and the server answers 409 until
+     the workspace is up, so the prompt waits here — on screen — and is
+     posted the instant the session reaches `idle`. */
+  const firstMessage =
+    (location.state as { firstMessage?: string } | null)?.firstMessage ?? null;
+  const [pendingFirst, setPendingFirst] = useState<string | null>(firstMessage);
+  const sentFirst = useRef(false);
+
+  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
+  const [gearSignal, setGearSignal] = useState(0);
+  const [focusSignal, setFocusSignal] = useState(0);
+  const [notes, setNotes] = useState<readonly LocalNote[]>([]);
+  const noteId = useRef(0);
+
   const layout = useLayoutMode();
   const overlay = isOverlayMode(layout);
+  const width = useDragSize(GRAPH_DEFAULT, GRAPH_MIN, GRAPH_MAX, "x-left");
 
-  const left = useDragSize(LEFT_DEFAULT, LEFT_MIN, LEFT_MAX, "x");
-  const panel = useDragSize(PANEL_DEFAULT, PANEL_MIN, PANEL_MAX, "y");
-  const [panelOpen, setPanelOpen] = useState(true);
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(true);
-  const [labels, setLabels] = useState(false);
-  const [fitToken, setFitToken] = useState(0);
-  const [zoomK, setZoomK] = useState(1);
-  const [search, setSearch] = useState("");
+  /* ---- the graph panel ---- */
+  const remembered = useMemo(
+    () => (sessionId ? loadGraphOpen(sessionId) : null),
+    [sessionId],
+  );
+  const [graphOpen, setGraphOpen] = useState(remembered ?? false);
+  /* An explicit choice is never overridden by the auto-expand below. */
+  const autoDone = useRef(remembered !== null);
 
-  /* ---- search ---- */
-  const matches = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return null;
-    const out = new Set<string>();
-    for (const particle of view.field.particles) {
-      if (particle.path.toLowerCase().includes(query)) out.add(particle.id);
-    }
-    return out;
-  }, [search, view.field]);
+  const setGraph = useCallback(
+    (open: boolean) => {
+      autoDone.current = true;
+      setGraphOpen(open);
+      if (sessionId) saveGraphOpen(sessionId, open);
+    },
+    [sessionId],
+  );
 
-  /* The drawer's default depends on what there is to look at: with a graph
-     on screen the graph is why you are here, with nothing drawn yet the
-     conversation is all there is. It keeps re-deciding until the reader
-     touches the toggle, and forgets that the moment the mode changes. */
-  const drawerTouched = useRef(false);
-  const hasGraph = view.field.particles.length > 0;
+  const liveSteps =
+    view.stepsByTurn[session?.current_turn_id ?? ""] ?? view.steps;
+  const touched = turnFileCount(liveSteps);
 
   useEffect(() => {
-    drawerTouched.current = false;
-    setPanelCollapsed(defaultPanelCollapsed(layout));
-  }, [layout]);
-
-  useEffect(() => {
-    if (drawerTouched.current) return;
-    setDrawerOpen(defaultDrawerOpen(layout, hasGraph));
-  }, [layout, hasGraph]);
-
-  const toggleDrawer = useCallback(() => {
-    drawerTouched.current = true;
-    setDrawerOpen((open) => !open);
-  }, []);
+    if (autoDone.current || graphOpen) return;
+    if (!shouldAutoOpenGraph(touched)) return;
+    autoDone.current = true;
+    setGraphOpen(true);
+  }, [touched, graphOpen]);
 
   /* ---- selection ---- */
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -111,45 +106,19 @@ export default function SynapsePage() {
 
   const { particleId } = view;
   const selectPath = useCallback(
-    (path: string) => select(particleId(path)),
-    [select, particleId],
+    (path: string) => {
+      const found = particleId(path);
+      if (found) setGraph(true);
+      select(found);
+    },
+    [select, particleId, setGraph],
   );
-
-  const inspected = inspectedId
-    ? (view.field.byId.get(inspectedId) ?? null)
-    : null;
-  const inspectedPath = inspected?.path ?? "";
 
   const closeInspector = useCallback(() => {
     setPinned(false);
     setInspectedId(null);
     setSelectedId(null);
   }, []);
-
-  /* A slide-over with a scrim over it is modal enough to owe the reader an
-     Escape. The drawer is not: the toolbar toggle is always in reach, and
-     the session switcher already answers Escape from inside the drawer. */
-  const inspectorOpen = inspected !== null;
-  useEffect(() => {
-    if (!overlay || !inspectorOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      closeInspector();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [overlay, inspectorOpen, closeInspector]);
-
-  const inspectedCotouch = useMemo(() => {
-    if (!inspectedPath) return [];
-    const out: string[] = [];
-    for (const key of view.cotouch) {
-      const [a, b] = key.split(" ");
-      if (a === inspectedPath) out.push(b);
-      else if (b === inspectedPath) out.push(a);
-    }
-    return out;
-  }, [view.cotouch, inspectedPath]);
 
   /* ---- status ---- */
   const status = String(session?.status ?? (sessionId ? "creating" : "idle"));
@@ -180,225 +149,179 @@ export default function SynapsePage() {
       ? data.now - currentTurn.startedAt
       : null;
 
-  /* ---- Ctrl/Cmd+Shift+Backspace stops the turn ---- */
+  /* ---- deliver the landing page's prompt ---- */
+  const send = data.send;
+  useEffect(() => {
+    if (!pendingFirst || sentFirst.current) return;
+    if (status !== "idle") return;
+    sentFirst.current = true;
+    const content = pendingFirst;
+    setPendingFirst(null);
+    void send(content);
+  }, [pendingFirst, status, send]);
+
+  /* ---- keyboard ---- */
   const stop = data.stop;
   useEffect(() => {
-    if (!data.isRunning) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Backspace" || !e.shiftKey) return;
-      if (!e.ctrlKey && !e.metaKey) return;
-      e.preventDefault();
-      stop();
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta) return;
+      if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        setFocusSignal((n) => n + 1);
+        return;
+      }
+      if (e.key === "g" || e.key === "G") {
+        e.preventDefault();
+        setGraph(!graphOpen);
+        return;
+      }
+      if (e.key === "Backspace" && e.shiftKey && data.isRunning) {
+        e.preventDefault();
+        stop();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data.isRunning, stop]);
+  }, [data.isRunning, stop, graphOpen, setGraph]);
 
-  const turnOptions: TurnOption[] = useMemo(
-    () => view.turnIds.map((turnId, i) => ({ id: turnId, no: i + 1 })),
-    [view.turnIds],
+  const note = useCallback((role: LocalNote["role"], text: string) => {
+    setNotes((prev) => [...prev, { id: (noteId.current += 1), role, text }]);
+  }, []);
+
+  const onCommand = useCallback(
+    ({ command, arg }: ParsedSlash) => {
+      /* The command is echoed the way a shell echoes it: what you typed
+         stays in the transcript, above whatever it did. */
+      note("user", `/${command.name}${arg ? ` ${arg}` : ""}`);
+      switch (command.name) {
+        case "stop":
+          if (data.isRunning) stop();
+          else note("system", "Nothing is running.");
+          break;
+        case "close":
+          data.close();
+          break;
+        case "graph":
+          setGraph(!graphOpen);
+          break;
+        case "settings":
+          setGearSignal((n) => n + 1);
+          break;
+        case "spawn":
+          note("system", SPAWN_SOON);
+          break;
+        case "help":
+          note("system", helpText());
+          break;
+      }
+    },
+    [data, stop, graphOpen, setGraph, note],
   );
 
   return (
-    <div
-      className={`synapse ${layout === "wide" ? "" : `is-${layout}`} ${
-        drawerOpen ? "drawer-open" : ""
-      }`}
-    >
-      <div
-        className={`synapse-left ${drawerOpen ? "is-open" : ""}`}
-        style={layout === "wide" ? { width: left.size } : undefined}
-        aria-hidden={!drawerOpen}
-      >
-        <Conversation
-          sessionId={sessionId}
+    <div className={`shell ${overlay ? "is-narrow" : ""}`}>
+      <ResumeRail
+        activeId={sessionId}
+        sessions={sessions}
+        error={listError}
+      />
+
+      <main className="work">
+        <SessionHeader
           session={session}
-          chat={chat}
-          groups={view.groups}
-          stepsByTurn={view.stepsByTurn}
-          edited={view.editedPaths}
-          selectedTurnId={view.selectedTurnId}
-          currentTurnId={session?.current_turn_id ?? null}
-          onSelectTurn={view.pickTurn}
-          cutoff={view.cutoff}
-          running={data.isRunning}
-          stopping={data.isStopping}
-          steeringQueued={data.steeringQueued}
           mode={mode}
           phase={data.phase}
           elapsed={elapsed}
           liveSteps={view.calls}
-          now={data.now}
-          locked={COMPOSER_LOCKED.has(status)}
-          lockedReason={lockedReason(status, data.phase, data.failureError)}
-          sendError={data.loadError ?? data.sendError}
-          gtError={data.gtError}
-          failureError={data.failureError}
-          onSend={data.send}
-          onStop={data.stop}
-          onContinue={() => void data.send("continue")}
-          onClose={
-            sessionId && status !== "closed" && status !== "creating"
-              ? data.close
-              : null
-          }
-          onCollapse={layout === "narrow" ? toggleDrawer : null}
-        />
-      </div>
-
-      {layout === "narrow" && drawerOpen && (
-        <div
-          className="scrim is-drawer"
-          role="presentation"
-          onClick={toggleDrawer}
-        />
-      )}
-
-      {layout === "wide" && (
-        <div
-          className="grip is-x"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the conversation"
-          {...left.handlers}
-        />
-      )}
-
-      <div className="synapse-main">
-        <GraphToolbar
-          turns={turnOptions}
-          selectedTurnId={view.selectedTurnId}
-          currentTurnId={session?.current_turn_id ?? null}
-          onSelectTurn={view.pickTurn}
-          search={search}
-          onSearch={setSearch}
-          onSearchEnter={() => {
-            const first = matches ? [...matches][0] : undefined;
-            if (first) select(first);
+          running={data.isRunning}
+          stopping={data.isStopping}
+          graphOpen={graphOpen}
+          onToggleGraph={() => setGraph(!graphOpen)}
+          onStop={stop}
+          prefs={prefs}
+          gearSignal={gearSignal}
+          onPrefs={(next) => {
+            setPrefs(next);
+            savePrefs(next);
           }}
-          matchCount={matches ? matches.size : null}
-          zoom={zoomK}
-          onFit={() => setFitToken((n) => n + 1)}
-          labels={labels}
-          onToggleLabels={() => setLabels(!labels)}
-          panelOpen={panelOpen}
-          onTogglePanel={() => setPanelOpen(!panelOpen)}
-          gt={graph.gt}
-          folded={view.field.folded}
-          drawerOpen={drawerOpen}
-          onToggleDrawer={layout === "narrow" ? toggleDrawer : null}
         />
 
-        <div className="synapse-stage">
-          <GraphCanvas
-            sessionId={sessionId}
-            field={view.field}
-            neighbours={view.neighbours}
-            attention={view.attentionById}
-            currentStep={view.cutoff}
-            edited={view.editedById}
-            positionId={view.positionId}
-            running={data.isRunning}
-            selectedId={selectedId}
-            onSelect={select}
-            matches={matches}
-            labels={labels}
-            trailIds={view.trailIds}
-            trailToken={`${view.selectedTurnId ?? ""}|${
-              view.live ? "live" : "scrub"
-            }`}
-            animate={
-              view.live &&
-              data.isRunning &&
-              view.selectedTurnId === session?.current_turn_id
-            }
-            fitToken={fitToken}
-            onZoom={setZoomK}
-            emptyText={emptyText(sessionId, status, view.field.particles.length)}
-          />
-        </div>
-
-        {panelOpen && (
-          <div
-            className={`synapse-bottom ${panelCollapsed ? "is-collapsed" : ""}`}
-            style={
-              !panelCollapsed && layout !== "stacked"
-                ? { height: panel.size }
-                : undefined
-            }
-          >
-            {!panelCollapsed && layout !== "stacked" && (
-              <div
-                className="grip is-y"
-                role="separator"
-                aria-orientation="horizontal"
-                aria-label="Resize the panel"
-                {...panel.handlers}
-              />
-            )}
-            {!panelCollapsed && (
-              <Scrubber
-                steps={view.steps}
-                edited={view.editedPaths}
-                position={view.cutoff}
-                calls={view.calls}
-                hereCall={view.hereCall}
-                live={view.live}
-                onScrub={view.setScrub}
-                onLive={() => view.setScrub(null)}
-              />
-            )}
-            <BottomPanel
-              steps={view.steps}
+        <div className="work-body">
+          <div className="work-talk">
+            <Conversation
+              sessionId={sessionId}
+              session={session}
+              chat={chat}
+              groups={view.groups}
+              stepsByTurn={view.stepsByTurn}
+              edited={view.editedPaths}
+              selectedTurnId={view.selectedTurnId}
+              currentTurnId={session?.current_turn_id ?? null}
+              onSelectTurn={view.pickTurn}
               cutoff={view.cutoff}
               hereStep={view.hereStep}
-              edited={view.editedPaths}
               running={data.isRunning}
+              stopping={data.isStopping}
+              steeringQueued={data.steeringQueued}
+              phase={data.phase}
+              now={data.now}
+              locked={COMPOSER_LOCKED.has(status)}
+              lockedReason={lockedReason(status, data.phase, data.failureError)}
+              sendError={data.loadError ?? data.sendError}
+              gtError={data.gtError}
+              failureError={data.failureError}
+              pendingFirst={pendingFirst}
+              notes={notes}
+              focusSignal={focusSignal}
+              onSend={data.send}
+              onCommand={onCommand}
+              onStop={stop}
+              onContinue={() => void data.send("continue")}
               onPickFile={selectPath}
-              diff={view.diffAtCutoff}
-              diffNote={view.diffNote}
-              diffError={data.diffError}
-              diffLoading={data.diffLoading}
-              onRefreshDiff={data.reloadDiff}
-              receipts={data.receipts}
-              receiptsError={data.receiptsError}
-              receiptsLoading={data.receiptsLoading}
-              onRefreshReceipts={data.reloadReceipts}
-              collapsed={panelCollapsed}
-              onExpand={overlay ? () => setPanelCollapsed(false) : null}
-              onCollapse={overlay ? () => setPanelCollapsed(true) : null}
             />
           </div>
-        )}
-      </div>
 
-      {overlay && inspectorOpen && (
-        <div
-          className="scrim is-inspector"
-          role="presentation"
-          onClick={closeInspector}
-        />
-      )}
-
-      <Inspector
-        particle={inspected}
-        open={inspectorOpen}
-        pinned={pinned}
-        onTogglePin={() => setPinned(!pinned)}
-        onClose={closeInspector}
-        diff={view.diffAtCutoff}
-        diffFile={view.editedAtCutoff.get(inspectedPath)}
-        diffNote={view.diffNote}
-        diffLoading={data.diffLoading}
-        diffError={data.diffError}
-        relations={relationsFor(view.relations, inspectedPath)}
-        cotouch={inspectedCotouch}
-        reads={view.attentionById.get(inspectedId ?? "")?.reads ?? 0}
-        steps={view.steps}
-        cutoff={view.cutoff}
-        onScrubTo={(n) => view.setScrub(n >= view.steps.length ? null : n)}
-        onPick={selectPath}
-      />
+          {graphOpen && (
+            <>
+              {overlay ? (
+                <div
+                  className="scrim is-graph"
+                  role="presentation"
+                  onClick={() => setGraph(false)}
+                />
+              ) : (
+                <div
+                  className="grip is-x"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize the graph"
+                  {...width.handlers}
+                />
+              )}
+              <div
+                className="work-graph"
+                style={overlay ? undefined : { width: width.size }}
+              >
+                <GraphPanel
+                  sessionId={sessionId}
+                  session={session}
+                  data={data}
+                  view={view}
+                  selectedId={selectedId}
+                  inspectedId={inspectedId}
+                  pinned={pinned}
+                  onSelect={select}
+                  onSelectPath={(path) => select(particleId(path))}
+                  onTogglePin={() => setPinned(!pinned)}
+                  onCloseInspector={closeInspector}
+                  onCollapse={() => setGraph(false)}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
@@ -429,15 +352,4 @@ function lockedReason(
     default:
       return "";
   }
-}
-
-function emptyText(
-  sessionId: string | null,
-  status: string,
-  particles: number,
-): string | null {
-  if (particles > 0) return null;
-  if (!sessionId) return "pick a session";
-  if (status === "creating") return "indexing…";
-  return "no files indexed";
 }

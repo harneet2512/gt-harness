@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { Receipt, SessionDiff } from "../api";
 import type { TrailStep } from "../trail";
 import ChangesPanel from "./ChangesPanel";
@@ -56,14 +56,11 @@ export default function BottomPanel({
   onExpand = null,
   onCollapse = null,
 }: Props) {
-  const [tab, setTab] = useState<TabId>("trail");
-  const chosen = useRef(false);
-
-  // While the agent is walking, the steps are what matter — unless the
-  // reader has already said otherwise.
-  useEffect(() => {
-    if (running && !chosen.current) setTab("trail");
-  }, [running]);
+  /* Changes, not the trail: every step of the turn is already inline in the
+     transcript, and a drawer that repeats it is a drawer worth nothing. The
+     trail is still here — with the scrubber, which the transcript has not —
+     one tab away. */
+  const [tab, setTab] = useState<TabId>("changes");
 
   const count = (id: TabId): string => {
     if (id === "trail") return steps.length > 0 ? String(steps.length) : "";
@@ -86,7 +83,6 @@ export default function BottomPanel({
               !collapsed && tab === id ? "is-active" : ""
             }`}
             onClick={() => {
-              chosen.current = true;
               setTab(id);
               // Picking a tab on a collapsed strip is a request to read it.
               if (collapsed) onExpand?.();

@@ -2,152 +2,15 @@
  * The conversation column.
  * ------------------------------------------------------------------ */
 
+/* The transcript is the page: one readable measure, centred, with the
+   composer sharing its gutter so the two read as one surface. */
 .talk {
+  --gutter: max(20px, calc((100% - 900px) / 2));
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  border-right: 1px solid var(--rule);
   background: var(--surface);
-}
-
-.talk-head {
-  flex: 0 0 auto;
-  padding: 10px 14px 9px;
-  border-bottom: 1px solid var(--rule);
-}
-/* The status line on the left, the session-level action on the right. */
-.talk-head-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.talk-head-foot .status {
-  min-width: 0;
-}
-
-/* ---------------- session switcher ---------------- */
-
-.switch {
-  position: relative;
-}
-
-.switch-btn {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 4px 6px;
-  margin-left: -6px;
-  border-radius: 4px;
-  font-weight: 500;
-  min-width: 0;
-}
-.switch-btn:hover {
-  background: rgba(26, 27, 30, 0.04);
-}
-.switch-repo {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.switch-sep {
-  color: var(--muted);
-}
-.switch-ref {
-  color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.switch-chev {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.switch-menu,
-/* Only a popover inside the switcher; the empty state renders it inline. */
-.switch .newsess {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  left: -6px;
-  width: 380px;
-  max-width: calc(100vw - 40px);
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  box-shadow: 0 10px 28px rgba(26, 27, 30, 0.1);
-  list-style: none;
-  max-height: 66vh;
-  overflow: auto;
-}
-
-.switch-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 9px 12px;
-  border-radius: 0;
-}
-.switch-item:hover {
-  background: var(--paper);
-}
-.switch-item.is-active {
-  box-shadow: inset 2px 0 0 var(--orange);
-}
-.switch-top {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.switch-top .switch-ref {
-  font-size: 11.5px;
-}
-.switch-last {
-  display: block;
-  margin-left: 13px;
-  color: var(--ink-2);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.switch-empty {
-  padding: 14px 12px;
-  color: var(--muted);
-}
-.switch-notice {
-  margin: 10px;
-}
-.switch-foot {
-  padding: 8px;
-  border-top: 1px solid var(--rule);
-  position: sticky;
-  bottom: 0;
-  background: var(--surface);
-}
-.switch-foot .build-stamp {
-  margin-top: 6px;
-  text-align: center;
-}
-
-.newsess {
-  padding: 14px;
-}
-.newsess h2 {
-  font-size: 13px;
-  margin-bottom: 10px;
-}
-.newsess-custom {
-  margin-top: 8px;
-}
-.newsess-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
 }
 
 /* ---------------- ground truth ---------------- */
@@ -240,7 +103,7 @@
 .talk-scroll {
   height: 100%;
   overflow-y: auto;
-  padding: 16px 16px 22px;
+  padding: 20px var(--gutter) 30px;
 }
 .talk-empty {
   color: var(--muted);
@@ -412,7 +275,7 @@
 .composer {
   flex: 0 0 auto;
   border-top: 1px solid var(--rule);
-  padding: 10px 14px 12px;
+  padding: 10px var(--gutter, 14px) 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -489,17 +352,6 @@
 .closed-note-line > span {
   flex: 1 1 220px;
 }
-.closed-note .newsess {
-  padding: 12px 0 0;
-}
-
-/* The switcher's own copy of the closed marker: it has to read at 11px
-   inside a row that is already three facts wide. */
-.switch-closed {
-  color: var(--muted);
-  font-size: 11.5px;
-}
-
 /* The one thing left to do with a closed session, in the header, sized for
    a row that already holds a status line and a marker. */
 .btn-restart {

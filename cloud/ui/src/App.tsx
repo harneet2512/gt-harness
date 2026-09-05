@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { getMe, LOGIN_URL, type User } from "./api";
 import { BUILD_SHA } from "./build";
-import StartPage from "./components/StartPage";
+import LandingPage from "./components/LandingPage";
 import SynapsePage from "./components/SynapsePage";
 
 type AuthState =
@@ -61,7 +61,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<StartPage />} />
+      <Route path="/" element={<LandingPage />} />
       <Route path="/sessions/:id" element={<SessionRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -13,13 +13,14 @@ export interface DragSize {
 /**
  * A draggable panel edge. `x` grows to the right of the grip, `y` grows
  * above it — which is what a bottom panel with a grip on its top edge
- * wants. Double-click restores the default.
+ * wants — and `x-left` grows to the left of it, which is what a right-hand
+ * panel wants. Double-click restores the default.
  */
 export function useDragSize(
   initial: number,
   min: number,
   max: number,
-  axis: "x" | "y",
+  axis: "x" | "y" | "x-left",
 ): DragSize {
   const [size, setSize] = useState(initial);
   const start = useRef<{ at: number; size: number } | null>(null);
@@ -29,7 +30,7 @@ export function useDragSize(
     handlers: {
       onPointerDown: (e) => {
         start.current = {
-          at: axis === "x" ? e.clientX : e.clientY,
+          at: axis === "y" ? e.clientY : e.clientX,
           size,
         };
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -37,7 +38,7 @@ export function useDragSize(
       onPointerMove: (e) => {
         const from = start.current;
         if (!from) return;
-        const now = axis === "x" ? e.clientX : e.clientY;
+        const now = axis === "y" ? e.clientY : e.clientX;
         const delta = now - from.at;
         const next = axis === "x" ? from.size + delta : from.size - delta;
         setSize(Math.min(max, Math.max(min, next)));

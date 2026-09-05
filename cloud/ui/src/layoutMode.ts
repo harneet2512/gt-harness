@@ -36,22 +36,6 @@ export function isOverlayMode(mode: LayoutMode): boolean {
   return mode !== "wide";
 }
 
-/**
- * Whether the conversation drawer starts open. On a session page the graph
- * is the thing you came for, so the drawer is out of the way; with nothing
- * drawn yet there is nothing to be out of the way of.
- */
-export function defaultDrawerOpen(mode: LayoutMode, hasGraph: boolean): boolean {
-  if (mode === "stacked") return true; // stacked: it is a column again
-  if (mode === "wide") return true;
-  return !hasGraph;
-}
-
-/** The bottom panel starts collapsed to its tab strip on a narrow screen. */
-export function defaultPanelCollapsed(mode: LayoutMode): boolean {
-  return mode !== "wide";
-}
-
 const NARROW_QUERY = `(max-width: ${NARROW_MAX_PX - 0.02}px)`;
 const STACK_QUERY = `(max-width: ${STACK_MAX_PX - 0.02}px)`;
 

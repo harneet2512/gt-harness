@@ -10,21 +10,26 @@ import {
 import {
   formatClock,
   formatCost,
-  gtBadgeLabel,
+  repoShort,
   sessionClosedBlurb,
-  sessionClosedLabel,
-  sessionTotals,
   shortSha,
   turnOutcomeNote,
 } from "../format";
 import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
+import type { ParsedSlash } from "../slash";
 import Composer from "./Composer";
-import NewSessionForm from "./NewSessionForm";
+import CreationLine from "./CreationLine";
 import Prose from "./Prose";
-import SessionSwitcher from "./SessionSwitcher";
-import StatusLine, { type StatusMode } from "./StatusLine";
+import TrailPanel from "./TrailPanel";
 import TransmissionStrip from "./TransmissionStrip";
+
+/** A line this page wrote itself: `/help`, `/spawn`, a refused command. */
+export interface LocalNote {
+  id: number;
+  role: "user" | "agent" | "system";
+  text: string;
+}
 
 interface Props {
   sessionId: string | null;
@@ -38,15 +43,13 @@ interface Props {
   onSelectTurn: (turnId: string) => void;
   /** Steps visible at the scrub position, for the selected turn only. */
   cutoff: number;
+  hereStep: number | null;
   running: boolean;
   /** Stop was pressed; the turn is winding down. */
   stopping: boolean;
   /** A sent message is queued and undelivered. */
   steeringQueued: boolean;
-  mode: StatusMode;
   phase: string | null;
-  elapsed: number | null;
-  liveSteps: number;
   /** Epoch seconds, ticking only while a turn runs. */
   now: number;
   locked: boolean;
@@ -56,31 +59,22 @@ interface Props {
   gtError: string | null;
   /** Why the session failed, in the server's words, when it has. */
   failureError: string | null;
+  /**
+   * The first message, typed on the landing page and not yet accepted: the
+   * server answers 409 until the workspace is up. Shown the moment the page
+   * opens, so the wait belongs to the prompt rather than to a blank screen.
+   */
+  pendingFirst: string | null;
+  notes: readonly LocalNote[];
   onSend: (content: string) => Promise<boolean>;
+  onCommand: (parsed: ParsedSlash) => void;
   onStop: () => void;
   onContinue: () => void;
-  /** Discard the workspace. Absent once the session is already closed. */
-  onClose: (() => void) | null;
-  /**
-   * Dismiss the conversation drawer. Only set on a narrow screen, where
-   * the column is an overlay and needs a way out that is not the toolbar.
-   */
-  onCollapse?: (() => void) | null;
+  onPickFile: (path: string) => void;
+  focusSignal: number;
 }
 
-/** GT in four words, in the header, at all times: which mode, and is it up. */
-function GtBadge({ mode, status }: { mode: string; status: string }) {
-  return (
-    <span
-      className={`gt-badge is-${status}`}
-      title={`ground truth: mode ${mode || "off"}, index ${status}`}
-    >
-      {gtBadgeLabel(mode, status)}
-    </span>
-  );
-}
-
-/** The left column: who you are talking to, what was said, and the composer. */
+/** The transcript: what you asked, what it did, what came back. */
 export default function Conversation({
   sessionId,
   session,
@@ -92,30 +86,30 @@ export default function Conversation({
   currentTurnId,
   onSelectTurn,
   cutoff,
+  hereStep,
   running,
   stopping,
   steeringQueued,
-  mode,
   phase,
-  elapsed,
-  liveSteps,
   now,
   locked,
   lockedReason,
   sendError,
   gtError,
   failureError,
+  pendingFirst,
+  notes,
   onSend,
+  onCommand,
   onStop,
   onContinue,
-  onClose,
-  onCollapse = null,
+  onPickFile,
+  focusSignal,
 }: Props) {
   const navigate = useNavigate();
   const scroll = useAutoScroll();
   const [gtDismissed, setGtDismissed] = useState(false);
   const [failDismissed, setFailDismissed] = useState(false);
-  const [restarting, setRestarting] = useState(false);
   let turnNo = 0;
 
   const gtMode = String(session?.gt_mode ?? "off");
@@ -123,99 +117,18 @@ export default function Conversation({
   // Asked for ground truth and did not get it: say so, once, until dismissed.
   const gtFailed = gtStatus === "unavailable" && gtMode !== "off";
 
-  /* A closed session is read-only for good: the workspace behind it is
-     gone. Saying *why* — you closed it, it expired, it failed — is the
-     difference between an explanation and a dead end, and the only useful
-     next move is the same repository again. */
   const sessionStatus = String(session?.status ?? "");
-  const closedLabel = sessionClosedLabel(
-    sessionStatus,
-    session?.closed_reason,
-  );
-  const closedBlurb = sessionClosedBlurb(
-    sessionStatus,
-    session?.closed_reason,
-  );
-  const totals = session ? sessionTotals(session) : "";
+  const closedBlurb = sessionClosedBlurb(sessionStatus, session?.closed_reason);
   const failNotice =
     sessionStatus === "failed" && Boolean(failureError) && !failDismissed;
+  const creating = sessionStatus === "creating";
 
   return (
     <section className="talk">
-      <header className="talk-head">
-        <SessionSwitcher activeId={sessionId} active={session} />
-        <div className="talk-head-foot">
-          <StatusLine
-            stopping={stopping}
-            mode={mode}
-            phase={phase}
-            elapsed={elapsed}
-            steps={liveSteps}
-          />
-          <span className="spacer" />
-          {session && <GtBadge mode={gtMode} status={gtStatus} />}
-          {onClose && (
-            <button
-              type="button"
-              className="btn-text"
-              title="Close this session and discard its workspace"
-              onClick={onClose}
-            >
-              close session
-            </button>
-          )}
-          {onCollapse && (
-            <button
-              type="button"
-              className="btn-text"
-              aria-label="Hide the conversation"
-              title="Hide the conversation"
-              onClick={onCollapse}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        {session && (totals !== "" || closedLabel !== null) && (
-          <div className="talk-head-meta">
-            {totals !== "" && (
-              <span
-                className="mono muted"
-                title={
-                  session.cost === 0
-                    ? "the provider reported no cost for this session"
-                    : undefined
-                }
-              >
-                {totals}
-              </span>
-            )}
-            {closedLabel !== null && (
-              <span className="cap closed-why">{closedLabel}</span>
-            )}
-            <span className="spacer" />
-            {/* Offered until it is taken: once the form is open, the form
-                is the interface and carries its own Cancel. */}
-            {closedBlurb !== null && !restarting && (
-              <button
-                type="button"
-                className="btn btn-orange btn-restart"
-                aria-expanded={false}
-                onClick={() => setRestarting(true)}
-              >
-                Start a new session on this repo
-              </button>
-            )}
-          </div>
-        )}
-      </header>
-
       <div className="talk-wrap">
         <div className="talk-scroll" ref={scroll.ref}>
           {/* The server said why. Saying it is the difference between a
-              dead end and something the reader can act on. While it stands
-              it speaks for the failure; the terse blurb below stands down. */}
+              dead end and something the reader can act on. */}
           {failNotice && (
             <div className="gt-warn is-fail">
               <div className="gt-warn-line">
@@ -258,39 +171,36 @@ export default function Conversation({
             </div>
           )}
 
-          {closedBlurb !== null && session && (!failNotice || restarting) && (
+          {closedBlurb !== null && session && !failNotice && (
             <div className="closed-note">
-              {!failNotice && (
-                <div className="closed-note-line">
-                  <span>{closedBlurb}</span>
-                </div>
-              )}
-              {restarting && (
-                <NewSessionForm
-                  title={null}
-                  seed={{
-                    repo: session.repo,
-                    ref: session.ref,
-                    model: session.model,
-                    gtMode: String(session.gt_mode),
-                  }}
-                  onCancel={() => setRestarting(false)}
-                  onCreated={(next) => {
-                    setRestarting(false);
-                    navigate(`/sessions/${next.id}`);
-                  }}
-                />
-              )}
+              <div className="closed-note-line">
+                <span>{closedBlurb}</span>
+                <button
+                  type="button"
+                  className="btn btn-orange btn-restart"
+                  onClick={() =>
+                    navigate(
+                      `/?repo=${encodeURIComponent(session.repo)}&ref=${encodeURIComponent(session.ref)}`,
+                    )
+                  }
+                >
+                  Start a new session on this repo
+                </button>
+              </div>
             </div>
           )}
 
-          {!sessionId && (
-            <p className="talk-empty">Pick a session or start a new one.</p>
+          {/* The prompt that created this session, before the server will
+              take it. It is already the first thing in the transcript. */}
+          {pendingFirst && <p className="said is-pending">{pendingFirst}</p>}
+
+          {creating && session && (
+            <CreationLine repo={repoShort(session.repo)} phase={phase} />
           )}
 
-          {sessionId && groups.length === 0 && (
+          {sessionId && groups.length === 0 && !pendingFirst && !creating && (
             <p className="talk-empty">
-              Message the agent. Every message walks the graph once.
+              Tell the agent what to do. Every message walks the graph once.
             </p>
           )}
 
@@ -321,12 +231,29 @@ export default function Conversation({
                 selected={selected}
                 running={running && group.turnId === currentTurnId}
                 cutoff={selected ? cutoff : steps.length}
+                hereStep={selected ? hereStep : null}
                 now={now}
                 onSelect={() => onSelectTurn(group.turnId)}
                 onContinue={onContinue}
+                onPickFile={onPickFile}
               />
             );
           })}
+
+          {notes.map((note) =>
+            note.role === "user" ? (
+              <p className="said arrives" key={note.id}>
+                {note.text}
+              </p>
+            ) : (
+              <p
+                className={`landing-say arrives ${note.role === "system" ? "is-system" : ""}`}
+                key={note.id}
+              >
+                {note.text}
+              </p>
+            ),
+          )}
         </div>
 
         {scroll.detached && (
@@ -345,7 +272,9 @@ export default function Conversation({
         isRunning={running}
         steeringQueued={steeringQueued}
         error={sendError}
+        focusSignal={focusSignal}
         onSend={onSend}
+        onCommand={onCommand}
         onStop={onStop}
       />
     </section>
@@ -361,9 +290,11 @@ function Exchange({
   selected,
   running,
   cutoff,
+  hereStep,
   now,
   onSelect,
   onContinue,
+  onPickFile,
 }: {
   no: number;
   group: TurnGroup;
@@ -373,9 +304,11 @@ function Exchange({
   selected: boolean;
   running: boolean;
   cutoff: number;
+  hereStep: number | null;
   now: number;
   onSelect: () => void;
   onContinue: () => void;
+  onPickFile: (path: string) => void;
 }) {
   const turn = chat.turns[group.turnId];
   const endedAt = turn?.finishedAt ?? (running ? now : null);
@@ -409,6 +342,21 @@ function Exchange({
         outcome={group.replies.length === 0 ? outcome : null}
         onSelect={onSelect}
       />
+
+      {/* The terminal part: thought, `$ command`, output, in the thread
+          where it happened rather than in a panel you have to go and find. */}
+      {(steps.length > 0 || running) && (
+        <div className="acts-inline">
+          <TrailPanel
+            steps={steps}
+            cutoff={cutoff}
+            hereStep={hereStep}
+            edited={edited}
+            running={running}
+            onPickFile={onPickFile}
+          />
+        </div>
+      )}
 
       {group.replies.map((message) => (
         <Reply key={message.id} message={message} onContinue={onContinue} />

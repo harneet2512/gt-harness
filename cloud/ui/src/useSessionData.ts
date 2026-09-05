@@ -25,7 +25,10 @@ import { gtErrorOf, nextSession, shouldApply } from "./sessionSync";
 import { WRITES } from "./trail";
 import { useSessionStream } from "./useSessionStream";
 
-const CREATING_POLL_MS = 4000;
+/* A session that is coming up is a session someone is watching: the first
+   message cannot be posted until it reaches `idle`, and the SSE frame can
+   be missed. 1.5s is the cost of not making them wait for nothing. */
+const CREATING_POLL_MS = 1500;
 /** A write settles before the diff is worth asking for again. */
 const DIFF_DEBOUNCE_MS = 800;
 /**

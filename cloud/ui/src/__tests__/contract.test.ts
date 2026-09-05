@@ -26,8 +26,6 @@ import {
   turnOutcomeNote,
 } from "../format";
 import {
-  defaultDrawerOpen,
-  defaultPanelCollapsed,
   isOverlayMode,
   layoutModeFor,
   NARROW_MAX_PX,
@@ -67,19 +65,6 @@ describe("layoutMode", () => {
     expect(isOverlayMode("stacked")).toBe(true);
   });
 
-  it("hides the drawer on a narrow session page and shows it with no graph", () => {
-    expect(defaultDrawerOpen("narrow", true)).toBe(false);
-    expect(defaultDrawerOpen("narrow", false)).toBe(true);
-    // Stacked puts the conversation back in flow: it is always there.
-    expect(defaultDrawerOpen("stacked", true)).toBe(true);
-    expect(defaultDrawerOpen("wide", true)).toBe(true);
-  });
-
-  it("starts the bottom panel collapsed on anything but the full layout", () => {
-    expect(defaultPanelCollapsed("wide")).toBe(false);
-    expect(defaultPanelCollapsed("narrow")).toBe(true);
-    expect(defaultPanelCollapsed("stacked")).toBe(true);
-  });
 });
 
 /* ------------------------------------------------------------------ *

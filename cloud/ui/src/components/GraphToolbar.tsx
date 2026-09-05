@@ -20,13 +20,8 @@ interface Props {
   onTogglePanel: () => void;
   gt: boolean;
   folded: number;
-  /**
-   * Show/hide the conversation. Only set on a narrow screen, where the
-   * conversation is a drawer over the graph rather than a column beside it;
-   * null everywhere else, so the wide layout grows no dead control.
-   */
-  drawerOpen?: boolean;
-  onToggleDrawer?: (() => void) | null;
+  /** Hide the whole panel. The conversation is the page; this is a detour. */
+  onCollapse: () => void;
 }
 
 const SWATCHES: readonly { key: string; label: string }[] = [
@@ -53,26 +48,10 @@ export default function GraphToolbar({
   onTogglePanel,
   gt,
   folded,
-  drawerOpen = false,
-  onToggleDrawer = null,
+  onCollapse,
 }: Props) {
   return (
     <div className="bar">
-      {onToggleDrawer && (
-        <button
-          type="button"
-          className={`btn-text bar-drawer ${drawerOpen ? "is-on" : ""}`}
-          aria-pressed={drawerOpen}
-          aria-label={
-            drawerOpen ? "Hide the conversation" : "Show the conversation"
-          }
-          title={drawerOpen ? "Hide the conversation" : "Show the conversation"}
-          onClick={onToggleDrawer}
-        >
-          <span aria-hidden="true">◧</span>
-        </button>
-      )}
-
       {turns.length > 0 && (
         <select
           className="bar-select"
@@ -156,6 +135,15 @@ export default function GraphToolbar({
         onClick={onTogglePanel}
       >
         panel
+      </button>
+      <button
+        type="button"
+        className="btn-text"
+        aria-label="Hide the graph"
+        title="Hide the graph — Ctrl/Cmd + G"
+        onClick={onCollapse}
+      >
+        <span aria-hidden="true">✕</span>
       </button>
     </div>
   );
