@@ -67,3 +67,43 @@ def test_build_failure_and_exception_never_publish():
             assert coordinator.last_error
         finally:
             coordinator.close()
+
+
+def test_identical_inputs_run_once_before_and_after_publication():
+    state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
+    gate = threading.Event()
+    started = []
+
+    def build(item):
+        started.append(item)
+        assert gate.wait(3)
+        return GraphBuildArtifact(True, "new.db", "g1")
+
+    coordinator = GraphBuildCoordinator(state, build)
+    try:
+        assert coordinator.schedule(request("r1")) == "scheduled"
+        assert coordinator.schedule(request("r1")) == "already_running"
+        gate.set()
+        assert coordinator.wait_idle(timeout=3)
+        assert coordinator.schedule(request("r1")) == "already_completed"
+        assert coordinator.poll() == 1
+        assert coordinator.schedule(request("r1")) == "already_completed"
+        assert len(started) == 1
+    finally:
+        gate.set()
+        coordinator.close(wait=True)
+
+
+def test_failed_identical_input_can_retry():
+    state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
+    coordinator = GraphBuildCoordinator(
+        state, lambda _: GraphBuildArtifact(False, "", "", "failed")
+    )
+    try:
+        coordinator.schedule(request("r1"))
+        assert coordinator.wait_idle(timeout=3)
+        coordinator.poll()
+        assert coordinator.schedule(request("r1")) == "scheduled"
+        assert coordinator.wait_idle(timeout=3)
+    finally:
+        coordinator.close(wait=True)

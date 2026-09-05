@@ -169,7 +169,7 @@ _SELECT_SYMBOLS_WITH_MINTED = f"""
            n.end_line, n.return_type,
            COALESCE(NULLIF(rs.stable_id, ''), NULLIF(n.stable_id, '')) AS stable_id
       FROM nodes n
-      LEFT JOIN resolution_symbols rs ON CAST(rs.native_id AS INTEGER) = n.id
+      LEFT JOIN resolution_symbols rs ON rs.native_id = CAST(n.id AS TEXT)
      WHERE n.label IN ({_LABEL_PLACEHOLDERS})
 """
 

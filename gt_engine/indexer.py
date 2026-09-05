@@ -40,6 +40,17 @@ SOURCE_EXTS = frozenset({
     ".exs", ".erl", ".hs", ".ml", ".clj", ".dart", ".zig", ".sh",
 })
 
+# Discovery and resolver inputs consumed by the pinned Go producer. These are
+# not source-language extensions, but changing them changes graph semantics.
+PRODUCER_CONFIG_NAMES = frozenset({
+    ".gitignore", "tsconfig.json", "jsconfig.json", "package.json", "go.mod", "Cargo.toml",
+})
+
+
+def is_producer_input(path: str | Path) -> bool:
+    candidate = Path(path)
+    return candidate.suffix.lower() in SOURCE_EXTS or candidate.name in PRODUCER_CONFIG_NAMES
+
 # Never descend into these (vendored/build/VCS trees are not the task's code).
 _SKIP_DIRS = frozenset({
     ".git", ".hg", ".svn", ".gt", ".groundtruth", "node_modules", ".venv",
@@ -143,7 +154,7 @@ def source_manifest_digest(root: str | Path) -> str:
         dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
         for filename in sorted(filenames):
             path = Path(directory) / filename
-            if path.suffix.lower() not in SOURCE_EXTS:
+            if not is_producer_input(path):
                 continue
             relative = path.relative_to(root_path).as_posix()
             size, digest = _file_identity(path)

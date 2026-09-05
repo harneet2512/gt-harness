@@ -515,12 +515,15 @@ def test_recovery_steer_scheduled_on_recurring_failure_after_edit(tmp_path):
     assert a.pending_transient
     assert "GT_RECOVERY" in a.pending_transient
     rows = [json.loads(x) for x in (tmp_path / "task" / "events.jsonl").read_text().splitlines()]
-    assert any(row["event"] == "recovery_steer" for row in rows)
+    assert any(row["event"] == "recovery_prepared" for row in rows)
+    assert not any(row["event"] == "recovery_steer" for row in rows)
     # bounded: at most 2 recovery steers per task
-    a.pending_transient = ""
+    rendered = a.prepare_recovery_delivery()
+    a.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     a.note_edit(["src/mod.py"])
     assert a.note_failure_fingerprint("fp-1", epoch=2) is True   # steer #2
-    a.pending_transient = ""
+    rendered = a.prepare_recovery_delivery()
+    a.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     a.note_edit(["src/mod.py"])
     assert a.note_failure_fingerprint("fp-1", epoch=3) is False  # budget exhausted
 
@@ -531,7 +534,8 @@ def test_same_epoch_repetition_is_not_post_edit_falsification(tmp_path):
     assert not adapter.note_failure_fingerprint("fp", epoch=0)
     assert not adapter.pending_transient
     assert adapter.note_failure_fingerprint("fp", epoch=1)
-    adapter.pending_transient = ""
+    rendered = adapter.prepare_recovery_delivery()
+    adapter.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     assert not adapter.note_failure_fingerprint("fp", epoch=1)
     assert not adapter.pending_transient
 
@@ -751,6 +755,24 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     assert a.graph_fresh is True
     assert a.graph_db == str(rebuilt)
     assert a.gateway_state().graph_db == str(rebuilt)
+
+
+@pytest.mark.parametrize("config_name", ["tsconfig.json", "package.json", "go.mod", "Cargo.toml", ".gitignore"])
+def test_frozen_input_and_reuse_key_include_resolver_configuration(tmp_path, config_name):
+    from gt_engine.runtime_observation import capture_workspace
+    from gt_engine.indexer import source_manifest_digest
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "a.ts").write_text("export const a = 1\n", encoding="utf-8")
+    config = repository / config_name
+    config.write_text("before", encoding="utf-8")
+    adapter = MiniSweAdapter(task_id="configuration", state_dir=tmp_path / "state",
+                             repo_root=str(repository), predicates=[])
+    before = source_manifest_digest(repository)
+    frozen = adapter._frozen_graph_input(capture_workspace(repository))
+    assert (config_name, b"before") in frozen.files
+    config.write_text("after", encoding="utf-8")
+    assert source_manifest_digest(repository) != before
 
 
 def test_frozen_graph_input_ignores_only_known_non_source_omissions(tmp_path):

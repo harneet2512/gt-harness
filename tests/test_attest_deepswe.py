@@ -290,8 +290,19 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "disposition": "WITNESSED",
             "trigger_source": "tests/provider_free.py",
             "evidence": {
-                "positive": {"exit_code": 0, "node_ids": ["tests/provider_free.py"]},
-                "negative": {"exit_code": 0, "node_ids": ["tests/provider_free.py"]},
+                polarity: {
+                    "exit_code": 0,
+                    "node_ids": ["tests/provider_free.py::test_fixture"],
+                    "execution": {
+                        "collected": ["tests/provider_free.py::test_fixture"],
+                        "reports": [
+                            {"node_id": "tests/provider_free.py::test_fixture",
+                             "phase": phase, "outcome": "passed", "wasxfail": False}
+                            for phase in ("setup", "call", "teardown")
+                        ],
+                    },
+                }
+                for polarity in ("positive", "negative")
             },
             "proof_dimensions": {
                 "produced": "tests/provider_free.py",

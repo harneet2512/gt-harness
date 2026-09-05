@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import subprocess
+import zipfile
 from pathlib import Path
 
 from gt_harness.canonical_io import canonical_json_bytes
@@ -116,6 +117,9 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
     source.mkdir()
     _git(source, "init")
     (source / "producer.go").write_text("package main\n", encoding="utf-8")
+    package = source / "src" / "groundtruth"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_bytes(b"VALUE = 1\n")
     source_head = _commit(source, "source")
     source_tree = _git(source, "rev-parse", "HEAD^{tree}")
 
@@ -145,9 +149,15 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
     )
     review_head = _commit(review, "review")
 
-    manifest = tmp_path / "manifest.json"
+    manifest = tmp_path / "config" / "manifest.json"
+    wheel = tmp_path / "vendor" / "fixture.whl"
+    wheel.parent.mkdir()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("groundtruth/__init__.py", b"VALUE = 1\n")
     payload = {
         "groundtruth": {
+            "wheel_path": "vendor/fixture.whl",
+            "wheel_sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
             "source_commit": source_head,
             "source_tree": source_tree,
             "lineage_exception": {
@@ -187,6 +197,25 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
         manifest, groundtruth_checkout=source, review_checkout=review
     )
     assert clean["status"] == "PASS", clean
+    original_wheel = wheel.read_bytes()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("groundtruth/__init__.py", b"VALUE = 2\n")
+    # Even a manifest correctly hashing the wrong package must be rejected.
+    payload["groundtruth"]["wheel_sha256"] = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    _write_json(manifest, payload)
+    mismatch = verify_groundtruth_lineage(
+        manifest, groundtruth_checkout=source, review_checkout=review
+    )
+    assert "wheel_source_correspondence_mismatch" in mismatch["failures"]
+    wheel.write_bytes(b"not a wheel")
+    malformed = verify_groundtruth_lineage(
+        manifest, groundtruth_checkout=source, review_checkout=review
+    )
+    assert "wheel_source_correspondence_invalid" in malformed["failures"]
+    assert malformed["status"] == "FAIL"
+    wheel.write_bytes(original_wheel)
+    payload["groundtruth"]["wheel_sha256"] = hashlib.sha256(original_wheel).hexdigest()
+    _write_json(manifest, payload)
     assert not _retired_supersession_chain_valid(
         review,
         packet_id="nonexistent-prior-packet",

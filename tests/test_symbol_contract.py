@@ -360,6 +360,24 @@ CREATE TABLE resolution_symbols (
 """
 
 
+def test_minted_join_uses_native_id_index_and_rejects_numeric_aliases(graph):
+    with sqlite3.connect(graph) as connection:
+        connection.execute(_RESOLUTION_SYMBOLS_DDL)
+        connection.execute("CREATE INDEX native_lookup ON resolution_symbols(native_id)")
+        connection.executemany(
+            "INSERT INTO resolution_symbols(stable_id, native_id) VALUES (?, ?)",
+            [("canonical", "1"), ("not-node-one", "1junk"), ("not-canonical", "01")],
+        )
+        query, _ = contract._symbol_query(connection)
+        plan = connection.execute(
+            "EXPLAIN QUERY PLAN " + query, contract.CODE_SYMBOL_LABELS
+        ).fetchall()
+        assert any("SEARCH rs USING INDEX native_lookup" in row[3] for row in plan), plan
+    projected = list(contracts(graph))
+    assert len(projected) == 3
+    assert projected[0]["symbol"]["stable_id"] == "canonical"
+
+
 def test_a_producer_minted_stable_id_is_preferred_over_a_derived_one(tmp_path: Path):
     """nodes.stable_id is null on every code symbol in real graphs, but the
     producer mints one in resolution_symbols keyed by native_id = nodes.id. The

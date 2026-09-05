@@ -356,7 +356,7 @@ class MiniSweAgent(BaseInstalledAgent):
             # which is how LSP promotion finds them. Prepending keeps the
             # image PATH intact and simply wins for these four names.
             f'PATH="{_REMOTE_LSP_BIN}:$PATH" '
-            f'exec "{_REMOTE_PY}" -m scripts.miniswe_gt_run '
+            f'exec "{_REMOTE_PY}" -m scripts.miniswe_supervisor '
             f"--task {shlex.quote(instruction)} --model {shlex.quote(model)} "
             f'--cwd "$PWD" '
             f"--output /logs/agent/miniswe_trajectory.json "

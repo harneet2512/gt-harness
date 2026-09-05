@@ -37,6 +37,7 @@ class GraphBuildCoordinator:
         self._running: FrozenBuildInput | None = None
         self._pending: FrozenBuildInput | None = None
         self._completed: list[tuple[FrozenBuildInput, GraphBuildArtifact]] = []
+        self._successful: tuple[FrozenBuildInput, GraphBuildArtifact] | None = None
         self._owner = threading.get_ident()
         self.last_error = ""
         self._closed = False
@@ -52,6 +53,24 @@ class GraphBuildCoordinator:
         with self._lock:
             if self._closed:
                 return "closed"
+            # Dirty paths describe invalidation, not producer input identity.
+            # Compare frozen bytes too: revision labels alone are not authority.
+            def same_input(other: FrozenBuildInput | None) -> bool:
+                return other is not None and (
+                    other.source_revision == request.source_revision
+                    and other.files == request.files
+                )
+
+            if same_input(self._running):
+                self._pending = None  # the latest request supersedes queued work
+                return "already_running"
+            if same_input(self._pending):
+                return "already_pending"
+            if self._successful is not None and same_input(self._successful[0]):
+                self._pending = None
+                if self._successful not in self._completed:
+                    self._completed.append(self._successful)
+                return "already_completed"
             if self._running is None:
                 self._start_locked(request)
                 return "scheduled"
@@ -82,7 +101,10 @@ class GraphBuildCoordinator:
         with self._lock:
             request = self._running
             if request is not None:
-                self._completed.append((request, future.result()))
+                result = future.result()
+                self._completed.append((request, result))
+                if result.success:
+                    self._successful = (request, result)
             self._running = None
             pending, self._pending = self._pending, None
             if pending is not None and not self._closed:

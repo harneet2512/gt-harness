@@ -777,9 +777,10 @@ jobs:
             --min-exercised 0 \
             --require-complete-census \
             --json attestation/gt-live-gate.json || LIVE_EXIT=$?
-          python scripts/issue_feature_matrix.py || MATRIX_ISSUE_EXIT=$?
-          if test -f gt_finalstand/feature_matrix.json; then
-            cp gt_finalstand/feature_matrix.json attestation/feature-matrix.json
+          python scripts/issue_feature_matrix.py \
+            --output attestation/feature-matrix.json \
+            --markdown-output attestation/feature-matrix.md || MATRIX_ISSUE_EXIT=$?
+          if test -f attestation/feature-matrix.json; then
             python scripts/verify_feature_matrix.py attestation/feature-matrix.json || MATRIX_VERIFY_EXIT=$?
           else
             MATRIX_VERIFY_EXIT=1

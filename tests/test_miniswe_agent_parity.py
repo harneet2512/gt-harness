@@ -152,7 +152,7 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
 
     async def execute(_environment, command, **_kwargs):
         commands.append(command)
-        if "scripts.miniswe_gt_run" in command:
+        if "scripts.miniswe_supervisor" in command:
             raise NonZeroAgentExitCodeError("Command failed (exit 137)")
 
     class Environment:
@@ -173,7 +173,7 @@ async def test_gt_run_records_exact_resource_interval_around_runner(monkeypatch,
     # Prefixed only by the staged language-server PATH; the installed runner
     # is still what executes.
     assert commands[0].startswith(f'PATH="{_REMOTE_LSP_BIN}:$PATH" exec ')
-    assert "scripts.miniswe_gt_run" in commands[0]
+    assert "scripts.miniswe_supervisor" in commands[0]
     evidence = json.loads((tmp_path / "logs" / "agent-resource.json").read_text())
     assert evidence["attestation_scope"] == "host_agent_adapter"
     assert evidence["error_code"] == "GT_AGENT_CGROUP_OOM"
@@ -244,7 +244,7 @@ async def test_failed_host_finalization_removes_task_forged_resource(monkeypatch
     async def execute(_environment, command, **_kwargs):
         nonlocal calls
         calls += 1
-        if "scripts.miniswe_gt_run" in command:
+        if "scripts.miniswe_supervisor" in command:
             Path(agent.logs_dir).mkdir(parents=True, exist_ok=True)
             (Path(agent.logs_dir) / "agent-resource.json").write_text("forged")
             raise NonZeroAgentExitCodeError("Command failed (exit 137)")

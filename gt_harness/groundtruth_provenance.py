@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -201,6 +202,26 @@ def verify_groundtruth_lineage(
     )
     expected_changes = sorted(lineage["post_certification_changed_paths"])
     failures: list[str] = []
+    from scripts.verify_wheel_source import verify_wheel_source
+
+    correspondence: dict[str, Any] = {"status": "FAIL"}
+    try:
+        # Product manifests live in config/; paths are rooted in the bundle,
+        # never in the current shell directory or the reviewed source checkout.
+        bundle_root = Path(manifest_path).resolve().parent.parent
+        relative_wheel = Path(str(groundtruth.get("wheel_path") or ""))
+        wheel = (bundle_root / relative_wheel).resolve()
+        if (relative_wheel.is_absolute() or ".." in relative_wheel.parts
+                or not wheel.is_relative_to(bundle_root) or not wheel.is_file()):
+            raise ValueError("invalid_bundle_wheel_path")
+        correspondence = verify_wheel_source(wheel, source / "src")
+        if correspondence["wheel_sha256"] != groundtruth.get("wheel_sha256"):
+            failures.append("wheel_sha256_mismatch")
+        if correspondence["status"] != "PASS":
+            failures.append("wheel_source_correspondence_mismatch")
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as exc:
+        correspondence = {"status": "FAIL", "error_type": type(exc).__name__}
+        failures.append("wheel_source_correspondence_invalid")
     source_status = _checkout_status(source)
     review_status = _checkout_status(review)
     if _git(source, "rev-parse", "HEAD") != source_commit:
@@ -352,6 +373,7 @@ def verify_groundtruth_lineage(
         "provider_calls": 0,
         "source_commit": source_commit,
         "source_tree": source_tree,
+        "wheel_source_correspondence": correspondence,
         "accepted_default_commit": accepted,
         "accepted_default_is_ancestor": ancestor.returncode == 0,
         "ancestry_path_match": observed_path == expected_path,

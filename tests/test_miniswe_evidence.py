@@ -5,6 +5,43 @@ from groundtruth.runtime.evidence_envelope import EvidenceEnvelope
 import gt_engine.miniswe_evidence as me
 
 
+def test_compound_edit_and_test_preserves_covering_failure_at_delivery(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    from groundtruth.runtime.gateway import CoveringResult, GatewayState
+
+    monkeypatch.setenv("GT_GATEWAY", "1")
+    (tmp_path / "app.py").write_text("value = 2\n")
+    execution = subprocess.run(
+        [sys.executable, "-c", "assert 2 == 1, 'expected 1 but got 2'"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10,
+    )
+    assert execution.returncode != 0
+    event = me.classify_event(
+        "python -m pytest", execution.stderr, execution.returncode,
+        action_index=1, cwd=str(tmp_path), changed_files=("app.py",),
+        test_outcome="fail",
+        covering=CoveringResult(
+            target="app.py", verdict="fail", body_lines=execution.stderr.splitlines(),
+            evidence=[("app.py", 1)],
+        ),
+    )
+    assert set(event.semantic_events) >= {"edit_result", "test_result"}
+    for native in (False, True):
+        state = GatewayState(repo_root=str(tmp_path))
+        dedup = set()
+        result = me.run_evidence_pipeline(
+            state, event, dedup_chain=dedup, chain_head="0" * 64,
+            episode_id="compound-fixture", event_id="compound-fixture:1",
+            native=native, model_prefix=True, commit=False,
+        )
+        assert result.sealed
+        assert result.envelope.evidence_type == "covering_verdict"
+        assert "AssertionError: expected 1 but got 2" in result.rendered
+        assert dedup == set(), "candidate rendering must not commit provider exposure"
+
+
 def test_is_submit_command_detects_real_magic_string():
     assert me.is_submit_command("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
     assert me.is_submit_command(

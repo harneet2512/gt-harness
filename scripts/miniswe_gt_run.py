@@ -937,6 +937,9 @@ def main() -> int:
     repro_source = Path(__file__).with_name("miniswe_repro.py")
     if repro_source.is_file():
         source_paths.append(str(repro_source.resolve()))
+    supervisor_source = Path(__file__).with_name("miniswe_supervisor.py")
+    if supervisor_source.is_file():
+        source_paths.append(str(supervisor_source.resolve()))
     uv_binary = shutil.which("uv")
     if uv_binary:
         binary_paths.append(uv_binary)

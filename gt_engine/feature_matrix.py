@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -163,13 +164,17 @@ def _git_head(repo_root: Path) -> str:
 
 
 def _run_evidence(nodes: tuple[str, ...], *, repo_root: Path) -> dict[str, Any]:
-    command = [sys.executable, "-m", "pytest", "-q", *nodes]
-    completed = subprocess.run(
-        command,
-        cwd=repo_root,
-        capture_output=True,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory(prefix="gt-pytest-evidence-") as temporary:
+        report_path = Path(temporary) / "execution.json"
+        command = [sys.executable, str(Path(__file__).with_name("pytest_evidence.py")),
+                   str(report_path), "-q", *nodes]
+        completed = subprocess.run(
+            command, cwd=repo_root, capture_output=True, check=False,
+        )
+        try:
+            execution = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            execution = None
     stdout = completed.stdout.decode("utf-8", errors="replace")
     stderr = completed.stderr.decode("utf-8", errors="replace")
     return {
@@ -178,13 +183,49 @@ def _run_evidence(nodes: tuple[str, ...], *, repo_root: Path) -> dict[str, Any]:
         "stdout_digest_sha256": hashlib.sha256(stdout.encode()).hexdigest(),
         "stderr_digest_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
         "node_ids": list(nodes),
+        "execution": execution,
     }
+
+
+def _witness_passed(witness: Any) -> bool:
+    if not isinstance(witness, dict) or type(witness.get("exit_code")) is not int:
+        return False
+    if witness["exit_code"] != 0:
+        return False
+    nodes = witness.get("node_ids")
+    execution = witness.get("execution")
+    if not isinstance(nodes, list) or not nodes or not isinstance(execution, dict):
+        return False
+    collected = execution.get("collected")
+    reports = execution.get("reports")
+    if not isinstance(collected, list) or not collected or not isinstance(reports, list):
+        return False
+    if not all(isinstance(node, str) and node for node in nodes + collected):
+        return False
+    if len(set(collected)) != len(collected):
+        return False
+    def matches(actual, requested):
+        return actual == requested or actual.startswith(requested + "[")
+    if not all(any(matches(actual, node) for actual in collected) for node in nodes):
+        return False
+    if not all(any(matches(actual, node) for node in nodes) for actual in collected):
+        return False
+    phases = {node: [] for node in collected}
+    for report in reports:
+        if (not isinstance(report, dict)
+                or not isinstance(report.get("node_id"), str)
+                or report["node_id"] not in phases):
+            return False
+        if report.get("outcome") != "passed" or report.get("wasxfail") is not False:
+            return False
+        phases[report["node_id"]].append(report.get("phase"))
+    return all(value == ["setup", "call", "teardown"] for value in phases.values())
 
 
 def _disposition_from_evidence(evidence: dict[str, Any]) -> str:
     positive = evidence.get("positive") or {}
     negative = evidence.get("negative") or {}
-    if positive.get("exit_code") == 0 and negative.get("exit_code") == 0:
+    if _witness_passed(positive) and _witness_passed(negative):
         return "WITNESSED"
     return "not_run"
 
@@ -325,6 +366,9 @@ def verify_matrix(
         if not isinstance(evidence, dict):
             errors.append(f"{row.get('identity')}: evidence object required")
             continue
+        if (row.get("disposition") == "WITNESSED"
+                and _disposition_from_evidence(evidence) != "WITNESSED"):
+            errors.append(f"{row.get('identity')}: WITNESSED lacks passing execution receipts")
         for polarity in ("positive", "negative"):
             witness = evidence.get(polarity)
             if (
@@ -346,7 +390,7 @@ def verify_matrix(
                 errors.append(f"{identity}: disposition is not WITNESSED")
             for polarity in ("positive", "negative"):
                 witness = evidence.get(polarity)
-                if not isinstance(witness, dict) or witness.get("exit_code") != 0:
+                if not _witness_passed(witness):
                     errors.append(f"{identity}: {polarity} witness did not pass")
     return errors
 

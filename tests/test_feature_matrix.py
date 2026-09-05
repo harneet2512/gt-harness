@@ -88,3 +88,14 @@ def test_benchmark_verification_rejects_unexecuted_witnesses(repo_root):
     assert any("disposition is not WITNESSED" in error for error in errors)
     assert any("positive witness did not pass" in error for error in errors)
     assert any("negative witness did not pass" in error for error in errors)
+
+
+def test_valid_digests_cannot_certify_exit_code_only_evidence(repo_root):
+    matrix = build_matrix(repo_root=repo_root, execute=False)
+    for row in matrix["rows"]:
+        row["disposition"] = "WITNESSED"
+        for polarity in ("positive", "negative"):
+            row["evidence"][polarity]["exit_code"] = 0
+        row["cell_digest_sha256"] = digest_body(row, field="cell_digest_sha256")
+    matrix["matrix_digest_sha256"] = digest_body(matrix, field="matrix_digest_sha256")
+    assert any("lacks passing execution receipts" in error for error in verify_matrix(matrix))

@@ -368,7 +368,12 @@ def _capture_edit_preimage(
     if not targets:
         return None
     path = targets[0]
-    abs_path = path if os.path.isabs(path) else os.path.join(adapter.repo_root, path)
+    repository = Path(adapter.repo_root).resolve()
+    abs_path = (repository / path).resolve()
+    try:
+        path = abs_path.relative_to(repository).as_posix()
+    except ValueError:
+        return None
     if not os.path.isfile(abs_path):
         return None
     try:
@@ -387,7 +392,12 @@ def _capture_edit_after(
     edit_before_after: dict[str, tuple[str | None, str]] = {}
     changed: list[str] = []
     for path, before in preimage.items():
-        abs_path = path if os.path.isabs(path) else os.path.join(adapter.repo_root, path)
+        repository = Path(adapter.repo_root).resolve()
+        abs_path = (repository / path).resolve()
+        try:
+            path = abs_path.relative_to(repository).as_posix()
+        except ValueError:
+            continue
         try:
             with open(abs_path, encoding="utf-8", errors="replace") as handle:
                 after = handle.read()
@@ -480,11 +490,12 @@ def _run_evidence(
                 {"kind": "syntax_result", "dedup_key": f"syntax-{adapter.iteration}",
                  "target": first_file},
             ))
+    proposed_dedup, proposed_head = adapter.pending_evidence_chain()
     result = run_evidence_pipeline(
         adapter.gateway_state(),
         event,
-        dedup_chain=adapter._dedup_chain,
-        chain_head=adapter._chain_head,
+        dedup_chain=proposed_dedup,
+        chain_head=proposed_head,
         episode_id=adapter.task_id,
         event_id=f"{adapter.task_id}:{adapter.iteration}:{action_index}",
         native=os.environ.get("GT_GATEWAY_NATIVE") == "1",
@@ -538,12 +549,13 @@ def _run_evidence(
         return ""
     winner = sorted(candidates, key=lambda item: (-item.priority, item.kind,
                                                    hashlib.sha256(item.rendered.encode()).hexdigest()))[0]
-    if winner.kind == "verification_plan":
-        adapter.consume_verification_candidate()
     adapter.stage_model_visible_delivery(**winner.metadata)
     if winner.dedup_key:
-        adapter._dedup_chain.add(winner.dedup_key)
-        adapter._chain_head = winner.chain_head
+        adapter.stage_exposure(
+            rendered=winner.rendered, dedup_key=winner.dedup_key,
+            previous_chain_head=proposed_head, next_chain_head=winner.chain_head,
+            verification_candidate=(winner.rendered if winner.kind == "verification_plan" else ""),
+        )
     return winner.rendered
 
 
@@ -647,6 +659,10 @@ def install_runtime_hooks(
                 reason="gt_disabled_before_transport"
             )
             return native_transport(messages, **kwargs)
+        if session.capability_model_visible("evidence_delivery"):
+            recovery = adapter.prepare_recovery_delivery()
+            if recovery:
+                messages = [*messages, {"role": "user", "content": recovery}]
         context_window = int(os.environ.get("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "0") or 0)
         reserved_output = int(
             os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
@@ -1033,6 +1049,11 @@ def install_runtime_hooks(
                     adapter.record_repository_snapshot(
                         post_snapshot, boundary="after_action"
                     )
+                    if transaction.complete:
+                        # An empty authoritative diff is evidence of no edit.
+                        # Do not retain shell-intent guesses from outside root.
+                        changed_files = transaction.changed_paths
+                        edit_before_after = {}
                     if transaction.changes:
                         transaction_artifacts = compile_transaction_artifacts(
                             transaction,
@@ -1126,11 +1147,6 @@ def install_runtime_hooks(
                         **metadata,
                     ):
                         rendered_by_index[action_index] = rendered
-                if adapter.pending_transient and session.model_visible:
-                    directives.append({
-                        "role": "user", "content": adapter.pending_transient,
-                    })
-                    adapter.pending_transient = ""
             except Exception as exc:  # noqa: BLE001 - preserve tool observation
                 session.degrade("after_action", exc)
                 rendered_by_index.clear()

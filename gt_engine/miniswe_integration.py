@@ -83,8 +83,21 @@ class PendingModelDelivery:
     ordinal: int
 
 
+@dataclass(frozen=True)
+class PendingExposure:
+    rendered: str
+    dedup_key: str
+    previous_chain_head: str
+    next_chain_head: str
+    verification_candidate: str = ""
+
+
 class ProviderModelMismatch(RuntimeError):
     """The provider reported a model outside the requested alias set."""
+
+
+class ExposureChainConflict(ValueError):
+    """A proposed request omits or conflicts with a chained predecessor."""
 
 
 class ExternalStateStore:
@@ -256,7 +269,9 @@ class MiniSweAdapter(GroundtruthController):
         # history: attribution asks which decision boundary first exposed a
         # delivery, not every later request that still contains it.
         self._pending_provider_deliveries: list[PendingModelDelivery] = []
+        self._pending_exposures: dict[str, PendingExposure] = {}
         self.pending_transient = ""
+        self._pending_recovery: tuple[str, int] | None = None
         self.pending_directives: list[str] = []
         self._refusal_count = 0
         self._last_refusal_signature: tuple[tuple[str, str], ...] = ()
@@ -495,6 +510,13 @@ class MiniSweAdapter(GroundtruthController):
         }
         affected.update(active_red)
         super().note_edit(normalized_paths, invalidate=affected)
+        if self._pending_recovery is not None:
+            self.store.append("recovery_invalidated", epoch=self.workspace_epoch)
+            self._pending_recovery = None
+            self.pending_transient = ""
+            self._pending_provider_deliveries = [
+                item for item in self._pending_provider_deliveries if item.kind != "recovery"
+            ]
         if active_red:
             self.store.append(
                 "red_invalidated_by_edit",
@@ -753,12 +775,12 @@ class MiniSweAdapter(GroundtruthController):
         return False
 
     def _frozen_graph_input(self, snapshot: Any) -> FrozenBuildInput:
-        from .indexer import SOURCE_EXTS
+        from .indexer import is_producer_input
 
         files: list[tuple[str, bytes]] = []
         missing: list[str] = []
         for item in snapshot.files:
-            if Path(item.path).suffix.lower() not in SOURCE_EXTS:
+            if not is_producer_input(item.path):
                 continue
             if item.kind != "file" or item.captured is None:
                 missing.append(str(item.path))
@@ -768,7 +790,7 @@ class MiniSweAdapter(GroundtruthController):
         for omission in snapshot.omissions:
             kind, separator, value = str(omission).partition(":")
             if kind == "unreadable" and separator:
-                if Path(value).suffix.lower() in SOURCE_EXTS:
+                if is_producer_input(value):
                     source_omissions.append(str(omission))
             else:
                 # Unknown omission types remain conservative until their
@@ -886,6 +908,30 @@ class MiniSweAdapter(GroundtruthController):
             item.identity for item in pending
             if not contains_text(messages, item.rendered)
         )
+        # Validate the complete request before committing even a valid prefix.
+        # An omitted predecessor cannot be treated as exposed merely because a
+        # later proposal was prepared on top of it.
+        proposed_head = self._chain_head
+        exposures_by_delivery: dict[str, list[PendingExposure]] = {}
+        for item in pending:
+            if item.identity not in matched:
+                continue
+            exposures = [exposure for exposure in self._pending_exposures.values()
+                         if exposure.dedup_key == item.dedup_key
+                         and exposure.rendered in item.rendered]
+            exposures_by_delivery[item.identity] = exposures
+            for exposure in exposures:
+                if not exposure.next_chain_head:
+                    continue
+                if proposed_head != exposure.previous_chain_head:
+                    self.store.append(
+                        "exposure_chain_conflict", delivery_identity=item.identity,
+                        payload_sha256=digest, disposition="request_refused",
+                        expected_head=proposed_head,
+                        supplied_head=exposure.previous_chain_head,
+                    )
+                    raise ExposureChainConflict("provider request exposure chain conflict")
+                proposed_head = exposure.next_chain_head
         request_sha256, request_manifest, request_manifest_sha256, storage = (
             store_provider_request(self.store, payload)
         )
@@ -931,6 +977,24 @@ class MiniSweAdapter(GroundtruthController):
             self._model_visible_delivery_count += 1
             self._model_visible_delivery_bytes += len(item.rendered.encode("utf-8"))
             self._model_visible_delivery_identities.add(item.identity)
+            if (item.kind == "recovery" and self._pending_recovery is not None
+                    and item.rendered == self.pending_transient):
+                fingerprint, epoch = self._pending_recovery
+                self._failure_first_epoch[fingerprint] = epoch
+                self._recovery_delivered += 1
+                self.store.append("recovery_steer", fingerprint=fingerprint, epoch=epoch,
+                                  delivered=self._recovery_delivered, request_id=request_id,
+                                  delivery_identity=item.identity)
+                self._pending_recovery = None
+                self.pending_transient = ""
+            for exposure in exposures_by_delivery.get(item.identity, ()):
+                if exposure.next_chain_head:
+                    self._chain_head = exposure.next_chain_head
+                if exposure.dedup_key:
+                    self._dedup_chain.add(exposure.dedup_key)
+                if (exposure.verification_candidate
+                        and self.verification_candidate()[0] == exposure.verification_candidate):
+                    self.consume_verification_candidate()
             if item.lane == "sealed":
                 self._accepted_sealed_delivery_count += 1
             if item.kind == "cochange_partner":
@@ -957,6 +1021,7 @@ class MiniSweAdapter(GroundtruthController):
             unmatched_delivery_ids=list(unmatched),
         )
         self._pending_provider_deliveries.clear()
+        self._pending_exposures.clear()
         for typed in self._pending_typed_observations:
             self.store.append(
                 "typed_observation_provider_join",
@@ -977,8 +1042,30 @@ class MiniSweAdapter(GroundtruthController):
                 delivery_ids=[item.identity for item in pending],
             )
         self._pending_provider_deliveries.clear()
+        self._pending_exposures.clear()
         self._boundary_delivery_count = 0
         self._boundary_delivery_bytes = 0
+
+    def pending_evidence_chain(self) -> tuple[set[str], str]:
+        """Build proposals on admitted pending predecessors, without committing."""
+        dedup, head = set(self._dedup_chain), self._chain_head
+        for delivery in self._pending_provider_deliveries:
+            for exposure in self._pending_exposures.values():
+                if exposure.dedup_key != delivery.dedup_key or exposure.rendered not in delivery.rendered:
+                    continue
+                if exposure.dedup_key:
+                    dedup.add(exposure.dedup_key)
+                if exposure.next_chain_head and head == exposure.previous_chain_head:
+                    head = exposure.next_chain_head
+        return dedup, head
+
+    def stage_exposure(self, *, rendered: str, dedup_key: str,
+                       previous_chain_head: str, next_chain_head: str = "",
+                       verification_candidate: str = "") -> None:
+        identity = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+        self._pending_exposures[identity] = PendingExposure(
+            rendered, dedup_key, previous_chain_head, next_chain_head, verification_candidate
+        )
 
     def record_typed_observation(
         self,
@@ -1807,23 +1894,37 @@ class MiniSweAdapter(GroundtruthController):
         recurrences = self._failure_recurrences.get(fingerprint, 1) + 1
         self._failure_recurrences[fingerprint] = recurrences
         # Repeated output in the same epoch cannot establish post-edit evidence.
-        # Advance the comparison epoch after each steer to prevent duplicates.
+        # Pending proposals do not consume the recurrence or delivery budget.
+        if self._pending_recovery is not None:
+            return False
         if epoch > first and recurrences >= 2 and self._recovery_delivered < 2:
-            self._failure_first_epoch[fingerprint] = epoch
-            self._recovery_delivered += 1
+            self._pending_recovery = (fingerprint, epoch)
             self.pending_transient = (
                 "GT_RECOVERY: the same test failure has recurred after your last "
                 "observed edit. That change has not cleared this failure; inspect "
                 "the check and changed surface before repeating the same action."
+                f" [workspace epoch {epoch}; failure {hashlib.sha256(fingerprint.encode()).hexdigest()}]"
             )
             self.store.append(
-                "recovery_steer",
+                "recovery_prepared",
                 fingerprint=fingerprint,
                 epoch=epoch,
-                delivered=self._recovery_delivered,
             )
             return True
         return False
+
+    def prepare_recovery_delivery(self) -> str:
+        """Admit a retryable recovery proposal without consuming exposure state."""
+        if self._pending_recovery is None or not self.pending_transient:
+            return ""
+        fingerprint, epoch = self._pending_recovery
+        if self.admit_model_visible_delivery(
+            lane="sealed", kind="recovery", rendered=self.pending_transient,
+            action_index=self.global_action, iteration=self.iteration,
+            dedup_key=f"recovery:{fingerprint}:{epoch}",
+        ):
+            return self.pending_transient
+        return ""
 
     def _refusal_escalates(self) -> bool:
         """True once two consecutive refusals show NO predicate-state change.

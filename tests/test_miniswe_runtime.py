@@ -14,6 +14,18 @@ from gt_engine.provider_limits import ProviderRequestTooLarge
 from gt_engine.task_contract import extract_task_contract
 
 
+@pytest.fixture(autouse=True)
+def isolated_git_fixture_identity(monkeypatch):
+    # These tests commit disposable repositories. Do not depend on a CI
+    # account's global identity or mutate the machine's Git configuration.
+    for name, value in {
+        "GIT_AUTHOR_NAME": "GT Test", "GIT_COMMITTER_NAME": "GT Test",
+        "GIT_AUTHOR_EMAIL": "gt-test@example.invalid",
+        "GIT_COMMITTER_EMAIL": "gt-test@example.invalid",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
@@ -149,10 +161,49 @@ def test_verification_candidate_outranks_weak_priors(tmp_path, monkeypatch):
         ("src/parser.py",),
     )
     assert "verification_plan" in rendered
+    assert adapter.verification_candidate()[0] == rendered
+    assert "verification:tx-1" not in adapter._dedup_chain
     assert (
         adapter.consume_model_visible_delivery_metadata()["kind"]
         == "verification_plan"
     )
+    adapter.admit_model_visible_delivery(lane="sealed", kind="verification_plan",
+        rendered=rendered, action_index=1, iteration=0, dedup_key="verification:tx-1")
+    adapter.discard_pending_provider_deliveries(reason="fixture_provider_refusal")
+    assert adapter.verification_candidate()[0] == rendered
+    assert "verification:tx-1" not in adapter._dedup_chain
+    rendered = rt._run_evidence(adapter, "edit", "", 0, 2, (), {})
+    assert adapter.admit_model_visible_delivery(lane="sealed", kind="verification_plan",
+        rendered=rendered, action_index=2, iteration=0, dedup_key="verification:tx-1")
+    adapter.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
+    assert adapter.verification_candidate()[0] == ""
+    assert "verification:tx-1" in adapter._dedup_chain
+
+
+def test_selected_gateway_chain_commits_only_on_exact_exposure(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    adapter = MiniSweAdapter(task_id="exposure", state_dir=tmp_path, predicates=[],
+                             contract=extract_task_contract("Fix parser."))
+    adapter._chain_head = "old-head"
+    monkeypatch.setattr(rt, "_cochange_prior", lambda *args: "")
+    monkeypatch.setattr(rt, "run_evidence_pipeline", lambda *args, **kwargs:
+        EvidenceResult(rendered="[GT_EVIDENCE:caller_contract]\nexact proof", sealed=True,
+                       chain_head="new-head", envelope=SimpleNamespace(
+                           evidence_type="caller_contract", dedup_key="proof-key", target="a.py")))
+    rendered = rt._run_evidence(adapter, "cat a.py", "x", 0, 1, (), {})
+    assert adapter._chain_head == "old-head"
+    assert "proof-key" not in adapter._dedup_chain
+    assert adapter.admit_model_visible_delivery(lane="sealed", kind="caller_contract",
+        rendered=rendered, action_index=1, iteration=0, dedup_key="proof-key")
+    adapter.bind_provider_payload({"messages": [{"role": "user", "content": "formatter removed proof"}]})
+    assert adapter._chain_head == "old-head"
+    assert "proof-key" not in adapter._dedup_chain
+    rendered = rt._run_evidence(adapter, "cat a.py", "x", 0, 2, (), {})
+    assert adapter.admit_model_visible_delivery(lane="sealed", kind="caller_contract",
+        rendered=rendered, action_index=2, iteration=1, dedup_key="proof-key")
+    adapter.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
+    assert adapter._chain_head == "new-head"
+    assert "proof-key" in adapter._dedup_chain
 
 
 def test_covering_selection_does_not_open_stale_graph(tmp_path, monkeypatch):
@@ -241,6 +292,44 @@ class FakeAgent:
 
     def get_template_vars(self):
         return {}
+
+
+def test_external_edit_cannot_dirty_repository(tmp_path, monkeypatch):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "a.py").write_text("x = 1\n", encoding="utf-8")
+    external = tmp_path / "scratch.py"
+    external.write_text("x = 1\n", encoding="utf-8")
+    adapter = MiniSweAdapter(task_id="external-edit", repo_root=str(repository),
+                             state_dir=tmp_path / "state", predicates=[])
+    agent = FakeAgent()
+    edits = []
+    monkeypatch.setattr(adapter, "note_edit", lambda paths: edits.append(paths))
+    monkeypatch.setattr(rt, "_run_evidence", lambda *args, **kwargs: "")
+
+    def execute(action):
+        external.write_text("x = 2\n", encoding="utf-8")
+        return {"output": "", "returncode": 0}
+
+    agent.env.execute = execute
+    install_runtime_hooks(agent, adapter)
+    agent.execute_actions({"extra": {"actions": [
+        {"command": f"sed -i 's/1/2/' {external.as_posix()}"}
+    ]}})
+    assert external.read_text(encoding="utf-8") == "x = 2\n"
+    assert edits == []
+
+
+def test_fallback_preimage_does_not_read_external_file(tmp_path):
+    from types import SimpleNamespace
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    external = tmp_path / "scratch.py"
+    external.write_text("outside", encoding="utf-8")
+    adapter = SimpleNamespace(repo_root=str(repository))
+    assert rt._capture_edit_preimage(
+        adapter, f"sed -i 's/outside/changed/' {external.as_posix()}"
+    ) is None
 
 
 class AlwaysSuppressBoundary:
@@ -597,6 +686,73 @@ def test_final_provider_refusal_does_not_consume_gt_delivery(tmp_path, monkeypat
     agent.model._query(retry)
     assert adapter.contract_shipped
     assert len(adapter.deliveries) == 1
+
+
+def test_recovery_retries_through_real_admission_and_transport_hooks(tmp_path, monkeypatch):
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "100")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "20")
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "fixture")
+    agent = FakeAgent()
+    agent.model = TransportFakeModel()
+    adapter = MiniSweAdapter(task_id="recovery-wire", state_dir=tmp_path, predicates=[])
+    adapter.start_task()
+    adapter.note_failure_fingerprint("failure", epoch=0)
+    adapter.note_edit(["module.py"])
+    adapter.note_failure_fingerprint("failure", epoch=1)
+    rendered = adapter.pending_transient
+    install_runtime_hooks(agent, _session(adapter))
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _: 81)
+    messages = [{"role": "user", "content": "task"}]
+    with pytest.raises(ProviderRequestTooLarge):
+        agent.model._query(messages)
+    assert not agent.model.calls
+    assert adapter._recovery_delivered == 0
+    assert adapter.pending_transient == rendered
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _: 79)
+    agent.model._query(messages)
+    assert agent.model.calls[-1][-1]["content"] == rendered
+    assert adapter._recovery_delivered == 1
+    assert adapter.deliveries[-1].delivery_ids
+    assert messages == [{"role": "user", "content": "task"}]
+    agent.model._query(messages)
+    assert all(rendered not in item["content"] for item in agent.model.calls[-1])
+    assert adapter._recovery_delivered == 1
+
+
+def test_chain_conflict_never_reaches_transport_and_can_be_reprepared(tmp_path, monkeypatch):
+    from gt_engine.miniswe_integration import ExposureChainConflict
+
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "100")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "20")
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "fixture")
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _: 10)
+    agent = FakeAgent()
+    agent.model = TransportFakeModel()
+    adapter = MiniSweAdapter(task_id="chain-wire", state_dir=tmp_path, predicates=[])
+    install_runtime_hooks(agent, _session(adapter))
+    initial = adapter._chain_head
+    rendered = "[GT_EVIDENCE:caller_contract] dependent proof"
+
+    def stage(previous):
+        adapter.stage_exposure(rendered=rendered, dedup_key="B",
+                               previous_chain_head=previous, next_chain_head="head-b")
+        assert adapter.admit_model_visible_delivery(
+            lane="sealed", kind="caller_contract", rendered=rendered,
+            action_index=1, iteration=0, dedup_key="B")
+
+    stage("missing-head-a")
+    messages = [{"role": "user", "content": rendered}]
+    with pytest.raises(ExposureChainConflict):
+        agent.model._query(messages)
+    assert not agent.model.calls
+    assert not adapter.deliveries
+    assert adapter._chain_head == initial
+    assert not adapter._pending_provider_deliveries
+    stage(initial)
+    agent.model._query(messages)
+    assert agent.model.calls == [messages]
+    assert adapter._chain_head == "head-b"
+    assert adapter._model_visible_delivery_count == 1
 
 
 def test_prepare_failure_discards_staged_delivery(tmp_path, monkeypatch):
