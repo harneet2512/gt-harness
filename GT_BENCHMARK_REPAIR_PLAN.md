@@ -434,3 +434,45 @@ witnesses. Production code under test is the 8ac9f813 checkpoint; subsequent
 commit `45d99c7b0dc13722e0a46defa136fcbe71e9e260` adds only the stronger Linux
 tests and this ledger. Canonical release acceptance remains RED on the pinned
 source/wheel mismatch despite the passing source regression suite.
+
+## Approved model-agnostic implementation program
+
+The user approved the detailed implementation plan: one mandatory GTSession
+boundary, authoritative observation/execution receipts, dependency-aware base
+plus overlay queries, consistent complete embeddings, recoverable context,
+native consumers for every capability, then immutable installed acceptance.
+GT is not an optional hint channel. Mini-SWE chooses actions; GT owns evidence
+and state processing. Automatic relevant checks are the target, without initial
+submit enforcement. Prove one frozen model first, keep model-specific logic at
+the provider adapter, and compare the complete product descriptively against
+retained Muse. The chosen outcome is a better solve/resource frontier, not a
+promised exponential speedup. Paid stages still need separate approval.
+
+### Work package A, first implementation increment
+
+Reproduced a validity bypass: a degraded GT session could inherit an engine's
+`verified=True`, and a healthy provider journal alone could yield a valid GT-on
+reproducibility manifest without any engine-integrity receipt. Completion now
+invalidates inherited verification on degraded/missing/disabled engine state;
+GT-on manifests require a matching typed integrity receipt. GT-off preserves its
+separate provider/journal contract. Agent output and patch conservation remain
+independent of research validity.
+
+Shell executions (including submission paths) and typed execution dispatch now
+pass through GTSession.execute. Start/terminal records bind an action digest,
+stable execution ID, action index and exact result digest or exception type.
+Failures of receipt writing preserve the original result/exception but invalidate
+GT assurance. Reopening a journal initially reproduced ID reuse; identity now
+includes its preceding journal head. A real native three-action batch covers
+success, empty output and a failed subprocess. These are execution-boundary
+repairs, not completion of work package A: suppressed-action dispositions,
+whole-lifecycle receipt coverage and all-capability acceptance still remain.
+
+Verification for this increment: 149 adjacent tests passed with one skip before
+the journal-reopen regression; latest execution tests five passed; native real
+three-action batch passed. Built harness plus repaired Groundtruth wheel passed
+44 session/execution/reproducibility checks in a network-disabled Linux container
+with only wheels and tests mounted. Broad regression: 1,345 passed, 96 skipped,
+two failures solely `source_closure_differs_from_head` before committing this
+increment. Ruff and diff whitespace checks passed. Skips and synthetic provider
+fixtures do not establish full capability or benchmark efficacy.

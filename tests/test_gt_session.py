@@ -88,6 +88,15 @@ def test_session_completion_state_reports_unverified_when_unknown(tmp_path):
     assert state["phase"] == "IMPLEMENT"
 
 
+def test_degraded_session_cannot_inherit_verified_engine_state(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    monkeypatch.setattr(adapter, "final_state", lambda: {"verified": True, "phase": "SUBMIT"})
+    session = GTSession(GTSessionConfig(task_id="t", state_dir=str(tmp_path),
+                                      capabilities=("exact_provider_payload",)), engine=adapter)
+    session.degrade("before_action", RuntimeError("fixture fault"))
+    assert session.completion_state()["verified"] is False
+
+
 def test_opaque_oversized_localization_is_not_sliced_into_a_claim(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
     monkeypatch.setattr(a, "task_start_localization", lambda **_: "header\n" + "x" * 5000)

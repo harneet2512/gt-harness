@@ -294,6 +294,33 @@ class FakeAgent:
         return {}
 
 
+def test_native_action_batch_has_session_owned_execution_receipts(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    agent = FakeAgent()
+    adapter = MiniSweAdapter(task_id="execution-batch", state_dir=tmp_path, predicates=[])
+    def execute(action):
+        result = subprocess.run([sys.executable, "-c", action["command"]],
+                                capture_output=True, text=True, check=False)
+        return {"output": result.stdout + result.stderr, "returncode": result.returncode}
+    agent.env.execute = execute
+    monkeypatch.setattr(rt, "_run_evidence", lambda *args, **kwargs: "")
+    install_runtime_hooks(agent, _session(adapter))
+    outputs = agent.execute_actions({"extra": {"actions": [
+        {"command": "print('real output')"}, {"command": "pass"},
+        {"command": "raise RuntimeError('real failure')"},
+    ]}})
+    assert len(outputs) == 3
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    starts = [row for row in rows if row["event"] == "execution_started"]
+    finishes = [row for row in rows if row["event"] == "execution_finished"]
+    assert len(starts) == len(finishes) == 3
+    assert [row["action_index"] for row in starts] == [1, 2, 3]
+    assert [row["execution_id"] for row in starts] == [row["execution_id"] for row in finishes]
+    assert all(row["result_sha256"] for row in finishes)
+
+
 def test_external_edit_cannot_dirty_repository(tmp_path, monkeypatch):
     repository = tmp_path / "repo"
     repository.mkdir()

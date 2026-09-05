@@ -26,6 +26,7 @@ import json
 import os
 import shlex
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from types import MethodType
 from typing import Any
@@ -907,7 +908,7 @@ def install_runtime_hooks(
                 ):
                     adapter.refresh_graph(phase="graph_query")
                 graph_snapshot = adapter.graph_query_snapshot()
-                request, result = execute_typed_action_fail_open(
+                request, result = session.execute(action, partial(execute_typed_action_fail_open,
                     action,
                     repo_root=adapter.repo_root or os.getcwd(),
                     configuration={
@@ -921,7 +922,7 @@ def install_runtime_hooks(
                         "repository_revision": graph_snapshot.source_revision,
                         "gt_mode": session.mode.value,
                     },
-                )
+                ))
                 result_bytes = len(str(result.get("output") or "").encode("utf-8"))
                 if typed_turn_bytes + result_bytes > 49_152:
                     output = json.dumps(
@@ -975,7 +976,7 @@ def install_runtime_hooks(
                 # Stock Mini-SWE still delegates a malformed/empty action to
                 # the environment. GT must observe less, not invent a result
                 # or consume an action the baseline would have executed.
-                outputs.append(environment.execute(action))
+                outputs.append(session.execute(action, partial(environment.execute, action)))
                 continue
             is_submit = False
             if not session.disabled:
@@ -986,7 +987,7 @@ def install_runtime_hooks(
             # Command-level fast path: the marker is literally in the command.
             if is_submit:
                 if submit_allowed():
-                    outputs.append(environment.execute(action))
+                    outputs.append(session.execute(action, partial(environment.execute, action)))
                 else:
                     outputs.append(dict(_NOT_EXECUTED))
                     directives.append(_refusal_directive(adapter))
@@ -1012,7 +1013,7 @@ def install_runtime_hooks(
                 except Exception as exc:  # noqa: BLE001 - observation is fail-open
                     session.degrade("before_action", exc)
             try:
-                result = environment.execute(action)
+                result = session.execute(action, partial(environment.execute, action))
             except Submitted:
                 # RESULT-level submit interception: the command's OUTPUT began
                 # with the magic string even though the command text did not

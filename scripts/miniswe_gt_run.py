@@ -962,6 +962,7 @@ def main() -> int:
         request_receipt=request_receipt,
         binary_paths=binary_paths,
         source_paths=source_paths,
+        engine_integrity=(gt_state or {}).get("engine_integrity"),
     )
     manifest["research_valid"] = bool(
         manifest["research_valid"]

@@ -14,8 +14,9 @@ recorded) instead of being silently approximated.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -134,6 +135,8 @@ class GTSession:
         self._pending_contract_delta = ""
         self._pending_contract_rendered = ""
         self._pending_localization = ""
+        self._execution_sequence = 0
+        self._open_executions: set[str] = set()
         self._capability_check()
 
     @property
@@ -396,8 +399,76 @@ class GTSession:
             "gt_disabled": self.disabled,
             "gt_disabled_stage": self.disabled_stage,
             "assurance": self.assurance_state.value,
+            "engine_integrity": self.integrity_receipt(),
         })
+        if not state["engine_integrity"]["valid"]:
+            state["verified"] = False
         return state
+
+    def integrity_receipt(self) -> dict[str, Any]:
+        """Engine participation is independent of whether obligations are green."""
+        issues = []
+        if self._engine is None:
+            issues.append("engine_missing")
+        if self.disabled:
+            issues.append("engine_disabled")
+        if self.assurance_state is not Assurance.FULL:
+            issues.append("engine_assurance_degraded")
+        if self._open_executions:
+            issues.append("execution_terminal_missing")
+        return {"schema": "gt.engine_integrity.v1", "valid": not issues,
+                "mode": self.mode.value, "disabled_stage": self.disabled_stage,
+                "issues": issues}
+
+    def execute(self, action: Mapping[str, Any], executor: Callable[[], Any]) -> Any:
+        """Own execution accounting without replacing the model's chosen action."""
+        if self.mode is GTMode.OFF:
+            return executor()
+        self._execution_sequence += 1
+        try:
+            journal_head = str(self._engine.store.receipt()["event_head"])
+        except Exception as exc:
+            self.degrade("execution_identity", exc)
+            journal_head = "unavailable"
+        execution_id = f"{self.config.task_id}:execution:{self._execution_sequence}:{journal_head}"
+        self._open_executions.add(execution_id)
+
+        def record(event: str, **details: Any) -> None:
+            try:
+                if self._engine is None:
+                    raise RuntimeError("engine_missing")
+                self._engine.store.append(event, execution_id=execution_id,
+                                          action_index=self._engine.global_action, **details)
+            except Exception as exc:
+                self.degrade("execution_receipt", exc)
+
+        try:
+            action_digest = hashlib.sha256(json.dumps(
+                dict(action), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            ).encode()).hexdigest()
+        except (TypeError, ValueError) as exc:
+            self.degrade("action_identity", exc)
+            action_digest = ""
+        record("execution_started", action_sha256=action_digest,
+               engine_disabled=self.disabled)
+        try:
+            result = executor()
+        except BaseException as exc:
+            record("execution_finished", disposition="raised", error_type=type(exc).__name__)
+            raise
+        else:
+            observation = result[1] if isinstance(result, tuple) and len(result) == 2 else result
+            try:
+                result_digest = hashlib.sha256(json.dumps(
+                    observation, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                ).encode()).hexdigest()
+            except (TypeError, ValueError) as exc:
+                self.degrade("execution_result_identity", exc)
+                result_digest = ""
+            record("execution_finished", disposition="returned", result_sha256=result_digest)
+            return result
+        finally:
+            self._open_executions.discard(execution_id)
 
     def close(self, terminal: str) -> None:
         self._terminal = terminal

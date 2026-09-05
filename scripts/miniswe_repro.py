@@ -336,6 +336,7 @@ def build_reproducibility_manifest(
     request_receipt: Mapping[str, Any],
     binary_paths: list[str] | tuple[str, ...] = (),
     source_paths: list[str] | tuple[str, ...] = (),
+    engine_integrity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         miniswe_version = importlib.metadata.version("mini-swe-agent")
@@ -370,6 +371,14 @@ def build_reproducibility_manifest(
         not event_journal or event_journal.get("valid", False)
     )
     endpoint = os.environ.get("OPENAI_BASE_URL", "")
+    engine_valid = gt_mode == "off" or (
+        isinstance(engine_integrity, Mapping)
+        and engine_integrity.get("schema") == "gt.engine_integrity.v1"
+        and engine_integrity.get("valid") is True
+        and engine_integrity.get("mode") == gt_mode
+        and engine_integrity.get("issues") == []
+        and engine_integrity.get("disabled_stage") == ""
+    )
     return {
         "schema": "gt.repro.v1",
         "created_utc": datetime.now(UTC).isoformat(),
@@ -401,6 +410,7 @@ def build_reproducibility_manifest(
             ),
         },
         "event_journal": dict(event_journal or {}),
+        "engine_integrity": dict(engine_integrity or {}),
         "provider_receipts": dict(request_receipt),
         "binaries": [_file_receipt(path) for path in binary_paths],
         "runner_sources": [_file_receipt(path) for path in source_paths],
@@ -410,6 +420,7 @@ def build_reproducibility_manifest(
             and not bool(request_receipt.get("model_mismatch"))
             and provider_receipts_valid
             and event_journal_valid
+            and engine_valid
         ),
     }
 

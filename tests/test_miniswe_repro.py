@@ -245,6 +245,34 @@ def test_manifest_is_invalid_when_any_receipt_layer_is_invalid(tmp_path):
     )
     assert bad_provider["research_valid"] is False
     assert bad_journal["research_valid"] is False
+    missing_engine = build_reproducibility_manifest(
+        event_journal={"valid": True},
+        request_receipt={"valid": True, "model_mismatch": False},
+        **common,
+    )
+    assert missing_engine["research_valid"] is False
+
+
+@pytest.mark.parametrize("mode, receipt, expected", [
+    ("off", None, True),
+    ("assistive", None, False),
+    ("assistive", {"schema": "gt.engine_integrity.v1", "valid": True,
+                   "mode": "assistive", "issues": [], "disabled_stage": ""}, True),
+    ("assistive", {"schema": "gt.engine_integrity.v1", "valid": True,
+                   "mode": "advisory", "issues": [], "disabled_stage": ""}, False),
+    ("assistive", {"schema": "gt.engine_integrity.v1", "valid": True,
+                   "mode": "assistive", "issues": [], "disabled_stage": "before_action"}, False),
+])
+def test_manifest_requires_matching_engine_integrity(tmp_path, monkeypatch, mode, receipt, expected):
+    monkeypatch.setattr("scripts.miniswe_repro._installed_packages", lambda: {})
+    manifest = build_reproducibility_manifest(
+        task="fixture", requested_model="model-a", resolved_model="model-a",
+        provider_reported_model="model-a", fallback_model="", temperature=0,
+        cwd=str(tmp_path), step_limit=1, timeout=1, gt_mode=mode,
+        event_journal={"valid": True}, request_receipt={"valid": True},
+        engine_integrity=receipt,
+    )
+    assert manifest["research_valid"] is expected
 
 
 def test_agent_shell_environment_excludes_host_credentials(monkeypatch, tmp_path):
