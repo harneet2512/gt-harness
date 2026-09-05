@@ -12,6 +12,7 @@ interpreter lives at the layout GTNanoAgent already relies on.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -49,8 +50,6 @@ _ALLOWED_MINISWE_AGENT_VERSIONS = frozenset({"2.4.6"})
 _UV_INSTALL = f"https://astral.sh/uv/{_UV_VERSION}/install.sh"
 _UV_INSTALLER_SHA256 = "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967"
 _PYTHON_ARCHIVE_SHA256 = "5854aa6ec71cad00334d5065633c210b2e7feb40956767a59a91791cadcf0b79"
-_GT_WHEEL_SHA256 = "2d0483c43cd7209d7049439af963d420666bc853854b21e8a82e07236b00ee0e"
-_GT_BINARY_SHA256 = "86975d2463eb85c7bbae284da0a18393d4412b6b00ed0ab9e0681b9c1d922827"
 _PROVIDER_BILLING_FAILURE = re.compile(
     r"(?:insufficient[ _-]*balance|(?:http(?: status)?|status(?: code)?)\s*[:=]?\s*402\b)",
     re.IGNORECASE,
@@ -59,6 +58,21 @@ _PROVIDER_BILLING_FAILURE = re.compile(
 
 class ProviderBillingError(NonZeroAgentExitCodeError):
     """The provider rejected a request because the account cannot fund it."""
+
+
+def _groundtruth_release() -> dict:
+    """Read the sole release manifest, including from an installed harness wheel."""
+    path = _REPO_ROOT / "config" / "deepswe_product_bundle_v1.json"
+    if not path.is_file():
+        path = _REPO_ROOT / "gt_harness" / "data" / "product_bundle_v1.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != "gt.product_bundle_source.v1":
+        raise ValueError("invalid product release manifest")
+    release = manifest["groundtruth"]
+    for key in ("wheel_sha256", "producer_sha256"):
+        if not re.fullmatch(r"[0-9a-f]{64}", release.get(key, "")):
+            raise ValueError(f"invalid groundtruth release pin: {key}")
+    return release
 
 
 def _miniswe_agent_version() -> str:
@@ -150,20 +164,12 @@ class MiniSweAgent(BaseInstalledAgent):
 
     @staticmethod
     def _gt_wheel() -> Path:
+        release = _groundtruth_release()
         configured = os.environ.get("GT_GROUNDTRUTH_WHEEL_HOST", "")
-        if configured:
-            wheels = [Path(configured)]
-        else:
-            wheels = sorted(_VENDOR_DIR.glob("groundtruth_mcp-*.whl"))
-        if not wheels:
-            raise FileNotFoundError(
-                "Mini-SWE treatment bundle needs GT_GROUNDTRUTH_WHEEL_HOST "
-                f"or a vendored GroundTruth wheel in {_VENDOR_DIR}"
-            )
-        wheel = wheels[-1]
+        wheel = Path(configured) if configured else _REPO_ROOT / release["wheel_path"]
         if not wheel.is_file():
             raise FileNotFoundError(f"GroundTruth wheel is missing: {wheel}")
-        MiniSweAgent._require_digest(wheel, _GT_WHEEL_SHA256, "groundtruth_wheel")
+        MiniSweAgent._require_digest(wheel, release["wheel_sha256"], "groundtruth_wheel")
         return wheel
 
     @staticmethod
@@ -187,14 +193,15 @@ class MiniSweAgent(BaseInstalledAgent):
 
     @staticmethod
     def _gt_binary_host() -> Path:
+        release = _groundtruth_release()
         override = os.environ.get("GT_INDEX_BINARY_HOST", "")
-        path = Path(override) if override else _VENDOR_DIR / "gt-index-linux-amd64"
+        path = Path(override) if override else _REPO_ROOT / release["producer_path"]
         if not path.is_file():
             raise FileNotFoundError(
                 f"Mini-SWE treatment bundle needs a Linux gt-index binary at "
                 f"{path} (or set GT_INDEX_BINARY_HOST)"
             )
-        MiniSweAgent._require_digest(path, _GT_BINARY_SHA256, "groundtruth_producer")
+        MiniSweAgent._require_digest(path, release["producer_sha256"], "groundtruth_producer")
         return path
 
     @staticmethod

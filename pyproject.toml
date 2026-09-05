@@ -44,6 +44,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["nano", "eval", "gt_engine", "gt_harness", "scripts"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"config/deepswe_product_bundle_v1.json" = "gt_harness/data/product_bundle_v1.json"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"

@@ -96,8 +96,8 @@ def test_installed_agent_resolves_explicit_verified_bundle_artifacts(monkeypatch
     monkeypatch.setenv("GT_HARNESS_WHEEL_HOST", str(harness_wheel))
     monkeypatch.setenv("GT_HARNESS_WHEEL_SHA256", hashlib.sha256(b"harness").hexdigest())
     monkeypatch.setattr(
-        "eval.miniswe_agent._GT_WHEEL_SHA256",
-        hashlib.sha256(b"groundtruth").hexdigest(),
+        "eval.miniswe_agent._groundtruth_release",
+        lambda: {"wheel_sha256": hashlib.sha256(b"groundtruth").hexdigest()},
     )
 
     assert MiniSweAgent._gt_wheel() == gt_wheel
