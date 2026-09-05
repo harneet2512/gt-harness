@@ -91,3 +91,10 @@ Deployed ${BUILD_SHA}. Check the bundle name above against the one the browser
 loads: if they differ, the browser is holding a cached index.html — hard-reload.
 Rebuild the sandbox image with --sandbox whenever cloud/sandbox/Dockerfile moves.
 EOF
+
+# Codespaces: recreating the containers re-registers the forwarded ports
+# with the tunnel at their default PRIVATE visibility, which turns the
+# public URL into a 302 to GitHub sign-in. Re-open it from any machine
+# with a `codespace`-scoped gh login:
+#   gh codespace ports visibility 80:public -c <codespace-name>
+echo "If this is a Codespace: run  gh codespace ports visibility 80:public -c <name>  (visibility resets on container recreation)."

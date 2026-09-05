@@ -322,3 +322,10 @@ storage does not.
   interrupted turn is not resumed.
 - GT features require the gt-index binary and the groundtruth-mcp wheel;
   without them a session degrades to `gt_status: unavailable` and runs plain.
+
+
+> **Codespaces port visibility resets.** Every time the compose containers are
+> recreated (any deploy), the tunnel re-registers ports 80/8000 as *private* and
+> the public URL 302s to GitHub sign-in. After each deploy run
+> `gh codespace ports visibility 80:public -c <codespace-name>` from a machine
+> with a `codespace`-scoped `gh` login (the codespace's own token lacks it).
