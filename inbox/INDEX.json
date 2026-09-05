@@ -136,6 +136,7 @@
     "har83-benchmark-producer-84e19be70",
     "har83-final-hardening-exact-build-08fe997d0",
     "har83-final-hardening-producer-9d0d8079f",
+    "har83-unified-source-1ecd03674",
     "merge-har70-ff578719",
     "merge-har70-ff578719-v2",
     "merge-har76-701a8472",
@@ -391,7 +392,8 @@
     "HAR-83":[
       "har83-benchmark-producer-84e19be70",
       "har83-final-hardening-exact-build-08fe997d0",
-      "har83-final-hardening-producer-9d0d8079f"
+      "har83-final-hardening-producer-9d0d8079f",
+      "har83-unified-source-1ecd03674"
     ]
   }
 }
