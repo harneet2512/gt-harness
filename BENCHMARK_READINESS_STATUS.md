@@ -75,9 +75,12 @@ uses literal Git path exclusions, rejects exclusions containing the whole
 repository, and leaves the agent's Git index unchanged.
 
 Local verification passed 27 tests with one Linux-only skip, including both
-real timeout CLI variants and the normal export path. Installed Linux proof,
-review, and successor CI remain required. This repair alone does not establish
-complete state exclusion from every index-build input.
+real timeout CLI variants and the normal export path. The rebuilt harness and
+Groundtruth wheels then passed all 28 checks in 11.48 seconds in a
+network-disabled Linux container, with no source packages mounted. The repair
+is committed in `bea8d59adbf481d8254428fdcf719af4e97cf3de`. Independent review
+and successor CI remain required. This repair alone does not establish complete
+state exclusion from every index-build input.
 
 ## Capability reference
 
