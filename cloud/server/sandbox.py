@@ -380,7 +380,18 @@ def prepare_workspace(workspace: str) -> None:
     for root, _dirs, files in os.walk(workspace):
         _add_mode(root, 0o777)
         for name in files:
-            _add_mode(os.path.join(root, name), 0o666)
+            path = os.path.join(root, name)
+            # a+rwX: every file becomes rw for everyone; a file that was
+            # executable for anyone stays executable for everyone, so the
+            # sandbox user can still run the repository's own scripts.
+            _add_mode(path, 0o666 | (0o111 if _is_executable(path) else 0))
+
+
+def _is_executable(path: str) -> bool:
+    try:
+        return bool(os.stat(path).st_mode & 0o111)
+    except OSError:
+        return False
 
 
 def _add_mode(path: str, bits: int) -> None:
