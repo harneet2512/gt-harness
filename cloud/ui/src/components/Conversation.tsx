@@ -39,6 +39,8 @@ interface Props {
   onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
   onContinue: () => void;
+  /** Discard the workspace. Absent once the session is already closed. */
+  onClose: (() => void) | null;
 }
 
 /** The left column: who you are talking to, what was said, and the composer. */
@@ -65,6 +67,7 @@ export default function Conversation({
   onSend,
   onStop,
   onContinue,
+  onClose,
 }: Props) {
   const scroll = useAutoScroll();
   let turnNo = 0;
@@ -73,12 +76,25 @@ export default function Conversation({
     <section className="talk">
       <header className="talk-head">
         <SessionSwitcher activeId={sessionId} active={session} />
-        <StatusLine
-          mode={mode}
-          phase={phase}
-          elapsed={elapsed}
-          steps={liveSteps}
-        />
+        <div className="talk-head-foot">
+          <StatusLine
+            mode={mode}
+            phase={phase}
+            elapsed={elapsed}
+            steps={liveSteps}
+          />
+          <span className="spacer" />
+          {onClose && (
+            <button
+              type="button"
+              className="btn-text"
+              title="Close this session and discard its workspace"
+              onClick={onClose}
+            >
+              close session
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="talk-wrap">

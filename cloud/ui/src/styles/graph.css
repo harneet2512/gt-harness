@@ -52,7 +52,16 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
   overflow: hidden;
+  /* The toolbar is the first thing to run out of room. Fade the tail rather
+     than guillotining a word in half. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 18px),
+    transparent
+  );
+  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
 }
 .legend-item {
   display: inline-flex;

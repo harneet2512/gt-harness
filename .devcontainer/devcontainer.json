@@ -1,0 +1,13 @@
+{
+  "name": "gt-cloud-agent",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [80, 8000],
+  "portsAttributes": {
+    "80": { "label": "GT Cloud Agent (UI + API)", "onAutoForward": "silent" },
+    "8000": { "label": "API (direct)", "onAutoForward": "silent" }
+  },
+  "hostRequirements": { "cpus": 4, "memory": "16gb" }
+}

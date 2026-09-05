@@ -104,10 +104,29 @@ export function useSessionData(sessionId: string | null): SessionData {
   const [receiptsError, setReceiptsError] = useState<string | null>(null);
   const [receiptsLoading, setReceiptsLoading] = useState(false);
 
+  /* Two refetches are routinely in flight at once — `stop()` fires one and the
+     `turn_finished` frame fires another a moment later. Their responses can
+     arrive out of order, and the older one carries a still-running row: without
+     a guard it overwrites the settled state and the header stays "Working"
+     forever. Responses are therefore applied in issue order only, and a
+     snapshot that names a turn the stream has already ended is discarded. */
+  const fetchSeq = useRef(0);
+  const appliedSeq = useRef(0);
+  const finishedTurns = useRef<Set<string>>(new Set());
+
   const refetchSession = useCallback(() => {
     if (!sessionId) return;
+    const seq = (fetchSeq.current += 1);
     getSession(sessionId)
-      .then(setSession)
+      .then((next) => {
+        if (seq < appliedSeq.current) return;
+        appliedSeq.current = seq;
+        setSession((prev) => {
+          const turn = next.current_turn_id;
+          if (prev && turn && finishedTurns.current.has(turn)) return prev;
+          return next;
+        });
+      })
       .catch(() => {
         /* transient — the stream or the next action will refresh it */
       });
@@ -257,6 +276,8 @@ export function useSessionData(sessionId: string | null): SessionData {
         }
 
         case "turn_finished": {
+          const finishedId = String(event.data.turn_id ?? "");
+          if (finishedId) finishedTurns.current.add(finishedId);
           setSession((prev) =>
             prev
               ? {

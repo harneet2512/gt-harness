@@ -37,7 +37,12 @@ const FILAMENT_WIDTH: Record<string, number> = {
 
 const DIMMED = 0.18;
 const LABEL_ZOOM = 1.8;
-const LABEL_MIN_R = 6;
+/** A file particle never exceeds r 9 (see `fileRadius`), so with labels off
+    only the folded directory particles carry a name of their own. */
+const LABEL_MIN_R = 10;
+/** Label collision grid, in screen pixels: one row per line of type. */
+const LABEL_CELL_W = 26;
+const LABEL_CELL_H = 13;
 const HALO_MS = 1400;
 
 export interface DrawInput {
@@ -353,12 +358,31 @@ function paintLabels(input: DrawInput): void {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
 
-  for (const particle of input.field.particles) {
+  /* Overlapping names read as a smear, so a label claims the cells it covers
+     and a later one that would land on top of it is dropped. The particles the
+     reader is pointing at are laid down first, so they always win. */
+  const taken = new Set<string>();
+  const claim = (sx: number, sy: number, width: number): boolean => {
+    const from = Math.floor((sx - width / 2) / LABEL_CELL_W);
+    const to = Math.floor((sx + width / 2) / LABEL_CELL_W);
+    const row = Math.floor(sy / LABEL_CELL_H);
+    for (let col = from; col <= to; col += 1) {
+      if (taken.has(`${col}:${row}`)) return false;
+    }
+    for (let col = from; col <= to; col += 1) taken.add(`${col}:${row}`);
+    return true;
+  };
+
+  const isMarked = (id: string): boolean =>
+    id === input.hoverId || id === input.selectedId || id === input.positionId;
+
+  const ordered = [...input.field.particles].sort(
+    (a, b) => Number(isMarked(b.id)) - Number(isMarked(a.id)),
+  );
+
+  for (const particle of ordered) {
     if (particle.x === undefined || particle.y === undefined) continue;
-    const marked =
-      particle.id === input.hoverId ||
-      particle.id === input.selectedId ||
-      particle.id === input.positionId;
+    const marked = isMarked(particle.id);
     if (!all && !marked && particle.r < LABEL_MIN_R) continue;
 
     const sx = screenX(transform, particle.x);
@@ -367,9 +391,12 @@ function paintLabels(input: DrawInput): void {
     if (sy < -20 || sy > input.height + 20) continue;
 
     const r = particle.r * transform.k;
+    const top = sy + r + 4;
+    if (!claim(sx, top, ctx.measureText(particle.label).width)) continue;
+
     ctx.fillStyle = marked ? INK : INK_2;
     ctx.globalAlpha = marked ? 1 : 0.85;
-    ctx.fillText(particle.label, sx, sy + r + 4);
+    ctx.fillText(particle.label, sx, top);
   }
 
   ctx.globalAlpha = 1;

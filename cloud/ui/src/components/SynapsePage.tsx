@@ -166,6 +166,11 @@ export default function SynapsePage() {
           onSend={data.send}
           onStop={data.stop}
           onContinue={() => void data.send("continue")}
+          onClose={
+            sessionId && status !== "closed" && status !== "creating"
+              ? data.close
+              : null
+          }
         />
       </div>
 

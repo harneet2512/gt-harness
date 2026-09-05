@@ -4,6 +4,10 @@
  * ------------------------------------------------------------------ */
 
 .ins {
+  /* One width for the drawer and for the min-width its children hold while it
+     animates, so the panel never has to reflow — and so it can be narrower
+     than 400px on a screen that cannot spare 400px. */
+  --ins-w: min(400px, 34vw);
   flex: 0 0 auto;
   width: 0;
   height: 100%;
@@ -18,7 +22,7 @@
   opacity: 0;
 }
 .ins.is-open {
-  width: 400px;
+  width: var(--ins-w);
   opacity: 1;
 }
 
@@ -26,7 +30,7 @@
   flex: 0 0 auto;
   padding: 10px 12px 9px;
   border-bottom: 1px solid var(--rule);
-  min-width: 400px;
+  min-width: var(--ins-w);
 }
 .ins-title {
   display: flex;
@@ -86,7 +90,7 @@
   gap: 2px;
   padding: 0 8px;
   border-bottom: 1px solid var(--rule);
-  min-width: 400px;
+  min-width: var(--ins-w);
 }
 .panel-tabs {
   min-width: 0;
@@ -130,7 +134,7 @@
   padding: 10px 12px 16px;
 }
 .ins-body {
-  min-width: 400px;
+  min-width: var(--ins-w);
 }
 .ins-empty,
 .panel-empty {
@@ -246,4 +250,22 @@
   font-style: italic;
   color: var(--ink-2);
   margin-bottom: 4px;
+}
+
+/* Below this width the graph has nothing left to give: the inspector stops
+   pushing the stage aside and floats over it instead. */
+@media (max-width: 1180px) {
+  .synapse {
+    position: relative;
+  }
+  .ins {
+    --ins-w: min(400px, 62vw);
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    height: auto;
+    z-index: 15;
+    box-shadow: -10px 0 28px rgba(26, 27, 30, 0.1);
+  }
 }

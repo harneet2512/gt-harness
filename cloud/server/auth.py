@@ -4,11 +4,11 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 import jwt
-from fastapi import APIRouter, Cookie, Header, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response
 from fastapi.responses import RedirectResponse
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -112,12 +112,6 @@ async def callback(code: str, state: str) -> RedirectResponse:
     return response
 
 
-@auth_router.get("/me")
-async def me(session: str | None = Cookie(None)) -> dict[str, Any]:
-    user = verify_jwt(session)
-    return user
-
-
 def bearer_token(authorization: str | None) -> str | None:
     """Extract the token from an ``Authorization: Bearer <jwt>`` header."""
     if not authorization:
@@ -137,6 +131,12 @@ async def require_user(
     There is no "auth disabled" mode — a request with neither credential is 401.
     """
     return verify_jwt(bearer_token(authorization) or session)
+
+
+@auth_router.get("/me")
+async def me(user: Annotated[dict[str, Any], Depends(require_user)]) -> dict[str, Any]:
+    """Who am I — accepts the same credentials as every /api route."""
+    return user
 
 
 @auth_router.post("/logout")

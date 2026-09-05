@@ -16,6 +16,15 @@
   padding: 10px 14px 9px;
   border-bottom: 1px solid var(--rule);
 }
+/* The status line on the left, the session-level action on the right. */
+.talk-head-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.talk-head-foot .status {
+  min-width: 0;
+}
 
 /* ---------------- session switcher ---------------- */
 
@@ -205,6 +214,10 @@
 .heard-code {
   font-family: var(--font-mono);
   font-size: 11.5px;
+  /* The conversation column is narrow; a long line must wrap rather than
+     disappear off the right edge with no scrollbar to say so. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: var(--paper);
   border: 1px solid var(--rule);
   border-radius: 4px;
