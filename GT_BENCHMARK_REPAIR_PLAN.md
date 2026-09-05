@@ -553,3 +553,19 @@ no checkout imports. Independent follow-up passed 12 selected tests in 14.15s
 and closed the authority finding with high confidence. Ruff and diff checks
 passed. This proves the safe fail-open boundary, not post-execution refusal
 authority, all-capability operation, release certification or benchmark uplift.
+
+Broad run at `49e01407`: 1,352 passed, 96 skipped, two scripted smoke failures
+in 309.73s. Its old environment discarded the Submitted result; updated only
+that fixture to mirror the canonical environment's retained result. All three
+available real-DefaultAgent/scripted-model smoke checks now pass (one graph-
+dependent skip), 12.65s; completion and delivery assertions remain unchanged.
+Both isolated bundle reproducibility/parity tests also passed in 66.46s.
+
+Release preparation, without changing pins: downloaded producer run 33984442405,
+successful at source `1ecd03674f7eb6a79f401c95bf147423379d5143`, to the local
+temporary artifact directory. Binary SHA-256:
+`8763262b13f44d4bc463a7481d93e74b86137d49b32d8f86bae06879086baf4f`.
+Its executed Linux build identity matches the artifact metadata, including build
+ID. The actual binary parsed a TSX component completely with Widget declaration
+and rejected a wrong content hash as incomplete. These are candidate component
+checks, not an exact-source review certificate or a certified installed bundle.

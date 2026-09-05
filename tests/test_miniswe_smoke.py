@@ -63,10 +63,16 @@ class ScriptedEnv:
         result = self.script.get(command, {"output": "", "returncode": 0})
         output = result["output"]
         if output.lstrip().startswith("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"):
-            raise Submitted({
+            terminal = Submitted({
                 "role": "exit", "content": output,
                 "extra": {"exit_status": "Submitted", "submission": output},
             })
+            # Match the canonical environment's retained execution result.
+            terminal.gt_execution_result = {
+                "output": output, "returncode": result.get("returncode", 0),
+                "exception_info": "", "extra": {"raw_output": output},
+            }
+            raise terminal
         return {"output": output, "returncode": result.get("returncode", 0),
                 "exception_info": ""}
 
