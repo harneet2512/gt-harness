@@ -3,15 +3,48 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 SessionStatusName = Literal["creating", "idle", "running", "failed", "closed"]
 GtStatusName = Literal["off", "ready", "unavailable", "pending"]
+#: The GT modes a session may ask for. These are **members of
+#: ``gt_engine.gt_session.GTMode``** (``off|shadow|advisory|assistive|
+#: enforced``), because ``runner._install_gt`` passes the value straight to
+#: ``GTMode(gt_mode)``. ``shadow`` is deliberately not offered: it runs the
+#: engine without letting it affect the agent, which is a benchmark mode, not
+#: a product one.
+#:
+#: HAR-84 G-02: ``"engine"`` used to be documented here and offered by the UI.
+#: It was **never** a ``GTMode`` member, so every ``engine`` session raised
+#: ``ValueError: 'engine' is not a valid GTMode`` on its first turn and
+#: silently degraded to ``gt_status: unavailable``. It is not accepted any
+#: more — an unknown mode is a 422 at creation instead of a broken session.
+GtModeName = Literal["off", "advisory", "assistive", "enforced"]
 RoleName = Literal["user", "agent", "system"]
 FinishReason = Literal[
     "reply", "question", "step_limit", "time_limit", "stopped", "error",
     "submitted",
+    #: the server restarted while this turn was running; recover() closes it
+    "interrupted",
 ]
+
+#: control characters are never legal in a git ref, and a ref that starts with
+#: ``-`` would be read as a flag by ``git clone``/``git fetch``
+_CONTROL_CHARS = frozenset(chr(c) for c in [*range(0x20), 0x7F])
+
+
+def _clean_ref(value: str) -> str:
+    """Validate a git ref: non-blank, no control characters, not a flag."""
+    if not value or not value.strip():
+        raise ValueError("ref must not be blank")
+    if any(ch in _CONTROL_CHARS for ch in value):
+        raise ValueError("ref must not contain control characters")
+    if value.strip() != value:
+        raise ValueError("ref must not have leading or trailing whitespace")
+    if value.startswith("-"):
+        # `git clone --branch <ref>` would read it as a flag.
+        raise ValueError("ref must not start with '-'")
+    return value
 #: why a session is ``closed``: an explicit close, the idle TTL reaper, or a
 #: failure. ``null`` while the session is still alive.
 ClosedReason = Literal["user", "expired", "failed"]
@@ -22,9 +55,13 @@ EdgeKind = Literal["import", "gt_call", "gt_ref", "gt_import"]
 
 class SessionCreate(BaseModel):
     repo: str = Field(..., description="GitHub repo URL (https://github.com/owner/repo)")
-    ref: str = Field("main", description="Git ref — branch, tag, or SHA")
-    model: str = Field(..., description="LiteLLM model identifier")
-    gt_mode: str = Field("off", description="GT mode: off | advisory | engine")
+    ref: str = Field(
+        "main", max_length=256, description="Git ref — branch, tag, or full SHA"
+    )
+    model: str = Field(..., min_length=1, description="LiteLLM model identifier")
+    gt_mode: GtModeName = Field(
+        "off", description="GT mode: off | advisory | assistive | enforced"
+    )
     step_limit: int = Field(60, ge=1, le=500, description="Max model calls per turn")
     #: per-turn wall-clock budget. Unset means "use TURN_WALL_SECONDS"
     #: (default 900), so the server default is configurable in one place.
@@ -32,6 +69,21 @@ class SessionCreate(BaseModel):
         None, ge=60, le=3600, description="Per-turn wall-clock budget in seconds"
     )
     temperature: float = Field(0.0, ge=0.0, le=2.0)
+
+    @field_validator("ref")
+    @classmethod
+    def _check_ref(cls, value: str) -> str:
+        return _clean_ref(value)
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str) -> str:
+        # Blank is a 422 here; a *syntactically* fine model that the provider
+        # does not serve is a 400 from the creation preflight (see
+        # ``runner.check_model``), because only the provider can say so.
+        if not value.strip():
+            raise ValueError("model must not be blank")
+        return value
 
 
 class Session(BaseModel):
@@ -78,6 +130,18 @@ class Message(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=100_000)
+
+    @field_validator("content")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        """``"   "`` is not a message (HAR-84 G-12).
+
+        ``min_length`` alone only caught ``""``, so whitespace started a real
+        turn and burned model calls and a concurrency slot.
+        """
+        if not value.strip():
+            raise ValueError("content must not be blank")
+        return value
 
 
 class MessageAccepted(BaseModel):

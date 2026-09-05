@@ -19,6 +19,18 @@ _GITHUB_USER = "https://api.github.com/user"
 
 _pending_states: dict[str, float] = {}
 
+#: How long a signed-in session lasts. Was 7 days, which is a long time for a
+#: token that cannot be revoked: removing somebody from
+#: ``ALLOWED_GITHUB_LOGINS`` did nothing until it expired (HAR-84 G-10).
+DEFAULT_JWT_TTL_SECONDS = 86400
+
+
+def jwt_ttl_seconds() -> int:
+    try:
+        return max(60, int(os.environ.get("JWT_TTL_SECONDS", DEFAULT_JWT_TTL_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_JWT_TTL_SECONDS
+
 
 def _client_id() -> str:
     return os.environ.get("GITHUB_CLIENT_ID", "")
@@ -89,13 +101,16 @@ async def callback(code: str, state: str) -> RedirectResponse:
     if allowed and login not in allowed:
         raise HTTPException(403, f"user {login} not in ALLOWED_GITHUB_LOGINS")
 
+    ttl = jwt_ttl_seconds()
+    issued_at = int(time.time())
     app_jwt = jwt.encode(
         {
             "sub": str(user_data.get("id", "")),
             "login": login,
             "name": user_data.get("name", ""),
             "avatar_url": user_data.get("avatar_url", ""),
-            "exp": int(time.time()) + 86400 * 7,
+            "iat": issued_at,
+            "exp": issued_at + ttl,
         },
         _jwt_secret(),
         algorithm="HS256",
@@ -107,7 +122,7 @@ async def callback(code: str, state: str) -> RedirectResponse:
         app_jwt,
         httponly=True,
         samesite="lax",
-        max_age=86400 * 7,
+        max_age=ttl,
     )
     return response
 
@@ -129,8 +144,16 @@ async def require_user(
     """Auth dependency for every /api route: bearer header or session cookie.
 
     There is no "auth disabled" mode — a request with neither credential is 401.
+    The allow-list is re-checked on **every** request, not only at
+    ``/auth/callback``: a token signed with ``JWT_SECRET`` for a login that was
+    never allowed (or has since been removed) used to read and write every
+    session in the deployment (HAR-84 G-10).
     """
-    return verify_jwt(bearer_token(authorization) or session)
+    user = verify_jwt(bearer_token(authorization) or session)
+    allowed = _allowed_logins()
+    if allowed is not None and str(user.get("login") or "") not in allowed:
+        raise HTTPException(403, "user is not allowed to use this deployment")
+    return user
 
 
 @auth_router.get("/me")

@@ -56,6 +56,21 @@ cp cloud/.env.example cloud/.env
 # Fill in GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, JWT_SECRET and a provider key.
 ```
 
+Every knob has a comment in `cloud/.env.example`. The ones that decide whether
+a bad day stays bounded:
+
+| Variable | Default | What it bounds |
+|---|---|---|
+| `ALLOWED_GITHUB_LOGINS` | *(empty = anyone with a valid token)* | Re-checked on **every** request, not just at `/auth/callback`: a login not on the list is 403 even with a correctly signed JWT. |
+| `JWT_TTL_SECONDS` | `86400` | How long a signed-in session lasts. Was 7 days; there is no revocation, so removing somebody from the allow-list only takes effect when their token expires. |
+| `MODEL_PREFLIGHT` | `1` | One 1-token completion at session creation, over the session's own LiteLLM route. `0` skips it (tests, air-gapped runs). |
+| `MODEL_REQUEST_TIMEOUT` | `300` | Per model call. LiteLLM's own retries are pinned off (`num_retries` **and** `max_retries`), so a dead model fails in seconds instead of retrying 11 times with a 60 s backoff. |
+| `WORKSPACES_MIN_FREE_MB` | `2048` | Free space under `WORKSPACES_DIR` below which a new session is refused outright, with a readable reason. `0` disables it. |
+| `SANDBOX_WORKSPACE_MAX_MB` | `2048` | Per-session workspace cap, measured (`du -sm`) after every write-shaped command. Over it the command is killed and the turn ends `error`. `0` disables it. **Not** a filesystem quota — see `docs/cloud-sandbox.md` §5. |
+| `MAX_CONCURRENT_SESSIONS` | `3` | Turns running at once (429 past it). |
+| `MAX_CONCURRENT_CREATIONS` | `3` | Clones + GT indexes running at once (429 past it). Creation used to take no slot at all. |
+| `SESSION_IDLE_TTL_SECONDS` | `21600` | How long an idle session keeps its clone and container. |
+
 ### 4. Run
 
 Terminal 1 — API server (from the repo root):
@@ -99,12 +114,12 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/sessions` | Create a session (`repo`, `ref`, `model`, `gt_mode`, `step_limit`, `wall_seconds` (60–3600, default `TURN_WALL_SECONDS`), `temperature`) → 201 `Session`. 400 on a non-GitHub URL. |
+| POST | `/api/sessions` | Create a session (`repo`, `ref`, `model`, `gt_mode`, `step_limit`, `wall_seconds` (60–3600, default `TURN_WALL_SECONDS`), `temperature`) → 201 `Session`. **400** on a non-GitHub URL, or `model not available: <reason>` when the creation preflight (`MODEL_PREFLIGHT`) cannot get a 1-token completion out of the provider. **422** on an unknown `gt_mode`, a blank `model`, or a `ref` that is blank, has control characters or starts with `-`. **429** when `MAX_CONCURRENT_CREATIONS` clones are already in flight. |
 | GET | `/api/sessions` | List sessions, newest first |
 | GET | `/api/sessions/:id` | One session |
 | GET | `/api/sessions/:id/messages` | Full conversation, in order |
-| POST | `/api/sessions/:id/messages` | Send a message → 202 `{message, delivery}` where delivery is `turn_started` or `queued_for_running_turn`. 409 while `creating`/`closed`/`failed`. |
-| GET | `/api/sessions/:id/events` | SSE stream, open across turns (`?after_id=` or `Last-Event-ID:`) |
+| POST | `/api/sessions/:id/messages` | Send a message → 202 `{message, delivery}` where delivery is `turn_started` or `queued_for_running_turn`. 409 while `creating`/`closed`/`failed`; 422 when the content is blank **or only whitespace**. |
+| GET | `/api/sessions/:id/events` | SSE stream, open across turns (`?after_id=` or `Last-Event-ID:`). A `Last-Event-ID` that is not a non-negative integer is **400**, not a silent replay of the whole history. |
 | GET | `/api/sessions/:id/diff` | Cumulative diff vs the cloned commit, incl. untracked files. With `?through_event=N` it returns the stored snapshot taken at the latest write **at or before** event `N` instead — same shape plus `{as_of_event, approximate: false}` (and `truncated: true` when the stored patch hit the 512 KB cap). `as_of_event: 0` means nothing had been written yet. |
 | GET | `/api/sessions/:id/tree` | Every file in the workspace with its byte size (`{base_sha, files:[{path,size}]}`), for the map |
 | GET | `/api/sessions/:id/graph` | File relation graph (`{base_sha, gt, nodes:[{id,path,size,lang,dir}], edges:[{source,target,kind,weight}]}`). `kind` is `import` (static imports) or `gt_call`/`gt_ref`/`gt_import` (GT symbol edges collapsed to file level, only when `gt_status` is `ready`; `gt` says whether they are in). Nodes are exactly the files `/tree` returns; over 5000 files only the busiest survive and `truncated: true` is added. |
@@ -129,6 +144,26 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 `gt_unavailable` lifecycle event, so a client that reloads after the event
 scrolled past can still say *why* a session is running without GT.
 
+### `gt_mode`
+
+`off | advisory | assistive | enforced`. These are members of
+`gt_engine.gt_session.GTMode`, because `runner._install_gt` hands the value
+straight to `GTMode(gt_mode)`; anything else is a **422 at creation**.
+
+> **`engine` is gone.** It was documented here, offered by the UI and accepted
+> by the API, and it was never a `GTMode` member. Every `engine` session built
+> its index, published `gt_ready`, and then raised
+> `ValueError: 'engine' is not a valid GTMode` on its first turn — the session
+> flipped to `gt_status: unavailable` with the `ValueError` in `gt_error`, and
+> `/graph` dropped from 551 GT edges to 156 import-only ones (HAR-84 G-02).
+> Use `assistive` or `enforced` for what `engine` was meant to mean. `shadow`
+> is a benchmark mode (it runs the engine without letting it affect the agent)
+> and is deliberately not offered.
+
+Any failure while installing GT for a turn still degrades rather than failing:
+`gt_status` becomes `unavailable`, `gt_error` records why, and a
+`lifecycle gt_unavailable {error}` event carries it live.
+
 `stopped` is a lifecycle **event**, not a status: after a stop the reply is
 written and the session goes straight back to `idle`.
 
@@ -150,6 +185,18 @@ A turn has two ceilings, both per turn and both checked at a step boundary:
 |---|---|---|
 | model calls | `step_limit` (1–500, default 60) | `step_limit` |
 | wall clock | `wall_seconds` (60–3600), default `TURN_WALL_SECONDS` (900) | `time_limit` |
+
+Two more endings are not budgets at all:
+
+* **`error`** — the turn failed and the *session survives*. A provider failure,
+  a sandbox that could not be recreated, a workspace over its quota or a bug in
+  one turn ends that turn with `finish_reason: "error"`, an `agent_error` event,
+  a reply that says what happened, a receipt, and the session back to `idle`.
+  Only a failed **workspace creation** fails a session now (HAR-84 G-04).
+* **`interrupted`** — the server restarted while the turn was running.
+  `recover()` closes the receipt, publishes `turn_finished
+  {finish_reason: "interrupted"}` and a `system_note` carrying *"Server
+  restarted; turn interrupted"*, then `lifecycle idle` (HAR-84 G-08).
 
 A step is not a unit of time: one `pytest -x` is one step and ten minutes. When
 the wall deadline passes with a command still running, the command is killed
@@ -178,15 +225,16 @@ plus a `: ping` comment heartbeat every 15s.
 
 | Type | `data` |
 |---|---|
-| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `diff_snapshots_disabled{reason}`, `failed{error}`, `closed{reason: user\|expired}` |
-| `turn_started` | `{turn_id, message_id}` |
+| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `sandbox_restarted{container}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `quota_exceeded{reason}`, `diff_snapshots_disabled{reason}`, `failed{error}`, `closed{reason: user\|expired}` |
+| `turn_started` | `{turn_id, message_id, role: "user", content}` — `content` is the user's message text. It is on the event so *every* subscriber can render the prompt; with only `message_id` a second tab showed the turn and the reply but never the question (HAR-84 G-09). |
 | `assistant` | `{turn_id, content, actions[], step, n_calls, cost, is_reply?}` — one per model call. `is_reply: true` marks the text-only response that *ends* the turn: it has no `actions`, and it is emitted just before `agent_reply` so a client counting `assistant` frames always matches `turn_finished.n_calls` instead of trailing it by one. The field is absent on every other frame. |
 | `tool_call` | `{turn_id, command, step, n_calls}` |
 | `tool_result` | `{turn_id, command, output (≤4000 chars), returncode, is_error, step}` |
 | `steering` | `{turn_id, message_id, content}` |
 | `agent_reply` | `{turn_id, message_id, content, finish_reason, n_calls, cost, patch_sha256, files_changed}` |
-| `turn_finished` | `{turn_id, finish_reason, n_calls, cost, patch_sha256, files_changed}` |
+| `turn_finished` | `{turn_id, finish_reason, n_calls, cost, patch_sha256, files_changed}` — `finish_reason` is one of `reply`, `question`, `step_limit`, `time_limit`, `stopped`, `submitted`, `error`, `interrupted`. The `interrupted` one comes from `recover()` and carries no patch fields. |
 | `agent_error` | `{turn_id?, error}` — named `agent_error`, never `error`, which collides with `EventSource`'s native error event |
+| `system_note` | `{turn_id, message_id, content}` — a message from the *server*, not the agent. Currently only *"Server restarted; turn interrupted"*, published by `recover()` alongside the `turn_finished {finish_reason: "interrupted"}` for that turn. |
 
 ## Architecture
 
@@ -361,8 +409,19 @@ storage does not.
   runs shell commands in the server process's machine account. Set
   `SANDBOX_MODE=docker` for per-session isolation and the egress policy.
 - Single server, SQLite, no horizontal scaling.
-- Sessions found `running` after a restart become `idle` with a system note; the
-  interrupted turn is not resumed.
+- Sessions found `running` after a restart become `idle`, the receipt is closed
+  with `finish_reason: "interrupted"`, and a `system_note` event carries the
+  note; the interrupted turn is **not resumed**.
+- `/stop` is honoured at a step boundary. While a command is running it lands in
+  well under a second (the command is killed); while a *model call* is in
+  flight it waits for that call, because the LiteLLM call is synchronous and not
+  cancellable. `MODEL_REQUEST_TIMEOUT` is the only bound on that worst case.
+- `SANDBOX_WORKSPACE_MAX_MB` is a watermark checked between commands, not a
+  kernel quota: a single write larger than the cap still lands on disk and is
+  caught immediately afterwards.
+- GT evidence artifacts (`gt.evidence_artifact.v1`) are not persisted into the
+  session transcript, so GT's contribution is visible in `/graph` but not
+  receipted in the trajectory.
 - GT features require the gt-index binary and the groundtruth-mcp wheel;
   without them a session degrades to `gt_status: unavailable` and runs plain.
 

@@ -25,7 +25,7 @@ from .models import (
     SessionTree,
     TurnReceipt,
 )
-from .runner import ConcurrencyLimit, SessionManager
+from .runner import ConcurrencyLimit, ModelUnavailable, SessionManager
 from .store import SessionStore
 
 router = APIRouter(dependencies=[Depends(require_user)])
@@ -91,6 +91,12 @@ async def create_session(
 ) -> dict[str, Any]:
     if not _GITHUB_REPO_RE.match(body.repo):
         raise HTTPException(400, "repo must be a GitHub HTTPS URL")
+    # Before anything is spent: an unusable model used to cost a clone, a
+    # sandbox, a GT index and a four-minute first turn (HAR-84 G-11).
+    try:
+        await manager.check_model(body.model)
+    except ModelUnavailable as exc:
+        raise HTTPException(400, f"model not available: {exc}") from exc
 
     session_id = await store.create_session(
         repo=body.repo,
@@ -99,7 +105,12 @@ async def create_session(
         gt_mode=body.gt_mode,
         config=_session_config(body),
     )
-    await manager.create_workspace(session_id)
+    try:
+        await manager.create_workspace(session_id)
+    except ConcurrencyLimit as exc:
+        # The row exists, so the failure is visible rather than a silent 500.
+        await store.update_status(session_id, "failed", closed_reason="failed")
+        raise HTTPException(429, str(exc)) from exc
     session = await store.get_session(session_id)
     return _session_view(session)  # type: ignore[arg-type]
 
@@ -150,10 +161,17 @@ async def stream_events(
 ) -> StreamingResponse:
     await _require_session(store, session_id)
     if not after_id and last_event_id:
+        # A malformed resume token used to fall back to replaying the whole
+        # history, silently — the client asked to continue and got the start
+        # of time instead (HAR-84 G-17).
         try:
             after_id = int(last_event_id)
-        except ValueError:
-            after_id = 0
+        except ValueError as exc:
+            raise HTTPException(
+                400, "Last-Event-ID must be an integer event id"
+            ) from exc
+        if after_id < 0:
+            raise HTTPException(400, "Last-Event-ID must not be negative")
 
     return StreamingResponse(
         event_bus.subscribe(session_id, after_id=after_id),

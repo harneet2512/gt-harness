@@ -19,6 +19,40 @@ TRANSCRIPT_NAME = "transcript.json"
 TRAJECTORY_NAME = "trajectory.json"
 CLONE_TIMEOUT = 300
 GIT_TIMEOUT = 60
+#: `du -sm` over a big tree is not instant; it runs on the turn worker
+DU_TIMEOUT = 30
+
+#: a full commit id, which ``git clone --branch`` cannot resolve
+_FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+#: an abbreviated one, only trusted as a *fallback* after a clone failed
+_ABBREV_SHA = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+#: free space below which a new session is refused outright (MB)
+DEFAULT_MIN_FREE_MB = 2048
+#: how big one session's workspace may get before its turn is cut off (MB)
+DEFAULT_WORKSPACE_MAX_MB = 2048
+
+#: git's own words -> the product's, so a failure does not leak the host path
+#: or ask the user about a username they were never going to be prompted for
+_CLONE_ERRORS = (
+    (
+        "could not read username",
+        "repository not found, or it is private and the server has no "
+        "credentials for it",
+    ),
+    (
+        "repository not found",
+        "repository not found, or it is private and the server has no "
+        "credentials for it",
+    ),
+    ("not found in upstream origin", "ref not found in the repository"),
+    # what GitHub says when a fetch-by-SHA names a commit it does not have
+    ("not our ref", "ref not found in the repository"),
+    ("couldn't find remote ref", "ref not found in the repository"),
+    ("remote branch", "ref not found in the repository"),
+    ("could not resolve host", "the repository host could not be reached"),
+    ("permission denied", "the server is not allowed to read this repository"),
+)
 
 #: `git diff --name-status` codes we map to the API's file statuses
 _STATUS_NAMES = {"A": "added", "D": "deleted"}
@@ -107,20 +141,170 @@ def remove_workspace(path: str) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def min_free_mb() -> int:
+    """Free space under the workspaces root below which creation is refused."""
+    return _int_env("WORKSPACES_MIN_FREE_MB", DEFAULT_MIN_FREE_MB)
+
+
+def workspace_max_mb() -> int:
+    """Per-session workspace cap in MB. ``0`` disables the quota."""
+    return _int_env("SANDBOX_WORKSPACE_MAX_MB", DEFAULT_WORKSPACE_MAX_MB)
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def free_mb(path: str) -> int:
+    """Free megabytes on the filesystem holding ``path`` (its nearest parent).
+
+    ``-1`` when the question cannot be answered, which callers treat as "do
+    not block on it": a broken statvfs must not stop the product.
+    """
+    probe = Path(path or ".")
+    for candidate in [probe, *probe.parents]:
+        if candidate.exists():
+            try:
+                return int(shutil.disk_usage(str(candidate)).free // (1024 * 1024))
+            except OSError:
+                return -1
+    return -1
+
+
+def ensure_free_space(root: str | None = None) -> None:
+    """Refuse to start a session that would fill the host (HAR-84 G-07a).
+
+    The workspaces directory is a bind mount of a *shared* filesystem — the
+    SQLite database, the docker images and every other session's clone live on
+    it too — so the last free gigabyte is not this session's to spend.
+    """
+    floor = min_free_mb()
+    if floor <= 0:
+        return
+    root = root or workspaces_root()
+    free = free_mb(root)
+    if 0 <= free < floor:
+        raise RuntimeError(
+            f"not enough free disk to start a session: {free} MB free under the "
+            f"workspaces directory, {floor} MB required "
+            f"(WORKSPACES_MIN_FREE_MB)"
+        )
+
+
+def workspace_mb(workspace: str) -> int:
+    """Size of a workspace in MB. ``du -sm`` where there is one, else a walk."""
+    if not workspace or not Path(workspace).is_dir():
+        return 0
+    try:
+        result = subprocess.run(
+            ["du", "-sm", workspace],
+            capture_output=True,
+            text=True,
+            timeout=DU_TIMEOUT,
+        )
+        if result.returncode == 0:
+            first = result.stdout.split(maxsplit=1)
+            if first and first[0].isdigit():
+                return int(first[0])
+    except Exception:  # noqa: BLE001 - no `du` (Windows), or a slow tree
+        pass
+    return _walk_mb(workspace)
+
+
+def _walk_mb(workspace: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(workspace):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                continue
+    return int(total // (1024 * 1024))
+
+
 def clone_repo(repo: str, ref: str, workspace: str) -> str:
-    """Clone ``repo`` at ``ref`` into ``workspace``; return the cloned SHA."""
+    """Clone ``repo`` at ``ref`` into ``workspace``; return the cloned SHA.
+
+    ``ref`` is documented as "branch, tag, or SHA", but ``git clone --depth 1
+    --branch <sha>`` cannot resolve a commit id — it only takes a *name*. A
+    full SHA therefore goes down the fetch path from the start, and anything
+    else falls back to it when the clone fails and the ref still looks like a
+    commit (HAR-84 G-06).
+    """
     remove_workspace(workspace)
     Path(workspace).parent.mkdir(parents=True, exist_ok=True)
-    clone = subprocess.run(
-        ["git", "clone", "--depth", "1", "--branch", ref, repo, workspace],
-        capture_output=True,
-        text=True,
-        timeout=CLONE_TIMEOUT,
+    try:
+        if _FULL_SHA.match(ref):
+            return _clone_at_sha(repo, ref, workspace)
+        clone = subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", ref, "--", repo, workspace],
+            capture_output=True,
+            text=True,
+            timeout=CLONE_TIMEOUT,
+        )
+        if clone.returncode != 0:
+            if _ABBREV_SHA.match(ref):
+                return _clone_at_sha(repo, ref, workspace)
+            raise RuntimeError(clone_error_message(clone.stderr or clone.stdout or ""))
+        state_dir(workspace).mkdir(parents=True, exist_ok=True)
+        return _git_output(workspace, ["rev-parse", "HEAD"])
+    except BaseException:
+        # A clone that failed leaves nothing behind. `close()` cannot do it:
+        # the session row never got a workspace_path, so the directory the
+        # fetch path created would sit on the disk forever.
+        remove_workspace(workspace)
+        raise
+
+
+def _clone_at_sha(repo: str, ref: str, workspace: str) -> str:
+    """``init`` + ``fetch --depth 1 <sha>`` + ``checkout FETCH_HEAD``."""
+    remove_workspace(workspace)
+    Path(workspace).mkdir(parents=True, exist_ok=True)
+    steps = (
+        ["init", "--quiet"],
+        ["remote", "add", "origin", "--", repo],
+        ["fetch", "--depth", "1", "origin", ref],
+        ["checkout", "--quiet", "FETCH_HEAD"],
     )
-    if clone.returncode != 0:
-        raise RuntimeError(f"git clone failed: {clone.stderr.strip()[:2000]}")
+    for args in steps:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=CLONE_TIMEOUT,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                clone_error_message(result.stderr or result.stdout or "")
+            )
     state_dir(workspace).mkdir(parents=True, exist_ok=True)
     return _git_output(workspace, ["rev-parse", "HEAD"])
+
+
+def clone_error_message(stderr: str) -> str:
+    """A clone failure in the product's words, with no host path in it.
+
+    git's own text names ``/srv/gt-workspaces/<session id>`` and asks about a
+    username nobody was going to be prompted for (HAR-84 G-22).
+    """
+    text = " ".join((stderr or "").split())
+    lowered = text.lower()
+    for needle, message in _CLONE_ERRORS:
+        if needle in lowered:
+            return f"could not clone the repository: {message}"
+    return f"could not clone the repository: {_strip_paths(text)[:500]}"
+
+
+def _strip_paths(text: str) -> str:
+    """Drop absolute paths (and the workspaces root) out of an error string."""
+    root = workspaces_root()
+    if root:
+        text = text.replace(str(Path(root)), "<workspace>").replace(root, "<workspace>")
+    return re.sub(r"(?<![\w])(?:[A-Za-z]:)?[/\\][\w./\\-]{6,}", "<path>", text)
 
 
 def compute_diff(workspace: str, base_sha: str) -> dict:

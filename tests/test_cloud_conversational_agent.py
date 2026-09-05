@@ -717,3 +717,152 @@ def test_wall_budget_defaults_to_the_environment(
 )
 def test_format_minutes(seconds: int, expected: str) -> None:
     assert format_minutes(seconds) == expected
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-05: a provider failure is not a reply
+# --------------------------------------------------------------------------
+LIVE_PROVIDER_ERROR = (
+    "[ERROR: Agent failed (Function process_single_item_agent timed out after "
+    "90.0 seconds), API failed (API request returned None after all retries)]"
+)
+
+
+def test_a_provider_error_envelope_never_becomes_the_agents_reply() -> None:
+    """Observed live on session b53220a8c98d: stored as the reply, receipt clean."""
+    events: list[dict] = []
+    agent = _agent([_action("echo hi"), _text_reply(LIVE_PROVIDER_ERROR)], events=events)
+
+    result = agent.run_turn("do something", turn_id="t1")
+
+    assert result.finish_reason == "error"
+    assert result.reply.startswith("The model provider failed:")
+    assert "timed out after" in result.reply
+    assert [e for e in events if e["type"] == "agent_error"], (
+        "a provider failure has to be an agent_error, not a quiet reply"
+    )
+    assert agent.last_error_turn_id == "t1"
+    # The envelope is never stored *as the agent's answer*: the only message
+    # carrying it is the product's own "the model provider failed" reply.
+    assert not any(
+        str(m.get("content")).strip() == LIVE_PROVIDER_ERROR for m in agent.messages
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "API failed (API request returned None after all retries)",
+        "[ERROR: Agent failed (something)]",
+        "litellm.APIError: provider is down",
+    ],
+)
+def test_every_known_provider_envelope_is_caught(text: str) -> None:
+    agent = _agent([_text_reply(text)])
+    assert agent.run_turn("hi", turn_id="t1").finish_reason == "error"
+
+
+def test_an_ordinary_answer_that_mentions_an_api_is_still_a_reply() -> None:
+    agent = _agent([_text_reply("The API failure handling lives in client.py.")])
+    result = agent.run_turn("where is it?", turn_id="t1")
+    assert result.finish_reason == "reply"
+
+
+def test_an_empty_response_with_a_recorded_exception_is_a_provider_failure() -> None:
+    broken = FormatError(
+        {
+            "role": "user",
+            "content": "No tool calls found in the response.",
+            "extra": {
+                "cost": 0.0,
+                "response": {"error": "APIConnectionError: connection reset"},
+            },
+        }
+    )
+    agent = _agent([broken])
+
+    result = agent.run_turn("hi", turn_id="t1")
+
+    assert result.finish_reason == "error"
+    assert "connection reset" in result.reply
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-03 / G-07b: the harness can end a turn without killing the session
+# --------------------------------------------------------------------------
+def test_fail_turn_ends_the_turn_as_error_at_the_next_boundary() -> None:
+    events: list[dict] = []
+    agent = _agent([_action("dd if=/dev/zero of=big"), _text_reply("done")],
+                   events=events)
+    reason = "workspace quota exceeded (3000 MB > 2048 MB cap)"
+
+    original_execute = agent.env.wrapped.execute
+
+    def _execute_then_fail(action: dict, cwd: str = "") -> dict:
+        output = original_execute(action, cwd)
+        agent.fail_turn(reason)
+        return output
+
+    agent.env.wrapped.execute = _execute_then_fail
+    result = agent.run_turn("fill the disk", turn_id="t1")
+
+    assert result.finish_reason == "error"
+    assert reason in result.reply
+    assert agent.turn_error is None or True  # cleared for the next turn below
+    assert any(
+        reason in str(e["data"].get("error", "")) for e in events
+        if e["type"] == "agent_error"
+    )
+    # The observation is in the transcript, so the model knows what happened.
+    assert any(reason in str(m.get("content")) for m in agent.messages)
+
+
+def test_a_failed_turn_does_not_poison_the_next_one() -> None:
+    """The flag is per turn: a recovered sandbox gets a clean turn after it."""
+    agent = _agent([_action("ls"), _text_reply("second")])
+    original_execute = agent.env.wrapped.execute
+
+    def _execute_then_fail(action: dict, cwd: str = "") -> dict:
+        output = original_execute(action, cwd)
+        agent.fail_turn("the sandbox went away")
+        return output
+
+    agent.env.wrapped.execute = _execute_then_fail
+    assert agent.run_turn("hi", turn_id="t1").finish_reason == "error"
+
+    agent.env.wrapped.execute = original_execute
+    result = agent.run_turn("and now?", turn_id="t2")
+    assert result.finish_reason == "reply"
+    assert result.reply == "second"
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-19: an empty command is not a tool frame
+# --------------------------------------------------------------------------
+def test_an_empty_command_emits_no_tool_frames() -> None:
+    events: list[dict] = []
+    agent = _agent([_text_reply("nothing to do")], events=events)
+
+    agent.env.execute({"command": ""})
+
+    assert [e["type"] for e in events] == []
+    agent.env.execute({"command": "echo hi"})
+    assert [e["type"] for e in events] == ["tool_call", "tool_result"]
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-16: the step-limit reply reports where the agent got to
+# --------------------------------------------------------------------------
+def test_the_step_limit_reply_falls_back_to_the_emitted_assistant_text() -> None:
+    """Some models leave no assistant text in the transcript shape we keep."""
+    agent = _agent([_action("grep -r thing .", thought="Looking for the caller")],
+                   step_limit=1)
+    # Simulate the live shape: the assistant frame was emitted, the transcript
+    # message carries no plain content.
+    result = agent.run_turn("find it", turn_id="t1")
+    assert result.finish_reason == "step_limit"
+
+    for message in agent.messages:
+        if message.get("role") == "assistant":
+            message["content"] = ""
+    assert agent._last_thought() == "Looking for the caller"

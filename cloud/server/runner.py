@@ -21,6 +21,7 @@ from typing import Any
 
 from .codegraph import build_graph
 from .conversational_agent import (
+    TURN_ERROR_REPLY,
     ConversationalAgent,
     Steering,
     TurnResult,
@@ -30,6 +31,7 @@ from .events import EventBus
 from .prompts import CHAT_BRIEF_TEMPLATE, CHAT_SYSTEM_TEMPLATE
 from .sandbox import (
     SANDBOX_WORKDIR,
+    SandboxError,
     ensure_running,
     is_docker_mode,
     reap_sandboxes,
@@ -42,12 +44,15 @@ from .workspace import (
     cap_diff,
     clone_repo,
     compute_diff,
+    ensure_free_space,
     list_tree,
     load_transcript,
     looks_like_write,
     remove_workspace,
     save_transcript,
     state_dir,
+    workspace_max_mb,
+    workspace_mb,
     workspace_path,
 )
 
@@ -74,6 +79,65 @@ DIFF_SNAPSHOT_BUDGET_SECONDS = 2.0
 
 RESTART_NOTICE = "Server restarted; turn interrupted"
 SUBMIT_REPLY_FALLBACK = "Done — I submitted my changes."
+
+#: how many sessions may be cloning/indexing at once. Creation used to take no
+#: slot at all, so any number of clones + GT indexes could start together
+#: (HAR-84 G-21).
+DEFAULT_MAX_CONCURRENT_CREATIONS = 3
+#: seconds a creation-time model preflight may take before it is a failure
+MODEL_PREFLIGHT_TIMEOUT = 30
+#: how long one workspace measurement may take before the quota check starts
+#: skipping commands (a huge tree must not slow the agent down)
+QUOTA_MEASURE_BUDGET_SECONDS = 2.0
+#: how many commands the check then skips between measurements
+QUOTA_CHECK_EVERY = 10
+#: how long one model call may take, so litellm cannot retry a dead model for
+#: four minutes behind a user who is watching a spinner (HAR-84 G-11/G-14)
+DEFAULT_MODEL_REQUEST_TIMEOUT = 300
+
+
+class ModelUnavailable(RuntimeError):
+    """The configured provider will not serve this model (a 400 at creation)."""
+
+
+def model_preflight_enabled() -> bool:
+    """Whether a session creation checks the model against the provider."""
+    return os.environ.get("MODEL_PREFLIGHT", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "",
+    }
+
+
+def model_request_timeout() -> int:
+    return _positive_int_env(
+        "MODEL_REQUEST_TIMEOUT", DEFAULT_MODEL_REQUEST_TIMEOUT
+    ) or DEFAULT_MODEL_REQUEST_TIMEOUT
+
+
+def resolve_model(model: str, temperature: float = 0.0) -> tuple[str, dict[str, Any]]:
+    """The LiteLLM model name and kwargs a session uses, in one place.
+
+    ``_build_agent`` and the creation preflight must agree, or the preflight
+    proves nothing about the route the turn will take.
+    """
+    model_kwargs: dict[str, Any] = {
+        "temperature": temperature,
+        # both halves: litellm retries at its own layer (num_retries) AND at
+        # the provider client's (max_retries). Only setting one left a bad
+        # model retrying 11 times with a 60 s backoff (HAR-84 G-11).
+        "num_retries": 0,
+        "max_retries": 0,
+        "timeout": model_request_timeout(),
+    }
+    model_name = model
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    if base_url:
+        if not model_name.startswith("openai/"):
+            model_name = f"openai/{model_name}"
+        model_kwargs["api_base"] = base_url
+    return model_name, model_kwargs
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -119,9 +183,17 @@ class _SessionState:
     graph_db: str | None = None
     #: set when a per-step ``compute_diff`` blew its budget; reset each turn
     snapshots_disabled: bool = False
+    #: commands run since the workspace was last measured for the quota
+    since_quota_check: int = 0
+    #: 1 = measure after every command; raised only when measuring is slow
+    quota_stride: int = 1
     #: last file-relation graph, keyed by its tree signature (see ``graph``)
     graph_cache: tuple[str, dict] | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    #: held for microseconds around "is this session running?" (post_message)
+    #: and around "flip to idle, then drain" (the turn worker), so a message
+    #: can never be queued as steering nothing will drain (HAR-84 G-15)
+    steer_lock: threading.Lock = field(default_factory=threading.Lock)
     turn_done: threading.Event = field(default_factory=threading.Event)
     closed: bool = False
     pending_stop: bool = False
@@ -144,6 +216,10 @@ class SessionManager:
         self._count_lock = threading.Lock()
         self._running_count = 0
         self._max_concurrent = int(os.environ.get("MAX_CONCURRENT_SESSIONS", "3"))
+        self._creating_count = 0
+        self._max_creations = _positive_int_env(
+            "MAX_CONCURRENT_CREATIONS", DEFAULT_MAX_CONCURRENT_CREATIONS
+        ) or DEFAULT_MAX_CONCURRENT_CREATIONS
         self._reaper_task: asyncio.Task | None = None
 
     # -- state bookkeeping ----------------------------------------------------
@@ -197,6 +273,38 @@ class SessionManager:
         with self._count_lock:
             self._running_count = max(0, self._running_count - 1)
 
+    @property
+    def creating_count(self) -> int:
+        with self._count_lock:
+            return self._creating_count
+
+    def _acquire_creation_slot(self) -> bool:
+        with self._count_lock:
+            if self._creating_count >= self._max_creations:
+                return False
+            self._creating_count += 1
+            return True
+
+    def _release_creation_slot(self) -> None:
+        with self._count_lock:
+            self._creating_count = max(0, self._creating_count - 1)
+
+    # -- model preflight ------------------------------------------------------
+
+    async def check_model(self, model: str) -> None:
+        """Prove the provider will serve ``model`` before a session is built.
+
+        An unusable model used to buy a clone, a sandbox and a GT index, and
+        only failed four minutes into the first turn (HAR-84 G-11). One
+        1-token completion over the same LiteLLM route settles it in a second.
+        ``MODEL_PREFLIGHT=0`` turns it off (tests, air-gapped runs).
+        """
+        if not model.strip():
+            raise ModelUnavailable("model must not be blank")
+        if not model_preflight_enabled():
+            return
+        await asyncio.to_thread(_preflight_blocking, model)
+
     # -- workspace creation ---------------------------------------------------
 
     async def create_workspace(self, session_id: str) -> None:
@@ -204,6 +312,10 @@ class SessionManager:
         session = await self._store.get_session(session_id)
         if session is None:
             raise ValueError(f"session {session_id} not found")
+        if not self._acquire_creation_slot():
+            raise ConcurrencyLimit(
+                f"max concurrent session creations ({self._max_creations}) reached"
+            )
         await self._bus.publish(
             session_id, {"type": "lifecycle", "data": {"status": "creating"}}
         )
@@ -217,6 +329,9 @@ class SessionManager:
         state = self._state(session_id)
         workspace = workspace_path(session_id)
         try:
+            # Before the clone: a session that cannot fit is a clean failure,
+            # not a host with no disk left for anybody (HAR-84 G-07).
+            ensure_free_space()
             self._emit(loop, session_id, "lifecycle", {
                 "status": "cloning",
                 "repo": session["repo"],
@@ -253,6 +368,8 @@ class SessionManager:
                 loop, session_id, "lifecycle", {"status": "failed", "error": error}
             )
             self._bus.finish(session_id)
+        finally:
+            self._release_creation_slot()
 
     def _start_sandbox(
         self, session_id: str, workspace: str, loop: asyncio.AbstractEventLoop
@@ -318,20 +435,27 @@ class SessionManager:
 
     async def post_message(self, session_id: str, content: str) -> tuple[dict, str]:
         """Deliver a user message: start a turn, or steer the running one."""
-        session = await self._store.get_session(session_id)
-        if session is None:
-            raise ValueError(f"session {session_id} not found")
+        state = self._state(session_id)
+        # The status read and the steering hand-off are one atomic step, and
+        # the turn worker takes the same lock *after* it has flipped the row to
+        # idle. Either this sees `running` and the worker's post-flip drain
+        # picks the message up, or it sees `idle` and starts its own turn —
+        # there is no ordering in which the message is lost (HAR-84 G-15).
+        with state.steer_lock:
+            session = await self._store.get_session(session_id)
+            if session is None:
+                raise ValueError(f"session {session_id} not found")
 
-        if session["status"] == "running":
-            message = await self._store.add_message(
-                session_id,
-                role="user",
-                content=content,
-                turn_id=session["current_turn_id"],
-            )
-            self._deliver_steering(session_id, message["id"], content)
-            await self._store.update_session(session_id, last_message=content)
-            return message, "queued_for_running_turn"
+            if session["status"] == "running":
+                message = await self._store.add_message(
+                    session_id,
+                    role="user",
+                    content=content,
+                    turn_id=session["current_turn_id"],
+                )
+                self._deliver_steering(session_id, message["id"], content)
+                await self._store.update_session(session_id, last_message=content)
+                return message, "queued_for_running_turn"
 
         if not self._acquire_slot():
             raise ConcurrencyLimit(
@@ -358,7 +482,15 @@ class SessionManager:
             )
             await self._bus.publish(session_id, {
                 "type": "turn_started",
-                "data": {"turn_id": turn_id, "message_id": message["id"]},
+                # `content` and `role` so every subscriber can render the
+                # prompt. With only `message_id`, a second tab showed the turn
+                # and the reply but never the question (HAR-84 G-09).
+                "data": {
+                    "turn_id": turn_id,
+                    "message_id": message["id"],
+                    "role": "user",
+                    "content": content,
+                },
             })
         except Exception:
             self._release_slot()
@@ -395,37 +527,84 @@ class SessionManager:
                     result = agent.run_turn(user_text, turn_id=turn_id)
                     self._finish_turn(session, state, turn_id, result, loop)
                     pending = agent.take_pending_steering()
+                    if not pending and not state.closed:
+                        pending = self._settle_idle(loop, session_id, state, agent)
+                        if not pending:
+                            return
                     if not pending or state.closed:
                         break
                     turn_id, user_text = self._chain_turn(session, pending, loop)
-            if not state.closed:
-                self._set_status(loop, session_id, "idle", current_turn_id=None)
-                self._emit(loop, session_id, "lifecycle", {"status": "idle"})
-        except Exception as exc:  # noqa: BLE001 - an agent crash fails the session
-            error = f"{type(exc).__name__}: {exc}"
-            agent = state.agent
-            if agent is None or agent.last_error_turn_id != turn_id:
-                # The agent already reported failures it saw itself; this covers
-                # everything around it (workspace, agent build, bookkeeping).
-                self._emit(
-                    loop, session_id, "agent_error",
-                    {"turn_id": turn_id, "error": error},
-                )
-            self._call_quietly(loop, self._store.finish_turn(
-                turn_id, n_calls=0, cost=0.0, finish_reason="error", patch_sha256=None
-            ))
-            self._set_status(
-                loop, session_id, "failed",
-                current_turn_id=None,
-                closed_reason=CLOSED_FAILED,
-            )
-            self._emit(
-                loop, session_id, "lifecycle", {"status": "failed", "error": error}
-            )
-            self._bus.finish(session_id)
+        except Exception as exc:  # noqa: BLE001 - a crash ends the TURN, not the session
+            self._fail_turn(session, state, turn_id, exc, loop)
         finally:
             self._release_slot()
             state.turn_done.set()
+
+    def _settle_idle(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        session_id: str,
+        state: _SessionState,
+        agent: ConversationalAgent,
+    ) -> list[Steering]:
+        """Flip the session back to ``idle``, then drain once more.
+
+        The order matters. Between the last drain and the status flip the row
+        still said ``running``, so a message landing in that window was queued
+        as steering that nothing would ever read. Draining *after* the flip,
+        under the lock ``post_message`` also takes, closes it (HAR-84 G-15).
+        """
+        self._set_status(loop, session_id, "idle", current_turn_id=None)
+        with state.steer_lock:
+            pending = agent.take_pending_steering()
+        if not pending:
+            self._emit(loop, session_id, "lifecycle", {"status": "idle"})
+            return []
+        # Somebody spoke into the window: go back to running, chain a turn.
+        self._set_status(loop, session_id, "running")
+        return pending
+
+    def _fail_turn(
+        self,
+        session: dict,
+        state: _SessionState,
+        turn_id: str,
+        exc: BaseException,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """End the TURN in ``error`` and hand the session back, still usable.
+
+        Only a failed *workspace creation* writes off a session. A provider
+        blip, a sandbox that had to be restarted or a bug in one turn used to
+        take the whole conversation with it, unrecoverably (HAR-84 G-04).
+        """
+        session_id = str(session["id"])
+        error = f"{type(exc).__name__}: {exc}"
+        agent = state.agent
+        if agent is None or agent.last_error_turn_id != turn_id:
+            # The agent already reported failures it saw itself; this covers
+            # everything around it (workspace, agent build, bookkeeping).
+            self._emit(
+                loop, session_id, "agent_error", {"turn_id": turn_id, "error": error}
+            )
+        result = TurnResult(
+            finish_reason="error",
+            reply=TURN_ERROR_REPLY.format(reason=_short_error(exc)),
+            n_calls=0,
+            cost=0.0,
+        )
+        try:
+            self._finish_turn(session, state, turn_id, result, loop)
+        except Exception:  # noqa: BLE001 - the receipt still has to close
+            log.exception("could not record the failed turn %s", turn_id)
+            self._call_quietly(loop, self._store.finish_turn(
+                turn_id, n_calls=0, cost=0.0, finish_reason="error",
+                patch_sha256=None,
+            ))
+        if state.closed:
+            return
+        self._set_status(loop, session_id, "idle", current_turn_id=None)
+        self._emit(loop, session_id, "lifecycle", {"status": "idle"})
 
     def _chain_turn(
         self,
@@ -447,7 +626,10 @@ class SessionManager:
             gt_status=str(session["gt_status"]),
         ))
         self._emit(loop, session_id, "turn_started", {
-            "turn_id": turn_id, "message_id": pending[-1].message_id
+            "turn_id": turn_id,
+            "message_id": pending[-1].message_id,
+            "role": "user",
+            "content": text,
         })
         return turn_id, text
 
@@ -653,16 +835,7 @@ class SessionManager:
     async def recover(self) -> None:
         """After a restart: no agent survives, so no turn can still be running."""
         for session in await self._store.sessions_with_status("running"):
-            session_id = str(session["id"])
-            await self._store.update_status(
-                session_id, "idle", current_turn_id=None
-            )
-            await self._store.add_message(
-                session_id, role="system", content=RESTART_NOTICE
-            )
-            await self._bus.publish(
-                session_id, {"type": "lifecycle", "data": {"status": "idle"}}
-            )
+            await self._recover_running(session)
         for session in await self._store.sessions_with_status("creating"):
             session_id = str(session["id"])
             error = "Server restarted during workspace creation"
@@ -675,6 +848,62 @@ class SessionManager:
             })
         await self.reap_idle_sessions()
         await self._reap_sandboxes()
+
+    async def _recover_running(self, session: dict) -> None:
+        """Close out a turn the restart interrupted, on the wire as well.
+
+        The row used to go back to ``idle`` with a system message nobody was
+        told about: the ``turn_started`` frame had no matching
+        ``turn_finished``, the receipt kept ``finish_reason ""`` and
+        ``finished_at null`` forever, and a live client showed the turn as
+        still running (HAR-84 G-08 / E-02 / E-03).
+        """
+        session_id = str(session["id"])
+        turn_id = session.get("current_turn_id")
+        await self._store.update_status(session_id, "idle", current_turn_id=None)
+        message = await self._store.add_message(
+            session_id, role="system", content=RESTART_NOTICE, turn_id=turn_id
+        )
+        if turn_id:
+            receipt = await self._interrupted_receipt(session_id, str(turn_id))
+            await self._store.finish_turn(
+                str(turn_id),
+                n_calls=int(receipt.get("n_calls") or 0),
+                cost=float(receipt.get("cost") or 0.0),
+                finish_reason="interrupted",
+                patch_sha256=receipt.get("patch_sha256"),
+                wall_seconds=float(receipt.get("wall_seconds") or 0.0),
+            )
+            await self._bus.publish(session_id, {
+                "type": "turn_finished",
+                "data": {
+                    "turn_id": turn_id,
+                    "finish_reason": "interrupted",
+                    "n_calls": int(receipt.get("n_calls") or 0),
+                    "cost": float(receipt.get("cost") or 0.0),
+                },
+            })
+        await self._bus.publish(session_id, {
+            "type": "system_note",
+            "data": {
+                "turn_id": turn_id,
+                "message_id": message["id"],
+                "content": RESTART_NOTICE,
+            },
+        })
+        await self._bus.publish(
+            session_id, {"type": "lifecycle", "data": {"status": "idle"}}
+        )
+
+    async def _interrupted_receipt(self, session_id: str, turn_id: str) -> dict:
+        """Whatever the interrupted turn had recorded before the lights went out."""
+        try:
+            for turn in await self._store.list_turns(session_id):
+                if str(turn.get("turn_id")) == turn_id:
+                    return turn
+        except Exception:  # noqa: BLE001 - recovery never fails on bookkeeping
+            log.exception("could not read the receipt for turn %s", turn_id)
+        return {}
 
     async def _reap_sandboxes(self) -> None:
         """Drop containers whose session is gone; keep the ones still usable.
@@ -780,6 +1009,11 @@ class SessionManager:
         issue_text: str,
     ) -> ConversationalAgent:
         if state.agent is not None:
+            # Re-check the jail on every turn, not only when the agent is
+            # built: a container can stop *between* turns (a daemon restart, an
+            # operator, an OOM of pid 1) and the cached agent would otherwise
+            # drive a container that is not there (HAR-84 G-04).
+            state.sandbox = self._ensure_sandbox(session, state, loop)
             return state.agent
         workspace = state.workspace or str(session.get("workspace_path") or "")
         if not workspace:
@@ -787,8 +1021,9 @@ class SessionManager:
         state.workspace = workspace
         state.base_sha = state.base_sha or str(session.get("base_sha") or "")
         # After a restart the container is still there but `state` is fresh, so
-        # the name is re-derived and checked rather than trusted.
-        sandbox = ensure_running(str(session["id"])) if is_docker_mode() else None
+        # the name is re-derived and checked rather than trusted. A container
+        # the daemon stopped is started again rather than declared dead.
+        sandbox = self._ensure_sandbox(session, state, loop)
         state.sandbox = sandbox
         config = _session_config(session)
         agent = self._build_agent(
@@ -813,6 +1048,33 @@ class SessionManager:
         self._attach_agent(state, agent)
         return agent
 
+    def _ensure_sandbox(
+        self,
+        session: dict,
+        state: _SessionState,
+        loop: asyncio.AbstractEventLoop,
+    ) -> str | None:
+        """This session's container, running. Started or rebuilt if it is not.
+
+        ``ensure_running`` handles *stopped but present*. A container that is
+        gone entirely is rebuilt on the same workspace — the clone and the
+        transcript are still on disk, so there is nothing to write off.
+        """
+        if not is_docker_mode():
+            return None
+        session_id = str(session["id"])
+        workspace = state.workspace or str(session.get("workspace_path") or "")
+        try:
+            return ensure_running(session_id, workspace)
+        except SandboxError:
+            if not workspace:
+                raise
+            container = self._start_sandbox(session_id, workspace, loop)
+            self._emit(loop, session_id, "lifecycle", {
+                "status": "sandbox_restarted", "container": container,
+            })
+            return container
+
     def _build_agent(
         self,
         *,
@@ -834,13 +1096,7 @@ class SessionManager:
 
         from .environment import CloudLocalEnvironment, LocalEnvironmentConfig
 
-        model_kwargs: dict[str, Any] = {"temperature": temperature, "num_retries": 0}
-        model_name = model
-        base_url = os.environ.get("OPENAI_BASE_URL")
-        if base_url:
-            if not model_name.startswith("openai/"):
-                model_name = f"openai/{model_name}"
-            model_kwargs["api_base"] = base_url
+        model_name, model_kwargs = resolve_model(model, temperature)
 
         gt_off = gt_mode == "off"
         model_obj: Any
@@ -874,6 +1130,14 @@ class SessionManager:
             env_obj = DockerSandboxEnvironment(
                 container=sandbox, image=os.environ.get("SANDBOX_IMAGE", ""),
                 cwd=SANDBOX_WORKDIR, timeout=30,
+                # so a wedged container can be recreated in place, and the
+                # session can say so on the wire (HAR-84 G-03)
+                session_id=session_id,
+                workspace=cwd,
+                on_restart=lambda container: self._emit(
+                    loop, session_id, "lifecycle",
+                    {"status": "sandbox_restarted", "container": container},
+                ),
             )
             env_cwd = SANDBOX_WORKDIR
         else:
@@ -1022,9 +1286,53 @@ class SessionManager:
         published = self._call_quietly(loop, self._bus.publish(session_id, event))
         if event.get("type") != "tool_result" or not isinstance(published, dict):
             return
+        data = event.get("data") or {}
+        state = self._state(session_id)
+        state.since_quota_check += 1
+        if state.since_quota_check >= state.quota_stride:
+            state.since_quota_check = 0
+            self._enforce_quota(loop, session_id)
         event_id = int(published.get("id") or 0)
         if event_id:
-            self._snapshot_diff(loop, session_id, event_id, event.get("data") or {})
+            self._snapshot_diff(loop, session_id, event_id, data)
+
+    def _enforce_quota(
+        self, loop: asyncio.AbstractEventLoop, session_id: str
+    ) -> None:
+        """Cut a turn off once its workspace is over ``SANDBOX_WORKSPACE_MAX_MB``.
+
+        The workspaces directory is a bind mount of a shared filesystem, so
+        without this one ``dd`` filled the host and took the product down
+        (HAR-84 G-07). Measured on the turn worker after **every** command,
+        not only write-shaped ones: ``dd if=/dev/zero of=big`` writes a
+        gigabyte and matches none of the write verbs, and the audit's repro
+        was a single-command turn, so any stride at all would have missed it.
+        A measurement that overruns
+        :data:`QUOTA_MEASURE_BUDGET_SECONDS` raises the stride to
+        :data:`QUOTA_CHECK_EVERY` for the rest of the session, so a huge tree
+        costs one ``du`` per ten commands instead of one per command.
+        """
+        cap = workspace_max_mb()
+        state = self._state(session_id)
+        workspace = state.workspace
+        agent = state.agent
+        if cap <= 0 or not workspace or agent is None or agent.turn_error:
+            return
+        started = time.monotonic()
+        try:
+            used = workspace_mb(workspace)
+        except Exception:  # noqa: BLE001 - a failed measurement is not a verdict
+            return
+        if time.monotonic() - started > QUOTA_MEASURE_BUDGET_SECONDS:
+            state.quota_stride = QUOTA_CHECK_EVERY
+        if used <= cap:
+            return
+        reason = f"workspace quota exceeded ({used} MB > {cap} MB cap)"
+        agent.fail_turn(reason)
+        self._emit(
+            loop, session_id, "lifecycle",
+            {"status": "quota_exceeded", "reason": reason},
+        )
 
     def _snapshot_diff(
         self,
@@ -1105,7 +1413,36 @@ class SessionManager:
 
 
 class ConcurrencyLimit(RuntimeError):
-    """Raised when a new turn would exceed MAX_CONCURRENT_SESSIONS."""
+    """Raised when a new turn or creation would exceed its concurrency cap."""
+
+
+#: longest failure text quoted back to the user in a turn's error reply
+_ERROR_REASON_CHARS = 300
+
+
+def _short_error(exc: BaseException) -> str:
+    """One bounded line describing a failure, for the user-facing reply."""
+    text = " ".join(f"{type(exc).__name__}: {exc}".split())
+    return text[:_ERROR_REASON_CHARS] or type(exc).__name__
+
+
+def _preflight_blocking(model: str) -> None:
+    """One 1-token completion over the session's own LiteLLM route."""
+    model_name, model_kwargs = resolve_model(model)
+    model_kwargs.pop("temperature", None)
+    # A preflight the user is waiting on gets its own, much shorter, budget.
+    model_kwargs["timeout"] = MODEL_PREFLIGHT_TIMEOUT
+    try:
+        import litellm
+
+        litellm.completion(
+            model=model_name,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+            **model_kwargs,
+        )
+    except Exception as exc:  # noqa: BLE001 - any refusal is "not available"
+        raise ModelUnavailable(_short_error(exc)) from exc
 
 
 def _tree_signature(base_sha: str, files: list[dict]) -> str:

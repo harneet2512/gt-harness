@@ -34,6 +34,16 @@ services:
       # path the server writes and the path the daemon binds identical, so
       # WORKSPACES_DIR needs no translation.
       - ${WORKSPACES_HOST_DIR:-/srv/gt-workspaces}:${WORKSPACES_HOST_DIR:-/srv/gt-workspaces}
+    # The codespace was found down twice in one audit: both containers had
+    # exited 255 after a daemon restart and, with no restart policy, stayed
+    # down while the public URL served 502 (HAR-84 G-01).
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     environment:
       - DB_PATH=/app/data/cloud_harness.db
       - WORKSPACES_DIR=${WORKSPACES_HOST_DIR:-/srv/gt-workspaces}
@@ -44,8 +54,13 @@ services:
       - SANDBOX_PROXY_URL=http://gt-egress-proxy:3128
       - SANDBOX_ALLOW_REGISTRIES=${SANDBOX_ALLOW_REGISTRIES:-1}
       - SANDBOX_EGRESS_ALLOW=${SANDBOX_EGRESS_ALLOW:-}
+      # Disk bounds. The workspaces bind mount is a SHARED filesystem —
+      # the database, the images and every other session are on it too.
+      - WORKSPACES_MIN_FREE_MB=${WORKSPACES_MIN_FREE_MB:-2048}
+      - SANDBOX_WORKSPACE_MAX_MB=${SANDBOX_WORKSPACE_MAX_MB:-2048}
     depends_on:
-      - egress-proxy
+      egress-proxy:
+        condition: service_started
 
   # The only way out of the sandbox network. On both networks by design: the
   # internal one to be reachable, the default one to have somewhere to forward.
@@ -55,6 +70,16 @@ services:
     image: gt-egress-proxy:latest
     container_name: gt-egress-proxy
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c "import socket,sys;
+          s=socket.create_connection(('127.0.0.1',3128),3); s.close()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
       - EGRESS_PROXY_PORT=3128
       - EGRESS_ALLOW_REGISTRIES=${SANDBOX_ALLOW_REGISTRIES:-1}
@@ -83,8 +108,19 @@ services:
         BUILD_SHA: ${BUILD_SHA:-dev}
     ports:
       - "80:80"
+    restart: unless-stopped
+    healthcheck:
+      # nginx's own root; busybox wget ships in the nginx:alpine image.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
-      - server
+      server:
+        # Not just "started": the UI proxies /api, so coming up before the
+        # server is answering is how a fresh deploy serves 502s.
+        condition: service_healthy
 
 networks:
   # internal: no route off the host, no external DNS. Sandboxes live here.

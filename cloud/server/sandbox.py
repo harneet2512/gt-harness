@@ -33,6 +33,7 @@ lists stay identical.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import time
@@ -57,6 +58,7 @@ __all__ = [
     "egress_allow_list",
     "ensure_running",
     "is_docker_mode",
+    "is_exec_failure",
     "list_sandboxes",
     "prepare_workspace",
     "reap_sandboxes",
@@ -93,6 +95,31 @@ DOCKER_TIMEOUT = 180
 TIMEOUT_GRACE_SECONDS = 10
 #: GNU `timeout` exit codes: 124 (TERM) and 137 (128+KILL)
 TIMEOUT_EXIT_CODES = (124, 137)
+
+#: `docker exec` itself failed to start the process. Not the command's exit
+#: code — the runtime's. See :func:`is_exec_failure`.
+EXEC_FAILURE_RETURNCODE = 128
+#: runc's wording when it cannot spawn the exec's helper process, which is what
+#: a container out of pids looks like from outside (HAR-84 G-03)
+EXEC_FAILURE_MARKERS = (
+    "oci runtime exec failed",
+    "unable to spawn stage-1",
+    "is not running",
+    "no such container",
+)
+#: what the agent is told when its sandbox could not be brought back
+SANDBOX_UNAVAILABLE_OUTPUT = (
+    "sandbox unavailable: the session container stopped responding and could "
+    "not be recreated"
+)
+#: 128 + SIGKILL. Reported for a command the kernel killed, and for the
+#: synthetic observation above, so the transcript never carries runc's text.
+KILLED_RETURNCODE = 137
+#: what an otherwise silent rc-137 means, since the kernel says nothing
+OOM_KILLED_OUTPUT = (
+    "[killed: the command hit the container memory limit "
+    "(SANDBOX_MEMORY) or was killed from outside]"
+)
 
 #: git endpoints — always reachable, this is what a coding agent needs
 GIT_ALLOW = (
@@ -348,6 +375,14 @@ def run_argv(
         docker_binary(), "run", "-d",
         "--name", container_name(session_id),
         "--label", f"{SESSION_LABEL}={session_id}",
+        # tini as pid 1. `sleep infinity` never reaps, so a workload that
+        # forks and dies leaves zombies until the container is out of pids and
+        # every later `docker exec` fails with rc 128 (HAR-84 G-03).
+        "--init",
+        # A daemon restart stops every sandbox; without this the container is
+        # `Exited (255)` forever and the session can never run again
+        # (HAR-84 G-04 / D-19).
+        "--restart", "unless-stopped",
         "--network", network or network_name(),
         "--memory", os.environ.get("SANDBOX_MEMORY", DEFAULT_MEMORY),
         "--cpus", os.environ.get("SANDBOX_CPUS", DEFAULT_CPUS),
@@ -462,15 +497,71 @@ def start_sandbox(
     }
 
 
-def ensure_running(session_id: str) -> str:
-    """The container name, if this session's sandbox is up. Otherwise raise."""
+def ensure_running(session_id: str, workspace: str | None = None) -> str:
+    """The container name, with this session's sandbox actually up.
+
+    A *stopped but present* container is started rather than declared dead
+    (HAR-84 G-04): after a docker daemon restart every sandbox is
+    ``Exited (255)`` while the workspace, the clone and the transcript are all
+    still on disk, so the session only needs ``docker start``. Only a container
+    that is gone, or that will not come back, is a :class:`SandboxError`.
+    """
     name = container_name(session_id)
     state = _docker("inspect", "-f", "{{.State.Running}}", name, check=False)
-    if state.returncode != 0 or state.stdout.strip() != "true":
+    if state.returncode != 0:
         raise SandboxError(
-            f"sandbox {name} is not running; the session cannot execute commands"
+            f"sandbox {name} no longer exists; the session cannot execute commands"
+        )
+    if state.stdout.strip() == "true":
+        return name
+
+    # Present but stopped. The bind mount's permissions are re-applied first:
+    # a workspace the server re-cloned or re-indexed since may have files uid
+    # 1000 cannot write.
+    if workspace:
+        prepare_workspace(workspace)
+    started = _docker("start", name, check=False)
+    if started.returncode != 0:
+        raise SandboxError(
+            f"sandbox {name} is stopped and would not start: "
+            f"{(started.stderr or '').strip()[:500]}"
+        )
+    ready = _docker("exec", "-u", SANDBOX_USER, name, "true", check=False, timeout=60)
+    if ready.returncode != 0:
+        raise SandboxError(
+            f"sandbox {name} restarted but is not executable: "
+            f"{(ready.stderr or '').strip()[:500]}"
         )
     return name
+
+
+def is_exec_failure(returncode: int, output: str) -> bool:
+    """True when ``docker exec`` itself failed, rather than the command in it.
+
+    Two shapes. A container out of pids answers rc **128** with runc's
+    ``OCI runtime exec failed``; a container that is merely *stopped* answers
+    rc **1** with nothing but the daemon's own error line. rc alone decides
+    neither — ``git`` exits 128 and half the world exits 1 — so the runtime's
+    wording has to be there too, and for the rc-1 shape it has to be the
+    *whole* output, not something a command happened to print.
+    """
+    lowered = (output or "").strip().lower()
+    if not lowered or returncode == 0:
+        return False
+    if returncode == EXEC_FAILURE_RETURNCODE:
+        return any(marker in lowered for marker in EXEC_FAILURE_MARKERS)
+    return lowered.startswith("error response from daemon:") and any(
+        marker in lowered for marker in EXEC_FAILURE_MARKERS
+    )
+
+
+def _is_exec_failure_output(output: dict) -> bool:
+    """:func:`is_exec_failure`, applied to an ``execute`` result dict."""
+    try:
+        returncode = int(output.get("returncode", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return is_exec_failure(returncode, str(output.get("output") or ""))
 
 
 def remove_sandbox(session_id: str) -> bool:
@@ -521,6 +612,11 @@ class SandboxEnvironmentConfig(LocalEnvironmentConfig):
 
     container: str = ""
     image: str = ""
+    #: identity of the session, so a dead container can be recreated in place
+    session_id: str = ""
+    #: HOST path of the workspace, for that same recreation (the daemon
+    #: resolves a bind mount on the host, not inside the server container)
+    workspace: str = ""
 
 
 class DockerSandboxEnvironment(LocalEnvironment):
@@ -542,6 +638,7 @@ class DockerSandboxEnvironment(LocalEnvironment):
         container: str,
         image: str = "",
         config_class: type = SandboxEnvironmentConfig,
+        on_restart: Any = None,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("cwd", SANDBOX_WORKDIR)
@@ -549,6 +646,12 @@ class DockerSandboxEnvironment(LocalEnvironment):
             config_class=config_class, container=container, image=image, **kwargs
         )
         self._uname_cache: tuple[str, str, str] | None = None
+        #: called with the new container name after a successful recreation,
+        #: so the session can publish ``lifecycle sandbox_restarted``
+        self._on_restart = on_restart
+        #: set once the sandbox could not be brought back. The turn ends at
+        #: the next step boundary rather than running on against a dead jail.
+        self.unavailable = False
         # Killing the local `docker exec` client is not enough: the process it
         # started keeps running inside the container. The guard therefore kills
         # the client *and* reaps the agent user's processes in the container.
@@ -612,8 +715,70 @@ class DockerSandboxEnvironment(LocalEnvironment):
         limit = int(timeout or self.config.timeout)
         self._guard.arm()
         try:
+            output = self._execute_with_recovery(command, cwd, limit)
+        finally:
+            interrupted = self._guard.disarm()
+        if interrupted:
+            output = interrupted_observation(str(output.get("output") or ""))
+        elif output.get("returncode") == KILLED_RETURNCODE and not str(
+            output.get("output") or ""
+        ).strip():
+            # rc 137 with no text at all is what an OOM kill looks like from
+            # here; without this the agent has to guess (HAR-84 G-20).
+            output = {**output, "output": OOM_KILLED_OUTPUT}
+        self._check_finished(output)
+        return output
+
+    def _execute_with_recovery(self, command: str, cwd: str, limit: int) -> dict:
+        """Run the command; recreate the sandbox once if the *exec* failed.
+
+        A container out of pids (or one the daemon restarted underneath us)
+        answers every ``docker exec`` with runc's ``OCI runtime exec failed``
+        and rc 128. That is a sandbox-health failure, not a command result:
+        pasting it into the transcript as ordinary output leaves the session
+        looking ``idle`` and permanently unusable (HAR-84 G-03).
+        """
+        output = self._execute_once(command, cwd, limit)
+        if not _is_exec_failure_output(output):
+            return output
+        if not self._recreate():
+            return self._unavailable_output()
+        output = self._execute_once(command, cwd, limit)
+        if _is_exec_failure_output(output):
+            return self._unavailable_output()
+        return output
+
+    def _unavailable_output(self) -> dict[str, Any]:
+        self.unavailable = True
+        return {
+            "output": SANDBOX_UNAVAILABLE_OUTPUT,
+            "returncode": KILLED_RETURNCODE,
+            "exception_info": SANDBOX_UNAVAILABLE_OUTPUT,
+        }
+
+    def _recreate(self) -> bool:
+        """``docker rm -f`` + a fresh ``docker run`` on the same workspace."""
+        session_id = str(getattr(self.config, "session_id", "") or "")
+        workspace = str(getattr(self.config, "workspace", "") or "")
+        if not session_id or not workspace:
+            return False
+        try:
+            remove_sandbox(session_id)
+            info = start_sandbox(session_id, workspace)
+        except Exception:  # noqa: BLE001 - a failed rescue is "unavailable"
+            return False
+        self._uname_cache = None
+        with contextlib.suppress(Exception):
+            self.config.container = info["container"]
+        if callable(self._on_restart):
+            with contextlib.suppress(Exception):
+                self._on_restart(info["container"])
+        return True
+
+    def _execute_once(self, command: str, cwd: str, limit: int) -> dict[str, Any]:
+        try:
             result = self._run(command, cwd, limit)
-            output = {
+            return {
                 "output": result.stdout,
                 "returncode": result.returncode,
                 "exception_info": "",
@@ -625,7 +790,7 @@ class DockerSandboxEnvironment(LocalEnvironment):
                 if isinstance(raw_output, bytes)
                 else (raw_output or "")
             )
-            output = {
+            return {
                 "output": raw_output,
                 "returncode": -1,
                 "exception_info": (
@@ -636,12 +801,6 @@ class DockerSandboxEnvironment(LocalEnvironment):
                     "exception": str(exc),
                 },
             }
-        finally:
-            interrupted = self._guard.disarm()
-        if interrupted:
-            output = interrupted_observation(str(output.get("output") or ""))
-        self._check_finished(output)
-        return output
 
     def _run(
         self, command: str, cwd: str, timeout: int

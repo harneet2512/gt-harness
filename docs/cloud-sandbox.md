@@ -40,7 +40,9 @@ listed under Known Limitations in `cloud/README.md`.
 | Escaping via the Docker daemon | **The Docker socket is mounted into the *server*, not into a sandbox** — `cloud/docker-compose.yml` puts `/var/run/docker.sock` on the `server` service only. A sandbox has no socket, no docker CLI, and no way to ask the daemon for anything. `test_the_sandbox_has_no_docker_socket` asserts it from inside. |
 | Stealing model-provider credentials | **Model keys never enter a sandbox.** Model calls happen in the server process. The exec environment is an allow-list — `PATH`, `HOME`, `LANG`, `TERM`, the proxy variables, and whatever `SANDBOX_ENV_PASSTHROUGH` names — and `is_sensitive_env_name` is then applied *on top* of it, so a name ending in `_API_KEY` / `_ACCESS_TOKEN` / `_AUTH_TOKEN` / `_SECRET` / `_PASSWORD` (or a known one such as `OPENAI_API_KEY`) is dropped even when it is listed explicitly. `PATH` and `HOME` come from the image, never from the server process — leaking the server's `HOME` would point pip and npm at `/root`. |
 | Exfiltrating a repository, or pulling a payload from an arbitrary host | The sandbox network is created `--internal`: no default route off the host, no external DNS. `HTTP_PROXY`/`HTTPS_PROXY` point at `gt-egress-proxy`, which serves only the allow-list and answers everything else `403` **before opening a connection**, so a denied host is never even resolved. A bare IP does not help: `is_allowed()` never matches one. |
-| Starving the host | `--memory 2g --cpus 2 --pids-limit 512`, plus a tmpfs `/tmp` capped at 512 MB (`rw,nosuid,nodev,exec`). |
+| Starving the host | `--memory 2g --cpus 2 --pids-limit 512`, plus a tmpfs `/tmp` capped at 512 MB (`rw,nosuid,nodev,exec`), plus a per-session **workspace quota** (`SANDBOX_WORKSPACE_MAX_MB`, default 2048) measured after every write-shaped command and a host-wide **free-space floor** (`WORKSPACES_MIN_FREE_MB`, default 2048) checked before a session is created. |
+| Zombies exhausting the pid limit | `--init` runs tini as pid 1, so orphans reparented to it are reaped. Without it pid 1 was `sleep infinity`, which never reaps: 510 forks left the container permanently out of pids and **every** later `docker exec` failed with `OCI runtime exec failed` (HAR-84 G-03). |
+| A container the daemon stopped, or one wedged out of pids | `--restart unless-stopped` brings it back after a daemon restart; `ensure_running()` `docker start`s a stopped-but-present container; and an `OCI runtime exec failed` rc-128 result is treated as a **sandbox-health failure** — the container is recreated (`lifecycle sandbox_restarted`), the command retried once, and only then does the turn end with an observation of `sandbox unavailable` and `finish_reason: error`. |
 | A wedged or runaway command | Two timeouts. GNU `timeout --signal=KILL <n>s` **inside** the container kills the process tree the exec created (`pkill -g` on an exec's pgid is unreliable across `docker exec`), and the client-side `communicate` timeout at `n + 10s` is a backstop for a wedged daemon, followed by `pkill -KILL -u 1000` in the container. |
 
 ### What is not
@@ -104,7 +106,9 @@ One container per session, named `gt-sandbox-<session_id>` and labelled
 | Sandbox failure | any of the above raises `SandboxError` | `sandbox_failed {error}`, then `failed {error}` — **the session fails** |
 | GT indexing | in the **server**, against the host path of the same workspace | `indexing` → `gt_ready` or `gt_unavailable {error}` |
 | Ready | | `idle` |
-| Each turn | `ensure_running()` re-derives and re-checks the container name (in-memory state is not trusted across a restart); every action is then one `docker exec` | `running`, then `assistant` / `tool_call` / `tool_result` … |
+| Each turn | `ensure_running()` re-derives and re-checks the container name (in-memory state is not trusted across a restart) and **`docker start`s it if the daemon stopped it**; every action is then one `docker exec` | `running`, then `assistant` / `tool_call` / `tool_result` … |
+| Sandbox recreated mid-turn | an `OCI runtime exec failed` rc-128 → `remove_sandbox()` + `start_sandbox()` on the same workspace, then the command is retried once | `sandbox_restarted {container}` |
+| Workspace over its quota | `du -sm` after a write-shaped `tool_result` exceeds `SANDBOX_WORKSPACE_MAX_MB` → the command in flight is killed and the turn ends `error` | `quota_exceeded {reason}` |
 | Close | `remove_sandbox()` **before** `remove_workspace()` | `closed` |
 | Server restart | `recover()` → `reap_sandboxes(keep)` | — |
 
@@ -141,6 +145,8 @@ All of these are documented in `cloud/.env.example`; the defaults live in
 | `SANDBOX_EGRESS_ALLOW` | *(empty)* | Extra hosts, comma-separated; `*.example.com` wildcards supported. |
 | `SANDBOX_MEMORY` / `SANDBOX_CPUS` / `SANDBOX_PIDS_LIMIT` / `SANDBOX_TMPFS_SIZE` | `2g` / `2` / `512` / `512m` | Resource caps. |
 | `SANDBOX_ENV_PASSTHROUGH` | *(empty)* | Extra environment variable **names** forwarded into exec. Subject to the credential scrub regardless. |
+| `SANDBOX_WORKSPACE_MAX_MB` | `2048` | Per-session workspace cap. Measured with `du -sm` on the turn worker after every write-shaped command; over it, the command is interrupted and the turn ends `error` with `workspace quota exceeded (N MB > cap)`. `0` disables it. |
+| `WORKSPACES_MIN_FREE_MB` | `2048` | Free-space floor under `WORKSPACES_DIR`. Below it a new session fails immediately with a readable reason instead of cloning into a full disk. `0` disables it. |
 | `WORKSPACES_HOST_DIR` | `/srv/gt-workspaces` | Compose only: the host directory holding workspaces, mounted into the server at the same absolute path (§2). |
 | `DOCKER_BINARY` | `docker` | The CLI to shell out to. There is deliberately no docker SDK dependency. |
 
@@ -178,6 +184,56 @@ docker logs --tail 50 gt-egress-proxy      # one ALLOW/DENY line per request
   cleaning up by hand.
 * **The proxy is shared** and `restart: unless-stopped`. While it is down,
   sandboxes have no egress at all — the safe direction.
+
+### Restart and health policy
+
+Every long-lived service — `server`, `ui`, `egress-proxy` — is
+`restart: unless-stopped` **and** has a healthcheck; `tests/test_cloud_compose.py`
+asserts both, because the audit twice found the deployment down with
+`cloud-server-1` / `cloud-ui-1` `Exited (255)` and nothing retrying (HAR-84
+G-01). Sandboxes get `--restart unless-stopped` from `run_argv` for the same
+reason.
+
+| Service | Healthcheck | Depends on |
+|---|---|---|
+| `server` | `curl -fsS http://127.0.0.1:8000/health` every 15s | `egress-proxy` started |
+| `ui` | busybox `wget` on nginx's own root every 15s | `server` **healthy** — the UI proxies `/api`, so coming up first is how a fresh deploy serves 502s |
+| `egress-proxy` | a TCP connect to `127.0.0.1:3128` every 30s | — |
+
+`restart: unless-stopped` has one deliberate hole: a `docker kill` (or an
+explicit `docker stop`) counts as a manual stop and is *not* undone. That is
+correct docker semantics and the reason `docker compose restart <svc>` is the
+way to bounce a service by hand.
+
+### Disk
+
+Three things bound disk, and only one of them is a real quota:
+
+1. **A floor before creation.** `WORKSPACES_MIN_FREE_MB` (default 2048): a
+   session that cannot fit fails cleanly rather than filling the host.
+2. **A per-session cap during a turn.** `SANDBOX_WORKSPACE_MAX_MB` (default
+   2048), measured with `du -sm` after every write-shaped command. It is a
+   *watermark*, not an enforcement: a single `dd` bigger than the cap still
+   lands on disk in full, and is caught immediately after.
+3. **The idle TTL** (`SESSION_IDLE_TTL_SECONDS`), which stops workspaces
+   accumulating for sessions nobody closed.
+
+**A true filesystem quota needs the workspaces directory on its own volume.**
+Docker's `--storage-opt size=` works only on `overlay2` with an xfs backing
+filesystem mounted `pquota` (and not at all on the codespace's ext4 overlay),
+and the bind mount is by definition the host's filesystem. If a hard limit is
+required, put `WORKSPACES_HOST_DIR` on a dedicated block device or loopback
+image sized for the deployment (or one loopback image per session, mounted at
+`/srv/gt-workspaces/<session_id>`); then the kernel enforces the bound and the
+watermark above becomes a courtesy rather than the only line of defence.
+
+### Zombies
+
+`--init` (tini as pid 1) reaps orphans. Before it, `sleep infinity` was pid 1
+and never called `wait()`: an ordinary session whose commands had been stopped
+mid-flight already carried `[sleep] <defunct>` entries, and a forking workload
+hit `--pids-limit 512` and left the container unable to run *any* further
+`docker exec` — while the session still reported `idle`.
 
 ## 6. Verification
 
@@ -242,9 +298,12 @@ GT side in [cloud-gt-run.md](cloud-gt-run.md).
   profile plus `--cap-drop ALL` plus `no-new-privileges` is the entire
   kernel-attack-surface story; a kernel bug reachable from the default syscall
   set is not defended against.
-* **No disk quota on the bind mount.** `/tmp` is a capped tmpfs, but the
-  workspace is a host directory: an agent can fill the host's disk. Memory,
-  CPU and pids are capped; bytes on disk are not.
+* **No *enforced* disk quota on the bind mount.** `/tmp` is a capped tmpfs and
+  the workspace is watched (`SANDBOX_WORKSPACE_MAX_MB`, plus the
+  `WORKSPACES_MIN_FREE_MB` floor before creation), but both are watermarks
+  checked between commands, not kernel enforcement: a single `dd` larger than
+  the cap still lands on disk before anyone notices. A hard bound needs the
+  workspaces directory on a dedicated volume — see §5, *Disk*.
 * **The proxy is HTTP-level.** It speaks exactly two things: `CONNECT
   host:443` and absolute-form plain HTTP, on ports 80 and 443 only. Everything
   else — SSH, raw TCP, UDP, ICMP, a git `ssh://` remote — is not proxied and,

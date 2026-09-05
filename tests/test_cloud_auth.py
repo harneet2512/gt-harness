@@ -6,10 +6,15 @@ import time
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from cloud.server.auth import auth_router, verify_jwt
+from cloud.server.auth import auth_router, jwt_ttl_seconds, require_user, verify_jwt
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 @pytest.fixture
@@ -128,3 +133,74 @@ def test_logout_clears_cookie(client: TestClient) -> None:
     assert resp.status_code == 200
     cookie_header = resp.headers.get("set-cookie", "")
     assert "session=" in cookie_header
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-10: the allow-list is enforced on every request, not once at login
+# --------------------------------------------------------------------------
+def _token(login: str, secret: str = "test-jwt-secret", ttl: int = 3600) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {"sub": "1234", "login": login, "iat": now, "exp": now + ttl},
+        secret,
+        algorithm="HS256",
+    )
+
+
+@pytest.mark.anyio
+async def test_a_valid_jwt_for_an_unlisted_login_is_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Signed with JWT_SECRET, arbitrary `sub`, login never allow-listed.
+
+    It used to read and write every session in the deployment.
+    """
+    monkeypatch.setenv("ALLOWED_GITHUB_LOGINS", "harneet2512, someone-else")
+    with pytest.raises(HTTPException) as caught:
+        await require_user(session=None, authorization=f"Bearer {_token('eve')}")
+    assert caught.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_an_allow_listed_login_still_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_LOGINS", "harneet2512, someone-else")
+    user = await require_user(
+        session=None, authorization=f"Bearer {_token('harneet2512')}"
+    )
+    assert user["login"] == "harneet2512"
+
+
+@pytest.mark.anyio
+async def test_no_allow_list_means_any_valid_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_LOGINS", "")
+    user = await require_user(session=None, authorization=f"Bearer {_token('anyone')}")
+    assert user["login"] == "anyone"
+
+
+@pytest.mark.anyio
+async def test_a_forged_signature_is_still_401_before_the_allow_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_LOGINS", "harneet2512")
+    forged = _token("harneet2512", secret="not-the-secret")
+    with pytest.raises(HTTPException) as caught:
+        await require_user(session=None, authorization=f"Bearer {forged}")
+    assert caught.value.status_code == 401
+
+
+def test_the_default_token_lifetime_is_a_day_not_a_week(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("JWT_TTL_SECONDS", raising=False)
+    assert jwt_ttl_seconds() == 86400
+
+
+def test_the_token_lifetime_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JWT_TTL_SECONDS", "3600")
+    assert jwt_ttl_seconds() == 3600
+    monkeypatch.setenv("JWT_TTL_SECONDS", "nonsense")
+    assert jwt_ttl_seconds() == 86400

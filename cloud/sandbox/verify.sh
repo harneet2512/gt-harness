@@ -14,7 +14,10 @@ OUT="/tmp/verify-$MODE.log"
 : > "$OUT"
 say() { echo "== $*" | tee -a "$OUT"; }
 
-TOKEN=$($DC exec -T server python -c "import jwt,os,time;print(jwt.encode({'sub':'1','login':'verify','exp':int(time.time())+7200},os.environ['JWT_SECRET'],algorithm='HS256'))" | tr -d '\r')
+# The login matters: HAR-84 G-10 made ALLOWED_GITHUB_LOGINS a per-request
+# check, so a token minted for a name nobody allow-listed is 403 on every
+# route. Borrow the first allowed login when there is a list at all.
+TOKEN=$($DC exec -T server python -c "import jwt,os,time;a=[x.strip() for x in os.environ.get('ALLOWED_GITHUB_LOGINS','').split(',') if x.strip()];n=int(time.time());print(jwt.encode({'sub':'1','login':(a[0] if a else 'verify'),'iat':n,'exp':n+7200},os.environ['JWT_SECRET'],algorithm='HS256'))" | tr -d '\r')
 [ -n "$TOKEN" ] || { echo "no token"; exit 1; }
 api() { $DC exec -T server curl -sS -H "Authorization: Bearer $TOKEN" "$@"; }
 jqp() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }

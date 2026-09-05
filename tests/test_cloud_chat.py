@@ -34,7 +34,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from types import MethodType
+from types import MethodType, SimpleNamespace
 from typing import Any
 
 import httpx
@@ -439,6 +439,14 @@ def harness(seed_repo, tmp_path, monkeypatch):
     monkeypatch.setenv("MAX_CONCURRENT_SESSIONS", "10")
     monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
     monkeypatch.setenv("CORS_ORIGINS", "")
+    # The creation-time model preflight talks to a real provider; the model
+    # here is a scripted fake with no route at all. Sessions that need the
+    # preflight itself turn it back on (see the G-11 tests).
+    monkeypatch.setenv("MODEL_PREFLIGHT", "0")
+    monkeypatch.delenv("ALLOWED_GITHUB_LOGINS", raising=False)
+    monkeypatch.delenv("WORKSPACES_MIN_FREE_MB", raising=False)
+    monkeypatch.delenv("SANDBOX_WORKSPACE_MAX_MB", raising=False)
+    monkeypatch.delenv("MAX_CONCURRENT_CREATIONS", raising=False)
     # The stream must stay open across turns; a short heartbeat keeps the test
     # reader responsive without changing the production default (15s).
     monkeypatch.setenv("SSE_HEARTBEAT_SECONDS", "0.2")
@@ -1603,20 +1611,25 @@ def test_last_event_id_header_replays_like_after_id(harness: Harness) -> None:
 # --------------------------------------------------------------------------
 # 11: infrastructure failure
 # --------------------------------------------------------------------------
-def test_environment_failure_emits_agent_error_and_fails_the_session(
+def test_environment_failure_ends_the_turn_and_keeps_the_session(
     harness: Harness,
 ) -> None:
-    """FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
+    """HAR-84 G-04: a crash inside a turn ends the TURN, not the session.
+
+    FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
     store, event bus, agent loop, bash environment (a subclass that raises),
-    git."""
+    git.
+
+    The conversation, the clone and the transcript are all still there, so
+    writing off the session over one bad turn destroyed recoverable work.
+    """
     harness.env_class = ExplodingEnvironment
     session_id = _create_idle(harness)
 
     _post_message(harness, session_id, "break something")
-    session = _wait_status(harness, session_id, {"failed"})
-    assert session["status"] == "failed"
-
-    frames = _read_sse(harness, session_id, until=_has("lifecycle", status="failed"))
+    frames = _read_sse(
+        harness, session_id, until=_has("turn_finished", finish_reason="error")
+    )
     assert "error" not in _types(frames), (
         "the event type must be agent_error — `error` collides with "
         "EventSource's native error event"
@@ -1625,7 +1638,24 @@ def test_environment_failure_emits_agent_error_and_fails_the_session(
     assert "environment exploded" in error["error"]
     assert error["turn_id"]
 
-    assert _post_message(harness, session_id, "again?").status_code == 409
+    reply = frames[_index(frames, "agent_reply")]["payload"]["data"]
+    assert reply["finish_reason"] == "error"
+    assert reply["content"].startswith("This turn failed:")
+    assert "environment exploded" in reply["content"]
+
+    # Back to idle, and the receipt says how the turn ended.
+    session = _wait_status(harness, session_id, {"idle"})
+    assert session["status"] == "idle"
+    assert session["current_turn_id"] is None
+    receipts = harness.client.get(
+        f"/api/sessions/{session_id}/receipts", headers=harness.auth
+    ).json()
+    assert [r["finish_reason"] for r in receipts] == ["error"]
+    assert receipts[0]["finished_at"] is not None
+
+    # And the session still takes messages: only creation failures kill one.
+    harness.env_class = CloudLocalEnvironment
+    assert _post_message(harness, session_id, "again?").status_code == 202
 
 
 # --------------------------------------------------------------------------
@@ -1761,3 +1791,290 @@ def test_messages_are_rejected_while_the_workspace_is_being_created(
         ).status_code
         == 409
     )
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-02 / G-13: gt_mode is a validated Literal, not free text
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("mode", ["off", "advisory", "assistive", "enforced"])
+def test_every_offered_gt_mode_is_accepted(harness: Harness, mode: str) -> None:
+    assert _create(harness, gt_mode=mode).status_code == 201
+
+
+@pytest.mark.parametrize("mode", ["banana", "engine", "ENGINE", "", "shadow"])
+def test_an_unknown_gt_mode_is_rejected_at_creation(
+    harness: Harness, mode: str
+) -> None:
+    """HAR-84 G-02: "engine" was never a GTMode member.
+
+    It built an index, advertised gt_ready, and then raised
+    ValueError: 'engine' is not a valid GTMode on the first turn of every
+    session that asked for it. An unknown mode is a 422 now.
+    """
+    response = _create(harness, gt_mode=mode)
+    assert response.status_code == 422, response.text
+    assert ("body", "gt_mode") in {tuple(e["loc"]) for e in response.json()["detail"]}
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-11 / G-12: creation and message validation
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "ref", ["", "   ", "\t", "main\n", "ma\x00in", "--upload-pack=x"]
+)
+def test_a_malformed_ref_is_rejected(harness: Harness, ref: str) -> None:
+    response = _create(harness, ref=ref)
+    assert response.status_code == 422, f"{ref!r} -> {response.status_code}"
+
+
+def test_a_blank_model_is_rejected(harness: Harness) -> None:
+    assert _create(harness, model="").status_code == 422
+    assert _create(harness, model="   ").status_code == 422
+
+
+def test_an_unavailable_model_is_a_400_at_creation_not_a_dead_session(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It used to buy a clone, a sandbox and a 250 s first turn before failing."""
+    monkeypatch.setenv("MODEL_PREFLIGHT", "1")
+
+    def _refuse(model: str) -> None:
+        raise runner_module.ModelUnavailable(
+            f"BadRequestError: {model} is not a valid model ID"
+        )
+
+    monkeypatch.setattr(runner_module, "_preflight_blocking", _refuse)
+
+    response = _create(harness, model="not/a/real/model-xyz")
+
+    assert response.status_code == 400, response.text
+    assert "model not available" in response.json()["detail"]
+    # Nothing was built for it.
+    assert harness.client.get("/api/sessions", headers=harness.auth).json() == []
+
+
+def test_a_working_model_passes_the_preflight(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MODEL_PREFLIGHT", "1")
+    seen: list[str] = []
+    monkeypatch.setattr(runner_module, "_preflight_blocking", seen.append)
+
+    assert _create(harness).status_code == 201
+    assert seen == [MODEL_NAME]
+
+
+@pytest.mark.parametrize("content", ["   ", "\n\t "])
+def test_a_whitespace_only_message_never_starts_a_turn(
+    harness: Harness, content: str
+) -> None:
+    """HAR-84 G-12: "" was 422 but "   " was 202 and burned two model calls."""
+    session_id = _create_idle(harness)
+
+    response = _post_message(harness, session_id, content)
+
+    assert response.status_code == 422, response.text
+    assert _session(harness, session_id)["status"] == "idle"
+    assert harness.models.get(session_id) is None
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-09: turn_started carries the prompt, so every tab can render it
+# --------------------------------------------------------------------------
+def test_turn_started_carries_the_users_own_message(harness: Harness) -> None:
+    """A second tab showed the turn and the reply but never the question."""
+    session_id = _create_idle(harness)
+    posted = _post_message(harness, session_id, "TABSYNC please").json()
+
+    frames = _read_sse(harness, session_id, until=_has("turn_started"))
+    started = frames[_index(frames, "turn_started")]["payload"]["data"]
+
+    assert started["content"] == "TABSYNC please"
+    assert started["role"] == "user"
+    assert started["message_id"] == posted["message"]["id"]
+    assert started["turn_id"]
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-17: a malformed resume token is an error, not a full replay
+# --------------------------------------------------------------------------
+def test_a_malformed_last_event_id_is_rejected(harness: Harness) -> None:
+    session_id = _create_idle(harness)
+    for bad in ["not-a-number", "12abc", "-4"]:
+        response = harness.client.get(
+            f"/api/sessions/{session_id}/events",
+            headers={**harness.auth, "Last-Event-ID": bad},
+        )
+        assert response.status_code == 400, f"{bad} -> {response.status_code}"
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-07: the disk floor and the per-session quota
+# --------------------------------------------------------------------------
+def test_a_session_is_refused_when_the_host_is_nearly_full(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WORKSPACES_MIN_FREE_MB", "2048")
+    monkeypatch.setattr(
+        workspace_module.shutil,
+        "disk_usage",
+        lambda _p: SimpleNamespace(total=0, used=0, free=64 * 1024 * 1024),
+    )
+    response = _create(harness)
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+
+    session = _wait_status(harness, session_id, {"failed"})
+
+    assert session["closed_reason"] == "failed"
+    frames = _read_sse(harness, session_id, until=_has("lifecycle", status="failed"))
+    error = frames[_index(frames, "lifecycle", status="failed")]["payload"]["data"]
+    assert "not enough free disk" in error["error"]
+    assert "2048 MB required" in error["error"]
+    # Nothing was cloned.
+    assert not (harness.workspaces / session_id).exists()
+
+
+def test_a_workspace_over_its_quota_ends_the_turn(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HAR-84 G-07b: one dd took the host from 82% to 92% full, uncapped."""
+    monkeypatch.setenv("SANDBOX_WORKSPACE_MAX_MB", "1")
+    harness.set_script(
+        [
+            _action("yes 0123456789abcdefghijklmnopqrstuvwxyz | head -60000 > fat.txt"),
+            _reply("should never be reached"),
+        ]
+    )
+    session_id = _create_idle(harness)
+
+    _post_message(harness, session_id, "fill the disk")
+    frames = _read_sse(
+        harness, session_id, until=_has("turn_finished", finish_reason="error")
+    )
+
+    quota = frames[_index(frames, "lifecycle", status="quota_exceeded")]["payload"]
+    assert "workspace quota exceeded" in quota["data"]["reason"]
+    reply = frames[_index(frames, "agent_reply")]["payload"]["data"]
+    assert "workspace quota exceeded" in reply["content"]
+    assert reply["finish_reason"] == "error"
+    # The session survives the turn that overran.
+    assert _wait_status(harness, session_id, {"idle"})["status"] == "idle"
+    assert harness.models[session_id].calls == 1, "the next model call never happened"
+
+
+def test_a_workspace_inside_its_quota_is_untouched(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SANDBOX_WORKSPACE_MAX_MB", "512")
+    session_id = _create_idle(harness)
+
+    _post_message(harness, session_id, "do the thing")
+    frames = _read_sse(harness, session_id, until=_turn_complete)
+
+    statuses = [
+        f["payload"]["data"].get("status") for f in frames if f["event"] == "lifecycle"
+    ]
+    assert "quota_exceeded" not in statuses
+    finished = frames[_index(frames, "turn_finished")]["payload"]["data"]
+    assert finished["finish_reason"] == "reply"
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-08: a restart-interrupted turn ends on the wire too
+# --------------------------------------------------------------------------
+def test_recover_ends_an_interrupted_turn_on_the_wire(harness: Harness) -> None:
+    """HAR-84 G-08/E-02/E-03.
+
+    The turn used to have no turn_finished, no note on the stream, and a
+    receipt left with finish_reason "" and finished_at null forever.
+    """
+    harness.block_model_at(1)
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "start something long")
+    harness.wait_blocked(session_id)
+    turn_id = _session(harness, session_id)["current_turn_id"]
+    assert turn_id
+
+    # The store is what survives a restart; recover() runs against exactly it.
+    harness.on_server_loop(deps.get_manager().recover(), POLL_TIMEOUT)
+
+    session = _session(harness, session_id)
+    assert session["status"] == "idle"
+    assert session["current_turn_id"] is None
+
+    frames = _read_sse(harness, session_id, until=_has("system_note"))
+    finished = frames[_index(frames, "turn_finished")]["payload"]["data"]
+    assert finished["turn_id"] == turn_id
+    assert finished["finish_reason"] == "interrupted"
+    note = frames[_index(frames, "system_note")]["payload"]["data"]
+    assert note["content"] == runner_module.RESTART_NOTICE
+    assert note["turn_id"] == turn_id
+    assert note["message_id"]
+
+    receipts = harness.client.get(
+        f"/api/sessions/{session_id}/receipts", headers=harness.auth
+    ).json()
+    receipt = next(r for r in receipts if r["turn_id"] == turn_id)
+    assert receipt["finish_reason"] == "interrupted"
+    assert receipt["finished_at"] is not None
+
+    messages = harness.client.get(
+        f"/api/sessions/{session_id}/messages", headers=harness.auth
+    ).json()
+    assert any(
+        m["role"] == "system" and m["content"] == runner_module.RESTART_NOTICE
+        for m in messages
+    )
+    harness.release_model()
+
+
+# --------------------------------------------------------------------------
+# HAR-84 G-21: creation takes a slot too
+# --------------------------------------------------------------------------
+def test_session_creation_is_bounded(harness: Harness) -> None:
+    """4 simultaneous creations all succeeded: 4 clones, 4 sandboxes, 4 indexes.
+
+    MAX_CONCURRENT_SESSIONS only ever gated *turns*.
+    """
+    harness.hold_worker()
+    try:
+        accepted = [_create(harness) for _ in range(3)]
+        assert [r.status_code for r in accepted] == [201, 201, 201]
+
+        refused = _create(harness)
+
+        assert refused.status_code == 429, refused.text
+        assert "creations" in refused.json()["detail"]
+    finally:
+        harness.release_worker()
+    for response in accepted:
+        _wait_status(harness, response.json()["id"], {"idle"})
+
+
+def test_a_dd_style_filler_is_still_caught_within_a_bounded_number_of_steps(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dd if=/dev/zero of=big` matches none of the write verbs (HAR-84 G-07).
+
+    The audit's repro was a *single-command* turn, so any stride at all would
+    have missed it: the workspace is measured after every command.
+    """
+    monkeypatch.setenv("SANDBOX_WORKSPACE_MAX_MB", "1")
+    harness.set_script(
+        [
+            _action("dd if=/dev/zero of=fat.bin bs=1M count=3 2>/dev/null"),
+            _reply("should never be reached"),
+        ]
+    )
+    session_id = _create_idle(harness)
+
+    _post_message(harness, session_id, "fill the disk without a redirect")
+    frames = _read_sse(
+        harness, session_id, until=_has("turn_finished", finish_reason="error")
+    )
+
+    quota = frames[_index(frames, "lifecycle", status="quota_exceeded")]["payload"]
+    assert "workspace quota exceeded" in quota["data"]["reason"]
+    assert _wait_status(harness, session_id, {"idle"})["status"] == "idle"
+    assert harness.models[session_id].calls == 1, "the turn stopped at that command"

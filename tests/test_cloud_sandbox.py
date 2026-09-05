@@ -801,3 +801,221 @@ def test_a_sandbox_is_removed_and_reaped_by_session_id(
             ["docker", "network", "rm", network],
         ):
             subprocess.run(argv, capture_output=True, timeout=120)
+
+
+# ---------------------------------------------------------------------------
+# HAR-84 G-03 / G-04 / G-20: sandbox health
+# ---------------------------------------------------------------------------
+OCI_EXEC_FAILURE = (
+    "OCI runtime exec failed: exec failed: unable to start container process: "
+    "error during container init: nsexec[12]: unable to spawn stage-1: "
+    "Resource temporarily unavailable: unknown"
+)
+
+
+def test_run_argv_runs_tini_so_forked_children_are_reaped() -> None:
+    """`sleep infinity` as pid 1 never reaps: 510 forks bricked a session."""
+    assert "--init" in sb.run_argv("s1", "/srv/gt-workspaces/s1")
+
+
+def test_run_argv_restarts_a_sandbox_the_daemon_stopped() -> None:
+    assert _flag_value(sb.run_argv("s1", "/tmp/ws"), "--restart") == "unless-stopped"
+
+
+def test_an_oci_exec_failure_is_a_health_failure_not_a_command_result() -> None:
+    assert sb.is_exec_failure(128, OCI_EXEC_FAILURE) is True
+    # rc 128 is an ordinary exit code for git; the runtime's wording decides.
+    assert sb.is_exec_failure(128, "fatal: not a git repository") is False
+    assert sb.is_exec_failure(1, OCI_EXEC_FAILURE) is False
+
+
+def test_a_wedged_sandbox_is_recreated_and_the_command_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = [
+        (128, OCI_EXEC_FAILURE),
+        (0, "hello\n"),
+    ]
+    calls: list[str] = []
+
+    class _Sequenced:
+        def __call__(self, argv: list[str], **_kwargs: object) -> _Sequenced:
+            calls.append(" ".join(argv))
+            self.returncode, self._stdout = outputs.pop(0)
+            return self
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            return self._stdout, ""
+
+        def kill(self) -> None:  # pragma: no cover - never reached here
+            pass
+
+    monkeypatch.setattr(sb.subprocess, "Popen", _Sequenced())
+    removed: list[str] = []
+    started: list[str] = []
+    monkeypatch.setattr(sb, "remove_sandbox", lambda sid: removed.append(sid) or True)
+    monkeypatch.setattr(
+        sb,
+        "start_sandbox",
+        lambda sid, ws: started.append((sid, ws))
+        or {"container": sb.container_name(sid), "image": "", "image_digest": ""},
+    )
+    restarted: list[str] = []
+    env = sb.DockerSandboxEnvironment(
+        container="gt-sandbox-s1",
+        timeout=30,
+        session_id="s1",
+        workspace="/srv/gt-workspaces/s1",
+        on_restart=restarted.append,
+    )
+
+    result = env.execute({"command": "echo hello"})
+
+    assert result["output"] == "hello\n"
+    assert result["returncode"] == 0
+    assert removed == ["s1"] and started == [("s1", "/srv/gt-workspaces/s1")]
+    assert restarted == ["gt-sandbox-s1"]
+    assert env.unavailable is False
+    assert len(calls) == 2, "the command is retried exactly once"
+
+
+def test_a_sandbox_that_will_not_come_back_is_reported_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_popen(monkeypatch, _FakePopen(stdout=OCI_EXEC_FAILURE, returncode=128))
+    monkeypatch.setattr(sb, "remove_sandbox", lambda _sid: True)
+    monkeypatch.setattr(
+        sb,
+        "start_sandbox",
+        lambda _sid, _ws: (_ for _ in ()).throw(sb.SandboxError("no")),
+    )
+    env = sb.DockerSandboxEnvironment(
+        container="gt-sandbox-s1", timeout=30,
+        session_id="s1", workspace="/srv/gt-workspaces/s1",
+    )
+
+    result = env.execute({"command": "ls"})
+
+    # Never runc's text as a normal tool output.
+    assert "OCI runtime" not in result["output"]
+    assert result["output"].startswith("sandbox unavailable")
+    assert result["returncode"] == sb.KILLED_RETURNCODE
+    assert env.unavailable is True
+
+
+def test_an_oom_kill_says_so_instead_of_returning_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # rc 137 with no elapsed time is a kill, not the in-container `timeout`.
+    _patch_popen(monkeypatch, _FakePopen(stdout="", returncode=137))
+    env = sb.DockerSandboxEnvironment(container="gt-sandbox-s1", timeout=30)
+
+    result = env.execute({"command": "python3 -c 'x = bytearray(3_000_000_000)'"})
+
+    assert result["returncode"] == 137
+    assert "memory limit" in result["output"]
+
+
+def test_output_that_already_says_something_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_popen(monkeypatch, _FakePopen(stdout="partial work\n", returncode=137))
+    env = sb.DockerSandboxEnvironment(container="gt-sandbox-s1", timeout=30)
+
+    assert env.execute({"command": "x"})["output"] == "partial work\n"
+
+
+def _docker_stub(monkeypatch: pytest.MonkeyPatch, replies: dict[str, tuple[int, str]]):
+    calls: list[tuple[str, ...]] = []
+
+    def _fake(*args: str, **_kwargs: object):
+        calls.append(args)
+        for key, (code, out) in replies.items():
+            if key in args:
+                return SimpleNamespace(returncode=code, stdout=out, stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(sb, "_docker", _fake)
+    return calls
+
+
+def test_ensure_running_starts_a_container_the_daemon_stopped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A daemon restart leaves every sandbox `Exited (255)` (HAR-84 D-19)."""
+    calls = _docker_stub(monkeypatch, {"inspect": (0, "false\n")})
+
+    assert sb.ensure_running("s1", str(tmp_path)) == "gt-sandbox-s1"
+
+    verbs = [call[0] for call in calls]
+    assert "start" in verbs, "a stopped container is started, not declared dead"
+    assert "exec" in verbs, "and proved executable before it is handed back"
+
+
+def test_ensure_running_is_a_no_op_for_a_healthy_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _docker_stub(monkeypatch, {"inspect": (0, "true\n")})
+
+    assert sb.ensure_running("s1") == "gt-sandbox-s1"
+    assert [call[0] for call in calls] == ["inspect"]
+
+
+def test_ensure_running_still_fails_when_the_container_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _docker_stub(monkeypatch, {"inspect": (1, "")})
+
+    with pytest.raises(sb.SandboxError, match="no longer exists"):
+        sb.ensure_running("s1")
+
+
+DAEMON_STOPPED = (
+    "Error response from daemon: Container "
+    "b2c15262218 is not running"
+)
+
+
+def test_a_stopped_container_is_an_exec_failure_even_at_rc_1() -> None:
+    """`docker exec` on a stopped container exits 1, not 128 (HAR-84 G-04)."""
+    assert sb.is_exec_failure(1, DAEMON_STOPPED) is True
+    assert sb.is_exec_failure(1, "Error response from daemon: No such container: x") is True
+
+
+def test_a_command_that_merely_prints_that_line_is_not_an_exec_failure() -> None:
+    # The daemon's line has to BE the output, not appear inside it.
+    assert sb.is_exec_failure(1, "checking...\nError response from daemon: is not running") is False
+    assert sb.is_exec_failure(1, "grep: nothing matched") is False
+    assert sb.is_exec_failure(0, DAEMON_STOPPED) is False
+
+
+def test_a_stopped_container_is_recreated_and_the_command_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = [(1, DAEMON_STOPPED), (0, "back\n")]
+
+    class _Sequenced:
+        def __call__(self, argv: list[str], **_kwargs: object) -> _Sequenced:
+            self.returncode, self._stdout = outputs.pop(0)
+            return self
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            return self._stdout, ""
+
+        def kill(self) -> None:  # pragma: no cover
+            pass
+
+    monkeypatch.setattr(sb.subprocess, "Popen", _Sequenced())
+    monkeypatch.setattr(sb, "remove_sandbox", lambda _sid: True)
+    monkeypatch.setattr(
+        sb, "start_sandbox",
+        lambda sid, _ws: {"container": sb.container_name(sid), "image": "",
+                          "image_digest": ""},
+    )
+    env = sb.DockerSandboxEnvironment(
+        container="gt-sandbox-s1", timeout=30,
+        session_id="s1", workspace="/srv/gt-workspaces/s1",
+    )
+
+    assert env.execute({"command": "echo back"})["output"] == "back\n"
+    assert env.unavailable is False

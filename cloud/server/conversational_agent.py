@@ -59,6 +59,21 @@ FORMAT_ERROR_REPLY = (
     "I could not produce a valid command after several attempts, so I stopped "
     "this turn. Tell me how you would like me to proceed."
 )
+PROVIDER_ERROR_REPLY = "The model provider failed: {reason}. Try again."
+TURN_ERROR_REPLY = "This turn failed: {reason}"
+
+#: mini-swe / litellm error envelopes that arrive shaped like a text response.
+#: They are NOT the agent talking — storing one as the reply makes the receipt
+#: lie about a turn that never happened (HAR-84 G-05).
+PROVIDER_ERROR_MARKERS = (
+    "[error: agent failed",
+    "api failed",
+    "api request returned none",
+    "litellm.apierror",
+    "litellm.internalservererror",
+)
+#: longest provider reason quoted back to the user
+PROVIDER_REASON_CHARS = 300
 
 #: finish reasons that end a turn (mirrors ``Message.meta.finish_reason``)
 REPLY = "reply"
@@ -191,6 +206,53 @@ def assistant_message_from_format_error(exc: FormatError) -> dict | None:
     }
 
 
+def looks_like_provider_error(text: str) -> bool:
+    """True when this "response" is really the provider's failure envelope."""
+    lowered = (text or "").strip().lower()
+    return bool(lowered) and any(
+        marker in lowered for marker in PROVIDER_ERROR_MARKERS
+    )
+
+
+def _short_reason(text: str) -> str:
+    """One line of a provider error, bounded, safe to show a user."""
+    collapsed = " ".join(str(text or "").split())
+    return collapsed[:PROVIDER_REASON_CHARS] or "no detail given"
+
+
+def _exception_signal(extra: dict) -> str | None:
+    """An explicit provider-side failure recorded next to the response."""
+    response = extra.get("response")
+    if isinstance(response, dict) and response.get("error"):
+        return str(response["error"])
+    for key in ("exception", "error"):
+        value = extra.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def provider_failure_reason(exc: FormatError) -> str | None:
+    """Why the provider failed, if this ``FormatError`` is really that.
+
+    Two shapes, both observed live: the failure arrives as the assistant's
+    *text* (``[ERROR: Agent failed (...), API failed (...)]``), or the response
+    carries no content at all and an exception is recorded beside it. Anything
+    else is an ordinary format error and must keep the retry path.
+    """
+    messages = list(getattr(exc, "messages", ()) or ())
+    if not messages:
+        return None
+    assistant = assistant_message_from_format_error(exc)
+    if assistant is not None:
+        content = _text_of(assistant.get("content"))
+        return _short_reason(content) if looks_like_provider_error(content) else None
+
+    extra = messages[0].get("extra") or {}
+    signal = _exception_signal(extra)
+    return _short_reason(signal) if signal else None
+
+
 def _submitted_output(exc: Submitted) -> dict[str, Any]:
     """The observation a ``Submitted`` marker leaves in place of a command run."""
     return {
@@ -238,11 +300,15 @@ class _EmittingEnvironment:
         command = (
             str(action.get("command", "")) if isinstance(action, dict) else str(action)
         )
+        # GT's ``execute_actions`` hook can hand us an empty action; a
+        # `command: ""` frame is noise in the trail (HAR-84 G-19).
+        emit = bool(command.strip())
         step = agent.current_step
-        agent.emit_event(
-            "tool_call",
-            {"command": command, "step": step, "n_calls": agent.n_calls},
-        )
+        if emit:
+            agent.emit_event(
+                "tool_call",
+                {"command": command, "step": step, "n_calls": agent.n_calls},
+            )
         submitted: Submitted | None = None
         try:
             output = self._env.execute(action, *args, **kwargs)
@@ -253,16 +319,25 @@ class _EmittingEnvironment:
             output = _submitted_output(exc)
         if not isinstance(output, dict):  # pragma: no cover - defensive
             output = {"output": str(output), "returncode": 0, "exception_info": ""}
-        agent.emit_event(
-            "tool_result",
-            {
-                "command": command,
-                "output": _text_of(output.get("output"))[:4000],
-                "returncode": output.get("returncode", -1),
-                "is_error": output.get("returncode", -1) != 0,
-                "step": step,
-            },
-        )
+        if emit:
+            agent.emit_event(
+                "tool_result",
+                {
+                    "command": command,
+                    "output": _text_of(output.get("output"))[:4000],
+                    "returncode": output.get("returncode", -1),
+                    "is_error": output.get("returncode", -1) != 0,
+                    "step": step,
+                },
+            )
+        if getattr(self._env, "unavailable", False):
+            # The jail is gone and could not be recreated. Ending the turn is
+            # the honest outcome; running on would produce observations that
+            # describe nothing (HAR-84 G-03).
+            agent.fail_turn(
+                _text_of(output.get("output")) or "the sandbox is unavailable",
+                observation=False,
+            )
         if submitted is not None:
             raise submitted
         return output
@@ -301,6 +376,12 @@ class ConversationalAgent(DefaultAgent):
         self._session_started = False
         self._turn_id: str | None = None
         self._turn_start_calls = 0
+        #: set by :meth:`fail_turn`; ends the turn as ``error`` at the next
+        #: boundary without unwinding the transcript
+        self._turn_error: str | None = None
+        #: last non-empty assistant text this agent *emitted*, which survives a
+        #: transcript whose assistant messages carry no plain content
+        self._last_assistant_text = ""
         #: turn whose failure already produced an ``agent_error`` event
         self.last_error_turn_id: str | None = None
         self._max_context_chars = (
@@ -353,6 +434,34 @@ class ConversationalAgent(DefaultAgent):
         """
         self._stop_event.set()
         self._interrupt_env()
+
+    def fail_turn(self, reason: str, *, observation: bool = True) -> None:
+        """End the running turn as ``error`` at the next step boundary.
+
+        For failures the *harness* detects around the agent — a dead sandbox,
+        a workspace over its quota — where the transcript is still coherent
+        and only this turn has to stop. The command in flight is killed the
+        way ``request_stop`` kills it, so the boundary arrives at once.
+        """
+        text = " ".join(str(reason or "").split()) or "the turn could not continue"
+        self._turn_error = text
+        if observation:
+            try:
+                self.add_messages(
+                    {
+                        "role": "user",
+                        "content": f"Observation: {text}",
+                        "extra": {"raw_output": text},
+                    }
+                )
+            except Exception:  # noqa: BLE001 - ending a turn must never raise
+                pass
+        self._interrupt_env()
+
+    @property
+    def turn_error(self) -> str | None:
+        """Why this turn is about to end as ``error``, if it is."""
+        return self._turn_error
 
     def _interrupt_env(self) -> None:
         """Kill whatever command is in flight, if the environment allows it."""
@@ -421,6 +530,7 @@ class ConversationalAgent(DefaultAgent):
         self._turn_id = turn_id
         self.n_consecutive_format_errors = 0
         self._turn_start_calls = self.n_calls
+        self._turn_error = None
         start_cost = self.cost
         started = time.monotonic()
         budget = max(0, int(self.config.step_limit))
@@ -431,6 +541,12 @@ class ConversationalAgent(DefaultAgent):
         finish_reason = ""
         reply = ""
         while True:
+            if self._turn_error is not None:
+                finish_reason = ERROR
+                reply = TURN_ERROR_REPLY.format(reason=self._turn_error)
+                self.last_error_turn_id = turn_id
+                self._emit("agent_error", {"error": self._turn_error})
+                break
             if self._stop_event.is_set():
                 finish_reason, reply = STOPPED, STOPPED_REPLY
                 break
@@ -509,6 +625,14 @@ class ConversationalAgent(DefaultAgent):
         # The call was billed before parsing failed, so query() never charged it.
         self.cost += (exc.messages[0].get("extra", {}) or {}).get("cost", 0.0)
 
+        reason = provider_failure_reason(exc)
+        if reason is not None:
+            # NOT a reply: the provider's error envelope is not the agent
+            # talking, and it never enters the transcript (HAR-84 G-05).
+            self.last_error_turn_id = self._turn_id
+            self._emit("agent_error", {"error": reason})
+            return ERROR, PROVIDER_ERROR_REPLY.format(reason=reason)
+
         assistant = assistant_message_from_format_error(exc)
         if assistant is not None:
             self.add_messages(assistant)
@@ -569,6 +693,11 @@ class ConversationalAgent(DefaultAgent):
             text = _text_of(message.get("content")).strip()
             if text:
                 return text[:500]
+        # Some models put their reasoning where the transcript does not keep
+        # it, so a turn with real steps behind it still reported "no progress"
+        # (HAR-84 G-16). The emitted `assistant` frames are the other record.
+        if self._last_assistant_text:
+            return self._last_assistant_text[:500]
         return "no progress recorded yet"
 
     def _save_quietly(self) -> None:
@@ -689,6 +818,10 @@ class ConversationalAgent(DefaultAgent):
         self._emit(event_type, data)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
+        if event_type == "assistant":
+            text = _text_of(data.get("content")).strip()
+            if text:
+                self._last_assistant_text = text
         if self._event_callback is None:
             return
         self._event_callback(
