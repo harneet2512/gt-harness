@@ -8,8 +8,10 @@ back onto the event loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -18,7 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from .codegraph import build_graph
-from .conversational_agent import ConversationalAgent, Steering, TurnResult
+from .conversational_agent import (
+    ConversationalAgent,
+    Steering,
+    TurnResult,
+    turn_wall_seconds,
+)
 from .events import EventBus
 from .prompts import CHAT_BRIEF_TEMPLATE, CHAT_SYSTEM_TEMPLATE
 from .sandbox import (
@@ -44,9 +51,22 @@ from .workspace import (
     workspace_path,
 )
 
+log = logging.getLogger(__name__)
+
 _STORE_TIMEOUT = 30
 #: how long close() waits for a running turn to notice the stop request
 _CLOSE_WAIT_SECONDS = 30.0
+
+#: how long a session may sit ``idle`` before the reaper closes it. ``0``
+#: disables the reaper entirely.
+DEFAULT_SESSION_IDLE_TTL_SECONDS = 6 * 60 * 60
+#: how often the reaper looks
+DEFAULT_SESSION_REAP_INTERVAL_SECONDS = 300
+
+#: ``closed_reason`` values (see ``models.ClosedReason``)
+CLOSED_BY_USER = "user"
+CLOSED_EXPIRED = "expired"
+CLOSED_FAILED = "failed"
 
 #: a single per-step ``compute_diff`` may take this long before snapshots are
 #: switched off for the rest of the turn (a huge tree must not slow the agent)
@@ -54,6 +74,36 @@ DIFF_SNAPSHOT_BUDGET_SECONDS = 2.0
 
 RESTART_NOTICE = "Server restarted; turn interrupted"
 SUBMIT_REPLY_FALLBACK = "Done — I submitted my changes."
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    """A non-negative integer setting, falling back on anything unparseable."""
+    try:
+        return max(0, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def idle_ttl_seconds() -> int:
+    """How long a session may sit idle before it is reaped. ``0`` disables it.
+
+    Without this a workspace (a full repo clone) and its sandbox container
+    live until someone remembers to press close, so the host disk is a
+    monotonic function of how many sessions anyone ever opened.
+    """
+    return _positive_int_env(
+        "SESSION_IDLE_TTL_SECONDS", DEFAULT_SESSION_IDLE_TTL_SECONDS
+    )
+
+
+def reap_interval_seconds() -> int:
+    """How often the reaper wakes up. Never zero — that would be a busy loop."""
+    return (
+        _positive_int_env(
+            "SESSION_REAP_INTERVAL_SECONDS", DEFAULT_SESSION_REAP_INTERVAL_SECONDS
+        )
+        or DEFAULT_SESSION_REAP_INTERVAL_SECONDS
+    )
 
 
 @dataclass
@@ -94,6 +144,7 @@ class SessionManager:
         self._count_lock = threading.Lock()
         self._running_count = 0
         self._max_concurrent = int(os.environ.get("MAX_CONCURRENT_SESSIONS", "3"))
+        self._reaper_task: asyncio.Task | None = None
 
     # -- state bookkeeping ----------------------------------------------------
 
@@ -193,7 +244,9 @@ class SessionManager:
             error = f"{type(exc).__name__}: {exc}"
             self._emit(loop, session_id, "agent_error", {"error": error})
             try:
-                self._call(loop, self._store.update_status(session_id, "failed"))
+                self._call(loop, self._store.update_status(
+                    session_id, "failed", closed_reason=CLOSED_FAILED
+                ))
             except Exception:  # noqa: BLE001
                 pass
             self._emit(
@@ -361,7 +414,11 @@ class SessionManager:
             self._call_quietly(loop, self._store.finish_turn(
                 turn_id, n_calls=0, cost=0.0, finish_reason="error", patch_sha256=None
             ))
-            self._set_status(loop, session_id, "failed", current_turn_id=None)
+            self._set_status(
+                loop, session_id, "failed",
+                current_turn_id=None,
+                closed_reason=CLOSED_FAILED,
+            )
             self._emit(
                 loop, session_id, "lifecycle", {"status": "failed", "error": error}
             )
@@ -432,9 +489,14 @@ class SessionManager:
             cost=result.cost,
             finish_reason=result.finish_reason,
             patch_sha256=patch_sha256,
+            wall_seconds=result.wall_seconds,
         ))
         self._call(loop, self._store.bump_totals(
-            session_id, turns=1, steps=result.n_calls, cost=result.cost
+            session_id,
+            turns=1,
+            steps=result.n_calls,
+            cost=result.cost,
+            wall_seconds=result.wall_seconds,
         ))
         self._call(loop, self._store.update_session(
             session_id, last_message=reply
@@ -467,6 +529,11 @@ class SessionManager:
 
     async def stop(self, session_id: str) -> bool:
         """Ask the running turn to end at its next step boundary."""
+        # A stop is user activity like any other; without this the row keeps
+        # the timestamp of whatever last wrote to it and the idle TTL measures
+        # age instead of idleness.
+        with contextlib.suppress(Exception):
+            await self._store.touch(session_id)
         state = self._state(session_id)
         agent = state.agent
         if agent is None:
@@ -476,10 +543,19 @@ class SessionManager:
         agent.request_stop()
         return True
 
-    async def close(self, session_id: str) -> None:
+    async def close(self, session_id: str, *, reason: str = CLOSED_BY_USER) -> None:
+        """Kill the turn, drop the sandbox and the workspace, close the row.
+
+        ``reason`` is recorded on the session and echoed on the lifecycle
+        event, so a session that vanished under a user can say whether they
+        closed it or the idle TTL did.
+        """
         session = await self._store.get_session(session_id)
         if session is None:
             raise ValueError(f"session {session_id} not found")
+        # A session that already died of something keeps that cause: closing a
+        # failed session is bookkeeping, not the reason it ended.
+        reason = str(session.get("closed_reason") or "") or reason
         state = self._state(session_id)
         state.closed = True
         agent = self.get_agent(session_id)
@@ -498,12 +574,81 @@ class SessionManager:
             self._states.pop(session_id, None)
         if session["status"] != "closed":
             await self._store.update_status(
-                session_id, "closed", current_turn_id=None
+                session_id, "closed", current_turn_id=None, closed_reason=reason
             )
             await self._bus.publish(
-                session_id, {"type": "lifecycle", "data": {"status": "closed"}}
+                session_id,
+                {"type": "lifecycle", "data": {"status": "closed", "reason": reason}},
             )
         self._bus.finish(session_id)
+
+    # -- idle TTL reaper ------------------------------------------------------
+
+    def start_reaper(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
+        """Start the background idle-session reaper (idempotent)."""
+        if self._reaper_task is not None and not self._reaper_task.done():
+            return
+        if idle_ttl_seconds() <= 0:
+            log.info("session idle reaper disabled (SESSION_IDLE_TTL_SECONDS=0)")
+            return
+        loop = loop or asyncio.get_running_loop()
+        self._reaper_task = loop.create_task(self._reaper_loop())
+
+    async def stop_reaper(self) -> None:
+        task, self._reaper_task = self._reaper_task, None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+    async def _reaper_loop(self) -> None:
+        """Reap expired sessions forever. One bad pass never ends the loop."""
+        interval = reap_interval_seconds()
+        log.info(
+            "session idle reaper: ttl=%ss interval=%ss",
+            idle_ttl_seconds(),
+            interval,
+        )
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self.reap_idle_sessions()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the reaper must outlive its faults
+                log.exception("session idle reaper pass failed")
+
+    async def reap_idle_sessions(self) -> list[str]:
+        """Close every session idle for longer than the TTL. Returns their ids.
+
+        Closing is the *same* path as ``/close`` — sandbox, then workspace,
+        then the row — so an expired session leaves nothing behind that a
+        user-closed one would not.
+        """
+        ttl = idle_ttl_seconds()
+        if ttl <= 0:
+            return []
+        try:
+            expired = await self._store.idle_sessions_before(time.time() - ttl)
+        except Exception:  # noqa: BLE001 - a store hiccup is not fatal
+            log.exception("session idle reaper could not list expired sessions")
+            return []
+        reaped: list[str] = []
+        for session in expired:
+            session_id = str(session["id"])
+            try:
+                # Re-read: a message may have started a turn since the query.
+                current = await self._store.get_session(session_id)
+                if current is None or str(current["status"]) != "idle":
+                    continue
+                await self.close(session_id, reason=CLOSED_EXPIRED)
+            except Exception:  # noqa: BLE001 - one bad session, not the pass
+                log.exception("session idle reaper could not close %s", session_id)
+                continue
+            log.info("session %s closed after %ss idle", session_id, ttl)
+            reaped.append(session_id)
+        return reaped
 
     async def recover(self) -> None:
         """After a restart: no agent survives, so no turn can still be running."""
@@ -521,11 +666,14 @@ class SessionManager:
         for session in await self._store.sessions_with_status("creating"):
             session_id = str(session["id"])
             error = "Server restarted during workspace creation"
-            await self._store.update_status(session_id, "failed")
+            await self._store.update_status(
+                session_id, "failed", closed_reason=CLOSED_FAILED
+            )
             await self._bus.publish(session_id, {
                 "type": "lifecycle",
                 "data": {"status": "failed", "error": error},
             })
+        await self.reap_idle_sessions()
         await self._reap_sandboxes()
 
     async def _reap_sandboxes(self) -> None:
@@ -652,6 +800,7 @@ class SessionManager:
             sandbox=sandbox,
             gt_mode=str(session["gt_mode"]),
             step_limit=int(config.get("step_limit", 60)),
+            wall_seconds=int(config.get("wall_seconds") or turn_wall_seconds()),
             temperature=float(config.get("temperature", 0.0)),
             issue_text=issue_text,
             loop=loop,
@@ -675,6 +824,7 @@ class SessionManager:
         sandbox: str | None,
         gt_mode: str,
         step_limit: int,
+        wall_seconds: int,
         temperature: float,
         issue_text: str,
         loop: asyncio.AbstractEventLoop,
@@ -742,6 +892,7 @@ class SessionManager:
             system_template=CHAT_SYSTEM_TEMPLATE,
             instance_template=CHAT_BRIEF_TEMPLATE,
             step_limit=step_limit,
+            wall_seconds=wall_seconds,
             cost_limit=0.0,
             output_path=scratch / TRAJECTORY_NAME,
         )

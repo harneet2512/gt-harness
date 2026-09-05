@@ -148,6 +148,66 @@ async def test_bump_totals_accumulates(store: SessionStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_bump_totals_accumulates_wall_clock(store: SessionStore) -> None:
+    """Cost is always 0.0 under ignore_errors pricing; time is the real total."""
+    session_id = await _session(store)
+    assert (await store.get_session(session_id))["total_wall_seconds"] == 0.0
+    await store.bump_totals(session_id, turns=1, wall_seconds=12.5)
+    await store.bump_totals(session_id, turns=1, wall_seconds=3.25)
+    session = await store.get_session(session_id)
+    assert session["total_wall_seconds"] == pytest.approx(15.75)
+
+
+@pytest.mark.asyncio
+async def test_touch_moves_updated_at_and_nothing_else(store: SessionStore) -> None:
+    session_id = await _session(store)
+    before = await store.get_session(session_id)
+    await store.update_session(session_id, last_message="hi")
+    await store.touch(session_id)
+    after = await store.get_session(session_id)
+
+    assert after["updated_at"] >= before["updated_at"]
+    assert after["status"] == before["status"]
+    assert after["last_message"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_idle_sessions_before_only_returns_stale_idle_rows(
+    store: SessionStore,
+) -> None:
+    stale = await _session(store)
+    await store.update_status(stale, "idle")
+    fresh = await _session(store)
+    await store.update_status(fresh, "idle")
+    running = await _session(store)
+    await store.update_status(running, "idle")
+    await store.update_status(running, "running", current_turn_id="t1")
+    creating = await _session(store)
+
+    now = (await store.get_session(fresh))["updated_at"]
+    for session_id in (stale, running, creating):
+        await store._db.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?", (now - 10_000, session_id)
+        )
+    await store._db.commit()
+
+    expired = await store.idle_sessions_before(now - 5_000)
+    assert [s["id"] for s in expired] == [stale], (
+        "running and creating sessions are never expired, nor is a fresh idle one"
+    )
+    assert await store.idle_sessions_before(now - 20_000) == []
+
+
+@pytest.mark.asyncio
+async def test_closed_reason_is_persisted_with_the_status(store: SessionStore) -> None:
+    session_id = await _session(store)
+    assert (await store.get_session(session_id))["closed_reason"] is None
+    await store.update_status(session_id, "idle")
+    await store.update_status(session_id, "closed", closed_reason="expired")
+    assert (await store.get_session(session_id))["closed_reason"] == "expired"
+
+
+@pytest.mark.asyncio
 async def test_sessions_with_status_finds_interrupted_runs(
     store: SessionStore,
 ) -> None:
@@ -201,13 +261,20 @@ async def test_turn_receipts_round_trip(store: SessionStore) -> None:
     session_id = await _session(store)
     await store.start_turn(session_id, "t1", model="m", gt_status="off")
     await store.finish_turn(
-        "t1", n_calls=3, cost=0.03, finish_reason="reply", patch_sha256="deadbeef"
+        "t1",
+        n_calls=3,
+        cost=0.03,
+        finish_reason="reply",
+        patch_sha256="deadbeef",
+        wall_seconds=4.5,
     )
     await store.start_turn(session_id, "t2", model="m", gt_status="off")
 
     receipts = await store.list_turns(session_id)
     assert [r["turn_id"] for r in receipts] == ["t1", "t2"]
     assert receipts[0]["n_calls"] == 3
+    assert receipts[0]["wall_seconds"] == pytest.approx(4.5)
+    assert receipts[1]["wall_seconds"] == 0.0, "an open turn has no duration yet"
     assert receipts[0]["cost"] == pytest.approx(0.03)
     assert receipts[0]["finish_reason"] == "reply"
     assert receipts[0]["patch_sha256"] == "deadbeef"

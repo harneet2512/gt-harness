@@ -9,8 +9,12 @@ SessionStatusName = Literal["creating", "idle", "running", "failed", "closed"]
 GtStatusName = Literal["off", "ready", "unavailable", "pending"]
 RoleName = Literal["user", "agent", "system"]
 FinishReason = Literal[
-    "reply", "question", "step_limit", "stopped", "error", "submitted"
+    "reply", "question", "step_limit", "time_limit", "stopped", "error",
+    "submitted",
 ]
+#: why a session is ``closed``: an explicit close, the idle TTL reaper, or a
+#: failure. ``null`` while the session is still alive.
+ClosedReason = Literal["user", "expired", "failed"]
 Delivery = Literal["turn_started", "queued_for_running_turn"]
 FileStatus = Literal["added", "modified", "deleted"]
 EdgeKind = Literal["import", "gt_call", "gt_ref", "gt_import"]
@@ -22,6 +26,11 @@ class SessionCreate(BaseModel):
     model: str = Field(..., description="LiteLLM model identifier")
     gt_mode: str = Field("off", description="GT mode: off | advisory | engine")
     step_limit: int = Field(60, ge=1, le=500, description="Max model calls per turn")
+    #: per-turn wall-clock budget. Unset means "use TURN_WALL_SECONDS"
+    #: (default 900), so the server default is configurable in one place.
+    wall_seconds: int | None = Field(
+        None, ge=60, le=3600, description="Per-turn wall-clock budget in seconds"
+    )
     temperature: float = Field(0.0, ge=0.0, le=2.0)
 
 
@@ -42,7 +51,11 @@ class Session(BaseModel):
     turns: int = 0
     steps: int = 0
     cost: float = 0.0
+    #: wall-clock seconds summed over finished turns. Cost is always 0.0 with
+    #: ``MSWEA_COST_TRACKING=ignore_errors``, so this is the honest budget line.
+    total_wall_seconds: float = 0.0
     current_turn_id: str | None = None
+    closed_reason: ClosedReason | None = None
 
 
 class MessageMeta(BaseModel):
@@ -139,6 +152,8 @@ class TurnReceipt(BaseModel):
     finished_at: float | None = None
     n_calls: int = 0
     cost: float = 0.0
+    #: how long the turn actually took, start to finish
+    wall_seconds: float = 0.0
     finish_reason: str = ""
     patch_sha256: str | None = None
     gt_status: str = "off"

@@ -43,11 +43,17 @@ from minisweagent.exceptions import (
 DEFAULT_MAX_CONTEXT_CHARS = 240_000
 KEEP_RECENT_OBSERVATIONS = 20
 MIN_TRUNCATABLE_CHARS = 64
+#: per-turn wall-clock budget, in seconds. ``0`` disables it.
+DEFAULT_TURN_WALL_SECONDS = 900
 
 STOPPED_REPLY = "Stopped."
 STEP_LIMIT_REPLY = (
     "I used the step budget for this turn without finishing. Where I am: "
     "{thought}. Say 'continue' to keep going."
+)
+TIME_LIMIT_REPLY = (
+    "I used the time budget for this turn ({minutes} min) without finishing. "
+    "Where I am: {thought}. Say 'continue' to keep going."
 )
 FORMAT_ERROR_REPLY = (
     "I could not produce a valid command after several attempts, so I stopped "
@@ -58,9 +64,30 @@ FORMAT_ERROR_REPLY = (
 REPLY = "reply"
 QUESTION = "question"
 STEP_LIMIT = "step_limit"
+TIME_LIMIT = "time_limit"
 STOPPED = "stopped"
 SUBMITTED = "submitted"
 ERROR = "error"
+
+
+def turn_wall_seconds() -> int:
+    """The default per-turn wall-clock budget, from ``TURN_WALL_SECONDS``.
+
+    Cost is always ``0.0`` under ``MSWEA_COST_TRACKING=ignore_errors``, so
+    steps were the only budget a turn had. A step is not a unit of time: one
+    ``pytest`` invocation can outlast fifty ``grep``s. This is the other half.
+    """
+    try:
+        value = int(os.environ.get("TURN_WALL_SECONDS", DEFAULT_TURN_WALL_SECONDS))
+    except ValueError:
+        return DEFAULT_TURN_WALL_SECONDS
+    return max(0, value)
+
+
+def format_minutes(seconds: float) -> str:
+    """``seconds`` as the minute figure quoted back to the user."""
+    minutes = seconds / 60.0
+    return f"{minutes:.0f}" if minutes >= 1 else f"{minutes:.2f}"
 
 
 @dataclass(frozen=True)
@@ -71,6 +98,8 @@ class TurnResult:
     reply: str
     n_calls: int
     cost: float
+    #: how long this turn took, start to finish
+    wall_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -250,6 +279,7 @@ class ConversationalAgent(DefaultAgent):
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         config_class: type = AgentConfig,
         max_context_chars: int | None = None,
+        wall_seconds: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(model, env, config_class=config_class, **kwargs)
@@ -260,6 +290,14 @@ class ConversationalAgent(DefaultAgent):
         self.env = _EmittingEnvironment(env, self)
         self._steering_queue: queue.Queue[Steering] = queue.Queue()
         self._stop_event = threading.Event()
+        #: set by the wall-clock watchdog when this turn ran out of time
+        self._deadline_event = threading.Event()
+        self._deadline_timer: threading.Timer | None = None
+        self._wall_seconds = (
+            max(0, int(wall_seconds))
+            if wall_seconds is not None
+            else turn_wall_seconds()
+        )
         self._session_started = False
         self._turn_id: str | None = None
         self._turn_start_calls = 0
@@ -314,12 +352,53 @@ class ConversationalAgent(DefaultAgent):
         returncode-137 observation and the loop reaches the boundary at once.
         """
         self._stop_event.set()
+        self._interrupt_env()
+
+    def _interrupt_env(self) -> None:
+        """Kill whatever command is in flight, if the environment allows it."""
         interrupt = getattr(self.env, "interrupt", None)
-        if callable(interrupt):
-            try:
-                interrupt()
-            except Exception:  # noqa: BLE001 - a stop must never raise
-                pass
+        if not callable(interrupt):
+            return
+        try:
+            interrupt()
+        except Exception:  # noqa: BLE001 - ending a turn must never raise
+            pass
+
+    @property
+    def wall_seconds(self) -> int:
+        """This session's per-turn wall-clock budget. ``0`` means unbounded."""
+        return self._wall_seconds
+
+    @property
+    def time_limit_reached(self) -> bool:
+        return self._deadline_event.is_set()
+
+    def _arm_deadline(self) -> None:
+        """Start the watchdog that ends a turn that overruns its wall budget.
+
+        A timer rather than a loop check alone, because the check only runs at
+        a step boundary: a single ``sleep 600`` would otherwise blow the budget
+        by ten minutes before anyone looked. The watchdog interrupts the
+        command exactly the way ``request_stop`` does, and the boundary check
+        below then ends the turn.
+        """
+        self._deadline_event.clear()
+        self._disarm_deadline()
+        if self._wall_seconds <= 0:
+            return
+        timer = threading.Timer(self._wall_seconds, self._on_deadline)
+        timer.daemon = True
+        self._deadline_timer = timer
+        timer.start()
+
+    def _disarm_deadline(self) -> None:
+        timer, self._deadline_timer = self._deadline_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _on_deadline(self) -> None:
+        self._deadline_event.set()
+        self._interrupt_env()
 
     def take_pending_steering(self) -> list[Steering]:
         """Messages that arrived after the last drain, for a follow-up turn."""
@@ -343,7 +422,9 @@ class ConversationalAgent(DefaultAgent):
         self.n_consecutive_format_errors = 0
         self._turn_start_calls = self.n_calls
         start_cost = self.cost
+        started = time.monotonic()
         budget = max(0, int(self.config.step_limit))
+        self._arm_deadline()
 
         self.add_messages(self.model.format_message(role="user", content=user_text))
 
@@ -356,6 +437,9 @@ class ConversationalAgent(DefaultAgent):
             self._drain_steering()
             if budget and (self.n_calls - self._turn_start_calls) >= budget:
                 finish_reason, reply = STEP_LIMIT, self._step_limit_reply()
+                break
+            if self._out_of_time(started):
+                finish_reason, reply = TIME_LIMIT, self._time_limit_reply()
                 break
 
             self._truncate_context()
@@ -381,16 +465,21 @@ class ConversationalAgent(DefaultAgent):
                 self._emit(
                     "agent_error", {"error": f"{type(exc).__name__}: {exc}"}
                 )
+                # The turn dies here; the watchdog must not outlive it and
+                # interrupt whatever runs next.
+                self._disarm_deadline()
                 raise
             finally:
                 self._save_quietly()
 
-        if finish_reason in {STOPPED, STEP_LIMIT, SUBMITTED, ERROR} and reply:
+        if finish_reason in {STOPPED, STEP_LIMIT, TIME_LIMIT, SUBMITTED, ERROR} and reply:
             self.add_messages(
                 self.model.format_message(role="assistant", content=reply)
             )
         self._save_quietly()
         self._turn_id = None
+        self._disarm_deadline()
+        self._deadline_event.clear()
         # Cleared only now, so a stop requested before the worker thread got
         # going (or during the turn) is honoured exactly once.
         self._stop_event.clear()
@@ -399,7 +488,21 @@ class ConversationalAgent(DefaultAgent):
             reply=reply,
             n_calls=self.n_calls - self._turn_start_calls,
             cost=round(self.cost - start_cost, 10),
+            wall_seconds=round(time.monotonic() - started, 3),
         )
+
+    def _out_of_time(self, started: float) -> bool:
+        """True once this turn has spent its wall-clock budget.
+
+        Both signals matter: the watchdog fires while a command is running,
+        and the elapsed check catches a turn that spent its budget on model
+        latency alone, where no command was ever in flight to interrupt.
+        """
+        if self._wall_seconds <= 0:
+            return False
+        if self._deadline_event.is_set():
+            return True
+        return (time.monotonic() - started) >= self._wall_seconds
 
     def _handle_format_error(self, exc: FormatError) -> tuple[str, str] | None:
         """Text-only response -> the turn's reply; otherwise a real format error."""
@@ -453,6 +556,11 @@ class ConversationalAgent(DefaultAgent):
 
     def _step_limit_reply(self) -> str:
         return STEP_LIMIT_REPLY.format(thought=self._last_thought())
+
+    def _time_limit_reply(self) -> str:
+        return TIME_LIMIT_REPLY.format(
+            minutes=format_minutes(self._wall_seconds), thought=self._last_thought()
+        )
 
     def _last_thought(self) -> str:
         for message in reversed(self.messages):

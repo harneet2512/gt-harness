@@ -20,10 +20,13 @@ import pytest
 from minisweagent.exceptions import FormatError, Submitted
 
 from cloud.server.conversational_agent import (
+    DEFAULT_TURN_WALL_SECONDS,
     KEEP_RECENT_OBSERVATIONS,
     ConversationalAgent,
     assistant_message_from_format_error,
+    format_minutes,
     is_question,
+    turn_wall_seconds,
 )
 from cloud.server.prompts import CHAT_BRIEF_TEMPLATE, CHAT_SYSTEM_TEMPLATE
 
@@ -142,6 +145,7 @@ def _agent(
     events: list[dict] | None = None,
     step_limit: int = 10,
     max_context_chars: int = 0,
+    wall_seconds: int | None = 0,
 ) -> ConversationalAgent:
     agent = ConversationalAgent(
         FakeModel(scripted),
@@ -151,6 +155,7 @@ def _agent(
         instance_template="BRIEF",
         step_limit=step_limit,
         max_context_chars=max_context_chars,
+        wall_seconds=wall_seconds,
     )
     agent.begin_session()
     return agent
@@ -628,3 +633,87 @@ def test_request_stop_without_an_interruptible_env_still_stops() -> None:
     agent = _agent([_action("echo one"), _text_reply("done")], env=FakeEnv())
     agent.request_stop()
     assert agent.run_turn("go", turn_id="t1").finish_reason == "stopped"
+
+
+# --------------------------------------------------------------------------
+# per-turn wall-clock budget (HAR-84)
+# --------------------------------------------------------------------------
+def test_wall_budget_interrupts_the_command_and_ends_the_turn() -> None:
+    """The deadline mirrors a stop: kill the command, end at the boundary.
+
+    Without the interrupt the budget would only be *noticed* once the running
+    command returned, so a single long command could outlast it by any margin.
+    """
+    events: list[dict] = []
+    env = SlowEnv()
+    agent = _agent(
+        [_action("echo one"), _action("sleep 120"), _text_reply("done")],
+        env=env,
+        events=events,
+        wall_seconds=1,
+    )
+    started = time.monotonic()
+    result = agent.run_turn("go", turn_id="t1")
+    elapsed = time.monotonic() - started
+
+    assert result.finish_reason == "time_limit"
+    assert result.reply.startswith(
+        "I used the time budget for this turn (0.02 min) without finishing."
+    )
+    assert result.reply.endswith("Say 'continue' to keep going.")
+    assert result.wall_seconds >= 1.0
+    assert elapsed < 8.0, f"the deadline took {elapsed:.1f}s to land"
+    assert env.interrupts == 1
+    assert agent.messages[-1] == {"role": "assistant", "content": result.reply}
+
+    interrupted = [
+        e for e in events
+        if e["type"] == "tool_result" and e["data"]["returncode"] == 137
+    ]
+    assert len(interrupted) == 1
+
+    # the budget is per turn: the next one starts with a full clock
+    assert not agent.time_limit_reached
+    assert agent.run_turn("continue", turn_id="t2").finish_reason == "reply"
+
+
+def test_a_turn_inside_its_wall_budget_reports_its_duration() -> None:
+    agent = _agent([_action("echo one"), _text_reply("done")], wall_seconds=60)
+    result = agent.run_turn("go", turn_id="t1")
+
+    assert result.finish_reason == "reply"
+    assert result.reply == "done"
+    # a scripted model and a fake shell can finish inside a millisecond, so
+    # the only honest claim is "recorded, and nowhere near the budget"
+    assert 0 <= result.wall_seconds < 60
+    assert not agent.time_limit_reached
+
+
+def test_a_zero_wall_budget_is_unbounded() -> None:
+    agent = _agent([_action("echo one"), _text_reply("done")], wall_seconds=0)
+    assert agent.wall_seconds == 0
+    result = agent.run_turn("go", turn_id="t1")
+    assert result.finish_reason == "reply"
+    assert 0 <= result.wall_seconds < 1, "the duration is still recorded"
+
+
+def test_wall_budget_defaults_to_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TURN_WALL_SECONDS", raising=False)
+    assert turn_wall_seconds() == DEFAULT_TURN_WALL_SECONDS
+    monkeypatch.setenv("TURN_WALL_SECONDS", "120")
+    assert turn_wall_seconds() == 120
+    assert _agent([_text_reply("done")], wall_seconds=None).wall_seconds == 120
+    monkeypatch.setenv("TURN_WALL_SECONDS", "not-a-number")
+    assert turn_wall_seconds() == DEFAULT_TURN_WALL_SECONDS
+    monkeypatch.setenv("TURN_WALL_SECONDS", "-5")
+    assert turn_wall_seconds() == 0, "a negative budget is no budget"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [(900, "15"), (120, "2"), (90, "2"), (60, "1"), (2, "0.03"), (1, "0.02")],
+)
+def test_format_minutes(seconds: int, expected: str) -> None:
+    assert format_minutes(seconds) == expected

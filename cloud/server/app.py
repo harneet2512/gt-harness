@@ -11,6 +11,7 @@ import os
 # to stay above it.
 os.environ.setdefault("MSWEA_COST_TRACKING", "ignore_errors")
 
+import asyncio  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
@@ -54,8 +55,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     manager = SessionManager(store, event_bus)
     deps.configure(store, event_bus, manager)
     await manager.recover()
-    yield
-    await store.close()
+    manager.start_reaper(asyncio.get_running_loop())
+    try:
+        yield
+    finally:
+        await manager.stop_reaper()
+        await store.close()
 
 
 def create_app() -> FastAPI:

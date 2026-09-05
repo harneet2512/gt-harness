@@ -18,11 +18,13 @@ underneath and a receipt on every turn.
   context (`steering`).
 - A **turn ends when the agent talks to you**: a model response with no command
   block is the reply — finished, or asking a question. It is not a format error.
-  Other endings: `stopped`, `step_limit` (per-turn budget), `error`, and the
-  legacy mini-SWE submit marker (`submitted`).
+  Other endings: `stopped`, `step_limit` (per-turn step budget), `time_limit`
+  (per-turn wall-clock budget), `error`, and the legacy mini-SWE submit marker
+  (`submitted`).
 - The workspace lives for the life of the session under `WORKSPACES_DIR`
-  (default `./workspaces/<session_id>`) and is removed on `close`. The
-  cumulative diff is available at any time.
+  (default `./workspaces/<session_id>`) and is removed on `close` — or by the
+  idle TTL reaper, which closes a session the same way once it has been `idle`
+  for `SESSION_IDLE_TTL_SECONDS`. The cumulative diff is available at any time.
 
 ## Quickstart
 
@@ -97,7 +99,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/sessions` | Create a session (`repo`, `ref`, `model`, `gt_mode`, `step_limit`, `temperature`) → 201 `Session`. 400 on a non-GitHub URL. |
+| POST | `/api/sessions` | Create a session (`repo`, `ref`, `model`, `gt_mode`, `step_limit`, `wall_seconds` (60–3600, default `TURN_WALL_SECONDS`), `temperature`) → 201 `Session`. 400 on a non-GitHub URL. |
 | GET | `/api/sessions` | List sessions, newest first |
 | GET | `/api/sessions/:id` | One session |
 | GET | `/api/sessions/:id/messages` | Full conversation, in order |
@@ -108,7 +110,7 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 | GET | `/api/sessions/:id/graph` | File relation graph (`{base_sha, gt, nodes:[{id,path,size,lang,dir}], edges:[{source,target,kind,weight}]}`). `kind` is `import` (static imports) or `gt_call`/`gt_ref`/`gt_import` (GT symbol edges collapsed to file level, only when `gt_status` is `ready`; `gt` says whether they are in). Nodes are exactly the files `/tree` returns; over 5000 files only the busiest survive and `truncated: true` is added. |
 | GET | `/api/sessions/:id/receipts` | One receipt per turn |
 | POST | `/api/sessions/:id/stop` | Stop the running turn at the next step boundary → 202 (409 if idle) |
-| POST | `/api/sessions/:id/close` | Kill the turn, delete the workspace, status `closed` (idempotent) |
+| POST | `/api/sessions/:id/close` | Kill the turn, delete the workspace, status `closed`, `closed_reason: "user"` (idempotent) |
 | GET | `/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logout` | GitHub OAuth |
 | GET | `/health` | Public liveness probe |
 
@@ -117,7 +119,8 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 ```
 {id, status: creating|idle|running|failed|closed, repo, ref, model, gt_mode,
  gt_status: off|ready|unavailable|pending, gt_error, created_at, updated_at,
- last_message, turns, steps, cost, current_turn_id}
+ last_message, turns, steps, cost, total_wall_seconds, current_turn_id,
+ closed_reason: user|expired|failed|null}
 ```
 
 `gt_error` is the reason GT is unavailable, in the indexer's own words (e.g.
@@ -129,6 +132,45 @@ scrolled past can still say *why* a session is running without GT.
 `stopped` is a lifecycle **event**, not a status: after a stop the reply is
 written and the session goes straight back to `idle`.
 
+`closed_reason` says *why* a session ended, which `closed` alone does not:
+`user` (someone pressed close), `expired` (the idle TTL reaper), `failed` (a
+clone, sandbox or agent failure — recorded when the session goes `failed`, and
+kept if it is closed later). It is `null` while the session is alive.
+
+`total_wall_seconds` is the sum of the finished turns' durations. Under
+`MSWEA_COST_TRACKING=ignore_errors` — which the server sets, because LiteLLM
+aborts a run it cannot price — `cost` is always `0.0`, so time is the only
+honest budget line a session has.
+
+### Budgets
+
+A turn has two ceilings, both per turn and both checked at a step boundary:
+
+| Budget | Set by | Ending |
+|---|---|---|
+| model calls | `step_limit` (1–500, default 60) | `step_limit` |
+| wall clock | `wall_seconds` (60–3600), default `TURN_WALL_SECONDS` (900) | `time_limit` |
+
+A step is not a unit of time: one `pytest -x` is one step and ten minutes. When
+the wall deadline passes with a command still running, the command is killed
+first — the same interrupt `/stop` uses, leaving a returncode-137 observation —
+so the loop reaches its next boundary immediately instead of after the command
+finally returns. Both endings write a reply that says where the agent got to
+and invite `continue`; the session goes back to `idle` and the transcript is
+intact, so the next turn resumes with a fresh budget.
+
+### Idle sessions
+
+A session holds a full repo clone (and, under `SANDBOX_MODE=docker`, a
+container). `SESSION_IDLE_TTL_SECONDS` (default 21600 = 6 h, `0` disables)
+bounds that: every `SESSION_REAP_INTERVAL_SECONDS` (default 300) a background
+task closes every session that has been `idle` — never `running`, never
+`creating` — for longer than the TTL, through exactly the `/close` path, and
+records `closed_reason: "expired"`. `recover()` runs one pass at startup, so a
+server that was down for a week does not come back holding the disk. `updated_at`
+moves on every message, turn end and stop, so the TTL measures idleness rather
+than age.
+
 ### Events
 
 Frames are `id: N` / `event: <type>` / `data: {"id","type","timestamp","data"}`,
@@ -136,7 +178,7 @@ plus a `: ping` comment heartbeat every 15s.
 
 | Type | `data` |
 |---|---|
-| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `diff_snapshots_disabled{reason}`, `failed{error}`, `closed` |
+| `lifecycle` | `{status, ...}` — `creating`, `cloning`, `sandbox_starting`, `sandbox_ready{container, image, image_digest}`, `sandbox_failed{error}`, `indexing`, `gt_ready`, `gt_unavailable{error}`, `idle`, `running`, `stopped`, `diff_snapshots_disabled{reason}`, `failed{error}`, `closed{reason: user\|expired}` |
 | `turn_started` | `{turn_id, message_id}` |
 | `assistant` | `{turn_id, content, actions[], step, n_calls, cost, is_reply?}` — one per model call. `is_reply: true` marks the text-only response that *ends* the turn: it has no `actions`, and it is emitted just before `agent_reply` so a client counting `assistant` frames always matches `turn_finished.n_calls` instead of trailing it by one. The field is absent on every other frame. |
 | `tool_call` | `{turn_id, command, step, n_calls}` |
@@ -156,9 +198,10 @@ Browser (React) ←→ FastAPI ←→ ConversationalAgent (mini-SWE) + GT engine
 
 - `conversational_agent.py` — `DefaultAgent` subclass: one transcript across
   many turns, text-only responses treated as replies, steering/stop at step
-  boundaries, observation truncation past `MAX_CONTEXT_CHARS`.
+  boundaries, per-turn step and wall-clock budgets, observation truncation past
+  `MAX_CONTEXT_CHARS`.
 - `runner.py` — `SessionManager`: workspaces, turn scheduling under a per-session
-  lock, receipts, diffs, restart recovery.
+  lock, receipts, diffs, restart recovery, the idle-session TTL reaper.
 - `store.py` — SQLite: `sessions`, `messages`, `turns`, `events`,
   `diff_snapshots`. The schema is drop-and-recreate on version change (dev
   tool).

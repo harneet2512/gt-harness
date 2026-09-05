@@ -56,8 +56,26 @@ def _session_view(row: dict) -> dict[str, Any]:
         "turns": row.get("turns", 0),
         "steps": row.get("steps", 0),
         "cost": row.get("cost", 0.0),
+        "total_wall_seconds": row.get("total_wall_seconds", 0.0),
         "current_turn_id": row.get("current_turn_id"),
+        "closed_reason": row.get("closed_reason"),
     }
+
+
+def _session_config(body: SessionCreate) -> dict[str, Any]:
+    """The per-session knobs the runner reads back off the row.
+
+    ``wall_seconds`` is stored only when the caller asked for one, so an
+    unset request keeps following ``TURN_WALL_SECONDS`` rather than freezing
+    today's default into every session row.
+    """
+    config: dict[str, Any] = {
+        "step_limit": body.step_limit,
+        "temperature": body.temperature,
+    }
+    if body.wall_seconds is not None:
+        config["wall_seconds"] = body.wall_seconds
+    return config
 
 
 async def _require_session(store: SessionStore, session_id: str) -> dict:
@@ -79,7 +97,7 @@ async def create_session(
         ref=body.ref,
         model=body.model,
         gt_mode=body.gt_mode,
-        config={"step_limit": body.step_limit, "temperature": body.temperature},
+        config=_session_config(body),
     )
     await manager.create_workspace(session_id)
     session = await store.get_session(session_id)

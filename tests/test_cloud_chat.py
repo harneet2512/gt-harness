@@ -26,8 +26,10 @@ Run: ``python -m pytest tests/test_cloud_chat.py -q`` from the repo root.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import threading
 import time
@@ -238,9 +240,12 @@ _ORIGINAL_CREATE_BLOCKING = SessionManager._create_blocking
 
 
 class Harness:
-    def __init__(self, seed_repo: Path, workspaces: Path) -> None:
+    def __init__(self, seed_repo: Path, workspaces: Path, db_path: Path) -> None:
         self.seed_repo = seed_repo
         self.workspaces = workspaces
+        self.db_path = db_path
+        #: the server's event loop, captured by ``_patched_create_blocking``
+        self.loop: asyncio.AbstractEventLoop | None = None
         self.client: httpx.Client = None  # type: ignore[assignment]
         self.script: list[Any] = list(DEFAULT_SCRIPT)
         self.models: dict[str, ScriptedModel] = {}
@@ -298,6 +303,37 @@ class Harness:
             time.sleep(POLL_INTERVAL)
         raise AssertionError(f"model for session {session_id} never reached its gate")
 
+    # -- server-loop access -----------------------------------------------
+    def on_server_loop(self, coro, timeout: float = GATE_TIMEOUT):
+        """Await a manager coroutine on the loop that owns the store."""
+        assert self.loop is not None, "no session has been created yet"
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
+
+    def reap(self, timeout: float = GATE_TIMEOUT) -> list[str]:
+        """Run exactly one real reaper pass and return the ids it closed."""
+        return self.on_server_loop(deps.get_manager().reap_idle_sessions(), timeout)
+
+    def backdate(self, session_id: str, seconds: float) -> None:
+        """Make a session look ``seconds`` older than it is.
+
+        A second SQLite connection to the same file, not a fake: the row the
+        reaper reads is the row this writes.
+        """
+        with sqlite3.connect(str(self.db_path), timeout=10) as db:
+            db.execute(
+                "UPDATE sessions SET updated_at = updated_at - ? WHERE id = ?",
+                (seconds, session_id),
+            )
+            db.commit()
+
+    def updated_at(self, session_id: str) -> float:
+        with sqlite3.connect(str(self.db_path), timeout=10) as db:
+            row = db.execute(
+                "SELECT updated_at FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        assert row is not None
+        return float(row[0])
+
     def shutdown(self) -> None:
         self.aborted = True
         self.start_gate.set()
@@ -348,6 +384,7 @@ def _patched_build_agent(harness: Harness):
         # parameter exists so the fake keeps matching the real signature.
         sandbox: str | None = None,
         step_limit: int,
+        wall_seconds: int,
         temperature: float,
         issue_text: str,
         loop,
@@ -361,6 +398,7 @@ def _patched_build_agent(harness: Harness):
             system_template=SYSTEM_TEMPLATE,
             instance_template=INSTANCE_TEMPLATE,
             step_limit=step_limit,
+            wall_seconds=wall_seconds,
             cost_limit=0.0,
             output_path=state_dir / "trajectory.json",
         )
@@ -375,6 +413,9 @@ def _patched_build_agent(harness: Harness):
 
 def _patched_create_blocking(harness: Harness):
     def _create_blocking(self: SessionManager, session: dict, loop):
+        # The only handle a test has on the loop that owns the store, which is
+        # where a manager coroutine (a reaper pass) has to be awaited.
+        harness.loop = loop
         if not harness.start_gate.wait(GATE_TIMEOUT) or harness.aborted:
             return None
         return _ORIGINAL_CREATE_BLOCKING(self, session, loop)
@@ -392,7 +433,8 @@ def seed_repo(tmp_path_factory) -> Path:
 def harness(seed_repo, tmp_path, monkeypatch):
     seed = seed_repo
     workspaces = tmp_path / "workspaces"
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "cloud.db"))
+    db_path = tmp_path / "cloud.db"
+    monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("WORKSPACES_DIR", str(workspaces))
     monkeypatch.setenv("MAX_CONCURRENT_SESSIONS", "10")
     monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
@@ -400,13 +442,19 @@ def harness(seed_repo, tmp_path, monkeypatch):
     # The stream must stay open across turns; a short heartbeat keeps the test
     # reader responsive without changing the production default (15s).
     monkeypatch.setenv("SSE_HEARTBEAT_SECONDS", "0.2")
+    # The idle reaper starts for real (the lifespan wires it), but its own
+    # interval never fires inside a test: reaper tests drive one pass by hand
+    # so a TTL assertion is a fact, not a sleep.
+    monkeypatch.setenv("SESSION_REAP_INTERVAL_SECONDS", "3600")
+    monkeypatch.delenv("SESSION_IDLE_TTL_SECONDS", raising=False)
+    monkeypatch.delenv("TURN_WALL_SECONDS", raising=False)
     # deps is module-global state populated by the lifespan; reset so nothing
     # leaks between tests (monkeypatch restores the originals afterwards).
     monkeypatch.setattr(deps, "_store", None, raising=False)
     monkeypatch.setattr(deps, "_event_bus", None, raising=False)
     monkeypatch.setattr(deps, "_manager", None, raising=False)
 
-    h = Harness(seed, workspaces)
+    h = Harness(seed, workspaces, db_path)
     monkeypatch.setattr(workspace_module, "subprocess", _GitCloneRedirector(seed))
     monkeypatch.setattr(SessionManager, "_build_agent", _patched_build_agent(h))
     monkeypatch.setattr(
@@ -1022,6 +1070,86 @@ def test_step_limit_auto_replies_and_returns_to_idle(harness: Harness) -> None:
 
 
 # --------------------------------------------------------------------------
+# 7b: per-turn wall-clock budget
+# --------------------------------------------------------------------------
+def test_wall_budget_interrupts_the_command_and_ends_the_turn(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
+    store, event bus, agent loop, bash environment (a real ``sleep 30`` in a
+    real subprocess, really killed), git.
+
+    Cost is always $0.0 under ``MSWEA_COST_TRACKING=ignore_errors``, so steps
+    were the only budget a turn had — and a step is not a unit of time. One
+    ``sleep 30`` against a 2 s budget is one step and half a minute.
+    """
+    monkeypatch.setenv("TURN_WALL_SECONDS", "2")
+    harness.set_script([_action("sleep 30"), _reply("Picked back up.")])
+    session_id = _create_idle(harness)
+
+    _post_message(harness, session_id, "take your time")
+    started = time.monotonic()
+    session = _wait_status(harness, session_id, {"idle"})
+    elapsed = time.monotonic() - started
+    assert elapsed < 20, f"the turn ran {elapsed:.1f}s past a 2s budget"
+    assert session["status"] == "idle", "a time limit is an ending, not a failure"
+    assert session["total_wall_seconds"] > 0
+
+    frames = _from_turn(_read_sse(harness, session_id, until=_turn_complete))
+    reply = frames[_index(frames, "agent_reply")]["payload"]["data"]
+    assert reply["finish_reason"] == "time_limit"
+    assert reply["content"].startswith(
+        "I used the time budget for this turn (0.03 min) without finishing."
+    )
+    assert "I will run: sleep 30" in reply["content"]
+    assert reply["content"].endswith("Say 'continue' to keep going.")
+
+    # the command in flight was really killed, not waited out
+    result = frames[_index(frames, "tool_result")]["payload"]["data"]
+    assert result["command"] == "sleep 30"
+    assert result["returncode"] == 137, "128 + SIGKILL"
+    assert result["is_error"] is True
+
+    assert harness.models[session_id].calls == 1, "no step after the deadline"
+    receipts = harness.client.get(
+        f"/api/sessions/{session_id}/receipts", headers=harness.auth
+    ).json()
+    assert receipts[0]["finish_reason"] == "time_limit"
+    assert receipts[0]["wall_seconds"] >= 2.0
+
+    messages = harness.client.get(
+        f"/api/sessions/{session_id}/messages", headers=harness.auth
+    ).json()
+    assert messages[-1]["meta"]["finish_reason"] == "time_limit"
+
+
+def test_a_turn_inside_its_wall_budget_is_untouched(harness: Harness) -> None:
+    """The budget is a ceiling, not a schedule: the default path is unchanged."""
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "do the thing")
+    session = _wait_status(harness, session_id, {"idle"})
+
+    receipts = harness.client.get(
+        f"/api/sessions/{session_id}/receipts", headers=harness.auth
+    ).json()
+    assert receipts[0]["finish_reason"] == "reply"
+    # the receipt carries the honest duration whether the budget was hit or not
+    assert 0 < receipts[0]["wall_seconds"] < 900
+    assert session["total_wall_seconds"] == pytest.approx(
+        receipts[0]["wall_seconds"], abs=0.05
+    )
+
+
+def test_wall_seconds_is_validated_like_step_limit(harness: Harness) -> None:
+    """Workspace workers are held: this is about the request body, not cloning."""
+    harness.hold_worker()
+    assert _create(harness, wall_seconds=60).status_code == 201
+    assert _create(harness, wall_seconds=3600).status_code == 201
+    assert _create(harness, wall_seconds=59).status_code == 422
+    assert _create(harness, wall_seconds=3601).status_code == 422
+
+
+# --------------------------------------------------------------------------
 # 8: diff
 # --------------------------------------------------------------------------
 def test_diff_reports_created_and_modified_files(harness: Harness) -> None:
@@ -1287,6 +1415,154 @@ def test_close_removes_the_workspace_and_rejects_new_messages(
     frames = _read_sse(harness, session_id, until=lambda _f: False)
     assert frames[-1]["event"] == "lifecycle"
     assert frames[-1]["payload"]["data"]["status"] == "closed"
+
+
+# --------------------------------------------------------------------------
+# 9b: idle-session TTL reaper
+# --------------------------------------------------------------------------
+def test_an_expired_idle_session_is_closed_exactly_like_close(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FAKE BOUNDARY: model provider (LLM). Real: FastAPI app, JWT auth, SQLite
+    store, event bus, agent loop, bash environment, git — and a real reaper
+    pass, awaited on the server's own event loop.
+
+    A workspace is a full repo clone. Without a TTL it lives until someone
+    remembers to press close, so host disk grows with every session anyone
+    ever opened and never shrinks.
+    """
+    monkeypatch.setenv("SESSION_IDLE_TTL_SECONDS", "3600")
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "do the thing")
+    _wait_status(harness, session_id, {"idle"})
+    workspace = harness.workspaces / session_id
+    assert workspace.is_dir()
+
+    harness.backdate(session_id, 7200)
+    assert harness.reap() == [session_id]
+
+    session = _session(harness, session_id)
+    assert session["status"] == "closed"
+    assert session["closed_reason"] == "expired"
+    assert not workspace.exists(), "the reaper closes exactly like /close"
+
+    rejected = _post_message(harness, session_id, "hello?")
+    assert rejected.status_code == 409
+    assert "session is closed" in rejected.json()["detail"]
+
+    frames = _read_sse(harness, session_id, until=lambda _f: False)
+    assert frames[-1]["event"] == "lifecycle"
+    assert frames[-1]["payload"]["data"] == {"status": "closed", "reason": "expired"}
+
+    # a second pass has nothing left to do
+    assert harness.reap() == []
+
+
+def test_a_user_close_is_recorded_as_such(harness: Harness) -> None:
+    """The other half of the reason: `closed` alone does not say who did it."""
+    session_id = _create_idle(harness)
+    closed = harness.client.post(
+        f"/api/sessions/{session_id}/close", headers=harness.auth
+    )
+    assert closed.status_code == 200
+    assert closed.json()["closed_reason"] == "user"
+
+    frames = _read_sse(harness, session_id, until=lambda _f: False)
+    assert frames[-1]["payload"]["data"] == {"status": "closed", "reason": "user"}
+
+
+def test_a_running_session_is_never_reaped(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Age is not idleness: a turn that has been working for hours is working."""
+    monkeypatch.setenv("SESSION_IDLE_TTL_SECONDS", "3600")
+    harness.set_script([_action("echo one"), _reply("Done.")])
+    session_id = _create_idle(harness)
+    harness.block_model_at(1)
+    _post_message(harness, session_id, "work on it")
+    harness.wait_blocked(session_id)
+    assert _session(harness, session_id)["status"] == "running"
+
+    harness.backdate(session_id, 7200)
+    assert harness.reap() == [], "a running session is not a candidate"
+    assert _session(harness, session_id)["status"] == "running"
+    assert (harness.workspaces / session_id).is_dir()
+
+    harness.release_model()
+    session = _wait_status(harness, session_id, {"idle"})
+    assert session["closed_reason"] is None
+
+
+def test_ttl_zero_disables_the_reaper(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SESSION_IDLE_TTL_SECONDS", "0")
+    session_id = _create_idle(harness)
+    harness.backdate(session_id, 10_000_000)
+
+    assert harness.reap() == []
+    assert _session(harness, session_id)["status"] == "idle"
+    assert (harness.workspaces / session_id).is_dir()
+
+
+def test_activity_inside_the_ttl_keeps_a_session_alive(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`updated_at` has to move on activity, or the TTL measures age."""
+    monkeypatch.setenv("SESSION_IDLE_TTL_SECONDS", "3600")
+    session_id = _create_idle(harness)
+    harness.backdate(session_id, 7200)
+    stale = harness.updated_at(session_id)
+
+    _post_message(harness, session_id, "still here")
+    _wait_status(harness, session_id, {"idle"})
+    assert harness.updated_at(session_id) > stale
+
+    assert harness.reap() == []
+    assert _session(harness, session_id)["status"] == "idle"
+    assert (harness.workspaces / session_id).is_dir()
+
+
+def test_stop_counts_as_activity(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/stop` writes no session field of its own, so it has to touch the row."""
+    monkeypatch.setenv("SESSION_IDLE_TTL_SECONDS", "3600")
+    harness.set_script([_action("echo one"), _reply("Picked back up.")])
+    session_id = _create_idle(harness)
+    harness.block_model_at(1)
+    _post_message(harness, session_id, "work on it")
+    harness.wait_blocked(session_id)
+
+    harness.backdate(session_id, 7200)
+    stale = harness.updated_at(session_id)
+    assert (
+        harness.client.post(
+            f"/api/sessions/{session_id}/stop", headers=harness.auth
+        ).status_code
+        == 202
+    )
+    assert harness.updated_at(session_id) > stale
+
+    harness.release_model()
+    _wait_status(harness, session_id, {"idle"})
+
+
+def test_recover_reaps_expired_sessions_on_startup(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server that was down for a week must not come back holding the disk."""
+    monkeypatch.setenv("SESSION_IDLE_TTL_SECONDS", "3600")
+    expired = _create_idle(harness)
+    live = _create_idle(harness)
+    harness.backdate(expired, 7200)
+
+    harness.on_server_loop(deps.get_manager().recover(), POLL_TIMEOUT)
+
+    assert _session(harness, expired)["closed_reason"] == "expired"
+    assert not (harness.workspaces / expired).exists()
+    assert _session(harness, live)["status"] == "idle"
+    assert (harness.workspaces / live).is_dir()
 
 
 # --------------------------------------------------------------------------

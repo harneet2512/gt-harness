@@ -12,7 +12,7 @@ import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: ``stopped`` is a lifecycle *event*, not a persisted status: after a stop the
 #: reply is written and the session goes straight back to ``idle``.
@@ -37,12 +37,18 @@ CREATE TABLE sessions (
     -- why GT is unavailable, in the indexer's own words; NULL when it is not
     gt_error TEXT,
     status TEXT NOT NULL DEFAULT 'creating',
+    -- why the session ended: 'user' (an explicit close), 'expired' (the idle
+    -- TTL reaper) or 'failed'. NULL while it is still alive.
+    closed_reason TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     last_message TEXT,
     turns INTEGER NOT NULL DEFAULT 0,
     steps INTEGER NOT NULL DEFAULT 0,
     cost REAL NOT NULL DEFAULT 0.0,
+    -- wall-clock seconds summed over finished turns; the only budget signal
+    -- that survives MSWEA_COST_TRACKING=ignore_errors pricing every turn at $0
+    total_wall_seconds REAL NOT NULL DEFAULT 0.0,
     current_turn_id TEXT,
     workspace_path TEXT,
     base_sha TEXT,
@@ -72,6 +78,8 @@ CREATE TABLE turns (
     n_calls INTEGER NOT NULL DEFAULT 0,
     cost REAL NOT NULL DEFAULT 0.0,
     finish_reason TEXT,
+    -- wall-clock seconds this turn took, start to finish
+    wall_seconds REAL NOT NULL DEFAULT 0.0,
     patch_sha256 TEXT,
     gt_status TEXT NOT NULL DEFAULT 'off',
     model TEXT NOT NULL DEFAULT '',
@@ -114,6 +122,7 @@ CREATE INDEX idx_turns_session ON turns(session_id, seq);
 _SESSION_FIELDS = (
     "gt_status",
     "gt_error",
+    "closed_reason",
     "last_message",
     "turns",
     "steps",
@@ -243,19 +252,52 @@ class SessionStore:
         await self._db.commit()
 
     async def bump_totals(
-        self, session_id: str, *, turns: int = 0, steps: int = 0, cost: float = 0.0
+        self,
+        session_id: str,
+        *,
+        turns: int = 0,
+        steps: int = 0,
+        cost: float = 0.0,
+        wall_seconds: float = 0.0,
     ) -> None:
         await self._db.execute(
             """UPDATE sessions
-               SET turns = turns + ?, steps = steps + ?, cost = cost + ?, updated_at = ?
+               SET turns = turns + ?, steps = steps + ?, cost = cost + ?,
+                   total_wall_seconds = total_wall_seconds + ?, updated_at = ?
                WHERE id = ?""",
-            (turns, steps, cost, time.time(), session_id),
+            (turns, steps, cost, wall_seconds, time.time(), session_id),
+        )
+        await self._db.commit()
+
+    async def touch(self, session_id: str) -> None:
+        """Mark the session as active *now*, without changing anything else.
+
+        The idle TTL reaper measures idleness from ``updated_at``, so every
+        path that is real user or agent activity has to move it. Most already
+        do as a side effect of writing a field; ``stop`` writes nothing.
+        """
+        await self._db.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (time.time(), session_id),
         )
         await self._db.commit()
 
     async def sessions_with_status(self, status: str) -> list[dict]:
         cursor = await self._db.execute(
             "SELECT * FROM sessions WHERE status = ?", (status,)
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+    async def idle_sessions_before(self, cutoff: float) -> list[dict]:
+        """Sessions sitting ``idle`` since before ``cutoff`` — the reaper's set.
+
+        Deliberately only ``idle``: a ``running`` session is busy however old
+        its row is, and ``creating`` is still cloning.
+        """
+        cursor = await self._db.execute(
+            "SELECT * FROM sessions WHERE status = 'idle' AND updated_at < ?"
+            " ORDER BY updated_at",
+            (cutoff,),
         )
         return [dict(r) for r in await cursor.fetchall()]
 
@@ -325,13 +367,22 @@ class SessionStore:
         cost: float,
         finish_reason: str,
         patch_sha256: str | None,
+        wall_seconds: float = 0.0,
     ) -> None:
         await self._db.execute(
             """UPDATE turns
                SET finished_at = ?, n_calls = ?, cost = ?, finish_reason = ?,
-                   patch_sha256 = ?
+                   wall_seconds = ?, patch_sha256 = ?
                WHERE turn_id = ?""",
-            (time.time(), n_calls, cost, finish_reason, patch_sha256, turn_id),
+            (
+                time.time(),
+                n_calls,
+                cost,
+                finish_reason,
+                wall_seconds,
+                patch_sha256,
+                turn_id,
+            ),
         )
         await self._db.commit()
 
@@ -346,6 +397,7 @@ class SessionStore:
                 "finished_at": r["finished_at"],
                 "n_calls": r["n_calls"],
                 "cost": r["cost"],
+                "wall_seconds": r["wall_seconds"],
                 "finish_reason": r["finish_reason"] or "",
                 "patch_sha256": r["patch_sha256"],
                 "gt_status": r["gt_status"],
