@@ -394,3 +394,36 @@ disabled plugin auto-loading and therefore lacked pytest-asyncio; these failures
 are an invocation defect, not passing product evidence. Explicitly loading the
 declared plugin gives 13 passing Mini-SWE parity tests. Other full-suite failures
 still need classification before any all-green claim.
+
+### Immutable checkpoint and strengthened interrupted-attempt proof
+
+Harness checkpoint `8ac9f8139cdb171b36b86cce05618b7f4666ef3e` is committed
+and pushed. Protected-pattern scan and repository construction hook passed;
+local closeout artifacts remain untracked and untouched. Its canonical CI
+33985762952 failed solely on `wheel_source_correspondence_mismatch` (63 missing,
+128 changed): expected rejection of the old pinned package, not a new crash.
+The two bundle tests formerly blocked by dirty/untracked closure now pass.
+Seven attestation test failures were stale synthetic execution receipts;
+fixtures now carry the required phases. The 77-test affected attestation/parity/
+closure suite passes. A corrected complete harness rerun is in progress.
+
+Built harness wheel SHA-256:
+`00f5dc83fc97c35d9d08effe983f2ed77c13742db60d981db12eed4c4425a672`.
+Installed this and the repaired Groundtruth wheel into an ephemeral Linux
+container with networking disabled, mounting only wheels and tests (no source
+checkout). Nine recovery/chain/descendant tests passed in 8.48s.
+
+Independent review of 8ac9f813: 32 focused checks passed in 85.07s; no new
+blocking regression found in the four repaired surfaces. Recovery consumption,
+partial-chain commitment, skipped-test witnessing and manual-only package
+correspondence findings are closed. This is not a formal release certificate.
+
+Additional Linux tests now join the interrupted worker and finalization paths:
+unchanged supervisor main, teardown, Git patch export and failure receipt issuer
+run with only the worker command substituted by a real hanging fixture that
+edits the repository and spawns a detached SIGTERM-ignoring child. Both deadline
+and external TERM produce exit 3; descendants are gone; model.patch includes
+the edit; the original index is untouched; journal hash/byte count match; both
+receipts are ERROR; provider counts remain unknown. Nine supervisor checks
+passed in 14.29s. This is actual supervisor-main finalization proof with a
+controlled worker, not paid Mini-SWE or official-verifier execution.

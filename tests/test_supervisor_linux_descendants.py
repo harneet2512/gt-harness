@@ -73,3 +73,86 @@ def test_setsid_descendant_reaped_before_finalization(tmp_path, termination):
             os.kill(descendant, signal.SIGKILL)
         unrelated.terminate()
         unrelated.wait(timeout=5)
+
+
+@pytest.mark.parametrize("termination", ["deadline", "signal"])
+def test_main_conserves_killed_worker_patch_and_receipts(tmp_path, termination):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {**os.environ, "GIT_AUTHOR_NAME": "GT Test", "GIT_COMMITTER_NAME": "GT Test",
+           "GIT_AUTHOR_EMAIL": "gt-test@example.invalid",
+           "GIT_COMMITTER_EMAIL": "gt-test@example.invalid"}
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, env=env, capture_output=True,
+                              check=True).stdout
+    git("init")
+    (repo / "a.py").write_text("x = 1\n")
+    git("add", ".")
+    git("-c", "core.hooksPath=", "commit", "-m", "fixture")
+    marker = tmp_path / "descendant"
+    state = tmp_path / "state"
+    state.mkdir()
+    journal = state / "events.jsonl"
+    journal.write_text('{"fixture":"real worker input"}\n')
+    child = (
+        "import os,signal,time,pathlib\n"
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "while True: time.sleep(.1)\n"
+    )
+    worker = (
+        "import subprocess,sys,time,pathlib\n"
+        f"pathlib.Path({str(repo / 'a.py')!r}).write_text('x = 2\\n')\n"
+        f"subprocess.Popen([sys.executable,'-c',{child!r}],start_new_session=True)\n"
+        "while True: time.sleep(.1)\n"
+    )
+    driver = tmp_path / "main_driver.py"
+    driver.write_text(
+        "import sys\nfrom scripts import miniswe_supervisor as s\n"
+        "original=s.supervise\n"
+        # Only the test worker is substituted; main, teardown, Git export and
+        # receipt issuance execute unchanged. No provider is needed for a hang.
+        "def supervise(command,**kwargs):\n"
+        f"    return original([sys.executable,'-c',{worker!r}],"
+        "deadline=kwargs['deadline'],termination_grace_seconds=.1)\n"
+        "s.supervise=supervise\nraise SystemExit(s.main())\n"
+    )
+    process = subprocess.Popen([
+        sys.executable, str(driver), "--cwd", str(repo), "--state-dir", str(state),
+        "--time-budget-seconds", "4", "--task-id", "fixture", "--model", "fixture/model",
+        "--metrics", str(tmp_path / "report.json"), "--patch-output", str(tmp_path / "model.patch"),
+        "--product-receipt", str(tmp_path / "product.json"),
+        "--adapter-receipt", str(tmp_path / "adapter.json"),
+    ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    descendant = None
+    try:
+        limit = time.monotonic() + 10
+        while not marker.exists() and process.poll() is None and time.monotonic() < limit:
+            time.sleep(.02)
+        assert marker.exists()
+        descendant = int(marker.read_text())
+        if termination == "signal":
+            process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=15)
+        assert process.returncode == 3, (stdout, stderr)
+        assert not Path("/proc", str(descendant)).exists()
+        assert "+x = 2" in (tmp_path / "model.patch").read_text()
+        assert git("diff", "--cached") == b""
+        report = json.loads((tmp_path / "report.json").read_text())
+        import hashlib
+        assert report["supervisor"]["conserved_journals"] == [{
+            "path": "events.jsonl", "sha256": hashlib.sha256(journal.read_bytes()).hexdigest(),
+            "bytes": len(journal.read_bytes()),
+        }]
+        for name in ("product.json", "adapter.json"):
+            receipt = json.loads((tmp_path / name).read_text())
+            assert receipt["status"] == "ERROR"
+        product = json.loads((tmp_path / "product.json").read_text())
+        assert product["provider_calls"] is None
+        assert product["research_valid"] is False
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if descendant is not None and Path("/proc", str(descendant)).exists():
+            os.kill(descendant, signal.SIGKILL)
