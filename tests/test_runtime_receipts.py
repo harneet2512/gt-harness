@@ -647,3 +647,41 @@ def test_sealed_evidence_may_recur_across_decisions():
         {"lane": "sealed", "delivery_identity": "b" * 64, "observed_iteration": 1},
         {"lane": "sealed", "delivery_identity": "b" * 64, "observed_iteration": 5},
     ])
+
+
+def _lsp_seal(state, digest, graph_sha, servers):
+    d = state / "graph" / "revisions" / digest
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "lsp-promotion.json").write_text(json.dumps({
+        "schema": "gt.lsp_promotion.v1", "graph_sha256": graph_sha,
+        "status": "promotion_not_scheduled",
+        "servers_detected": servers, "server_count": len(servers),
+    }), encoding="utf-8")
+
+
+def test_the_lsp_seal_is_read_from_the_published_graph_not_by_uniqueness(tmp_path):
+    """Every real task has more than one seal, and requiring one was fatal.
+
+    With a runtime layout the indexer seals lsp-promotion.json beside each
+    graph revision - graph_root/revisions/<reuse-key-digest>/ - and the
+    benchmark rebuilds at every edit boundary. So any run that edits anything
+    has two or more, and _single_optional raises duplicate_runtime_artifact on
+    the second. That turned receipt issuance into a failure receipt on every
+    real task: the smoke goes red after the spend.
+
+    The multiplicity is not new and was harmless for as long as nothing read
+    the seal. Adding the reader is what made it fatal.
+    """
+    from gt_harness.runtime_receipts import _lsp_promotion_receipt
+
+    _lsp_seal(tmp_path, "aa" * 32, "11" * 32, ["go"])
+    _lsp_seal(tmp_path, "bb" * 32, "22" * 32, ["go", "python", "rust", "typescript"])
+    assert len(list(tmp_path.rglob("lsp-promotion.json"))) == 2
+
+    receipt = _lsp_promotion_receipt(
+        tmp_path, [{"event": "graph_publication", "graph_sha256": "22" * 32}]
+    )
+
+    # The seal for the graph that was actually published, not the first found.
+    assert receipt["server_count"] == 4
+    assert receipt["servers_detected"] == ["go", "python", "rust", "typescript"]

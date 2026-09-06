@@ -106,7 +106,9 @@ def _atomic_json(path: Path, value: object) -> None:
     _atomic_bytes(path, payload)
 
 
-def _lsp_promotion_receipt(state_dir: Path) -> dict[str, Any]:
+def _lsp_promotion_receipt(
+    state_dir: Path, events: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Report whether language servers were discoverable during the run.
 
     Scope, stated exactly, because the first version of this comment claimed
@@ -125,7 +127,29 @@ def _lsp_promotion_receipt(state_dir: Path) -> dict[str, Any]:
     way the dense index already is. Whether promotion actually fired is a
     separate claim proven from the coordinator's own terminal receipt.
     """
-    _, promotion = _single_optional(state_dir, "lsp-promotion.json")
+    # Selected by PUBLISHED graph, never by global uniqueness. With a runtime
+    # layout, indexer seals this beside each graph revision -
+    # layout.graph_root/revisions/<reuse-key-digest>/ - and the benchmark
+    # rebuilds at every edit boundary, so a run that edits anything has two or
+    # more seals. _single_optional raises duplicate_runtime_artifact on the
+    # second, which would have turned receipt issuance into a failure receipt
+    # on every real task: the smoke goes red after the spend. The multiplicity
+    # was harmless for as long as nothing read the seal; adding this reader is
+    # what made it fatal. Same selection the graph manifest already uses.
+    promotion = None
+    if events:
+        publications = [r for r in events if r.get("event") == "graph_publication"]
+        if publications:
+            published = str(publications[-1].get("graph_sha256") or "")
+            for path in sorted(state_dir.rglob("lsp-promotion.json")):
+                candidate = _read_object(path)
+                if isinstance(candidate, dict) and str(
+                    candidate.get("graph_sha256") or ""
+                ) == published:
+                    promotion = candidate
+                    break
+    if promotion is None:
+        _, promotion = _single_optional(state_dir, "lsp-promotion.json")
     if not isinstance(promotion, dict):
         return {"schema": "gt.lsp_promotion.v1", "status": "promotion_receipt_missing",
                 "servers_detected": [], "server_count": 0}
@@ -806,7 +830,7 @@ def issue_runtime_receipts(
         "provider_admissions": provider_admissions,
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
-        "lsp_promotion": _lsp_promotion_receipt(Path(state_dir)),
+        "lsp_promotion": _lsp_promotion_receipt(Path(state_dir), event_rows),
         "dense_execution_receipts": dense_runs,
         "event_journal": event_journal,
         "completion_state_event_journal": dict(gt.get("event_journal") or {}),
