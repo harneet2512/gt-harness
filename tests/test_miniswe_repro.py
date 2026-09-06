@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import inspect
+from types import MethodType
 import json
 import os
 import subprocess
@@ -1047,3 +1048,77 @@ def test_recorded_oversize_rejection_would_now_cost_one_attempt(tmp_path):
     with pytest.raises(Exception):
         model.query([{"role": "user", "content": "oversize"}])
     assert model.transport_calls == 1
+
+
+# Adversarial review of the seam move's own machinery. Each of these pins a
+# property the change silently depends on; none of them was tested when the
+# change landed.
+
+
+def test_rebinding_the_same_seam_function_is_not_a_replacement(tmp_path):
+    """The guard must not fail a good run closed.
+
+    _seam_issues compares bound methods with !=, not `is not`. Rebinding the
+    same underlying function to the same instance produces a NEW bound-method
+    object that is equal but not identical, and an identity comparison would
+    report a replacement that never happened - adding an issue to a valid
+    ledger and refusing a run that was fine.
+    """
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    assert observer._seam_issues() == []
+
+    installed = model._query
+    model._query = MethodType(installed.__func__, model)
+    assert model._query == installed
+    assert model._query is not installed
+    assert observer._seam_issues() == []
+
+
+def test_install_shadows_abort_exceptions_without_mutating_the_class(tmp_path):
+    """The registration is per instance; another model keeps the default.
+
+    LitellmModel declares abort_exceptions as a mutable CLASS attribute. If
+    install() appended to it in place, every model in the process would
+    inherit this run's additions.
+    """
+    class SharedAbortModel(FakeModel):
+        abort_exceptions = [KeyboardInterrupt]
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            del self.abort_exceptions  # fall back to the class attribute
+
+    before = list(SharedAbortModel.abort_exceptions)
+    installed = SharedAbortModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(installed)
+
+    assert ResearchModelMismatch in installed.abort_exceptions
+    assert SharedAbortModel.abort_exceptions == before
+    assert ResearchModelMismatch not in SharedAbortModel().abort_exceptions
+
+
+def test_response_digest_is_stable_for_one_response(tmp_path):
+    """A response row's digest must not depend on when it was computed."""
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    response = model._query([])
+    digests = {
+        hashlib.sha256(
+            _canonical(RunReceiptObserver._response_payload(response))
+        ).hexdigest()
+        for _ in range(20)
+    }
+    assert len(digests) == 1
