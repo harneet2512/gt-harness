@@ -451,7 +451,20 @@ class IngestAccepted(BaseModel):
 
 class ExternalAgentFinish(BaseModel):
     status: ExternalFinishStatus
-    summary: str | None = Field(None, max_length=MAX_FINISH_SUMMARY_CHARS)
+    #: The closing summary. Like every other string on the ingest path this
+    #: **truncates rather than rejects** (HAR-84, found live): a summary one
+    #: character over the cap used to 422, and because ``finish`` is the only
+    #: way a card settles, the agent stayed ``running`` for ever with its last
+    #: activity reading "Finished". A summary is a courtesy; the lifecycle is
+    #: not, so the summary must never be able to block it.
+    summary: str | None = None
+
+    @field_validator("summary")
+    @classmethod
+    def _clip_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value[:MAX_FINISH_SUMMARY_CHARS]
 
 
 class DiffFile(BaseModel):

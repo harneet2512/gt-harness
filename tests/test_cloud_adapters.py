@@ -1040,3 +1040,52 @@ def test_codex_tailer_streams_appended_lines(server, config, tmp_path):
 
     tailer.bridge.flush()
     assert [event["text"] for event in server.events] == ["hi"]
+
+
+# ---------------------------------------------------------------------------
+# HAR-84: defects a live Claude Code run found that the suite did not
+# ---------------------------------------------------------------------------
+def test_a_finish_summary_is_capped_after_the_dropped_note_is_added(
+    server, config, tmp_path
+):
+    """The note used to push the payload one line past the server's cap.
+
+    ``finish`` is the only thing that settles a card, so the 422 that came
+    back left the agent reading ``running`` for ever with its activity stuck
+    on "Finished". Observed on a real run before the cap moved.
+    """
+    from cloud.adapters.gt_cloud_bridge import MAX_TEXT_CHARS
+
+    bridge = Bridge(
+        agent_kind="claude-code", label="capped", cwd=str(tmp_path),
+        state_key="cap-session", config=config, background=False,
+    )
+    assert bridge.start() is True
+    bridge.dropped = 7
+
+    bridge.finish("done", "x" * MAX_TEXT_CHARS)
+
+    assert server.finishes, "finish was never posted"
+    summary = server.finishes[-1]["body"]["summary"]
+    assert len(summary) <= MAX_TEXT_CHARS
+    assert "dropped 7 events" in summary
+
+
+def test_the_parent_hook_never_registers_a_card_for_a_subagent(
+    server, hook_config, tmp_path
+):
+    """``open_existing`` settles a card; it must never invent one.
+
+    A completed foreground ``Agent`` call is reported in the **parent's**
+    hook, where the subagent's own label is unknown. Registering from there
+    produced a second, empty card named after the parent's agent type beside
+    the child's real one — one subagent, two rows, seen live.
+    """
+    from cloud.adapters.claude_code.gt_cloud_hook import HookSession
+
+    session = HookSession(_payload(hook_event_name="Stop"), hook_config)
+    before = len(server.registrations)
+
+    assert session.open_existing("never-registered-id") is None
+
+    assert len(server.registrations) == before

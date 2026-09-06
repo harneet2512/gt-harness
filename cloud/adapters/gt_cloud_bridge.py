@@ -802,7 +802,20 @@ class Bridge:
             note = truncate(summary, MAX_TEXT_CHARS)
             if self.dropped:
                 dropped_note = f"[gt-cloud-bridge dropped {self.dropped} events]"
-                note = f"{note}\n{dropped_note}" if note else dropped_note
+                # The warning outranks the prose: room is reserved for it, and
+                # the summary is cut to fit around it. A reader who is told
+                # nothing was lost when something was is worse off than one who
+                # gets a shorter summary.
+                room = max(0, MAX_TEXT_CHARS - len(dropped_note) - 1)
+                head = (note or "")[:room]
+                note = f"{head}\n{dropped_note}" if head else dropped_note
+            # A hard cap on the composed string. `truncate` marks its cut by
+            # appending "... [N more characters]" **past** the limit, so a long
+            # summary at the limit and then adding a line put the payload one
+            # line over, the server rejected it, and because finish is the only
+            # thing that settles a card the agent stayed "running" for ever with
+            # its last activity reading "Finished". Found on a live run.
+            note = note[:MAX_TEXT_CHARS] if note else note
             if breaker_is_open(self.config):
                 debug("circuit breaker open; not posting finish")
                 self.breaker_open = True

@@ -753,6 +753,31 @@ def test_finishing_with_an_error_fails_the_row(harness: Harness) -> None:
     assert response.json()["report"]["reply_excerpt"] == "it broke"
 
 
+def test_an_over_long_summary_is_clipped_rather_than_refused(
+    harness: Harness,
+) -> None:
+    """Found live: a summary one character over the cap 422'd the finish.
+
+    ``finish`` is the only thing that settles a card, so the refusal left the
+    agent reading ``running`` for ever with its last activity stuck on
+    "Finished" — a lost summary is a nuisance, a card that never closes is a
+    broken feature. Every other string on this path truncates; so does this.
+    """
+    parent_id = _create_idle(harness)
+    body = _registered(harness, parent_id)
+    agent_id, token = body["agent"]["id"], body["ingest_token"]
+
+    response = _finish(
+        harness, agent_id, token, status="done",
+        summary="x" * (models_module.MAX_FINISH_SUMMARY_CHARS + 500),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "idle"
+    excerpt = response.json()["report"]["reply_excerpt"]
+    assert len(excerpt) <= models_module.MAX_FINISH_SUMMARY_CHARS
+
+
 def test_closing_the_session_closes_its_external_agents(harness: Harness) -> None:
     parent_id = _create_idle(harness)
     first = _registered(harness, parent_id, label="one")["agent"]

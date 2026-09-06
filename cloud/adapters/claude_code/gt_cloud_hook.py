@@ -256,6 +256,22 @@ class HookSession:
             debug("HookSession.open failed", exc)
             return None
 
+    def open_existing(self, agent_id: str) -> Bridge | None:
+        """The bridge for an agent that has **already registered**, else None.
+
+        `open()` registers when it finds no record, which is right in the
+        agent's own context and wrong in anyone else's: a hook firing in the
+        parent knows a child's id but not its label, so registering from there
+        invents a duplicate card. This is the read-only door.
+        """
+        try:
+            if not read_registration(self.config, self._key(agent_id)):
+                return None
+            return self.open(agent_id, self.agent_type)
+        except Exception as exc:
+            debug("HookSession.open_existing failed", exc)
+            return None
+
     def current(self) -> Bridge | None:
         """The agent this hook fired inside: the subagent when there is one.
 
@@ -402,7 +418,11 @@ def _finish_completed_subagent(session: HookSession, response: Any) -> None:
     agent_id = response.get("agentId")
     if not agent_id:
         return
-    bridge = session.open(str(agent_id), session.agent_type)
+    # Settle the card that already exists; never make one here. This runs in
+    # the **parent's** hook, where `session.agent_type` is the parent's — so
+    # registering from here produced a second, empty card labelled "subagent"
+    # beside the child's real one. Seen on a live run: one subagent, two rows.
+    bridge = session.open_existing(str(agent_id))
     if not bridge:
         return
     blocks = response.get("content")
