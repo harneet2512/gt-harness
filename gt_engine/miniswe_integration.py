@@ -1556,8 +1556,12 @@ class MiniSweAdapter(GroundtruthController):
         if delivery_identity in pending_identities:
             return True
         reason = ""
-        if candidate_ordinal > MAX_BOUNDARY_CLAIMS:
+        if delivery_identity in self._model_visible_delivery_identities:
+            reason = "duplicate_delivery_identity"
+        elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
+        elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
+            reason = "cochange_task_ceiling"
         elif rendered_bytes > per_delivery_limit:
             reason = "delivery_byte_ceiling"
         elif self._boundary_delivery_bytes + rendered_bytes > TOTAL_DELIVERY_BYTE_LIMIT:
