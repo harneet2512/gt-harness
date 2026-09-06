@@ -14,6 +14,7 @@ from gt_harness.runtime_receipts import issue_runtime_receipts
 from scripts.attest_deepswe import _total_cost, attest_deepswe, main
 from scripts.gt_audit import artifact_corpus_sha256, audit_digest_sha256
 from scripts.provider_preflight import load_route
+from tests.conftest import write_certifiable_graph
 
 TASK = "abs-module-cache-flags"
 REQUESTED = "deepseek/deepseek-v4-flash-0731"
@@ -243,12 +244,15 @@ def _fixture(
             },
         },
     )
-    _write(
-        agent / "gt-state" / "graph" / "graph.manifest.json",
-        {
-            "schema": "gt.graph_certification.v1", "binary_certified": True,
-            "sqlite_quick_check": "ok", "graph_sha256": "c" * 64,
-        },
+    # A producer certificate binds a sealed index resource, the producer
+    # binary identity and the graph's own bytes to each other. The stub that
+    # stood here carried four of those fields, so certification failed at the
+    # first one it was missing and the whole positive path read as a narrow
+    # repository_root mismatch.
+    write_certifiable_graph(
+        agent / "gt-state" / "graph",
+        task_id=TASK,
+        product_source_sha=source_sha,
     )
     issue_runtime_receipts(
         report_path=report,

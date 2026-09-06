@@ -968,14 +968,26 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     calls = ((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls")
     if calls is None:
         errors.append("product_provider_calls_missing")
-    elif int(calls) != int(
-        receipt.get("agent_turn_calls", receipt.get("provider_calls")) or 0
-    ):
+    else:
         # F10: api_calls is the AGENT's turn count. provider_calls also includes
         # GT-internal bootstrap turns, so comparing the two populations directly
-        # mismatches whenever a bootstrap fired. Compare like with like; the
-        # bootstrap is reconciled separately against admissions and responses.
-        errors.append("product_provider_calls_mismatch")
+        # mismatches whenever a bootstrap fired. Compare like with like.
+        agent_turn_calls = int(
+            receipt.get("agent_turn_calls", receipt.get("provider_calls")) or 0
+        )
+        declared = int(receipt.get("provider_calls") or 0)
+        # ...but comparing only like with like left provider_calls compared to
+        # NOTHING on any receipt that declares agent_turn_calls, so a mutated
+        # total passed attestation untouched. Recompute the total from the
+        # parts the receipt itself declares. A receipt with no agent_turn_calls
+        # predates the split and keeps the original single comparison.
+        reconciled = (
+            agent_turn_calls + int(receipt.get("select_catalog_bootstrap_calls") or 0)
+            if "agent_turn_calls" in receipt
+            else declared
+        )
+        if int(calls) != agent_turn_calls or declared != reconciled:
+            errors.append("product_provider_calls_mismatch")
     attempted_calls = int(receipt.get("provider_calls") or 0)
     completed_calls = int(receipt.get("provider_completed_calls") or 0)
     failed_calls = int(receipt.get("provider_failed_calls") or 0)
