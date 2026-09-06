@@ -382,6 +382,7 @@ def build_product_bundle(
         "harbor_version": source["harbor_version"],
         "pier_version": source["pier_version"],
         "miniswe_agent_version": source["miniswe_agent_version"],
+        "provider_receipt_ledger": _PROVIDER_RECEIPT_LEDGER,
         "dataset": dict(source["dataset"]),
         "tasks": tasks,
         "artifacts": artifacts,
@@ -409,6 +410,37 @@ def build_product_bundle(
         target = Path(output_dir) / "product-bundle.json"
         _atomic_json(target, body)
     return body
+
+
+#: What a frozen candidate's provider ledger attests. Stated in the manifest
+#: rather than inferred from a schema version, because the digest subject
+#: changed at v2 and a reader comparing a v1 row to a v2 row would otherwise
+#: conclude the provider returned something different when only the seam moved.
+_PROVIDER_RECEIPT_LEDGER: dict[str, Any] = {
+    "schema": "gt.provider-receipt.v2",
+    "terminal_granularity": "attempt",
+    "response_digest_subject": "provider_response.model_dump(mode=json)",
+    "invariant": (
+        "every provider_request row has exactly one terminal row "
+        "(provider_response XOR provider_failure), paired by request identity"
+    ),
+    "capture_seam": "model._query",
+    "supersedes": {
+        "schema": "gt.provider-receipt.v1",
+        "response_sha256_comparable": False,
+        "changes": [
+            "v1 digested the query wrapper's message dict via extra.response "
+            "(response.model_dump()); v2 digests the raw provider response as "
+            "response.model_dump(mode=\"json\") captured at the transport seam",
+            "v1 emitted terminal rows per logical call while request rows were "
+            "already per attempt, so any retried provider call produced N "
+            "request rows against a single terminal row",
+            "v1 recorded a provider_failure when the query wrapper raised after "
+            "a successful provider response (for example during cost "
+            "calculation), attributing a local fault to the provider",
+        ],
+    },
+}
 
 
 def validate_product_bundle(bundle: Mapping[str, Any], *, root: str | Path) -> None:

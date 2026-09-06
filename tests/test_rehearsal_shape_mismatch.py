@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.gt_installed_rehearsal import (  # noqa: E402
     accepts_synthetic_repair,
     shape_mismatch,
+    unaudited_reason,
 )
 
 
@@ -125,5 +126,61 @@ def test_gate_blocks_on_unexpected_receipt_error() -> None:
     receipt = _accepting_receipt()
     receipt["runtime_receipt_errors"] = [
         "synthetic_transport_not_paid_evidence", "treatment_provider_receipts_invalid",
+    ]
+    assert _gate(receipt) is False
+
+
+# 6:52 item 1 - the noise half. An interrupted run declines these predicates
+# by construction, and saying "unaudited_run_shape" there reports an intended
+# ending as an unrecognised one. Measured on the real transport with
+# interrupt_at_ordinal=6: 6 commands served, 1 execution_evidence check,
+# 7 agent requests. These drive unaudited_reason, the production authority.
+
+
+def test_interrupted_run_missing_its_second_check_is_not_an_unknown_shape() -> None:
+    """The measured interrupted shape: checks == 1."""
+    assert unaudited_reason(forced_interruption=True, checks=1) == (
+        "not_applicable_interrupted"
+    )
+
+
+def test_interrupted_run_with_no_checks_is_still_the_interruption() -> None:
+    assert unaudited_reason(forced_interruption=True, checks=0) == (
+        "not_applicable_interrupted"
+    )
+
+
+def test_interrupted_run_that_produced_both_checks_stays_loud() -> None:
+    """An interruption cannot reach the second check; if it did, that is real."""
+    assert unaudited_reason(forced_interruption=True, checks=2) == "unaudited_run_shape"
+
+
+@pytest.mark.parametrize("checks", [0, 1, 2, 3])
+def test_uninterrupted_run_never_borrows_the_interruption_reason(checks: int) -> None:
+    """The excuse is available only to runs that were actually interrupted."""
+    assert unaudited_reason(forced_interruption=False, checks=checks) == (
+        "unaudited_run_shape"
+    )
+
+
+def test_interruption_reason_reaches_the_recorded_entry() -> None:
+    """The reason is what a reader of predicates_not_evaluated actually sees."""
+    entry = shape_mismatch(
+        unaudited_reason(forced_interruption=True, checks=1),
+        "execution_evidence_verified",
+        checks=(1, 2),
+        agent_requests=(7, 6),
+    )
+    assert entry is not None
+    assert entry["reason"] == "not_applicable_interrupted"
+    assert entry["checks"] == 1 and entry["expected_checks"] == 2
+
+
+def test_declining_still_withholds_acceptance_when_reason_is_interruption() -> None:
+    """A softer reason must not soften the gate: it is diagnostic only."""
+    receipt = _accepting_receipt()
+    receipt["predicates_not_evaluated"] = [
+        shape_mismatch("not_applicable_interrupted", "execution_evidence_verified",
+                       checks=(1, 2)),
     ]
     assert _gate(receipt) is False

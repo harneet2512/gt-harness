@@ -18,8 +18,11 @@ from scripts.miniswe_gt_run import (
     _write_model_patch,
 )
 from scripts.miniswe_repro import (
+    RECEIPT_SCHEMA,
+    RESPONSE_DIGEST_SUBJECT,
     ResearchModelMismatch,
     RunReceiptObserver,
+    _canonical,
     build_reproducibility_manifest,
     write_reproducibility_manifest,
 )
@@ -73,26 +76,94 @@ def test_deepseek_openrouter_route_refuses_missing_provider_lock(monkeypatch) ->
         _model_and_kwargs("deepseek/deepseek-v4-flash-0731", 1.0)
 
 
+class FakeResponse:
+    """A provider response object, dumped the way litellm dumps one."""
+
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def model_dump(self, mode: str | None = None) -> dict:
+        return json.loads(json.dumps(self._payload))
+
+
 class FakeModel:
+    """Mirrors LitellmModel 2.4.6's composition, not a convenient subset.
+
+    The point of the mirror is the retry loop. Upstream, query() runs
+    ``for attempt in retry(...)`` and the loop body is
+    ``self._query(self._prepare_messages_for_api(messages), **kwargs)`` -
+    so message preparation happens once per ATTEMPT while the wrapper's own
+    post-processing happens once per CALL. A fake with only a query() method
+    cannot express that asymmetry, which is why the N-requests-to-1-terminal
+    ledger defect was invisible to this suite for as long as it existed.
+    """
+
     model_name = "openai/deepseek-v4-flash"
     model_kwargs = {"temperature": 1.0, "api_base": "https://gateway.invalid"}
+    max_attempts = 3
+
+    def __init__(self, *, failures: int = 0, error: Exception | None = None,
+                 reported_model: str = "deepseek-v4-flash"):
+        self.abort_exceptions: list[type[BaseException]] = [KeyboardInterrupt]
+        self.failures = failures
+        self.error = error or TimeoutError("provider timeout")
+        self.reported_model = reported_model
+        self.transport_calls = 0
 
     def _prepare_messages_for_api(self, messages):
         return [{k: v for k, v in row.items() if k != "extra"} for row in messages]
 
+    def _query(self, messages, **kwargs):
+        self.transport_calls += 1
+        if self.transport_calls <= self.failures:
+            raise self.error
+        return FakeResponse({
+            "id": f"resp-{self.transport_calls}",
+            "model": self.reported_model,
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        })
+
     def query(self, messages, **kwargs):
-        self._prepare_messages_for_api(messages)
+        response = None
+        last: Exception | None = None
+        for _ in range(self.max_attempts):
+            try:
+                response = self._query(self._prepare_messages_for_api(messages), **kwargs)
+                break
+            except Exception as exc:
+                # tenacity's retry_if_not_exception_type: an abort exception
+                # reaches the caller on its first occurrence, unretried.
+                if isinstance(exc, tuple(self.abort_exceptions)):
+                    raise
+                last = exc
+        else:
+            raise last  # type: ignore[misc]
         return {
             "role": "assistant",
             "content": "ok",
-            "extra": {
-                "response": {
-                    "id": "resp-1",
-                    "model": "deepseek-v4-flash",
-                    "usage": {"prompt_tokens": 3, "completion_tokens": 2},
-                }
-            },
+            "extra": {"response": response.model_dump(mode="json")},
         }
+
+
+def _rows(observer) -> list[dict]:
+    return [json.loads(line) for line in
+            observer.events_path.read_text(encoding="utf-8").splitlines()]
+
+
+def _pairs(rows: list[dict]) -> list[tuple[str, str]]:
+    """(open request id, terminal request id) in emission order."""
+    out: list[tuple[str, str]] = []
+    pending = None
+    for row in rows:
+        if row["event"] == "provider_request":
+            assert pending is None, "a request opened while another was unterminated"
+            pending = row["request_id"]
+        else:
+            assert pending is not None, "a terminal row with no open request"
+            out.append((pending, row["request_id"]))
+            pending = None
+    assert pending is None, "run ended with an unterminated request"
+    return out
 
 
 def test_neutral_receipt_observer_commits_final_request_and_response(tmp_path):
@@ -122,13 +193,7 @@ def test_neutral_receipt_observer_commits_final_request_and_response(tmp_path):
 
 
 def test_neutral_observer_fails_loudly_on_model_substitution(tmp_path):
-    class WrongModel(FakeModel):
-        def query(self, messages, **kwargs):
-            result = super().query(messages, **kwargs)
-            result["extra"]["response"]["model"] = "fallback-model"
-            return result
-
-    model = WrongModel()
+    model = FakeModel(reported_model="fallback-model")
     observer = RunReceiptObserver(
         tmp_path, requested_model="deepseek-v4-flash",
         resolved_model="openai/deepseek-v4-flash",
@@ -137,15 +202,14 @@ def test_neutral_observer_fails_loudly_on_model_substitution(tmp_path):
     with pytest.raises(ResearchModelMismatch):
         model.query([{"role": "user", "content": "task"}])
     assert observer.model_mismatch is True
+    # The mismatch is raised from inside the retry loop, so it must be an
+    # abort exception or the run bills ten substituted calls before failing.
+    assert model.transport_calls == 1
+    assert observer.request_count == 1
 
 
 def test_neutral_observer_records_provider_failure_symmetrically(tmp_path):
-    class FailedModel(FakeModel):
-        def query(self, messages, **kwargs):
-            self._prepare_messages_for_api(messages)
-            raise TimeoutError("provider timeout")
-
-    model = FailedModel()
+    model = FakeModel(failures=FakeModel.max_attempts)
     observer = RunReceiptObserver(
         tmp_path, requested_model="deepseek-v4-flash",
         resolved_model="openai/deepseek-v4-flash",
@@ -153,11 +217,15 @@ def test_neutral_observer_records_provider_failure_symmetrically(tmp_path):
     observer.install(model)
     with pytest.raises(TimeoutError):
         model.query([{"role": "user", "content": "task"}])
-    rows = [json.loads(line) for line in observer.events_path.read_text(
-        encoding="utf-8"
-    ).splitlines()]
-    assert rows[-1]["event"] == "provider_failure"
-    assert rows[-1]["request_id"] == rows[0]["request_id"]
+    rows = _rows(observer)
+    # Every attempt is a request, so every attempt owes a terminal. Three
+    # failed attempts are three failures - not one, and not two orphans.
+    assert [row["event"] for row in rows] == [
+        "provider_request", "provider_failure",
+        "provider_request", "provider_failure",
+        "provider_request", "provider_failure",
+    ]
+    assert all(opened == closed for opened, closed in _pairs(rows))
     assert observer.receipt()["valid"] is True
 
 
@@ -642,3 +710,139 @@ print(result.stdout.strip())
 
     assert result.stdout.strip() == "BLOCKED"
     assert canary not in result.stdout
+
+
+# Ruling 3b - the ledger contract under retry. Before the terminal hook moved
+# to the transport seam these cases produced N request rows against a single
+# terminal row, and receipt() reported every earlier attempt as "provider
+# request lacks terminal receipt". The corruption was stochastic: it needed a
+# flaky provider, so it could not appear in any synthetic rehearsal and would
+# have first appeared on a paid run, as an attestation refusal on a task that
+# may well have succeeded.
+
+
+def test_retried_call_pairs_every_attempt(tmp_path):
+    """Two failures then a success: 3 requests, 3 terminals, all paired."""
+    model = FakeModel(failures=2)
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    rows = _rows(observer)
+    assert [row["event"] for row in rows] == [
+        "provider_request", "provider_failure",
+        "provider_request", "provider_failure",
+        "provider_request", "provider_response",
+    ]
+    assert all(opened == closed for opened, closed in _pairs(rows))
+    assert observer.request_count == 3
+    assert observer.receipt()["valid"] is True
+    assert observer.receipt()["issues"] == []
+
+
+def test_single_retry_leaves_no_request_without_a_terminal(tmp_path):
+    """The minimal case the old seam got wrong: one retry, two requests."""
+    model = FakeModel(failures=1)
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    rows = _rows(observer)
+    requests = [row for row in rows if row["event"] == "provider_request"]
+    terminals = [row for row in rows if row["event"] != "provider_request"]
+    assert len(requests) == 2 and len(terminals) == 2
+    assert {row["request_id"] for row in requests} == {
+        row["request_id"] for row in terminals
+    }
+    assert not any("lacks terminal" in issue
+                   for issue in observer.receipt()["issues"])
+
+
+def test_response_digest_covers_the_raw_provider_response(tmp_path):
+    """v2: the digest is over what the provider returned, and says so."""
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    response = _rows(observer)[-1]
+    assert response["schema"] == RECEIPT_SCHEMA == "gt.provider-receipt.v2"
+    assert response["response_digest_subject"] == RESPONSE_DIGEST_SUBJECT
+    raw = FakeResponse({"id": "resp-1", "model": "deepseek-v4-flash",
+                        "usage": {"prompt_tokens": 3, "completion_tokens": 2}})
+    assert response["response_sha256"] == hashlib.sha256(
+        _canonical(raw.model_dump(mode="json"))
+    ).hexdigest()
+    assert response["usage"] == {"prompt_tokens": 3, "completion_tokens": 2}
+
+
+def test_terminal_capture_observes_a_call_that_bypasses_query(tmp_path):
+    """GT's select_catalog turn reaches _query without going through the
+    query reference the recorder used to hook.
+
+    Nine calls in, nine terminals out - the shape that previously came out
+    as nine requests against eight responses.
+    """
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    native_query = FakeModel.query  # as GT captures it, before the recorder
+    native_query(model, [{"role": "user", "content": "bootstrap"}])
+    for step in range(8):
+        model.query([{"role": "user", "content": "step %d" % step}])
+    rows = _rows(observer)
+    assert len([r for r in rows if r["event"] == "provider_request"]) == 9
+    assert len([r for r in rows if r["event"] == "provider_response"]) == 9
+    receipt = observer.receipt()
+    assert receipt["valid"] is True
+    assert not any("lacks terminal" in issue for issue in receipt["issues"])
+
+
+def _rewrite(observer, rows: list[dict]) -> None:
+    observer.events_path.write_text(
+        "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                for row in rows),
+        encoding="utf-8",
+    )
+
+
+def test_dropped_terminal_row_is_rejected(tmp_path):
+    """Mutation (3c): the pairing invariant is enforced, not decorative."""
+    model = FakeModel(failures=1)
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    rows = _rows(observer)
+    _rewrite(observer, [row for row in rows if row["event"] != "provider_failure"])
+    receipt = observer.receipt()
+    assert receipt["valid"] is False
+    assert any("lacks terminal" in issue for issue in receipt["issues"])
+
+
+def test_duplicated_terminal_row_is_rejected(tmp_path):
+    """Mutation (3c): exactly one terminal per request, not at least one."""
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    rows = _rows(observer)
+    _rewrite(observer, rows + [rows[-1]])
+    receipt = observer.receipt()
+    assert receipt["valid"] is False
+    assert any("multiple provider terminals" in issue
+               for issue in receipt["issues"])

@@ -64,6 +64,26 @@ def _sanitize(value: Any, *, key: str = "") -> Any:
     return str(value)
 
 
+#: Ledger contract. v2 differs from v1 in three ways, all consequences of
+#: moving terminal capture down to the transport seam:
+#:   * terminal rows are per ATTEMPT, not per logical call. LitellmModel.query
+#:     retries up to 10 times and calls _prepare_messages_for_api inside the
+#:     loop, so v1 emitted N request rows against 1 terminal row on any
+#:     retried call - a corrupt ledger that only appeared when the provider
+#:     was flaky, i.e. never in rehearsal and only on a paid run.
+#:   * response_sha256 covers the RAW provider response, response.model_dump(
+#:     mode="json"), not the wrapper's message dict. Parsed actions and cost
+#:     are local derivation and do not belong under a provider digest.
+#:     v1 and v2 response_sha256 values are NOT comparable.
+#:   * invariant: every provider_request row has exactly one terminal row -
+#:     provider_response XOR provider_failure - paired by request identity.
+RECEIPT_SCHEMA = "gt.provider-receipt.v2"
+
+#: What the response digest covers, stated in the row so a reader never has to
+#: infer it from the schema version alone.
+RESPONSE_DIGEST_SUBJECT = "provider_response.model_dump(mode=json)"
+
+
 class RunReceiptObserver:
     """Pass-through receipt seam installed identically in both A/B arms."""
 
@@ -90,11 +110,11 @@ class RunReceiptObserver:
         self._request_started: dict[str, float] = {}
         self._installed_model: Any | None = None
         self._original_prepare: Any | None = None
-        self._original_query: Any | None = None
+        self._original_transport: Any | None = None
 
     def _append(self, event: str, **payload: Any) -> None:
         row = {
-            "schema": "gt.provider-receipt.v1",
+            "schema": RECEIPT_SCHEMA,
             "timestamp_utc": datetime.now(UTC).isoformat(),
             "event": event,
             **payload,
@@ -157,9 +177,24 @@ class RunReceiptObserver:
             fallback_model=self.fallback_model,
         )
 
-    def _record_response(self, message: Mapping[str, Any]) -> None:
-        extra = message.get("extra") or {}
-        response = extra.get("response") if isinstance(extra, Mapping) else None
+    @staticmethod
+    def _response_payload(response: Any) -> Any:
+        """The exact provider object, in the form the ledger digests.
+
+        mini-swe-agent itself persists responses as model_dump(mode="json")
+        on its FormatError path, so this is the upstream spelling of "the
+        response", not a shape invented here.
+        """
+        dump = getattr(response, "model_dump", None)
+        if callable(dump):
+            try:
+                return dump(mode="json")
+            except TypeError:
+                return dump()
+        return response
+
+    def _record_response(self, result: Any) -> None:
+        response = self._response_payload(result)
         reported = str(response.get("model") or "") if isinstance(response, Mapping) else ""
         self.provider_reported_model = reported
         expected = {
@@ -177,6 +212,7 @@ class RunReceiptObserver:
                 str(response.get("id") or "") if isinstance(response, Mapping) else ""
             ),
             response_sha256=_sha(_canonical(response)) if response is not None else "",
+            response_digest_subject=RESPONSE_DIGEST_SUBJECT,
             provider_reported_model=reported,
             model_mismatch=mismatch,
             usage=dict(response.get("usage") or {}) if isinstance(response, Mapping) else {},
@@ -193,21 +229,28 @@ class RunReceiptObserver:
         if getattr(model, "_research_receipt_observer", None) is not None:
             return
         prepare = getattr(model, "_prepare_messages_for_api", None)
-        query = getattr(model, "query", None)
-        if not callable(prepare) or not callable(query):
-            raise TypeError("model lacks request preparation/query seams")
+        transport = getattr(model, "_query", None)
+        if not callable(prepare) or not callable(transport):
+            raise TypeError("model lacks request preparation/transport seams")
         self._installed_model = model
         self._original_prepare = prepare
-        self._original_query = query
+        self._original_transport = transport
 
         def prepare_messages(_model: Any, messages: list[dict]) -> list[dict]:
             prepared = prepare(messages)
             self._record_request(_model, prepared)
             return prepared
 
-        def query_messages(_model: Any, messages: list[dict], **kwargs: Any) -> dict:
+        # Both hooks sit on the SAME seam depth. LitellmModel.query calls
+        # self._query(self._prepare_messages_for_api(messages)) inside its
+        # retry loop, so a request row and its terminal row are now emitted by
+        # the same attempt, in order, and a retried call can no longer leave
+        # earlier attempts without a terminal. This is also the seam GT's own
+        # query_transport occupies, so it observes the select_catalog bootstrap
+        # - which reaches _query without passing through model.query.
+        def send_transport(_model: Any, messages: list[dict], **kwargs: Any) -> Any:
             try:
-                result = query(messages, **kwargs)
+                result = transport(messages, **kwargs)
             except Exception as exc:
                 self._append(
                     "provider_failure",
@@ -222,7 +265,14 @@ class RunReceiptObserver:
             return result
 
         model._prepare_messages_for_api = MethodType(prepare_messages, model)
-        model.query = MethodType(query_messages, model)
+        model._query = MethodType(send_transport, model)
+        # A model mismatch is now raised from inside the retry loop. Without
+        # this it would be retried up to ten times - ten billed calls and ten
+        # request/failure pairs - before reaching the caller. Shadowed on the
+        # instance so other models keep the class default.
+        aborts = list(getattr(model, "abort_exceptions", ()) or ())
+        if ResearchModelMismatch not in aborts:
+            model.abort_exceptions = [*aborts, ResearchModelMismatch]
         model._research_receipt_observer = self
 
     def receipt(self) -> dict[str, Any]:

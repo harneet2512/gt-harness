@@ -350,6 +350,22 @@ def _pre_repair_source_stable(events: list[dict], commands: list[str]) -> bool:
     )
 
 
+def unaudited_reason(*, forced_interruption: bool, checks: int) -> str:
+    """Name WHY a predicate declined: an unknown shape, or a known ending.
+
+    The sole authority on this distinction. An interrupted run cannot produce
+    the two execution-evidence checks the repair predicates audit - the second
+    unittest is the step the interruption blocks - so filing it as an
+    unrecognised shape reports an intended outcome as an anomaly and the field
+    stops separating runs worth investigating from runs that ended on purpose.
+    An interruption that DID produce both checks is a genuine anomaly and keeps
+    the loud reason.
+    """
+    if forced_interruption and checks < 2:
+        return "not_applicable_interrupted"
+    return "unaudited_run_shape"
+
+
 def shape_mismatch(kind: str, predicate: str, **observed_expected: Any) -> dict[str, Any] | None:
     """Name a shape the auditor cannot audit, or return None when it can.
 
@@ -572,8 +588,17 @@ async def run(args) -> dict:
         # predicate that declines to evaluate is indistinguishable from one that
         # found a violation.
         agent_requests = len(handler.requests) - len(handler.bootstrap_requests)
+        # An interrupted run CANNOT produce the two checks these predicates
+        # audit: the second unittest is the very step the interruption blocks.
+        # Measured on the real transport at interrupt_at_ordinal=6 - 6 commands
+        # served, 1 check. Filing that as "unaudited_run_shape" reports a known
+        # outcome as an unrecognised one, so the field stops distinguishing
+        # runs worth investigating from runs that ended on purpose.
+        unaudited = unaudited_reason(
+            forced_interruption=forced_interruption, checks=len(checks)
+        )
         entry = shape_mismatch(
-            "unaudited_run_shape", "execution_evidence_verified",
+            unaudited, "execution_evidence_verified",
             checks=(len(checks), 2),
             agent_requests=(agent_requests, len(handler.commands)),
         )
@@ -618,7 +643,7 @@ async def run(args) -> dict:
             )
         publications = [row for row in events if row.get("event") == "graph_publication"]
         refresh_entry = shape_mismatch(
-            "unaudited_run_shape", "native_graph_refresh_verified",
+            unaudited, "native_graph_refresh_verified",
             checks=(len(checks), 2),
         )
         if refresh_entry is not None:
@@ -679,9 +704,7 @@ async def run(args) -> dict:
             )
             if verdict_entry is not None:
                 receipt["acceptance_shape_mismatch"] = verdict_entry
-        if forced_interruption:
-            pass
-        elif accepts_synthetic_repair(
+        if not forced_interruption and accepts_synthetic_repair(
                 receipt,
                 exception_info=result.exception_info,
                 rewards=rewards,
