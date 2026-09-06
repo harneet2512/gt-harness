@@ -9,6 +9,7 @@ import pytest
 
 from gt_engine.runtime_observation import (
     capture_workspace,
+    classify_execution_outcome,
     certify_observation_equivalence,
     compile_execution_evidence,
     compile_transaction_artifacts,
@@ -397,3 +398,45 @@ def test_parser_signature_delta_rejects_duplicate_qualified_names(
     assert artifact["signatures"][0]["status"] == (
         "unavailable_ambiguous_declaration_identity"
     )
+
+
+# A missing certified classifier is not a non-test command. Before the split
+# below, the non-streamed ImportError branch returned ("", ""), which made
+# compile_execution_evidence return None - so a run against a stale producer
+# recorded NO execution evidence and read as an agent that never ran a test.
+# Evidence compilation must refuse; outcome classification keeps its
+# documented conservatism. Both halves, one fixture.
+
+
+_UNITTEST_PASS = "Ran 1 test in 0.001s\n\nOK\n"
+
+
+@pytest.fixture
+def absent_canonical_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make `from groundtruth.runtime.patterns import ...` raise ImportError."""
+    monkeypatch.setitem(sys.modules, "groundtruth.runtime.patterns", None)
+
+
+def test_absent_classifier_refuses_to_compile_evidence(absent_canonical_classifier):
+    with pytest.raises(RuntimeError, match="canonical_classifier_unavailable"):
+        compile_execution_evidence(
+            command="python3 -m unittest -v",
+            output=_UNITTEST_PASS,
+            returncode=0, action_id=1, repository_revision="a" * 64,
+        )
+
+
+def test_absent_classifier_leaves_outcome_unknown_not_absent(
+    absent_canonical_classifier,
+):
+    """An unknown outcome is a recorded fact; no evidence is an absence."""
+    assert classify_execution_outcome(
+        "python3 -m unittest -v", _UNITTEST_PASS, 0
+    ) == "unknown"
+
+
+def test_absent_classifier_does_not_mask_a_guarded_outcome(
+    absent_canonical_classifier,
+):
+    """The returncode guard answers before the classifier is consulted."""
+    assert classify_execution_outcome("pytest -q", "", 124) == "timeout"

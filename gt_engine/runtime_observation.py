@@ -487,7 +487,17 @@ def _classify_test_output(
     except ImportError as exc:
         if output_artifact is not None:
             raise RuntimeError("canonical_streaming_classifier_unavailable") from exc
-        return "", ""
+        # This branch fires ONLY when the certified producer's classifier
+        # cannot be imported. A genuinely non-test command never reaches it -
+        # it flows through the working classifier's ordinary return - so
+        # ("", "") here does not mean "not a test", it means "nothing
+        # classified it". Returning it degraded KIND as well as outcome, and
+        # a missing kind makes compile_execution_evidence return None: not an
+        # unknown outcome, which is a recorded fact, but no evidence at all.
+        # A run against a stale producer then reports an agent that ran no
+        # tests. Refuse instead, so the pinned-container requirement is
+        # enforced by construction rather than by convention.
+        raise RuntimeError("canonical_classifier_unavailable") from exc
 
 
 def classify_execution_outcome(
@@ -513,7 +523,14 @@ def classify_execution_outcome(
     guarded = _execution_outcome_guard(command, returncode, kind=kind)
     if guarded:
         return guarded
-    outcome, _ = _classify_test_output(command, output, returncode)
+    try:
+        outcome, _ = _classify_test_output(command, output, returncode)
+    except RuntimeError:
+        # The docstring's conservatism is about OUTCOME, and it still holds
+        # here: an unparsed outcome is "unknown", a recorded fact a context
+        # consumer can act on. Evidence compilation is the caller that must
+        # not degrade, and it does not - it lets the error through.
+        return "unknown"
     return outcome or "unknown"
 
 
