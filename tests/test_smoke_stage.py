@@ -34,9 +34,14 @@ def test_stage_selection_partitions_the_frozen_cohort_exactly_once() -> None:
     assert set(gate).isdisjoint(remainder)
 
 
-def test_gate_one_has_a_real_thirty_minute_agent_ceiling() -> None:
-    assert GATE_ONE_MAX_TIMEOUT_SECONDS == 30 * 60
-    assert stage_timeout_cap_seconds("gate-one") == 30 * 60
+def test_gate_one_ceiling_lets_the_gate_task_finish() -> None:
+    # Was 30 minutes, which left the agent 1500s after the supervisor grace -
+    # below the task's own 5400s allowance and level with the baseline's 1439s
+    # mean duration. Run 34062325608 died at terminal=timeout having indexed
+    # and run correctly for the full budget. The ceiling matches the task's
+    # allowance now, so gate-one can actually reach a verdict.
+    assert GATE_ONE_MAX_TIMEOUT_SECONDS == 90 * 60
+    assert stage_timeout_cap_seconds("gate-one") == 90 * 60
     assert stage_timeout_cap_seconds("remaining-19") is None
 
 

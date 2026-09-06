@@ -13,9 +13,16 @@ GATE_STAGE = "gate-one"
 REMAINDER_STAGE = "remaining-19"
 STAGES = frozenset({GATE_STAGE, REMAINDER_STAGE})
 GATE_TASK_ID = "arktype-json-schema-refs-dependencies"
-# Gate-one is an infrastructure proof, not a full benchmark attempt. Keep its
-# outer agent phase bounded; the remaining cohort retains each task-owned cap.
-GATE_ONE_MAX_TIMEOUT_SECONDS = 30 * 60
+# Gate-one proves the infrastructure, and it can only do that if the task is
+# allowed to finish. The 30-minute cap left the agent 1500s after the 300s
+# supervisor grace, against a task whose own task.toml allows 5400s and a
+# deepseek-v4-flash baseline whose MEAN task duration is 1439s - so the budget
+# sat on the mean and run 34062325608 died at terminal=timeout with
+# receipt_issuance=supervisor:deadline_exceeded, having built its graph and run
+# the model loop correctly for the full 25 minutes. A proof that cannot reach a
+# verdict is not a proof. The cap now matches the task's own allowance, which
+# is the largest value that changes nothing else about the stage.
+GATE_ONE_MAX_TIMEOUT_SECONDS = 90 * 60
 
 
 def stage_timeout_cap_seconds(stage: str) -> float | None:
