@@ -609,3 +609,41 @@ def test_benchmark_arms_match_what_the_writers_produce():
         f"writers produce {sorted(produced)} but every validator keyed on "
         f"BENCHMARK_ARMS allows {sorted(BENCHMARK_ARMS)}"
     )
+
+
+def test_the_same_prompt_content_twice_in_a_run_is_rejected():
+    """GT is a context provider; not repeating itself is its central claim.
+
+    The runtime enforces this run-scoped - _model_visible_delivery_identities
+    is initialised once and never cleared - but acceptance only ever checked
+    uniqueness within a single decision, and treatment_refused_then_delivered
+    cannot cover the gap either: it inspects content that WAS refused, and a
+    dedup miss produces no refusal row at all. So the strongest property in the
+    path had no check that would notice it breaking.
+    """
+    import pytest
+
+    from gt_harness.runtime_receipts import _validate_delivery_boundaries
+
+    # Same identity, DIFFERENT decisions: legal per-boundary, illegal per run.
+    repeated = [
+        {"lane": "prompt", "delivery_identity": "a" * 64, "observed_iteration": 1},
+        {"lane": "prompt", "delivery_identity": "a" * 64, "observed_iteration": 5},
+    ]
+    with pytest.raises(ValueError, match="prompt_delivery_repeated_in_run"):
+        _validate_delivery_boundaries(repeated)
+
+
+def test_sealed_evidence_may_recur_across_decisions():
+    """The sealed lane is decision-scoped by design and must not be caught here.
+
+    _decision_delivery_identities is cleared on every iteration change, so the
+    same sealed bytes recurring across decisions is intended behaviour. A
+    run-scoped check that caught it would fire on correct runs.
+    """
+    from gt_harness.runtime_receipts import _validate_delivery_boundaries
+
+    _validate_delivery_boundaries([
+        {"lane": "sealed", "delivery_identity": "b" * 64, "observed_iteration": 1},
+        {"lane": "sealed", "delivery_identity": "b" * 64, "observed_iteration": 5},
+    ])

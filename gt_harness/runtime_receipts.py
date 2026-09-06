@@ -43,6 +43,23 @@ def _validate_delivery_boundaries(deliveries: list[dict]) -> None:
             raise ValueError("duplicate_delivery_identity")
         if len(rows) > MAX_BOUNDARY_CLAIMS:
             raise ValueError("delivery_boundary_claim_limit_exceeded")
+    # The prompt lane's guarantee is RUN-scoped, not decision-scoped: the
+    # runtime's _model_visible_delivery_identities is initialised once and
+    # never cleared, so byte-identical content reaches the model's prompt at
+    # most once per task. That is the strongest property in the anti-repetition
+    # path and it had no acceptance check - the loop above mirrors only the
+    # weaker per-decision scope, and treatment_refused_then_delivered cannot
+    # cover it either, because it inspects content that WAS refused and a dedup
+    # miss produces no refusal row. So if the run-scoped set broke, every gate
+    # still passed. This cannot false-fire: the runtime forbids the condition
+    # by construction, so it fires only when that construction has failed.
+    prompt_identities = [
+        str(row.get("delivery_identity") or "")
+        for row in deliveries
+        if str(row.get("lane") or "") == "prompt"
+    ]
+    if len(prompt_identities) != len(set(prompt_identities)):
+        raise ValueError("prompt_delivery_repeated_in_run")
         if sum(int(row.get("context_byte_count") or 0) for row in rows) > TOTAL_DELIVERY_BYTE_LIMIT:
             raise ValueError("delivery_request_budget_exceeded")
 
