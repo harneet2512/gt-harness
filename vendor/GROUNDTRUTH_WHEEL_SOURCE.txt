@@ -1,10 +1,11 @@
 artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
-source_commit=66791e0b6ce32d973a288d4244337bb3fee837cb
-source_tree=c47cc65128a6d45b9aecfd3699667d7af10f6fa0
-sha256=9a895bb80a4950a460bcd4693a664cc9186daa43b1d450ed93f31d917c610fe8
+source_commit=193b9d93b0650721be6120ae519ab3a1d8e8137f
+source_tree=7aad36fd4b218fbb681cdcaacc4ccbeae4126245
+sha256=dffc1871f7eedc170524c39f8f9c9595d8e9e4bcb814695c55c4c98d2bf584da
 build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
 
-The wheel contains 317 packaged files plus dist-info metadata, built from the recorded source tree.
+Recorded source tree carries 2428 committed files.
+CI at this revision is green: run 34044180999, all nine jobs.
 This pin records the vendored artifact's identity only. It does not certify installed
 validation or whole-product readiness; those are recorded in Linear HAR-87.

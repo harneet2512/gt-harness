@@ -22,13 +22,13 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "66791e0b6ce32d973a288d4244337bb3fee837cb",
-    "source_tree": "c47cc65128a6d45b9aecfd3699667d7af10f6fa0",
+    "source_commit": "193b9d93b0650721be6120ae519ab3a1d8e8137f",
+    "source_tree": "7aad36fd4b218fbb681cdcaacc4ccbeae4126245",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "wheel_sha256": "9a895bb80a4950a460bcd4693a664cc9186daa43b1d450ed93f31d917c610fe8",
+    "wheel_sha256": "dffc1871f7eedc170524c39f8f9c9595d8e9e4bcb814695c55c4c98d2bf584da",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "347025160edb45a19a10f52260110bbddd6adc7ff04152834240b1543499a234",
+    "producer_sha256": "c3b9f16edd0cd6415f3ae1f144a1a0489c248bf7a62669974a27f6267d093da5",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -46,11 +46,11 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "66791e0b6ce32d973a288d4244337bb3fee837cb",
-      "source_tree": "c47cc65128a6d45b9aecfd3699667d7af10f6fa0",
-      "binary_sha256": "347025160edb45a19a10f52260110bbddd6adc7ff04152834240b1543499a234",
+      "source_commit": "193b9d93b0650721be6120ae519ab3a1d8e8137f",
+      "source_tree": "7aad36fd4b218fbb681cdcaacc4ccbeae4126245",
+      "binary_sha256": "c3b9f16edd0cd6415f3ae1f144a1a0489c248bf7a62669974a27f6267d093da5",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "f09ea86a6c59922995161ba2f756ef611956295213f8a6a139fb8fa9ddf9e253",
+      "build_info_sha256": "2133248b89ad4c89fc6c03b89ce5ec97159d15bd90465b7b0ffecb916d8c4aba",
       "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
       "build_tags": "netgo,osusergo,sqlite_fts5",
       "static_linking": true
@@ -62,7 +62,7 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "66791e0b6ce32d973a288d4244337bb3fee837cb",
+      "source_commit": "193b9d93b0650721be6120ae519ab3a1d8e8137f",
       "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -169,7 +169,9 @@
         "64e8585957523db32ee2deb76a4e385fb4db4b7b",
         "5caa8ec284ad646cb525d9b65d8a44117d9ea47b",
         "88c5f6401846faf69127bee6f0bb75df39fab0e7",
-        "66791e0b6ce32d973a288d4244337bb3fee837cb"
+        "66791e0b6ce32d973a288d4244337bb3fee837cb",
+        "597100e56a5effc4ad2bc552be1a56c48df66d37",
+        "193b9d93b0650721be6120ae519ab3a1d8e8137f"
       ],
       "post_certification_changed_paths": [
         ".gitattributes",
@@ -947,6 +949,15 @@
           "kind": "check_outcome",
           "status": "PASS",
           "packet_digest_sha256": "2105d5128a0946599bf42198753c1ca346233ffd310c73b5da7347b86f4bad16"
+        },
+        {
+          "path": "inbox/HAR-87/har87-groundtruth-green-ci-193b9d93b.json",
+          "packet_id": "har87-groundtruth-green-ci-193b9d93b",
+          "head_sha": "193b9d93b0650721be6120ae519ab3a1d8e8137f",
+          "kind": "check_outcome",
+          "status": "PASS",
+          "basis": "exact_ci_full_matrix_green",
+          "packet_digest_sha256": "796467ca61c8a7294a8f4631683c32928bca20b577de31a28947c44413d8c673"
         }
       ],
       "product_review_packets": [
@@ -967,7 +978,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "d5ff8f22b11d6a3d2d0002b6c504f8586062a9021ba62e12267d6f431ff25160"
+      "attestation_digest_sha256": "0aecd7260136ef3b7760c1b9d58b1f7cf8a5f27d44db5557a0832490c8fed70e"
     }
   },
   "capabilities": [
@@ -1066,6 +1077,7 @@
     "gt_harness/product.py",
     "gt_harness/recorded_content.py",
     "gt_harness/runtime_receipts.py",
+    "inbox/HAR-87/har87-groundtruth-green-ci-193b9d93b.json",
     "pyproject.toml",
     "scripts/__init__.py",
     "scripts/agent_resource_evidence.py",

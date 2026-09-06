@@ -1,0 +1,46 @@
+{
+  "authority": "HAR-87_OWNER_DIRECTIVE",
+  "basis": "exact_ci_full_matrix_green",
+  "detail": {
+    "conclusion": "success",
+    "confidence": "high",
+    "jobs_green": [
+      "lint",
+      "go-build",
+      "benchmark",
+      "test (ubuntu-latest, 3.11)",
+      "test (ubuntu-latest, 3.12)",
+      "test (macos-latest, 3.11)",
+      "test (macos-latest, 3.12)",
+      "test (windows-latest, 3.11)",
+      "test (windows-latest, 3.12)"
+    ],
+    "paid_dispatch": false,
+    "prior_red_runs": [
+      {
+        "cause": "ruff format --check (10 files) and 2 pytest timeouts",
+        "conclusion": "failure",
+        "head_sha": "66791e0b6ce32d973a288d4244337bb3fee837cb",
+        "run": 34042787349
+      },
+      {
+        "cause": "2 pytest timeouts (lint fixed)",
+        "conclusion": "failure",
+        "head_sha": "597100e56a5effc4ad2bc552be1a56c48df66d37",
+        "run": 34043261982
+      }
+    ],
+    "repairs": [
+      "597100e56 style: ruff format, 10 files, formatting only",
+      "193b9d93b test: @pytest.mark.timeout(300) on the two giant-input tests added by 5caa8ec28, which exceed the suite-wide 60s cap on CI runners (33.89s and 20.22s measured locally); inputs and assertions unchanged"
+    ],
+    "repository": "harneet2512/groundtruth",
+    "workflow": "ci.yml",
+    "workflow_run_id": 34044180999
+  },
+  "head_sha": "193b9d93b0650721be6120ae519ab3a1d8e8137f",
+  "kind": "check_outcome",
+  "packet_id": "har87-groundtruth-green-ci-193b9d93b",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS"
+}
