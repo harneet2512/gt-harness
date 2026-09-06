@@ -1,27 +1,14 @@
 # Known limitations
 
 Everything not done, deferred, or working in a way that will disappoint someone,
-with the reason and where it lives. As of `9c394863`.
+with the reason and where it lives. As of `e12f5b65`. Nothing is in progress.
 
-- [In progress right now](#in-progress-right-now)
 - [Deferred from the audit](#deferred-from-the-audit)
 - [Product limits](#product-limits)
 - [Isolation and security](#isolation-and-security)
 - [Operational limits](#operational-limits)
 - [GroundTruth limits](#groundtruth-limits)
 - [Testing gaps](#testing-gaps)
-
----
-
-## In progress right now
-
-| Item | State | Where |
-|---|---|---|
-| **Worker agents in the browser.** The server side is complete and the API works, but the committed UI still answers `/spawn` with *"spawning worker agents is coming — the server side is being built"*. `cloud/ui/src/api.ts` has no `agent_spawned` / `agent_report` / `agent_applied` / `agent_closed` event types, no `agent_id` on `MessageMeta`, no `"spawned"` in `MessageDelivery`, and no spawn/apply client functions. | In progress | `cloud/ui/src/**` (uncommitted: `workers.ts`, `WorkerCard.tsx`, `TermWorker.tsx`, `__tests__/workers.test.ts`) |
-| **The Claude-Code terminal re-skin.** `>` prompt, `⏺`/`⎿` lines, spinner status with *esc to interrupt*, box-drawn input, `/resume`, `/theme`, dark by default with a light terminal theme. `slash.ts` still lists six commands with no `/resume` or `/theme`. | In progress | `cloud/ui/src/**` (uncommitted: `TermLine`, `TermStatus`, `TermOutput`, `TermActivity`, `TermSettings`, `Box`, `ResumePicker`, `theme.ts`, `palette.ts`, `gt.ts`, `styles/term.css`) |
-
-Once these land, re-check [api.md](api.md), [user-guide.md](user-guide.md) and
-[testing-and-ci.md](testing-and-ci.md).
 
 ---
 
@@ -49,6 +36,8 @@ their measurements.
 | **Shallow clones.** | `git clone --depth 1`, or `init` + `fetch --depth 1 <sha>` + `checkout FETCH_HEAD` for a SHA. History is not available to the agent. |
 | **No branch, commit or push.** | The session produces a diff. Nothing pushes it anywhere. |
 | **No per-object authorisation.** | Any authenticated, allow-listed user can list, read, message, stop and close **every** session in the deployment. Sessions carry no owner. |
+| **`gt_action.duration_ms` is per batch, not per action.** | It is the wall clock of the action batch the typed action belonged to. A model call almost always carries one action, in which case it is that action's own time; in a two-action batch both frames carry the same figure. Exact per-action timing would need a process-global patch of `execute_typed_action_fail_open`, which was rejected — see [`docs/har84-gt-action-events.md`](../har84-gt-action-events.md) §2. |
+| **An expired session says "session expired".** | `auth.verify_jwt` answers a `jwt.ExpiredSignatureError` with `401 session expired`, which reads as *your coding session expired* rather than *your login expired* — the two are unrelated, and a session outliving a token is the normal case. Pending; the fix is wording, not behaviour. |
 | **Cost is untracked.** | `MSWEA_COST_TRACKING=ignore_errors` is required, because LiteLLM aborts a run it cannot price and the free models have no price entry. `cost` is always `0.0`; `wall_seconds` is the budget signal that means something. |
 | **`/spawn` is all-or-nothing and shallow-parsed.** | Every non-blank line of the message must be a `/spawn` line, or it is a 400. |
 | **Slash commands are client-side.** | Only `/spawn` has a server behaviour. The others do nothing over the API. |
@@ -119,4 +108,4 @@ Full treatment in [security.md](security.md) and
 | **The docker-dependent sandbox tests skip in CI.** | `SANDBOX_MODE` is unset on the runner and there is no daemon, so the integration half of `tests/test_cloud_sandbox.py` never runs there. It runs locally and on the deployment host. |
 | **The model provider is faked in every server suite.** | Deliberately — but it means no automated test exercises a real provider's error shapes. Those were found live and are pinned by unit tests over the *shapes*, not the provider. |
 | **No load or soak testing.** | The concurrency caps are asserted; behaviour at the caps under sustained load is not measured. |
-| **No test asserts the UI and server event catalogues agree.** | The `_WRITES` regex has a twin test; the event type list does not. `cloud/ui/src/api.ts:EVENT_TYPES` is currently missing the four worker event types the server emits. |
+| **No test asserts the UI and server event catalogues agree.** | The `_WRITES` regex has a twin test that fails on divergence; the event type list does not. `cloud/ui/src/api.ts:EVENT_TYPES` matches the server today, but nothing enforces it — a new server event type will simply be ignored by the browser. |

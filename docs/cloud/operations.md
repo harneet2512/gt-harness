@@ -1,6 +1,6 @@
 # Operations runbook
 
-For the deployment at `9c394863` on `cloud/internal-harness`. The primary
+For the deployment at `e12f5b65` on `cloud/internal-harness`. The primary
 deployment is a GitHub Codespace; the same compose file runs unchanged on a
 plain VM.
 

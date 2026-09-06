@@ -1,6 +1,6 @@
 # Testing and CI
 
-Everything below is as committed at `9c394863`. Test-function counts are
+Everything below is as committed at `e12f5b65`. Test-function counts are
 `def test_` counts in each file, so parameterised cases collect higher than the
 number shown; the totals quoted from commit messages are the collected figures.
 
@@ -71,26 +71,22 @@ is `execute_typed_action_fail_open`, which ships in the server image's vendored
 Vitest, `environment: "node"`, `include: ["src/**/*.test.ts"]`. The config is
 deliberately separate from `vite.config.ts` — the production image builds the
 bundle with `npm run build`, and nothing in that path should have to resolve
-vitest. Only the **pure layers** are tested; component tests would need jsdom,
-and the bugs these layers produce do not.
+vitest. Only the **pure data layer** is tested; component tests would need
+jsdom, and the bugs these layers produce do not.
 
 | File | `it()` blocks | Covers |
 |---|---|---|
-| `src/__tests__/chatState.test.ts` | 30 | The thread reducer: event folding, turn grouping, message linking, orphan steering. |
-| `src/__tests__/contract.test.ts` | 34 | The API contract as the UI understands it: `EVENT_TYPES`, `GT_MODES` and their help text, `lifecycleToSessionStatus`, `streamUrl` flooring, the wall-second bounds, `CAP_REASONS`. |
+| `src/__tests__/chatState.test.ts` | 30 | The thread reducer: event folding, turn grouping, message linking, orphan steering, and keeping a worker's mirrored frames out of the primary turn. |
+| `src/__tests__/contract.test.ts` | 34 | The API contract as the UI understands it: `EVENT_TYPES` (including `gt_action` and the four worker frames), `GT_MODES` and their help text, `lifecycleToSessionStatus`, `streamUrl` flooring, the wall-second bounds, `CAP_REASONS`, `agentIdOf`. |
+| `src/__tests__/workers.test.ts` | 29 | Worker cards folded out of the parent's stream: spawn, mirrored activity, reports, apply and its conflicts, closure, hue assignment by spawn order, `workerNo`, and the nested `/resume` rows. |
+| `src/__tests__/terminal.test.ts` | 16 | The terminal grammar's pure parts: the GroundTruth line (`gt.ts`, both the `gt_action` frame and the typed-action `tool_call` fallback), the status verbs (`verbFor`), and the theme helpers. |
+| `src/__tests__/prompt.test.ts` | 24 | `launch.ts` (creation stages, `combinePrompt`, `createAndStart`, file counting), `prefs.ts` normalisation, `slash.ts` parsing and suggestions, and `parseSpawn`'s refusals. |
 | `src/__tests__/graph.test.ts` | 19 | Particle field construction, relation folding, cluster hue, radius, the `MAX_PARTICLES` cap, neighbour lookup. |
-| `src/__tests__/prompt.test.ts` | 24 | `launch.ts` (creation stages, `combinePrompt`, file counting, graph auto-open), `prefs.ts` normalisation, and slash parsing/suggestions. |
 | `src/__tests__/sync.test.ts` | 20 | `sessionSync` — snapshot ordering (the round-1 P0 that wedged the header on *Working*) — and `streamSync` ingest, dedupe and terminal detection. |
 | `src/__tests__/trail.test.ts` | 18 | Step kinds, the `WRITES` twin, file matching, attention decay, call counting. |
 
-Reported at `54532f86`: **169 Vitest tests**, with `tsc --noEmit` and
-`vite build` clean, and Playwright 62/62 at 1440x900 and 1100x800 with zero
-console errors.
-
-> **In progress.** `src/__tests__/workers.test.ts` is untracked at `9c394863`;
-> it accompanies the worker-agent UI wiring.
-
----
+Reported at `e12f5b65`: **214 Vitest tests** collected, with `tsc --noEmit` and
+`vite build` clean.
 
 ## Running them
 

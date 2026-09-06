@@ -1,6 +1,6 @@
 # Security, as built
 
-The threat model of the cloud coding agent at `9c394863`. The sandbox half is
+The threat model of the cloud coding agent at `e12f5b65`. The sandbox half is
 condensed from [`docs/cloud-sandbox.md`](../cloud-sandbox.md), which is the
 primary document and carries the evidence; the authentication and secrets halves
 are from `cloud/server/auth.py`, `cloud/server/environment.py` and

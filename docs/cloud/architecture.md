@@ -1,9 +1,7 @@
 # Architecture, as built
 
-Everything below is the code committed at `9c394863` on
-`cloud/internal-harness`. Two areas are being changed concurrently and are
-marked **in progress**: the browser UI (`cloud/ui/src/**`) and GroundTruth
-typed-action events (`cloud/server/gt_events.py`).
+Everything below is the code committed at `e12f5b65` on
+`cloud/internal-harness`. Nothing is in progress.
 
 - [1. Components and boundaries](#1-components-and-boundaries)
 - [2. Session state machine](#2-session-state-machine)
@@ -13,8 +11,9 @@ typed-action events (`cloud/server/gt_events.py`).
 - [6. The file-relation graph](#6-the-file-relation-graph)
 - [7. Worker agents](#7-worker-agents)
 - [8. GroundTruth in the cloud](#8-groundtruth-in-the-cloud)
-- [9. Persistence](#9-persistence)
-- [10. Concurrency, threads and locks](#10-concurrency-threads-and-locks)
+- [9. The browser](#9-the-browser)
+- [10. Persistence](#10-persistence)
+- [11. Concurrency, threads and locks](#11-concurrency-threads-and-locks)
 
 ---
 
@@ -602,7 +601,61 @@ Payload fields are in [api.md](api.md#gt_action).
 
 ---
 
-## 9. Persistence
+## 9. The browser
+
+A React 18 + Vite SPA (`cloud/ui/src`), built by `npm run build` and served by
+nginx. It is deliberately split into a **data layer** of pure, testable modules
+and a **presentation layer** of components that render what those modules
+produce. Component tests would need jsdom; the bugs these layers produce do not,
+which is why the Vitest suite runs `environment: "node"` over the data layer
+only.
+
+### Data layer
+
+| Module | Responsibility |
+|---|---|
+| `api.ts` | The wire contract: every REST call, every SSE envelope type and payload, the enums (`GT_MODES`, `EVENT_TYPES`, `COMPOSER_LOCKED`, `TERMINAL_STATUSES`), `parseEventFrame`, `streamUrl`, and `agentIdOf`. |
+| `useSessionStream.ts` | The `EventSource`, one listener per event type, reconnecting from the last id seen. |
+| `streamSync.ts` | Ingest: de-duplication by envelope id, the resume watermark, terminal detection. |
+| `sessionSync.ts` | Snapshot reconciliation — two `GET /sessions/{id}` responses are routinely in flight and can land out of order (round-1 P0-1). |
+| `chatState.ts` | The thread reducer: frames and messages folded into turns and groups. |
+| `workers.ts` | Worker cards folded out of the parent's stream by `agent_id`, plus the hues, the spawn numbering and the nested `/resume` rows. |
+| `gt.ts` | A `gt_action` frame (or, as a fallback, a typed-action `tool_call`) formatted as a GroundTruth line. |
+| `trail.ts` | Steps, step kinds, the `WRITES` twin of the server's regex, and file inference from command tokens. |
+| `graph.ts`, `graphSim.ts`, `graphDraw.ts`, `useGraphView.ts`, `useGraphCamera.ts`, `layoutStore.ts` | The particle field, the force simulation, the canvas painter, and per-session layout/camera persistence. |
+| `useSessionData.ts` | The one hook a page uses: session, messages, receipts, diff, tree, graph, workers, and the actions (`send`, `stop`, `close`, `spawn`, `applyWorker`). |
+| `slash.ts`, `launch.ts`, `repoUrl.ts`, `prefs.ts`, `theme.ts`, `palette.ts`, `layoutMode.ts`, `format.ts`, `patch.ts`, `fences.ts` | Command parsing, the create-and-start flow, repository inference, stored preferences, the two themes, breakpoints, and formatting. |
+
+### Presentation layer
+
+| Component | Draws |
+|---|---|
+| `App.tsx` | Auth gate and routes (`/`, `/sessions/:id`). |
+| `LandingPage.tsx`, `TermBanner.tsx` | The prompt-first landing: a box-drawn banner, four tips, one composer. |
+| `SynapsePage.tsx` | The session: transcript, the graph split, the global keys. |
+| `Conversation.tsx` | The transcript, including the `Receipt(turn N)` line. |
+| `TermLine.tsx` | The two line shapes (`⏺`, `⎿`) everything else is built from. |
+| `TermActivity.tsx`, `TermOutput.tsx` | A turn step by step, and clipped command output. |
+| `TermStatus.tsx` | The spinner status line and the verb it shows. |
+| `TermWorker.tsx` | A worker as one call, with its folded trail and `[apply]` / `[open]`. |
+| `TermSettings.tsx` | `/settings`, as a box in the transcript. |
+| `ResumePicker.tsx` | `/resume`, full screen, keyboard-driven, workers nested. |
+| `Box.tsx` | Character-drawn frames (`╭─╮ │ ╰─╯`) and rules. |
+| `Composer.tsx` | The `>` input, the `/` palette, and the hint line. |
+| `GraphPanel.tsx`, `GraphCanvas.tsx`, `GraphToolbar.tsx`, `GraphOverlay.tsx`, `Inspector.tsx`, `RelationsList.tsx`, `FileActivity.tsx`, `Scrubber.tsx` | The graph pane, its inspector and the step scrubber. |
+| `BottomPanel.tsx`, `TrailPanel.tsx`, `ChangesPanel.tsx`, `ReceiptsPanel.tsx`, `DiffView.tsx`, `CommandOutput.tsx`, `Prose.tsx` | The Trail / Changes / Receipts drawer and its renderers. |
+
+`agent_id` is the boundary that keeps a worker's frames out of the primary
+turn's step count, and it is enforced in `chatState.ts` and `workers.ts` rather
+than in a component.
+
+Both themes are custom properties on `:root`, so a theme change is one attribute
+on `<html>`; the canvas cannot read a CSS variable, so `palette.ts` re-reads
+them once per change rather than per frame.
+
+---
+
+## 10. Persistence
 
 | What | Where | Lifetime |
 |---|---|---|
@@ -619,7 +672,7 @@ a dev tool; see
 
 ---
 
-## 10. Concurrency, threads and locks
+## 11. Concurrency, threads and locks
 
 The agent loop is blocking, so workspace creation and every turn run on worker
 threads (`asyncio.to_thread`), and everything that touches the store or the event

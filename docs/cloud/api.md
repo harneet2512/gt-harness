@@ -1,7 +1,14 @@
 # API reference
 
-Every route below is as committed at `9c394863`, from `cloud/server/routes.py`,
+Every route below is as committed at `e12f5b65`, from `cloud/server/routes.py`,
 `cloud/server/models.py`, `cloud/server/auth.py` and `cloud/server/events.py`.
+
+`cloud/ui/src/api.ts` models all of this: since `e12f5b65` its `EVENT_TYPES`
+carries `gt_action`, `agent_spawned`, `agent_report`, `agent_applied` and
+`agent_closed`; `Session` carries `parent_id` / `role` / `task` / `report` /
+`applied_at`; `MessageMeta` carries `agent_id`; and the client has
+`spawnAgents`, `listAgents`, `applyAgent` and `closeAgent`. It is the closest
+thing to a second copy of this document, and it is type-checked in CI.
 
 - [Authentication](#authentication)
 - [Auth endpoints](#auth-endpoints)

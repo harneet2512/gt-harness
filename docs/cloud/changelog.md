@@ -7,14 +7,18 @@ first, grouped by day. Generated from:
 git log --format='%h %ad %s' --date=short cloud/internal-harness ^origin/main
 ```
 
-31 commits, 2026-09-04 to 2026-09-05.
+35 commits, 2026-09-04 to 2026-09-05.
 
 ---
 
-## 2026-09-05 — sandboxing, the audit, budgets, workers, prompt-first
+## 2026-09-05 — sandboxing, the audit, budgets, workers, prompt-first, the terminal look
 
 | Commit | Change |
 |---|---|
+| `e12f5b65` | **Worker agents in the UI, and the Claude Code terminal look.** `/spawn` (one or many lines) wired to the agents API; a card per worker in the transcript with live activity, the reported reply, files and patch sha, `[apply]` (409 conflicts shown inline) and `[open]`; frames with `agent_id` go to the worker only, never to the primary turn; a four-hue palette gives each worker its own trail, halo and legend chip on the graph; workers nest under their parent in `/resume`, with a back link from a worker page; create-and-run uses `first_message` in one call. The terminal grammar: a 100ch monospace column, box-drawn banner and input, a `>` prompt, `⏺` lines for the agent's prose, `Bash(cmd)` with continuation lines clipped at six, `Agent(worker-N · task)` lines with bracketed actions, `GroundTruth(...)` lines for typed actions, a `Receipt(turn N)` line per turn, the spinner status line with *esc to interrupt*, the `/` palette, `/resume`, `/theme` (dark default, light terminal theme), and the code graph as a tmux-style split pane; stacked below 1100 px. 214 Vitest tests. Verified live: two workers on `pallets/click` reported in 65 s, both applied into the parent diff, cards rebuilt on a cold load, parent close cascaded, zero console errors. |
+| `5c6b3e48` | Correct three stale documentation statements (the workspace quota is measured after every command, not only write-shaped ones; the running producer is `+cloud.2`; `NewSessionForm.tsx` was removed in `54532f86`) and document `gt_action` as landed. |
+| `71f7942d` | The as-built documentation set under `docs/cloud/`, plus a Documentation index at the end of `cloud/README.md`. |
+| `9c0212d5` | **`gt_action` events.** A GT typed action never reaches `_EmittingEnvironment`, so the trail showed a model call with nothing under it. `cloud/server/gt_events.py` wraps `model.format_observation_messages` — the one call that sees the normalised requests and their results — and emits one `gt_action` frame per typed action, with the kind, arguments, the scope actually searched, semantics/coverage, match count, omissions, reason codes and the evidence artifact id. `gt_action` joins `MIRRORED_EVENT_TYPES`; receipts gained `gt_actions` / `gt_exact_matches` and the session row a `gt_actions` total. Schema v7. Nothing under `gt_engine/` modified. 333 passed / 4 skipped. |
 | `9c394863` | **Worker coding agents — spawn, report, apply.** A worker is a child session with its own workspace, sandbox and transcript; all-or-nothing spawning against the concurrency caps; reports mirrored into the parent's conversation; `git apply --3way` into an idle parent with conflict paths on 409. Schema v6. 306 passed / 4 skipped. |
 | `54532f86` | **Prompt-first entry.** The landing configuration form becomes one composer; the repository is inferred from a GitHub URL in the message or the most recent session; model, GT mode and budgets move behind a gear and persist locally. Sending creates the session, navigates, and posts the message the moment it is idle. Slash commands and keyboard shortcuts. 169 Vitest tests. |
 | `15f845a0` | **Close the audit gaps (server/ops).** P0: compose restart policy and healthchecks, the `gt_mode` `Literal`, `--init` plus recreate-and-retry for wedged sandboxes. P1: turn-scoped failures, `ensure_running` per turn, provider envelopes never stored as replies, 40-hex refs via fetch/checkout, the disk floor and workspace cap, interrupted turns closed on the wire, `turn_started.content`, per-request `ALLOWED_GITHUB_LOGINS`, a 24 h JWT TTL, the model preflight. P2: G-12 … G-23. Deferred: G-14, G-18. |

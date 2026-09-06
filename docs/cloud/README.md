@@ -2,19 +2,9 @@
 
 As-built documentation for the internal cloud coding agent on branch
 `cloud/internal-harness` (Linear **HAR-84**, with **HAR-85** and **HAR-86**
-alongside it). Everything here describes committed code: the server package as
-of `9c0212d5` (*feat(HAR-84): gt_action events*), which sits on `9c394863`
-(*feat(HAR-84): worker coding agents — spawn, report, apply*).
-
-One package is still being changed by another agent while this was written and
-is marked **in progress** wherever it appears:
-
-| In-progress package | Where | Documented as |
-|---|---|---|
-| Claude-Code terminal re-skin + worker-agent wiring in the browser | `cloud/ui/src/**` | current committed UI, plus a target section per doc |
-
-GroundTruth typed-action events have since landed as `9c0212d5` and are
-documented as built.
+alongside it). Everything here describes committed code as of **`e12f5b65`**
+(*feat(HAR-84): worker agents in the UI, and the Claude Code terminal look*).
+Nothing is in progress.
 
 ## What this is
 
@@ -42,8 +32,8 @@ agent that can be told *"the evidence must be exact and complete or abstain"*
 
 | Document | What is in it |
 |---|---|
-| [architecture.md](architecture.md) | Components and boundaries, the session state machine, the turn loop and its step boundaries, the event bus and SSE contract, diff snapshots, the file graph, worker agents, typed-scope normalisation, the producer build, the HAR-86 snapshot fix. Three diagrams. |
-| [user-guide.md](user-guide.md) | Signing in, the prompt-first landing, talking to the agent, steering, stop, `/spawn` and applying a worker's diff, the graph and inspector, receipts, what each GT mode does, slash commands and keys. Ends with the in-progress terminal grammar. |
+| [architecture.md](architecture.md) | Components and boundaries, the session state machine, the turn loop and its step boundaries, the event bus and SSE contract, diff snapshots, the file graph, worker agents, GroundTruth (typed scopes, typed-action events, the producer build, the HAR-86 snapshot fix), the browser's data/presentation split, and concurrency. Three diagrams. |
+| [user-guide.md](user-guide.md) | The terminal grammar, signing in, the prompt-first landing, talking to the agent, steering, stop, `/spawn` and applying a worker's diff, the graph split and inspector, receipts, what each GT mode does, slash commands, keys and themes. |
 | [api.md](api.md) | Every REST endpoint and status code, every SSE event type and payload field, the `Session` / `Message` / `TurnReceipt` shapes, and the auth rules. |
 | [operations.md](operations.md) | Prerequisites, the OAuth app, every environment variable, `deploy.sh`, Codespaces specifics, image builds, restart/health, the reaper, quotas, the disk floor, logs, verification, recovery, and the SQLite drop-and-recreate. |
 | [security.md](security.md) | The threat model as built: what is isolated, what is not, secrets, the egress allow-list, resource caps, authorisation, and the known gaps. |

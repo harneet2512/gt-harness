@@ -1,10 +1,9 @@
 # User guide
 
-How to use the cloud coding agent. This describes the UI **as committed at
-`9c394863`**; the terminal re-skin that supersedes parts of it is in progress
-and is described at the end, under
-[In progress: the terminal grammar](#in-progress-the-terminal-grammar).
+How to use the cloud coding agent. This describes the UI as committed at
+`e12f5b65` — the Claude Code terminal look, with worker agents wired end to end.
 
+- [The grammar](#the-grammar)
 - [Signing in](#signing-in)
 - [The landing page: type a task](#the-landing-page-type-a-task)
 - [Settings](#settings)
@@ -17,8 +16,40 @@ and is described at the end, under
 - [GroundTruth modes](#groundtruth-modes)
 - [Slash commands](#slash-commands)
 - [Keyboard](#keyboard)
+- [Theme](#theme)
 - [Closing a session](#closing-a-session)
-- [In progress: the terminal grammar](#in-progress-the-terminal-grammar)
+
+---
+
+## The grammar
+
+The whole page is a terminal transcript, and it is made of two line shapes.
+Everything — the agent's prose, a command, a GroundTruth query, a worker, a
+receipt — is one of them (`cloud/ui/src/components/TermLine.tsx`):
+
+```
+⏺ I need to see how the option parser is wired.
+⏺ Bash(rg -n "class Option" src/click)
+  ⎿  src/click/core.py:2103:class Option(Parameter):
+     … +37 lines (click to expand)
+⏺ GroundTruth(exact_literal_search "class Option" in src/click)
+  ⎿  2 matches · exact · complete
+⏺ Agent(worker-1 · Add a docstring to Command.invoke)
+  ⎿  $ rg -n "def invoke" src/click/core.py
+  ⎿  ✓ reported · 2 files · a80d4c46  [apply] [open]
+⏺ Receipt(turn 3) · 7 calls · 66s · untracked · a80d4c46 · GT ready
+```
+
+`⏺` is a thing that happened; `⎿` is what it said. Command output is clipped
+at six lines with an expander (`TermOutput.tsx`). Boxes — the landing banner,
+`/settings`, `/resume` — are drawn with characters (`╭─╮ │ ╰─╯`), not CSS
+borders, so they behave like a terminal's (`Box.tsx`).
+
+A **GroundTruth line is not a shell command and never reads as one**
+(`gt.ts`). It is formatted from the server's `gt_action` frame — the kind, the
+arguments, the scope actually searched, the semantics and coverage verdict and
+the match count — and an abstention says so: `⎿ abstained:
+COVERAGE_NOT_COMPLETE`.
 
 ---
 
@@ -42,9 +73,10 @@ does not, the browser or compose is serving a stale bundle — see
 
 ## The landing page: type a task
 
-The landing page is a **prompt, not a form**. One composer, placeholder *"What
-should I work on?"*. You type the task; the repository, the model and the
-budgets are inferred or remembered.
+The landing page is a **prompt, not a form**: a box-drawn banner naming what the
+agent is pointed at (repo, GT mode, model), four tips, and one composer. You
+type the task; the repository, the model and the budgets are inferred or
+remembered (`TermBanner.tsx`, `LandingPage.tsx`).
 
 ### How the repository is chosen
 
@@ -66,20 +98,24 @@ budgets are inferred or remembered.
 
    A trailing `.git`, and sentence punctuation glued to the URL, are trimmed.
 
-2. **The chip under the composer**, if you picked a repository explicitly.
-3. **The most recent session's repo** — work where you last worked.
-4. **`?repo=` / `?ref=` query parameters**, which pre-select the chip.
+2. **The most recent session's repo** — work where you last worked. The banner
+   and the line under the composer both name whatever is currently in force.
+3. **`?repo=` / `?ref=` query parameters**, which pre-select it.
 
 If none of those name a repository, the agent answers *"Which repository should
 I work in? Paste a GitHub URL."* and **keeps your intent**: the next message
 carrying a URL starts the session with **both texts**, in the order you typed
-them (`launch.ts:combinePrompt`).
+them (`launch.ts:combinePrompt`). A `/spawn` typed with no repository known gets
+its own version of that question, and asks you to send the `/spawn` lines again
+once the repository is set.
 
 ### What sending does
 
-One action creates the session, navigates to `/sessions/<id>`, shows your prompt
-already on screen, and posts it the moment the workspace reaches `idle` — the
-server answers 409 until then, so the page holds it rather than failing. While
+One action creates the session and starts the first turn: the prompt is sent as
+`first_message`, so the server runs it itself the moment the workspace is ready
+(`launch.ts:createAndStart`, which falls back to creating and posting separately
+against a server that does not accept the field). The page navigates to
+`/sessions/<id>` with your prompt already on screen. While
 that happens the page shows the three creation steps in order:
 
 ```
@@ -96,9 +132,10 @@ host with no disk — the prompt stays in the box and the error is shown.
 
 ## Settings
 
-Behind the gear next to the composer; also reachable with `/settings`. Four
-things, remembered in `localStorage` under `synapse:prefs` and merged onto the
-defaults field by field, so one stale key cannot take the prompt down:
+`/settings` — a form drawn as a box **in the transcript**, at the point where you
+asked for it (`TermSettings.tsx`). Four things, remembered in `localStorage`
+under `synapse:prefs` and merged onto the defaults field by field, so one stale
+key cannot take the prompt down:
 
 | Setting | Default | Range |
 |---|---|---|
@@ -107,27 +144,40 @@ defaults field by field, so one stale key cannot take the prompt down:
 | Step limit | 60 | 1..500 model calls per turn |
 | Wall-clock budget | *(unset)* | 60..3600 s; unset means "use the server's `TURN_WALL_SECONDS`" |
 
-Settings apply at **session creation**. Changing them does not retune a session
-that is already running.
+Settings apply at **session creation**. Opened inside a live session the box says
+so: changing them does not retune a session that is already running, only the
+next one you start.
 
 ---
 
 ## Talking to the agent
 
 The session page is a transcript. Each turn shows the agent's reasoning, each
-command it ran and that command's output, inline, in order. A turn is one
-exchange: your message goes in, the agent works, and the turn ends **when the
-agent talks to you** — either because it finished, or because it has a question.
+command it ran and that command's output, inline, in order, in the grammar
+above. A turn is one exchange: your message goes in, the agent works, and the
+turn ends **when the agent talks to you** — either because it finished, or
+because it has a question.
 
-The header carries the session status:
+Your own messages are `>` lines, the way a shell echoes a prompt.
 
-| Status word | Meaning |
+While a turn runs there is exactly one animated thing on the page — the status
+line between the transcript and the input (`TermStatus.tsx`):
+
+```
+✻ Working… (12s · 3 steps · esc to interrupt)
+```
+
+A five-glyph spinner (`✻ ✽ ✶ ✳ ✢`) and a verb that follows what the agent is
+actually doing, read from the last command it ran, so a long step still reads as
+motion:
+
+| Verb | When |
 |---|---|
-| Preparing | The workspace is still being made (with the current phase named). |
-| Working | A turn is running, with a live step count and a stopwatch. |
-| Waiting for you | The last reply was a question. |
-| Idle | Ready for the next message. |
-| Failed / Closed | Terminal, with the reason. |
+| Thinking | A model call is in flight; no command yet. |
+| Reading | `cat`, `ls`, `rg`, `grep`, `find`, `git log/show/status/diff`, `sed -n`, … |
+| Editing | A write-shaped command — the same test the server uses for diff snapshots. |
+| Checking | `pytest`, `tox`, `npm test`, `make test`, `ruff`, `mypy`, `eslint`, `tsc`, … |
+| Running | Anything else. |
 
 A **step** is one model call. That is the same number as
 `turn_finished.n_calls`, and the definition is enforced in `trail.ts`.
@@ -160,7 +210,8 @@ turn if anything was waiting.
 
 ## Stopping a turn
 
-The **Stop** control in the header, `/stop`, or `Ctrl`/`Cmd`+`Shift`+`Backspace`.
+Press **`esc`** while a turn is running — the status line says so — or type
+`/stop`.
 
 Stop is honoured at the next step boundary, and the command in flight is killed
 so that boundary arrives immediately — measured at 0.16 s on the live
@@ -190,33 +241,57 @@ Every non-blank line must be a `/spawn` line — a half-written command is refus
 rather than run past a model as prose. At most four tasks per message, at most
 four live workers per session, and a worker cannot spawn workers.
 
-The message does not start a turn. The server records what you asked and answers
-with a system note listing the workers it created. Each worker then runs its task
-as its own first turn, without being messaged.
+The draft is checked before the round trip (`slash.ts:parseSpawn`): a line that
+is not a `/spawn`, a `/spawn` with no task, or more than four of them is
+refused in the transcript with the reason, rather than sent and answered 400.
+The message does not start a turn — the server records what you asked and
+answers with a note listing the workers it created. Each worker then runs its
+task as its own first turn, without being messaged.
 
 **Watching them.** You do not subscribe to anything else: a worker's frames
-arrive on *your* session's stream tagged with `agent_id`, so each worker draws
-its own trail. When a worker finishes a turn it **reports** into your
-conversation — the reply, the files it changed, and the patch's sha256 — and the
-report survives a reload because it is a real message, not only a frame.
+arrive on *your* session's stream tagged with `agent_id`, and that tag is the
+whole protocol — a frame that carries it belongs to that worker and never to
+your own turn or step count. Each worker becomes one call in your transcript
+(`TermWorker.tsx`):
 
-**Taking the work.** Applying a worker's diff merges it into your workspace with
-a 3-way merge. It is all-or-nothing:
+```
+⏺ Agent(worker-1 · Add a one-line docstring to Command.invoke)
+  ⎿  $ rg -n "def invoke" src/click/core.py
+     … +7 earlier commands
+  ⎿  ✓ reported · 2 files · a80d4c46  [apply] [open]
+```
 
-- The session must be `idle` (409 otherwise).
-- A worker with no changes is a 400.
-- On conflict you get the **list of paths** git could not merge, and your
-  workspace is byte-for-byte what it was.
+Its own activity is folded to the last three rows — the primary transcript is
+what you are reading, and a worker that ran forty commands must not take forty
+lines of it. Click the fold to see the rest. A worker's GroundTruth queries are
+drawn as GroundTruth lines there too, not as shell commands.
+
+The status mark is `…` running, `✓` reported or applied, `·` closed.
+
+**Colours.** Each worker gets one of four hues by spawn order, wrapping past the
+fourth (`workers.ts:WORKER_HUES`). None of them is the primary agent's orange or
+the edited-file teal, so a worker's trail on the graph is never mistaken for the
+session's own.
+
+When a worker finishes a turn it **reports** into your conversation — the reply,
+the files it changed, and the patch's sha256 — and the report survives a reload,
+because it is a real message and not only a frame.
+
+**Taking the work.** `[apply]` merges that worker's diff into your workspace
+with a 3-way merge; `[open]` navigates into the worker's own session, which has
+a *back to parent* link at the top. Apply is all-or-nothing:
+
+- The session must be `idle` — `[apply]` is disabled while a turn is running.
+- A worker with no changes is refused.
+- On conflict you get the **list of paths** git could not merge, on the card,
+  and your workspace is byte-for-byte what it was.
 - Apply **before** closing the worker: closing deletes its clone like any other
   session's, and the patch goes with it.
 - Applying changes files, not the transcript. Your agent does not know it
   happened unless you tell it.
 
-> **In progress.** At `9c394863` the committed UI answers `/spawn` with
-> *"spawning worker agents is coming — the server side is being built"*. The
-> server side is complete and the API works; the browser wiring is the
-> in-progress package. Until it lands, spawn and apply through the API — see
-> [api.md](api.md#worker-agents).
+`/resume` nests workers under the session that spawned them, labelled with their
+task, rather than listing them as four things you started.
 
 ---
 
@@ -224,7 +299,10 @@ a 3-way merge. It is all-or-nothing:
 
 The graph is the thing this product has that a terminal does not: **every file in
 the workspace as a particle, every relation between two files as a filament**,
-laid out by a force simulation so related code clusters.
+laid out by a force simulation so related code clusters. It opens as a
+**tmux-style split pane** beside the transcript, with a rule-drawn pane title —
+`── graph · 166 files · GT ready · 2 workers ──` — rather than as a dashboard
+panel. `Ctrl`/`Cmd`+`G` or `/graph` toggles it.
 
 Edges come from two places (see
 [architecture.md](architecture.md#6-the-file-relation-graph)): static imports
@@ -241,12 +319,17 @@ symbol edges (`gt_call`, `gt_import`, `gt_ref`) collapsed to file level.
 - Click a particle for the **inspector**: that file's live diff (refetched as the
   agent writes), its relations, and the exact steps that touched it. Clicking a
   step scrubs the graph back to that moment.
+- Each live worker draws its own trail in its own hue, and the pane title counts
+  them; a worker's trail can be isolated from the rest.
 
 The **scrubber** replays the turn step by step. Its diff is the real stored
 snapshot taken at that write (`/diff?through_event=N`), not a reconstruction.
 
-The header badge names the GT mode and its status: `ready`, `indexing…`,
-`unavailable` (with the reason, which survives a reload) or `off`.
+GT status is stated where it matters rather than as a permanent badge: the
+banner names the mode before a session exists, the graph pane title says
+`GT ready`, and every `Receipt(turn N)` line ends with the GT status that turn
+actually ran with. An unavailable index is a line in the transcript carrying the
+reason, which survives a reload.
 
 ---
 
@@ -261,11 +344,15 @@ the turn is already inline in the transcript.
 | Changes | The cumulative diff: every file the session has changed, with a two-tone patch. |
 | Receipts | One row per turn. |
 
-A **receipt** is the turn's record: turn id, start and end, model calls, wall
-seconds, `finish_reason`, the sha256 of the patch as of that turn, the GT status
-the turn actually ran with, and the model it actually used. Cost is shown as
-*untracked* rather than `$0.00`, because it is: pricing is disabled for the free
-models this deployment uses.
+A **receipt** is the turn's record, and it is also a line in the transcript —
+one `⏺ Receipt(turn N)` closing every finished turn, with the model calls, the
+elapsed time, the cost, the patch sha and the GT status. Clicking it selects
+that turn for the scrubber. The Receipts tab is the same data as a table, with
+`gt_actions` / `gt_exact_matches` alongside.
+
+Cost reads *untracked* rather than `$0.00`, because it is: pricing is disabled
+for the free models this deployment uses, and wall-clock seconds are the honest
+budget line.
 
 ---
 
@@ -301,25 +388,34 @@ is missing from the image.
 
 ## Slash commands
 
-Six, all client-side, with autocomplete while you type the name. A message that
-merely *starts* with a slash (`/usr/bin/env`, `/api/sessions returns 409`) is a
-message, not a command: only a known name followed by end-of-line or a space
-counts.
+Eight, all client-side, with a `/` palette that completes while you type the
+name. A message that merely *starts* with a slash (`/usr/bin/env`,
+`/api/sessions returns 409`) is a message, not a command: only a known name
+followed by end-of-line or a space counts. `?` on an empty line opens the whole
+palette.
 
 | Command | Does |
 |---|---|
 | `/stop` | Stop the turn in flight. |
 | `/close` | Close the session and discard its workspace. |
-| `/graph` | Show or hide the graph panel. |
-| `/settings` | Model, ground truth and the per-turn budgets. |
-| `/spawn <task>` | Hand a task to a worker agent. One per line. |
+| `/graph` | Show or hide the code graph — `ctrl+g`. |
+| `/resume` | Pick up a previous session — `ctrl+r`. |
+| `/settings` | Model, ground truth and the per-turn budgets, as a box in the transcript. |
+| `/spawn <task>` | Hand a task to a worker agent — one `/spawn` line per worker, up to 4. |
+| `/theme [dark\|light]` | Switch the terminal theme; no argument toggles. |
 | `/help` | List these commands. |
 
-On the landing page, only `/help`, `/settings` and `/spawn` mean anything; the
-rest answer *"There is no session yet."*
+On the landing page, `/help`, `/settings`, `/resume`, `/theme` and `/spawn` all
+work; `/stop`, `/close` and `/graph` answer *"There is no session yet."*
 
 The command you typed is echoed into the transcript the way a shell echoes it,
-above whatever it did.
+above whatever it did — a multi-line `/spawn` is echoed whole, one line per
+worker.
+
+`/resume` is the session list, full screen, driven from the keyboard: `↑↓`
+moves, `⏎` opens, `esc` closes, workers nested under the session that spawned
+them with their task. It replaces a permanent sidebar, on the principle that a
+list you ask for costs nothing when you are not asking for it.
 
 ---
 
@@ -329,63 +425,44 @@ above whatever it did.
 |---|---|
 | `Enter` | Send. |
 | `Shift`+`Enter` | Newline. |
+| `esc` | Interrupt the running turn. |
+| `?` (on an empty composer) | Open the command palette. |
 | `Ctrl`/`Cmd`+`K` | Focus the composer. |
-| `Ctrl`/`Cmd`+`G` | Toggle the graph panel. |
-| `Ctrl`/`Cmd`+`Shift`+`Backspace` | Stop the running turn. |
-| `Tab` / `Enter` | Accept the highlighted slash-command suggestion. |
-| `↑` / `↓` | Move through slash-command suggestions. |
-| `Escape` | Dismiss the suggestions; close an overlay or the inspector on a narrow screen. |
+| `Ctrl`/`Cmd`+`G` | Toggle the code graph. |
+| `Ctrl`/`Cmd`+`R` | Open `/resume`. |
+| `Tab` / `Enter` | Accept the highlighted palette entry. |
+| `↑` / `↓` | Move through the palette, or through `/resume`. |
+| `esc` (with the palette or a box open) | Dismiss it. |
 
-Below 1100 px the conversation becomes a toggleable drawer and the inspector a
-slide-over with a scrim; below 760 px the layout stacks.
+The hint under the composer says the ones that matter:
+`? for shortcuts · /help · ⏎ send · shift+⏎ newline · esc interrupt`.
+
+Below 1100 px the graph becomes an overlay and the inspector a slide-over with a
+scrim; below 760 px the layout stacks.
+
+---
+
+## Theme
+
+Two terminals: **dark by default**, with a light terminal theme behind
+`/theme light` (`/theme` alone toggles). The choice is remembered in
+`localStorage` under `synapse:theme`.
+
+Every colour the page paints is a custom property on `:root`, so switching is
+one attribute on `<html>` and nothing re-renders; the graph canvas cannot read a
+CSS variable, so it re-reads the palette once per theme change rather than per
+frame (`theme.ts`, `palette.ts`).
 
 ---
 
 ## Closing a session
 
-`/close`, or the Close control in the header (with a confirm). Closing kills the
-turn, removes the sandbox container, **deletes the workspace**, and closes the
-row. Everything the agent wrote is gone unless you took the diff first.
+`/close`, which asks *"Close this session? The workspace is discarded."* first.
+Closing kills the turn, removes the sandbox container, **deletes the
+workspace**, and closes the row — along with every live worker under it.
+Everything the agent wrote is gone unless you took the diff first.
 
 Sessions also close themselves: a session that has been `idle` for
 `SESSION_IDLE_TTL_SECONDS` (default 6 h) is closed by the reaper in exactly the
-same way, with `closed_reason: "expired"`. The switcher and the header say
-which — *by you*, *expired*, or *failed* — and offer to start again.
-
----
-
-## In progress: the terminal grammar
-
-> This is the **target**, not what `9c394863` serves. It is being implemented in
-> `cloud/ui/src/**` by another agent, alongside the worker-agent wiring above.
-> The components exist in the working tree (`TermLine`, `TermStatus`,
-> `TermOutput`, `TermActivity`, `TermWorker`, `TermSettings`, `Box`,
-> `ResumePicker`, `theme.ts`, `palette.ts`, `gt.ts`) but are not committed.
-
-The product is a Claude-Code-style coding agent, so the UI should look like one.
-The whole transcript reduces to two line shapes, and everything — the agent's
-prose, a command, a GroundTruth query, a worker, a receipt — is one of them:
-
-```
-⏺ I need to see how the option parser is wired.
-⏺ Bash(rg -n "class Option" src/click)
-  ⎿  src/click/core.py:2103:class Option(Parameter):
-     … +37 lines (click to expand)
-⏺ GroundTruth(exact_literal_search "class Option" in src/click)
-  ⎿  2 matches · exact · complete
-```
-
-| Element | Target |
-|---|---|
-| Prompt | `>` at the input, in a box drawn with characters (`╭─╮ │ ╰─╯`), not CSS borders. |
-| Activity | `⏺` for a thing that happened, `⎿` for what it said. Output clipped at six lines with an expander. |
-| Status | One animated line between the transcript and the input: `✻ Working… (12s · 3 steps · esc to interrupt)`, with a five-glyph spinner and a verb that follows what the agent is doing (Thinking / Reading / Editing / Running / Checking). |
-| GroundTruth | A typed GT action is **not** a shell command and must not read as one. It gets its own line with the kind, the arguments, the scope actually searched, and the semantics/coverage verdict. Until the server emits `gt_action`, the same line is recovered structurally from the `tool_call` command, which is the JSON of the typed action. |
-| Workers | A worker is a line in the same grammar with its own tail of activity, a spawn number, and an apply action. |
-| `/resume` | The session list, full screen, driven from the keyboard (`↑↓` moves, `⏎` opens, `esc` closes) — replacing the permanent sidebar rail. A list you ask for costs nothing when you are not asking for it. |
-| `/settings` | Drawn as a box in the transcript, at the point where it was asked for. |
-| Theme | Dark by default, with a light terminal theme behind a `/theme` toggle. Every colour is a custom property on `:root`, so switching is one attribute and the canvas re-reads the same variables. |
-| The graph | Kept, rendered as a box-framed pane in the same grammar — a tmux-style split rather than a dashboard panel. |
-
-`/resume` and `/theme` are not in the committed `slash.ts` command list; they
-are part of this package.
+same way, with `closed_reason: "expired"`. The transcript and `/resume` both say
+which — *by you*, *expired*, or *failed*.
