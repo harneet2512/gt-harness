@@ -654,7 +654,8 @@ def _promoted(edges, *, digest="a" * 64):
     )
 
 
-def _capability_rows(tmp_path, rows, blobs=None):
+def _capability_rows(tmp_path, rows, blobs=None, *, disabled=False,
+                     disabled_stage=""):
     """Drive _mandatory_capability_rows against a journal written by hand.
 
     Called unbound on purpose. This helper reads only the journal, and the one
@@ -675,7 +676,9 @@ def _capability_rows(tmp_path, rows, blobs=None):
     stub = SimpleNamespace(
         _engine=SimpleNamespace(
             store=SimpleNamespace(path=str(journal), root=tmp_path)
-        )
+        ),
+        disabled=disabled,
+        disabled_stage=disabled_stage,
     )
     return {
         name: (str(state), evidence)
@@ -756,7 +759,8 @@ def test_an_unreadable_journal_fails_both_capabilities(tmp_path):
     stub = SimpleNamespace(
         _engine=SimpleNamespace(
             store=SimpleNamespace(path=str(tmp_path / "absent.jsonl"))
-        )
+        ),
+        disabled=False, disabled_stage="",
     )
     rows = {
         name: (str(state), evidence)
@@ -828,7 +832,8 @@ def test_a_truncated_final_line_fails_the_dense_capability_closed(tmp_path):
         encoding="utf-8",
     )
     stub = SimpleNamespace(
-        _engine=SimpleNamespace(store=SimpleNamespace(path=str(journal)))
+        _engine=SimpleNamespace(store=SimpleNamespace(path=str(journal))),
+        disabled=False, disabled_stage="",
     )
     rows = {
         name: (str(state), evidence)
@@ -966,4 +971,148 @@ def test_an_unreadable_receipt_blob_is_not_reported_as_success(tmp_path):
 
     assert rows["lsp_promotion"] == (
         "DEGRADED", "terminal_succeeded:published:yield_unknown"
+    )
+
+
+def test_a_run_where_gt_switched_itself_off_says_so(tmp_path):
+    """The least visible failure in the system, made visible.
+
+    degrade() writes gt_degraded_fail_open and disables GT for the rest of the
+    run. Nothing anywhere read that event - no gate, no receipt, no report, not
+    even a test - so a run whose observer stopped observing partway through
+    finished looking like any other, and every GT claim after that point came
+    from a component that had already given up.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "gt_degraded_fail_open", "stage": "before_model",
+         "error_type": "SQLiteError", "error": "database is locked"},
+    ], disabled=True, disabled_stage="before_model")
+
+    assert rows["gt_engine_enabled"] == (
+        "FAILED", "disabled_at_before_model:SQLiteError"
+    )
+
+
+def test_the_fail_open_row_never_carries_the_exception_message(tmp_path):
+    """capability() asserts its evidence is secret-free.
+
+    The journal row carries the exception text, which is unbounded run content
+    and can hold anything the failing component was handling. Only the stage
+    and the exception type name reach the report.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "gt_degraded_fail_open", "stage": "submit",
+         "error_type": "ValueError",
+         "error": "token sk-do-not-leak-this failed to parse"},
+    ], disabled=True, disabled_stage="submit")
+
+    assert "sk-do-not-leak-this" not in rows["gt_engine_enabled"][1]
+    assert rows["gt_engine_enabled"] == ("FAILED", "disabled_at_submit:ValueError")
+
+
+def test_gt_disabled_without_a_journal_row_is_still_reported(tmp_path):
+    """degrade() wraps its own append in try/except.
+
+    The state sink may be the very component that failed, so GT can be disabled
+    with no row to show for it. Reading only the journal would report that run
+    as healthy - the one reading that must never happen here.
+    """
+    rows = _capability_rows(
+        tmp_path, [_DENSE_READY], disabled=True, disabled_stage="record_action"
+    )
+
+    assert rows["gt_engine_enabled"] == (
+        "FAILED", "disabled_at_record_action:unrecorded"
+    )
+
+
+def test_a_run_that_kept_gt_on_reports_it_working(tmp_path):
+    rows = _capability_rows(tmp_path, [_DENSE_READY])
+
+    assert rows["gt_engine_enabled"] == ("WORKING", "no_fail_open_recorded")
+
+
+@pytest.mark.parametrize("stage", ["off", "global_kill_switch"])
+def test_gt_disabled_by_configuration_is_not_reported_as_a_fault(tmp_path, stage):
+    """__init__ disables GT when the mode is OFF or the kill switch is set.
+
+    A baseline arm arrives at close having done exactly what it was asked.
+    Calling that FAILED would cry wolf on every control run and train the
+    reader to skip the row on the treatment runs where it carries the signal.
+    """
+    rows = _capability_rows(
+        tmp_path, [_DENSE_READY], disabled=True, disabled_stage=stage
+    )
+
+    assert rows["gt_engine_enabled"] == (
+        "UNEXERCISED", f"gt_disabled_by_configuration:{stage}"
+    )
+
+
+def test_an_early_failure_does_not_outrank_later_successes(tmp_path):
+    """The mirror of the buried-failure case, which neither earlier rule handled.
+
+    The FIRST enrichment offer is made on the initial graph, which the
+    coordinator did not build, so _schedule_lsp_candidate certifies a manifest
+    it did not produce and can raise lsp_base_uncertified there while every
+    later graph carries a manifest the coordinator made itself. Ranking an
+    unscheduled terminal above everything reported FAILED for a run that threw
+    once and then published cleanly for the rest of the task; ranking it below
+    everything buried a failure that started late. The rank is stamped during
+    the parse, so it means "newer than everything scheduled so far".
+    """
+    digest = "d" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_terminal", "status": "failed",
+         "disposition": "factory_exception", "input_graph_revision": "r0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r1"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r1",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+    ], {digest: {"verified": 9, "corrected": 0, "deleted": 0}})
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:9_edges:last_of_2"
+    )
+
+
+def test_tombstones_alone_are_not_a_populated_tier(tmp_path):
+    """`deleted` is a window-miss tombstone, not a promotion.
+
+    verified and corrected stamp resolution_method='lsp' at confidence 1.0;
+    deleted stamps 'lsp_window_miss' at confidence 0.0 and trust tier
+    SPECULATIVE, which the closure excludes from traversal. Summing it made a
+    receipt of verified=0, corrected=0, deleted=40 report WORKING on a graph
+    whose lsp tier was empty and forty of whose edges had just been demoted.
+    """
+    digest = "e" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r0",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+    ], {digest: {"verified": 0, "corrected": 0, "deleted": 40}})
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:published:0_edges:40_tombstoned"
+    )
+
+
+def test_promoted_edges_and_tombstones_are_both_reported(tmp_path):
+    """Tombstoning is real precision work and stays visible - just not as yield."""
+    digest = "f" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r0",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+    ], {digest: {"verified": 7, "corrected": 5, "deleted": 3}})
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:12_edges:3_tombstoned"
     )

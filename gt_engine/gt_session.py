@@ -1146,7 +1146,7 @@ class GTSession:
             self._open_executions.discard(execution_id)
 
     def _mandatory_capability_rows(self) -> list[tuple[str, "CapabilityState", str]]:
-        """State of the two capabilities that must never degrade silently.
+        """State of the capabilities that must never degrade silently.
 
         Derived from what the run actually recorded, never from configuration.
         An unreadable or absent record is FAILED, not unknown - "we could not
@@ -1172,8 +1172,8 @@ class GTSession:
         store = getattr(self._engine, "store", None)
         journal = getattr(store, "path", None)
 
-        def _promotion_yield(row: dict[str, object]) -> int | None:
-            """Edges the promotion actually added, or None if it cannot be told.
+        def _promotion_yield(row: dict[str, object]) -> tuple[int, int] | None:
+            """(edges promoted, edges tombstoned), or None if it cannot be told.
 
             The journal row carries only status and disposition; the counts
             that say whether the tier was populated live in the terminal
@@ -1181,28 +1181,46 @@ class GTSession:
             means unreadable, which must not be reported as success - the whole
             point of this helper is that "we could not tell" and "it worked"
             do not look alike.
+
+            Only `verified` and `corrected` are the tier. Both stamp
+            resolution_method='lsp' at confidence 1.0 (resolve.py:944-959) and
+            nothing else does. `deleted` is NOT a removal and NOT a promotion:
+            it stamps resolution_method='lsp_window_miss' at confidence 0.0 and
+            trust tier SPECULATIVE (resolve.py:994-1008), a non-destructive
+            tombstone the closure excludes from traversal. Summing it made a
+            receipt of verified=0, corrected=0, deleted=40 report WORKING on a
+            graph whose lsp tier was empty and forty of whose edges had just
+            been demoted out of traversal - the same defect this yield check
+            was added to prevent. It is real work and it is reported, but never
+            in the number that decides WORKING.
+
+            The blob directory comes from the journal's own parent rather than
+            store.root, because root is not in the EvidenceStore protocol
+            (request_history.py declares put_blob/blob_exists and no root) and
+            a conforming store without it would make every published run
+            report yield_unknown, failing closed but invisibly.
             """
             relative = str(row.get("artifact_blob") or "")
-            root = getattr(store, "root", None)
-            if not relative or root is None:
+            if not relative or journal is None:
                 return None
             try:
                 receipt = _json.loads(
-                    (_Path(root) / relative).read_text(encoding="utf-8")
+                    (_Path(journal).parent / relative).read_text(encoding="utf-8")
                 )
             except Exception:  # noqa: BLE001 - an unreadable receipt is unknown
                 return None
             if not isinstance(receipt, dict):
                 return None
-            return sum(
-                int(receipt.get(key) or 0)
-                for key in ("verified", "corrected", "deleted")
+            promoted = sum(
+                int(receipt.get(key) or 0) for key in ("verified", "corrected")
             )
+            return promoted, int(receipt.get("deleted") or 0)
 
         dense_state = CapabilityState.FAILED
         dense_evidence = "dense_index_receipt_absent"
         lsp_state = CapabilityState.FAILED
         lsp_evidence = "promotion_never_scheduled"
+        fail_open: dict[str, object] | None = None
         scheduled = False
         terminals: list[dict[str, object]] = []
         schedule_order: list[str] = []
@@ -1212,7 +1230,11 @@ class GTSession:
                     continue
                 row = _json.loads(line)
                 event = row.get("event")
-                if event == "dense_index_ready":
+                if event == "gt_degraded_fail_open":
+                    # degrade() is idempotent, so the first row is the causal
+                    # fault and any later one is a consequence of it.
+                    fail_open = fail_open or row
+                elif event == "dense_index_ready":
                     if row.get("query_ready") is True:
                         dense_state = CapabilityState.WORKING
                         dense_evidence = "dense_index_ready_query_ready"
@@ -1238,6 +1260,20 @@ class GTSession:
                     # it discarded the most common real outcome - promotion
                     # succeeded and lost the publication race - and reported it
                     # as though promotion had never run at all.
+                    # Rank stamped HERE, not after the loop. An unscheduled
+                    # revision is newer than everything scheduled SO FAR, which
+                    # is what this position knows and all that is true.
+                    # Computing it afterwards ranked such a row above every
+                    # scheduled revision, so a run whose FIRST enrichment threw
+                    # and whose every later one published cleanly reported
+                    # FAILED. Ranking it oldest had the mirror fault. Both were
+                    # attempts to synthesise recency from a list that failures
+                    # never join; the parse order already has it.
+                    revision = str(row.get("input_graph_revision") or "")
+                    row["_rank"] = (
+                        schedule_order.index(revision)
+                        if revision in schedule_order else len(schedule_order)
+                    )
                     terminals.append(row)
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
             # Both must fail closed. The journal is parsed line by line, so a
@@ -1255,24 +1291,10 @@ class GTSession:
                 # The newest graph the run scheduled an enrichment for is the
                 # one whose fate the report is about; a terminal for an older
                 # revision describes a graph that has already been replaced.
-                def _recency(row: dict[str, object]) -> int:
-                    revision = str(row.get("input_graph_revision") or "")
-                    if revision in schedule_order:
-                        return schedule_order.index(revision)
-                    # An unscheduled revision is NEWER than any scheduled one,
-                    # never older. _schedule_lsp_candidate raises
-                    # lsp_base_uncertified, unsafe_lsp_source_path and
-                    # lsp_source_input_mismatch BEFORE it journals
-                    # lsp_promotion_scheduled, and consider_enrichment turns
-                    # any such raise into a factory_exception terminal - so the
-                    # rows with no scheduled row are exactly the failures. This
-                    # returned -1 first, which ranked them oldest and let a
-                    # healthier earlier revision outrank the news that the
-                    # factory had started throwing on every graph.
-                    return len(schedule_order)
-
-                newest = max(_recency(row) for row in terminals)
-                current = [row for row in terminals if _recency(row) == newest]
+                newest = max(int(row.get("_rank") or 0) for row in terminals)
+                current = [
+                    row for row in terminals if int(row.get("_rank") or 0) == newest
+                ]
                 terminal = current[-1]
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
@@ -1300,12 +1322,15 @@ class GTSession:
                     if yielded is None:
                         lsp_state = CapabilityState.DEGRADED
                         lsp_evidence += ":yield_unknown"
-                    elif yielded > 0:
-                        lsp_state = CapabilityState.WORKING
-                        lsp_evidence += f":{yielded}_edges"
                     else:
-                        lsp_state = CapabilityState.DEGRADED
-                        lsp_evidence += ":0_edges"
+                        promoted, tombstoned = yielded
+                        lsp_state = (
+                            CapabilityState.WORKING if promoted > 0
+                            else CapabilityState.DEGRADED
+                        )
+                        lsp_evidence += f":{promoted}_edges"
+                        if tombstoned:
+                            lsp_evidence += f":{tombstoned}_tombstoned"
                 elif status == "succeeded":
                     # Promotion worked and the enriched graph never became the
                     # published one - obsolete, obsolete_after_certification or
@@ -1336,6 +1361,49 @@ class GTSession:
                 lsp_evidence = "scheduled_no_terminal"
         rows.append(("dense_retrieval", dense_state, dense_evidence))
         rows.append(("lsp_promotion", lsp_state, lsp_evidence))
+
+        # A run in which GT switched itself off partway through is the single
+        # case a reader most needs told, and it was the one they were least
+        # likely to learn: degrade() records gt_degraded_fail_open and nothing
+        # anywhere read it - not a gate, not a receipt, not a report, not even
+        # a test. Every claim GT makes after that point comes from an observer
+        # that has already stopped observing.
+        #
+        # Both the journal and the session are consulted because degrade()
+        # wraps its own append in try/except - the state sink may be the very
+        # component that failed - so GT can be disabled with no row to show
+        # for it. That case is named rather than passed over.
+        if fail_open is not None:
+            # The row also carries the exception message, which is unbounded
+            # run content and never goes in evidence; capability() asserts the
+            # evidence is secret-free. A stage and an exception type name are
+            # enough to say what stopped observing and where.
+            stage = str(fail_open.get("stage") or "unknown")
+            error_type = str(fail_open.get("error_type") or "unknown")
+            rows.append((
+                "gt_engine_enabled", CapabilityState.FAILED,
+                f"disabled_at_{stage}:{error_type}",
+            ))
+        elif self.disabled and self.disabled_stage in {"off", "global_kill_switch"}:
+            # Not a fault. __init__ sets disabled when the mode is OFF or the
+            # global kill switch is set, so a baseline arm arrives here having
+            # done exactly what it was asked. Reporting that as FAILED would
+            # cry wolf on every control run and teach the reader to skip the
+            # row on the treatment runs where it matters.
+            rows.append((
+                "gt_engine_enabled", CapabilityState.UNEXERCISED,
+                f"gt_disabled_by_configuration:{self.disabled_stage}",
+            ))
+        elif self.disabled:
+            rows.append((
+                "gt_engine_enabled", CapabilityState.FAILED,
+                f"disabled_at_{self.disabled_stage or 'unknown'}:unrecorded",
+            ))
+        else:
+            rows.append((
+                "gt_engine_enabled", CapabilityState.WORKING,
+                "no_fail_open_recorded",
+            ))
         return rows
 
     def close(self, terminal: str) -> None:
