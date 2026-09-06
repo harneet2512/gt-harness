@@ -1077,6 +1077,7 @@
     "scripts/gt_live_gate.py",
     "scripts/gt_product_acceptance.py",
     "scripts/issue_feature_matrix.py",
+    "scripts/linux_suite_check.sh",
     "scripts/miniswe_gt_run.py",
     "scripts/miniswe_repro.py",
     "scripts/miniswe_supervisor.py",

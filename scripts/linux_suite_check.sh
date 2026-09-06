@@ -29,17 +29,27 @@ apt-get install -y -qq gcc git >/dev/null
 
 git config --global --add safe.directory "$ROOT"
 
-# The pinned runtime and test dependencies. Both product installs below are
-# --no-deps (so nothing silently resolves a different version), which means
-# nothing else installs these. Omitting them is not a slow failure: modules
-# importing pydantic fail at COLLECTION, so the suite reports errors that look
-# like the product and are the environment. Versions are pyproject's, pinned.
+# The runtime and test dependencies. Both product installs below are --no-deps
+# (so nothing silently resolves a different version), which means nothing else
+# installs these. Omitting them is not a slow failure: modules importing
+# pydantic fail at COLLECTION, so the suite reports errors that look like the
+# product and are the environment.
+#
+# First block: pyproject's own pins, copied exactly.
 pip install -q \
-    "pytest==9.1.1" "pytest-asyncio==1.4.0" pytest-timeout \
+    "pytest==9.1.1" "pytest-asyncio==1.4.0" \
     "anthropic==0.120.2" "openai==2.50.0" "pydantic==2.13.4" "rich==15.0.0" \
     "datacurve-pier==0.3.1" "harbor==0.20.0" "mini-swe-agent==2.4.6" \
-    "numpy==2.5.1" "onnxruntime==1.20.1" "tokenizers==0.23.1" \
-    "structlog>=24.0,<26.0" "mcp>=1.0,<2.0"
+    "numpy==2.5.1" "onnxruntime==1.20.1" "tokenizers==0.23.1"
+
+# Second block: NOT in pyproject, and exact here on purpose. pytest-timeout
+# parses the --timeout=900 the chunk loop relies on, so its behaviour is
+# load-bearing; structlog and mcp are the groundtruth wheel's own declared
+# RANGES. A range in the instrument of record is tomorrow's instrument defect -
+# it resolves differently on a later day and the change is invisible. These
+# versions were read from a resolved environment, not chosen: pinning them
+# makes any future bump a visible edit instead of a silent resolution.
+pip install -q "pytest-timeout==2.4.0" "structlog==25.5.0" "mcp==1.29.1"
 
 # Two wheels, not one. The command worker is launched as
 #   python -I -m scripts.miniswe_supervisor
@@ -72,6 +82,11 @@ git config core.hooksPath "$ROOT/.githooks"
 # script, and a count it produces cannot be checked by anyone else. pip check
 # is here for the same reason: an unsatisfied pin is an environment failure
 # that reads as a product failure.
+#
+# For an ACCEPTANCE-path run this line is not sufficient: python:3.12-slim
+# mutates under its tag, so invoke the image by DIGEST (python@sha256:...)
+# and record that digest. What is printed below identifies a tag-based
+# triage run only, and must not be cited as an installed-check environment.
 printf 'base: %s / %s\n' "$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null)" "$(python -V 2>&1)"
 pip check
 printf 'instrument: gcc=%s producer=%s hooks=%s\n' \
