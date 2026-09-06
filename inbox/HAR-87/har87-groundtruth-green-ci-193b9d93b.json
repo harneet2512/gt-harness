@@ -39,7 +39,9 @@
   },
   "head_sha": "193b9d93b0650721be6120ae519ab3a1d8e8137f",
   "kind": "check_outcome",
+  "packet_digest_sha256": "34aaadc2c50ac34450e74d3cf11ea2a9187c640aeccc5bf3d3417f4d1aa16937",
   "packet_id": "har87-groundtruth-green-ci-193b9d93b",
   "schema": "gt.review_packet.v1",
-  "status": "PASS"
+  "status": "PASS",
+  "ticket": "HAR-87"
 }

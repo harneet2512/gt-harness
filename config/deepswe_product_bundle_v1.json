@@ -889,7 +889,7 @@
         "tests/wrapper/test_router_v2_telemetry.py",
         "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
       ],
-      "review_inbox_commit": "64085cb5a49318c52df910786cd67f789330b471",
+      "review_inbox_commit": "a18803adfc24a98a55f9fb0a054e3e2bc881435d",
       "review_packets": [
         {
           "packet_id": "har70-groundtruth-db9daf9e",
@@ -957,7 +957,7 @@
           "kind": "check_outcome",
           "status": "PASS",
           "basis": "exact_ci_full_matrix_green",
-          "packet_digest_sha256": "f49a3db5cb490cd9feefb2b55754cf19785d9baf69e7692f2aa43f13981f86a4"
+          "packet_digest_sha256": "34aaadc2c50ac34450e74d3cf11ea2a9187c640aeccc5bf3d3417f4d1aa16937"
         }
       ],
       "product_review_packets": [
@@ -978,7 +978,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "6020d577b0e461582dc54ca70ad719d8828b1d2cc423493d326c95cf700beb51"
+      "attestation_digest_sha256": "3c482567d91fb4c045d92c9ace249692f39d4b7271e6f636800be6da60dea403"
     }
   },
   "capabilities": [
