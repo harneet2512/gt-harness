@@ -39,11 +39,47 @@ def verify_lsp_assets(root: Path, *, expected_manifest_sha256: str = "") -> dict
             "file_count": len(files), "verified": True}
 
 
+def write_lsp_manifest(root: Path) -> dict:
+    """Record the staged tree so verify_lsp_assets has something to check.
+
+    The staging step provisions the servers; without this the manifest never
+    exists and every agent install fails on its absence, which is what
+    happened to paid run 34046802932 - the task errored in setup before any
+    model call. Generator and verifier live together so the census rule they
+    share cannot drift: every file under root except the manifest itself is
+    listed, so an unlisted addition or a silent removal fails the census.
+    """
+    root = root.resolve()
+    manifest_path = root / "manifest.json"
+    files = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("lsp_asset_symlink")
+        if path.is_file() and path != manifest_path:
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            files[path.relative_to(root).as_posix()] = digest
+    if not files:
+        raise ValueError("lsp_asset_files_missing")
+    manifest_path.write_bytes(
+        json.dumps({"schema": "gt.lsp_assets.v1", "files": files},
+                   sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    return verify_lsp_assets(root)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--expected-manifest-sha256", required=True)
+    parser.add_argument("--write", action="store_true",
+                        help="generate manifest.json for the staged tree")
+    parser.add_argument("--expected-manifest-sha256", default="")
     args = parser.parse_args()
+    if args.write:
+        print(json.dumps(write_lsp_manifest(args.root), sort_keys=True))
+        return 0
+    if not args.expected_manifest_sha256:
+        parser.error("--expected-manifest-sha256 is required without --write")
     print(json.dumps(verify_lsp_assets(
         args.root, expected_manifest_sha256=args.expected_manifest_sha256,
     ), sort_keys=True))

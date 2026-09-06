@@ -60,3 +60,39 @@ def test_the_image_path_is_preserved_not_replaced(tmp_path: Path):
 
 def test_staging_lands_under_the_installed_agent_root():
     assert _REMOTE_LSP_BIN.startswith("/installed-agent/")
+
+
+def test_write_manifest_makes_a_staged_tree_verifiable(tmp_path):
+    """Paid run 34046802932 errored in setup because nothing wrote this file.
+
+    The staging step provisioned the servers and set GT_LSP_BIN_HOST, but
+    verify_lsp_assets opens root/manifest.json unconditionally, so the agent
+    install raised FileNotFoundError before any model call.
+    """
+    from gt_harness.lsp_assets import verify_lsp_assets, write_lsp_manifest
+
+    (tmp_path / "node-runtime/bin").mkdir(parents=True)
+    (tmp_path / "gopls").write_bytes(b"gopls-binary")
+    (tmp_path / "node-runtime/bin/node").write_bytes(b"node-binary")
+
+    with pytest.raises(FileNotFoundError):
+        verify_lsp_assets(tmp_path)
+
+    result = write_lsp_manifest(tmp_path)
+    assert result["verified"] is True
+    assert result["file_count"] == 2
+    assert verify_lsp_assets(
+        tmp_path, expected_manifest_sha256=result["manifest_sha256"]
+    )["verified"] is True
+
+
+def test_written_manifest_fails_the_census_when_the_tree_moves(tmp_path):
+    """The generator must not paper over a later change to the tree."""
+    from gt_harness.lsp_assets import verify_lsp_assets, write_lsp_manifest
+
+    (tmp_path / "gopls").write_bytes(b"gopls-binary")
+    write_lsp_manifest(tmp_path)
+
+    (tmp_path / "unlisted").write_bytes(b"added after the manifest")
+    with pytest.raises(ValueError, match="lsp_asset_file_census_mismatch"):
+        verify_lsp_assets(tmp_path)

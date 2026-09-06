@@ -645,6 +645,12 @@ jobs:
           test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
           test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
 
+          # Record the staged tree. verify_lsp_assets opens
+          # $lsp_bin/manifest.json unconditionally, so without this the agent
+          # install raises FileNotFoundError and the task errors in setup
+          # before any model call - which is exactly what run 34046802932 did.
+          python -m gt_harness.lsp_assets --root "$lsp_bin" --write
+
           echo "GT_LSP_BIN_HOST=$lsp_bin" >> "$GITHUB_ENV"
 
       - name: Mint the host-only resource attestation key
