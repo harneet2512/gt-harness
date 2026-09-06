@@ -641,6 +641,15 @@ jobs:
             "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" > "$lsp_bin/typescript-language-server"
           chmod 755 "$lsp_bin/pyright-langserver" "$lsp_bin/typescript-language-server"
 
+          # npm writes node_modules/.bin symlinks regardless of the shims
+          # above. They are unreachable in the task environment - symlinks do
+          # not survive the upload, which is why the shims exist - and
+          # write_lsp_manifest refuses to record a tree containing any symlink,
+          # so they killed the staging step itself. Removed at the source, so
+          # the manifest stays strict rather than learning to tolerate them.
+          find "$node_root" -type l -delete
+          test -z "$(find "$lsp_bin" -type l -print -quit)"
+
           test -x "$node_root/bin/node"
           test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
           test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
