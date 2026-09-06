@@ -1145,6 +1145,67 @@ class GTSession:
         finally:
             self._open_executions.discard(execution_id)
 
+    def _mandatory_capability_rows(self) -> list[tuple[str, "CapabilityState", str]]:
+        """State of the two capabilities that must never degrade silently.
+
+        Derived from what the run actually recorded, never from configuration:
+        the dense receipt in the journal, and the promotion seal the indexer
+        writes beside the graph. An unreadable or absent record is FAILED, not
+        unknown - "we could not tell" and "it worked" must not look alike in
+        the one summary a human reads at the end of a task.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        rows: list[tuple[str, CapabilityState, str]] = []
+        store = getattr(self._engine, "store", None)
+        journal = getattr(store, "path", None)
+
+        dense_state = CapabilityState.FAILED
+        dense_evidence = "dense_index_receipt_absent"
+        try:
+            for line in _Path(journal).read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                row = _json.loads(line)
+                if row.get("event") == "dense_index_ready":
+                    if row.get("query_ready") is True:
+                        dense_state = CapabilityState.WORKING
+                        dense_evidence = "dense_index_ready_query_ready"
+                    else:
+                        dense_state = CapabilityState.DEGRADED
+                        dense_evidence = "dense_index_ready_not_query_ready"
+        except Exception:  # noqa: BLE001 - an unreadable journal is a failure
+            dense_evidence = "dense_index_receipt_unreadable"
+        rows.append(("dense_retrieval", dense_state, dense_evidence))
+
+        lsp_state = CapabilityState.FAILED
+        lsp_evidence = "lsp_promotion_receipt_absent"
+        try:
+            roots = [_Path(getattr(store, "root", journal)).parent]
+            seals = [s for r in roots for s in sorted(r.rglob("lsp-promotion.json"))]
+            if seals:
+                seal = _json.loads(seals[0].read_text(encoding="utf-8"))
+                status = str(seal.get("status") or "")
+                count = int(seal.get("server_count") or 0)
+                lsp_evidence = f"{status}:servers={count}"
+                if count < 1 or status in {
+                    "promotion_unavailable", "promotion_no_servers",
+                }:
+                    lsp_state = CapabilityState.FAILED
+                elif status == "promotion_not_scheduled":
+                    # Servers are present and discoverable but the producer
+                    # exposes no graph-bound scheduling receipt, so promotion
+                    # never runs. Degraded, not working: the highest-precision
+                    # edge tier is still empty and the reader must see that.
+                    lsp_state = CapabilityState.DEGRADED
+                else:
+                    lsp_state = CapabilityState.WORKING
+        except Exception:  # noqa: BLE001 - an unreadable seal is a failure
+            lsp_evidence = "lsp_promotion_receipt_unreadable"
+        rows.append(("lsp_promotion", lsp_state, lsp_evidence))
+        return rows
+
     def close(self, terminal: str) -> None:
         self._terminal = terminal
         if self._engine is not None:
@@ -1167,6 +1228,14 @@ class GTSession:
                     else CapabilityState.DEGRADED,
                     "declared_capabilities_checked",
                 )
+                # Mandatory capability must say at the end of the task whether
+                # it worked. Both of these were reportable only as an absence
+                # in someone else's receipt: a run with no language servers or
+                # no embedder finished looking normal, and the person reading
+                # the result had nothing telling them GT ran with less than GT
+                # has. Reported here so the end-of-task summary names them.
+                for name, state, evidence in self._mandatory_capability_rows():
+                    diagnostics.capability(name, state, evidence)
                 if self.assurance_state is Assurance.DEGRADED:
                     diagnostics.record(
                         DiagnosticEvent.create(

@@ -36,6 +36,24 @@ def main(argv: list[str] | None = None) -> int:
         if os.environ.get("GITHUB_ACTIONS") == "true":
             annotation = "error" if event.severity == "ERROR" else "warning"
             print(f"::{annotation} title={event.code.value}::{line}", file=sys.stderr)
+    # Capabilities that did not work must be visible at the END of the task,
+    # not only as an error string inside a receipt someone has to go and read.
+    # A run whose language servers or embedder never came up finishes looking
+    # normal otherwise, and the person reading the result is the last one who
+    # should have to reconstruct that GT ran with less than GT has.
+    capabilities = [row for row in payload.get("capabilities", [])
+                    if isinstance(row, dict)]
+    degraded = [row for row in capabilities if not row.get("verified")]
+    for row in degraded:
+        line = (
+            f"[GT][CAPABILITY][{row.get('state')}] {row.get('capability')} "
+            f"required={row.get('required')} evidence={row.get('evidence')}"
+        )
+        print(line, file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            severity = "error" if row.get("required") else "warning"
+            print(f"::{severity} title=capability_not_working::{line}", file=sys.stderr)
+
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         lines = [
@@ -46,6 +64,22 @@ def main(argv: list[str] | None = None) -> int:
             f"| {row['task_id']} | {row['primary_diagnostic']} | `{row['fingerprint'][:16]}` |"
             for row in payload["tasks"]
         )
+        if capabilities:
+            lines.extend([
+                "", "### Capabilities", "",
+                "| Capability | State | Required | Worked | Evidence |",
+                "|---|---|---|---|---|",
+            ])
+            lines.extend(
+                f"| {row.get('capability')} | {row.get('state')} | "
+                f"{'yes' if row.get('required') else 'no'} | "
+                f"{'yes' if row.get('verified') else '**NO**'} | "
+                f"{row.get('evidence')} |"
+                for row in capabilities
+            )
+            if degraded:
+                names = ", ".join(str(row.get("capability")) for row in degraded)
+                lines.extend(["", f"**These did not work: {names}**"])
         with Path(summary_path).open("a", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
     return report.exit_code

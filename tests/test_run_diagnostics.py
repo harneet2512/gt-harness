@@ -193,3 +193,45 @@ def test_packaged_cli_discovers_nested_healthy_artifact(tmp_path: Path):
         }
     ]
     assert (tmp_path / "diagnostic-summary.json").is_file()
+
+
+def test_failed_capabilities_are_named_at_the_end_of_the_task(tmp_path, monkeypatch, capsys):
+    """A capability that did not work must be visible when the task ends.
+
+    Refusing the run inside a receipt is not the same as telling the person
+    reading the result. Without this, a run whose language servers never came
+    up finishes looking normal and the reader has to reconstruct that GT ran
+    with less than GT has.
+    """
+    import scripts.diagnose_benchmark_run as diagnose
+
+    payload = {
+        "tasks": [{"task_id": "t", "primary_diagnostic": "none", "fingerprint": "a" * 40}],
+        "capabilities": [
+            {"capability": "dense_retrieval", "state": "WORKING", "required": True,
+             "verified": True, "evidence": "dense_index_ready_query_ready"},
+            {"capability": "lsp_promotion", "state": "FAILED", "required": True,
+             "verified": False, "evidence": "promotion_no_servers:servers=0"},
+        ],
+    }
+
+    class _Report:
+        diagnostics: list = []
+        exit_code = 0
+
+        def to_mapping(self):
+            return payload
+
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(diagnose, "diagnose_artifact_root", lambda *a, **k: _Report())
+    diagnose.main(["--root", str(tmp_path)])
+
+    stderr = capsys.readouterr().err
+    assert "[GT][CAPABILITY][FAILED] lsp_promotion" in stderr
+    assert "dense_retrieval" not in stderr  # working capabilities are not noise
+
+    rendered = summary.read_text(encoding="utf-8")
+    assert "### Capabilities" in rendered
+    assert "| lsp_promotion | FAILED | yes | **NO** |" in rendered
+    assert "**These did not work: lsp_promotion**" in rendered
