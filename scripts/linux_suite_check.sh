@@ -18,13 +18,28 @@ set -eu
 ROOT="${1:-/work}"
 cd "$ROOT"
 
-git config --global --add safe.directory "$ROOT"
-
-# gcc: scripts/red_evidence.py resolves it by name when capturing red evidence
-# (_resolve_executable("gcc", ...)); python:3.12-slim ships no compiler and the
-# capture fails with CaptureError("executable_not_found").
+# System tools FIRST. python:3.12-slim ships neither git nor a compiler, and
+# every git line below - including the safe.directory one - is a hard failure
+# without git. Ordering this after them is how the first bare-image run of
+# this script died on line 21.
+#   gcc: scripts/red_evidence.py resolves it by name (_resolve_executable
+#   ("gcc", ...)) and the capture fails with CaptureError("executable_not_found").
 apt-get update -qq >/dev/null
 apt-get install -y -qq gcc git >/dev/null
+
+git config --global --add safe.directory "$ROOT"
+
+# The pinned runtime and test dependencies. Both product installs below are
+# --no-deps (so nothing silently resolves a different version), which means
+# nothing else installs these. Omitting them is not a slow failure: modules
+# importing pydantic fail at COLLECTION, so the suite reports errors that look
+# like the product and are the environment. Versions are pyproject's, pinned.
+pip install -q \
+    "pytest==9.1.1" "pytest-asyncio==1.4.0" pytest-timeout \
+    "anthropic==0.120.2" "openai==2.50.0" "pydantic==2.13.4" "rich==15.0.0" \
+    "datacurve-pier==0.3.1" "harbor==0.20.0" "mini-swe-agent==2.4.6" \
+    "numpy==2.5.1" "onnxruntime==1.20.1" "tokenizers==0.23.1" \
+    "structlog>=24.0,<26.0" "mcp>=1.0,<2.0"
 
 # Two wheels, not one. The command worker is launched as
 #   python -I -m scripts.miniswe_supervisor
@@ -52,6 +67,13 @@ chmod +x "$HOME/.groundtruth/bin/v1.1.0/gt-index"
 # "core.hooksPath is not the common repository .githooks".
 git config core.hooksPath "$ROOT/.githooks"
 
+# Name the environment in the output. A run whose setup lives partly in a
+# prebuilt image rather than in this script is not reproducible FROM this
+# script, and a count it produces cannot be checked by anyone else. pip check
+# is here for the same reason: an unsatisfied pin is an environment failure
+# that reads as a product failure.
+printf 'base: %s / %s\n' "$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null)" "$(python -V 2>&1)"
+pip check
 printf 'instrument: gcc=%s producer=%s hooks=%s\n' \
     "$(command -v gcc)" \
     "$(sha256sum "$HOME/.groundtruth/bin/v1.1.0/gt-index" | cut -c1-16)" \
