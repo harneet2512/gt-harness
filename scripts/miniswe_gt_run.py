@@ -1170,6 +1170,37 @@ def main() -> int:
                     f"{type(fallback_exc).__name__}: {fallback_exc}",
                     file=sys.stderr,
                 )
+    # Copy the journal and the diagnostics beside the receipts, because the
+    # runtime state directory is only partially exported. Run 34062325608
+    # proved it: gt-state/<task_id>/ reached the artifact carrying recovery/
+    # and nothing else - no events.jsonl, no diagnostics.json, no
+    # output_evidence/ - while every file written straight to the receipt
+    # directory survived. The journal is fsynced per row so it exists on disk;
+    # it simply never leaves the container.
+    #
+    # Without it the attestation reports capabilities: [] on ANY outcome, the
+    # auditor reports gt_deliveries 0 and ledger_present false for a run that
+    # built a graph and drove a model loop, and the capability rows cannot even
+    # be recomputed offline - they are journal-derived by design.
+    try:
+        if args.product_receipt:
+            sink = Path(args.product_receipt).resolve().parent
+            # .resolve() matches ExternalStateStore, which is constructed from
+            # RuntimeLayout.state_root and that is resolved at engine_state.py:48.
+            task_state = Path(args.state_dir).resolve() / task_id
+            for source in (
+                task_state / "events.jsonl",
+                task_state / "diagnostics.json",
+                task_state / "diagnostics.txt",
+                task_state / "incident-replay.json",
+            ):
+                if source.is_file():
+                    shutil.copy2(source, sink / source.name)
+    except Exception as exc:  # noqa: BLE001 - evidence export never fails a run
+        print(
+            f"runtime evidence export failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
     restore_termination_handler()
     print(json.dumps(report, sort_keys=True))
     return native_exit_code
