@@ -26,10 +26,15 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
+
+from .engine_state import RuntimeLayout
+from .graph_coordinator import GraphBuildArtifact
+from .repository_identity import RepositoryHistory, repository_history
 
 # Extensions gt-index parses (tree-sitter structural coverage). A root with at
 # least one of these is a code repository worth indexing.
@@ -38,6 +43,9 @@ SOURCE_EXTS = frozenset({
     ".rb", ".java", ".kt", ".kts", ".cs", ".php", ".swift", ".scala",
     ".c", ".h", ".cc", ".hh", ".cpp", ".hpp", ".m", ".mm", ".lua", ".ex",
     ".exs", ".erl", ".hs", ".ml", ".clj", ".dart", ".zig", ".sh",
+    ".bash", ".cue", ".elm", ".css", ".groovy", ".gradle", ".html", ".htm",
+    ".tf", ".hcl", ".md", ".mli", ".proto", ".rake", ".sc", ".sql",
+    ".svelte", ".toml", ".yml", ".yaml", ".cxx", ".hxx",
 })
 
 # Discovery and resolver inputs consumed by the pinned Go producer. These are
@@ -68,6 +76,8 @@ _MAX_SCAN_FILES = 50_000  # detection bound; a hit returns immediately
 
 GRAPH_SCHEMA_VERSION = "gt.graph_certification.v1"
 INDEX_RESOURCE_SCHEMA = "gt.index_resource.v1"
+LSP_TERMINAL_SCHEMA = "gt.lsp_promotion_task.v1"
+LSP_DERIVATION_SCHEMA = "gt.graph_derivation.v1"
 _INDEX_GOMEMLIMIT_BYTES = 3 * 1024**3
 _INDEX_RSS_LIMIT_BYTES = 4 * 1024**3
 _INDEX_TIMEOUT_SECONDS = 600
@@ -146,19 +156,43 @@ def verify_configured_producer_artifact(
         return False, "receipt_unreadable"
 
 
-def source_manifest_digest(root: str | Path) -> str:
+class SourceDiscoveryIncomplete(RuntimeError):
+    pass
+
+
+def _source_paths(root: Path, excluded_roots: tuple[Path, ...] = (),
+                  *, scan_limit: int | None = None):
+    def excluded(path: Path) -> bool:
+        resolved = path.resolve()
+        return any(resolved == target or target in resolved.parents for target in excluded_roots)
+
+    seen = 0
+    for directory, dirnames, filenames in os.walk(root):
+        base = Path(directory)
+        dirnames[:] = sorted(d for d in dirnames
+                             if d not in _SKIP_DIRS and not excluded(base / d))
+        seen += len(dirnames)
+        if scan_limit is not None and seen > scan_limit:
+            raise SourceDiscoveryIncomplete("source_discovery_limit_exceeded")
+        for filename in sorted(filenames):
+            path = base / filename
+            if excluded(path):
+                continue
+            seen += 1
+            if scan_limit is not None and seen > scan_limit:
+                raise SourceDiscoveryIncomplete("source_discovery_limit_exceeded")
+            if is_producer_input(path):
+                yield path
+
+
+def source_manifest_digest(root: str | Path, *, excluded_roots: tuple[Path, ...] = ()) -> str:
     """Hash sorted, length-delimited source path and file-byte identities."""
     root_path = Path(root)
     records: list[tuple[str, int, str]] = []
-    for directory, dirnames, filenames in os.walk(root_path):
-        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
-        for filename in sorted(filenames):
-            path = Path(directory) / filename
-            if not is_producer_input(path):
-                continue
-            relative = path.relative_to(root_path).as_posix()
-            size, digest = _file_identity(path)
-            records.append((relative, size, digest))
+    for path in _source_paths(root_path, excluded_roots):
+        relative = path.relative_to(root_path).as_posix()
+        size, digest = _file_identity(path)
+        records.append((relative, size, digest))
     encoded = bytearray()
     for relative, size, byte_hash in sorted(records):
         path_bytes = relative.encode("utf-8", "surrogatepass")
@@ -176,12 +210,14 @@ class IndexReuseKey:
     source_manifest_sha256: str
     producer_binary_sha256: str
     graph_schema_version: str = GRAPH_SCHEMA_VERSION
+    history: RepositoryHistory = RepositoryHistory()
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict:
         return {
             "source_manifest_sha256": self.source_manifest_sha256,
             "producer_binary_sha256": self.producer_binary_sha256,
             "graph_schema_version": self.graph_schema_version,
+            "history": self.history.mapping(),
         }
 
     @property
@@ -192,27 +228,47 @@ class IndexReuseKey:
 
 
 def compute_index_reuse_key(
-    root: str | Path, *, graph_schema_version: str = GRAPH_SCHEMA_VERSION
+    root: str | Path, *, graph_schema_version: str = GRAPH_SCHEMA_VERSION,
+    excluded_roots: tuple[Path, ...] = (),
 ) -> IndexReuseKey:
     return IndexReuseKey(
-        source_manifest_digest(root),
+        source_manifest_digest(root, excluded_roots=excluded_roots),
         _binary_certification().get("binary_sha256", ""),
         graph_schema_version,
+        repository_history(Path(root)),
     )
 
 
-def is_code_repo(root: str) -> bool:
+def _freeze_history(root: Path, frozen: Path, history: RepositoryHistory) -> None:
+    if not history.head:
+        return
+    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
+                    "--", str(root.resolve()), str(frozen.resolve())],
+                   capture_output=True, check=True, timeout=60)
+    subprocess.run(["git", "-C", str(frozen), "update-ref", "--no-deref", "HEAD", history.head],
+                   capture_output=True, check=True, timeout=8)
+    shallow = frozen / ".git" / "shallow"
+    if history.shallow:
+        shallow.write_text("\n".join(history.shallow) + "\n", encoding="ascii", newline="\n")
+    else:
+        shallow.unlink(missing_ok=True)
+    # Pinning HEAD does not own the borrowed objects. Repack the requested
+    # closure before dropping alternates so source pruning cannot change it.
+    subprocess.run(["git", "-C", str(frozen), "repack", "-a", "-d"],
+                   capture_output=True, check=True, timeout=60)
+    (frozen / ".git" / "objects" / "info" / "alternates").unlink(missing_ok=True)
+    subprocess.run(["git", "-C", str(frozen), "fsck", "--connectivity-only", "--no-dangling"],
+                   capture_output=True, check=True, timeout=60)
+    if repository_history(frozen) != history:
+        raise ValueError("repository history changed during snapshot")
+
+
+def is_code_repo(root: str, *, excluded_roots: tuple[Path, ...] = ()) -> bool:
     """True iff ``root`` contains at least one source file (bounded scan)."""
-    seen = 0
     try:
-        for _dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-            for fn in filenames:
-                seen += 1
-                if os.path.splitext(fn)[1].lower() in SOURCE_EXTS:
-                    return True
-                if seen >= _MAX_SCAN_FILES:
-                    return False
+        return any(path.suffix.lower() in SOURCE_EXTS for path in _source_paths(
+            Path(root), excluded_roots, scan_limit=_MAX_SCAN_FILES,
+        ))
     except OSError:
         return False
     return False
@@ -867,7 +923,12 @@ def _publish_graph_failure(
         failure_backup.unlink(missing_ok=True)
 
 
-def _graph_state_dir(root: str | Path, state_dir: str | Path | None) -> Path:
+def _graph_state_dir(root: str | Path, state_dir: str | Path | None,
+                     layout: RuntimeLayout | None = None,
+                     reuse_key: IndexReuseKey | None = None) -> Path:
+    if layout is not None:
+        key = reuse_key or compute_index_reuse_key(root, excluded_roots=layout.excluded_roots)
+        return layout.graph_root / "revisions" / key.digest
     external = str(state_dir or os.environ.get("GT_STATE_DIR") or "").strip()
     if external:
         root_key = hashlib.sha256(
@@ -889,7 +950,9 @@ def _read_sealed_json(path: Path, digest_field: str) -> dict[str, object] | None
         return None
 
 
-def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | None:
+def _ensure_index_unlocked(root: str, *, state_dir: str | None = None,
+                           excluded_roots: tuple[Path, ...] = (),
+                           layout: RuntimeLayout | None = None) -> str | None:
     """Ensure a fresh graph.db exists for ``root``; return its path or None.
 
     When ``GT_STATE_DIR`` is set, the db lives in a root-identity subdirectory
@@ -901,11 +964,13 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
     try:
         if not root or not os.path.isdir(root):
             return None
-        if not is_code_repo(root):
+        if not is_code_repo(root, **({"excluded_roots": excluded_roots} if excluded_roots else {})):
             return None  # non-code task: GT dormant
         _seed_binary_env()
 
-        gt_dir = _graph_state_dir(root, state_dir)
+        logical_root = str(layout.workspace) if layout is not None else str(root)
+        reuse_key = compute_index_reuse_key(root, excluded_roots=excluded_roots)
+        gt_dir = _graph_state_dir(root, state_dir, layout, reuse_key)
         if gt_dir != Path(root) / ".gt":
             gt_dir.mkdir(parents=True, exist_ok=True)
         else:
@@ -915,18 +980,17 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                 ignore.write_text("*\n", encoding="utf-8")
         db = gt_dir / "graph.db"
         identity = _execution_identity()
-        reuse_key = compute_index_reuse_key(root)
         if identity["identity_scope"] == "benchmark_invalid":
             staged_evidence = gt_dir / ".index-identity-resource.json"
             refusal = IndexProcessResult(
                 False, "identity_refused", "GT_INDEX_IDENTITY_INVALID"
             )
             _write_index_evidence(
-                staged_evidence, root=str(root), result=refusal,
+                staged_evidence, root=logical_root, result=refusal,
                 reuse_key=reuse_key, identity=identity,
             )
             _publish_graph_failure(
-                gt_dir, root=root, reuse_key=reuse_key,
+                gt_dir, root=logical_root, reuse_key=reuse_key,
                 error_code=refusal.error_code, staged_evidence=staged_evidence,
                 identity=identity,
             )
@@ -940,7 +1004,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                     and manifest.get("index_reuse_key_sha256") == reuse_key.digest
                 ):
                     valid, _reason = _certify_published_graph(
-                        db, existing_manifest, expected_root=Path(root),
+                        db, existing_manifest, expected_root=Path(logical_root),
                         expected_binary_sha256=reuse_key.producer_binary_sha256,
                     )
                     if valid:
@@ -949,17 +1013,36 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                         return str(db)
             except (OSError, ValueError, TypeError):
                 pass
+        if layout is not None and db.exists():
+            raise ValueError("immutable_graph_artifact_invalid")
         with tempfile.NamedTemporaryFile(
             dir=gt_dir, prefix=".graph.", suffix=".db", delete=False
         ) as handle:
             candidate = Path(handle.name)
         candidate.unlink(missing_ok=True)
-        process_result, build_attempts = _build_index_with_attempts(
-            str(root), candidate, gt_dir
-        )
+        if excluded_roots:
+            # The producer receives the same filtered, frozen input that was
+            # hashed. Filtering only the reuse key would certify hidden state
+            # as source, and rewriting the workspace's .gitignore is an edit.
+            with tempfile.TemporaryDirectory(prefix="gt-index-input-") as staging:
+                frozen = Path(staging)
+                _freeze_history(Path(root), frozen, reuse_key.history)
+                for source in _source_paths(Path(root), excluded_roots):
+                    target = frozen / source.relative_to(root)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, target)
+                if source_manifest_digest(frozen) != reuse_key.source_manifest_sha256:
+                    raise ValueError("producer input changed during snapshot")
+                process_result, build_attempts = _build_index_with_attempts(
+                    str(frozen), candidate, gt_dir,
+                )
+        else:
+            process_result, build_attempts = _build_index_with_attempts(
+                str(root), candidate, gt_dir,
+            )
         evidence_path = candidate.with_suffix(".resource.json")
         _write_index_evidence(
-            evidence_path, root=str(root), result=process_result,
+            evidence_path, root=logical_root, result=process_result,
             reuse_key=reuse_key, identity=identity, attempts=build_attempts,
         )
         evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
@@ -967,7 +1050,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
         if not process_result.success:
             _publish_graph_failure(
                 gt_dir,
-                root=root,
+                root=logical_root,
                 reuse_key=reuse_key,
                 error_code=process_result.error_code,
                 staged_evidence=evidence_path,
@@ -977,7 +1060,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             return None
         if not candidate.is_file():
             _write_index_evidence(
-                evidence_path, root=str(root),
+                evidence_path, root=logical_root,
                 result=replace(
                     process_result, success=False, status="output_missing",
                     error_code="GT_INDEX_OUTPUT_MISSING",
@@ -986,7 +1069,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             )
             _publish_graph_failure(
                 gt_dir,
-                root=root,
+                root=logical_root,
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_MISSING",
                 staged_evidence=evidence_path,
@@ -1003,7 +1086,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
                 con.close()
         except (sqlite3.Error, OSError):
             _write_index_evidence(
-                evidence_path, root=str(root),
+                evidence_path, root=logical_root,
                 result=replace(
                     process_result, success=False, status="output_invalid",
                     error_code="GT_INDEX_OUTPUT_INVALID",
@@ -1012,7 +1095,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             )
             _publish_graph_failure(
                 gt_dir,
-                root=root,
+                root=logical_root,
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_INVALID",
                 staged_evidence=evidence_path,
@@ -1022,7 +1105,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             return None
         if quick_check.lower() != "ok":
             _write_index_evidence(
-                evidence_path, root=str(root),
+                evidence_path, root=logical_root,
                 result=replace(
                     process_result, success=False, status="output_invalid",
                     error_code="GT_INDEX_OUTPUT_INVALID",
@@ -1031,7 +1114,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             )
             _publish_graph_failure(
                 gt_dir,
-                root=root,
+                root=logical_root,
                 reuse_key=reuse_key,
                 error_code="GT_INDEX_OUTPUT_INVALID",
                 staged_evidence=evidence_path,
@@ -1039,6 +1122,9 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             )
             candidate.unlink(missing_ok=True)
             return None
+        if compute_index_reuse_key(root, excluded_roots=excluded_roots) != reuse_key:
+            candidate.unlink(missing_ok=True)
+            raise ValueError("producer input superseded before publication")
         graph_sha256 = hashlib.sha256(candidate.read_bytes()).hexdigest()
         manifest = {
             "schema": "gt.graph_certification.v1",
@@ -1048,7 +1134,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None) -> str | 
             "index_reuse_key_sha256": reuse_key.digest,
             "source_manifest_sha256": reuse_key.source_manifest_sha256,
             "repository_root_sha256": hashlib.sha256(
-                os.path.realpath(root).encode("utf-8", "surrogatepass")
+                os.path.realpath(logical_root).encode("utf-8", "surrogatepass")
             ).hexdigest(),
             "graph_sha256": graph_sha256,
             "graph_bytes": candidate.stat().st_size,
@@ -1145,7 +1231,9 @@ class BenchmarkGraphRequired(RuntimeError):
     """
 
 
-def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
+def ensure_index(root: str, *, state_dir: str | None = None,
+                 excluded_roots: tuple[Path, ...] = (),
+                 layout: RuntimeLayout | None = None) -> str | None:
     """Build/reuse one graph under an inter-process publication lock.
 
     Correct-or-quiet for local work; fail-closed for a benchmark-bound run,
@@ -1153,16 +1241,23 @@ def ensure_index(root: str, *, state_dir: str | None = None) -> str | None:
     """
 
     graph: str | None = None
+    if layout is not None:
+        excluded_roots = tuple(dict.fromkeys((*excluded_roots, *layout.excluded_roots)))
     # Whether there was source to index at all. A task that starts empty has
     # nothing to build from yet and fills as the agent creates files; a task
     # holding source and producing no graph is a defect.
-    indexable = bool(root and os.path.isdir(root) and is_code_repo(root))
+    indexable = bool(root and os.path.isdir(root) and is_code_repo(
+        root, **({"excluded_roots": excluded_roots} if excluded_roots else {})
+    ))
     try:
         if indexable:
-            gt_dir = _graph_state_dir(root, state_dir)
+            gt_dir = layout.graph_root if layout is not None else _graph_state_dir(root, state_dir)
             gt_dir.mkdir(parents=True, exist_ok=True)
-            with _graph_publication_lock(gt_dir / ".graph.lock"):
-                graph = _ensure_index_unlocked(root, state_dir=state_dir)
+            lock_root = layout.graph_root if layout is not None else gt_dir
+            with _graph_publication_lock(lock_root / ".graph.lock"):
+                graph = _ensure_index_unlocked(root, state_dir=state_dir, **(
+                    {"excluded_roots": excluded_roots} if excluded_roots else {}
+                ), **({"layout": layout} if layout is not None else {}))
     except Exception:  # noqa: BLE001 - indexing remains correct-or-quiet
         graph = None
     if (
@@ -1396,15 +1491,203 @@ def _graph_schema_receipt(graph: Path) -> tuple[bool, str]:
 def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root: Path,
                              expected_source_revision: str = "",
                              expected_binary_sha256: str = "") -> tuple[bool, str]:
+    return certify_graph_artifact(
+        graph, manifest_path,
+        expected_root_sha256=hashlib.sha256(
+            os.path.realpath(expected_root).encode("utf-8", "surrogatepass")
+        ).hexdigest(),
+        expected_source_revision=expected_source_revision,
+        expected_binary_sha256=expected_binary_sha256,
+        expected_task_id=os.environ.get("GT_TASK_ID", ""),
+        expected_product_source_sha=os.environ.get("GT_PRODUCT_SOURCE_SHA", ""),
+    )
+
+
+def _lsp_failure(error: str) -> GraphBuildArtifact:
+    return GraphBuildArtifact(False, "", "", error)
+
+
+def _lineage_file(root: Path, parent: Path, value: object) -> Path | None:
+    """Resolve one relocatable reference within its declared graph root."""
+
+    if not isinstance(value, str) or not value or Path(value).is_absolute():
+        return None
+    relative = Path(value)
+    if value in {".", ".."}:
+        return None
+    unresolved = parent / relative
+    if unresolved.is_symlink():
+        return None
+    resolved = unresolved.resolve()
+    resolved_root = root.resolve()
+    return resolved if resolved_root in resolved.parents else None
+
+
+def _portable_lineage_reference(root: Path, parent: Path, target: Path) -> str:
+    parent_parts = parent.resolve().relative_to(root.resolve()).parts
+    target_parts = target.resolve().relative_to(root.resolve()).parts
+    return "/".join((*(("..",) * len(parent_parts)), *target_parts))
+
+
+def certify_lsp_candidate(
+    base_graph: str | Path,
+    candidate_graph: str | Path,
+    terminal_receipt: Mapping[str, object],
+    *,
+    expected_source_revision: str,
+    expected_repository_root_sha256: str,
+    expected_repository_snapshot_sha256: str,
+    layout: RuntimeLayout,
+    expected_root_sha256: str,
+    expected_binary_sha256: str = "",
+    expected_task_id: str = "",
+    expected_product_source_sha: str = "",
+) -> GraphBuildArtifact:
+    """Publish a one-level LSP derivative with independently checked lineage."""
+
+    base_input = Path(base_graph)
+    candidate_input = Path(candidate_graph)
+    if base_input.is_symlink() or candidate_input.is_symlink():
+        return _lsp_failure("lsp_layout_symlink_forbidden")
+    base = base_input.resolve()
+    candidate = candidate_input.resolve()
+    graph_root = layout.graph_root.resolve()
+    try:
+        base_relative = base.relative_to(graph_root)
+        candidate_relative = candidate.relative_to(graph_root)
+    except ValueError:
+        return _lsp_failure("lsp_layout_invalid")
+    if (
+        not expected_source_revision
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_repository_root_sha256)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_repository_snapshot_sha256)
+        or base == candidate
+        or not base_relative.parts
+        or base_relative.parts[0] != "revisions"
+        or len(candidate_relative.parts) != 3
+        or candidate_relative.parts[0] != "enrichments"
+        or not base.is_file()
+        or not candidate.is_file()
+    ):
+        return _lsp_failure("lsp_layout_invalid")
+    base_manifest_path = base.with_suffix(".manifest.json")
+    manifest_path = candidate.with_suffix(".manifest.json")
+    receipt_path = candidate.with_suffix(".lsp-terminal.json")
+    if manifest_path.exists() or receipt_path.exists():
+        return _lsp_failure("lsp_certification_already_exists")
+    valid, reason = certify_graph_artifact(
+        base,
+        base_manifest_path,
+        expected_root_sha256=expected_root_sha256,
+        expected_source_revision="",
+        expected_binary_sha256=expected_binary_sha256,
+        expected_task_id=expected_task_id,
+        expected_product_source_sha=expected_product_source_sha,
+    )
+    if not valid:
+        return _lsp_failure(f"lsp_base_invalid:{reason}")
+    try:
+        base_manifest = json.loads(base_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _lsp_failure("lsp_base_manifest_unreadable")
+    if base_manifest.get("derivation") is not None:
+        return _lsp_failure("lsp_nested_derivation_forbidden")
+    base_sha = hashlib.sha256(base.read_bytes()).hexdigest()
+    candidate_sha = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    base_revision = str(
+        base_manifest.get("graph_revision") or base_manifest.get("graph_sha256") or ""
+    )
+    receipt = dict(terminal_receipt)
+    if (
+        receipt.get("schema") != LSP_TERMINAL_SCHEMA
+        or receipt.get("terminal") is not True
+        or receipt.get("status") != "succeeded"
+        or receipt.get("publishable") is not True
+        or receipt.get("source_revision") != expected_source_revision
+        or receipt.get("repository_root_sha256")
+        != expected_repository_root_sha256
+        or receipt.get("repository_snapshot_sha256")
+        != expected_repository_snapshot_sha256
+        or receipt.get("input_graph_revision") != base_revision
+        or receipt.get("input_graph_sha256") != base_sha
+        or receipt.get("output_graph_sha256") != candidate_sha
+    ):
+        return _lsp_failure("lsp_terminal_receipt_identity_mismatch")
+    try:
+        if Path(str(receipt.get("candidate_path") or "")).resolve() != candidate:
+            return _lsp_failure("lsp_terminal_receipt_candidate_mismatch")
+        schema_valid, schema_reason = _graph_schema_receipt(candidate)
+    except (OSError, ValueError):
+        return _lsp_failure("lsp_candidate_unreadable")
+    if not schema_valid:
+        return _lsp_failure(f"lsp_candidate_schema_invalid:{schema_reason}")
+
+    receipt_seal = _sealed_json(receipt_path, receipt, "receipt_sha256")
+    receipt_file_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    manifest = dict(base_manifest)
+    manifest.update({
+        "source_revision": expected_source_revision,
+        "graph_revision": candidate_sha,
+        "graph_sha256": candidate_sha,
+        "graph_bytes": candidate.stat().st_size,
+        "indexed_file_count": _graph_scale(candidate)[0],
+        "indexed_node_count": _graph_scale(candidate)[1],
+        **_graph_phase_metadata(candidate),
+        "derivation": {
+            "schema": LSP_DERIVATION_SCHEMA,
+            "phase": "lsp",
+            "graph_root": "../..",
+            "base_graph": _portable_lineage_reference(
+                graph_root, candidate.parent, base
+            ),
+            "base_manifest": _portable_lineage_reference(
+                graph_root, candidate.parent, base_manifest_path
+            ),
+            "base_resource": _portable_lineage_reference(
+                graph_root, candidate.parent, base.with_name("index-resource.json")
+            ),
+            "base_graph_sha256": base_sha,
+            "base_graph_revision": base_revision,
+            "repository_snapshot_root_sha256": expected_repository_root_sha256,
+            "terminal_receipt": receipt_path.name,
+            "terminal_receipt_sha256": receipt_file_sha,
+            "terminal_receipt_seal": receipt_seal,
+        },
+    })
+    _atomic_write(manifest_path, _canonical_json(manifest))
+    valid, reason = certify_graph_artifact(
+        candidate,
+        manifest_path,
+        expected_root_sha256=expected_root_sha256,
+        expected_source_revision=expected_source_revision,
+        expected_binary_sha256=expected_binary_sha256,
+        expected_task_id=expected_task_id,
+        expected_product_source_sha=expected_product_source_sha,
+    )
+    if not valid:
+        manifest_path.unlink(missing_ok=True)
+        receipt_path.unlink(missing_ok=True)
+        return _lsp_failure(f"lsp_candidate_invalid:{reason}")
+    return GraphBuildArtifact(True, str(candidate), candidate_sha)
+
+
+def certify_graph_artifact(
+    graph: Path, manifest_path: Path, *, expected_root_sha256: str,
+    expected_source_revision: str = "", expected_binary_sha256: str = "",
+    expected_task_id: str = "", expected_product_source_sha: str = "",
+) -> tuple[bool, str]:
+    """Validate the same producer certificate before and after collection."""
+    if graph.is_symlink() or manifest_path.is_symlink():
+        return False, "graph_artifact_symlink_forbidden"
+    if manifest_path.resolve() != graph.with_suffix(".manifest.json").resolve():
+        return False, "manifest_path_mismatch"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False, "manifest_unreadable"
     if manifest.get("schema") != "gt.graph_certification.v1":
         return False, "manifest_schema_mismatch"
-    root_sha = hashlib.sha256(
-        os.path.realpath(expected_root).encode("utf-8", "surrogatepass")
-    ).hexdigest()
+    root_sha = expected_root_sha256
     if manifest.get("repository_root_sha256") != root_sha:
         return False, "repository_root_mismatch"
     if expected_source_revision and manifest.get("source_revision") != expected_source_revision:
@@ -1419,7 +1702,126 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
         return False, "graph_bytes_mismatch"
     if manifest.get("graph_sha256") != hashlib.sha256(graph.read_bytes()).hexdigest():
         return False, "graph_sha256_mismatch"
+    derivation = manifest.get("derivation")
     resource_path = graph.with_name("index-resource.json")
+    if derivation is not None:
+        if not isinstance(derivation, dict):
+            return False, "derivation_invalid"
+        if (
+            derivation.get("schema") != LSP_DERIVATION_SCHEMA
+            or derivation.get("phase") != "lsp"
+        ):
+            return False, "derivation_unknown"
+        parent = manifest_path.resolve().parent
+        if derivation.get("graph_root") != "../..":
+            return False, "derivation_root_invalid"
+        lineage_root = (parent / "../..").resolve()
+        try:
+            candidate_relative = graph.resolve().relative_to(lineage_root)
+        except ValueError:
+            return False, "derivation_root_invalid"
+        if (
+            len(candidate_relative.parts) != 3
+            or candidate_relative.parts[0] != "enrichments"
+        ):
+            return False, "derivation_root_invalid"
+        base_graph = _lineage_file(
+            lineage_root, parent, derivation.get("base_graph")
+        )
+        base_manifest_path = _lineage_file(
+            lineage_root, parent, derivation.get("base_manifest")
+        )
+        base_resource = _lineage_file(
+            lineage_root, parent, derivation.get("base_resource")
+        )
+        receipt_path = _lineage_file(
+            lineage_root, parent, derivation.get("terminal_receipt")
+        )
+        if None in {base_graph, base_manifest_path, base_resource, receipt_path}:
+            return False, "derivation_reference_invalid"
+        assert base_graph is not None
+        assert base_manifest_path is not None
+        assert base_resource is not None
+        assert receipt_path is not None
+        if base_graph == graph.resolve() or base_manifest_path == manifest_path.resolve():
+            return False, "derivation_cycle"
+        if base_manifest_path != base_graph.with_suffix(".manifest.json"):
+            return False, "derivation_base_manifest_path_mismatch"
+        try:
+            if base_graph.relative_to(lineage_root).parts[0] != "revisions":
+                return False, "derivation_base_location_invalid"
+        except (IndexError, ValueError):
+            return False, "derivation_base_location_invalid"
+        try:
+            base_manifest = json.loads(base_manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False, "derivation_base_manifest_unreadable"
+        if base_manifest.get("derivation") is not None:
+            return False, "derivation_nested"
+        base_valid, base_reason = certify_graph_artifact(
+            base_graph,
+            base_manifest_path,
+            expected_root_sha256=expected_root_sha256,
+            expected_source_revision="",
+            expected_binary_sha256=expected_binary_sha256,
+            expected_task_id=expected_task_id,
+            expected_product_source_sha=expected_product_source_sha,
+        )
+        if not base_valid:
+            return False, f"derivation_base_invalid:{base_reason}"
+        base_sha = hashlib.sha256(base_graph.read_bytes()).hexdigest()
+        base_revision = str(
+            base_manifest.get("graph_revision")
+            or base_manifest.get("graph_sha256")
+            or ""
+        )
+        if (
+            derivation.get("base_graph_sha256") != base_sha
+            or derivation.get("base_graph_revision") != base_revision
+            or base_resource != base_graph.with_name("index-resource.json")
+            or manifest.get("index_resource_sha256")
+            != hashlib.sha256(base_resource.read_bytes()).hexdigest()
+        ):
+            return False, "derivation_base_identity_mismatch"
+        if (
+            not receipt_path.is_file()
+            or derivation.get("terminal_receipt_sha256")
+            != hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+        ):
+            return False, "derivation_terminal_receipt_mismatch"
+        receipt = _read_sealed_json(receipt_path, "receipt_sha256")
+        if (
+            receipt is None
+            or derivation.get("terminal_receipt_seal")
+            != hashlib.sha256(_canonical_json(receipt)).hexdigest()
+        ):
+            return False, "derivation_terminal_receipt_seal_invalid"
+        if (
+            receipt.get("schema") != LSP_TERMINAL_SCHEMA
+            or receipt.get("terminal") is not True
+            or receipt.get("status") != "succeeded"
+            or receipt.get("publishable") is not True
+            or receipt.get("source_revision") != manifest.get("source_revision")
+            or receipt.get("repository_root_sha256")
+            != derivation.get("repository_snapshot_root_sha256")
+            or not re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(receipt.get("repository_snapshot_sha256") or ""),
+            )
+            or receipt.get("input_graph_revision") != base_revision
+            or receipt.get("input_graph_sha256") != base_sha
+            or receipt.get("output_graph_sha256") != manifest.get("graph_sha256")
+        ):
+            return False, "derivation_terminal_receipt_identity_mismatch"
+        inherited = (
+            "identity_scope", "task_id", "product_source_sha",
+            "repository_root_sha256", "source_manifest_sha256",
+            "binary_sha256", "binary_certified",
+            "index_resource_sha256",
+        )
+        if any(manifest.get(key) != base_manifest.get(key) for key in inherited):
+            return False, "derivation_producer_identity_mismatch"
+        resource_path = base_resource
     if (
         not resource_path.is_file()
         or manifest.get("index_resource_sha256")
@@ -1430,7 +1832,10 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
     if resource is None:
         return False, "index_resource_seal_invalid"
     if (
-        resource.get("status") != "completed"
+        resource.get("schema") != INDEX_RESOURCE_SCHEMA
+        or type(resource.get("exit_code")) is not int
+        or resource.get("exit_code") != 0
+        or resource.get("status") != "completed"
         or resource.get("error_code") != ""
         or resource.get("memory_evidence") is not False
         or resource.get("repository_root_sha256") != root_sha
@@ -1441,13 +1846,11 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
         or resource.get("product_source_sha") != manifest.get("product_source_sha")
         or resource.get("identity_scope") != manifest.get("identity_scope")
         or (
-            os.environ.get("GT_TASK_ID")
-            and resource.get("task_id") != os.environ["GT_TASK_ID"]
+            expected_task_id and resource.get("task_id") != expected_task_id
         )
         or (
-            os.environ.get("GT_PRODUCT_SOURCE_SHA")
-            and resource.get("product_source_sha")
-            != os.environ["GT_PRODUCT_SOURCE_SHA"]
+            expected_product_source_sha
+            and resource.get("product_source_sha") != expected_product_source_sha
         )
     ):
         return False, "index_resource_identity_mismatch"
@@ -1462,12 +1865,27 @@ def _certify_published_graph(graph: Path, manifest_path: Path, *, expected_root:
 
 
 def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None = None,
-                              source_revision: str = "") -> IndexBuildReceipt:
+                              source_revision: str = "",
+                              excluded_roots: tuple[Path, ...] = (),
+                              layout: RuntimeLayout | None = None) -> IndexBuildReceipt:
     root_path = Path(root)
-    if not root_path.is_dir() or not is_code_repo(str(root_path)):
+    if layout is not None:
+        excluded_roots = tuple(dict.fromkeys((*excluded_roots, *layout.excluded_roots)))
+    try:
+        indexable = root_path.is_dir() and is_code_repo(
+            str(root_path), **({"excluded_roots": excluded_roots} if excluded_roots else {})
+        )
+    except SourceDiscoveryIncomplete as exc:
+        if _execution_identity()["identity_scope"] == "benchmark_bound":
+            raise BenchmarkGraphRequired(str(exc)) from exc
+        return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
+                                 error_type="source_discovery_incomplete", error_diagnostic=str(exc))
+    if not indexable:
         return IndexBuildReceipt(IndexBuildStatus.NOT_APPLICABLE, source_revision=source_revision)
     try:
-        graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None)
+        graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None,
+                             **({"excluded_roots": excluded_roots} if excluded_roots else {}),
+                             **({"layout": layout} if layout is not None else {}))
     except BenchmarkGraphRequired:
         # A benchmark without its graph is not a receipt outcome to record and
         # continue from; it stops the run.
@@ -1476,7 +1894,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         return IndexBuildReceipt(IndexBuildStatus.BUILD_FAILED, source_revision=source_revision,
                                  error_type=type(exc).__name__, error_diagnostic=str(exc)[:600])
     if not graph:
-        gt_dir = _graph_state_dir(root_path, state_dir)
+        gt_dir = _graph_state_dir(root_path, state_dir, layout)
         failure = _read_sealed_json(gt_dir / "graph.failure.json", "manifest_sha256")
         evidence_path = gt_dir / "index-failure-resource.json"
         evidence = _read_sealed_json(evidence_path, "evidence_sha256")
@@ -1638,7 +2056,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         else IndexBuildStatus.BUILT
     )
     # Refresh the contract-embedding sidecar after every successful build.
-    # A failure here is logged but never costs the graph — the embedding store
+    # A failure here is logged but never costs the graph â€” the embedding store
     # is a cache the retrieval side can degrade from with a named reason.
     embedding_state = "unconfigured"
     embedding_failure = ""

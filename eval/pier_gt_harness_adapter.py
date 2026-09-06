@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from eval.miniswe_agent import MiniSweGtAgent
 
 
@@ -10,11 +12,28 @@ class PierGtHarnessMiniSwe246Agent(MiniSweGtAgent):
 
     MINISWE_AGENT_VERSION = "2.4.6"
 
+    def __init__(self, *args, synthetic_transport_url: str = "", **kwargs):
+        super().__init__(*args, **kwargs)
+        self._synthetic_transport_url = synthetic_transport_url
+
     def install_spec(self):
         return None
 
+    def _run_command(self, instruction: str, model: str, extra_args: str = "") -> str:
+        if self._synthetic_transport_url:
+            extra_args += " --synthetic-transport "
+        return super()._run_command(instruction, model, extra_args)
+
     def network_allowlist(self):
         from pier.models.agent.network import NetworkAllowlist
+
+        if self._synthetic_transport_url:
+            address = urlsplit(self._synthetic_transport_url)
+            if (self.model_name != "synthetic-transport" or address.scheme != "http"
+                    or address.hostname not in {"host.docker.internal", "127.0.0.1"}
+                    or address.username or address.password or address.port is None):
+                raise ValueError("invalid synthetic transport endpoint")
+            return NetworkAllowlist(domains=[address.hostname])
 
         # Installation inputs are staged and verified before task startup.
         # Only the configured model transport receives network access.

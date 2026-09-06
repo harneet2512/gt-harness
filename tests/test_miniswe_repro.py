@@ -11,12 +11,10 @@ from pathlib import Path
 import pytest
 
 from scripts.miniswe_gt_run import (
-    MAX_TOOL_OUTPUT_CHARS,
     BoundedHistoryAgent,
     CredentialIsolatedLocalEnvironment,
     _compact_miniswe_history,
     _model_and_kwargs,
-    _truncate_tool_output,
     _write_model_patch,
 )
 from scripts.miniswe_repro import (
@@ -25,6 +23,9 @@ from scripts.miniswe_repro import (
     build_reproducibility_manifest,
     write_reproducibility_manifest,
 )
+
+# Historical request sizes used by the regression fixtures.
+MAX_TOOL_OUTPUT_CHARS = 16_000
 
 
 def test_muse_route_preserves_the_baseline_xhigh_reasoning_contract(monkeypatch) -> None:
@@ -291,14 +292,21 @@ def test_agent_shell_environment_excludes_host_credentials(monkeypatch, tmp_path
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in template
 
 
-def test_miniswe_tool_output_is_bounded_without_losing_head_or_tail() -> None:
+def test_miniswe_tool_output_is_bounded_with_recoverable_tail(tmp_path) -> None:
+    from gt_engine.output_evidence import EvidenceStore
+
     raw = "HEAD" + ("x" * (MAX_TOOL_OUTPUT_CHARS * 2)) + "TAIL"
-    bounded = _truncate_tool_output(raw)
+    store = EvidenceStore(tmp_path / "evidence")
+    spool = tmp_path / "spool"
+    spool.write_bytes(raw.encode())
+    reference = store.publish(spool)
+    bounded = store.preview(reference)
     assert len(bounded) < len(raw)
     assert len(bounded) <= MAX_TOOL_OUTPUT_CHARS + 100
     assert bounded.startswith("HEAD")
-    assert bounded.endswith("TAIL")
-    assert "truncated" in bounded
+    assert "gt-evidence read" in bounded
+    assert store.read(reference["sha256"], len(raw) - 4, 4)["text"] == "TAIL"
+    assert "Preview only" in bounded
 
 
 def test_miniswe_history_references_duplicates_below_old_size_threshold() -> None:
@@ -536,7 +544,10 @@ def test_environment_bounds_model_output_but_preserves_exact_raw_output(tmp_path
     result = env.execute({"command": command})
 
     assert len(result["output"]) < len(raw)
-    assert result["extra"]["raw_output"] == raw
+    from gt_engine.output_evidence import EvidenceStore
+
+    ref = result["extra"]["output_artifact"]
+    assert EvidenceStore(ref["root"]).bytes(ref["sha256"]) == raw.encode()
 
 
 def test_model_patch_exports_committed_tracked_and_untracked_changes(tmp_path) -> None:

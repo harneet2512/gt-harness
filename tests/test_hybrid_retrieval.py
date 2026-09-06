@@ -19,10 +19,10 @@ import pytest
 
 from gt_engine import dense_runtime, retrieval
 
-REAL_GRAPH = Path(
+REAL_GRAPH = Path(os.environ.get("GT_RETRIEVAL_TEST_GRAPH",
     r"D:\tmp\claude\D--gt-harness\d4578d92-0fad-4131-b9ed-3ade34ece4fc"
     r"\scratchpad\ark-new.db"
-)
+))
 
 # (id, label, name, qualified_name, file_path, language, start_line, end_line,
 #  signature)

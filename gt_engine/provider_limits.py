@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -181,6 +182,56 @@ def enforce_provider_request_limit(
     return admission
 
 
+def render_and_admit_provider_request(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    render_messages: Callable[
+        [list[dict[str, Any]]], Sequence[Mapping[str, Any]]
+    ],
+    model: str,
+    context_window_tokens: int,
+    reserved_output_tokens: int,
+    metadata_source: str,
+    model_kwargs: Mapping[str, Any] | None = None,
+    tools: Any = None,
+    call_kwargs: Mapping[str, Any] | None = None,
+    token_counter: Callable[[Mapping[str, Any]], int] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], ProviderAdmission]:
+    """Render first, then admit the exact envelope that can reach transport.
+
+    The renderer receives a detached message list so an admission failure cannot
+    partially mutate durable history. The returned messages are the only message
+    value represented by ``payload`` and ``admission``.
+    """
+
+    detached = copy.deepcopy([dict(message) for message in messages])
+    rendered_value = render_messages(detached)
+    if not isinstance(rendered_value, Sequence) or isinstance(
+        rendered_value, (str, bytes)
+    ):
+        raise ValueError("provider renderer must return a message sequence")
+    rendered: list[dict[str, Any]] = []
+    for message in rendered_value:
+        if not isinstance(message, Mapping):
+            raise ValueError("provider renderer returned a non-object message")
+        rendered.append(dict(message))
+    payload = build_provider_request_envelope(
+        messages=rendered,
+        model=model,
+        model_kwargs=model_kwargs,
+        tools=tools,
+        call_kwargs=call_kwargs,
+    )
+    admission = enforce_provider_request_limit(
+        payload,
+        context_window_tokens=context_window_tokens,
+        reserved_output_tokens=reserved_output_tokens,
+        metadata_source=metadata_source,
+        token_counter=token_counter,
+    )
+    return rendered, payload, admission
+
+
 __all__ = [
     "ProviderAdmission",
     "ProviderContextWindowUnavailable",
@@ -189,4 +240,5 @@ __all__ = [
     "enforce_provider_request_limit",
     "provider_request_bytes",
     "provider_request_tokens",
+    "render_and_admit_provider_request",
 ]

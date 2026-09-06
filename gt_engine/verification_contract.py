@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -143,6 +144,160 @@ class PredicateReceipt:
     required_value: str = ""
     unit: str = ""
     coverage_basis: str = ""
+
+
+@dataclass(frozen=True, order=True)
+class DependencyIdentity:
+    """One typed input identity on which a predicate proof depends."""
+
+    kind: str
+    value: str
+
+
+@dataclass(frozen=True)
+class DependencyFootprint:
+    """Conservative dependency envelope for a semantic predicate receipt.
+
+    ``complete`` means the identities are sufficient to decide whether a
+    workspace edit can stale the proof. Recorded graph edges are useful
+    evidence, but do not establish completeness in the presence of unresolved
+    imports, dynamic loading, configuration, or environment inputs.
+    """
+
+    identities: tuple[DependencyIdentity, ...]
+    complete: bool
+    basis: str
+
+
+def normalize_dependency_path(path: str) -> str:
+    value = str(path or "").replace("\\", "/").strip()
+    while value.startswith("./"):
+        value = value[2:]
+    return value.strip("/")
+
+
+def conservative_execution_footprint(*, basis: str = "executed_check") -> DependencyFootprint:
+    """Bind a proof to all workspace and environment inputs when scope is unknown."""
+
+    return DependencyFootprint(
+        identities=(
+            DependencyIdentity("workspace", "."),
+            DependencyIdentity("environment", "*"),
+        ),
+        complete=False,
+        basis=basis,
+    )
+
+
+def recorded_graph_dependency_footprint(
+    proof_roots: Iterable[str],
+    file_dependencies: Iterable[tuple[str, str, str]],
+    *,
+    basis: str = "recorded_graph_dependencies",
+) -> DependencyFootprint:
+    """Preserve recorded transitive dependency identities without overstating coverage.
+
+    File dependency rows use the product graph direction ``source -> target``.
+    Even a successful closure walk remains incomplete because the graph may not
+    contain dynamic or unresolved dependencies.
+    """
+
+    roots = {
+        path
+        for raw in proof_roots
+        if (path := normalize_dependency_path(raw))
+    }
+    edges: dict[str, set[str]] = {}
+    for source, target, _kind in file_dependencies:
+        normalized_source = normalize_dependency_path(source)
+        normalized_target = normalize_dependency_path(target)
+        if normalized_source and normalized_target:
+            edges.setdefault(normalized_source, set()).add(normalized_target)
+    closure = set(roots)
+    pending = list(sorted(roots))
+    while pending:
+        source = pending.pop()
+        for target in sorted(edges.get(source, ())):
+            if target not in closure:
+                closure.add(target)
+                pending.append(target)
+    identities = [DependencyIdentity("path", path) for path in sorted(closure)]
+    identities.extend(
+        (DependencyIdentity("workspace", "."), DependencyIdentity("environment", "*"))
+    )
+    return DependencyFootprint(tuple(identities), complete=False, basis=basis)
+
+
+def certified_path_footprint(
+    paths: Iterable[str], *, basis: str
+) -> DependencyFootprint:
+    """Create a complete path-local footprint from a trusted direct witness."""
+
+    if basis != "live_artifact_stat":
+        raise ValueError("complete path footprint requires live_artifact_stat basis")
+    normalized = tuple(
+        sorted(
+            {
+                normalize_dependency_path(path)
+                for path in paths
+                if normalize_dependency_path(path)
+            }
+        )
+    )
+    if not normalized:
+        raise ValueError("complete path footprint requires at least one path")
+    return DependencyFootprint(
+        identities=tuple(DependencyIdentity("path", path) for path in normalized),
+        complete=True,
+        basis=basis,
+    )
+
+
+def predicate_receipt_footprint(
+    predicate: ObligationPredicate,
+    receipt: PredicateReceipt,
+) -> DependencyFootprint:
+    """Derive the narrowest dependency footprint proved by the receipt itself."""
+
+    # `scoped_artifact_assertion` is still an arbitrary user-selected command:
+    # lexical mentions of a path and words such as "exists" do not prove that
+    # the command depends only on that path. Only the harness-owned live stat
+    # boundary may call `certified_path_footprint`.
+    _ = predicate
+    return conservative_execution_footprint(basis=receipt.coverage_basis or receipt.kind)
+
+
+def dependency_footprint_affected(
+    footprint: DependencyFootprint,
+    edited_paths: Iterable[str],
+) -> bool:
+    """Return whether an edit invalidates a receipt with this footprint."""
+
+    edited = tuple(
+        path
+        for raw in edited_paths
+        if (path := normalize_dependency_path(raw))
+    )
+    if not edited:
+        return False
+    if not footprint.complete:
+        return True
+    for identity in footprint.identities:
+        if identity.kind == "workspace":
+            return True
+        if identity.kind != "path":
+            # Environment and other non-path identities cannot be shown
+            # disjoint from a workspace mutation by this edit witness.
+            return True
+        base = normalize_dependency_path(identity.value)
+        if not base:
+            return True
+        if any(
+            path == base or path.startswith(base + "/") or base.startswith(path + "/")
+            for path in edited
+        ):
+            return True
+    return False
 
 
 @dataclass(frozen=True)

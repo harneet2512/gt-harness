@@ -65,14 +65,16 @@ def write_host_interval(
         if first.get(field) != last.get(field):
             raise ValueError("agent resource cgroup identity changed")
 
-    def delta(name: str) -> int:
+    def delta(name: str) -> int | None:
         old = first.get(name)
         new = last.get(name)
-        return max(0, new - old) if type(old) is int and type(new) is int else 0
+        return max(0, new - old) if type(old) is int and type(new) is int else None
 
     oom_delta = delta("oom")
     oom_kill_delta = delta("oom_kill")
-    memory_evidence = exit_code == 137 and (oom_delta > 0 or oom_kill_delta > 0)
+    memory_evidence = exit_code == 137 and any(
+        type(value) is int and value > 0 for value in (oom_delta, oom_kill_delta)
+    )
     payload: dict[str, object] = {
         "schema": "gt.agent_resource.v1",
         "attestation_scope": "host_agent_adapter",

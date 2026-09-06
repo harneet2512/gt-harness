@@ -11,12 +11,14 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any
 
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
+    MAX_BOUNDARY_CLAIMS,
     MAX_TASK_DELIVERIES,
     TOTAL_DELIVERY_BYTE_LIMIT,
     delivery_byte_limit,
@@ -26,6 +28,28 @@ from gt_engine.graph_utilisation import graph_utilisation
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 _SHA64 = re.compile(r"[0-9a-f]{64}")
 _TOTAL_DELIVERY_BYTE_LIMIT = TOTAL_DELIVERY_BYTE_LIMIT
+
+
+def _validate_delivery_boundaries(deliveries: list[dict]) -> None:
+    """Budget each actual next-provider decision, never a task's lifetime."""
+    boundaries: dict[int, list[dict]] = {}
+    for delivery in deliveries:
+        boundaries.setdefault(int(delivery.get("observed_iteration") or 0), []).append(delivery)
+    for rows in boundaries.values():
+        identities = [str(row.get("delivery_identity") or "") for row in rows]
+        if len(identities) != len(set(identities)):
+            raise ValueError("duplicate_delivery_identity")
+        if len(rows) > MAX_BOUNDARY_CLAIMS:
+            raise ValueError("delivery_boundary_claim_limit_exceeded")
+        if sum(int(row.get("context_byte_count") or 0) for row in rows) > TOTAL_DELIVERY_BYTE_LIMIT:
+            raise ValueError("delivery_request_budget_exceeded")
+
+
+def _dense_execution_receipts(events: list[dict]) -> list[dict]:
+    return [{"schema": "gt.dense_index_receipt.v1",
+             **{key: value for key, value in row.items()
+                if key not in {"event", "event_hash", "sequence", "schema"}}}
+            for row in events if row.get("event") == "dense_index_ready"]
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -92,6 +116,42 @@ def _events(state_dir: Path) -> tuple[Path | None, list[dict[str, Any]]]:
     return paths[0], rows
 
 
+def _published_graph(state_dir: Path, events: list[dict[str, Any]]) -> tuple[Path | None, dict | None]:
+    publications = [row for row in events if row.get("event") == "graph_publication"]
+    if not publications:
+        return _single_optional(state_dir, "graph.manifest.json")
+    publication = publications[-1]
+    digest = str(publication.get("artifact_sha256") or "")
+    if not _SHA64.fullmatch(digest):
+        raise ValueError("invalid_graph_publication_identity")
+    matches = [path for path in state_dir.rglob("graph.manifest.json") if _sha256(path) == digest]
+    if len(matches) != 1:
+        raise ValueError("graph_publication_manifest_missing_or_ambiguous")
+    manifest = _read_object(matches[0])
+    if manifest.get("graph_sha256") != publication.get("graph_sha256"):
+        raise ValueError("graph_publication_content_mismatch")
+    return matches[0], manifest
+
+
+def _graph_publication_state(events: list[dict[str, Any]]) -> dict:
+    publications = [row for row in events if row.get("event") == "graph_publication"]
+    snapshots = [row for row in events if row.get("event") == "repository_snapshot"]
+    publication = publications[-1] if publications else {}
+    snapshot = snapshots[-1] if snapshots else {}
+    published_revision = str(publication.get("repository_revision") or "")
+    current_revision = str(snapshot.get("repository_revision") or "")
+    known = bool(_SHA64.fullmatch(published_revision) and _SHA64.fullmatch(current_revision)
+                 and snapshot.get("complete") is True)
+    return {
+        "schema": "gt.graph_publication_state.v1",
+        "manifest_sha256": publication.get("artifact_sha256"),
+        "published_source_revision": published_revision,
+        "observed_source_revision": current_revision,
+        "status": ("current" if published_revision == current_revision else "historical")
+        if known else "unknown",
+    }
+
+
 def _delivery_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deliveries: list[dict[str, Any]] = []
     for row in events:
@@ -126,6 +186,7 @@ def _delivery_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "payload_sha256": payload_sha256 or None,
                 "delivery_identity": payload_sha256 or None,
                 "action_index": int(row.get("action_index") or 0),
+                "observed_iteration": int(row.get("iteration") or 0),
                 "rendered_bytes": int(row.get("rendered_bytes") or 0),
                 "semantics": str(row.get("semantics") or ""),
                 "target": str(row.get("target") or ""),
@@ -135,21 +196,32 @@ def _delivery_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    evidence = {
-        (str(row.get("dedup_key") or ""), int(row.get("iteration") or 0)): row
-        for row in events
+    evidence = [
+        row for row in events
         if row.get("event") in {"evidence_delivery", "context_addition_delivery"}
         and row.get("dedup_key")
-    }
+    ]
     provider_rows = [row for row in events if row.get("event") == "provider_delivery"]
     receipts: list[dict[str, Any]] = []
     for row in events:
         if row.get("event") != "receipt" or row.get("transition") != "delivered":
             continue
         iteration = int(row.get("iteration") or 0)
-        match = evidence.get((str(row.get("dedup_key") or ""), iteration))
-        if match is None:
+        matching = [
+            candidate for candidate in evidence
+            if str(candidate.get("dedup_key") or "")
+            == str(row.get("dedup_key") or "")
+            and int(candidate.get("iteration") or 0) == iteration
+            and int(candidate.get("sequence") or 0) < int(row.get("sequence") or 0)
+        ]
+        if len(matching) != 1:
             raise ValueError("delivery_receipt_evidence_join_failed")
+        match = matching[0]
+        delivery_identity = str(row.get("payload_hash") or "")
+        if delivery_identity != str(
+            match.get("delivery_identity") or match.get("payload_sha256") or ""
+        ):
+            raise ValueError("delivery_receipt_identity_join_failed")
         provider = next(
             (
                 candidate
@@ -158,6 +230,15 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
             ),
             None,
         )
+        if provider is None:
+            raise ValueError("delivery_receipt_provider_join_failed")
+        delivery_ids = provider.get("delivery_ids")
+        if (
+            not isinstance(delivery_ids, list)
+            or any(not isinstance(value, str) for value in delivery_ids)
+            or delivery_identity not in delivery_ids
+        ):
+            raise ValueError("delivery_receipt_provider_join_failed")
         index = len(receipts) + 1
         kind = "repository_start" if index == 1 else "repository_update"
         lane = str(match.get("lane") or "sealed")
@@ -176,8 +257,10 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
                 "delivery_kind": delivery_kind,
                 "evidence_type": str(row.get("evidence_type") or ""),
                 "dedup_key": str(row.get("dedup_key") or ""),
-                "context_sha256": str(row.get("payload_hash") or ""),
-                "delivery_identity": str(row.get("payload_hash") or ""),
+                "context_sha256": delivery_identity,
+                "delivery_identity": delivery_identity,
+                **({"artifact_sha256": match["artifact_sha256"]}
+                   if match.get("artifact_sha256") else {}),
                 "context_byte_count": context_byte_count,
                 "byte_limit": byte_limit,
                 "event_sequence": int(match.get("sequence") or 0),
@@ -192,6 +275,8 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
 
 def _delivery_refusals(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     allowed_reasons = {
+        "boundary_claim_ceiling",
+        "request_delivery_byte_ceiling",
         "delivery_byte_ceiling",
         "task_delivery_byte_ceiling",
         "task_delivery_dose_ceiling",
@@ -229,6 +314,7 @@ def _delivery_refusals(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "delivery_identity": str(row.get("delivery_identity") or payload_sha256),
                 "admitted_count": int(row.get("admitted_count") or 0),
                 "admitted_bytes": int(row.get("admitted_bytes") or 0),
+                "observed_iteration": int(row.get("iteration") or 0),
             }
         )
     return refusals
@@ -332,6 +418,168 @@ def _provider_admissions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return admissions
 
 
+def _semantic_graph_deliveries(
+    state_dir: Path, events: list[dict[str, Any]], deliveries: list[dict[str, Any]],
+    *, task_id: str, product_source_sha: str,
+) -> frozenset[str]:
+    """Verify graph localization against its source snapshot at admission."""
+    from gt_engine.delivery_budget import compact_localization
+    from gt_engine.indexer import certify_graph_artifact
+    from gt_engine.request_history import load_history_evidence
+    from gt_engine.retrieval import render_semantic_localization, source_symbol
+    from gt_harness.product import groundtruth_release
+
+    events_path, _ = _events(state_dir)
+    if events_path is None:
+        return frozenset()
+    task_root = events_path.parent
+
+    def blob(namespace: str, digest: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("semantic_localization_blob_identity_invalid")
+        path = task_root / namespace / f"{digest}.json"
+        if not path.is_file() or _sha256(path) != digest:
+            raise ValueError("semantic_localization_blob_integrity_failed")
+        return _read_object(path)
+
+    verified = set()
+    for delivery in deliveries:
+        if not str(delivery.get("dedup_key", "")).startswith("semantic-localization:"):
+            continue
+        artifact = blob("localization_advisory", str(delivery.get("artifact_sha256") or ""))
+        if artifact.get("schema") != "gt.semantic_localization.v1":
+            raise ValueError("semantic_localization_schema_invalid")
+        preceding = [row for row in events if row.get("event") == "repository_snapshot"
+                     and int(row.get("sequence", 0)) < int(delivery["event_sequence"])]
+        if not preceding:
+            raise ValueError("semantic_localization_source_witness_missing")
+        witness = preceding[-1]
+        snapshot = blob("repository_snapshots", str(witness.get("snapshot_sha256") or ""))
+        revision = artifact.get("source_revision")
+        if (not revision or revision != witness.get("repository_revision")
+                or revision != snapshot.get("revision") or snapshot.get("complete") is not True):
+            raise ValueError("semantic_localization_source_revision_mismatch")
+        graph_digest = artifact.get("graph_revision")
+        matching = []
+        for manifest_path in state_dir.rglob("graph.manifest.json"):
+            manifest = _read_object(manifest_path)
+            if manifest.get("graph_sha256") == graph_digest:
+                graph_path = manifest_path.with_name("graph.db")
+                valid, reason = certify_graph_artifact(
+                    graph_path, manifest_path,
+                    expected_root_sha256=str(snapshot.get("root_sha256") or ""),
+                    expected_binary_sha256=groundtruth_release()["producer_sha256"],
+                    expected_task_id=task_id, expected_product_source_sha=product_source_sha,
+                )
+                if not valid:
+                    raise ValueError(f"semantic_localization_graph_integrity_failed:{reason}")
+                matching.append(graph_path)
+        if len(matching) != 1:
+            raise ValueError("semantic_localization_certified_graph_missing")
+        graph_path = matching[0]
+        ranking = artifact.get("ranking", {})
+        if ranking.get("graph_content_sha256") != graph_digest:
+            raise ValueError("semantic_localization_projection_revision_mismatch")
+        items = artifact.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValueError("semantic_localization_items_missing")
+        fused = {row["stable_id"]: row for row in ranking.get("fused", [])}
+        files = {row["path"]: row["sha256"] for row in snapshot.get("files", [])}
+        with sqlite3.connect(f"{graph_path.resolve().as_uri()}?mode=ro", uri=True) as db:
+            for item in items:
+                candidate = fused.get(item.get("stable_id"), {})
+                provenance = candidate.get("provenance", {})
+                symbol, source_hash = source_symbol(db, provenance.get("node_id"))
+                if (symbol.as_dict() != provenance or symbol.stable_id != item.get("stable_id")
+                        or symbol.file_path != item.get("path")
+                        or max(1, symbol.start_line) != item.get("line")
+                        or item.get("anchor") != f"{symbol.file_path}:{max(1, symbol.start_line)}"
+                        or not source_hash or files.get(symbol.file_path) != source_hash
+                        or item.get("score") != candidate.get("rrf_score")
+                        or item.get("reasons") != [f"retrieval:{value}" for value in
+                                                   candidate.get("contributing_sources", [])]):
+                    raise ValueError("semantic_localization_primary_source_mismatch")
+        rendered = compact_localization(render_semantic_localization(items))
+        if not rendered:
+            raise ValueError("semantic_localization_admitted_bytes_mismatch")
+        delivery_identity = str(delivery.get("delivery_identity") or "")
+        delivery_path = task_root / "deliveries" / f"{delivery_identity}.json"
+        if (not _SHA64.fullmatch(delivery_identity) or not delivery_path.is_file()
+                or _sha256(delivery_path) != delivery_identity):
+            raise ValueError("semantic_localization_delivery_blob_integrity_failed")
+        delivered = delivery_path.read_text(encoding="utf-8")
+        if (len(delivered.encode("utf-8")) != int(delivery.get("context_byte_count") or 0)
+                or hashlib.sha256(delivered.encode("utf-8")).hexdigest()
+                != delivery.get("context_sha256")):
+            raise ValueError("semantic_localization_admitted_bytes_mismatch")
+        prefix = "[GT_CONTEXT_UNIT] "
+        if not delivered.startswith(prefix) or "\n" not in delivered:
+            raise ValueError("semantic_localization_context_wrapper_invalid")
+        header, body = delivered.split("\n", 1)
+        try:
+            metadata = json.loads(header[len(prefix):])
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError("semantic_localization_context_wrapper_invalid") from exc
+        admitted = [
+            row for row in events
+            if row.get("event") == "decision_context_unit_admitted"
+            and row.get("delivery_identity") == delivery_identity
+        ]
+        if len(admitted) != 1:
+            raise ValueError("semantic_localization_context_unit_join_failed")
+        context_unit = admitted[0]
+        reference = context_unit.get("artifact_reference")
+        if not isinstance(reference, dict):
+            raise ValueError("semantic_localization_context_reference_missing")
+        expected_evidence_root = (task_root / "output_evidence").resolve()
+        try:
+            layouts = [row for row in events if row.get("event") == "runtime_layout"]
+            if layouts:
+                if (len(layouts) != 1 or layouts[0].get("layout_schema") != "gt.runtime_layout.v1"
+                        or not layouts[0].get("evidence_root")
+                        or reference.get("root") != layouts[0]["evidence_root"]):
+                    raise ValueError("history_evidence_runtime_root_mismatch")
+                # Collection relocates files. Bind the original namespace to
+                # its journal witness, then read only this task's collected CAS.
+                local_reference = {**reference, "root": str(expected_evidence_root)}
+            else:
+                local_reference = reference
+            referenced = load_history_evidence(expected_evidence_root, local_reference).decode(
+                "utf-8", "strict"
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("semantic_localization_context_reference_invalid") from exc
+        if referenced != rendered:
+            raise ValueError("semantic_localization_primary_bytes_mismatch")
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("unit_id") != context_unit.get("unit_id")
+            or metadata.get("supersession_key")
+            != context_unit.get("supersession_key")
+            or metadata.get("source_revision") != artifact.get("source_revision")
+        ):
+            raise ValueError("semantic_localization_context_wrapper_invalid")
+        if body == rendered:
+            verified.add(delivery_identity)
+            continue
+        reference_prefix = "[GT_CONTEXT_UNIT_REFERENCE] "
+        if not body.startswith(reference_prefix):
+            raise ValueError("semantic_localization_admitted_bytes_mismatch")
+        try:
+            visible_reference = json.loads(body[len(reference_prefix):])
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError("semantic_localization_context_wrapper_invalid") from exc
+        for key in (
+            "schema", "sha256", "total_length", "encoding", "kind",
+            "retrieval_command",
+        ):
+            if visible_reference.get(key) != reference.get(key):
+                raise ValueError("semantic_localization_context_reference_spliced")
+        # A reference proves availability, not that the semantic bytes were in
+        # the request. Graph-use credit requires an inline exact canonical unit.
+    return frozenset(verified)
+
+
 def issue_runtime_receipts(
     *,
     report_path: Path,
@@ -386,17 +634,13 @@ def issue_runtime_receipts(
     deliveries = _provider_delivery_receipts(event_rows)
     if len(deliveries) != len(delivery_events):
         raise ValueError("delivery_receipt_census_mismatch")
-    delivery_identities = [str(row.get("delivery_identity") or "") for row in deliveries]
-    if len(delivery_identities) != len(set(delivery_identities)):
-        raise ValueError("duplicate_delivery_identity")
-    if sum(row["context_byte_count"] for row in deliveries) > _TOTAL_DELIVERY_BYTE_LIMIT:
-        raise ValueError("delivery_total_budget_exceeded")
-    delivered_keys = {str(row.get("dedup_key") or "") for row in delivery_events}
+    _validate_delivery_boundaries(deliveries)
     delivered_identities = {str(row.get("delivery_identity") or "") for row in delivery_events}
     for refusal in refused_deliveries:
         duplicate = refusal["reason"] == "duplicate_delivery_identity"
         later_delivery = any(
             int(delivery["event_sequence"]) > int(refusal["event_sequence"])
+            and delivery["observed_iteration"] == refusal["observed_iteration"]
             and (
                 delivery["delivery_identity"] == refusal["delivery_identity"]
                 or delivery["dedup_key"] == refusal["dedup_key"]
@@ -405,32 +649,21 @@ def issue_runtime_receipts(
         )
         if later_delivery:
             raise ValueError("refused_then_delivered")
-        if refusal["dedup_key"] in delivered_keys and not duplicate:
+        if any(row["dedup_key"] == refusal["dedup_key"]
+               and row["observed_iteration"] == refusal["observed_iteration"]
+               for row in delivery_events) and not duplicate:
             raise ValueError("refused_delivery_present")
         if duplicate and refusal["delivery_identity"] not in delivered_identities:
             raise ValueError("invalid_duplicate_delivery_refusal")
     provider_usage = _provider_usage(event_rows, attempted_calls=provider_calls)
     provider_admissions = _provider_admissions(event_rows)
     repro_path, reproduction = _single_optional(state_dir, "reproducibility_manifest.json")
-    graph_path, graph = _single_optional(state_dir, "graph.manifest.json")
+    graph_path, graph = _published_graph(state_dir, event_rows)
     reproduction = reproduction or {}
     graph = graph or {}
-    dense_rows = [row for row in event_rows if row.get("event") == "dense_index_ready"]
-    if len(dense_rows) > 1:
-        raise ValueError("duplicate_dense_index_receipt")
+    dense_runs = _dense_execution_receipts(event_rows)
     dense_index = (
-        {
-            "schema": "gt.dense_index_receipt.v1",
-            "query_ready": dense_rows[0].get("query_ready") is True,
-            "model_sha256": dense_rows[0].get("model_sha256"),
-            "tokenizer_sha256": dense_rows[0].get("tokenizer_sha256"),
-            "dimension": dense_rows[0].get("dimension"),
-            "document_count": dense_rows[0].get("document_count"),
-            "query_result_count": dense_rows[0].get("query_result_count"),
-            "index_sha256": dense_rows[0].get("index_sha256"),
-            "reason": dense_rows[0].get("reason"),
-        }
-        if dense_rows
+        dense_runs[-1] if dense_runs
         else {
             "schema": "gt.dense_index_receipt.v1",
             "query_ready": False,
@@ -490,6 +723,7 @@ def issue_runtime_receipts(
         "provider_delivery_receipts": deliveries,
         "refused_deliveries": refused_deliveries,
         "delivery_budget": {
+            "schema": "gt.delivery_budget.v2",
             "unit": "utf8_bytes",
             "conversion_from_legacy_tokens": "4_bytes_per_token",
             "sealed_limit": DELIVERY_BYTE_LIMITS["sealed"],
@@ -497,16 +731,23 @@ def issue_runtime_receipts(
             "prompt_delta_limit": DELIVERY_BYTE_LIMITS["context_delta"],
             "total_limit": _TOTAL_DELIVERY_BYTE_LIMIT,
             "total_observed": sum(row["context_byte_count"] for row in deliveries),
-            "task_delivery_limit": MAX_TASK_DELIVERIES,
+            "task_delivery_limit": None,
+            "boundary_claim_limit": MAX_BOUNDARY_CLAIMS,
+            "scope": "provider_decision",
             "admitted_count": len(deliveries),
             "refused_count": len(refused_deliveries),
         },
         "graph_utilisation": graph_utilisation(
-            deliveries, cochange_rows=graph.get("cochange_rows")
+            deliveries, cochange_rows=graph.get("cochange_rows"),
+            verified_graph_deliveries=_semantic_graph_deliveries(
+                state_dir, event_rows, deliveries, task_id=task_id,
+                product_source_sha=product_source_sha,
+            ),
         ),
         "provider_admissions": provider_admissions,
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
+        "dense_execution_receipts": dense_runs,
         "event_journal": event_journal,
         "completion_state_event_journal": dict(gt.get("event_journal") or {}),
         "provider_identity": {
@@ -517,9 +758,11 @@ def issue_runtime_receipts(
         },
         "reproducibility_manifest": reproduction,
         "graph_certification": graph,
+        "graph_publication_state": _graph_publication_state(event_rows),
     }
     product: dict[str, Any] = {
         "schema": "gt.run_receipt.v1",
+        "synthetic_transport": bool(report.get("synthetic_transport")),
         "task_id": task_id,
         "status": status,
         "terminal": terminal,
@@ -544,6 +787,7 @@ def issue_runtime_receipts(
     }
     adapter = {
         "schema": "gt.benchmark_adapter_receipt.v1",
+        "synthetic_transport": bool(report.get("synthetic_transport")),
         "task_id": task_id,
         "product_command": "gt-miniswe-run",
         "attempt": 1,
@@ -619,6 +863,7 @@ def issue_runtime_receipt_failure(
     product: dict[str, Any] = {
         "schema": "gt.run_receipt.v1",
         "task_id": task_id,
+        "synthetic_transport": bool(report.get("synthetic_transport")),
         "status": "ERROR",
         "terminal": terminal,
         "stop_reason": terminal,
@@ -637,6 +882,7 @@ def issue_runtime_receipt_failure(
     adapter: dict[str, Any] = {
         "schema": "gt.benchmark_adapter_receipt.v1",
         "task_id": task_id,
+        "synthetic_transport": bool(report.get("synthetic_transport")),
         "status": "ERROR",
         "product_command": "gt-miniswe-run",
         "attempt": 1,
@@ -662,6 +908,8 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
 
     receipt = _read_object(receipt_path)
     errors: list[str] = []
+    if receipt.get("synthetic_transport"):
+        errors.append("synthetic_transport_not_paid_evidence")
     if receipt.get("schema") != "gt.run_receipt.v1":
         errors.append("product_receipt_schema")
     if receipt.get("status") != "COMPLETED":
@@ -670,6 +918,18 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         errors.append("product_treatment_mismatch")
     if receipt.get("agent_scaffold_version") != "2.4.6":
         errors.append("product_scaffold_version_mismatch")
+    try:
+        adapter = _read_object(receipt_path.with_name("benchmark-adapter.json"))
+        if (adapter.get("schema") != "gt.benchmark_adapter_receipt.v1"
+                or adapter.get("product_command") != "gt-miniswe-run"
+                or any(adapter.get(key) != receipt.get(key) for key in (
+                    "task_id", "treatment", "requested_model", "effective_model",
+                    "agent_scaffold_version", "product_source_sha", "time_budget_seconds",
+                ))
+                or bool(adapter.get("synthetic_transport")) != bool(receipt.get("synthetic_transport"))):
+            errors.append("product_adapter_receipt_mismatch")
+    except (ValueError, OSError):
+        errors.append("product_adapter_receipt_missing_or_invalid")
 
     trajectory_path = receipt_path.with_name("gt-run.trajectory.json")
     report_path = receipt_path.with_name("miniswe_report.json")
@@ -689,6 +949,10 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         report = _read_object(report_path)
         if integrity.get("report_sha256") != _sha256(report_path):
             errors.append("product_report_digest_mismatch")
+    if bool(report.get("synthetic_transport")) != bool(receipt.get("synthetic_transport")):
+        errors.append("product_transport_report_mismatch")
+    if report.get("synthetic_transport") and "synthetic_transport_not_paid_evidence" not in errors:
+        errors.append("synthetic_transport_not_paid_evidence")
     calls = ((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls")
     if calls is None:
         errors.append("product_provider_calls_missing")
@@ -787,15 +1051,23 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     if not isinstance(deliveries, list):
         errors.append("treatment_provider_deliveries_invalid")
         deliveries = []
+    budget = treatment.get("delivery_budget")
+    budget = budget if isinstance(budget, dict) else {}
+    decision_scoped = budget.get("schema") == "gt.delivery_budget.v2"
     delivery_identities = [
         str(row.get("delivery_identity") or row.get("context_sha256") or "")
         for row in deliveries
         if isinstance(row, dict)
     ]
-    if len(delivery_identities) != len(deliveries) or len(delivery_identities) != len(
-        set(delivery_identities)
+    if len(delivery_identities) != len(deliveries) or (
+        not decision_scoped and len(delivery_identities) != len(set(delivery_identities))
     ):
         errors.append("treatment_duplicate_delivery_identity")
+    if decision_scoped:
+        try:
+            _validate_delivery_boundaries(deliveries)
+        except (ValueError, TypeError, AttributeError) as exc:
+            errors.append("treatment_delivery_boundary_invalid:" + str(exc))
     try:
         observed_delivery_events = _delivery_rows(runtime_events)
         observed_refusals = _delivery_refusals(runtime_events)
@@ -820,7 +1092,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         errors.append("treatment_prompt_delivery_count_mismatch")
     if int(treatment.get("sealed_delivery_count") or 0) != len(evidence_events):
         errors.append("treatment_sealed_delivery_count_mismatch")
-    if len(deliveries) > MAX_TASK_DELIVERIES:
+    if not decision_scoped and len(deliveries) > MAX_TASK_DELIVERIES:
         errors.append("treatment_delivery_limit_exceeded")
     core_evidence = int(treatment.get("evidence_items_delivered") or 0)
     if core_evidence < 0 or core_evidence != len(evidence_events):
@@ -860,9 +1132,11 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append("treatment_delivery_context_digest_invalid")
         if delivery.get("delivery_identity") != delivery.get("context_sha256"):
             errors.append("treatment_delivery_identity_invalid")
-    if total_bytes > _TOTAL_DELIVERY_BYTE_LIMIT:
+    if not decision_scoped and total_bytes > _TOTAL_DELIVERY_BYTE_LIMIT:
         errors.append("treatment_total_context_budget_exceeded")
     allowed_refusals = {
+        "boundary_claim_ceiling",
+        "request_delivery_byte_ceiling",
         "delivery_byte_ceiling",
         "task_delivery_byte_ceiling",
         "task_delivery_dose_ceiling",
@@ -878,6 +1152,8 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         later_delivery = any(
             isinstance(delivery, dict)
             and int(delivery.get("event_sequence") or 0) > refusal_sequence
+            and (not decision_scoped or delivery.get("observed_iteration")
+                 == refusal.get("observed_iteration"))
             and (
                 delivery.get("delivery_identity") == refusal.get("delivery_identity")
                 or delivery.get("dedup_key") == refusal.get("dedup_key")
@@ -891,23 +1167,36 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             or refusal.get("lane") not in {"prompt", "sealed"}
             or not _SHA64.fullmatch(str(refusal.get("payload_sha256") or ""))
             or refusal_sequence < 1
-            or (str(refusal.get("dedup_key") or "") in delivered_keys and not duplicate)
+            or (not duplicate and any(
+                isinstance(row, dict) and row.get("dedup_key") == refusal.get("dedup_key")
+                and (not decision_scoped or row.get("observed_iteration")
+                     == refusal.get("observed_iteration")) for row in deliveries))
             or (
                 duplicate
                 and str(refusal.get("delivery_identity") or "") not in set(delivery_identities)
             )
         ):
             errors.append("treatment_delivery_refusal_invalid")
-    budget = treatment.get("delivery_budget")
-    budget = budget if isinstance(budget, dict) else {}
+    policy_valid = (
+        budget.get("task_delivery_limit") is None
+        and budget.get("boundary_claim_limit") == MAX_BOUNDARY_CLAIMS
+        and budget.get("scope") == "provider_decision"
+        and budget.get("total_limit") == TOTAL_DELIVERY_BYTE_LIMIT
+    ) if decision_scoped else int(budget.get("task_delivery_limit") or 0) == MAX_TASK_DELIVERIES
     if (
-        int(budget.get("task_delivery_limit") or 0) != MAX_TASK_DELIVERIES
+        not policy_valid
         or int(budget.get("admitted_count") or 0) != len(deliveries)
         or int(budget.get("refused_count") or 0) != len(refused_deliveries)
         or int(budget.get("total_observed") or 0) != total_bytes
     ):
         errors.append("treatment_delivery_budget_conservation_failed")
     dense = treatment.get("dense_index_receipt")
+    if "dense_execution_receipts" in treatment:
+        dense_runs = _dense_execution_receipts(runtime_events)
+        if treatment["dense_execution_receipts"] != dense_runs:
+            errors.append("treatment_dense_execution_census_mismatch")
+        if dense_runs and dense != dense_runs[-1]:
+            errors.append("treatment_dense_execution_identity_mismatch")
     if (
         treatment.get("retrieval_mode") != "hybrid_required"
         or not isinstance(dense, dict)
@@ -956,6 +1245,30 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         and _SHA64.fullmatch(str(graph.get("graph_sha256") or ""))
     ):
         errors.append("treatment_graph_certification_invalid")
+    try:
+        from gt_engine.indexer import certify_graph_artifact
+        from gt_harness.product import groundtruth_release
+
+        manifest_path, collected_graph = _published_graph(state_dir, runtime_events)
+        if ("graph_publication_state" in treatment
+                or any(row.get("event") == "graph_publication" for row in runtime_events)):
+            if treatment.get("graph_publication_state") != _graph_publication_state(runtime_events):
+                errors.append("treatment_graph_publication_state_mismatch")
+        if (manifest_path is None or collected_graph != graph
+                or integrity.get("graph_manifest_sha256") != _sha256(manifest_path)):
+            errors.append("treatment_graph_manifest_integrity_failed")
+        else:
+            valid, reason = certify_graph_artifact(
+                manifest_path.with_name("graph.db"), manifest_path,
+                expected_root_sha256=str(graph.get("repository_root_sha256") or ""),
+                expected_binary_sha256=groundtruth_release()["producer_sha256"],
+                expected_task_id=str(receipt.get("task_id") or ""),
+                expected_product_source_sha=str(receipt.get("product_source_sha") or ""),
+            )
+            if not valid:
+                errors.append(f"treatment_graph_artifact_invalid:{reason}")
+    except (ValueError, OSError, TypeError, KeyError, sqlite3.Error) as exc:
+        errors.append(f"treatment_graph_artifact_invalid:{exc}")
     # A repository that had source to index owes graph-derived evidence: the
     # treatment either used the mechanism under test or it did not. The exemption
     # is for a task that starts with no source at all -- there the graph fills as
@@ -965,8 +1278,17 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     utilisation = treatment.get("graph_utilisation")
     utilisation = utilisation if isinstance(utilisation, dict) else {}
     certification = graph if isinstance(graph, dict) else {}
+    try:
+        graph_deliveries = _semantic_graph_deliveries(
+            state_dir, runtime_events, deliveries, task_id=str(receipt.get("task_id") or ""),
+            product_source_sha=str(receipt.get("product_source_sha") or ""),
+        )
+    except (ValueError, OSError, KeyError, TypeError, sqlite3.Error) as exc:
+        errors.append(str(exc))
+        graph_deliveries = frozenset()
     expected_utilisation = graph_utilisation(
-        deliveries, cochange_rows=certification.get("cochange_rows")
+        deliveries, cochange_rows=certification.get("cochange_rows"),
+        verified_graph_deliveries=graph_deliveries,
     )
     if utilisation != expected_utilisation:
         errors.append("treatment_graph_utilisation_mismatch")

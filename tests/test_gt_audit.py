@@ -9,7 +9,6 @@ detection, pairing - are pinned before a healthy artifact exists.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -19,17 +18,12 @@ from pathlib import Path
 import pytest
 
 from gt_engine.event_journal import GENESIS_HASH, event_hash
+from scripts import gt_audit
 
 REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / "scripts" / "gt_audit.py"
+SCRIPT = Path(gt_audit.__file__)
 CRASHED_RUN = Path(__file__).resolve().parent / "fixtures" / "gt_audit" / "crashed_run"
 SMOKE_RUN = Path(__file__).resolve().parent / "fixtures" / "gt_audit" / "smoke_run"
-
-_spec = importlib.util.spec_from_file_location("gt_audit", SCRIPT)
-gt_audit = importlib.util.module_from_spec(_spec)
-sys.modules["gt_audit"] = gt_audit  # dataclasses resolve types via sys.modules
-_spec.loader.exec_module(gt_audit)
-
 
 # --------------------------------------------------------------------------- #
 # synthetic transcript builders (nano CLI rich-panel shape)
@@ -226,6 +220,17 @@ def test_native_miniswe_audit_uses_real_artifacts_not_nano(tmp_path):
         gt_audit.summarize_features({})
     )
     assert "missing agent/nano.txt" not in " ".join(audit.verdict_reasons)
+
+
+def test_native_miniswe_246_terminal_is_read_from_info(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+    path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(path.read_text())
+    trajectory["info"]["exit_status"] = trajectory.pop("exit_status")
+    path.write_text(json.dumps(trajectory))
+    audit = gt_audit.audit_task(task)
+    assert audit.verdict == "GREEN-quiet"
+    assert audit.stop_reason == "submitted"
 
 
 def test_native_miniswe_audit_reports_timeout_cause_not_missing_nano(tmp_path):

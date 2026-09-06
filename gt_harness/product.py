@@ -36,6 +36,23 @@ class BundleError(ValueError):
     """A bundle or one of its bound inputs is invalid."""
 
 
+def groundtruth_release(root: Path | None = None) -> dict[str, Any]:
+    """Read the sole source or installed-wheel producer and wheel pins."""
+    root = root or Path(__file__).resolve().parent.parent
+    path = root / "config" / "deepswe_product_bundle_v1.json"
+    if not path.is_file():
+        path = root / "gt_harness" / "data" / "product_bundle_v1.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != PRODUCT_SOURCE_SCHEMA:
+        raise ValueError("invalid product release manifest")
+    release = manifest["groundtruth"]
+    for key in ("wheel_sha256", "producer_sha256"):
+        digest = release.get(key, "")
+        if not isinstance(digest, str) or len(digest) != 64 or not set(digest) <= _HASH:
+            raise ValueError(f"invalid groundtruth release pin: {key}")
+    return release
+
+
 def _digest(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 

@@ -6,11 +6,12 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sqlite3
 import tempfile
 import threading
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,8 @@ from .delivery_budget import (
     compact_localization,
     delivery_byte_limit,
 )
-from .engine_state import EngineState, GraphQuerySnapshot
-from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash
+from .engine_state import EngineState, GraphQuerySnapshot, RuntimeLayout
+from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash, verify_event_journal
 from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
 from .request_history import store_provider_request
@@ -34,9 +35,12 @@ from .task_contract import (
     render_task_contract,
 )
 from .verification_contract import (
+    certified_path_footprint,
     compile_obligation_predicates,
+    conservative_execution_footprint,
     evaluate_passing_observation,
     is_executable_check,
+    predicate_receipt_footprint,
 )
 
 
@@ -112,14 +116,10 @@ class ExternalStateStore:
         self._head = GENESIS_HASH
         if self.path.exists():
             try:
-                rows = [
-                    json.loads(line)
-                    for line in self.path.read_text(encoding="utf-8").splitlines()
-                    if line.strip()
-                ]
-                if rows and all(row.get("schema") == JOURNAL_SCHEMA for row in rows):
-                    self._sequence = int(rows[-1].get("sequence") or len(rows))
-                    self._head = str(rows[-1].get("event_hash") or GENESIS_HASH)
+                verified = verify_event_journal(self.path)
+                if verified.valid:
+                    self._sequence = verified.event_count
+                    self._head = verified.event_head
             except Exception:
                 # Legacy/partial state remains untouched. The next write starts
                 # a fresh v1 chain; the verifier will correctly flag the mixed
@@ -204,7 +204,8 @@ class MiniSweAdapter(GroundtruthController):
                  contract: TaskContract | None = None,
                  repo_root: str | Path = "", graph_db: str | None = None,
                  issue_text: str = "", requested_model: str = "",
-                 resolved_model: str = "", fallback_model: str = ""):
+                 resolved_model: str = "", fallback_model: str = "",
+                 layout: RuntimeLayout | None = None):
         super().__init__(predicates, repeat_budget=repeat_budget)
         self.task_id = task_id
         self.contract = contract
@@ -218,7 +219,10 @@ class MiniSweAdapter(GroundtruthController):
         self._obligation_by_predicate = {
             value: key for key, value in self._predicate_by_obligation.items()
         }
-        self.store = ExternalStateStore(state_dir, task_id)
+        layout = layout or RuntimeLayout.resolve(
+            workspace=repo_root or Path.cwd(), state_root=state_dir, task_id=task_id,
+        )
+        self.store = ExternalStateStore(layout.state_root, task_id)
         self.diagnostics = DiagnosticJournal(self.store.root, task_id=task_id)
         self.iteration = 0
         self.deliveries: list[ProviderDelivery] = []
@@ -227,6 +231,7 @@ class MiniSweAdapter(GroundtruthController):
         self.repo_root = str(repo_root or "")
         self.graph_db = graph_db or None
         self.engine_state = EngineState(
+            layout=layout,
             graph_path=str(self.graph_db or ""),
             graph_revision=_initial_graph_revision(self.graph_db),
         )
@@ -240,6 +245,7 @@ class MiniSweAdapter(GroundtruthController):
         self._dedup_chain: set[str] = set()
         self._chain_head = ""
         self._latest_delivery: ProviderDelivery | None = None
+        self._last_graph_publication: tuple[str, str] | None = None
         self._terminal_request_ids: set[str] = set()
         self._contract_shipped = False
         self._last_delta_signature: tuple[tuple[str, str], ...] = ()
@@ -299,6 +305,12 @@ class MiniSweAdapter(GroundtruthController):
         self._submit_invalidation_keys: dict[str, str] = {}
         self._latest_workspace_snapshot: Any | None = None
         self._graph_coordinator: GraphBuildCoordinator | None = None
+        self._lsp_scheduler: Any | None = None
+        self._lsp_requests: dict[str, Any] = {}
+        self.store.append(
+            "runtime_layout", layout_schema="gt.runtime_layout.v1",
+            evidence_root=str(layout.evidence_root.resolve()),
+        )
 
     @property
     def graph_fresh(self) -> bool:
@@ -478,7 +490,7 @@ class MiniSweAdapter(GroundtruthController):
             return None
         self.store.append(
             "submit_suppression_zero_delivery",
-            schema=receipt.schema,
+            receipt_schema=receipt.schema,
             repository_revision=receipt.repository_revision,
             action_sha256=receipt.action_sha256,
             provider_payload_sha256=receipt.provider_payload_sha256,
@@ -564,6 +576,27 @@ class MiniSweAdapter(GroundtruthController):
             omissions=list(snapshot.omissions),
             file_count=len(snapshot.files),
         )
+        self._record_graph_publication()
+
+    def _record_graph_publication(self) -> None:
+        if not self.engine_state.graph_current:
+            return
+        graph = Path(self.engine_state.graph_path)
+        manifest = graph.with_suffix(".manifest.json")
+        if not manifest.is_file():
+            return
+        manifest_bytes = manifest.read_bytes()
+        manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
+        identity = (manifest_digest, self.engine_state.source_revision)
+        if identity == self._last_graph_publication:
+            return
+        payload = json.loads(manifest_bytes)
+        self.store.append(
+            "graph_publication", artifact_sha256=manifest_digest,
+            graph_sha256=payload["graph_sha256"],
+            repository_revision=self.engine_state.source_revision,
+        )
+        self._last_graph_publication = identity
 
     def record_edit_transaction(self, transaction: Any) -> None:
         encoded = transaction.canonical_bytes()
@@ -726,7 +759,41 @@ class MiniSweAdapter(GroundtruthController):
     def record_execution_evidence(self, artifact: Any) -> str:
         """Store exact raw diagnostics and return a structured augmentation."""
         raw_digest = artifact.raw_output_sha256
-        self.store.put_blob("raw_execution_output", raw_digest, artifact.raw_output)
+        raw_blob = f"raw_execution_output/{raw_digest}.json"
+        captured_path = str(getattr(artifact, "output_artifact_path", "") or "")
+        if captured_path:
+            path = Path(captured_path).resolve()
+            try:
+                relative = path.relative_to(self.store.root.resolve())
+            except ValueError:
+                # Legacy environments may have their own external capture root.
+                # Production uses this task's store for capture and analysis.
+                relative = None
+            if relative is not None:
+                from .output_evidence import EvidenceStore
+
+                page = EvidenceStore(path.parent).read(raw_digest, 0, 1)
+                expected_length = (len(artifact.raw_output) if artifact.raw_output is not None
+                                   else artifact.stored_output_length)
+                if path.name != raw_digest or page["total_length"] != expected_length:
+                    raise ValueError("execution_output_identity_mismatch")
+                raw_blob = relative.as_posix()
+        if raw_blob.startswith("raw_execution_output/"):
+            if artifact.raw_output is not None:
+                self.store.put_blob("raw_execution_output", raw_digest, artifact.raw_output)
+            elif captured_path:
+                from .output_evidence import EvidenceStore
+
+                target_store = EvidenceStore(self.store.root / "output_evidence")
+                with tempfile.NamedTemporaryFile(dir=target_store.root, delete=False) as copied:
+                    copied_path = Path(copied.name)
+                shutil.copyfile(captured_path, copied_path)
+                reference = target_store.publish(copied_path)
+                if reference["sha256"] != raw_digest:
+                    raise ValueError("execution_output_identity_mismatch")
+                raw_blob = f"output_evidence/{raw_digest}"
+            else:
+                raise ValueError("execution_output_missing")
         encoded = artifact.canonical_bytes()
         artifact_digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("execution_evidence", artifact_digest, encoded)
@@ -734,7 +801,7 @@ class MiniSweAdapter(GroundtruthController):
         self.store.append(
             "execution_evidence",
             artifact_sha256=artifact_digest,
-            raw_blob=f"raw_execution_output/{raw_digest}.json",
+            raw_blob=raw_blob,
             **payload,
         )
         return "[GT_EXECUTION_EVIDENCE]\n" + json.dumps(
@@ -749,16 +816,29 @@ class MiniSweAdapter(GroundtruthController):
                 self.graph_db = self.engine_state.graph_path
                 self._gateway_state = None
                 self.graph_stale_since_revision = ""
+                self._record_graph_publication()
                 return True
         if not self.repo_root or self._latest_workspace_snapshot is None:
             self._record_graph_refresh_failure("frozen_source_unavailable", phase=phase)
             return False
         try:
             request = self._frozen_graph_input(self._latest_workspace_snapshot)
+            from .indexer import SOURCE_EXTS
+
+            if not any(Path(path).suffix.lower() in SOURCE_EXTS for path, _ in request.files):
+                return False
             if self._graph_coordinator is None:
                 self._graph_coordinator = GraphBuildCoordinator(
-                    self.engine_state, self._build_frozen_graph
+                    self.engine_state, self._build_frozen_graph,
+                    enrichment_factory=self._schedule_lsp_candidate,
+                    candidate_certifier=self._certify_lsp_candidate,
+                    enrichment_observer=self._record_lsp_terminal,
                 )
+            if self.engine_state.graph_current:
+                self._graph_coordinator.consider_enrichment(request, GraphBuildArtifact(
+                    True, self.engine_state.graph_path, self.engine_state.graph_revision,
+                ))
+                return True
             disposition = self._graph_coordinator.schedule(request)
         except Exception as exc:  # noqa: BLE001 - freshness is fail-open
             self.store.append(
@@ -802,13 +882,15 @@ class MiniSweAdapter(GroundtruthController):
             str(snapshot.revision),
             self.engine_state.query_snapshot().masked_paths,
             tuple(sorted(files)),
+            snapshot.history,
         )
 
     def _build_frozen_graph(self, request: FrozenBuildInput) -> GraphBuildArtifact:
-        from .indexer import ensure_index_with_receipt
+        from .indexer import _freeze_history, ensure_index_with_receipt
 
         with tempfile.TemporaryDirectory(prefix="gt-frozen-source-") as temporary:
             root = Path(temporary)
+            _freeze_history(Path(self.repo_root), root, request.history)
             for relative, payload in request.files:
                 target = (root / relative).resolve()
                 if root.resolve() not in target.parents:
@@ -816,7 +898,7 @@ class MiniSweAdapter(GroundtruthController):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(payload)
             receipt = ensure_index_with_receipt(
-                root, state_dir=str(self.store.root.parent),
+                root, layout=self.engine_state.layout,
                 source_revision=request.source_revision,
             )
         return GraphBuildArtifact(
@@ -824,9 +906,100 @@ class MiniSweAdapter(GroundtruthController):
             str(receipt.graph_revision or ""), receipt.error_type or "",
         )
 
+    def _schedule_lsp_candidate(self, request: FrozenBuildInput, base: GraphBuildArtifact) -> Any:
+        from groundtruth.lsp.background_promotion import (
+            LSPPromotionRequest,
+            LSPPromotionScheduler,
+            repository_snapshot_sha256,
+        )
+
+        from .indexer import _certify_published_graph, source_manifest_digest
+
+        base_path = Path(base.graph_path).resolve()
+        valid, reason = _certify_published_graph(
+            base_path, base_path.with_suffix(".manifest.json"),
+            expected_root=Path(self.repo_root),
+        )
+        if not valid:
+            raise ValueError(f"lsp_base_uncertified:{reason}")
+        layout = self.engine_state.layout
+        namespace = layout.graph_root / "enrichments"
+        namespace.mkdir(parents=True, exist_ok=True)
+        directory = Path(tempfile.mkdtemp(prefix="lsp-", dir=namespace))
+        source = directory / "source"
+        source.mkdir()
+        for relative, payload in request.files:
+            target = (source / relative).resolve()
+            if source.resolve() not in target.parents:
+                raise ValueError("unsafe_lsp_source_path")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+        base_manifest = json.loads(base_path.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+        if source_manifest_digest(source) != base_manifest.get("source_manifest_sha256"):
+            raise ValueError("lsp_source_input_mismatch")
+        if self._lsp_scheduler is None:
+            self._lsp_scheduler = LSPPromotionScheduler()
+        promotion_request = LSPPromotionRequest(
+            source_revision=request.source_revision,
+            graph_revision=base.graph_revision,
+            graph_path=str(base_path),
+            graph_sha256=hashlib.sha256(base_path.read_bytes()).hexdigest(),
+            repository_root=str(source),
+            repository_snapshot_sha256=repository_snapshot_sha256(source),
+            candidate_path=str(directory / "graph.db"),
+        )
+        handle = self._lsp_scheduler.schedule(promotion_request)
+        self._lsp_requests[handle.task_id] = promotion_request
+        self.store.append(
+            "lsp_promotion_scheduled", task_id=handle.task_id,
+            source_revision=request.source_revision, graph_revision=base.graph_revision,
+            repository_snapshot_sha256=promotion_request.repository_snapshot_sha256,
+        )
+        return handle
+
+    def _certify_lsp_candidate(self, request: FrozenBuildInput, base: GraphBuildArtifact,
+                               terminal: Mapping[str, Any]) -> GraphBuildArtifact:
+        from .indexer import certify_lsp_candidate
+
+        scheduled = self._lsp_requests.get(str(terminal.get("task_id") or ""))
+        if (scheduled is None or scheduled.source_revision != request.source_revision
+                or scheduled.graph_revision != base.graph_revision
+                or str(terminal.get("candidate_path") or "") != scheduled.candidate_path):
+            return GraphBuildArtifact(False, "", "", "lsp_scheduled_identity_mismatch")
+        return certify_lsp_candidate(
+            base.graph_path, str(terminal.get("candidate_path") or ""), terminal,
+            expected_source_revision=request.source_revision,
+            expected_repository_snapshot_sha256=scheduled.repository_snapshot_sha256,
+            expected_repository_root_sha256=hashlib.sha256(
+                str(Path(scheduled.repository_root).resolve()).encode("utf-8", "surrogatepass")
+            ).hexdigest(),
+            layout=self.engine_state.layout,
+            expected_root_sha256=hashlib.sha256(
+                str(Path(self.repo_root).resolve()).encode("utf-8", "surrogatepass")
+            ).hexdigest(),
+            expected_task_id=os.environ.get("GT_TASK_ID", ""),
+            expected_product_source_sha=os.environ.get("GT_PRODUCT_SOURCE_SHA", ""),
+        )
+
+    def _record_lsp_terminal(self, request: FrozenBuildInput, base: GraphBuildArtifact,
+                             terminal: Mapping[str, Any], disposition: str) -> None:
+        encoded = json.dumps(dict(terminal), ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":")).encode("utf-8")
+        digest = hashlib.sha256(encoded).hexdigest()
+        self.store.put_blob("lsp_receipts", digest, encoded)
+        self.store.append(
+            "lsp_promotion_terminal", artifact_sha256=digest,
+            artifact_blob=f"lsp_receipts/{digest}.json", disposition=disposition,
+            source_revision=request.source_revision, input_graph_revision=base.graph_revision,
+            status=terminal.get("status"),
+        )
+        self._lsp_requests.pop(str(terminal.get("task_id") or ""), None)
+
     def close_graph_coordinator(self) -> None:
         if self._graph_coordinator is not None:
             self._graph_coordinator.close(wait=False)
+        if self._lsp_scheduler is not None:
+            self._lsp_scheduler.close(wait=False)
 
     def _record_graph_refresh_failure(self, cause: str, *, phase: str) -> None:
         self.engine_state.mark_graph_failed()
@@ -1143,9 +1316,13 @@ class MiniSweAdapter(GroundtruthController):
         )
         predicate_ids = {item.predicate_id for item in self.predicates.values()}
         green: list[str] = []
+        dependencies: dict[str, Any] = {}
         for receipt in receipts:
             if receipt.predicate_id not in predicate_ids:
                 continue
+            footprint = predicate_receipt_footprint(
+                self._compiled_predicates[receipt.obligation_id], receipt,
+            )
             self.record_receipt(
                 receipt.predicate_id,
                 command,
@@ -1154,13 +1331,16 @@ class MiniSweAdapter(GroundtruthController):
                 epoch=self.workspace_epoch,
                 status="GREEN",
                 semantic=True,
+                dependency_footprint=footprint,
             )
+            dependencies[receipt.predicate_id] = asdict(footprint)
             green.append(receipt.predicate_id)
         self.store.append(
             "semantic_observation",
             command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest(),
             action_index=action_index,
             predicate_ids=green,
+            dependency_footprints=dependencies,
         )
         return tuple(green)
 
@@ -1376,12 +1556,8 @@ class MiniSweAdapter(GroundtruthController):
         if delivery_identity in pending_identities:
             return True
         reason = ""
-        if delivery_identity in self._model_visible_delivery_identities:
-            reason = "duplicate_delivery_identity"
-        elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
+        if candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
-        elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
-            reason = "cochange_task_ceiling"
         elif rendered_bytes > per_delivery_limit:
             reason = "delivery_byte_ceiling"
         elif self._boundary_delivery_bytes + rendered_bytes > TOTAL_DELIVERY_BYTE_LIMIT:
@@ -1592,7 +1768,7 @@ class MiniSweAdapter(GroundtruthController):
         if not model_dir or not snapshot.graph_current or not snapshot.graph_path:
             return ""
         try:
-            from .retrieval import RetrievalSource, hybrid_rank
+            from .retrieval import RetrievalSource, hybrid_rank, render_semantic_localization
 
             ranking = hybrid_rank(
                 snapshot.graph_path,
@@ -1606,6 +1782,12 @@ class MiniSweAdapter(GroundtruthController):
                 source for source in ranking.sources
                 if source.source is RetrievalSource.DENSE
             )
+            dense_receipt = dense.detail.get("execution_receipt")
+            if isinstance(dense_receipt, dict):
+                self.store.append(
+                    "dense_index_ready",
+                    **{key: value for key, value in dense_receipt.items() if key != "schema"},
+                )
             if not dense.available or not dense.ranking:
                 self.store.append(
                     "semantic_localization_unavailable",
@@ -1650,11 +1832,7 @@ class MiniSweAdapter(GroundtruthController):
             ).encode("utf-8")
             digest = hashlib.sha256(encoded).hexdigest()
             self.store.put_blob("localization_advisory", digest, encoded)
-            rendered = "[GT_EVIDENCE:localization]\n" + "\n".join(
-                f"{item['anchor']} score={item['score']:.8f} "
-                f"reasons={','.join(item['reasons'])}"
-                for item in items
-            )
+            rendered = render_semantic_localization(items)
             self._localization_metadata = {
                 "kind": "localization",
                 "dedup_key": f"semantic-localization:{digest}",
@@ -2052,6 +2230,7 @@ class MiniSweAdapter(GroundtruthController):
                         predicate.predicate_id, "gt_live_verify", 0,
                         "artifact exists", epoch=self.workspace_epoch,
                         status="GREEN", semantic=True,
+                        dependency_footprint=self._live_artifact_footprint(predicate.scope),
                     )
                     green.append(predicate.predicate_id)
                     continue
@@ -2076,6 +2255,17 @@ class MiniSweAdapter(GroundtruthController):
             if not os.path.isfile(abs_path):
                 return False
         return True
+
+    def _live_artifact_footprint(self, scope: tuple[str, ...]):
+        root = Path(self.repo_root).resolve()
+        paths: list[str] = []
+        for relative in scope:
+            original = Path(os.path.abspath(root / relative))
+            resolved = original.resolve()
+            if resolved != original or root not in resolved.parents:
+                return conservative_execution_footprint(basis="artifact_external_or_symlink")
+            paths.append(resolved.relative_to(root).as_posix())
+        return certified_path_footprint(paths, basis="live_artifact_stat")
 
     def _live_renumber(
         self,

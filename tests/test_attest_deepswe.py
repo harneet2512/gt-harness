@@ -185,6 +185,7 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "event": "evidence_delivery", "event_hash": "3" * 64, "sequence": 3,
             "dedup_key": "localization", "evidence_type": "localization",
             "iteration": 0, "action_index": 0, "rendered_bytes": 100,
+            "delivery_identity": "5" * 64,
         },
         {
             "event": "receipt", "event_hash": "4" * 64, "sequence": 4,
@@ -194,6 +195,7 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
         {
             "event": "provider_delivery", "event_hash": "6" * 64, "sequence": 5,
             "iteration": 1, "request_id": "request-1",
+            "delivery_ids": ["5" * 64],
         },
         {
             "event": "dense_index_ready", "event_hash": "7" * 64, "sequence": 6,

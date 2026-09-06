@@ -85,12 +85,15 @@ __all__ = [
     "BINDING_TABLE",
     "CONTRACT_SOURCE_REVISION",
     "DEFAULT_BATCH_SIZE",
+    "DOCUMENT_CACHE_TABLE",
+    "DOCUMENT_RECIPE_ID",
     "KEY_SCHEMA",
     "RECEIPT_SCHEMA",
     "UNBOUND_GRAPH_REVISION",
     "Binding",
     "ContractEmbeddingStore",
     "EmbeddingPlan",
+    "DocumentVectorLookup",
     "StoreLookup",
     "SymbolEmbeddingInput",
     "contract_text",
@@ -98,13 +101,34 @@ __all__ = [
     "fingerprints",
     "invalidation_key",
     "lookup_vectors",
+    "lookup_document_vectors",
     "onnx_embedder",
     "plan_embeddings",
+    "publish_document_vectors",
 ]
 
 RECEIPT_SCHEMA = "gt.contract_embedding_receipt.v1"
 
 BINDING_TABLE = "gt_contract_embedding_bindings"
+
+# Retrieval's fallback documents are deliberately separate from the contract
+# vectors.  Their text recipe differs, and mixing the two under one stable id
+# would let whichever writer ran last silently change ranking semantics.
+DOCUMENT_CACHE_TABLE = "gt_dense_document_cache"
+DOCUMENT_RECIPE_ID = "gt.retrieval.symbol_document.v1"
+
+_CREATE_DOCUMENT_CACHE_TABLE = f"""
+CREATE TABLE IF NOT EXISTS {DOCUMENT_CACHE_TABLE} (
+    cache_key TEXT PRIMARY KEY,
+    content_sha256 TEXT NOT NULL,
+    document_recipe_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    tokenizer_id TEXT NOT NULL,
+    dimension INTEGER NOT NULL,
+    embedding_json TEXT NOT NULL,
+    embedding_hash TEXT NOT NULL
+)
+"""
 
 # The contract projection's schema stands in for "the revision of the source
 # text these vectors were made from" -- change the projection and every vector
@@ -764,6 +788,161 @@ def lookup_vectors(
         dimension=dimension,
         reason=None,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentVectorLookup:
+    """Content-addressed fallback vectors for contract-store pool misses."""
+
+    vectors: Mapping[int, tuple[float, ...]]
+    hits: int
+    misses: int
+    missing_node_ids: tuple[int, ...]
+    recipe_id: str
+    reason: str | None
+
+
+def _document_content_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _document_cache_key(
+    text: str, *, recipe_id: str, model_id: str, tokenizer_id: str, dimension: int
+) -> str:
+    material = json.dumps(
+        {
+            "content_sha256": _document_content_sha256(text),
+            "dimension": int(dimension),
+            "document_recipe_id": recipe_id,
+            "model_id": model_id,
+            "tokenizer_id": tokenizer_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def lookup_document_vectors(
+    store_path: str | Path,
+    documents: Mapping[str, str],
+    node_stable_ids: Mapping[int, str],
+    *,
+    recipe_id: str = DOCUMENT_RECIPE_ID,
+) -> DocumentVectorLookup:
+    """Read fallback document vectors by exact content and embedding recipe.
+
+    Node ids and retrieval ids are graph-local attribution only.  Neither is a
+    reuse key: an unchanged document can move between graph builds, while a
+    reused id can name changed content.  The key therefore covers the complete
+    text plus the query-independent document recipe and model identity.
+    """
+    identity = dense_runtime.model_identity()
+    model_id = str(identity["model_id"])
+    tokenizer_id = str(identity["tokenizer_sha256"])
+    dimension = int(identity["dimension"])
+    keys = {
+        node_id: _document_cache_key(
+            documents[stable_id], recipe_id=recipe_id, model_id=model_id,
+            tokenizer_id=tokenizer_id, dimension=dimension,
+        )
+        for node_id, stable_id in node_stable_ids.items()
+        if stable_id in documents
+    }
+    content_by_key = {
+        key: _document_content_sha256(documents[node_stable_ids[node_id]])
+        for node_id, key in keys.items()
+    }
+    if not keys:
+        return DocumentVectorLookup({}, 0, 0, (), recipe_id, None)
+    found: dict[str, tuple[float, ...]] = {}
+    try:
+        connection = sqlite3.connect(Path(store_path).resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (DOCUMENT_CACHE_TABLE,),
+            ).fetchone() is not None:
+                wanted = sorted(set(keys.values()))
+                for start in range(0, len(wanted), 400):
+                    batch = wanted[start:start + 400]
+                    slots = ",".join("?" for _ in batch)
+                    rows = connection.execute(
+                        "SELECT cache_key,content_sha256,document_recipe_id,model_id,"
+                        "tokenizer_id,dimension,embedding_json,embedding_hash "
+                        f"FROM {DOCUMENT_CACHE_TABLE} WHERE cache_key IN ({slots})",
+                        batch,
+                    )
+                    for row in rows:
+                        if (row[1] != content_by_key.get(str(row[0]))
+                                or row[2] != recipe_id or row[3] != model_id
+                                or row[4] != tokenizer_id or int(row[5]) != dimension):
+                            continue
+                        vector = tuple(float(value) for value in json.loads(row[6]))
+                        encoded = json.dumps(vector, separators=(",", ":")).encode()
+                        if (len(vector) != dimension or not any(vector)
+                                or any(not math.isfinite(value) for value in vector)
+                                or hashlib.sha256(encoded).hexdigest() != row[7]):
+                            continue
+                        found[str(row[0])] = vector
+        finally:
+            connection.close()
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        return DocumentVectorLookup(
+            {}, 0, len(keys), tuple(sorted(keys)), recipe_id,
+            f"dense_document_cache_unreadable:{type(exc).__name__}",
+        )
+    vectors = {node_id: found[key] for node_id, key in keys.items() if key in found}
+    missing = tuple(sorted(set(keys) - set(vectors)))
+    return DocumentVectorLookup(
+        vectors, len(vectors), len(missing), missing, recipe_id, None,
+    )
+
+
+def publish_document_vectors(
+    store_path: str | Path,
+    documents: Mapping[str, str],
+    node_stable_ids: Mapping[int, str],
+    vectors: Mapping[int, Sequence[float]],
+    *,
+    recipe_id: str = DOCUMENT_RECIPE_ID,
+) -> None:
+    """Atomically persist newly embedded fallback documents in their namespace."""
+    if not vectors:
+        return
+    identity = dense_runtime.model_identity()
+    model_id = str(identity["model_id"])
+    tokenizer_id = str(identity["tokenizer_sha256"])
+    dimension = int(identity["dimension"])
+    rows = []
+    for node_id, raw_vector in vectors.items():
+        stable_id = node_stable_ids[node_id]
+        text = documents[stable_id]
+        vector = tuple(float(value) for value in raw_vector)
+        if (len(vector) != dimension or not any(vector)
+                or any(not math.isfinite(value) for value in vector)):
+            raise ValueError("dense_document_cache_vector_invalid")
+        encoded = json.dumps(vector, separators=(",", ":"))
+        rows.append((
+            _document_cache_key(
+                text, recipe_id=recipe_id, model_id=model_id,
+                tokenizer_id=tokenizer_id, dimension=dimension,
+            ),
+            _document_content_sha256(text), recipe_id, model_id, tokenizer_id,
+            dimension, encoded, hashlib.sha256(encoded.encode()).hexdigest(),
+        ))
+    connection = sqlite3.connect(Path(store_path))
+    try:
+        with connection:
+            connection.execute(_CREATE_DOCUMENT_CACHE_TABLE)
+            connection.executemany(
+                f"INSERT OR REPLACE INTO {DOCUMENT_CACHE_TABLE} "
+                "(cache_key,content_sha256,document_recipe_id,model_id,tokenizer_id,"
+                "dimension,embedding_json,embedding_hash) VALUES (?,?,?,?,?,?,?,?)",
+                rows,
+            )
+    finally:
+        connection.close()
 
 
 def score_pool(

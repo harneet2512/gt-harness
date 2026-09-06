@@ -46,7 +46,7 @@ def test_normal_child_exit_is_not_reclassified():
     assert result.returncode == 6
 
 
-@pytest.mark.parametrize("state_inside", [False, True])
+@pytest.mark.parametrize("state_inside", [False, True, "shared"])
 def test_actual_cli_expired_startup_conserves_patch_and_error_receipts(tmp_path, state_inside):
     repository = tmp_path / "repo"
     repository.mkdir()
@@ -66,9 +66,11 @@ def test_actual_cli_expired_startup_conserves_patch_and_error_receipts(tmp_path,
     source.write_text("x = 2\n", encoding="utf-8")
     index_before = git("diff", "--cached")
     output = tmp_path / "artifacts"
-    state = repository / "runtime-records" if state_inside else tmp_path / "state"
-    state.mkdir()
-    (state / "internal.json").write_text('{"internal_state": true}', encoding="utf-8")
+    state = (repository if state_inside == "shared" else
+             repository / "runtime-records" if state_inside else tmp_path / "state")
+    internal = state / "fixture-task" if state_inside == "shared" else state
+    internal.mkdir(parents=True, exist_ok=True)
+    (internal / "internal.json").write_text('{"internal_state": true}', encoding="utf-8")
     result = subprocess.run([
         sys.executable, "-m", "scripts.miniswe_supervisor",
         "--task", "fixture", "--model", "fixture/model", "--task-id", "fixture-task",
@@ -97,3 +99,37 @@ def test_public_console_entrypoint_uses_deadline_owner():
 
     project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
     assert project["project"]["scripts"]["gt-miniswe-run"] == "scripts.miniswe_supervisor:main"
+
+
+def test_export_omits_generated_cache_and_preserves_source_paths(tmp_path):
+    from gt_engine.runtime_observation import capture_workspace
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True, check=True).stdout
+    git("init")
+    (repo / "source.py").write_text("value = 1\n")
+    cache = repo / "__pycache__"
+    cache.mkdir()
+    tracked = cache / "tracked.py"
+    tracked.write_text("tracked = 1\n")
+    git("add", ".")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "core.hooksPath=", "commit", "-m", "baseline")
+    baseline = git("rev-parse", "HEAD").decode().strip()
+    subprocess.run([sys.executable, "-c", "import source"], cwd=repo, check=True,
+                   env={**os.environ, "PYTHONDONTWRITEBYTECODE": ""})
+    assert list(cache.glob("*.pyc"))
+    (repo / "source.py").write_text("value = 2\n")
+    tracked.write_text("tracked = 2\n")
+    (repo / "vendor").mkdir()
+    (repo / "vendor" / "new.py").write_text("new = 1\n")
+    patch = tmp_path / "model.patch"
+    supervisor.export_patch(repo, baseline, patch)
+    payload = patch.read_bytes()
+    assert b".pyc" not in payload
+    assert b"a/__pycache__/tracked.py" in payload
+    assert b"b/vendor/new.py" in payload
+    paths = {row.path for row in capture_workspace(repo).files}
+    assert "vendor/new.py" in paths
+    assert "__pycache__/tracked.py" in paths

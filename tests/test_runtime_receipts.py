@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from copy import deepcopy
 from pathlib import Path
+
+import pytest
 
 from gt_harness.runtime_receipts import issue_runtime_receipts, verify_runtime_receipt
 
@@ -13,8 +16,9 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+@pytest.mark.parametrize("synthetic_transport", [False, True])
 def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
-    tmp_path: Path,
+    tmp_path: Path, synthetic_transport: bool,
 ) -> None:
     state = tmp_path / "gt-state"
     task_state = state / "task-hash"
@@ -35,6 +39,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     _write_json(
         report,
         {
+            "synthetic_transport": synthetic_transport,
             "model": "meta/muse-spark-1.2-contributor",
             "terminal": "submitted_unverified",
             "exit_code": 0,
@@ -90,6 +95,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "sequence": 3,
             "iteration": 1,
             "request_id": "request-1",
+            "delivery_ids": ["a" * 64],
         },
         {
             "event": "provider_admission", "event_hash": "c" * 64, "sequence": 4,
@@ -139,6 +145,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "sequence": 7,
             "iteration": 2,
             "request_id": "request-2",
+            "delivery_ids": ["9" * 64],
         },
         {
             "event": "provider_admission", "event_hash": "e" * 64, "sequence": 8,
@@ -221,12 +228,34 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         },
     )
     graph_state = state / "repo-hash"
+    graph_state.mkdir(parents=True)
+    graph_db = graph_state / "graph.db"
+    with sqlite3.connect(graph_db) as db:
+        db.execute("CREATE TABLE project_meta (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("CREATE TABLE cochanges (id INTEGER)")
+        db.executemany("INSERT INTO cochanges VALUES (?)", [(1,), (2,)])
+    from gt_engine.indexer import _graph_phase_metadata, _sealed_json
+    from gt_harness.product import groundtruth_release
+
+    binding = {"repository_root_sha256": "b" * 64, "source_manifest_sha256": "c" * 64,
+               "task_id": "task-a", "product_source_sha": "f" * 40,
+               "identity_scope": "benchmark_bound"}
+    producer = groundtruth_release()["producer_sha256"]
+    resource_path = graph_state / "index-resource.json"
+    _sealed_json(resource_path, {"schema": "gt.index_resource.v1", **binding,
+                 "status": "completed", "exit_code": 0, "error_code": "", "memory_evidence": False,
+                 "producer_binary_sha256": producer}, "evidence_sha256")
+    graph_digest = hashlib.sha256(graph_db.read_bytes()).hexdigest()
     _write_json(
         graph_state / "graph.manifest.json",
         {
             "schema": "gt.graph_certification.v1",
+            **binding, **_graph_phase_metadata(graph_db),
             "binary_certified": True,
-            "graph_sha256": "e" * 64,
+            "binary_sha256": producer,
+            "graph_sha256": graph_digest,
+            "graph_bytes": graph_db.stat().st_size,
+            "index_resource_sha256": hashlib.sha256(resource_path.read_bytes()).hexdigest(),
             "sqlite_quick_check": "ok",
             "cochange_rows": 2,
         },
@@ -272,6 +301,9 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert treatment["provider_delivery_receipts"][0]["event_sequence"] == 1
     assert treatment["provider_delivery_receipts"][1]["event_sequence"] == 5
     assert treatment["delivery_budget"] == {
+        "schema": "gt.delivery_budget.v2",
+        "scope": "provider_decision",
+        "boundary_claim_limit": 4,
         "unit": "utf8_bytes",
         "conversion_from_legacy_tokens": "4_bytes_per_token",
         "sealed_limit": 1_400,
@@ -279,11 +311,11 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "prompt_delta_limit": 1_400,
         "total_limit": 9_600,
         "total_observed": 223,
-        "task_delivery_limit": 24,
+        "task_delivery_limit": None,
         "admitted_count": 2,
         "refused_count": 1,
     }
-    assert product_row["treatment_receipt"]["graph_certification"]["graph_sha256"] == "e" * 64
+    assert product_row["treatment_receipt"]["graph_certification"]["graph_sha256"] == graph_digest
     assert product_row["treatment_receipt"]["graph_utilisation"]["cochange_rows"] == 2
     assert (
         product_row["integrity"]["trajectory_sha256"]
@@ -291,6 +323,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     )
     assert copied.read_bytes() == trajectory.read_bytes()
     assert adapter_row == {
+        "synthetic_transport": synthetic_transport,
         "schema": "gt.benchmark_adapter_receipt.v1",
         "task_id": "task-a",
         "product_command": "gt-miniswe-run",
@@ -302,7 +335,25 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "product_source_sha": "f" * 40,
         "time_budget_seconds": 3600,
     }
-    assert verify_runtime_receipt(product) == []
+    assert product_row["synthetic_transport"] is synthetic_transport
+    assert verify_runtime_receipt(product) == (
+        ["synthetic_transport_not_paid_evidence"] if synthetic_transport else []
+    )
+    original_resource = resource_path.read_bytes()
+    resource_path.unlink()
+    assert "treatment_graph_artifact_invalid:index_resource_mismatch" in verify_runtime_receipt(product)
+    resource_path.write_bytes(original_resource)
+    original_adapter = adapter.read_bytes()
+    adapter.unlink()
+    assert "product_adapter_receipt_missing_or_invalid" in verify_runtime_receipt(product)
+    adapter.write_bytes(original_adapter)
+    if synthetic_transport:
+        concealed = {**product_row, "synthetic_transport": False}
+        _write_json(product, concealed)
+        errors = verify_runtime_receipt(product)
+        assert "product_transport_report_mismatch" in errors
+        assert "synthetic_transport_not_paid_evidence" in errors
+        _write_json(product, product_row)
 
     refused_admission = {
         "event": "provider_admission",
@@ -374,7 +425,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             ].update(disabled_stage="global_kill_switch"),
         ),
         (
-            "treatment_delivery_limit_exceeded",
+            "treatment_delivery_boundary_invalid:duplicate_delivery_identity",
             lambda row: row["treatment_receipt"]["provider_delivery_receipts"].extend(
                 deepcopy(row["treatment_receipt"]["provider_delivery_receipts"]) * 12
             ),
@@ -405,7 +456,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             ),
         ),
         (
-            "treatment_duplicate_delivery_identity",
+            "treatment_provider_delivery_census_mismatch",
             lambda row: row["treatment_receipt"]["provider_delivery_receipts"][1].update(
                 context_sha256=row["treatment_receipt"]["provider_delivery_receipts"][0][
                     "context_sha256"

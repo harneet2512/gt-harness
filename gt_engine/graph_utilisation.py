@@ -48,6 +48,7 @@ def graph_utilisation(
     deliveries: Iterable[dict[str, Any]],
     *,
     cochange_rows: int | None = None,
+    verified_graph_deliveries: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Summarise which delivered evidence could only have come from the graph.
 
@@ -72,6 +73,9 @@ def graph_utilisation(
             continue
         delivered_features.add(feature)
         if feature in GRAPH_BACKED_FEATURES:
+            graph_backed.add(feature)
+        if (feature == "localization"
+                and row.get("delivery_identity") in verified_graph_deliveries):
             graph_backed.add(feature)
 
     rows = None if cochange_rows is None else max(0, int(cochange_rows))

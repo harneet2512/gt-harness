@@ -33,3 +33,46 @@ The local `nano` CLI and historical benchmark workflows are development or compa
 The product remains not ready until installed-bundle identity, official-verifier binding, credential isolation, task-result conservation, workflow reachability, and provider-free clean-container acceptance all pass. Missing, malformed, setup-failed, provider-failed, or unverified trials remain typed failures with unknown reward; never manufacture a score.
 
 Do not perform GCP authentication, account switching, credential mutation, or paid provider calls while repairing or auditing these gates.
+
+## Product identity and semantic conservation
+
+Before GT implementation work, read the current user plan,
+`GT_HARNESS_SESSION_HANDOFF.md`, and `docs/plans/product-completion-contract.md`.
+The Groundtruth master architecture at `D:/Groundtruth/gt_gt.md`, Part I, explains
+the product; its historical run states and older policy limits do not supersede
+the current user plan or this harness's pinned installed execution path.
+
+GT automatically supplies current, relevant, deterministic codebase evidence at
+the agent's own decision boundary. Mini-SWE owns reasoning and actions. Repair
+existing producers and consumers through GTSession/EngineState; do not replace
+them with a second engine, scripted reasoner, or pull-tool workflow.
+
+Output capture and provider rendering are distinct from GT semantic analysis.
+A preview or byte cap must never replace complete input to a canonical analyzer.
+Do not mark an otherwise supported executed check UNKNOWN solely because its
+output exceeds the provider preview. Do not invent replacement classification
+rules in the harness. Any streaming migration must preserve the canonical
+producer's supported positive and negative behavior, with failures and success
+summaries beyond the preview included in regression coverage.
+
+`gt-evidence read` is recovery plumbing. Its existence does not prove automatic
+GT capability delivery. Neither honest abstention, component tests, nor installed
+CLI success closes a required supported capability or whole-product release gate.
+When an optimization exposes a capability gap, report it and keep the requirement
+open; never reduce the product contract to make a check pass.
+
+Keep the continuing HAR-83 Linear record current after material changes, gaps,
+failed checks and completed proofs:
+https://linear.app/harneet2512/document/gt-product-contract-and-drift-correction-continuing-implementation-49e1f2b67cc1
+Preserve failed attempts and distinguish source, installed, full-flow and paid
+evidence. Read this record on continuation; do not restart from a stale summary.
+
+## Journal integration regression prevention
+
+When adding a typed event, preserve the journal envelope schema. Put a payload
+version in an explicitly named field such as `layout_schema`, unless the journal
+contract explicitly supports that payload schema. Exercise the actual producer
+through `verify_event_journal` and the installed collector/auditor; fabricated
+row lists do not prove journal admission. Candidate 20 repaired and exported the
+fixture successfully but failed audit because `runtime_layout` overwrote the
+journal schema. Its failed artifacts must remain historical evidence.

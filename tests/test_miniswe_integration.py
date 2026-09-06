@@ -157,6 +157,8 @@ def test_task_start_uses_independent_dense_graph_retrieval(
         available=True,
         ranking=(RankedSymbol(stable_id, 1.0, "semantic"),),
         reason=None,
+        detail={"execution_receipt": {"schema": "gt.dense_index_receipt.v1",
+                                      "query_ready": True, "index_sha256": "a" * 64}},
     )
     ranking = SimpleNamespace(
         sources=(dense,),
@@ -187,6 +189,10 @@ def test_task_start_uses_independent_dense_graph_retrieval(
     assert adapter.localization_delivery_metadata()["dedup_key"].startswith(
         "semantic-localization:"
     )
+    dense_rows = [row for row in map(json.loads, (adapter.store.root / "events.jsonl").read_text().splitlines())
+                  if row["event"] == "dense_index_ready"]
+    assert len(dense_rows) == 1
+    assert dense_rows[0]["index_sha256"] == "a" * 64
 
 
 def test_lexical_localization_is_quiet_on_no_match(tmp_path):
@@ -742,7 +748,7 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     rebuilt.write_bytes(b"new")
     monkeypatch.setattr(
         "gt_engine.indexer.ensure_index_with_receipt",
-        lambda root, state_dir=None, source_revision="": IndexBuildReceipt(
+        lambda root, state_dir=None, source_revision="", layout=None: IndexBuildReceipt(
             IndexBuildStatus.BUILT,
             graph_db=str(rebuilt),
             graph_revision="b" * 64,
@@ -759,8 +765,8 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("config_name", ["tsconfig.json", "package.json", "go.mod", "Cargo.toml", ".gitignore"])
 def test_frozen_input_and_reuse_key_include_resolver_configuration(tmp_path, config_name):
-    from gt_engine.runtime_observation import capture_workspace
     from gt_engine.indexer import source_manifest_digest
+    from gt_engine.runtime_observation import capture_workspace
     repository = tmp_path / "repo"
     repository.mkdir()
     (repository / "a.ts").write_text("export const a = 1\n", encoding="utf-8")

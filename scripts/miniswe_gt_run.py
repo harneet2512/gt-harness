@@ -1,8 +1,8 @@
 """Run pinned Mini-SWE-Agent 2.x with the GT lifecycle adapter (or GT-off).
 
-``--gt-off`` builds the stock Mini-SWE agent only. Every gt_engine import is
-lazy (inside ``build_agent``, behind the flag) so a GT-off run never imports
-gt_engine/groundtruth and the container needs no groundtruth wheel.
+``--gt-off`` builds Mini-SWE without the Groundtruth engine. Both arms use
+the same byte-preserving command artifact transport; GT-off needs no
+Groundtruth wheel.
 
 Model routing: litellm refuses a bare model name when a gateway is configured,
 so ``OPENAI_BASE_URL`` maps ``<model>`` to ``openai/<model>`` + ``api_base``.
@@ -16,10 +16,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -78,21 +80,6 @@ _SENSITIVE_SHELL_ENV = {
     "HF_TOKEN",
     "OPENAI_API_KEY",
 }
-
-# Match the bounded-output behavior of nano/tools.py. Mini-SWE otherwise keeps
-# every byte of every command result and resends the complete history on each
-# provider call; one 430k-character grep result caused 117k extra prompt tokens
-# per subsequent call in paid run 33915825554.
-MAX_TOOL_OUTPUT_CHARS = 16_000
-
-
-def _truncate_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
-    if len(text) <= limit:
-        return text
-    half = limit // 2
-    dropped = len(text) - limit
-    return f"{text[:half]}\n... [truncated {dropped} chars] ...\n{text[-half:]}"
-
 
 def _history_reference_marker(digest: str, size: int, tool_call_id: str) -> str:
     reference = {"sha256": digest, "utf8_bytes": size, "tool_call_id": tool_call_id}
@@ -163,8 +150,11 @@ def _compact_miniswe_history(messages: list[dict]) -> None:
             identity = json.dumps({
                 "content_sha256": digest,
                 "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest() if raw is not None else None,
+                "output_artifact": extra.get("output_artifact"),
                 "returncode": extra.get("returncode"),
                 "exception_info": extra.get("exception_info"),
+                "timed_out": extra.get("timed_out"),
+                "environment_sha256": extra.get("environment_sha256"),
             }, sort_keys=True, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError):
             continue
@@ -328,8 +318,18 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
     shell commands or template variables. It is used identically in both arms.
     """
 
+    def __init__(self, *, evidence_root: str | Path | None = None, **kwargs):
+        super().__init__(**kwargs)
+        from gt_engine.output_evidence import EvidenceStore
+
+        self.evidence_store = EvidenceStore(
+            evidence_root or tempfile.mkdtemp(prefix="gt-task-evidence-")
+        )
+
     def execution_env(self) -> dict[str, str]:
-        combined = os.environ | self.config.env
+        combined = os.environ | self.config.env | {
+            "GT_EVIDENCE_ROOT": str(self.evidence_store.root),
+        }
         return {
             key: value
             for key, value in combined.items()
@@ -337,53 +337,110 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
         }
 
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict:
+        from gt_harness.canonical_io import atomic_json, canonical_json_bytes
+
         command = action.get("command", "")
-        cwd = cwd or self.config.cwd or os.getcwd()
+        cwd = str(Path(cwd or self.config.cwd or os.getcwd()).resolve())
+        child_env = self.execution_env()
+        output = {"returncode": -1, "exception_info": "", "extra": {"timed_out": False}}
+        output["extra"]["environment_sha256"] = hashlib.sha256(
+            canonical_json_bytes(child_env)
+        ).hexdigest()
+        interrupted = None
+        command_timeout = timeout if timeout is not None else self.config.timeout
+        with tempfile.NamedTemporaryFile(
+            dir=self.evidence_store.root, prefix="pending-", delete=False,
+        ) as spool:
+            receipt_path = Path(spool.name + ".receipt.json")
+            checkpoint = {"schema": "gt.command_capture.v1", "status": "running",
+                          "pending_output": Path(spool.name).name,
+                          "command_sha256": hashlib.sha256(command.encode()).hexdigest(),
+                          "environment_sha256": output["extra"]["environment_sha256"]}
+            atomic_json(receipt_path, checkpoint)
+            child = None
+            worker_receipt = Path(spool.name + ".worker.json")
+            contained = sys.platform.startswith("linux")
+            try:
+                child = subprocess.Popen(
+                    ([sys.executable, "-I", "-m", "scripts.miniswe_supervisor", "--command-worker",
+                      str(worker_receipt), cwd, str(command_timeout), command]
+                     if contained else command),
+                    shell=not contained, cwd=cwd, env=child_env,
+                    stdout=spool, stderr=subprocess.STDOUT,
+                    start_new_session=os.name == "posix",
+                )
+                child.wait(timeout=command_timeout + 10 if contained else command_timeout)
+            except BaseException as exc:
+                if not isinstance(exc, Exception) or isinstance(exc, RunnerTerminationRequested):
+                    interrupted = exc
+                output["extra"].update(
+                    exception_type=type(exc).__name__, exception=str(exc),
+                    timed_out=isinstance(exc, subprocess.TimeoutExpired),
+                )
+                output["exception_info"] = f"An error occurred while executing the command: {exc}"
+            finally:
+                if child is not None:
+                    # Kill descendants even if the shell exited before a background
+                    # writer. No child may mutate a published output artifact.
+                    if os.name == "posix":
+                        if contained and child.poll() is None:
+                            child.terminate()
+                            try:
+                                child.wait(timeout=7)
+                            except subprocess.TimeoutExpired:
+                                pass
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    elif child.poll() is None:
+                        subprocess.run(["taskkill", "/PID", str(child.pid), "/T", "/F"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    child.wait()
+                    output["returncode"] = child.returncode
+                if contained:
+                    if not worker_receipt.is_file():
+                        raise RuntimeError("command_descendant_receipt_missing")
+                    terminal = json.loads(worker_receipt.read_text())
+                    if terminal["reason"] != "exited" and not terminal.get("descendants_reaped"):
+                        raise RuntimeError("command_descendants_not_reaped")
+                    output["returncode"] = terminal["returncode"]
+                    output["extra"]["timed_out"] = terminal["reason"] == "deadline_exceeded"
+                    if terminal["reason"] != "exited":
+                        output["exception_info"] = terminal["reason"]
+                    output["extra"]["descendant_scope"] = "linux_subreaper"
+                    output["extra"]["capture_complete"] = terminal["capture_complete"]
+                else:
+                    output["extra"]["descendant_scope"] = "windows_best_effort"
+                spool.flush()
+                os.fsync(spool.fileno())
+        reference = self.evidence_store.publish(Path(spool.name))
+        output["extra"]["output_artifact"] = reference
+        output["extra"]["capture_receipt"] = str(receipt_path)
+        atomic_json(receipt_path, {
+            **checkpoint, "status": "interrupted" if interrupted else "finished",
+            "returncode": output["returncode"], **output["extra"],
+        })
+        if interrupted is not None:
+            raise interrupted
+        output["output"] = self.evidence_store.preview(
+            reference, retrieval_result=bool(re.fullmatch(
+                r"\s*gt-evidence\s+read\s+[0-9a-f]{64}\s+\d+\s+\d+\s*", command
+            )),
+        )
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                text=True,
-                cwd=cwd,
-                env=self.execution_env(),
-                timeout=timeout or self.config.timeout,
-                encoding="utf-8",
-                errors="replace",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            output = {
-                "output": result.stdout,
-                "returncode": result.returncode,
-                "exception_info": "",
-            }
-        except Exception as exc:  # identical recoverable environment contract
-            raw_output = getattr(exc, "output", None)
-            raw_output = (
-                raw_output.decode("utf-8", errors="replace")
-                if isinstance(raw_output, bytes)
-                else (raw_output or "")
-            )
-            output = {
-                "output": raw_output,
-                "returncode": -1,
-                "exception_info": f"An error occurred while executing the command: {exc}",
-                "extra": {"exception_type": type(exc).__name__, "exception": str(exc)},
-            }
-        try:
-            self._check_finished(output)
+            if not output["exception_info"]:
+                terminal_output = output
+                if output["output"].lstrip().startswith("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"):
+                    terminal_output = {
+                        **output, "output": self.evidence_store.bytes(reference["sha256"]).decode("utf-8", "replace"),
+                    }
+                self._check_finished(terminal_output)
         except Submitted as exc:
             # Keep the native terminal message intact and retain the actual
             # environment result if the runtime refuses only submission.
-            raw = str(output.get("output") or "")
-            exc.gt_execution_result = {
-                **output, "output": _truncate_tool_output(raw),
-                "extra": {**output.get("extra", {}), "raw_output": raw},
-            }
+            exc.gt_execution_result = output
             raise
-        raw_output = str(output.get("output") or "")
-        output.setdefault("extra", {})["raw_output"] = raw_output
-        output["output"] = _truncate_tool_output(raw_output)
         return output
 
     def get_template_vars(self, **kwargs):
@@ -479,10 +536,9 @@ def resolve_run_task_identity(canonical_task_id: str, task: str) -> str:
     workflow passes --task-id.
     """
 
-    canonical = str(canonical_task_id or "").strip()
-    if canonical:
-        return canonical
-    return hashlib.sha256(task.encode("utf-8")).hexdigest()[:16]
+    from gt_engine.engine_state import resolve_run_task_identity as resolve_identity
+
+    return resolve_identity(canonical_task_id, task)
 
 
 def build_agent(
@@ -501,6 +557,8 @@ def build_agent(
     step_limit: int = 100,
     timeout: int = 30,
     wall_time_limit_seconds: int = 0,
+    layout=None,
+    synthetic_transport: bool = False,
 ) -> tuple[DefaultAgent, MiniSweAdapter | None, GTSession | None]:
     system_template, instance_template = _templates()
     model_name, model_kwargs = _model_and_kwargs(model, temperature)
@@ -519,11 +577,18 @@ def build_agent(
             model_name=model_name, model_kwargs=model_kwargs
         )
     task_id = resolve_run_task_identity(canonical_task_id, task)
+    from gt_engine.engine_state import RuntimeLayout
+
+    layout = layout or RuntimeLayout.resolve(
+        workspace=cwd, state_root=state_dir, task_id=task_id,
+    )
     env_obj = CredentialIsolatedLocalEnvironment(
         config_class=LocalEnvironmentConfig,
         cwd=cwd,
         timeout=timeout,
+        evidence_root=layout.evidence_root,
     )
+    env_obj.runtime_layout = layout
     if gt_disabled:
         agent = BoundedHistoryAgent(
             model_obj, env_obj,
@@ -573,7 +638,9 @@ def build_agent(
     graph_db = None
     index_error: Exception | None = None
     try:
-        index_receipt = ensure_index_with_receipt(cwd, state_dir=state_dir)
+        index_receipt = ensure_index_with_receipt(
+            cwd, layout=layout, excluded_roots=layout.excluded_roots,
+        )
         graph_db = index_receipt.graph_db if index_receipt.success else None
         if not index_receipt.success and index_receipt.error_type:
             index_error = RuntimeError(
@@ -588,6 +655,7 @@ def build_agent(
     except Exception as exc:  # noqa: BLE001 - indexing is an optional observer
         index_error = exc
     adapter = MiniSweAdapter(
+        layout=layout,
         task_id=task_id,
         state_dir=state_dir,
         predicates=predicates,
@@ -598,6 +666,13 @@ def build_agent(
         requested_model=model,
         resolved_model=model_name,
     )
+    from gt_engine.runtime_observation import capture_workspace
+
+    adapter.record_repository_snapshot(
+        capture_workspace(layout.workspace, excluded_roots=layout.excluded_roots),
+        boundary="task_start",
+    )
+    adapter.store.append("execution_transport", synthetic_transport=synthetic_transport)
     delivery_path = (
         "legacy" if os.environ.get("GT_LEGACY_MODEL_VISIBLE", "").strip() == "1"
         else "compiled"
@@ -814,6 +889,7 @@ def main() -> int:
         metavar="NAME=MODE",
         help="set one capability mode: off/shadow/advisory/assistive/enforced",
     )
+    parser.add_argument("--synthetic-transport", action="store_true")
     args = parser.parse_args()
     patch_baseline = ""
     capability_modes: dict[str, str] = {}
@@ -828,7 +904,11 @@ def main() -> int:
             # still emit the typed setup result instead of escaping before the
             # runner's failure-conservation path is installed.
             patch_baseline = _repository_head(Path(args.cwd))
+        from gt_engine.engine_state import RuntimeLayout
+
         agent, adapter, session = build_agent(
+            synthetic_transport=args.synthetic_transport,
+            layout=RuntimeLayout.from_run_args(args),
             task=args.task,
             canonical_task_id=args.task_id,
             model=args.model,
@@ -849,6 +929,7 @@ def main() -> int:
         model_name, _model_kwargs = _model_and_kwargs(args.model, args.temperature)
         report = {
             "model": args.model,
+            "synthetic_transport": args.synthetic_transport,
             "terminal": terminal,
             "exit_code": TERMINAL_EXIT_CODES[terminal],
             "exception": f"{type(exc).__name__}: {exc}",
@@ -891,7 +972,8 @@ def main() -> int:
             )
         print(json.dumps(report, sort_keys=True))
         return TERMINAL_EXIT_CODES[terminal]
-    report: dict = {"model": args.model, "terminal": "internal_error"}
+    report: dict = {"model": args.model, "terminal": "internal_error",
+                    "synthetic_transport": args.synthetic_transport}
     result: dict = {}
     exception: BaseException | None = None
     gt_state: dict | None = None
@@ -906,7 +988,7 @@ def main() -> int:
         try:
             _write_model_patch(
                 Path(args.cwd), patch_baseline, Path(args.patch_output),
-                excluded_roots=(Path(args.state_dir),),
+                excluded_roots=agent.env.runtime_layout.excluded_roots,
             )
         except Exception as exc:  # noqa: BLE001 - missing patch invalidates grading
             report["patch_export_error"] = f"{type(exc).__name__}: {exc}"

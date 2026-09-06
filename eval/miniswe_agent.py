@@ -12,7 +12,6 @@ interpreter lives at the layout GTNanoAgent already relies on.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -58,17 +57,9 @@ class ProviderBillingError(NonZeroAgentExitCodeError):
 
 def _groundtruth_release() -> dict:
     """Read the sole release manifest, including from an installed harness wheel."""
-    path = _REPO_ROOT / "config" / "deepswe_product_bundle_v1.json"
-    if not path.is_file():
-        path = _REPO_ROOT / "gt_harness" / "data" / "product_bundle_v1.json"
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-    if manifest.get("schema") != "gt.product_bundle_source.v1":
-        raise ValueError("invalid product release manifest")
-    release = manifest["groundtruth"]
-    for key in ("wheel_sha256", "producer_sha256"):
-        if not re.fullmatch(r"[0-9a-f]{64}", release.get(key, "")):
-            raise ValueError(f"invalid groundtruth release pin: {key}")
-    return release
+    from gt_harness.product import groundtruth_release
+
+    return groundtruth_release(_REPO_ROOT)
 
 
 def _miniswe_agent_version() -> str:
@@ -222,6 +213,9 @@ class MiniSweAgent(BaseInstalledAgent):
             raise FileNotFoundError(
                 f"GT_LSP_BIN_HOST is set but no directory exists at {path}"
             )
+        from gt_harness.lsp_assets import verify_lsp_assets
+
+        verify_lsp_assets(path)
         return path
 
     @staticmethod
@@ -339,6 +333,16 @@ class MiniSweAgent(BaseInstalledAgent):
             f"rm -rf -- {_REMOTE_BUNDLE_DIR} /tmp/gt-install-smoke-src"
         )
         await self.exec_as_agent(environment, install, env=dict(UTF8_ENV))
+        if lsp_bin is not None:
+            from gt_harness.lsp_assets import verify_lsp_assets
+
+            receipt = verify_lsp_assets(lsp_bin)
+            await self.exec_as_agent(
+                environment,
+                f'"{_REMOTE_PY}" -m gt_harness.lsp_assets --root {_REMOTE_LSP_BIN} '
+                f"--expected-manifest-sha256 {receipt['manifest_sha256']}",
+                env=dict(UTF8_ENV),
+            )
 
     def _model_and_env(self) -> tuple[str, dict[str, str]]:
         model = str(self.model_name or "").strip()

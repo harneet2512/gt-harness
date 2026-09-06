@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 
 import pytest
 
@@ -13,6 +14,17 @@ from gt_engine.runtime_observation import (
     compile_transaction_artifacts,
     diff_workspace,
 )
+
+
+def test_pipeline_retains_observed_failure_without_certifying_segment_exit():
+    evidence = compile_execution_evidence(
+        command="pytest -q | tee test.log", output="1 failed\n", returncode=0,
+        action_id=1, repository_revision="source-revision",
+    )
+    assert evidence is not None
+    assert evidence.outcome == "unknown"
+    assert evidence.observed_test_outcome == "fail"
+    assert json.loads(evidence.canonical_bytes())["observed_test_outcome"] == "fail"
 
 
 def test_workspace_revision_changes_and_multifile_transaction_is_canonical(tmp_path):
@@ -53,6 +65,41 @@ def test_workspace_snapshot_excludes_gitignored_generated_output(tmp_path):
     assert "generated-out/source.js" not in paths
 
 
+def test_git_snapshot_excludes_untracked_runtime_cache_but_keeps_sources(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    source = tmp_path / "module.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    neighboring = tmp_path / "new_module.py"
+    neighboring.write_text("neighbor = 2\n", encoding="utf-8")
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    tracked_cache_source = cache / "tracked.py"
+    tracked_cache_source.write_text("tracked = True\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "module.py", "__pycache__/tracked.py"],
+        cwd=tmp_path,
+        check=True,
+    )
+    before = capture_workspace(tmp_path)
+
+    subprocess.run(
+        [sys.executable, "-c", "import module; assert module.value == 1"],
+        cwd=tmp_path,
+        check=True,
+    )
+    generated = tuple(cache.glob("module.*.pyc"))
+    assert generated, "real Python import did not create the cache regression fixture"
+    after = capture_workspace(tmp_path)
+
+    paths = {item.path for item in after.files}
+    assert "module.py" in paths
+    assert "new_module.py" in paths
+    assert "__pycache__/tracked.py" in paths
+    assert all(path.relative_to(tmp_path).as_posix() not in paths for path in generated)
+    assert after.revision == before.revision
+    assert diff_workspace(before, after, action_id=1, command="python import").changes == ()
+
+
 def test_workspace_revision_uses_repository_text_bytes(tmp_path):
     source = tmp_path / "module.py"
     source.write_bytes(b"first\nsecond\n")
@@ -78,6 +125,29 @@ def test_workspace_revision_keeps_binary_crlf_byte_exact(tmp_path):
     source.write_bytes(b"\x00first\n")
     lf = capture_workspace(tmp_path)
     assert crlf.revision != lf.revision
+
+
+@pytest.mark.parametrize("command", [
+    "python3 -m unittest -v", "python3 -B -m unittest -v",
+    "python3.12 -IB -m unittest -v",
+])
+def test_canonical_python_test_protocol_reaches_execution_evidence(command):
+    evidence = compile_execution_evidence(
+        command=command, output="Ran 1 test in 0.001s\n\nOK\n",
+        returncode=0, action_id=1, repository_revision="a" * 64,
+    )
+    assert evidence is not None
+    assert (evidence.kind, evidence.protocol, evidence.outcome) == ("test", "unittest", "pass")
+
+
+def test_native_test_protocol_reaches_execution_evidence():
+    evidence = compile_execution_evidence(
+        command="./target/debug/deps/actual-check",
+        output="running 1 test\ntest result: FAILED. 0 passed; 1 failed\n",
+        returncode=1, action_id=1, repository_revision="a" * 64,
+    )
+    assert evidence is not None
+    assert (evidence.kind, evidence.protocol, evidence.outcome) == ("test", "native", "fail")
 
 
 def test_execution_evidence_preserves_exact_raw_bytes_and_structure():

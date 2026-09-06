@@ -447,7 +447,7 @@ def test_a_line_that_cannot_fit_at_all_stages_nothing(tmp_path: Path):
 def test_the_seam_collects_the_prior_but_ranks_it_below_current_evidence(
     tmp_path: Path,
 ):
-    """Candidate collection must precede one deterministic ranked selection."""
+    """Candidate collection must precede session-owned packet admission."""
 
     import inspect
 
@@ -456,11 +456,12 @@ def test_the_seam_collects_the_prior_but_ranks_it_below_current_evidence(
     source = inspect.getsource(miniswe_runtime._run_evidence)
     pipeline_at = source.index("result = run_evidence_pipeline(")
     prior_at = source.index("_cochange_prior(adapter")
-    selection_at = source.index("winner = sorted(candidates")
+    packet_at = source.index("packet.append(GTDecisionCandidate(")
+    queue_at = source.index("session.queue_decision_candidates(packet)")
 
-    assert pipeline_at < prior_at < selection_at
+    assert pipeline_at < prior_at < packet_at < queue_at
     assert '10, cochange_metadata.get("kind", "cochange_partner")' in source
-    assert "100 if event.test_outcome" in source
+    assert "current_failure=" in source
 
 
 def test_the_seam_hook_is_quiet_when_the_action_touched_no_file(tmp_path: Path):

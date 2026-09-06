@@ -94,3 +94,12 @@ def test_verified_replay_rejects_reordered_rows(tmp_path):
         assert "invalid event journal" in str(exc)
     else:
         raise AssertionError("tampered journal was replayed")
+
+
+def test_reopened_store_continues_verified_typed_event_chain(tmp_path):
+    store = ExternalStateStore(tmp_path, "task")
+    store.append("execution_evidence", schema="gt.runtime_observation.v1", outcome="fail")
+    reopened = ExternalStateStore(tmp_path, "task")
+    reopened.append("checkpoint_recovered")
+    result = verify_event_journal(reopened.path, **reopened.receipt())
+    assert result.valid, result.issues

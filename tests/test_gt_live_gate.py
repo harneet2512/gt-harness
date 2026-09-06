@@ -147,6 +147,13 @@ def test_live_gate_accepts_healthy_provider_bound_feature_union(tmp_path):
     assert report["passed"] is True
     assert report["witnessed_count"] == 3
 
+    audit["tasks"][0]["synthetic_transport"] = True
+    synthetic = evaluate_live_gate(
+        audit, min_witnessed=3, expected_tasks=1,
+        expected_model="deepseek-v4-flash", run_dir=tmp_path,
+    )
+    assert synthetic["passed"] is False
+
 
 def test_live_gate_discovers_model_metadata_in_nested_harbor_trial(tmp_path):
     trial = tmp_path / "artifact-wrapper" / "job" / "task__trial"

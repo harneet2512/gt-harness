@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import re
 from pathlib import Path
 
@@ -57,35 +56,12 @@ class PierFilteredDockerEnvironment(DockerEnvironment):
         pid_text = stdout.decode("ascii", errors="strict").strip()
         if not pid_text.isdigit() or int(pid_text) <= 0:
             raise RuntimeError("task container PID invalid")
-        cgroup_line = next(
-            (
-                line
-                for line in Path(f"/proc/{pid_text}/cgroup")
-                .read_text(encoding="ascii")
-                .splitlines()
-                if line.startswith("0::")
-            ),
-            "",
-        )
-        if not cgroup_line:
-            raise RuntimeError("task container cgroup v2 identity unavailable")
-        cgroup_root = Path("/sys/fs/cgroup").resolve()
-        cgroup_path = (cgroup_root / cgroup_line[3:].lstrip("/")).resolve()
-        if os.path.commonpath((cgroup_root, cgroup_path)) != str(cgroup_root):
-            raise RuntimeError("task container cgroup escaped host root")
-        events: dict[str, int] = {}
-        for line in (cgroup_path / "memory.events").read_text(encoding="ascii").splitlines():
-            name, value = line.split(maxsplit=1)
-            events[name] = int(value)
+        from gt_harness.cgroup import memory_snapshot
+
         return {
             "schema": "gt.host_cgroup_snapshot.v1",
             "container_id_sha256": hashlib.sha256(container_id.encode("ascii")).hexdigest(),
-            "cgroup_path_sha256": hashlib.sha256(str(cgroup_path).encode("utf-8")).hexdigest(),
-            "current": self._read_cgroup_integer(cgroup_path / "memory.current"),
-            "max": self._read_cgroup_integer(cgroup_path / "memory.max"),
-            "peak": self._read_cgroup_integer(cgroup_path / "memory.peak"),
-            "oom": events.get("oom"),
-            "oom_kill": events.get("oom_kill"),
+            **memory_snapshot(int(pid_text)),
         }
 
 

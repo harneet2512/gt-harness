@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
+
+from .output_evidence import EvidenceStore
 
 SCHEMA = "gt.provider_request_manifest.v1"
 
@@ -20,6 +23,58 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
+
+
+def store_history_evidence(
+    store: EvidenceStore,
+    payload: bytes,
+    *,
+    kind: str,
+) -> dict[str, Any]:
+    """Persist one complete history/context unit and return its immutable ref."""
+
+    if not isinstance(payload, bytes):
+        raise TypeError("history evidence payload must be bytes")
+    evidence_kind = str(kind or "").strip()
+    if not evidence_kind:
+        raise ValueError("history evidence kind is required")
+    with tempfile.NamedTemporaryFile(prefix="gt-history-", delete=False) as handle:
+        spool = Path(handle.name)
+        handle.write(payload)
+        handle.flush()
+    reference = store.publish(spool)
+    reference["kind"] = evidence_kind
+    reference["retrieval_command"] = (
+        f"gt-evidence read {reference['sha256']} 0 8192"
+    )
+    return reference
+
+
+def load_history_evidence(
+    state_dir: str | Path,
+    reference: Mapping[str, Any],
+) -> bytes:
+    """Load and integrity-check a complete history/context evidence unit."""
+
+    if reference.get("schema") != "gt.output_artifact.v1":
+        raise ValueError("history_evidence_schema_invalid")
+    digest = str(reference.get("sha256") or "")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("history_evidence_digest_invalid")
+    size = reference.get("total_length")
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        raise ValueError("history_evidence_size_invalid")
+    root = Path(state_dir).resolve()
+    referenced_root = Path(str(reference.get("root") or "")).resolve()
+    if referenced_root != root:
+        raise ValueError("history_evidence_root_mismatch")
+    try:
+        payload = EvidenceStore(root).bytes(digest)
+    except (OSError, ValueError) as exc:
+        raise ValueError("history_evidence_identity_mismatch") from exc
+    if len(payload) != size or hashlib.sha256(payload).hexdigest() != digest:
+        raise ValueError("history_evidence_identity_mismatch")
+    return payload
 
 
 def store_provider_request(
@@ -144,4 +199,10 @@ def load_provider_request(state_dir: str | Path, event: Mapping[str, Any]) -> di
     return request
 
 
-__all__ = ["SCHEMA", "load_provider_request", "store_provider_request"]
+__all__ = [
+    "SCHEMA",
+    "load_history_evidence",
+    "load_provider_request",
+    "store_history_evidence",
+    "store_provider_request",
+]

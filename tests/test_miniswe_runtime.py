@@ -24,6 +24,18 @@ def isolated_git_fixture_identity(monkeypatch):
         "GIT_COMMITTER_EMAIL": "gt-test@example.invalid",
     }.items():
         monkeypatch.setenv(name, value)
+    instances = []
+    initialize = MiniSweAdapter.__init__
+
+    def tracked_initialize(instance, *args, **kwargs):
+        initialize(instance, *args, **kwargs)
+        instances.append(instance)
+
+    monkeypatch.setattr(MiniSweAdapter, "__init__", tracked_initialize)
+    yield
+    for instance in instances:
+        if instance._graph_coordinator is not None:
+            instance._graph_coordinator.close(wait=True)
 
 
 @pytest.mark.parametrize(
@@ -54,7 +66,8 @@ def test_newfile_precedent_does_not_preempt_executed_syntax_failure(tmp_path, mo
                                  ("new.py",), allow_live_probes=True)
     assert calls == ["covering", "syntax"]
     assert "[GT_EVIDENCE:syntax_result]" in rendered
-    assert "nearby example" not in rendered
+    assert "nearby example" in rendered
+    assert rendered.index("syntax error") < rendered.index("nearby example")
 
 
 def test_runtime_collects_every_candidate_before_current_syntax_wins(
@@ -113,7 +126,11 @@ def test_runtime_collects_every_candidate_before_current_syntax_wins(
 
     assert calls == ["covering", "syntax", "gateway", "newfile", "cochange"]
     assert "syntax error" in rendered
-    assert adapter.consume_model_visible_delivery_metadata()["kind"] == "syntax_result"
+    assert [item.kind for item in adapter._pending_provider_deliveries] == [
+        "syntax_result", "new_file_destination", "cochange_partner",
+    ]
+    assert rendered.index("syntax error") < rendered.index("nearby example")
+    assert rendered.index("nearby example") < rendered.index("weak prior")
     assert "weak-prior" not in adapter._dedup_chain
     assert adapter._chain_head == original_chain
 
@@ -127,9 +144,10 @@ def test_verification_candidate_outranks_weak_priors(tmp_path, monkeypatch):
         predicates=[],
         contract=extract_task_contract("Fix the parser."),
     )
-    adapter._pending_verification_candidate = (
+    verification = (
         "[GT_EVIDENCE:verification_plan]\npytest tests/test_parser.py"
     )
+    adapter._pending_verification_candidate = verification
     adapter._pending_verification_metadata = {
         "kind": "verification_plan",
         "dedup_key": "verification:tx-1",
@@ -161,20 +179,14 @@ def test_verification_candidate_outranks_weak_priors(tmp_path, monkeypatch):
         ("src/parser.py",),
     )
     assert "verification_plan" in rendered
-    assert adapter.verification_candidate()[0] == rendered
+    assert adapter.verification_candidate()[0] == verification
+    assert rendered.index("verification_plan") < rendered.index("example")
+    assert rendered.index("example") < rendered.index("weak prior")
     assert "verification:tx-1" not in adapter._dedup_chain
-    assert (
-        adapter.consume_model_visible_delivery_metadata()["kind"]
-        == "verification_plan"
-    )
-    adapter.admit_model_visible_delivery(lane="sealed", kind="verification_plan",
-        rendered=rendered, action_index=1, iteration=0, dedup_key="verification:tx-1")
     adapter.discard_pending_provider_deliveries(reason="fixture_provider_refusal")
-    assert adapter.verification_candidate()[0] == rendered
+    assert adapter.verification_candidate()[0] == verification
     assert "verification:tx-1" not in adapter._dedup_chain
     rendered = rt._run_evidence(adapter, "edit", "", 0, 2, (), {})
-    assert adapter.admit_model_visible_delivery(lane="sealed", kind="verification_plan",
-        rendered=rendered, action_index=2, iteration=0, dedup_key="verification:tx-1")
     adapter.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     assert adapter.verification_candidate()[0] == ""
     assert "verification:tx-1" in adapter._dedup_chain
@@ -182,27 +194,31 @@ def test_verification_candidate_outranks_weak_priors(tmp_path, monkeypatch):
 
 def test_selected_gateway_chain_commits_only_on_exact_exposure(tmp_path, monkeypatch):
     from types import SimpleNamespace
+
+    from groundtruth.runtime.evidence_envelope import chain_hash
+
     adapter = MiniSweAdapter(task_id="exposure", state_dir=tmp_path, predicates=[],
                              contract=extract_task_contract("Fix parser."))
-    adapter._chain_head = "old-head"
+    old_head = "1" * 64
+    adapter._chain_head = old_head
     monkeypatch.setattr(rt, "_cochange_prior", lambda *args: "")
     monkeypatch.setattr(rt, "run_evidence_pipeline", lambda *args, **kwargs:
         EvidenceResult(rendered="[GT_EVIDENCE:caller_contract]\nexact proof", sealed=True,
-                       chain_head="new-head", envelope=SimpleNamespace(
+                       chain_head="2" * 64, envelope=SimpleNamespace(
                            evidence_type="caller_contract", dedup_key="proof-key", target="a.py")))
     rendered = rt._run_evidence(adapter, "cat a.py", "x", 0, 1, (), {})
-    assert adapter._chain_head == "old-head"
+    assert adapter._chain_head == old_head
     assert "proof-key" not in adapter._dedup_chain
     assert adapter.admit_model_visible_delivery(lane="sealed", kind="caller_contract",
         rendered=rendered, action_index=1, iteration=0, dedup_key="proof-key")
     adapter.bind_provider_payload({"messages": [{"role": "user", "content": "formatter removed proof"}]})
-    assert adapter._chain_head == "old-head"
+    assert adapter._chain_head == old_head
     assert "proof-key" not in adapter._dedup_chain
     rendered = rt._run_evidence(adapter, "cat a.py", "x", 0, 2, (), {})
     assert adapter.admit_model_visible_delivery(lane="sealed", kind="caller_contract",
         rendered=rendered, action_index=2, iteration=1, dedup_key="proof-key")
     adapter.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
-    assert adapter._chain_head == "new-head"
+    assert adapter._chain_head == chain_hash(old_head, rendered.encode())
     assert "proof-key" in adapter._dedup_chain
 
 
@@ -406,6 +422,41 @@ def _configure_fixture_provider(monkeypatch):
     monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "1000")
     monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "fixture")
     monkeypatch.setattr(rt, "provider_request_tokens", lambda _: 1)
+
+
+def test_native_first_source_creation_bootstraps_installed_graph(tmp_path):
+    import os
+    import subprocess
+
+    if os.name != "posix" or not os.environ.get("GT_INDEX_BINARY"):
+        pytest.skip("installed Linux producer required")
+    root = tmp_path / "empty"
+    root.mkdir()
+    adapter = MiniSweAdapter(task_id="first-source", state_dir=tmp_path / "state",
+                             repo_root=str(root), predicates=[])
+    agent = FakeAgent()
+
+    def execute(action):
+        result = subprocess.run(["bash", "-c", action["command"]], cwd=root,
+                                capture_output=True, text=True, check=False)
+        return {"output": result.stdout + result.stderr, "returncode": result.returncode}
+
+    agent.env.execute = execute
+    install_runtime_hooks(agent, _session(adapter))
+    agent.execute_actions({"extra": {"actions": [{"command": "printf ready"}]}})
+    assert adapter._graph_coordinator is None
+    agent.execute_actions({"extra": {"actions": [
+        {"command": "printf 'def first(): return 1\\n' > first.py"}
+    ]}})
+    assert (root / "first.py").read_text() == "def first(): return 1\n"
+    assert adapter._graph_coordinator is not None
+    assert adapter._graph_coordinator.wait_idle(timeout=60)
+    # A normal native view must consume the completed publication.
+    agent.execute_actions({"extra": {"actions": [{"command": "cat first.py"}]}})
+    assert adapter.graph_fresh
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    publications = [row for row in rows if row["event"] == "graph_publication"]
+    assert publications[-1]["repository_revision"] == adapter.repository_revision
 
 
 def test_runtime_hooks_capture_provider_payload_and_action(tmp_path, monkeypatch):
@@ -1214,7 +1265,8 @@ def test_syntax_probe_catches_broken_edit(monkeypatch, tmp_path):
         {"command": "python - <<'WRITE_BROKEN'\nopen('src/mod.py','w').write('x')\nWRITE_BROKEN",
          "tool_call_id": "c1"},
     ]}})
-    joined = "\n".join(str(m.get("content")) for m in msgs)
+    prepared = agent.model._prepare_messages_for_api(msgs)
+    joined = "\n".join(str(m.get("content")) for m in prepared)
     assert "[GT_EVIDENCE:syntax_result]" in joined
     assert "syntax error" in joined
 
@@ -1230,21 +1282,24 @@ def test_evidence_capsule_splices_into_observation(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         rt, "run_evidence_pipeline",
-        lambda *a, **k: EvidenceResult(rendered="[GT] evidence", sealed=True),
+        lambda *a, **k: EvidenceResult(
+            rendered="[GT] evidence", sealed=True, chain_head="2" * 64,
+            envelope=__import__("types").SimpleNamespace(
+                evidence_type="caller_contract", dedup_key="evidence", target="src/a.py",
+            ),
+        ),
     )
     install_runtime_hooks(agent, adapter)
     agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
     msgs = agent.execute_actions({"extra": {"actions": [
         {"cmd": "pytest tests/ -q", "tool_call_id": "call-1"},
     ]}})
-    # FRONT placement: GT facts LEAD the observation (before <returncode>)
-    spliced = [str(m.get("content")) for m in msgs if "<gt-facts>" in str(m.get("content"))]
-    assert spliced
-    assert spliced[0].startswith("<gt-facts>")
-    assert "<returncode>" in spliced[0]
+    prepared = agent.model._prepare_messages_for_api(msgs)
+    assert "[GT] evidence" in prepared[-1]["content"]
+    assert "<returncode>" in prepared[-1]["content"]
 
 
-def test_sealed_evidence_is_refused_after_shared_prompt_lane_storm_backstop(
+def test_sealed_evidence_joins_the_next_request_after_action(
     monkeypatch, tmp_path
 ):
     agent = FakeAgent()
@@ -1257,33 +1312,22 @@ def test_sealed_evidence_is_refused_after_shared_prompt_lane_storm_backstop(
     )
     monkeypatch.setattr(
         rt, "run_evidence_pipeline",
-        lambda *a, **k: EvidenceResult(rendered="[GT] twenty-fifth evidence", sealed=True),
+        lambda *a, **k: EvidenceResult(
+            rendered="[GT] current evidence", sealed=True, chain_head="2" * 64,
+            envelope=__import__("types").SimpleNamespace(
+                evidence_type="covering_red", dedup_key="current", target="src/a.py",
+            ),
+        ),
     )
     install_runtime_hooks(agent, adapter)
     agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
-    for ordinal in range(3):
-        assert adapter.admit_model_visible_delivery(
-            lane="prompt",
-            kind="context_delta",
-            rendered=f"delta-{ordinal}",
-            action_index=0,
-            iteration=adapter.iteration,
-            dedup_key=f"delta-{ordinal}",
-        )
-
     msgs = agent.execute_actions({"extra": {"actions": [
         {"cmd": "pytest tests/ -q", "tool_call_id": "call-1"},
     ]}})
 
-    assert not any("<gt-facts>" in str(message.get("content")) for message in msgs)
-    rows = [
-        __import__("json").loads(line)
-        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
-    ]
-    refused = [row for row in rows if row["event"] == "delivery_refused"]
-    assert refused[-1]["lane"] == "sealed"
-    assert refused[-1]["candidate_ordinal"] == 5
-    assert refused[-1]["reason"] == "boundary_claim_ceiling"
+    assert not any("[GT] current evidence" in str(message.get("content")) for message in msgs)
+    prepared = agent.model._prepare_messages_for_api(msgs)
+    assert "[GT] current evidence" in prepared[-1]["content"]
 
 
 def test_newfile_precedent_delivered_on_file_create(tmp_path, monkeypatch):
@@ -1329,13 +1373,13 @@ def test_newfile_precedent_delivered_on_file_create(tmp_path, monkeypatch):
             "CREATE_NOW"
          ), "tool_call_id": "c1"},
     ]}})
-    joined = "\n".join(str(m.get("content")) for m in msgs)
+    agent.model.query(msgs)
+    joined = "\n".join(str(m.get("content")) for m in agent.model.calls[-1])
     assert "[GT_EVIDENCE:new_file_destination]" in joined
     assert "advisory precedent" in joined
     assert "reason=same_directory,same_extension" in joined
     assert "inspect=src/util.py" in joined
     assert "<output>ok</output>" in joined
-    agent.model.query(msgs)
     rows = [
         __import__("json").loads(line)
         for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
@@ -1353,7 +1397,12 @@ def test_newfile_precedent_delivered_on_file_create(tmp_path, monkeypatch):
         and row["evidence_type"] == "new_file_destination"
     )
     marker = "[GT_EVIDENCE:new_file_destination]\n"
-    shipped = marker + joined.split(marker, 1)[1].split("\n</gt-facts>", 1)[0]
+    marker_offset = joined.index(marker)
+    unit_offset = joined.rfind("[GT_CONTEXT_UNIT] ", 0, marker_offset)
+    unit_tail = joined[unit_offset:]
+    shipped = unit_tail.split("\n\n[GT_CONTEXT_UNIT] ", 1)[0].split(
+        "\n</gt-facts>", 1
+    )[0]
     assert delivery["target"] == "src/new_util.py"
     assert delivery["rendered_bytes"] == len(shipped.encode("utf-8"))
     assert delivery["payload_sha256"] == receipt["payload_hash"]
@@ -1556,15 +1605,16 @@ def test_runtime_captures_one_multifile_transaction_and_invalidates_graph(
     assert any(row["event"] == "graph_invalidated" for row in rows)
 
 
+@pytest.mark.parametrize("pipeline", [False, True])
 def test_runtime_augments_test_result_but_keeps_raw_output_byte_for_byte(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, pipeline
 ):
     raw = "tests/test_x.py::test_x FAILED\r\n1 failed\r\n"
 
     class TestEnv(FakeEnv):
         def execute(self, action):
             self.executed.append(action.get("command", ""))
-            return {"output": raw, "returncode": 1, "exception_info": "failed"}
+            return {"output": raw, "returncode": 0 if pipeline else 1, "exception_info": "failed"}
 
     monkeypatch.setattr(
         rt, "run_evidence_pipeline",
@@ -1578,17 +1628,23 @@ def test_runtime_augments_test_result_but_keeps_raw_output_byte_for_byte(
     )
     install_runtime_hooks(agent, _session(adapter))
     messages = agent.execute_actions({"extra": {"actions": [
-        {"command": "python -m pytest tests/test_x.py -q", "tool_call_id": "c1"},
+        {"command": "python -m pytest tests/test_x.py -q" + (" | tee test.log" if pipeline else ""), "tool_call_id": "c1"},
     ]}})
 
     content = messages[0]["content"]
-    assert "[GT_EXECUTION_EVIDENCE]" in content
     assert raw in content
+    assert content.count(raw) == 1
+    prepared = agent.model._prepare_messages_for_api(messages)
+    assert "[GT_EXECUTION_EVIDENCE]" in prepared[-1]["content"]
+    assert '"observed_test_outcome":"fail"' in prepared[-1]["content"]
+    assert raw in prepared[-1]["content"]
     rows = [
         __import__("json").loads(line)
         for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
     ]
     evidence = next(row for row in rows if row["event"] == "execution_evidence")
+    assert evidence["observed_test_outcome"] == "fail"
+    assert evidence["outcome"] == ("unknown" if pipeline else "fail")
     blob = adapter.store.root / evidence["raw_blob"]
     assert blob.read_bytes() == raw.encode("utf-8")
 
@@ -1694,6 +1750,9 @@ def test_gt_on_binds_terminal_failure_and_authorizes_zero_delivery_suppression(
     zero = next(row for row in rows if row["event"] == "submit_suppression_zero_delivery")
     assert zero["provider_dispatched"] is False
     assert zero["chars_delivered"] == 0
+    from gt_engine.event_journal import verify_event_journal
+    verified = verify_event_journal(adapter.store.path, **adapter.store.receipt())
+    assert verified.valid, verified.issues
 
 
 def test_gt_off_never_attaches_terminal_or_provider_authorities(tmp_path):
@@ -1833,3 +1892,157 @@ def test_gt_on_real_boundary_suppresses_fresh_recorded_failure_end_to_end(
     assert len(suppressed) == 1
     assert suppressed[0]["reason"] == "submit_refused"
     assert suppressed[0]["action_index"] == 2
+
+
+def test_runtime_hook_routes_artifact_to_canonical_stored_gateway_event(
+    tmp_path, monkeypatch
+):
+    from groundtruth.runtime.adapters.miniswe import StoredToolEvent
+    from groundtruth.runtime.gateway import _grep_hit_paths_event
+
+    from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a_padding.txt").write_text("target\n" * 4_000, encoding="utf-8")
+    (repo / "z_beyond_preview.py").write_text("target = 1\n", encoding="utf-8")
+    contract = extract_task_contract("Find the target definition and fix it.")
+    adapter = MiniSweAdapter(
+        task_id="stored-runtime",
+        state_dir=tmp_path / "state",
+        predicates=[],
+        repo_root=str(repo),
+        contract=contract,
+    )
+    agent = FakeAgent()
+    agent.env = CredentialIsolatedLocalEnvironment(
+        cwd=str(repo),
+        timeout=10,
+        evidence_root=str(adapter.engine_state.layout.evidence_root),
+    )
+    captured = {}
+
+    def observe_gateway(state, event, **kwargs):
+        captured["event"] = event
+        captured["paths"] = _grep_hit_paths_event(event, str(repo))
+        needle = b"z_beyond_preview.py"
+        offset = 0
+        tail = b""
+        for chunk in event.stored_output.iter_bytes():
+            probe = tail + chunk
+            found = probe.find(needle)
+            if found >= 0:
+                captured["late_offset"] = offset - len(tail) + found
+            offset += len(chunk)
+            tail = probe[-(len(needle) - 1):]
+        return EvidenceResult()
+
+    monkeypatch.setattr(rt, "run_evidence_pipeline", observe_gateway)
+    install_runtime_hooks(agent, _session(adapter))
+    agent.model._prepare_messages_for_api([{"role": "user", "content": "task"}])
+
+    agent.execute_actions({"extra": {"actions": [{
+        "command": ("rg --sort path -n target a_padding.txt z_beyond_preview.py"
+                    if __import__("shutil").which("rg") else
+                    "grep -n target a_padding.txt z_beyond_preview.py"),
+        "tool_call_id": "stored-search",
+    }]}})
+
+    assert isinstance(captured["event"], StoredToolEvent)
+    identity = captured["event"].stored_output.identity()
+    assert identity["total_length"] > 8192
+    assert captured["late_offset"] > 8192
+    assert "z_beyond_preview.py" in captured["paths"]
+
+
+def test_runtime_hook_select_catalog_uses_admitted_transport_and_matching_action(
+    tmp_path, monkeypatch
+):
+    import sqlite3
+    from types import SimpleNamespace
+
+    from minisweagent.models.litellm_model import LitellmModel
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def compute():\n    return 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    with sqlite3.connect(graph) as connection:
+        connection.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, file_path TEXT)")
+        connection.execute("INSERT INTO nodes(file_path) VALUES ('service.py')")
+    agent = FakeAgent()
+    agent.model = LitellmModel(
+        model_name="fixture/model", model_kwargs={}, cost_tracking="ignore_errors"
+    )
+    def execute(action):
+        agent.env.executed.append(action.get("command", ""))
+        return {"output": "ok", "returncode": 0, "exception_info": None}
+    agent.env.execute = execute
+    calls = []
+
+    class Message:
+        def __init__(self, tool_calls):
+            self.content, self.tool_calls = "", tool_calls
+        def model_dump(self):
+            return {"role": "assistant", "content": "", "tool_calls": self.tool_calls}
+
+    class Response:
+        def __init__(self, message, identity):
+            self.id, self.model = identity, "fixture/model"
+            self.usage = {"prompt_tokens": 3, "completion_tokens": 1}
+            self.choices = [SimpleNamespace(message=message, finish_reason="tool_calls")]
+        def model_dump(self, mode=None):
+            return {"id": self.id, "model": self.model, "usage": self.usage,
+                    "choices": [{"message": self.choices[0].message.model_dump()}]}
+
+    def completion(*, model, messages, tools, **kwargs):
+        calls.append({"messages": messages, "tools": tools, "kwargs": kwargs})
+        tool_name = tools[0]["function"]["name"]
+        if tool_name == "select_catalog":
+            request = json.loads(messages[-1]["content"].splitlines()[0])
+            function = SimpleNamespace(name="select_catalog", arguments=json.dumps(
+                {"ids": [request["items"][0]["item_id"]]}
+            ))
+            return Response(Message([SimpleNamespace(id="catalog-call", function=function)]), "bootstrap")
+        function = SimpleNamespace(name="bash", arguments='{"command":"cat service.py"}')
+        return Response(Message([SimpleNamespace(id="bash-call", function=function)]), "executor")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr(agent.model, "_calculate_cost", lambda _: {"cost": 0.0})
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "10000")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "100")
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "fixture")
+    adapter = MiniSweAdapter(
+        task_id="select-runtime", state_dir=tmp_path / "state", predicates=[],
+        repo_root=repo, graph_db=str(graph), issue_text="Inspect service.py compute.",
+        requested_model="fixture/model", resolved_model="fixture/model",
+    )
+    adapter.record_repository_snapshot(rt.capture_workspace(repo), boundary="task_start")
+    session = _session(adapter)
+    install_runtime_hooks(agent, session)
+
+    message = agent.model.query([{"role": "user", "content": adapter.issue_text}])
+    assert [call["tools"][0]["function"]["name"] for call in calls] == [
+        "select_catalog", "bash",
+    ]
+    assert "GT_SELECT_CATALOG_RESULT" in calls[1]["messages"][-1]["content"]
+    assert message["extra"]["actions"] == [
+        {"command": "cat service.py", "tool_call_id": "bash-call"}
+    ]
+    before_action = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+        if json.loads(line).get("event") == "select_catalog_lifecycle"
+    ][-1]
+    assert before_action["receipt"]["stage"] == "DELIVERED"
+    session.observe_select_catalog_action("printf unrelated")
+    assert session._select_catalog_lifecycle.stage.value == "DELIVERED"
+    agent.execute_actions(message)
+    assert agent.env.executed == ["cat service.py"]
+    rows = [json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    lifecycle = [row for row in rows if row.get("event") == "select_catalog_lifecycle"][-1]
+    assert lifecycle["receipt"]["stage"] == "CONSUMED"
+    assert lifecycle["receipt"]["resulting_agent_action"] == "cat service.py"
+    assert sum(row.get("event") == "provider_response" for row in rows) == 2
+    assert adapter._usage["prompt_tokens"] == 6
+    assert adapter._usage["completion_tokens"] == 2

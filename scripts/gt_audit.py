@@ -670,6 +670,7 @@ class TaskAudit:
     task_name: str
     trial_dir: str
     verdict: str = "UNKNOWN"
+    synthetic_transport: bool = False
     verdict_reasons: list[str] = field(default_factory=list)
     # run health
     stop_reason: str | None = None
@@ -1024,7 +1025,10 @@ def _audit_native_miniswe_task(
         )
         api_calls = 0
     a.iterations = api_calls
-    exit_status = trajectory.get("exit_status")
+    exit_status = info.get("exit_status", trajectory.get("exit_status"))
+    if ("exit_status" in info and "exit_status" in trajectory
+            and info["exit_status"] != trajectory["exit_status"]):
+        a.attribution_issues.append("Mini-SWE trajectory terminal fields disagree")
     if not isinstance(exit_status, str):
         a.attribution_issues.append(
             "Mini-SWE trajectory exit_status is not a string"
@@ -1070,6 +1074,8 @@ def _audit_native_miniswe_task(
         a.attribution_rows = verification.event_count
 
     for row in rows:
+        if row.get("event") == "execution_transport" and row.get("synthetic_transport") is True:
+            a.synthetic_transport = True
         iteration = row.get("iteration", 0)
         if (
             not isinstance(iteration, int)

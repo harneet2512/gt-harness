@@ -36,6 +36,7 @@ gt = ["groundtruth-mcp==1.0.0", "numpy==2.5.1"]
 nano = "nano.cli:main"
 gt-product-acceptance = "scripts.gt_product_acceptance:main"
 gt-miniswe-run = "scripts.miniswe_supervisor:main"
+gt-evidence = "gt_engine.output_evidence:main"
 
 [build-system]
 requires = ["hatchling"]

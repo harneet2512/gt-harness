@@ -22,13 +22,13 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "1ecd03674f7eb6a79f401c95bf147423379d5143",
-    "source_tree": "d9e48fd4702f37cc30b7562ef1abe691a1e39273",
+    "source_commit": "66791e0b6ce32d973a288d4244337bb3fee837cb",
+    "source_tree": "c47cc65128a6d45b9aecfd3699667d7af10f6fa0",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "wheel_sha256": "4c4ba9ac08ee8f352e125be69bc0e60d9fc540af1a04b4fe5010d9ac8c1f488f",
+    "wheel_sha256": "9a895bb80a4950a460bcd4693a664cc9186daa43b1d450ed93f31d917c610fe8",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "8763262b13f44d4bc463a7481d93e74b86137d49b32d8f86bae06879086baf4f",
+    "producer_sha256": "347025160edb45a19a10f52260110bbddd6adc7ff04152834240b1543499a234",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -46,11 +46,11 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "1ecd03674f7eb6a79f401c95bf147423379d5143",
-      "source_tree": "d9e48fd4702f37cc30b7562ef1abe691a1e39273",
-      "binary_sha256": "8763262b13f44d4bc463a7481d93e74b86137d49b32d8f86bae06879086baf4f",
+      "source_commit": "66791e0b6ce32d973a288d4244337bb3fee837cb",
+      "source_tree": "c47cc65128a6d45b9aecfd3699667d7af10f6fa0",
+      "binary_sha256": "347025160edb45a19a10f52260110bbddd6adc7ff04152834240b1543499a234",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "e80446b6010c0c49c647871c2dcdcb34331cedc8dd2519c42458a7f251fa7570",
+      "build_info_sha256": "f09ea86a6c59922995161ba2f756ef611956295213f8a6a139fb8fa9ddf9e253",
       "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
       "build_tags": "netgo,osusergo,sqlite_fts5",
       "static_linking": true
@@ -62,7 +62,7 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "1ecd03674f7eb6a79f401c95bf147423379d5143",
+      "source_commit": "66791e0b6ce32d973a288d4244337bb3fee837cb",
       "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -165,7 +165,10 @@
         "84e19be7011fd3b94d8e28616402898e73849bc0",
         "473ebdb8324d175fc911a727d9d63e5efcbcfc08",
         "cac42da5c15a6c1dca20280a8d6d75abd488efd4",
-        "1ecd03674f7eb6a79f401c95bf147423379d5143"
+        "1ecd03674f7eb6a79f401c95bf147423379d5143",
+        "64e8585957523db32ee2deb76a4e385fb4db4b7b",
+        "5caa8ec284ad646cb525d9b65d8a44117d9ea47b",
+        "66791e0b6ce32d973a288d4244337bb3fee837cb"
       ],
       "post_certification_changed_paths": [
         ".gitattributes",
@@ -228,6 +231,8 @@
         "CLAUDE.md",
         "README.md",
         "UNIFIED_SOURCE_PROVENANCE.md",
+        "artifact_deepswe/gt_mini_patch.py",
+        "docs/python-test-runner-boundary.md",
         "gt-index/cmd/gt-index/budget.go",
         "gt-index/cmd/gt-index/budget_test.go",
         "gt-index/cmd/gt-index/build_info.go",
@@ -375,6 +380,7 @@
         "src/groundtruth/index/path_resolver.py",
         "src/groundtruth/index/repo_scope.py",
         "src/groundtruth/index/schema_version.py",
+        "src/groundtruth/lsp/background_promotion.py",
         "src/groundtruth/lsp/client.py",
         "src/groundtruth/lsp/edge_verifier.py",
         "src/groundtruth/main.py",
@@ -748,6 +754,7 @@
         "tests/test_phase_policy_module.py",
         "tests/test_pier_retry_loop.py",
         "tests/test_proof_progress_json.py",
+        "tests/test_python_test_runner_options.py",
         "tests/test_reconcile.py",
         "tests/test_resolve_failure_detail_capture.py",
         "tests/test_resolve_lsp_fix_campaign.py",
@@ -758,6 +765,9 @@
         "tests/test_semantic_encode_budget.py",
         "tests/test_sprint1_edge_cases.py",
         "tests/test_stdlib_modules_single_source.py",
+        "tests/test_stored_gateway_output.py",
+        "tests/test_stored_miniswe_output.py",
+        "tests/test_streaming_test_observation.py",
         "tests/test_symbol_granularity.py",
         "tests/test_task_truth.py",
         "tests/test_test_filter_parity.py",
@@ -826,6 +836,9 @@
         "tests/unit/test_l5_deprescribe.py",
         "tests/unit/test_l5_diagnostic.py",
         "tests/unit/test_lsp_client.py",
+        "tests/unit/test_lsp_primary_resolution.py",
+        "tests/unit/test_lsp_promotion_scheduler.py",
+        "tests/unit/test_lsp_runtime_recovery.py",
         "tests/unit/test_mismatch_false_positive.py",
         "tests/unit/test_novelty.py",
         "tests/unit/test_orientation_composite.py",
@@ -955,7 +968,7 @@
       ],
       "attestation_digest_sha256": "32f537d7a2e14d95757c3706b2b34b742eb42ce5da85084481e237fd8f5b2eab"
     },
-    "build_info_sha256": "e80446b6010c0c49c647871c2dcdcb34331cedc8dd2519c42458a7f251fa7570"
+    "build_info_sha256": "f09ea86a6c59922995161ba2f756ef611956295213f8a6a139fb8fa9ddf9e253"
   },
   "capabilities": [
     "atomic_graph_publication",

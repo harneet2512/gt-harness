@@ -100,6 +100,8 @@ def evaluate_live_gate(
         )
     for task in tasks:
         task_name = str(task.get("task_name") or "?")
+        if task.get("synthetic_transport"):
+            issues.append(f"{task_name}: synthetic transport cannot qualify as paid smoke")
         if task.get("agent_error") or task.get("exception_info"):
             issues.append(f"{task_name}: unhealthy agent/harness result")
         for issue in task.get("attribution_issues") or ():

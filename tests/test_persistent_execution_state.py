@@ -10,6 +10,8 @@ from gt_engine.persistent_execution_state import (
     SelectCatalogAbstention,
     SelectCatalogStage,
     build_feature18_catalog,
+    build_select_catalog_tool,
+    parse_select_catalog_arguments,
 )
 
 
@@ -81,3 +83,19 @@ def test_feature18_wrong_transition_is_rejected():
     lifecycle = Feature18Lifecycle.from_catalog(_catalog(), event_id="event-4")
     with pytest.raises(ValueError, match="DELIVERED requires CERTIFIED"):
         lifecycle.deliver(delivery_id="delivery-4")
+
+
+def test_select_catalog_schema_and_parser_are_bound_to_visible_ids():
+    catalog = _catalog()
+    tool = build_select_catalog_tool(catalog)
+    enum = tool["function"]["parameters"]["properties"]["ids"]["items"]["enum"]
+    assert enum == ["check-1", "focus-1"]
+    assert parse_select_catalog_arguments({"ids": ["focus-1"]}, catalog) == (
+        ("focus-1",), ("focus-1",),
+    )
+    assert parse_select_catalog_arguments({"ids": ["missing"]}, catalog) == (
+        ("missing",), (),
+    )
+    assert parse_select_catalog_arguments({"ids": ["focus-1", "focus-1"]}, catalog) == (
+        ("focus-1", "focus-1"), (),
+    )

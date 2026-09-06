@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -18,9 +20,17 @@ def test_a_provisioned_directory_resolves(monkeypatch, tmp_path: Path):
     staged = tmp_path / "lsp-bin"
     staged.mkdir()
     (staged / "gopls").write_bytes(b"#!/bin/sh\n")
+    (staged / "manifest.json").write_text(json.dumps({
+        "schema": "gt.lsp_assets.v1",
+        "files": {"gopls": hashlib.sha256(b"#!/bin/sh\n").hexdigest()},
+    }))
     monkeypatch.setenv("GT_LSP_BIN_HOST", str(staged))
 
     assert MiniSweAgent._lsp_bin_host() == staged
+
+    (staged / "gopls").write_bytes(b"changed executable")
+    with pytest.raises(ValueError, match="lsp_asset_digest_mismatch"):
+        MiniSweAgent._lsp_bin_host()
 
 
 def test_configured_but_absent_fails_loudly(monkeypatch, tmp_path: Path):

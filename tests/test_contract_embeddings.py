@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
 import struct
 from pathlib import Path
@@ -684,6 +686,12 @@ def test_dense_rank_consumes_the_stored_contract_vectors(
     assert result.reason is None
     assert result.detail["vector_source"] == "contract_embedding_store"
     assert result.detail["store_hits"] == 5
+    receipt = result.detail["execution_receipt"]
+    assert receipt["query_ready"] is True
+    assert receipt["cached_documents"] == 5
+    assert receipt["embedded_documents"] == 0
+    assert receipt["query_result_count"] == 3
+    assert receipt["index_sha256"] == hashlib.sha256(store_path.read_bytes()).hexdigest()
     assert result[0].stable_id == retrieval_identity(3)
 
 
@@ -793,3 +801,286 @@ def test_dense_rank_reports_a_partially_covered_pool(
     assert result.detail["store_misses"] == 1
     assert result.detail["missing_stable_ids"] == ["sym-5"]
     assert len(result.ranking) == 5
+
+
+def test_dense_rank_persists_missing_document_vectors_across_queries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial contract store must pay for each missing document only once."""
+    smaller = build_graph(tmp_path / "a.db", "removed")
+    full = build_graph(tmp_path / "b.db", "base")
+    model_dir = _stub_model_dir(tmp_path)
+    _install_query_embedder(monkeypatch, model_dir)
+    store_path = tmp_path / "vectors.sqlite"
+    store = _store(store_path)
+    store.refresh(smaller, embed_fn=RecordingEmbedder())
+    store.close()
+
+    document_batches: list[tuple[str, ...]] = []
+    query_batches: list[tuple[str, ...]] = []
+    original_documents = dense_runtime.embed_texts
+    original_queries = dense_runtime.embed_queries
+
+    def record_documents(root, texts):
+        document_batches.append(tuple(texts))
+        return original_documents(root, texts)
+
+    def record_queries(root, texts):
+        query_batches.append(tuple(texts))
+        return original_queries(root, texts)
+
+    monkeypatch.setattr(dense_runtime, "embed_texts", record_documents)
+    monkeypatch.setattr(dense_runtime, "embed_queries", record_queries)
+
+    first = retrieval.dense_rank(
+        full, "public scope", 5, model_dir=model_dir, store_path=store_path
+    )
+    second = retrieval.dense_rank(
+        full, "public scope again", 5, model_dir=model_dir, store_path=store_path
+    )
+
+    document_only = [batch for batch in document_batches
+                     if not batch[0].startswith(dense_runtime.QUERY_PREFIX)]
+    assert [len(batch) for batch in document_only] == [1]
+    assert [len(batch) for batch in query_batches] == [1, 1]
+    assert first.detail["runtime_embedded_missing"] == 1
+    assert second.detail["runtime_embedded_missing"] == 0
+    assert second.detail["runtime_document_cache_hits"] == 1
+
+
+def test_fallback_document_cache_is_bound_to_content_and_recipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = _stub_model_dir(tmp_path)
+    _install_query_embedder(monkeypatch, model_dir)
+    store_path = tmp_path / "vectors.sqlite"
+    sqlite3.connect(store_path).close()
+    documents = {"symbol": "Function symbol\nfile: source.py"}
+    node_stable_ids = {7: "symbol"}
+    vector = RecordingEmbedder.vector(documents["symbol"])
+
+    contract_embeddings.publish_document_vectors(
+        store_path, documents, node_stable_ids, {7: vector},
+    )
+
+    hit = contract_embeddings.lookup_document_vectors(
+        store_path, documents, node_stable_ids,
+    )
+    changed = contract_embeddings.lookup_document_vectors(
+        store_path, {"symbol": documents["symbol"] + "\nreturn_shape: changed"},
+        node_stable_ids,
+    )
+    other_recipe = contract_embeddings.lookup_document_vectors(
+        store_path, documents, node_stable_ids, recipe_id="different-document-recipe",
+    )
+
+    assert hit.vectors == {7: vector}
+    assert changed.hits == 0 and changed.misses == 1
+    assert other_recipe.hits == 0 and other_recipe.misses == 1
+
+
+def test_dense_rank_document_cache_invalidates_changed_content_and_keeps_semantic_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Content changes re-embed once and store-only misses remain candidates."""
+    smaller = build_graph(tmp_path / "small.db", "removed")
+    base = build_graph(tmp_path / "base.db", "base")
+    changed = build_graph(tmp_path / "changed.db", "return_change")
+    model_dir = _stub_model_dir(tmp_path)
+    _install_query_embedder(monkeypatch, model_dir)
+    store_path = tmp_path / "vectors.sqlite"
+    store = _store(store_path)
+    store.refresh(smaller, embed_fn=RecordingEmbedder())
+    store.close()
+
+    document_batches: list[tuple[str, ...]] = []
+    original_documents = dense_runtime.embed_texts
+
+    def record_documents(root, texts):
+        document_batches.append(tuple(texts))
+        return original_documents(root, texts)
+
+    monkeypatch.setattr(dense_runtime, "embed_texts", record_documents)
+
+    # sym-5 is absent from the contract store. Its exact document text makes it
+    # the semantic winner even though neither a cached contract vector nor a
+    # lexical/property candidate is required for admission to the dense pool.
+    with sqlite3.connect(base) as connection:
+        provenance = {}
+        documents = retrieval._dense_pool(
+            connection, limit=None, labels=retrieval.SYMBOL_LABELS,
+            restrict_to=None, provenance=provenance,
+        )
+    semantic_only_id = retrieval_identity(5)
+    first = retrieval.dense_rank(
+        base, documents[semantic_only_id], 5,
+        model_dir=model_dir, store_path=store_path,
+    )
+    assert first[0].stable_id == semantic_only_id
+
+    retrieval.dense_rank(
+        changed, "changed return", 5, model_dir=model_dir, store_path=store_path
+    )
+    unchanged = retrieval.dense_rank(
+        changed, "changed return again", 5, model_dir=model_dir, store_path=store_path
+    )
+
+    # First query embeds the previously absent sym-5. The changed return text
+    # embeds once on the changed graph while sym-5 is reused by content, and the
+    # following query embeds no documents.
+    document_only = [batch for batch in document_batches
+                     if not batch[0].startswith(dense_runtime.QUERY_PREFIX)]
+    assert [len(batch) for batch in document_only] == [1, 1]
+    assert unchanged.detail["runtime_embedded_missing"] == 0
+
+
+def test_installed_real_onnx_document_cache_acceptance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise cache reuse and invalidation through the installed ONNX runtime."""
+    graph_env = os.environ.get("GT_RETRIEVAL_TEST_GRAPH", "").strip()
+    graph = Path(graph_env) if graph_env else Path()
+    model_dir = Path(
+        os.environ.get("GT_DENSE_MODEL_DIR", "/proof/runtime/dense-model")
+    )
+    if not graph_env or not graph.is_file():
+        pytest.skip("installed GT_RETRIEVAL_TEST_GRAPH is unavailable")
+    if not all((model_dir / name).is_file() for name in (
+        "model.onnx", "tokenizer.json", "manifest.json",
+    )):
+        pytest.skip("installed pinned dense-model assets are unavailable")
+
+    identity = dense_runtime.model_identity()
+    assert identity["model_sha256"] == (
+        "564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971"
+    )
+    assert identity["tokenizer_sha256"] == (
+        "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854"
+    )
+    assert "7802add0519e4bf94c46ef23552176697c7a1ac7" in str(identity["model_id"])
+    store_path = tmp_path / "installed-vectors.sqlite"
+    store = contract_embeddings.ContractEmbeddingStore(
+        store_path,
+        model_id=str(identity["model_id"]),
+        tokenizer_id=str(identity["tokenizer_sha256"]),
+        dimension=int(identity["dimension"]),
+    )
+    try:
+        store.refresh(
+            graph,
+            embed_fn=lambda texts: dense_runtime.embed_texts(model_dir, texts),
+        )
+    finally:
+        store.close()
+
+    provenance: dict[str, retrieval.SymbolProvenance] = {}
+    with sqlite3.connect(graph) as connection:
+        documents = retrieval._dense_pool(
+            connection,
+            limit=None,
+            labels=retrieval.SYMBOL_LABELS,
+            restrict_to=None,
+            provenance=provenance,
+        )
+    by_node = {item.node_id: stable_id for stable_id, item in provenance.items()}
+    inputs = [
+        item for item in contract_embeddings.embedding_inputs(graph)
+        if item.node_id in by_node
+    ]
+    if len(inputs) < 2:
+        pytest.skip("installed retrieval graph has fewer than two contract symbols")
+    missing_input = max(inputs[1:], key=lambda item: len(
+        documents[by_node[item.node_id]]
+    ))
+    missing_id = by_node[missing_input.node_id]
+
+    # Force one contract-store miss. Dense retrieval must independently admit
+    # this symbol from the complete dense pool and cache its document vector.
+    with sqlite3.connect(store_path) as connection:
+        connection.execute(
+            "DELETE FROM gt_vector_documents WHERE document_id=?",
+            (missing_input.stable_id,),
+        )
+        connection.execute(
+            f"DELETE FROM {contract_embeddings.BINDING_TABLE} WHERE stable_id=?",
+            (missing_input.stable_id,),
+        )
+
+    document_batches: list[tuple[str, ...]] = []
+    query_batches: list[tuple[str, ...]] = []
+    original_documents = dense_runtime.embed_texts
+    original_queries = dense_runtime.embed_queries
+
+    def record_documents(root, texts):
+        document_batches.append(tuple(texts))
+        return original_documents(root, texts)
+
+    def record_queries(root, texts):
+        query_batches.append(tuple(texts))
+        return original_queries(root, texts)
+
+    monkeypatch.setattr(dense_runtime, "embed_texts", record_documents)
+    monkeypatch.setattr(dense_runtime, "embed_queries", record_queries)
+
+    query = documents[missing_id]
+    first = retrieval.dense_rank(
+        graph, query, len(documents), model_dir=model_dir, store_path=store_path,
+    )
+    second = retrieval.dense_rank(
+        graph, query + " unchanged", len(documents), model_dir=model_dir,
+        store_path=store_path,
+    )
+    assert first.available and first[0].stable_id == missing_id
+    assert first.detail["runtime_embedded_missing"] == 1
+    assert second.detail["runtime_embedded_missing"] == 0
+    assert second.detail["runtime_document_cache_hits"] == 1
+
+    changed_graph = tmp_path / "changed-graph.db"
+    shutil.copy2(graph, changed_graph)
+    with sqlite3.connect(changed_graph) as connection:
+        connection.execute(
+            "UPDATE nodes SET qualified_name=qualified_name || '.cache_changed' "
+            "WHERE id=?",
+            (missing_input.node_id,),
+        )
+    changed_provenance: dict[str, retrieval.SymbolProvenance] = {}
+    with sqlite3.connect(changed_graph) as connection:
+        changed_documents = retrieval._dense_pool(
+            connection, limit=None, labels=retrieval.SYMBOL_LABELS,
+            restrict_to=None, provenance=changed_provenance,
+        )
+    changed_id = next(
+        stable_id for stable_id, item in changed_provenance.items()
+        if item.node_id == missing_input.node_id
+    )
+    changed_query = changed_documents[changed_id]
+    changed = retrieval.dense_rank(
+        changed_graph, changed_query, len(changed_documents), model_dir=model_dir,
+        store_path=store_path,
+    )
+    unchanged = retrieval.dense_rank(
+        changed_graph, changed_query + " unchanged", len(changed_documents),
+        model_dir=model_dir, store_path=store_path,
+    )
+
+    real_document_batches = [
+        batch for batch in document_batches
+        if batch and not batch[0].startswith(dense_runtime.QUERY_PREFIX)
+    ]
+    assert [len(batch) for batch in real_document_batches] == [1, 1]
+    assert [len(batch) for batch in query_batches] == [1, 1, 1, 1]
+    assert changed.available and changed[0].stable_id == changed_id
+    assert changed.detail["runtime_embedded_missing"] == 1
+    assert unchanged.detail["runtime_embedded_missing"] == 0
+    assert unchanged.detail["runtime_document_cache_hits"] == 1
+
+    changed_node_ids = {missing_input.node_id: changed_id}
+    default_recipe = contract_embeddings.lookup_document_vectors(
+        store_path, changed_documents, changed_node_ids,
+    )
+    other_recipe = contract_embeddings.lookup_document_vectors(
+        store_path, changed_documents, changed_node_ids,
+        recipe_id=contract_embeddings.DOCUMENT_RECIPE_ID + ".different",
+    )
+    assert default_recipe.hits == 1 and default_recipe.misses == 0
+    assert other_recipe.hits == 0 and other_recipe.misses == 1

@@ -4,8 +4,10 @@ import hashlib
 import json
 
 import pytest
+from groundtruth.runtime.evidence_envelope import EvidenceEnvelope
 
-from gt_engine.gt_session import GTSession, GTSessionConfig
+from gt_engine import miniswe_evidence
+from gt_engine.gt_session import GTDecisionCandidate, GTSession, GTSessionConfig
 from gt_engine.miniswe_integration import MiniSweAdapter
 
 
@@ -45,6 +47,8 @@ def test_failed_blob_write_consumes_no_admission_state(tmp_path, monkeypatch):
 
 
 def test_localization_receipt_matches_final_structurally_compacted_bytes(tmp_path, monkeypatch):
+    from gt_engine.request_history import load_history_evidence
+
     adapter = adapter_for(tmp_path)
     lines = [f"source{i}.py:1 score=1 reasons=content_token:compute" for i in range(50)]
     candidate = "[GT_EVIDENCE:localization]\n" + "\n".join(lines)
@@ -52,7 +56,17 @@ def test_localization_receipt_matches_final_structurally_compacted_bytes(tmp_pat
     session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
     rendered = session.before_model([], iteration=0).context_additions[0]
     assert len(rendered.encode()) <= 1400
-    assert all(line in lines for line in rendered.splitlines()[1:])
+    assert "[GT_CONTEXT_UNIT_REFERENCE]" in rendered
+    prepared = next(
+        json.loads(line)
+        for line in adapter.store.path.read_text().splitlines()
+        if '"decision_context_unit_prepared"' in line
+    )
+    complete = load_history_evidence(
+        adapter.engine_state.layout.evidence_root, prepared["artifact_reference"]
+    ).decode()
+    assert complete.startswith("[GT_EVIDENCE:localization]\n")
+    assert all(line in lines for line in complete.splitlines()[1:])
     adapter.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
     receipts = [row for row in rows if row["event"] == "evidence_delivery"]
@@ -85,7 +99,7 @@ def test_localization_preview_does_not_seal_or_admit(tmp_path):
     assert adapter.task_start_localization(commit=False) == rendered
 
 
-def test_cochange_quota_counts_only_final_provider_deliveries(tmp_path):
+def test_cochange_history_never_blocks_a_later_decision(tmp_path):
     adapter = adapter_for(tmp_path)
 
     def offer(iteration, text):
@@ -108,14 +122,25 @@ def test_cochange_quota_counts_only_final_provider_deliveries(tmp_path):
     adapter.bind_provider_payload({
         "messages": [{"role": "tool", "content": "second"}]
     })
-    assert not offer(4, "third")
+    assert offer(4, "third")
+    adapter.bind_provider_payload({
+        "messages": [{"role": "tool", "content": "third"}]
+    })
 
     rows = [
         json.loads(line)
         for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
     ]
-    refusal = [row for row in rows if row.get("event") == "delivery_refused"][-1]
-    assert refusal["reason"] == "cochange_task_ceiling"
+    assert len([
+        row for row in rows
+        if row.get("event") == "evidence_delivery"
+        and row.get("kind") == "cochange_partner"
+    ]) == 3
+    assert not [
+        row for row in rows
+        if row.get("event") == "delivery_refused"
+        and row.get("reason") == "cochange_task_ceiling"
+    ]
 
 
 def test_provider_refusal_allows_identical_delivery_retry(tmp_path):
@@ -123,3 +148,69 @@ def test_provider_refusal_allows_identical_delivery_retry(tmp_path):
     assert admit(adapter, 0, "retry these exact bytes")
     adapter.discard_pending_provider_deliveries(reason="provider_refused")
     assert admit(adapter, 1, "retry these exact bytes")
+
+
+def test_identical_current_fact_can_recur_on_a_later_decision(tmp_path):
+    adapter = adapter_for(tmp_path)
+    rendered = "same current failure"
+    assert admit(adapter, 0, rendered)
+    adapter.bind_provider_payload({
+        "messages": [{"role": "tool", "content": rendered}]
+    })
+
+    assert admit(adapter, 1, rendered)
+
+
+def test_multidose_request_retains_per_fact_delivery_provenance(tmp_path, monkeypatch):
+    adapter = adapter_for(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+    envelopes = [
+        EvidenceEnvelope(
+            producer="test", fact_id="failure", target="src/a.py",
+            evidence_type="covering_red", payload=("executed failure",),
+            confidence=1.0, tier="VERIFIED", dedup_key="failure-key",
+        ),
+        EvidenceEnvelope(
+            producer="test", fact_id="location", target="src/b.py",
+            evidence_type="localization", payload=("src/b.py:2",),
+            confidence=0.5, tier="INFO", dedup_key="location-key",
+        ),
+    ]
+    monkeypatch.setattr(miniswe_evidence, "augment", lambda *_: envelopes)
+    result = miniswe_evidence.run_evidence_pipeline(
+        adapter.gateway_state(),
+        miniswe_evidence.classify_event(
+            "python -m pytest", "1 failed", 1, action_index=1,
+            test_outcome="fail",
+        ),
+        dedup_chain=set(), chain_head="", episode_id="admission",
+        event_id="admission:1",
+    )
+    candidates = tuple(
+        GTDecisionCandidate(
+            rendered=dose.rendered,
+            kind=dose.envelope.evidence_type,
+            dedup_key=dose.envelope.dedup_key,
+            target=dose.envelope.target,
+            previous_chain_head=dose.previous_chain_head,
+            next_chain_head=dose.chain_head,
+            source_ordinal=ordinal,
+            current_failure=dose.envelope.evidence_type == "covering_red",
+            artifact_sha256=(
+                dose.artifact_reference["sha256"] if dose.artifact_reference else ""
+            ),
+            artifact_reference=dose.artifact_reference,
+        )
+        for ordinal, dose in enumerate(result.doses)
+    )
+    batch = session.admit_decision_packet(candidates, iteration=0, action_index=1)
+    delivery = adapter.bind_provider_payload({
+        "messages": [{"role": "tool", "content": "\n".join(batch.context_additions)}]
+    })
+
+    assert len(delivery.delivery_ids) == 2
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    delivered = [row for row in rows if row["event"] == "evidence_delivery"]
+    assert [row["dedup_key"] for row in delivered] == ["failure-key", "location-key"]
+    assert len({row["payload_sha256"] for row in delivered}) == 2
+    assert adapter._dedup_chain == {"failure-key", "location-key"}

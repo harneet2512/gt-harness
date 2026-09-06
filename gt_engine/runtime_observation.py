@@ -20,7 +20,10 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .repository_identity import canonical_repository_bytes
+from .repository_identity import (
+    RepositoryHistory, canonical_repository_bytes, is_untracked_runtime_artifact,
+    repository_history,
+)
 
 _SCHEMA = "gt.runtime_observation.v1"
 _SKIP_DIRS = frozenset({
@@ -29,12 +32,9 @@ _SKIP_DIRS = frozenset({
     ".ruff_cache", "build", "dist", "target", "vendor",
 })
 _MAX_CAPTURE_BYTES = 1_000_000
-_TEST_RE = re.compile(
-    r"(?i)(?:^|[;&|]\s*)(?:python\s+-m\s+pytest|pytest|tox|nox|"
-    r"npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test|yarn\s+test|"
-    r"python\s+-m\s+unittest|go\s+test|cargo\s+test|dotnet\s+test|"
-    r"mvn(?:w)?\s+test|gradle(?:w)?\s+test|make\s+(?:test|check)|"
-    r"bazel\s+test|meson\s+test|ctest|rspec|phpunit)\b"
+_ADDITIONAL_TEST_RE = re.compile(
+    r"(?i)(?:^|[;&|]\s*)(?:nox|dotnet\s+test|mvnw\s+test|"
+    r"bazel\s+test|meson\s+test)\b"
 )
 _BUILD_RE = re.compile(
     r"(?i)(?:^|[;&|]\s*)(?:npm\s+(?:run\s+)?build|pnpm\s+(?:run\s+)?build|"
@@ -78,6 +78,7 @@ class WorkspaceSnapshot:
     files: tuple[FileState, ...]
     complete: bool
     omissions: tuple[str, ...]
+    history: RepositoryHistory = RepositoryHistory()
 
     def canonical_bytes(self) -> bytes:
         return _canonical({
@@ -85,6 +86,7 @@ class WorkspaceSnapshot:
             "kind": "repository_snapshot",
             "root_sha256": hashlib.sha256(self.root.encode("utf-8")).hexdigest(),
             "revision": self.revision,
+            "history": self.history.mapping(),
             "complete": self.complete,
             "omissions": list(self.omissions),
             "files": [item.mapping() for item in self.files],
@@ -152,11 +154,19 @@ class ExecutionEvidence:
     command_sha256: str
     returncode: int | None
     repository_revision: str
-    raw_output: bytes
+    raw_output: bytes | None
+    environment_sha256: str = ""
+    timed_out: bool = False
+    output_artifact_path: str = ""
+    stored_output_sha256: str = ""
+    stored_output_length: int = 0
+    stored_output_encoding: str = "utf-8"
+    observed_test_outcome: str = ""
 
     @property
     def raw_output_sha256(self) -> str:
-        return hashlib.sha256(self.raw_output).hexdigest()
+        return (hashlib.sha256(self.raw_output).hexdigest() if self.raw_output is not None
+                else self.stored_output_sha256)
 
     def canonical_bytes(self) -> bytes:
         return _canonical({
@@ -164,14 +174,27 @@ class ExecutionEvidence:
             "kind": self.kind,
             "protocol": self.protocol,
             "outcome": self.outcome,
+            "observed_test_outcome": self.observed_test_outcome,
             "action_id": self.action_id,
             "command_sha256": self.command_sha256,
             "returncode": self.returncode,
             "repository_revision": self.repository_revision,
             "raw_output_sha256": self.raw_output_sha256,
-            "raw_output_bytes": len(self.raw_output),
+            "raw_output_bytes": len(self.raw_output) if self.raw_output is not None else self.stored_output_length,
             "raw_preserved": True,
+            "environment_sha256": self.environment_sha256,
+            "timed_out": self.timed_out,
+            "encoding": ("utf-8" if _is_utf8(self.raw_output) else "base64")
+            if self.raw_output is not None else self.stored_output_encoding,
         })
+
+
+def _is_utf8(payload: bytes) -> bool:
+    try:
+        payload.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
 
 
 def capture_workspace(
@@ -184,6 +207,7 @@ def capture_workspace(
     make a before/after transaction incomplete rather than silently truncated.
     """
     resolved = Path(root).resolve()
+    history = repository_history(resolved)
     excluded = tuple(Path(path).resolve() for path in excluded_roots)
     files: list[FileState] = []
     omissions: list[str] = []
@@ -202,20 +226,38 @@ def capture_workspace(
                 timeout=8,
             )
             if Path(top.stdout.strip()).resolve() == resolved:
-                listed = subprocess.run(
+                tracked = subprocess.run(
                     [
-                        "git", "-C", str(resolved), "ls-files", "-z",
-                        "--cached", "--others", "--exclude-standard",
+                        "git", "-C", str(resolved), "ls-files", "-z", "--cached",
                     ],
                     check=True,
                     capture_output=True,
                     timeout=8,
                 )
+                untracked = subprocess.run(
+                    [
+                        "git", "-C", str(resolved), "ls-files", "-z",
+                        "--others", "--exclude-standard",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=8,
+                )
+                tracked_values = tracked.stdout.decode(
+                    "utf-8", "surrogateescape"
+                ).split("\0")
+                untracked_values = untracked.stdout.decode(
+                    "utf-8", "surrogateescape"
+                ).split("\0")
+                visible_untracked = (
+                    value
+                    for value in untracked_values
+                    if value
+                    and not is_untracked_runtime_artifact(value)
+                )
                 git_paths = tuple(
                     resolved / value
-                    for value in listed.stdout.decode(
-                        "utf-8", "surrogateescape"
-                    ).split("\0")
+                    for value in (*tracked_values, *visible_untracked)
                     if value and os.path.lexists(resolved / value)
                 )
         except (OSError, subprocess.SubprocessError):
@@ -267,14 +309,18 @@ def capture_workspace(
                 ))
             except OSError:
                 omissions.append(f"unreadable:{path.name}")
-    identity = _canonical([item.mapping() for item in files])
-    revision = hashlib.sha256(b"gt.workspace.v1\0" + identity).hexdigest()
+    if repository_history(resolved) != history:
+        omissions.append("history_changed_during_snapshot")
+    identity = _canonical({"files": [item.mapping() for item in files],
+                           "history": history.mapping()})
+    revision = hashlib.sha256(b"gt.workspace.v2\0" + identity).hexdigest()
     return WorkspaceSnapshot(
         root=str(resolved),
         revision=revision,
         files=tuple(files),
         complete=not omissions,
         omissions=tuple(sorted(omissions)),
+        history=history,
     )
 
 
@@ -324,7 +370,7 @@ def diff_workspace(
 def _protocol(command: str) -> str:
     lowered = command.lower()
     protocols = (
-        "pytest", "tox", "nox", "npm", "pnpm", "yarn", "cargo", "go",
+        "pytest", "unittest", "tox", "nox", "npm", "pnpm", "yarn", "cargo", "go",
         "dotnet", "mvn", "gradle", "ctest", "rspec", "phpunit", "make",
         "cmake",
     )
@@ -341,31 +387,45 @@ def compile_execution_evidence(
     returncode: int | None,
     action_id: int,
     repository_revision: str,
+    raw_output: bytes | None = None,
+    timed_out: bool = False,
+    environment_sha256: str = "",
+    output_artifact_path: str = "",
+    output_artifact: dict | None = None,
 ) -> ExecutionEvidence | None:
-    kind = "test" if _TEST_RE.search(command) else "build" if _BUILD_RE.search(command) else ""
+    test_outcome, test_protocol = _classify_test_output(
+        command, output, returncode, output_artifact=output_artifact
+    )
+    kind = (
+        "test" if test_protocol or _ADDITIONAL_TEST_RE.search(command)
+        else "build" if _BUILD_RE.search(command) else ""
+    )
     if not kind:
         return None
-    outcome = classify_execution_outcome(command, output, returncode, kind=kind)
+    outcome = "timeout" if timed_out else (
+        _execution_outcome_guard(command, returncode, kind=kind) or test_outcome or "unknown"
+    )
     return ExecutionEvidence(
         action_id=action_id,
         kind=kind,
-        protocol=_protocol(command),
+        protocol="native" if test_protocol == "native" else _protocol(command),
         outcome=outcome,
         command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest(),
         returncode=returncode,
         repository_revision=repository_revision,
-        raw_output=output.encode("utf-8"),
+        raw_output=(None if output_artifact is not None else
+                    raw_output if raw_output is not None else output.encode("utf-8")),
+        environment_sha256=environment_sha256,
+        timed_out=timed_out,
+        output_artifact_path=output_artifact_path,
+        stored_output_sha256=str((output_artifact or {}).get("sha256") or ""),
+        stored_output_length=int((output_artifact or {}).get("total_length") or 0),
+        stored_output_encoding=str((output_artifact or {}).get("encoding") or "utf-8"),
+        observed_test_outcome=test_outcome,
     )
 
 
-def classify_execution_outcome(command: str, output: str, returncode: int | None,
-                               *, kind: str = "test") -> str:
-    """Conservative outcome shared by context and verification consumers.
-
-    A shell's aggregate exit cannot attribute a pipeline/compound result to one
-    check. Do not rewrite commands or guess segment status from their output.
-    Protocol parsing uses the certified producer; missing parsing means unknown.
-    """
+def _execution_outcome_guard(command: str, returncode: int | None, *, kind: str) -> str:
     if returncode is None:
         return "unknown"
     if returncode < 0:
@@ -376,11 +436,84 @@ def classify_execution_outcome(command: str, output: str, returncode: int | None
         return "unknown"
     if kind == "build":
         return "pass" if returncode == 0 else "fail"
+    return ""
+
+
+def _classify_test_output(
+    command: str,
+    output: str,
+    returncode: int | None,
+    *,
+    output_artifact: dict | None = None,
+) -> tuple[str, str]:
     try:
-        from groundtruth.runtime.patterns import classify_test_observation
-    except ImportError:
-        return "unknown"
-    outcome, _ = classify_test_observation(command, output, returncode)
+        if output_artifact is None:
+            from groundtruth.runtime.patterns import classify_test_observation
+
+            return classify_test_observation(command, output, returncode)
+
+        from groundtruth.runtime.patterns import classify_test_observation_stream
+
+        from .output_evidence import EvidenceStore
+
+        if output_artifact.get("schema") != "gt.output_artifact.v1":
+            raise ValueError("invalid output artifact schema")
+        root = output_artifact.get("root")
+        digest = output_artifact.get("sha256")
+        length = output_artifact.get("total_length")
+        encoding = output_artifact.get("encoding")
+        if not isinstance(root, str) or not root:
+            raise ValueError("invalid output artifact root")
+        if not isinstance(digest, str):
+            raise ValueError("invalid output artifact digest")
+        if type(length) is not int or length < 0:
+            raise ValueError("invalid output artifact length")
+        if encoding not in {"utf-8", "base64"}:
+            raise ValueError("invalid output artifact encoding")
+        chunks = EvidenceStore(root).iter_bytes(
+            digest,
+            expected_length=length,
+            expected_encoding=encoding,
+        )
+        result = classify_test_observation_stream(
+            command, chunks, returncode, encoding="utf-8", errors="replace"
+        )
+        # The canonical implementation consumes every chunk, but keep the
+        # trust boundary explicit: no derived result leaves this function until
+        # the artifact iterator has reached and validated its tail.
+        for _ in chunks:
+            pass
+        return result
+    except ImportError as exc:
+        if output_artifact is not None:
+            raise RuntimeError("canonical_streaming_classifier_unavailable") from exc
+        return "", ""
+
+
+def classify_execution_outcome(
+    command: str,
+    output: str,
+    returncode: int | None,
+    *,
+    kind: str = "test",
+    output_artifact: dict | None = None,
+) -> str:
+    """Conservative outcome shared by context and verification consumers.
+
+    A shell's aggregate exit cannot attribute a pipeline/compound result to one
+    check. Do not rewrite commands or guess segment status from their output.
+    Protocol parsing uses the certified producer; missing parsing means unknown.
+    """
+    if output_artifact is not None:
+        outcome, _ = _classify_test_output(
+            command, output, returncode, output_artifact=output_artifact
+        )
+        guarded = _execution_outcome_guard(command, returncode, kind=kind)
+        return guarded or outcome or "unknown"
+    guarded = _execution_outcome_guard(command, returncode, kind=kind)
+    if guarded:
+        return guarded
+    outcome, _ = _classify_test_output(command, output, returncode)
     return outcome or "unknown"
 
 

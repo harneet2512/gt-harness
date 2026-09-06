@@ -192,9 +192,11 @@ def _resource_evidence(
             before.get("oom"), after.get("oom"),
             before.get("oom_kill"), after.get("oom_kill"),
         )
-        if any(type(value) is not int for value in counters):
+        legacy_memory = (before.get("cgroup_version") == after.get("cgroup_version") == 1
+                         and before.get("oom") is None and after.get("oom") is None)
+        if any(type(value) is not int for value in (counters[2:] if legacy_memory else counters)):
             continue
-        oom_delta = max(0, after["oom"] - before["oom"])
+        oom_delta = None if legacy_memory else max(0, after["oom"] - before["oom"])
         oom_kill_delta = max(0, after["oom_kill"] - before["oom_kill"])
         unsigned = dict(payload)
         supplied_hmac = unsigned.pop("attestation_hmac_sha256", None)
@@ -216,7 +218,7 @@ def _resource_evidence(
             and payload.get("memory_evidence") is True
             and payload.get("cgroup_oom_delta") == oom_delta
             and payload.get("cgroup_oom_kill_delta") == oom_kill_delta
-            and (oom_delta > 0 or oom_kill_delta > 0)
+            and ((oom_delta is not None and oom_delta > 0) or oom_kill_delta > 0)
         ):
             valid.append((path, payload))
     return valid[0] if len(valid) == 1 else (None, None)

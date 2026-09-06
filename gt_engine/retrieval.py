@@ -265,6 +265,7 @@ class HybridRanking:
     provenance: Mapping[str, SymbolProvenance]
     rrf_k: int = RRF_K
     graph_revision: str = ""
+    graph_content_sha256: str = ""
 
     @property
     def available_sources(self) -> tuple[str, ...]:
@@ -301,6 +302,7 @@ class HybridRanking:
             ).hexdigest(),
             "query_chars": len(self.query),
             "graph_revision": self.graph_revision,
+            "graph_content_sha256": self.graph_content_sha256,
             "rrf_k": self.rrf_k,
             "available_sources": list(self.available_sources),
             "degraded_sources": self.degraded_sources,
@@ -449,6 +451,24 @@ def _provenance_from_row(row: Sequence[Any]) -> SymbolProvenance:
         start_line=start_line,
         end_line=end_line,
         identity_origin="derived:gt.symbol.identity.v1",
+    )
+
+
+def source_symbol(db: sqlite3.Connection, node_id: int) -> tuple[SymbolProvenance, str]:
+    """Read a primary symbol and its producer-observed source content identity."""
+    row = db.execute(
+        f"SELECT {_SYMBOL_COLUMNS}, n.file_hash FROM nodes n WHERE n.id = ?",
+        (node_id,),
+    ).fetchone()
+    if row is None or row[2] not in SYMBOL_LABELS:
+        raise ValueError("semantic_localization_primary_symbol_missing")
+    return _provenance_from_row(row), str(row[9] or "")
+
+
+def render_semantic_localization(items: Sequence[Mapping[str, Any]]) -> str:
+    return "[GT_EVIDENCE:localization]\n" + "\n".join(
+        f"{item['anchor']} score={item['score']:.8f} "
+        f"reasons={','.join(item['reasons'])}" for item in items
     )
 
 
@@ -815,6 +835,8 @@ def _rank_from_store(
     node_stable_ids: Mapping[int, str],
     k: int,
     store_path: Path,
+    source_revision: str,
+    graph_identity: str,
 ) -> SourceRanking:
     """Rank a pool against vectors the contract-embedding store already holds.
 
@@ -831,11 +853,34 @@ def _rank_from_store(
 
         query_vector = embed_queries(model_root, [query])[0]
         vectors = dict(lookup.vectors)
-        missing = [node_id for node_id in node_stable_ids if node_id not in vectors]
+        store_missing = {
+            node_id: stable_id for node_id, stable_id in node_stable_ids.items()
+            if node_id not in vectors
+        }
+        document_lookup = contract_embeddings.lookup_document_vectors(
+            store_path, documents, store_missing,
+        )
+        vectors.update(document_lookup.vectors)
+        missing = [node_id for node_id in store_missing if node_id not in vectors]
+        embedded: dict[int, tuple[float, ...]] = {}
         for start in range(0, len(missing), 32):
             batch = missing[start:start + 32]
             encoded = embed_texts(model_root, [documents[node_stable_ids[node_id]] for node_id in batch])
-            vectors.update(zip(batch, encoded, strict=True))
+            embedded.update(zip(batch, encoded, strict=True))
+        document_cache_reason = document_lookup.reason
+        try:
+            contract_embeddings.publish_document_vectors(
+                store_path, documents, node_stable_ids, embedded,
+            )
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            # Cache persistence is an optimization boundary. The vectors were
+            # produced successfully and remain valid for this exact query, so a
+            # read-only/corrupt sidecar is reported without erasing the dense
+            # result that was already computed.
+            document_cache_reason = (
+                f"dense_document_cache_publish_failed:{type(exc).__name__}"
+            )
+        vectors.update(embedded)
     except Exception as exc:  # noqa: BLE001 - dense fails closed, never loudly
         return SourceRanking(
             RetrievalSource.DENSE,
@@ -865,17 +910,39 @@ def _rank_from_store(
         for node_id, score in scored
         if node_id in node_stable_ids
     )[: max(0, int(k))]
+    with sqlite3.connect(f"{store_path.resolve().as_uri()}?mode=ro", uri=True) as check:
+        quick_check = str(check.execute("PRAGMA quick_check").fetchone()[0])
+    query_ready = bool(ranking) and quick_check == "ok" and len(vectors) == len(node_stable_ids)
+    from .dense_runtime import model_identity
+
+    execution_receipt = {
+        "schema": "gt.dense_index_receipt.v1", **model_identity(),
+        "query_ready": query_ready, "source_revision": source_revision,
+        "graph_revision": graph_identity, "document_count": len(vectors),
+        "query_result_count": len(ranking), "embedded_documents": len(embedded),
+        "cached_documents": len(lookup.vectors) + document_lookup.hits,
+        "sqlite_quick_check": quick_check,
+        "index_sha256": hashlib.sha256(store_path.read_bytes()).hexdigest(),
+        "exact_rescore": True, "vector_source": "contract_embedding_store",
+        "reason": None if query_ready else "dense_query_not_ready",
+    }
     return SourceRanking(
         RetrievalSource.DENSE,
         ranking,
-        available=True,
+        available=query_ready,
+        reason=execution_receipt["reason"],
         detail={
+            "execution_receipt": execution_receipt,
             "vector_source": "contract_embedding_store",
             "store_path": str(store_path),
             "pool_size": len(documents),
             "store_hits": lookup.hits,
             "store_misses": lookup.misses,
-            "runtime_embedded_missing": len(missing),
+            "runtime_embedded_missing": len(embedded),
+            "runtime_document_cache_hits": document_lookup.hits,
+            "runtime_document_cache_misses": document_lookup.misses,
+            "document_recipe_id": document_lookup.recipe_id,
+            "document_cache_reason": document_cache_reason,
             "missing_stable_ids": list(lookup.missing_stable_ids),
             "dimension": lookup.dimension,
         },
@@ -1013,6 +1080,8 @@ def dense_rank(
                 node_stable_ids=node_stable_ids,
                 k=k,
                 store_path=resolved_store,
+                source_revision=source_revision,
+                graph_identity=graph_revision(source_path) if source_path else "",
             )
         # Named, never silent: the caller asked for a cache and did not get one.
         store_detail["store_reason"] = lookup.reason
@@ -1066,6 +1135,7 @@ def dense_rank(
         reason=None if query_ready else str(receipt.get("reason") or "dense_not_ready"),
         detail={
             **store_detail,
+            "execution_receipt": dict(receipt),
             "pool_size": len(documents),
             "pool_bounded": restrict_to is not None or (
                 pool_limit is not None and len(documents) >= pool_limit),
@@ -1187,10 +1257,15 @@ def hybrid_rank(
             con.close()
 
     sources = (lexical, properties, dense)
+    graph_digest = ""
+    if path:
+        with open(path, "rb") as graph_file:
+            graph_digest = hashlib.file_digest(graph_file, "sha256").hexdigest()
     return HybridRanking(
         query=query,
         fused=tuple(fuse(sources, rrf_k, limit=k)),
         sources=sources,
+        graph_content_sha256=graph_digest,
         provenance=provenance,
         rrf_k=rrf_k,
         graph_revision=graph_revision(path) if path else "",

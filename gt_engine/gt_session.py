@@ -16,12 +16,29 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
+import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from .delivery_budget import PROMPT_CONTEXT_BYTE_LIMIT, compact_localization, truncate_utf8
+from groundtruth.runtime.evidence_envelope import chain_hash
+
+from .delivery_budget import compact_localization, delivery_byte_limit
+from .output_evidence import EvidenceStore
+from .persistent_execution_state import (
+    CatalogItem,
+    Feature18Catalog,
+    Feature18Lifecycle,
+    SelectCatalogAbstention,
+    SelectCatalogStage,
+    build_feature18_catalog,
+    build_select_catalog_messages,
+    build_select_catalog_tool,
+    parse_select_catalog_arguments,
+)
+from .request_history import load_history_evidence, store_history_evidence
 from .run_diagnostics import CapabilityState, DiagnosticCode, DiagnosticEvent
 
 # Capabilities a host can declare (see the verdict's negotiation list).
@@ -105,6 +122,77 @@ class GTDecisionBatch:
                         self.verification, self.provenance, self.degraded])
 
 
+@dataclass(frozen=True)
+class GTDecisionCandidate:
+    """One producer-owned fact proposed for the current provider decision."""
+
+    rendered: str
+    kind: str
+    dedup_key: str
+    lane: str = "sealed"
+    target: str = ""
+    semantics: str = "advisory"
+    artifact_sha256: str = ""
+    previous_chain_head: str = ""
+    next_chain_head: str = ""
+    verification_candidate: str = ""
+    source_ordinal: int = 0
+    current_failure: bool = False
+    current_obligation: bool = False
+    action_index: int = 0
+    unit_id: str = ""
+    supersession_key: str = ""
+    supersedes: tuple[str, ...] = ()
+    source_revision: str = ""
+    artifact_reference: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class SelectCatalogOffer:
+    """One exact, revision-bound task-start selection request."""
+
+    catalog: Feature18Catalog
+    messages: tuple[dict[str, str], ...]
+    tool: Mapping[str, Any]
+
+
+_FAILURE_KINDS = frozenset({
+    "covering_red",
+    "covering_verdict",
+    "recovery",
+    "test_failure",
+    "trace_frame",
+})
+_OBLIGATION_KINDS = frozenset({
+    "context_contract",
+    "context_delta",
+    "obligations",
+})
+_LOCALIZATION_KINDS = frozenset({"brief_localization", "localization"})
+_WEAK_HISTORY_KINDS = frozenset({"cochange_partner", "cochange_prior"})
+_MINISWE_CHAIN_GENESIS = hashlib.sha256(b"miniswe-genesis").hexdigest()
+
+
+def _decision_candidate_order(candidate: GTDecisionCandidate) -> tuple[int, int, str, str]:
+    """Current facts first; weak historical priors consume only spare room."""
+
+    kind = candidate.kind
+    if candidate.current_failure or kind in _FAILURE_KINDS:
+        priority = 0
+    elif candidate.current_obligation or kind in _OBLIGATION_KINDS:
+        priority = 1
+    elif kind in _LOCALIZATION_KINDS:
+        priority = 2
+    elif kind in _WEAK_HISTORY_KINDS or "cochange" in kind:
+        priority = 4
+    else:
+        # Edit consequences and verification evidence share the actionable
+        # middle lane. Their stable kind/hash order makes replay byte-identical.
+        priority = 3
+    identity = hashlib.sha256(candidate.rendered.encode("utf-8")).hexdigest()
+    return priority, candidate.source_ordinal, kind, identity
+
+
 class GTSession:
     """Single-owner GT session facade.
 
@@ -134,10 +222,208 @@ class GTSession:
         self._task_start_shipped = False
         self._pending_contract_delta = ""
         self._pending_contract_rendered = ""
+        self._pending_contract_identity = ""
         self._pending_localization = ""
+        self._pending_localization_identity = ""
+        self._queued_decision_candidates: list[GTDecisionCandidate] = []
+        self._active_context_units: dict[str, dict[str, Any]] = {}
+        self._pending_context_units: dict[str, dict[str, Any]] = {}
         self._execution_sequence = 0
         self._open_executions: set[str] = set()
+        self._select_catalog_attempted = False
+        self._select_catalog_lifecycle: Feature18Lifecycle | None = None
         self._capability_check()
+
+    def _record_select_catalog(self, reason: str) -> None:
+        lifecycle = self._select_catalog_lifecycle
+        if lifecycle is None:
+            return
+        self._engine.store.append(
+            "select_catalog_lifecycle",
+            lifecycle_schema=lifecycle.receipt()["schema"],
+            reason=reason,
+            receipt=lifecycle.receipt(),
+        )
+
+    @staticmethod
+    def _graph_contains_target(graph_path: str, target: str) -> bool:
+        normalized = target.replace("\\", "/").lstrip("./")
+        if not graph_path or not normalized:
+            return False
+        try:
+            uri = f"file:{os.path.abspath(graph_path)}?mode=ro"
+            with sqlite3.connect(uri, uri=True) as connection:
+                row = connection.execute(
+                    "SELECT 1 FROM nodes WHERE file_path = ? OR file_path = ? LIMIT 1",
+                    (normalized, normalized.replace("/", "\\")),
+                ).fetchone()
+            return row is not None
+        except (OSError, sqlite3.Error):
+            return False
+
+    def prepare_select_catalog(self) -> SelectCatalogOffer | None:
+        """Prepare the one eligible task-start catalog through decision admission."""
+
+        if self._select_catalog_attempted:
+            return None
+        self._select_catalog_attempted = True
+        if (
+            self._engine is None
+            or self.disabled
+            or not self.capability_model_visible("select_catalog")
+        ):
+            return None
+        snapshot = self._engine.graph_query_snapshot()
+        source_revision = str(snapshot.source_revision or "")
+        if not snapshot.graph_current or not source_revision or not snapshot.graph_revision:
+            self._engine.store.append(
+                "select_catalog_abstained", reason="stale_or_incomplete_graph"
+            )
+            return None
+        localization = self._engine.task_start_localization(commit=False)
+        metadata = self._engine.localization_delivery_metadata()
+        target = str(metadata.get("target") or "").replace("\\", "/").lstrip("./")
+        if not localization or not self._graph_contains_target(snapshot.graph_path, target):
+            self._engine.store.append(
+                "select_catalog_abstained", reason="no_graph_backed_catalog_item"
+            )
+            return None
+        content_sha256 = hashlib.sha256(localization.encode("utf-8")).hexdigest()
+        item_id = f"focus-{hashlib.sha256((target + content_sha256).encode()).hexdigest()[:20]}"
+        catalog = build_feature18_catalog(
+            source_revision=source_revision,
+            workspace_revision=str(getattr(self._engine, "repository_revision", "") or source_revision),
+            graph_revision=str(snapshot.graph_revision),
+            items=(CatalogItem(item_id, "focus", target, content_sha256, target),),
+        )
+        self._select_catalog_lifecycle = Feature18Lifecycle.from_catalog(
+            catalog, event_id=f"{self.config.task_id}:select_catalog"
+        )
+        rendered = "[GT_SELECT_CATALOG]\n" + json.dumps(
+            catalog.as_dict(), ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        )
+        batch = self.admit_decision_packet(
+            [GTDecisionCandidate(
+                rendered=rendered,
+                kind="select_catalog",
+                dedup_key=f"select_catalog:{catalog.content_sha256}",
+                lane="sealed",
+                target=target,
+                source_revision=source_revision,
+                unit_id=catalog.content_sha256,
+                supersession_key="select_catalog:task_start",
+            )],
+            iteration=0,
+            action_index=0,
+        )
+        if not batch.context_additions:
+            self._select_catalog_lifecycle.abstain(SelectCatalogAbstention.INCOMPLETE)
+            self._record_select_catalog("decision_admission_refused")
+            return None
+        messages = build_select_catalog_messages(catalog, task=self.config.issue_text)
+        messages[-1]["content"] += "\n\n" + batch.context_additions[0]
+        self._record_select_catalog("catalog_prepared")
+        return SelectCatalogOffer(
+            catalog=catalog,
+            messages=tuple(messages),
+            tool=build_select_catalog_tool(catalog),
+        )
+
+    def certify_select_catalog_offer(
+        self, *, request_bytes: bytes, tool_schema_bytes: bytes,
+        provider_request_id: str, delivery_ids: tuple[str, ...]
+    ) -> None:
+        lifecycle = self._select_catalog_lifecycle
+        if lifecycle is None:
+            return
+        lifecycle.certify_offer(
+            request_bytes=request_bytes,
+            tool_schema_bytes=tool_schema_bytes,
+            provider_request_id=provider_request_id,
+        )
+        if lifecycle.stage is SelectCatalogStage.CERTIFIED:
+            lifecycle.deliver(delivery_id=provider_request_id)
+            self.provider_request_admitted(delivery_ids)
+        self._record_select_catalog("provider_request_admitted")
+
+    def accept_select_catalog(self, arguments: Any) -> tuple[str, ...]:
+        """Validate selected IDs and queue them for the ordinary Mini-SWE request."""
+
+        lifecycle = self._select_catalog_lifecycle
+        if lifecycle is None:
+            return ()
+        attempted, selected = parse_select_catalog_arguments(arguments, lifecycle.catalog)
+        raw = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str).encode()
+        lifecycle.record_selection(
+            attempted_ids=attempted, selected_ids=selected, argument_bytes=raw
+        )
+        if lifecycle.stage is SelectCatalogStage.ABSTAINED:
+            self._record_select_catalog("selection_refused")
+            return ()
+        by_id = {item.item_id: item for item in lifecycle.catalog.items}
+        rendered = "[GT_SELECT_CATALOG_RESULT]\n" + json.dumps(
+            {
+                "schema": "gt.select_catalog.result.v1",
+                "catalog_sha256": lifecycle.catalog.content_sha256,
+                "selected_items": [by_id[item_id].as_dict() for item_id in selected],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.queue_decision_candidates((GTDecisionCandidate(
+            rendered=rendered,
+            kind="select_catalog",
+            dedup_key=f"select_catalog_result:{lifecycle.catalog.content_sha256}",
+            lane="sealed",
+            target=by_id[selected[0]].target,
+            source_revision=lifecycle.catalog.source_revision,
+            unit_id=hashlib.sha256(rendered.encode()).hexdigest(),
+            supersession_key="select_catalog:selection",
+        ),))
+        self._record_select_catalog("selection_accepted")
+        return selected
+
+    def fail_select_catalog(self, reason: str) -> None:
+        """Close a dispatched selection request after provider/parse failure."""
+
+        lifecycle = self._select_catalog_lifecycle
+        if lifecycle is None or lifecycle.stage not in {
+            SelectCatalogStage.CANDIDATE,
+            SelectCatalogStage.CERTIFIED,
+            SelectCatalogStage.DELIVERED,
+        }:
+            return
+        lifecycle.abstain(SelectCatalogAbstention.INCOMPLETE)
+        self._record_select_catalog(reason)
+
+    def observe_select_catalog_action(self, command: str) -> None:
+        """Consume selection only when a real Mini-SWE Bash action matches it."""
+
+        lifecycle = self._select_catalog_lifecycle
+        if lifecycle is None or lifecycle.stage is not SelectCatalogStage.DELIVERED:
+            return
+        if lifecycle.catalog.source_revision != str(self._engine.repository_revision or ""):
+            lifecycle.abstain(SelectCatalogAbstention.STALE_REVISION)
+            self._record_select_catalog("selection_stale_before_action")
+            return
+        selected = {item.item_id: item for item in lifecycle.catalog.items
+                    if item.item_id in lifecycle.selected_ids}
+        try:
+            command_tokens = {
+                token.replace("\\", "/").lstrip("./")
+                for token in shlex.split(command, posix=os.name != "nt")
+            }
+        except ValueError:
+            return
+        matched = tuple(
+            item_id for item_id, item in selected.items()
+            if item.target and item.target in command_tokens
+        )
+        if not matched:
+            return
+        lifecycle.consume(selected_ids=matched, resulting_action=command)
+        self._record_select_catalog("matching_action_consumed")
 
     @property
     def engine(self) -> Any | None:
@@ -252,34 +538,47 @@ class GTSession:
         """Deliver context additions (contract/localization) before a model call."""
         if self._engine is None or self.disabled:
             return GTDecisionBatch()
-        additions: list[str] = []
+        candidates = list(self._queued_decision_candidates)
+        contract_candidate: tuple[str, str] | None = None
+        contract_unit_id = ""
+        localization_candidate = ""
+        localization_unit_id = ""
         contract_was_shipped = bool(self._engine.contract_shipped)
+        contract_kind = "context_delta" if contract_was_shipped else "context_contract"
         delta = self._engine.next_contract_delta(
             commit=False,
             max_chars=min(
-                self.config.context_budget_bytes, PROMPT_CONTEXT_BYTE_LIMIT
+                self.config.context_budget_bytes,
+                delivery_byte_limit(lane="prompt", kind=contract_kind),
             )
         )
         if delta:
             tag = "GT_TASK_CONTRACT" if not contract_was_shipped else "GT_OBLIGATION_DELTA"
-            rendered = truncate_utf8(
-                f"[{tag}]\n{delta}", PROMPT_CONTEXT_BYTE_LIMIT
-            )
+            rendered = f"[{tag}]\n{delta}"
             if self.model_visible:
-                kind = "context_delta" if contract_was_shipped else "context_contract"
+                kind = contract_kind
                 payload_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
-                if self._engine.admit_model_visible_delivery(
-                    lane="prompt",
-                    kind=kind,
+                supersession_key = "obligations:task"
+                active = self._active_context_units.get(supersession_key)
+                reference = self._store_context_unit(rendered)
+                candidates.append(GTDecisionCandidate(
                     rendered=rendered,
-                    action_index=0,
-                    iteration=iteration,
+                    kind=kind,
                     dedup_key=f"prompt:{payload_hash}",
+                    lane="prompt",
                     target="provider_prompt",
-                ):
-                    self._pending_contract_delta = delta
-                    self._pending_contract_rendered = rendered
-                    additions.append(rendered)
+                    current_obligation=True,
+                    unit_id=payload_hash,
+                    supersession_key=supersession_key,
+                    supersedes=((active["unit_id"],) if active else ()),
+                    source_revision=str(
+                        getattr(self._engine, "repository_revision", "") or ""
+                    ),
+                    artifact_sha256=reference.get("sha256", ""),
+                    artifact_reference=reference or None,
+                ))
+                contract_candidate = (delta, rendered)
+                contract_unit_id = payload_hash
             else:
                 self._engine.store.append(
                     "shadow_context_computed",
@@ -292,8 +591,9 @@ class GTSession:
         ):
             localization = self._engine.task_start_localization(commit=False)
             if localization:
-                original_bytes = len(localization.encode("utf-8"))
-                localization = _compress_context(localization, 1_400)
+                original_localization = localization
+                original_bytes = len(original_localization.encode("utf-8"))
+                localization = _compress_context(original_localization, 1_400)
                 delivered_bytes = len(localization.encode("utf-8"))
                 if delivered_bytes < original_bytes:
                     self._engine.store.append(
@@ -322,34 +622,389 @@ class GTSession:
                                 ),
                             )
                         )
-                if self.model_visible and localization and self._engine.admit_model_visible_delivery(
-                    lane="sealed", rendered=localization, action_index=0,
-                    iteration=iteration, **self._engine.localization_delivery_metadata(),
-                ):
-                    self._pending_localization = localization
-                    additions.append(localization)
-                elif not self.model_visible:
+                if not self.model_visible:
                     self._engine.store.append(
                         "shadow_task_start_localization",
                         rendered_bytes=len(localization.encode("utf-8")),
                     )
-        return GTDecisionBatch(context_additions=additions)
+                elif localization:
+                    metadata = self._engine.localization_delivery_metadata()
+                    payload_hash = hashlib.sha256(localization.encode("utf-8")).hexdigest()
+                    supersession_key = "localization:task"
+                    active = self._active_context_units.get(supersession_key)
+                    # The compact localization remains useful inline, while its
+                    # reference always identifies the producer's complete unit.
+                    reference = self._store_context_unit(original_localization)
+                    localization_unit_id = reference.get("sha256", payload_hash)
+                    candidates.append(GTDecisionCandidate(
+                        rendered=localization,
+                        kind=metadata["kind"],
+                        dedup_key=metadata["dedup_key"],
+                        target=metadata.get("target", ""),
+                        semantics=metadata.get("semantics", "advisory"),
+                        artifact_sha256=metadata.get("artifact_sha256", ""),
+                        unit_id=localization_unit_id,
+                        supersession_key=supersession_key,
+                        supersedes=((active["unit_id"],) if active else ()),
+                        source_revision=str(
+                            getattr(self._engine, "repository_revision", "") or ""
+                        ),
+                        artifact_reference=reference or None,
+                    ))
+                    localization_candidate = localization
+        batch = self.admit_decision_packet(
+            candidates, iteration=iteration, action_index=0
+        )
+        if contract_candidate and contract_candidate[1] in batch.context_additions:
+            self._pending_contract_delta, self._pending_contract_rendered = contract_candidate
+        elif contract_candidate:
+            delivered = next(
+                (
+                    item for item in batch.context_additions
+                    if f'"unit_id":"{contract_unit_id}"' in item
+                ),
+                "",
+            )
+            if delivered:
+                self._pending_contract_delta, self._pending_contract_rendered = contract_candidate
+                self._pending_contract_identity = hashlib.sha256(delivered.encode()).hexdigest()
+        if localization_candidate in batch.context_additions:
+            self._pending_localization = localization_candidate
+        elif localization_candidate:
+            delivered = next(
+                (
+                    item for item in batch.context_additions
+                    if f'"unit_id":"{localization_unit_id}"' in item
+                ),
+                "",
+            )
+            if delivered:
+                self._pending_localization = localization_candidate
+                self._pending_localization_identity = hashlib.sha256(delivered.encode()).hexdigest()
+        return batch
+
+    def _store_context_unit(self, rendered: str) -> dict[str, Any]:
+        try:
+            root = self._engine.engine_state.layout.evidence_root
+            return store_history_evidence(
+                EvidenceStore(root), rendered.encode("utf-8"), kind="decision_evidence"
+            )
+        except (AttributeError, OSError, ValueError):
+            return {}
+
+    def _valid_context_reference(self, reference: Mapping[str, Any]) -> bool:
+        """Accept only an existing immutable object in this task's evidence CAS."""
+
+        try:
+            root = self._engine.engine_state.layout.evidence_root
+            payload = load_history_evidence(root, reference)
+            encoding = str(reference.get("encoding") or "")
+            if encoding not in {"utf-8", "base64"}:
+                return False
+            actual_encoding = "utf-8"
+            try:
+                payload.decode("utf-8", "strict")
+            except UnicodeDecodeError:
+                actual_encoding = "base64"
+            return (
+                encoding == actual_encoding
+                and bool(str(reference.get("kind") or "").strip())
+                and str(reference.get("retrieval_command") or "")
+                == f"gt-evidence read {reference['sha256']} 0 8192"
+            )
+        except (AttributeError, KeyError, OSError, TypeError, ValueError):
+            return False
 
     def provider_request_admitted(self, delivery_ids: tuple[str, ...]) -> None:
         """Commit shipped latches only for bytes in an admitted final request."""
         identities = set(delivery_ids)
-        if (self._pending_contract_rendered
-                and hashlib.sha256(self._pending_contract_rendered.encode()).hexdigest()
-                in identities):
+        contract_identity = self._pending_contract_identity or (
+            hashlib.sha256(self._pending_contract_rendered.encode()).hexdigest()
+            if self._pending_contract_rendered else ""
+        )
+        if contract_identity and contract_identity in identities:
             self._engine.acknowledge_contract_delta(self._pending_contract_delta)
             self._pending_contract_delta = ""
             self._pending_contract_rendered = ""
-        if (self._pending_localization
-                and hashlib.sha256(self._pending_localization.encode()).hexdigest()
-                in identities):
+            self._pending_contract_identity = ""
+        localization_identity = self._pending_localization_identity or (
+            hashlib.sha256(self._pending_localization.encode()).hexdigest()
+            if self._pending_localization else ""
+        )
+        if localization_identity and localization_identity in identities:
             self._engine.acknowledge_localization(self._pending_localization)
             self._pending_localization = ""
+            self._pending_localization_identity = ""
             self._task_start_shipped = True
+        for identity, unit in tuple(self._pending_context_units.items()):
+            if identity not in identities:
+                continue
+            key = unit["supersession_key"]
+            if not unit["historical"]:
+                self._active_context_units[key] = {
+                    "unit_id": unit["unit_id"],
+                    "source_revision": unit["source_revision"],
+                    "action_index": unit["action_index"],
+                }
+            self._engine.store.append(
+                "decision_context_unit_admitted",
+                delivery_identity=identity,
+                unit_id=unit["unit_id"],
+                supersession_key=key,
+                supersedes=list(unit["supersedes"]),
+                source_revision=unit["source_revision"],
+                artifact_sha256=unit["artifact_sha256"],
+                artifact_reference=unit["artifact_reference"],
+                historical=unit["historical"],
+                action_index=unit["action_index"],
+            )
+        self._pending_context_units.clear()
+        # Queued action evidence belongs to this exact decision. A provider
+        # refusal never calls this method, so the same candidates remain
+        # available for the request retry without being promoted to history.
+        self._queued_decision_candidates.clear()
+
+    def queue_decision_candidates(
+        self, candidates: list[GTDecisionCandidate] | tuple[GTDecisionCandidate, ...]
+    ) -> None:
+        """Retain action evidence until the next exact provider request is built."""
+
+        if self._engine is None or self.disabled or not self.model_visible:
+            return
+        self._queued_decision_candidates.extend(
+            candidate for candidate in candidates if candidate.rendered
+        )
+
+    def admit_decision_packet(
+        self,
+        candidates: list[GTDecisionCandidate] | tuple[GTDecisionCandidate, ...],
+        *,
+        iteration: int,
+        action_index: int,
+    ) -> GTDecisionBatch:
+        """Admit every fitting current-decision fact through the existing owner.
+
+        Producers keep ownership of fact bytes and derivation. GTSession only
+        orders the decision-local proposals and asks the adapter's transactional
+        admission boundary to prepare each one. Exposure chain state is staged
+        only after that candidate is admitted; a refused candidate therefore
+        cannot consume a dedup key, chain head, or verification proposal.
+        """
+
+        if self._engine is None or self.disabled or not self.model_visible:
+            return GTDecisionBatch()
+        additions: list[str] = []
+        evidence: list[str] = []
+        verification: list[str] = []
+        provenance: list[dict] = []
+        _, admission_chain_head = self._engine.pending_evidence_chain()
+        proposed_units = dict(self._active_context_units)
+        current_revision = str(
+            getattr(self._engine, "repository_revision", "")
+            or getattr(getattr(self._engine, "engine_state", None), "source_revision", "")
+            or ""
+        )
+
+        def is_historical(candidate: GTDecisionCandidate) -> bool:
+            return bool(
+                current_revision
+                and candidate.source_revision
+                and candidate.source_revision != current_revision
+            )
+
+        ordered = sorted(
+            candidates,
+            key=lambda candidate: (
+                1 if is_historical(candidate) else 0,
+                *_decision_candidate_order(candidate),
+            ),
+        )
+        for candidate in ordered:
+            if not candidate.rendered:
+                continue
+            original_sha256 = hashlib.sha256(
+                candidate.rendered.encode("utf-8")
+            ).hexdigest()
+            artifact_reference = dict(
+                candidate.artifact_reference
+                or self._store_context_unit(candidate.rendered)
+            )
+            reference_sha256 = str(artifact_reference.get("sha256") or "")
+            if artifact_reference and not self._valid_context_reference(
+                artifact_reference
+            ):
+                self._engine.store.append(
+                    "decision_context_unit_refused",
+                    reason="artifact_reference_identity_mismatch",
+                    payload_sha256=original_sha256,
+                    artifact_sha256=candidate.artifact_sha256,
+                )
+                continue
+            unit_id = candidate.unit_id or reference_sha256 or original_sha256
+            supersedes = tuple(candidate.supersedes)
+            historical = is_historical(candidate)
+            previous_unit = (
+                None if historical else proposed_units.get(candidate.supersession_key)
+            )
+            if (
+                candidate.supersession_key
+                and previous_unit is not None
+                and previous_unit["unit_id"] != unit_id
+                and previous_unit["unit_id"] not in supersedes
+            ):
+                if (
+                    candidate.source_revision
+                    and previous_unit["source_revision"]
+                    and candidate.source_revision != previous_unit["source_revision"]
+                ):
+                    supersedes = (*supersedes, previous_unit["unit_id"])
+                elif (
+                    candidate.action_index > 0
+                    and candidate.action_index > previous_unit.get("action_index", 0)
+                ):
+                    # Re-running the same command against an unchanged tree can
+                    # reverse its outcome. The later executed observation owns
+                    # the current claim even when the repository revision did
+                    # not move.
+                    supersedes = (*supersedes, previous_unit["unit_id"])
+                else:
+                    self._engine.store.append(
+                        "decision_context_unit_refused",
+                        reason="implicit_supersession_forbidden",
+                        unit_id=unit_id,
+                        supersession_key=candidate.supersession_key,
+                        active_unit_id=previous_unit["unit_id"],
+                        source_revision=candidate.source_revision,
+                    )
+                    continue
+            if historical:
+                supersedes = ()
+            rendered = candidate.rendered
+            if candidate.supersession_key:
+                visible_reference = {
+                    key: artifact_reference[key]
+                    for key in (
+                        "schema", "sha256", "total_length", "encoding", "kind",
+                        "retrieval_command",
+                    )
+                    if key in artifact_reference
+                }
+                metadata = {
+                    "unit_id": unit_id,
+                    "supersession_key": candidate.supersession_key,
+                    "source_revision": candidate.source_revision,
+                    "supersedes": list(dict.fromkeys(supersedes)),
+                    "historical": historical,
+                    "action_index": candidate.action_index,
+                }
+                header = "[GT_CONTEXT_UNIT] " + json.dumps(
+                    metadata, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+                )
+                full = f"{header}\n{candidate.rendered}"
+                limit = delivery_byte_limit(lane=candidate.lane, kind=candidate.kind)
+                if historical and visible_reference:
+                    rendered = f"{header}\n[GT_CONTEXT_UNIT_REFERENCE] " + json.dumps(
+                        visible_reference, ensure_ascii=True, sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                elif len(full.encode("utf-8")) <= limit:
+                    rendered = full
+                elif visible_reference:
+                    rendered = f"{header}\n[GT_CONTEXT_UNIT_REFERENCE] " + json.dumps(
+                        visible_reference, ensure_ascii=True, sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                else:
+                    self._engine.store.append(
+                        "decision_context_unit_refused",
+                        reason="context_unit_metadata_byte_ceiling",
+                        unit_id=unit_id,
+                        supersession_key=candidate.supersession_key,
+                        source_revision=candidate.source_revision,
+                    )
+                    continue
+            payload_sha256 = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+            admitted = self._engine.admit_model_visible_delivery(
+                lane=candidate.lane,
+                kind=candidate.kind,
+                rendered=rendered,
+                action_index=candidate.action_index or action_index,
+                iteration=iteration,
+                dedup_key=candidate.dedup_key,
+                target=candidate.target,
+                semantics=candidate.semantics,
+                artifact_sha256=candidate.artifact_sha256,
+            )
+            if not admitted:
+                continue
+            if candidate.supersession_key:
+                unit = {
+                    "unit_id": unit_id,
+                    "supersession_key": candidate.supersession_key,
+                    "supersedes": tuple(dict.fromkeys(supersedes)),
+                    "source_revision": candidate.source_revision,
+                    "artifact_sha256": candidate.artifact_sha256,
+                    "artifact_reference": artifact_reference,
+                    "historical": historical,
+                    "action_index": candidate.action_index,
+                }
+                self._pending_context_units[payload_sha256] = unit
+                if not historical:
+                    proposed_units[candidate.supersession_key] = {
+                        "unit_id": unit_id,
+                        "source_revision": candidate.source_revision,
+                        "action_index": candidate.action_index,
+                    }
+                self._engine.store.append(
+                    "decision_context_unit_prepared",
+                    delivery_identity=payload_sha256,
+                    unit_id=unit_id,
+                    supersession_key=candidate.supersession_key,
+                    supersedes=list(unit["supersedes"]),
+                    source_revision=candidate.source_revision,
+                    artifact_sha256=candidate.artifact_sha256,
+                    artifact_reference=artifact_reference,
+                    historical=historical,
+                    action_index=candidate.action_index,
+                )
+            if candidate.dedup_key and (
+                candidate.previous_chain_head
+                or candidate.next_chain_head
+                or candidate.verification_candidate
+            ):
+                previous_chain_head = candidate.previous_chain_head
+                next_chain_head = candidate.next_chain_head
+                if candidate.next_chain_head:
+                    previous_chain_head = admission_chain_head
+                    next_chain_head = chain_hash(
+                        admission_chain_head or _MINISWE_CHAIN_GENESIS,
+                        rendered.encode("utf-8"),
+                    )
+                self._engine.stage_exposure(
+                    rendered=rendered,
+                    dedup_key=candidate.dedup_key,
+                    previous_chain_head=previous_chain_head,
+                    next_chain_head=next_chain_head,
+                    verification_candidate=candidate.verification_candidate,
+                )
+                if candidate.next_chain_head:
+                    admission_chain_head = next_chain_head
+            additions.append(rendered)
+            evidence.append(candidate.kind)
+            if candidate.kind == "verification_plan":
+                verification.append(rendered)
+            provenance.append({
+                "event": "decision_candidate_admitted",
+                "kind": candidate.kind,
+                "dedup_key": candidate.dedup_key,
+                "payload_sha256": payload_sha256,
+            })
+        return GTDecisionBatch(
+            context_additions=additions,
+            evidence=evidence,
+            verification=verification,
+            provenance=provenance,
+        )
 
     def after_action(
         self,

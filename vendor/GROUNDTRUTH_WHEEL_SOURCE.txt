@@ -1,10 +1,10 @@
 artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
-source_commit=7fcb019104f0e43311e2db009950e60014bc1f4b
-sha256=60abf2f50435e5de01a35877a57d39b21a8ddd34c5ed4fdca0f79b6f279dfef7
-build_command=python -m build --wheel
+source_commit=88c5f6401846faf69127bee6f0bb75df39fab0e7
+source_tree=f5c840d3cdc060920133f1d2694e0f2fb307da1d
+sha256=685af2f1456f78dcbf1ebc8f02b016a842a409fd6048e0a5e2c861ee4906b0b2
+build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
 
-The wheel was built from a detached clean worktree at source_commit, not from
-the developer checkout. The edit-time caller-contract and patch-delta producer
-audit fixes are committed upstream. The relevant upstream runtime tests passed
-before build, and the built archive was inspected for all four fix markers.
+All 317 packaged files match the committed source archive.
+Installed validation of candidate 23 is pending. This does not certify whole-product readiness.
+Historical identities and evidence remain in git history and Linear HAR-83.

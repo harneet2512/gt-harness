@@ -162,6 +162,7 @@ class ExecutionStateSnapshot:
 
 SELECT_CATALOG_FEATURE_ID = "select_catalog"
 SELECT_CATALOG_SCHEMA = "gt.select_catalog_lifecycle.v1"
+SELECT_CATALOG_TOOL_NAME = "select_catalog"
 
 
 class SelectCatalogStage(StrEnum):
@@ -201,6 +202,7 @@ class CatalogItem:
     kind: str
     label: str
     content_sha256: str
+    target: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -208,6 +210,7 @@ class CatalogItem:
             "kind": self.kind,
             "label": self.label,
             "content_sha256": self.content_sha256,
+            "target": self.target,
         }
 
 
@@ -235,6 +238,95 @@ class Feature18Catalog:
             "graph_revision": self.graph_revision,
             "items": [item.as_dict() for item in self.items],
         }
+
+
+def build_select_catalog_tool(catalog: Feature18Catalog) -> dict[str, Any]:
+    """Return a provider tool constrained to this exact catalog surface."""
+
+    item_ids = sorted(catalog.item_ids)
+    return {
+        "type": "function",
+        "function": {
+            "name": SELECT_CATALOG_TOOL_NAME,
+            "description": (
+                "Select and order existing catalog IDs for the next execution "
+                "focus. Do not invent IDs, paths, commands, or facts."
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": True,
+                        "items": {"type": "string", "enum": item_ids},
+                    }
+                },
+            },
+        },
+    }
+
+
+def build_select_catalog_messages(
+    catalog: Feature18Catalog, *, task: str, max_chars: int = 8_000
+) -> list[dict[str, str]]:
+    """Render a bounded ID-only selection request without changing item facts."""
+
+    items = [item.as_dict() for item in catalog.items]
+    payload = json.dumps(
+        {
+            "schema": catalog.schema,
+            "source_revision": catalog.source_revision,
+            "workspace_revision": catalog.workspace_revision,
+            "graph_revision": catalog.graph_revision,
+            "task": str(task)[:2_000],
+            "items": items,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if len(payload) > max_chars:
+        raise ValueError("select_catalog request exceeds bounded input")
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Select existing catalog IDs with the select_catalog tool. "
+                "Selection only orders deterministic context; Mini-SWE retains "
+                "all reasoning and action authority."
+            ),
+        },
+        {"role": "user", "content": payload},
+    ]
+
+
+def parse_select_catalog_arguments(
+    raw: Any, catalog: Feature18Catalog
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return attempted and accepted IDs from one strict typed payload."""
+
+    value = raw
+    if isinstance(raw, (bytes, bytearray)):
+        value = raw.decode("utf-8", "replace")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return (), ()
+    if not isinstance(value, dict) or set(value) != {"ids"}:
+        return (), ()
+    ids = value.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(item, str) for item in ids):
+        return (), ()
+    attempted = tuple(ids)
+    if not attempted or len(attempted) != len(set(attempted)):
+        return attempted, ()
+    if any(item not in catalog.item_ids for item in attempted):
+        return attempted, ()
+    return attempted, attempted
 
 
 def build_feature18_catalog(
@@ -310,8 +402,15 @@ class Feature18Lifecycle:
         self.stage = target
 
     def _abstain(self, reason: SelectCatalogAbstention) -> None:
-        if self.stage not in {SelectCatalogStage.CANDIDATE, SelectCatalogStage.CERTIFIED}:
-            raise ValueError(f"ABSTAINED requires CANDIDATE or CERTIFIED; found {self.stage.value}")
+        if self.stage not in {
+            SelectCatalogStage.CANDIDATE,
+            SelectCatalogStage.CERTIFIED,
+            SelectCatalogStage.DELIVERED,
+        }:
+            raise ValueError(
+                "ABSTAINED requires CANDIDATE, CERTIFIED, or DELIVERED; "
+                f"found {self.stage.value}"
+            )
         self.transitions.append({
             "from": self.stage.value,
             "to": SelectCatalogStage.ABSTAINED.value,
@@ -319,6 +418,11 @@ class Feature18Lifecycle:
         })
         self.stage = SelectCatalogStage.ABSTAINED
         self.abstention_reason = reason
+
+    def abstain(self, reason: SelectCatalogAbstention) -> None:
+        """Record a typed terminal abstention at the current legal stage."""
+
+        self._abstain(reason)
 
     @staticmethod
     def _has_duplicates(values: Iterable[str]) -> bool:
@@ -335,8 +439,53 @@ class Feature18Lifecycle:
         argument_bytes: bytes,
         provider_request_id: str,
     ) -> None:
+        self.certify_offer(
+            request_bytes=request_bytes,
+            tool_schema_bytes=tool_schema_bytes,
+            provider_request_id=provider_request_id,
+        )
+        self.record_selection(
+            attempted_ids=attempted_ids,
+            selected_ids=selected_ids,
+            argument_bytes=argument_bytes,
+        )
+
+    def certify_offer(
+        self,
+        *,
+        request_bytes: bytes,
+        tool_schema_bytes: bytes,
+        provider_request_id: str,
+    ) -> None:
+        """Certify the exact request before provider dispatch."""
+
         if self.stage is not SelectCatalogStage.CANDIDATE:
             raise ValueError(f"CERTIFIED requires CANDIDATE; found {self.stage.value}")
+        if not request_bytes or not tool_schema_bytes or not provider_request_id.strip():
+            self._abstain(SelectCatalogAbstention.INCOMPLETE)
+            return
+        self.request_sha256 = _sha256(request_bytes)
+        self.tool_schema_sha256 = _sha256(tool_schema_bytes)
+        self.provider_request_id = provider_request_id
+        self._move(
+            SelectCatalogStage.CANDIDATE,
+            SelectCatalogStage.CERTIFIED,
+            "selection_offer_certified",
+        )
+
+    def record_selection(
+        self,
+        *,
+        attempted_ids: tuple[str, ...],
+        selected_ids: tuple[str, ...],
+        argument_bytes: bytes,
+    ) -> None:
+        """Bind a provider selection to IDs present in the certified offer."""
+
+        if self.stage not in {SelectCatalogStage.CERTIFIED, SelectCatalogStage.DELIVERED}:
+            raise ValueError(
+                f"selection requires CERTIFIED or DELIVERED; found {self.stage.value}"
+            )
         if self._has_duplicates(attempted_ids) or self._has_duplicates(selected_ids):
             self._abstain(SelectCatalogAbstention.DUPLICATE_ID)
             return
@@ -350,25 +499,12 @@ class Feature18Lifecycle:
         if any(item_id not in attempted_ids for item_id in selected_ids):
             self._abstain(SelectCatalogAbstention.OUT_OF_CATALOG)
             return
-        if (
-            not request_bytes
-            or not tool_schema_bytes
-            or not argument_bytes
-            or not provider_request_id.strip()
-        ):
+        if not argument_bytes:
             self._abstain(SelectCatalogAbstention.INCOMPLETE)
             return
         self.attempted_ids = tuple(attempted_ids)
         self.selected_ids = tuple(selected_ids)
-        self.request_sha256 = _sha256(request_bytes)
-        self.tool_schema_sha256 = _sha256(tool_schema_bytes)
         self.argument_sha256 = _sha256(argument_bytes)
-        self.provider_request_id = provider_request_id
-        self._move(
-            SelectCatalogStage.CANDIDATE,
-            SelectCatalogStage.CERTIFIED,
-            "selection_request_sealed",
-        )
 
     def deliver(self, *, delivery_id: str) -> None:
         if self.stage is not SelectCatalogStage.CERTIFIED:

@@ -4,8 +4,14 @@ from __future__ import annotations
 import hashlib
 import shlex
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
+
+from .verification_contract import (
+    DependencyFootprint,
+    conservative_execution_footprint,
+    dependency_footprint_affected,
+)
 
 
 def _normalize_command(command: str) -> str:
@@ -47,6 +53,7 @@ class Receipt:
     epoch: int
     status: PredicateStatus
     semantic: bool = False
+    dependency_footprint: DependencyFootprint | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +107,15 @@ class GroundtruthController:
 
     @property
     def unmet_predicates(self) -> tuple[str, ...]:
-        return tuple(sorted(k for k, v in self._status.items() if v is not PredicateStatus.GREEN))
+        return tuple(
+            sorted(
+                key
+                for key, status in self._status.items()
+                if status is not PredicateStatus.GREEN
+                or (receipt := self._receipts.get(key)) is None
+                or receipt.epoch != self.workspace_epoch
+            )
+        )
 
     @property
     def blocking_predicates(self) -> tuple[str, ...]:
@@ -145,13 +160,25 @@ class GroundtruthController:
     def note_edit(self, paths: Iterable[str], *, invalidate: Iterable[str] | None = None) -> None:
         if self._phase != "IMPLEMENT":
             raise LifecycleError(f"edit is illegal in {self._phase}")
-        if list(paths):
+        edited_paths = tuple(paths)
+        if edited_paths:
             self.workspace_epoch += 1
             affected = set(invalidate) if invalidate is not None else set(self._status)
+            affected.update(
+                key
+                for key, receipt in self._receipts.items()
+                if dependency_footprint_affected(
+                    receipt.dependency_footprint
+                    or conservative_execution_footprint(basis="unrecorded"),
+                    edited_paths,
+                )
+            )
             for key in affected:
                 if key in self._status:
                     self._status[key] = PredicateStatus.UNKNOWN
                     self._receipts.pop(key, None)
+            for key, receipt in tuple(self._receipts.items()):
+                self._receipts[key] = replace(receipt, epoch=self.workspace_epoch)
             self._verification_plan_evaluated = False
             self._verification_plan_epoch = None
             # C3: a legitimate re-run of the same command AFTER an edit is new
@@ -161,7 +188,8 @@ class GroundtruthController:
     def record_receipt(self, predicate_id: str, command: str, exit_code: int,
                        output: str, *, epoch: int,
                        status: str | PredicateStatus | None = None,
-                       semantic: bool = False) -> Receipt:
+                       semantic: bool = False,
+                       dependency_footprint: DependencyFootprint | None = None) -> Receipt:
         if predicate_id not in self.predicates:
             raise LifecycleError(f"unknown predicate {predicate_id}")
         if epoch != self.workspace_epoch:
@@ -177,7 +205,7 @@ class GroundtruthController:
         receipt = Receipt(
             predicate_id, command, exit_code,
             hashlib.sha256(output.encode("utf-8")).hexdigest(), epoch, parsed,
-            semantic,
+            semantic, dependency_footprint,
         )
         self._receipts[predicate_id] = receipt
         self._status[predicate_id] = parsed
