@@ -7,9 +7,17 @@ import pytest
 from eval.miniswe_agent import _REMOTE_DENSE_MODEL_DIR, MiniSweAgent
 
 
-def test_absent_model_is_optional(monkeypatch):
+def test_absent_model_is_a_setup_error(monkeypatch):
+    """The embedder is mandatory capability, not an optional extra.
+
+    This asserted the resolver returned None, and install() then skipped the
+    upload, so a run could retrieve with no embedder and still report a
+    normal result - GT measured with a capability switched off and nothing in
+    the record saying so.
+    """
     monkeypatch.delenv("GT_DENSE_MODEL_DIR", raising=False)
-    assert MiniSweAgent._dense_model_host() is None
+    with pytest.raises(FileNotFoundError, match="GT_DENSE_MODEL_DIR is required"):
+        MiniSweAgent._dense_model_host()
 
 
 def test_provisioned_model_resolves_on_the_host(monkeypatch, tmp_path: Path):

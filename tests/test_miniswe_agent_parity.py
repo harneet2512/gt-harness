@@ -78,6 +78,30 @@ def test_workflow_max_iterations_reaches_the_installed_runner(tmp_path):
     assert "scripts.provider_probe" not in command
 
 
+@pytest.fixture(autouse=True)
+def _stage_mandatory_capabilities(monkeypatch, tmp_path_factory):
+    """Language servers and the embedder are mandatory, so stage both.
+
+    They used to be optional and these tests never provisioned them, which is
+    precisely how a run could measure GT with either capability switched off
+    and still look normal. Now the resolvers raise when unstaged, so a test
+    that exercises the install path has to provide them exactly as a real run
+    does.
+    """
+    from gt_harness.lsp_assets import write_lsp_manifest
+
+    root = tmp_path_factory.mktemp("mandatory")
+    lsp_bin = root / "lsp-bin"
+    lsp_bin.mkdir()
+    (lsp_bin / "gopls").write_bytes(b"#!/bin/sh\n")
+    write_lsp_manifest(lsp_bin)
+    dense = root / "dense-model"
+    dense.mkdir()
+    (dense / "model.onnx").write_bytes(b"onnx")
+    monkeypatch.setenv("GT_LSP_BIN_HOST", str(lsp_bin))
+    monkeypatch.setenv("GT_DENSE_MODEL_DIR", str(dense))
+
+
 def test_installed_agent_resolves_explicit_verified_bundle_artifacts(monkeypatch, tmp_path):
     gt_wheel = tmp_path / "groundtruth_mcp-1.0.0-py3-none-any.whl"
     harness_wheel = tmp_path / "nano_harness-0.0.1-py3-none-any.whl"

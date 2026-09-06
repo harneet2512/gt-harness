@@ -9,11 +9,25 @@ import pytest
 from eval.miniswe_agent import _REMOTE_LSP_BIN, MiniSweAgent, MiniSweGtAgent
 
 
-def test_staging_is_optional(monkeypatch):
-    """No servers provisioned leaves today's behaviour untouched."""
+def test_staging_is_mandatory(monkeypatch):
+    """Unprovisioned language servers are a setup error, not a quiet no-op.
+
+    This previously asserted the resolver returned None and install() skipped
+    the upload, so a run without language servers produced a weaker graph and
+    a normal-looking result. On a benchmark measuring GT's contribution that
+    is the worst failure available: the number comes out lower and nothing
+    says why.
+    """
 
     monkeypatch.delenv("GT_LSP_BIN_HOST", raising=False)
-    assert MiniSweAgent._lsp_bin_host() is None
+    with pytest.raises(FileNotFoundError, match="GT_LSP_BIN_HOST is required"):
+        MiniSweAgent._lsp_bin_host()
+
+
+def test_embedder_is_mandatory(monkeypatch):
+    monkeypatch.delenv("GT_DENSE_MODEL_DIR", raising=False)
+    with pytest.raises(FileNotFoundError, match="GT_DENSE_MODEL_DIR is required"):
+        MiniSweAgent._dense_model_host()
 
 
 def test_a_provisioned_directory_resolves(monkeypatch, tmp_path: Path):

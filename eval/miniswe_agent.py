@@ -192,22 +192,30 @@ class MiniSweAgent(BaseInstalledAgent):
         return path
 
     @staticmethod
-    def _lsp_bin_host() -> Path | None:
-        """Locate host-staged language servers, if any were provisioned.
+    def _lsp_bin_host() -> Path:
+        """Locate host-staged language servers. REQUIRED, not optional.
 
         LSP promotion discovers servers with shutil.which, and the task
         container reaches only the model transport -- nothing can be installed
         at task time. Servers therefore arrive the way every other execution
         input does: resolved on the host, uploaded, and put on PATH.
 
-        Staging is optional. With none provisioned the runtime records
-        promotion_no_servers, which is a visible no-op rather than a silent
-        one, and the graph is exactly what it is today.
+        This used to return None when unprovisioned, and install() skipped the
+        upload, so a run with no language servers produced promotion_no_servers
+        and a weaker graph while still reporting a normal result. On a
+        benchmark that measures what GT contributes, silently contributing
+        less is the worst available failure: the number comes out lower and
+        nothing in the record says why. Language servers are mandatory
+        capability, so absence is now a setup error, exactly as it already is
+        for the uv installer, the Python archive and the wheelhouse.
         """
 
         configured = os.environ.get("GT_LSP_BIN_HOST", "").strip()
         if not configured:
-            return None
+            raise FileNotFoundError(
+                "GT_LSP_BIN_HOST is required: language servers are mandatory "
+                "capability and must be staged on the host before the task runs"
+            )
         path = Path(configured)
         if not path.is_dir():
             raise FileNotFoundError(
@@ -219,19 +227,27 @@ class MiniSweAgent(BaseInstalledAgent):
         return path
 
     @staticmethod
-    def _dense_model_host() -> Path | None:
-        """Locate the pinned retrieval model on the host, if one is provisioned.
+    def _dense_model_host() -> Path:
+        """Locate the pinned retrieval model on the host. REQUIRED.
 
-        Dense retrieval is optional: launchers that provision no model leave
-        GT_DENSE_MODEL_DIR unset and the runtime records the capability as
-        unavailable.  What must not happen is a provisioned model that never
-        reaches the task environment, because GT reads GT_DENSE_MODEL_DIR
-        inside the container while the workflow exports a host path.
+        What must not happen is a provisioned model that never reaches the
+        task environment, because GT reads GT_DENSE_MODEL_DIR inside the
+        container while the workflow exports a host path.
+
+        Nor may it be absent. This used to return None when unprovisioned and
+        the runtime recorded the capability as unavailable, which means a run
+        could retrieve without the embedder and still report a normal result -
+        measuring GT with a capability switched off and no line in the record
+        saying so. The embedder is mandatory capability, so absence is a setup
+        error rather than a quiet downgrade.
         """
 
         configured = os.environ.get("GT_DENSE_MODEL_DIR", "").strip()
         if not configured:
-            return None
+            raise FileNotFoundError(
+                "GT_DENSE_MODEL_DIR is required: the retrieval embedder is "
+                "mandatory capability and must be staged on the host"
+            )
         path = Path(configured)
         if not path.is_dir():
             raise FileNotFoundError(
@@ -291,15 +307,15 @@ class MiniSweAgent(BaseInstalledAgent):
         await environment.upload_file(uv_installer, _REMOTE_UV_INSTALLER)
         await environment.upload_file(python_archive, _REMOTE_PYTHON_ARCHIVE)
         await environment.upload_dir(wheelhouse, _REMOTE_WHEELHOUSE)
+        # Both are mandatory capability, so both upload unconditionally. The
+        # resolvers above raise when unstaged, which is what makes a missing
+        # embedder or missing language servers a loud setup failure instead of
+        # a run that quietly measures GT with less than GT has.
         dense_model = self._dense_model_host()
-        if dense_model is not None:
-            await environment.upload_dir(dense_model, _REMOTE_DENSE_MODEL_DIR)
+        await environment.upload_dir(dense_model, _REMOTE_DENSE_MODEL_DIR)
         lsp_bin = self._lsp_bin_host()
-        if lsp_bin is not None:
-            await environment.upload_dir(lsp_bin, _REMOTE_LSP_BIN)
-            await self.exec_as_root(
-                environment, f"chmod -R 755 {_REMOTE_LSP_BIN}"
-            )
+        await environment.upload_dir(lsp_bin, _REMOTE_LSP_BIN)
+        await self.exec_as_root(environment, f"chmod -R 755 {_REMOTE_LSP_BIN}")
         await self.exec_as_root(environment, f"chmod 755 {_REMOTE_GT_BINARY}")
         install = (
             "set -eu; "
@@ -329,20 +345,41 @@ class MiniSweAgent(BaseInstalledAgent):
             f'"{_REMOTE_GT_BINARY}" -root /tmp/gt-install-smoke-src '
             "-output /tmp/gt-install-smoke.db >/dev/null && "
             "test -s /tmp/gt-install-smoke.db && rm -f /tmp/gt-install-smoke.db && "
+            # Mandatory capability must WORK, not merely be present. The asset
+            # manifest proves the bytes arrived; it cannot tell whether a
+            # server executes in this container. A language server that is
+            # staged but unrunnable degrades the graph exactly as a missing one
+            # does, and just as quietly, so each is executed here and a
+            # non-zero exit fails the install.
+            f"{_REMOTE_LSP_BIN}/gopls version >/dev/null && "
+            f"{_REMOTE_LSP_BIN}/rust-analyzer --version >/dev/null && "
+            f"{_REMOTE_LSP_BIN}/pyright-langserver --version >/dev/null && "
+            f"{_REMOTE_LSP_BIN}/typescript-language-server --version >/dev/null && "
+            # The embedder likewise: loading the pinned ONNX graph and the
+            # tokenizer is what proves retrieval can actually embed. An
+            # unloadable model would otherwise surface as "no dense evidence"
+            # in the result and as nothing at all in the record.
+            f'"{_REMOTE_PY}" -c "import onnxruntime, tokenizers, pathlib; '
+            f"root = pathlib.Path('{_REMOTE_DENSE_MODEL_DIR}'); "
+            "sess = onnxruntime.InferenceSession(str(root / 'model.onnx'), "
+            "providers=['CPUExecutionProvider']); "
+            "assert sess.get_inputs(), 'dense model exposes no inputs'; "
+            "tok = tokenizers.Tokenizer.from_file(str(root / 'tokenizer.json')); "
+            "assert tok.encode('gt embedder smoke').ids, 'tokenizer produced no ids'"
+            '" && '
             'rm -rf "$HOME/.cache/uv/archive-v0" /tmp/uv-extract && '
             f"rm -rf -- {_REMOTE_BUNDLE_DIR} /tmp/gt-install-smoke-src"
         )
         await self.exec_as_agent(environment, install, env=dict(UTF8_ENV))
-        if lsp_bin is not None:
-            from gt_harness.lsp_assets import verify_lsp_assets
+        from gt_harness.lsp_assets import verify_lsp_assets
 
-            receipt = verify_lsp_assets(lsp_bin)
-            await self.exec_as_agent(
-                environment,
-                f'"{_REMOTE_PY}" -m gt_harness.lsp_assets --root {_REMOTE_LSP_BIN} '
-                f"--expected-manifest-sha256 {receipt['manifest_sha256']}",
-                env=dict(UTF8_ENV),
-            )
+        receipt = verify_lsp_assets(lsp_bin)
+        await self.exec_as_agent(
+            environment,
+            f'"{_REMOTE_PY}" -m gt_harness.lsp_assets --root {_REMOTE_LSP_BIN} '
+            f"--expected-manifest-sha256 {receipt['manifest_sha256']}",
+            env=dict(UTF8_ENV),
+        )
 
     def _model_and_env(self) -> tuple[str, dict[str, str]]:
         model = str(self.model_name or "").strip()
@@ -436,8 +473,13 @@ class MiniSweGtAgent(MiniSweAgent):
         env.update(project_task_environment(os.environ, treatment="groundtruth"))
         env.update(self.resolve_env_vars())
         env.setdefault("GT_INDEX_BINARY", _REMOTE_GT_BINARY)
-        if self._dense_model_host() is not None:
-            env["GT_DENSE_MODEL_DIR"] = _REMOTE_DENSE_MODEL_DIR
+        # Unconditional: the resolver raises when the embedder is unstaged, so
+        # reaching here means it was uploaded and the container must be told
+        # where it landed. A conditional here would let a staged embedder go
+        # unused inside the task, which is the same silent downgrade one layer
+        # further in.
+        self._dense_model_host()
+        env["GT_DENSE_MODEL_DIR"] = _REMOTE_DENSE_MODEL_DIR
         env["GT_TASK_ID"] = str(self._resolved_flags.get("task_id", ""))
         env["GT_PRODUCT_SOURCE_SHA"] = str(self._resolved_flags.get("product_source_sha", ""))
         task_id = env["GT_TASK_ID"].strip()
