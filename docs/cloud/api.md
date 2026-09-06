@@ -1,6 +1,6 @@
 # API reference
 
-Every route below is as committed at `e12f5b65`, from `cloud/server/routes.py`,
+Every route below is as committed at `645fe276`, from `cloud/server/routes.py`,
 `cloud/server/models.py`, `cloud/server/auth.py` and `cloud/server/events.py`.
 
 `cloud/ui/src/api.ts` models all of this: since `e12f5b65` its `EVENT_TYPES`
@@ -52,7 +52,7 @@ allow-list is not used.
 | Failure | Status |
 |---|---|
 | No cookie and no bearer header | 401 `not authenticated` |
-| Expired token | 401 `session expired` |
+| Expired token | 401 `sign-in expired; sign in again` — the wording says *login*, not *coding session*; the two are unrelated and a session outliving its token is the normal case |
 | Bad signature or malformed | 401 `invalid session` |
 | Valid token, login not allow-listed | 403 `user is not allowed to use this deployment` |
 

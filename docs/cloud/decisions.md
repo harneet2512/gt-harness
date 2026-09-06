@@ -19,7 +19,7 @@ the commit that carries it. Dates are the commit dates on
 | [11](#11-a-wall-clock-budget-because-cost-is-untracked) | Budget turns in wall-clock seconds, not cost | 2026-09-05 | `24f9e0fb` |
 | [12](#12-har-86-as-its-own-commit) | Keep the HAR-86 `gt_engine` fix as its own commit | 2026-09-05 | `4ebf8dbe` |
 | [13](#13-workers-are-sessions) | A worker agent is a full child session | 2026-09-05 | `9c394863` |
-| [14](#14-the-ui-directions) | UI: dashboard → Survey → Synapse → prompt-first → terminal | 2026-09-04 → 09-05 | `dd41057f`, `4bde9d98`, `54532f86`, `e12f5b65` |
+| [14](#14-the-ui-directions) | UI: dashboard → Survey → Synapse → prompt-first → terminal | 2026-09-04 → 09-05 | `dd41057f`, `4bde9d98`, `54532f86`, `e12f5b65`, `645fe276` |
 | [15](#15-the-free-model-choice) | Run on a free tool-calling model | 2026-09-04 | `docs/cloud-e2e-run.md` |
 | [16](#16-drop-and-recreate-on-a-schema-bump) | Drop and recreate the database on a schema bump | 2026-09-04 | `a26d02a6` |
 
@@ -267,7 +267,7 @@ stream is the only one a client watches: worker frames are mirrored onto it with
 | **"Survey"** (`dd41057f`) — a squarified treemap of the workspace, cells lighting as the agent reads and edits, with a radio-log conversation | **Rejected after implementation.** A treemap shows file *size*, which is not interesting. The product's differentiator is that GroundTruth knows the *relations*. |
 | **"Synapse"** (`4bde9d98`) — every file a particle, every relation a filament, force-laid-out; agent activity as signal travelling along edges; click-to-inspect like an IDE | **Accepted.** It renders what GT actually provides. The step/path-inference model from Survey was kept as `trail.ts`. |
 | **Prompt-first landing** (`54532f86`) — one composer, the repository inferred from the message, model and budgets behind a gear | **Accepted.** The landing was a configuration form; "give it a task and it works" is the product. |
-| **Terminal grammar** (`e12f5b65`) — Claude Code's own grammar: `>` prompt, `⏺`/`⎿` lines, a spinner status line with *esc to interrupt*, box-drawn banner and input, the `/` palette, `/resume`, `/theme`, dark by default with a light terminal theme | **Accepted and shipped.** The product is a Claude-Code-style coding agent, so it should look like one; the differentiators — `GroundTruth(...)` evidence lines, `Agent(worker-N · task)` cards, `Receipt(turn N)`, and the code graph as a tmux-style split pane — are rendered in that same grammar rather than bolted beside it. This supersedes the earlier light-mode-only preference; the light theme survives as an option. |
+| **Terminal grammar** (`e12f5b65`, refined by `645fe276`) — Claude Code's own grammar: `>` prompt, `⏺`/`⎿` lines, a spinner status line with *esc to interrupt*, box-drawn banner and input, the `/` palette, `/resume`, `/theme`, dark by default with a light terminal theme | **Accepted and shipped.** The product is a Claude-Code-style coding agent, so it should look like one; the differentiators — `GroundTruth(...)` evidence lines, `Agent(worker-N · task)` cards, `Receipt(turn N)`, and the code graph as a tmux-style split pane — are rendered in that same grammar rather than bolted beside it. This supersedes the earlier light-mode-only preference; the light theme survives as an option. |
 
 ## 15. The free model choice
 

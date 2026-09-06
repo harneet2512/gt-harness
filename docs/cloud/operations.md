@@ -1,6 +1,6 @@
 # Operations runbook
 
-For the deployment at `e12f5b65` on `cloud/internal-harness`. The primary
+For the deployment at `645fe276` on `cloud/internal-harness`. The primary
 deployment is a GitHub Codespace; the same compose file runs unchanged on a
 plain VM.
 
@@ -257,6 +257,47 @@ gh codespace ports forward 80:18080 -c "$NAME" &   # then use localhost:18080
 Expect it to drop (`websocket: close 1006 (abnormal closure)`) on a flaky link.
 It is the interim, not the mechanism.
 
+### The codespace name can stop resolving after a cold start
+
+Seen 2026-09-06 after the codespace had been *Shutdown* (idle timeout) and was
+started again: every `https://<name>-<port>.app.github.dev` URL returned **404
+with an empty body** — including the private port (which should 302 to sign-in)
+and the tunnel's own internal ports — while `gh codespace ports` listed 80 as
+public, the compose stack was healthy, and `gh codespace ports forward` worked.
+Neither re-publishing the port, holding a forwarder, nor a full `stop` /
+`start` changed it.
+
+The diagnosis and the workaround both go through the dev-tunnel behind the
+codespace. `gh api '/user/codespaces/<name>?internal=true'` returns
+`connection.tunnelProperties` — `tunnelId`, `clusterId`, `serviceUri` and a
+`managePortsAccessToken` (scope `manage:ports`; treat it as a secret). With it:
+
+```bash
+# tunnel status: hostConnectionCount must be 1; ports must list 80 as protocol http
+curl -s -H "Authorization: tunnel $TOKEN"   "$SERVICE_URI/tunnels/$TUNNEL_ID?clusterId=$CLUSTER&includePorts=true&api-version=2023-09-27-preview"
+# the tunnel reached by its id instead of the codespace name
+curl -s https://$TUNNEL_ID-80.app.github.dev/health
+```
+
+A cold start creates a **new tunnel** (a new `tunnelId`; the old one answers
+404 from the management API). When the id-based URL serves the app but the
+name-based one 404s, the tunnel is fine and GitHub's alias from the codespace
+name to the new tunnel is what has not been (re)registered — a lookup of the
+tunnel by name on the management API 404s too. The `manage:ports` token cannot
+touch the tunnel's `name` (403, `expected [manage]`), so this is not fixable
+from outside GitHub.
+
+What to do: the id-based URL is a working front door for smoke tests
+(`/health`, the SPA), but **sign-in fails on it**: the server sends no
+`redirect_uri`, so GitHub returns the browser to the OAuth app's registered
+callback, which is the name-based host. Nothing in the server's own
+configuration binds the host (`UI_ORIGIN=/`, and the cookie belongs to whichever
+host served it), so the only change needed to use the tunnel id for real is the
+OAuth app's *Authorization callback URL* — knowing the id changes on the next
+cold start. Otherwise wait for GitHub to heal the alias. Keeping the codespace
+awake (the forwarder, or a shorter idle-timeout policy) avoids the cold start
+altogether.
+
 ### Cost
 
 A 4-core machine burns **4 core-hours per wall-clock hour**. Personal accounts
@@ -437,6 +478,7 @@ Note the script hard-codes `cd /workspaces/gt-harness` and
 |---|---|---|
 | Public URL 302s to GitHub sign-in | Codespaces port visibility reset by the deploy. | `gh codespace ports visibility 80:public -c <name>` from a machine with a `codespace`-scoped `gh` login. |
 | Public URL returns **404, empty body** | The Codespaces edge: port not registered. nginx is fine. | `forwardPorts` in the devcontainer (takes effect on the next codespace), or hold `gh codespace ports forward 80:18080 -c <name>`. |
+| **Every** `<name>-<port>.app.github.dev` URL 404s after a cold start, private ports included, ports listed and stack healthy | The codespace name no longer resolves to its (new) tunnel. | See [The codespace name can stop resolving after a cold start](#the-codespace-name-can-stop-resolving-after-a-cold-start): confirm with the id-based URL, then wait for GitHub or re-point the OAuth app's callback URL at the tunnel id. |
 | Public URL returns **502** | `ui` came up before `server` was answering, or `server` is down. | `$DC ps`; the compose file already makes `ui` depend on `server` being *healthy*. `docker compose restart server`. |
 | Containers `Exited (255)` and staying down | A daemon restart plus a manual `docker stop`/`kill` (which `unless-stopped` does not undo). | `docker compose -f cloud/docker-compose.yml up -d`. |
 | Every session `gt_status: unavailable` | `GT_PRODUCER_ARTIFACT` set (fails closed), the wheel or `gt-index` missing, or an indexer failure. | Check `gt_error` on the session row; unset the GT pins; `docker compose exec server gt-index -build-info`. |

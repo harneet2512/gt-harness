@@ -1,6 +1,6 @@
 # Architecture, as built
 
-Everything below is the code committed at `e12f5b65` on
+Everything below is the code committed at `645fe276` on
 `cloud/internal-harness`. Nothing is in progress.
 
 - [1. Components and boundaries](#1-components-and-boundaries)

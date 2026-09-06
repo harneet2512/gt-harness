@@ -1,7 +1,7 @@
 # User guide
 
 How to use the cloud coding agent. This describes the UI as committed at
-`e12f5b65` — the Claude Code terminal look, with worker agents wired end to end.
+`645fe276` — the Claude Code terminal look, with worker agents wired end to end.
 
 - [The grammar](#the-grammar)
 - [Signing in](#signing-in)
@@ -37,7 +37,7 @@ receipt — is one of them (`cloud/ui/src/components/TermLine.tsx`):
 ⏺ Agent(worker-1 · Add a docstring to Command.invoke)
   ⎿  $ rg -n "def invoke" src/click/core.py
   ⎿  ✓ reported · 2 files · a80d4c46  [apply] [open]
-⏺ Receipt(turn 3) · 7 calls · 66s · untracked · a80d4c46 · GT ready
+⏺ Receipt(turn 3) · 7 steps · 1m 6s · patch a80d4c46 · GT ready · GT 3 actions / 2 exact
 ```
 
 `⏺` is a thing that happened; `⎿` is what it said. Command output is clipped
@@ -48,8 +48,16 @@ borders, so they behave like a terminal's (`Box.tsx`).
 A **GroundTruth line is not a shell command and never reads as one**
 (`gt.ts`). It is formatted from the server's `gt_action` frame — the kind, the
 arguments, the scope actually searched, the semantics and coverage verdict and
-the match count — and an abstention says so: `⎿ abstained:
-COVERAGE_NOT_COMPLETE`.
+the match count — and the continuation line is one of two things:
+
+| The action | Reads |
+|---|---|
+| **Answered** — `returncode` 0, `semantics: exact`, `coverage: complete` | `2 matches · exact · complete` |
+| **Abstained** — anything else | `abstained: COVERAGE_NOT_COMPLETE`, or the omissions when there are no reason codes |
+
+Those three conditions are the whole test. `EXACT_COMPLETE_EQUIVALENCE` is the
+code for an **answer**, not a reason for refusing, so it never appears on an
+abstention line and omissions never turn an answer into one.
 
 ---
 
@@ -186,7 +194,10 @@ Other ways a turn can end, all shown honestly rather than as an error:
 
 - **Step limit** — the reply says where the agent got to and offers *continue*.
 - **Time limit** — the same, quoting the budget in minutes.
-- **Stopped** — you pressed stop.
+- **Stopped** — you pressed `esc`. The killed command's `rc 137` is annotated
+  *stopped* when the observation says the stop caused it, and
+  *killed (memory limit or stop)* otherwise — never reported as an
+  out-of-memory kill without evidence.
 - **Error** — the reply says what failed; the **session survives** and stays
   usable.
 - **Interrupted** — a server restart cut the turn short. The turn card closes
@@ -271,7 +282,8 @@ The status mark is `…` running, `✓` reported or applied, `·` closed.
 **Colours.** Each worker gets one of four hues by spawn order, wrapping past the
 fourth (`workers.ts:WORKER_HUES`). None of them is the primary agent's orange or
 the edited-file teal, so a worker's trail on the graph is never mistaken for the
-session's own.
+session's own. Order is the workers' `created_at`, not the order frames happen
+to arrive in, so `worker-1` and its colour are the same after a reload.
 
 When a worker finishes a turn it **reports** into your conversation — the reply,
 the files it changed, and the patch's sha256 — and the report survives a reload,
@@ -345,13 +357,23 @@ the turn is already inline in the transcript.
 | Receipts | One row per turn. |
 
 A **receipt** is the turn's record, and it is also a line in the transcript —
-one `⏺ Receipt(turn N)` closing every finished turn, with the model calls, the
-elapsed time, the cost, the patch sha and the GT status. Clicking it selects
-that turn for the scrubber. The Receipts tab is the same data as a table, with
-`gt_actions` / `gt_exact_matches` alongside.
+one `⏺ Receipt(turn N)` closing every finished turn:
 
-Cost reads *untracked* rather than `$0.00`, because it is: pricing is disabled
-for the free models this deployment uses, and wall-clock seconds are the honest
+```
+⏺ Receipt(turn 3) · 7 steps · 1m 6s · patch a80d4c46 · GT ready · GT 3 actions / 2 exact
+```
+
+`GT N actions / M exact` is the turn's `gt_actions` and `gt_exact_matches`:
+how many GroundTruth typed actions ran, and how many of them actually answered.
+The pair is the point — an exact abstention over an empty scope is a GT action
+that did not pay. The segment is left out entirely when the turn ran none.
+Clicking the line selects that turn for the scrubber; the Receipts tab is the
+same data as a table.
+
+Cost is left off this line rather than shown as `$0.00`: pricing is disabled for
+the free models this deployment uses, and a provider that reports no price is
+not a run that was free. The Receipts pane has the room to say *untracked* in as
+many words, so that is where it says it. Wall-clock seconds are the honest
 budget line.
 
 ---
@@ -414,8 +436,9 @@ worker.
 
 `/resume` is the session list, full screen, driven from the keyboard: `↑↓`
 moves, `⏎` opens, `esc` closes, workers nested under the session that spawned
-them with their task. It replaces a permanent sidebar, on the principle that a
-list you ask for costs nothing when you are not asking for it.
+them with their task. It is the **only** session switcher — there is no
+permanent sidebar rail, on the principle that a list you ask for costs nothing
+when you are not asking for it.
 
 ---
 
@@ -457,8 +480,13 @@ frame (`theme.ts`, `palette.ts`).
 
 ## Closing a session
 
-`/close`, which asks *"Close this session? The workspace is discarded."* first.
-Closing kills the turn, removes the sandbox container, **deletes the
+`/close`, which asks in the transcript first:
+
+```
+⏺ close this session? [y] [n]
+```
+
+Answering `[y]` kills the turn, removes the sandbox container, **deletes the
 workspace**, and closes the row — along with every live worker under it.
 Everything the agent wrote is gone unless you took the diff first.
 

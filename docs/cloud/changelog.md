@@ -7,7 +7,7 @@ first, grouped by day. Generated from:
 git log --format='%h %ad %s' --date=short cloud/internal-harness ^origin/main
 ```
 
-35 commits, 2026-09-04 to 2026-09-05.
+37 commits, 2026-09-04 to 2026-09-05.
 
 ---
 
@@ -15,6 +15,8 @@ git log --format='%h %ad %s' --date=short cloud/internal-harness ^origin/main
 
 | Commit | Change |
 |---|---|
+| `645fe276` | **Final-QA findings.** P0: a GroundTruth line is an abstention only when `returncode != 0`, `semantics != exact` or `coverage != complete` — `EXACT_COMPLETE_EQUIVALENCE` is the *answer* code and omissions never flip an answer, so answering actions read `N matches · exact · complete`. The receipt line and the graph pane show `GT N actions / M exact`; rc 137 reads *stopped* when the observation says the stop caused it and *killed (memory limit or stop)* otherwise, never OOM without evidence; workers are numbered by `created_at`, so `worker-N` and its hue survive a reload; below 1200 px with the split open the transcript keeps at least 55vh and never hides under the composer. P2s: the landing echoes commands; a terminal-look sign-in with an expired notice; apply hidden for a zero-change worker and not offered twice; an in-transcript close confirm; syntax query arguments kept; one `owner/name @ ref` rendering; guarded pointer capture; untracked cost only in the receipts pane; *Cloning* shown immediately; `esc` handled at the window level. Server: the expired-token 401 reads *sign-in expired; sign in again*. Dead `ResumeRail.tsx` removed. 227 UI tests; 40/40 verified checks, zero page errors. |
+| `15985185` | Document the landed terminal UI and worker agents: the user guide rewritten around the terminal grammar, the browser section added to the architecture, and api / testing / known-limitations / changelog / baselines moved to `e12f5b65`. |
 | `e12f5b65` | **Worker agents in the UI, and the Claude Code terminal look.** `/spawn` (one or many lines) wired to the agents API; a card per worker in the transcript with live activity, the reported reply, files and patch sha, `[apply]` (409 conflicts shown inline) and `[open]`; frames with `agent_id` go to the worker only, never to the primary turn; a four-hue palette gives each worker its own trail, halo and legend chip on the graph; workers nest under their parent in `/resume`, with a back link from a worker page; create-and-run uses `first_message` in one call. The terminal grammar: a 100ch monospace column, box-drawn banner and input, a `>` prompt, `⏺` lines for the agent's prose, `Bash(cmd)` with continuation lines clipped at six, `Agent(worker-N · task)` lines with bracketed actions, `GroundTruth(...)` lines for typed actions, a `Receipt(turn N)` line per turn, the spinner status line with *esc to interrupt*, the `/` palette, `/resume`, `/theme` (dark default, light terminal theme), and the code graph as a tmux-style split pane; stacked below 1100 px. 214 Vitest tests. Verified live: two workers on `pallets/click` reported in 65 s, both applied into the parent diff, cards rebuilt on a cold load, parent close cascaded, zero console errors. |
 | `5c6b3e48` | Correct three stale documentation statements (the workspace quota is measured after every command, not only write-shaped ones; the running producer is `+cloud.2`; `NewSessionForm.tsx` was removed in `54532f86`) and document `gt_action` as landed. |
 | `71f7942d` | The as-built documentation set under `docs/cloud/`, plus a Documentation index at the end of `cloud/README.md`. |

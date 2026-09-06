@@ -1,6 +1,6 @@
 # Testing and CI
 
-Everything below is as committed at `e12f5b65`. Test-function counts are
+Everything below is as committed at `645fe276`. Test-function counts are
 `def test_` counts in each file, so parameterised cases collect higher than the
 number shown; the totals quoted from commit messages are the collected figures.
 
@@ -44,7 +44,7 @@ racy. Both wrappers run the real code they wrap.
 | [`tests/test_cloud_workspace.py`](../../tests/test_cloud_workspace.py) | 17 | None — a real git repository | Clone (including the full-SHA fetch path and the abbreviated-SHA fallback), the sanitised clone error text, `compute_diff` with untracked files and the `.gt_state` exclusion, `split_patch_by_file`, `cap_diff`, `list_tree`, `apply_patch` (clean, conflicting, and the index restored afterwards), the `_WRITES` twin, and the disk helpers. |
 | [`tests/test_cloud_store.py`](../../tests/test_cloud_store.py) | 23 | None — a real SQLite database | Schema version, the transition table, unknown-field rejection, message and turn round-trips, totals, `touch`, `idle_sessions_before`, children, diff snapshots and event append/replay. |
 | [`tests/test_cloud_codegraph.py`](../../tests/test_cloud_codegraph.py) | 18 | None for imports; the GT graph db is a real SQLite file written with the indexer's schema | Python (absolute, relative, `src/` layout), JS/TS specifier resolution, Go module paths, Rust `mod`/`use`, the binary and size guards, node fields, the `MAX_NODES` cap, the GT edge-kind mapping, path normalisation, and fail-open on a broken database. |
-| [`tests/test_cloud_auth.py`](../../tests/test_cloud_auth.py) | 16 | None — real JWT encode/decode | The OAuth state, token TTL, bearer parsing, cookie vs header, expiry and tampering, and the per-request allow-list. |
+| [`tests/test_cloud_auth.py`](../../tests/test_cloud_auth.py) | 16 | None — real JWT encode/decode | The OAuth state, token TTL, bearer parsing, cookie vs header, expiry (including the *sign-in expired; sign in again* wording) and tampering, and the per-request allow-list. |
 | [`tests/test_cloud_environment.py`](../../tests/test_cloud_environment.py) | 6 | None — real `bash -c` subprocesses | Credential scrubbing, `bash` resolution, the timeout kill, and the interrupt path — the same one `request_stop()` drives in production, so a pass here means a live Stop really does kill the command in flight. |
 | [`tests/test_cloud_typed_scopes.py`](../../tests/test_cloud_typed_scopes.py) | 14 | None | HAR-85: the pure normaliser (glob reduced, plain path untouched, non-existent prefix untouched, absolute and `..` refused, dedupe) and the real typed-action code path. |
 | [`tests/test_cloud_compose.py`](../../tests/test_cloud_compose.py) | 7 | None — the compose file *is* the artefact | Restart policies, healthchecks, and `ui` depending on `server` being **healthy**. |
@@ -77,16 +77,16 @@ jsdom, and the bugs these layers produce do not.
 | File | `it()` blocks | Covers |
 |---|---|---|
 | `src/__tests__/chatState.test.ts` | 30 | The thread reducer: event folding, turn grouping, message linking, orphan steering, and keeping a worker's mirrored frames out of the primary turn. |
-| `src/__tests__/contract.test.ts` | 34 | The API contract as the UI understands it: `EVENT_TYPES` (including `gt_action` and the four worker frames), `GT_MODES` and their help text, `lifecycleToSessionStatus`, `streamUrl` flooring, the wall-second bounds, `CAP_REASONS`, `agentIdOf`. |
-| `src/__tests__/workers.test.ts` | 29 | Worker cards folded out of the parent's stream: spawn, mirrored activity, reports, apply and its conflicts, closure, hue assignment by spawn order, `workerNo`, and the nested `/resume` rows. |
-| `src/__tests__/terminal.test.ts` | 16 | The terminal grammar's pure parts: the GroundTruth line (`gt.ts`, both the `gt_action` frame and the typed-action `tool_call` fallback), the status verbs (`verbFor`), and the theme helpers. |
+| `src/__tests__/contract.test.ts` | 37 | The API contract as the UI understands it: `EVENT_TYPES` (including `gt_action` and the four worker frames), `GT_MODES` and their help text, `lifecycleToSessionStatus`, `streamUrl` flooring, the wall-second bounds, `CAP_REASONS`, `agentIdOf`. |
+| `src/__tests__/workers.test.ts` | 32 | Worker cards folded out of the parent's stream: spawn, mirrored activity, reports, apply and its conflicts, closure, hue assignment and `workerNo` by `created_at` (stable across a reload), and the nested `/resume` rows. |
+| `src/__tests__/terminal.test.ts` | 23 | The terminal grammar's pure parts: the GroundTruth line (`gt.ts`, both the `gt_action` frame and the typed-action `tool_call` fallback, and the answered-vs-abstained rule), the status verbs (`verbFor`), the receipt tail's `GT N actions / M exact`, the rc-137 note, and the theme helpers. |
 | `src/__tests__/prompt.test.ts` | 24 | `launch.ts` (creation stages, `combinePrompt`, `createAndStart`, file counting), `prefs.ts` normalisation, `slash.ts` parsing and suggestions, and `parseSpawn`'s refusals. |
 | `src/__tests__/graph.test.ts` | 19 | Particle field construction, relation folding, cluster hue, radius, the `MAX_PARTICLES` cap, neighbour lookup. |
 | `src/__tests__/sync.test.ts` | 20 | `sessionSync` — snapshot ordering (the round-1 P0 that wedged the header on *Working*) — and `streamSync` ingest, dedupe and terminal detection. |
 | `src/__tests__/trail.test.ts` | 18 | Step kinds, the `WRITES` twin, file matching, attention decay, call counting. |
 
-Reported at `e12f5b65`: **214 Vitest tests** collected, with `tsc --noEmit` and
-`vite build` clean.
+Reported at `645fe276`: **227 Vitest tests** collected, with `tsc --noEmit` and
+`vite build` clean, and 40/40 verified browser checks with zero page errors.
 
 ## Running them
 

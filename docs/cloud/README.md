@@ -2,9 +2,8 @@
 
 As-built documentation for the internal cloud coding agent on branch
 `cloud/internal-harness` (Linear **HAR-84**, with **HAR-85** and **HAR-86**
-alongside it). Everything here describes committed code as of **`e12f5b65`**
-(*feat(HAR-84): worker agents in the UI, and the Claude Code terminal look*).
-Nothing is in progress.
+alongside it). Everything here describes committed code as of **`645fe276`**
+(*fix(HAR-84): final-QA findings*). Nothing is in progress.
 
 ## What this is
 
