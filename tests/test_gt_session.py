@@ -701,9 +701,9 @@ def test_promotion_that_never_scheduled_is_failed_not_silent(tmp_path):
 @pytest.mark.parametrize(
     ("status", "expected_state"),
     [
-        # Promotion ran and had nothing to promote: the capability worked and
-        # the empty edge tier is a property of the repository.
-        ("no_op", "WORKING"),
+        # Adds zero edges, exactly like cancelled: on the axis the report is
+        # for - is the highest-precision tier populated - both are degraded.
+        ("no_op", "DEGRADED"),
         # No language server for a language the graph could have promoted.
         ("unavailable", "FAILED"),
         ("failed", "FAILED"),
@@ -745,3 +745,68 @@ def test_an_unreadable_journal_fails_both_capabilities(tmp_path):
 
     assert rows["lsp_promotion"] == ("FAILED", "promotion_journal_unreadable")
     assert rows["dense_retrieval"] == ("FAILED", "dense_index_receipt_unreadable")
+
+
+def test_a_superseded_enrichment_does_not_override_the_final_one(tmp_path):
+    """poll() journals draining enrichments AFTER the active one.
+
+    graph_coordinator.py:430-433 observes the active enrichment first and the
+    draining ones after, so a stale cancelled receipt for a superseded graph
+    revision lands later in the journal than the success that superseded it.
+    Taking the literal last row would report DEGRADED for a run that promoted -
+    the same misreport this whole helper exists to prevent.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r1"},
+        {"event": "lsp_promotion_terminal", "status": "cancelled",
+         "disposition": "obsolete", "input_graph_revision": "r0"},
+    ])
+
+    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published")
+
+
+def test_repeated_failures_before_a_success_are_not_hidden(tmp_path):
+    """One success after several failures must not read as an unblemished run."""
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_terminal", "status": "failed",
+         "disposition": "factory_exception"},
+        {"event": "lsp_promotion_terminal", "status": "failed",
+         "disposition": "certification_failed"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published"},
+    ])
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:last_of_3"
+    )
+
+
+def test_a_truncated_final_line_fails_the_dense_capability_closed(tmp_path):
+    """The likeliest corruption is a half-written last line, not an absent file.
+
+    Parsing is line by line, so an earlier dense_index_ready row had already
+    set WORKING before the truncated line raised. Without an explicit reset the
+    row read WORKING with evidence dense_index_receipt_unreadable - a state
+    contradicting its own evidence, in the summary a human reads, in exactly
+    the case where a process was killed at its budget.
+    """
+    from types import SimpleNamespace
+
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text(
+        json.dumps(_DENSE_READY) + "\n" + '{"event": "lsp_promotion_sched',
+        encoding="utf-8",
+    )
+    stub = SimpleNamespace(
+        _engine=SimpleNamespace(store=SimpleNamespace(path=str(journal)))
+    )
+    rows = {
+        name: (str(state), evidence)
+        for name, state, evidence in GTSession._mandatory_capability_rows(stub)
+    }
+
+    assert rows["dense_retrieval"] == ("FAILED", "dense_index_receipt_unreadable")
+    assert rows["lsp_promotion"] == ("FAILED", "promotion_journal_unreadable")

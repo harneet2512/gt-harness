@@ -1177,7 +1177,7 @@ class GTSession:
         lsp_state = CapabilityState.FAILED
         lsp_evidence = "promotion_never_scheduled"
         scheduled = False
-        terminal: dict[str, object] | None = None
+        terminals: list[dict[str, object]] = []
         try:
             for line in _Path(journal).read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -1194,27 +1194,50 @@ class GTSession:
                 elif event == "lsp_promotion_scheduled":
                     scheduled = True
                 elif event == "lsp_promotion_terminal":
-                    # Last terminal wins: a run may enrich more than one graph
-                    # revision, and the capability's state is where it ended.
-                    terminal = row
+                    # A run enriches every graph revision it publishes, so
+                    # several terminals are normal. Rows about a SUPERSEDED
+                    # graph are dropped here rather than ranked, because poll()
+                    # observes the active enrichment before the draining ones
+                    # (graph_coordinator.py:430-433): a stale cancelled receipt
+                    # for revision r0 is journalled AFTER r1's success, so
+                    # taking the literal last row reports DEGRADED for a run
+                    # that promoted. Every draining disposition is prefixed
+                    # obsolete (_poll_draining_enrichment emits obsolete,
+                    # obsolete_handle_exception, obsolete_receipt_exception;
+                    # the active path adds obsolete_after_certification).
+                    if not str(row.get("disposition") or "").startswith("obsolete"):
+                        terminals.append(row)
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
+            # Both must fail closed. The journal is parsed line by line, so a
+            # truncated final line - the likeliest corruption when a process is
+            # killed at its wall-clock budget - can leave dense_state WORKING
+            # from an earlier row while the evidence says unreadable. A state
+            # and an evidence string that contradict each other are worse than
+            # either, and this is the summary a human reads.
+            dense_state = CapabilityState.FAILED
             dense_evidence = "dense_index_receipt_unreadable"
             lsp_evidence = "promotion_journal_unreadable"
-            terminal = None
-            scheduled = False
+            terminals = []
         else:
-            if terminal is not None:
+            if terminals:
+                terminal = terminals[-1]
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
                 lsp_evidence = f"terminal_{status or 'unknown'}:{disposition or 'none'}"
+                if len(terminals) > 1:
+                    # One success after nine failures must not read as clean.
+                    lsp_evidence += f":last_of_{len(terminals)}"
                 if status == "succeeded":
                     lsp_state = CapabilityState.WORKING
-                elif status == "no_op":
-                    # Promotion ran and had nothing to promote. The capability
-                    # worked; the empty tier is a property of the repository,
-                    # not a degradation, and the evidence string says which.
-                    lsp_state = CapabilityState.WORKING
-                elif status == "cancelled":
+                elif status in {"no_op", "cancelled"}:
+                    # Both add zero edges to the graph. no_op was WORKING here
+                    # on the reasoning that the machinery functioned and the
+                    # empty tier was the repository's doing - but that axis
+                    # makes cancelled WORKING too, and the axis the owner asked
+                    # for is whether the tier is populated. On that axis both
+                    # are degraded. no_op also leaves publishable False, so its
+                    # disposition is not_publishable, and WORKING beside that
+                    # string was a row contradicting its own evidence.
                     lsp_state = CapabilityState.DEGRADED
                 else:
                     # unavailable (no server for a promotable language) and
