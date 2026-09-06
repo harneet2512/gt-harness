@@ -571,12 +571,10 @@ backing derivation. cloud.1 also recorded nothing; cloud.2 persists the count.
 
 Details: [`cloud/producer/README.md`](../../cloud/producer/README.md).
 
-### In progress: typed-action events (`gt_events.py`)
+### Typed-action events (`gt_events.py`)
 
-> **`cloud/server/gt_events.py` is untracked at `9c394863`.** What follows is the
-> intended behaviour, from the module as it currently stands and the README
-> section that accompanies it. Re-verify against the committed code once it
-> lands.
+Landed in `9c0212d5`. Design note and live evidence:
+[`docs/har84-gt-action-events.md`](../har84-gt-action-events.md).
 
 A GT typed action produces no `tool_call` / `tool_result` pair, because GT's
 `execute_actions` replacement dispatches the typed branch through
@@ -584,7 +582,7 @@ A GT typed action produces no `tool_call` / `tool_result` pair, because GT's
 `_EmittingEnvironment`, the seam those frames come from, sees nothing. The UI
 shows a model call with no work under it.
 
-The intended fix emits one **`gt_action`** frame per typed action, hooked at
+The fix emits one **`gt_action`** frame per typed action, hooked at
 `model.format_observation_messages(message, outputs, template_vars)`: the
 narrowest cloud-side point that sees both the normalised action requests
 (`message["extra"]["actions"]`, already through `typed_scopes`) and their results
@@ -595,8 +593,12 @@ also covers the three answers GT synthesises without calling the router at all
 
 Nothing under `gt_engine/` is modified: the wrappers are installed onto the agent
 and model *instances* the cloud runner built, and a frame that cannot be built
-swallows its own failure so the turn is never affected. Payload fields are in
-[api.md](api.md#gt_action-in-progress).
+swallows its own failure so the turn is never affected. `install_gt_action_events`
+is called by `_install_gt` immediately **after** `install_runtime_hooks`, so the
+timer wraps GT's replacement rather than the base method. `gt_action` is in
+`MIRRORED_EVENT_TYPES`, and the turn's tally lands on the receipt as
+`gt_actions` / `gt_exact_matches` with a running total on the session row.
+Payload fields are in [api.md](api.md#gt_action).
 
 ---
 
@@ -610,7 +612,7 @@ swallows its own failure so the turn is never affected. Payload fields are in
 | The mini-SWE trajectory | `<workspace>/.gt_state/trajectory.json` | The session |
 | The GT index and graph db | `<workspace>/.gt_state/` (path mirrored on the session row as `graph_db`) | The session |
 
-Schema is at `SCHEMA_VERSION = 6`. Evolution is **drop-and-recreate**: `init()`
+Schema is at `SCHEMA_VERSION = 7`. Evolution is **drop-and-recreate**: `init()`
 compares `PRAGMA user_version` and rebuilds every table when it differs. This is
 a dev tool; see
 [operations.md](operations.md#the-database-is-dropped-on-a-schema-bump).

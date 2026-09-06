@@ -2,16 +2,19 @@
 
 As-built documentation for the internal cloud coding agent on branch
 `cloud/internal-harness` (Linear **HAR-84**, with **HAR-85** and **HAR-86**
-alongside it). Everything here describes the code that is committed at
-`9c394863` (*feat(HAR-84): worker coding agents — spawn, report, apply*).
+alongside it). Everything here describes committed code: the server package as
+of `9c0212d5` (*feat(HAR-84): gt_action events*), which sits on `9c394863`
+(*feat(HAR-84): worker coding agents — spawn, report, apply*).
 
-Two packages are being changed by other agents while this was written and are
-marked **in progress** wherever they appear:
+One package is still being changed by another agent while this was written and
+is marked **in progress** wherever it appears:
 
 | In-progress package | Where | Documented as |
 |---|---|---|
 | Claude-Code terminal re-skin + worker-agent wiring in the browser | `cloud/ui/src/**` | current committed UI, plus a target section per doc |
-| GroundTruth typed-action events | `cloud/server/gt_events.py`, `tests/test_cloud_gt_events.py` | intended behaviour only — the file is untracked at `9c394863` |
+
+GroundTruth typed-action events have since landed as `9c0212d5` and are
+documented as built.
 
 ## What this is
 
@@ -62,6 +65,7 @@ They are linked rather than copied:
 | [`docs/cloud-e2e-run.md`](../cloud-e2e-run.md) | The first live end-to-end run: six cases against a real server and OpenRouter, cited by event id. |
 | [`docs/cloud-gt-run.md`](../cloud-gt-run.md) | GT indexing on the Codespaces deployment, and why the producer is built from source. |
 | [`docs/har85-literal-search.md`](../har85-literal-search.md) | HAR-85: why `exact_literal_search` abstained on a complete graph. |
+| [`docs/har84-gt-action-events.md`](../har84-gt-action-events.md) | Why a typed GT action was invisible on the stream, the seam chosen (and the three rejected), and the live two-action verification behind the `gt_action` frame. |
 | [`docs/cloud-qa-round2-fixes.md`](../cloud-qa-round2-fixes.md) | Round-2 QA: tool frames under GT, stop latency, deploy hygiene. |
 | [`docs/cloud-audit-fixes.md`](../cloud-audit-fixes.md) | The audit, gap by gap (G-01 … G-23), with before/after evidence. |
 | [`docs/upstream-groundtruth-issue.md`](../upstream-groundtruth-issue.md) | The upstream bug text filed as harneet2512/groundtruth issue #5. |

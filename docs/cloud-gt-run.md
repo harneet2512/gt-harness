@@ -30,16 +30,21 @@ error into `abortStagedBuild`. The invariant has no environment gate. The
 session still went `idle` with an import-only graph (166 nodes / 156 edges,
 `gt: false`).
 
-## 2. Fix: build the producer from source with a one-hunk patch
+## 2. Fix: build the producer from source with a patch
 
 `cloud/producer/0001-skip-invalid-candidates.patch` (against the same commit)
-logs and skips a derivation-invalid candidate instead of returning the error.
-`cloud/Dockerfile` stage 1 fetches the pinned commit, applies the patch and
-builds with CI's exact recipe (static CGO, `sqlite_fts5`, provenance ldflags),
-stamping `main.commitSHA=0aadb1b9…+cloud.1` so the binary can never be
-mistaken for the certified one. The certified benchmark producer is unchanged.
+skips a derivation-invalid candidate as an abstention instead of returning the
+error. `cloud/Dockerfile` stage 1 fetches the pinned commit, applies the patch
+and builds with CI's exact recipe (static CGO, `sqlite_fts5`, provenance
+ldflags), stamping `main.commitSHA=0aadb1b9…+cloud.2` — the variant read from
+`cloud/producer/PRODUCER_VARIANT` — so the binary can never be mistaken for the
+certified one. The certified benchmark producer is unchanged.
 
-`gt-index -build-info` in the running image:
+`gt-index -build-info` in the **current** image reports
+`"git_commit":"0aadb1b9111f70f3c6b8874e1b8eff927397d22b+cloud.2"`. The block
+below is the **historical 2026-09-04 build**, when the patch was still the
+hand-written `cloud.1` hunk described in the update at the end of this section;
+everything else about the build recipe is unchanged.
 
 ```
 {"schema":"gt-index.build.v1","complete":true,
@@ -53,8 +58,8 @@ Harness acceptance: `_binary_certification()` only fails closed when
 `GT_TASK_ID` + `GT_PRODUCT_SOURCE_SHA`. None are set for the cloud service, so
 no harness change was needed (documented in `cloud/.env.example`).
 
-**Update (2026-09-05, `cloud.2`):** the hand-written one-hunk patch above was
-replaced by the port of upstream PR
+**Update (2026-09-05, `cloud.2`):** the original hand-written one-hunk patch
+(`cloud.1`, the build quoted above) was replaced by the port of upstream PR
 [harneet2512/groundtruth#6](https://github.com/harneet2512/groundtruth/pull/6),
 which partitions candidates *before* `prepareResolutionV2` — so an abstained
 candidate no longer leaves a `CANDIDATE_TARGET` edge, `DerivationFact` node or

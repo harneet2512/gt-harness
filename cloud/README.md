@@ -66,7 +66,7 @@ a bad day stays bounded:
 | `MODEL_PREFLIGHT` | `1` | One 1-token completion at session creation, over the session's own LiteLLM route. `0` skips it (tests, air-gapped runs). |
 | `MODEL_REQUEST_TIMEOUT` | `300` | Per model call. LiteLLM's own retries are pinned off (`num_retries` **and** `max_retries`), so a dead model fails in seconds instead of retrying 11 times with a 60 s backoff. |
 | `WORKSPACES_MIN_FREE_MB` | `2048` | Free space under `WORKSPACES_DIR` below which a new session is refused outright, with a readable reason. `0` disables it. |
-| `SANDBOX_WORKSPACE_MAX_MB` | `2048` | Per-session workspace cap, measured (`du -sm`) after every write-shaped command. Over it the command is killed and the turn ends `error`. `0` disables it. **Not** a filesystem quota — see `docs/cloud-sandbox.md` §5. |
+| `SANDBOX_WORKSPACE_MAX_MB` | `2048` | Per-session workspace cap, measured (`du -sm`) after **every** command — not only write-shaped ones, because `dd if=/dev/zero of=big` matches no write verb. (The write-shaped test gates the per-step diff snapshots, not this.) Over it the command is killed and the turn ends `error`. `0` disables it. **Not** a filesystem quota — see `docs/cloud-sandbox.md` §5. |
 | `MAX_CONCURRENT_SESSIONS` | `3` | Turns running at once (429 past it). |
 | `MAX_CONCURRENT_CREATIONS` | `3` | Clones + GT indexes running at once (429 past it). Creation used to take no slot at all. |
 | `SESSION_IDLE_TTL_SECONDS` | `21600` | How long an idle session keeps its clone and container. |

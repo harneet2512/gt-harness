@@ -40,7 +40,7 @@ listed under Known Limitations in `cloud/README.md`.
 | Escaping via the Docker daemon | **The Docker socket is mounted into the *server*, not into a sandbox** — `cloud/docker-compose.yml` puts `/var/run/docker.sock` on the `server` service only. A sandbox has no socket, no docker CLI, and no way to ask the daemon for anything. `test_the_sandbox_has_no_docker_socket` asserts it from inside. |
 | Stealing model-provider credentials | **Model keys never enter a sandbox.** Model calls happen in the server process. The exec environment is an allow-list — `PATH`, `HOME`, `LANG`, `TERM`, the proxy variables, and whatever `SANDBOX_ENV_PASSTHROUGH` names — and `is_sensitive_env_name` is then applied *on top* of it, so a name ending in `_API_KEY` / `_ACCESS_TOKEN` / `_AUTH_TOKEN` / `_SECRET` / `_PASSWORD` (or a known one such as `OPENAI_API_KEY`) is dropped even when it is listed explicitly. `PATH` and `HOME` come from the image, never from the server process — leaking the server's `HOME` would point pip and npm at `/root`. |
 | Exfiltrating a repository, or pulling a payload from an arbitrary host | The sandbox network is created `--internal`: no default route off the host, no external DNS. `HTTP_PROXY`/`HTTPS_PROXY` point at `gt-egress-proxy`, which serves only the allow-list and answers everything else `403` **before opening a connection**, so a denied host is never even resolved. A bare IP does not help: `is_allowed()` never matches one. |
-| Starving the host | `--memory 2g --cpus 2 --pids-limit 512`, plus a tmpfs `/tmp` capped at 512 MB (`rw,nosuid,nodev,exec`), plus a per-session **workspace quota** (`SANDBOX_WORKSPACE_MAX_MB`, default 2048) measured after every write-shaped command and a host-wide **free-space floor** (`WORKSPACES_MIN_FREE_MB`, default 2048) checked before a session is created. |
+| Starving the host | `--memory 2g --cpus 2 --pids-limit 512`, plus a tmpfs `/tmp` capped at 512 MB (`rw,nosuid,nodev,exec`), plus a per-session **workspace quota** (`SANDBOX_WORKSPACE_MAX_MB`, default 2048) measured after **every** command and a host-wide **free-space floor** (`WORKSPACES_MIN_FREE_MB`, default 2048) checked before a session is created. |
 | Zombies exhausting the pid limit | `--init` runs tini as pid 1, so orphans reparented to it are reaped. Without it pid 1 was `sleep infinity`, which never reaps: 510 forks left the container permanently out of pids and **every** later `docker exec` failed with `OCI runtime exec failed` (HAR-84 G-03). |
 | A container the daemon stopped, or one wedged out of pids | `--restart unless-stopped` brings it back after a daemon restart; `ensure_running()` `docker start`s a stopped-but-present container; and an `OCI runtime exec failed` rc-128 result is treated as a **sandbox-health failure** — the container is recreated (`lifecycle sandbox_restarted`), the command retried once, and only then does the turn end with an observation of `sandbox unavailable` and `finish_reason: error`. |
 | A wedged or runaway command | Two timeouts. GNU `timeout --signal=KILL <n>s` **inside** the container kills the process tree the exec created (`pkill -g` on an exec's pgid is unreliable across `docker exec`), and the client-side `communicate` timeout at `n + 10s` is a backstop for a wedged daemon, followed by `pkill -KILL -u 1000` in the container. |
@@ -108,7 +108,7 @@ One container per session, named `gt-sandbox-<session_id>` and labelled
 | Ready | | `idle` |
 | Each turn | `ensure_running()` re-derives and re-checks the container name (in-memory state is not trusted across a restart) and **`docker start`s it if the daemon stopped it**; every action is then one `docker exec` | `running`, then `assistant` / `tool_call` / `tool_result` … |
 | Sandbox recreated mid-turn | an `OCI runtime exec failed` rc-128 → `remove_sandbox()` + `start_sandbox()` on the same workspace, then the command is retried once | `sandbox_restarted {container}` |
-| Workspace over its quota | `du -sm` after a write-shaped `tool_result` exceeds `SANDBOX_WORKSPACE_MAX_MB` → the command in flight is killed and the turn ends `error` | `quota_exceeded {reason}` |
+| Workspace over its quota | `du -sm` after **any** `tool_result` exceeds `SANDBOX_WORKSPACE_MAX_MB` → the command in flight is killed and the turn ends `error` | `quota_exceeded {reason}` |
 | Close | `remove_sandbox()` **before** `remove_workspace()` | `closed` |
 | Server restart | `recover()` → `reap_sandboxes(keep)` | — |
 
@@ -145,7 +145,7 @@ All of these are documented in `cloud/.env.example`; the defaults live in
 | `SANDBOX_EGRESS_ALLOW` | *(empty)* | Extra hosts, comma-separated; `*.example.com` wildcards supported. |
 | `SANDBOX_MEMORY` / `SANDBOX_CPUS` / `SANDBOX_PIDS_LIMIT` / `SANDBOX_TMPFS_SIZE` | `2g` / `2` / `512` / `512m` | Resource caps. |
 | `SANDBOX_ENV_PASSTHROUGH` | *(empty)* | Extra environment variable **names** forwarded into exec. Subject to the credential scrub regardless. |
-| `SANDBOX_WORKSPACE_MAX_MB` | `2048` | Per-session workspace cap. Measured with `du -sm` on the turn worker after every write-shaped command; over it, the command is interrupted and the turn ends `error` with `workspace quota exceeded (N MB > cap)`. `0` disables it. |
+| `SANDBOX_WORKSPACE_MAX_MB` | `2048` | Per-session workspace cap. Measured with `du -sm` on the turn worker after **every** command — not only write-shaped ones, since `dd if=/dev/zero of=big` matches no write verb and the audit's repro was a single-command turn. (The write-shaped test gates the per-step diff snapshots, not this.) A measurement that overruns 2 s raises the stride to one `du` per ten commands for the rest of the session. Over the cap the command is interrupted and the turn ends `error` with `workspace quota exceeded (N MB > cap)`. `0` disables it. |
 | `WORKSPACES_MIN_FREE_MB` | `2048` | Free-space floor under `WORKSPACES_DIR`. Below it a new session fails immediately with a readable reason instead of cloning into a full disk. `0` disables it. |
 | `WORKSPACES_HOST_DIR` | `/srv/gt-workspaces` | Compose only: the host directory holding workspaces, mounted into the server at the same absolute path (§2). |
 | `DOCKER_BINARY` | `docker` | The CLI to shell out to. There is deliberately no docker SDK dependency. |
@@ -212,9 +212,13 @@ Three things bound disk, and only one of them is a real quota:
 1. **A floor before creation.** `WORKSPACES_MIN_FREE_MB` (default 2048): a
    session that cannot fit fails cleanly rather than filling the host.
 2. **A per-session cap during a turn.** `SANDBOX_WORKSPACE_MAX_MB` (default
-   2048), measured with `du -sm` after every write-shaped command. It is a
-   *watermark*, not an enforcement: a single `dd` bigger than the cap still
-   lands on disk in full, and is caught immediately after.
+   2048), measured with `du -sm` after **every** command — not only
+   write-shaped ones: `dd if=/dev/zero of=big` writes a gigabyte and matches
+   none of the write verbs, and the audit's repro was a single-command turn, so
+   any stride at all would have missed it. (The write-shaped test is what gates
+   the per-step *diff snapshots*; the two are separate.) It is a *watermark*,
+   not an enforcement: a single `dd` bigger than the cap still lands on disk in
+   full, and is caught immediately after.
 3. **The idle TTL** (`SESSION_IDLE_TTL_SECONDS`), which stops workspaces
    accumulating for sessions nobody closed.
 

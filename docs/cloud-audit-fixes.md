@@ -473,9 +473,13 @@ For the record, the UI halves were:
   `turn_finished {finish_reason: "interrupted"}` and `system_note`.
 * **E-12 / G-09 (browser half)** — `chatState.ts:applyEvent` must read the new
   `turn_started.content` / `role` instead of only `linkMessage(message_id)`.
-* **F-01 (UI half)** — `NewSessionForm.tsx:18` offers
+* **F-01 (UI half)** — `NewSessionForm.tsx:18` offered
   `GT_MODES = ["off","advisory","engine"]`. `engine` is now a **422**; the list
-  should read `["off","advisory","assistive","enforced"]`.
+  should read `["off","advisory","assistive","enforced"]`. *(That file no longer
+  exists: `54532f86` — prompt-first entry — removed the creation form, and the
+  GT mode picker now lives in the settings gear, reading the corrected
+  `GT_MODES` from `cloud/ui/src/api.ts`. The reference is kept for the audit
+  record.)*
 * **G-7** — the Codespaces first-visit *"You are about to access a development
   port"* interstitial. Not a defect in this product.
 

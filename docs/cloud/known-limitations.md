@@ -19,7 +19,6 @@ with the reason and where it lives. As of `9c394863`.
 |---|---|---|
 | **Worker agents in the browser.** The server side is complete and the API works, but the committed UI still answers `/spawn` with *"spawning worker agents is coming — the server side is being built"*. `cloud/ui/src/api.ts` has no `agent_spawned` / `agent_report` / `agent_applied` / `agent_closed` event types, no `agent_id` on `MessageMeta`, no `"spawned"` in `MessageDelivery`, and no spawn/apply client functions. | In progress | `cloud/ui/src/**` (uncommitted: `workers.ts`, `WorkerCard.tsx`, `TermWorker.tsx`, `__tests__/workers.test.ts`) |
 | **The Claude-Code terminal re-skin.** `>` prompt, `⏺`/`⎿` lines, spinner status with *esc to interrupt*, box-drawn input, `/resume`, `/theme`, dark by default with a light terminal theme. `slash.ts` still lists six commands with no `/resume` or `/theme`. | In progress | `cloud/ui/src/**` (uncommitted: `TermLine`, `TermStatus`, `TermOutput`, `TermActivity`, `TermSettings`, `Box`, `ResumePicker`, `theme.ts`, `palette.ts`, `gt.ts`, `styles/term.css`) |
-| **GroundTruth typed-action events.** A typed GT action produces no `tool_call`/`tool_result` pair, so the trail shows a model call with nothing under it. The intended `gt_action` frame, and the `gt_actions` / `gt_exact_matches` receipt counters, are not committed. | In progress | `cloud/server/gt_events.py`, `tests/test_cloud_gt_events.py` (both untracked) |
 
 Once these land, re-check [api.md](api.md), [user-guide.md](user-guide.md) and
 [testing-and-ci.md](testing-and-ci.md).
@@ -31,7 +30,7 @@ Once these land, re-check [api.md](api.md), [user-guide.md](user-guide.md) and
 | Gap | Status | Why |
 |---|---|---|
 | **G-14 — `/stop` while a model call is in flight** | Partially fixed | 0.48 s when a command is running (it is killed); **46.8 s** measured when a model call is. The LiteLLM call is synchronous inside the turn worker, so a stop cannot reach it. Fully fixing it means changing how turns are executed. `MODEL_REQUEST_TIMEOUT` (default 300 s) now bounds the worst case explicitly instead of leaving it to the provider. |
-| **G-18 — GT evidence artifacts absent from the transcript** | Deferred | `.gt_state/transcript.json` holds the `exact_literal_search` calls and zero `gt.evidence_artifact.v1`, zero typed actions, zero `abstain` records. Persisting them means changing what `gt_engine.miniswe_runtime` / `MiniSweAdapter` write — i.e. editing `gt_engine/**`, which is out of scope for the cloud change sets. GT's contribution is visible in `/graph` but not receipted in the trajectory. The in-progress `gt_action` package addresses the *stream*, not the trajectory. |
+| **G-18 — GT evidence artifacts absent from the transcript** | Deferred | `.gt_state/transcript.json` holds the `exact_literal_search` calls and zero `gt.evidence_artifact.v1`, zero typed actions, zero `abstain` records. Persisting them means changing what `gt_engine.miniswe_runtime` / `MiniSweAdapter` write — i.e. editing `gt_engine/**`, which is out of scope for the cloud change sets. GT's contribution is visible in `/graph` but not receipted in the trajectory. The `gt_action` package (`9c0212d5`) addresses the *stream* and the receipt, not the trajectory. |
 
 Both are recorded in [`docs/cloud-audit-fixes.md`](../cloud-audit-fixes.md) with
 their measurements.
@@ -84,7 +83,7 @@ Full treatment in [security.md](security.md) and
 | Limit | Detail |
 |---|---|
 | **Single server, SQLite, no horizontal scaling.** | `SessionManager` holds in-memory state per session and the event bus is process-local. A second replica would not see either. |
-| **The database is dropped on a schema bump.** | `init()` rebuilds every table when `PRAGMA user_version` differs. Six schema versions landed in two days. No migrations, no backup mechanism, and workspace directories are left orphaned on disk. See [operations.md](operations.md#the-database-is-dropped-on-a-schema-bump). |
+| **The database is dropped on a schema bump.** | `init()` rebuilds every table when `PRAGMA user_version` differs. Seven schema versions landed in two days. No migrations, no backup mechanism, and workspace directories are left orphaned on disk. See [operations.md](operations.md#the-database-is-dropped-on-a-schema-bump). |
 | **Codespaces port visibility resets on every deploy.** | Recreating the containers re-registers ports 80/8000 as private and the public URL 302s to GitHub sign-in. `gh codespace ports visibility 80:public -c <name>` after every deploy, from a machine with a `codespace`-scoped `gh` login. |
 | **A codespace rebuilt under a new name needs the OAuth App updated.** | The callback host must match the forwarded origin exactly. |
 | **Free Codespaces hours are the real ceiling.** | A 4-core machine burns 4 core-hours per wall-clock hour: roughly 30 h/month on Free, 45 h on Pro of *running* time. Storage keeps accruing until the codespace is deleted. |

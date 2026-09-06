@@ -52,10 +52,17 @@ racy. Both wrappers run the real code they wrap.
 
 Reported at `9c394863`: **306 passed / 4 skipped**.
 
-> **In progress.** `tests/test_cloud_gt_events.py` is untracked at `9c394863`.
-> It accompanies the GroundTruth typed-action package and covers
-> `build_gt_action_event`, `match_count`, `producer_scope` and the
-> `install_gt_action_events` wrapper.
+[`tests/test_cloud_gt_events.py`](../../tests/test_cloud_gt_events.py) landed
+with the typed-action package in `9c0212d5`: **24 tests** over the payload
+builder against real `gt.compiled_observation.v1` shapes (exact answer,
+abstention, enum-valued semantics, mapping-valued `coverage`, argument
+truncation, the omission cap, unparseable output, every `match_count` shape, and
+producer scope never echoing the request back), the HAR-85 scope-normalised case,
+and ordering plus tallies through the real turn loop with a `FakeGtRuntime`
+standing in for GT's `execute_actions` replacement. `test_cloud_chat.py` and
+`test_cloud_agents.py` gained the HTTP-level and mirroring cases. The only stub
+is `execute_typed_action_fail_open`, which ships in the server image's vendored
+`groundtruth` wheel. Totals after it: **333 passed / 4 skipped** (306 before).
 
 ---
 

@@ -471,4 +471,5 @@ This is deliberate — it is a dev tool — but it means:
 
 Schema versions on this branch: v2 (`a26d02a6`, the chat rebuild), v3
 (`34f11f69`, `graph_db`), v4 (`1d08976a`, `gt_error`), v5 (`24f9e0fb`,
-`closed_reason`), v6 (`9c394863`, worker columns).
+`closed_reason`), v6 (`9c394863`, worker columns), v7 (`9c0212d5`,
+`gt_actions` / `gt_exact_matches`).

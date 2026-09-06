@@ -361,11 +361,11 @@ excluding `.git/` and `.gt_state/`.
 One per turn, oldest first.
 
 ```json
-[{"turn_id": "cb501ff62fbd", "started_at": 1788557646.1,
-  "finished_at": 1788557712.4, "n_calls": 7, "cost": 0.0,
-  "wall_seconds": 66.3, "finish_reason": "reply",
-  "patch_sha256": "9b1c...", "gt_status": "ready",
-  "model": "nvidia/nemotron-3-super-120b-a12b:free"}]
+[{"turn_id": "2de252ff46ce", "started_at": 1788557646.1,
+  "finished_at": 1788557712.4, "n_calls": 2, "cost": 0.0,
+  "wall_seconds": 7.699, "gt_actions": 2, "gt_exact_matches": 2,
+  "finish_reason": "reply", "patch_sha256": "9b1c...",
+  "gt_status": "ready", "model": "deepseek/deepseek-v4-flash"}]
 ```
 
 `gt_status` and `model` are captured when the turn *starts*, so a receipt says
@@ -373,11 +373,13 @@ what the turn actually ran with. `cost` is always `0.0` under
 `MSWEA_COST_TRACKING=ignore_errors`; `wall_seconds` is the honest budget line. A
 turn still in flight has `finished_at: null` and `finish_reason: ""`.
 
-> **In progress.** The GroundTruth typed-action package intends to add
-> `gt_actions` (how many `gt_action` frames the turn emitted) and
-> `gt_exact_matches` (the subset with `semantics == "exact"` **and**
-> `match_count > 0`), with a `gt_actions` total on the session row. Neither
-> field exists at `9c394863`.
+| GT field | Meaning |
+|---|---|
+| `gt_actions` | How many `gt_action` frames this turn emitted — i.e. how many GroundTruth typed actions it ran. `0` on a `gt_mode: off` turn. |
+| `gt_exact_matches` | The subset that actually **answered**: `semantics == "exact"` **and** `match_count > 0`. An exact abstention over an empty scope is a GT action, not an answer, so the two numbers together say whether GT was used *and* whether it paid. |
+
+The session row carries the `gt_actions` total (`Session.gt_actions`). Added in
+`9c0212d5`; store schema 6 → 7, drop-and-recreate as usual.
 
 ---
 
@@ -559,18 +561,30 @@ with `agent_id: "<worker_id>"` added to `data`. A frame from a primary session
 carries no `agent_id` at all, so the field is the whole protocol: a frame that
 has it belongs to that worker and never to the primary turn or its step count.
 
-### `gt_action` (in progress)
+### `gt_action`
 
-> **Not emitted at `9c394863`.** `cloud/server/gt_events.py` is untracked. This
-> is the intended payload.
+Landed in `9c0212d5`. One frame per GroundTruth **typed action**
+(`tool_name: "groundtruth"`), emitted after the action ran and before the next
+model call. A typed action produces no `tool_call` / `tool_result` pair — GT's
+`execute_actions` replacement dispatches it through
+`execute_typed_action_fail_open` and never touches `env.execute`, which is the
+seam those frames come from — so without this the trail showed a model call with
+nothing under it. Design note and live evidence:
+[`docs/har84-gt-action-events.md`](../har84-gt-action-events.md).
+
+A typed action adds **no** `assistant` frame of its own: it is part of the model
+call that requested it, and `step` says which. `gt_action` is in
+`MIRRORED_EVENT_TYPES`, so a worker's typed actions reach its parent's stream
+tagged `agent_id`.
 
 ```json
-{"turn_id": "...", "step": 2, "kind": "exact_literal_search",
- "arguments": {"literal": "class Command", "paths": ["src/click"]},
- "scope": ["src/click"], "returncode": 0,
+{"turn_id": "2de252ff46ce", "step": 1, "kind": "exact_literal_search",
+ "arguments": {"literal": "class Command", "paths": ["src/click/core.py"]},
+ "scope": ["src/click/core.py"], "returncode": 0,
  "semantics": "exact", "coverage": "complete", "match_count": 2,
  "omissions": [], "reason_codes": ["EXACT_COMPLETE_EQUIVALENCE"],
- "duration_ms": 41.2, "evidence_artifact_id": "call_ab12"}
+ "duration_ms": 229.052,
+ "evidence_artifact_id": "call_7df0a8e260014c4ca9acec82"}
 ```
 
 | Field | Meaning |
@@ -584,7 +598,7 @@ has it belongs to that worker and never to the primary turn or its step count.
 | `match_count` | Rows in the answer, counted the way GT counts its own `returned_count`. |
 | `omissions` | Why the evidence is not complete (`missing_scope:src/click/**`, `capability_disabled`, `query_result_byte_limit`, ...), capped at 10. |
 | `reason_codes` | From `gt.interception_decision.v1` — `EXACT_COMPLETE_EQUIVALENCE` on an answer; `SEMANTICS_NOT_EXACT` / `COVERAGE_NOT_COMPLETE` / `EVIDENCE_HAS_OMISSIONS` on an abstention. |
-| `duration_ms` | Wall clock of the action batch this action belonged to. A model call almost always carries one action, in which case it is that action's own time. |
+| `duration_ms` | Wall clock of the action **batch** this action belonged to. A model call almost always carries one action, in which case it is that action's own time; in a two-action batch both frames carry the same figure. |
 | `evidence_artifact_id` | The evidence artifact's `action_id`, or the compiled observation's sha256 when it has none. Absent when neither is available. |
 
 ---
@@ -610,6 +624,7 @@ has it belongs to that worker and never to the primary turn or its step count.
   "steps": 21,
   "cost": 0.0,
   "total_wall_seconds": 184.7,
+  "gt_actions": 2,
   "current_turn_id": null,
   "closed_reason": null,
   "parent_id": null,
@@ -626,6 +641,7 @@ has it belongs to that worker and never to the primary turn or its step count.
 | `gt_status` | `off` / `pending` / `ready` / `unavailable`. `pending` is the value a `gt_mode != off` session carries between creation and the index result. |
 | `gt_error` | Why GT is unavailable, in the indexer's own words. Survives a reload, unlike the `gt_unavailable` frame, which scrolls away. |
 | `turns` / `steps` / `cost` / `total_wall_seconds` | Running totals over finished turns. `cost` is always 0.0. |
+| `gt_actions` | Running total of GroundTruth typed actions across every finished turn. |
 | `current_turn_id` | Non-null only while `running`. |
 | `closed_reason` | `user` / `expired` / `failed`, or null while alive. |
 | `parent_id` / `role` / `task` | Worker identity. `role` is `primary` or `worker`. |
