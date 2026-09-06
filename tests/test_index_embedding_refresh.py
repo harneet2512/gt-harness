@@ -16,7 +16,7 @@ def test_index_receipt_calls_real_store_refresh_and_reports_failure(tmp_path, mo
     monkeypatch.delenv("GT_CONTRACT_EMBEDDING_INDEX", raising=False)
     calls = []
 
-    def refresh(self, path, *, embed_fn):
+    def refresh(self, path, *, embed_fn, deadline=None):
         calls.append(path)
         raise ValueError("fixture invalid model")
 

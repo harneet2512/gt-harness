@@ -638,8 +638,20 @@ def build_agent(
     graph_db = None
     index_error: Exception | None = None
     try:
+        # The contract-embedding refresh inside this call is CPU-bound ONNX
+        # inference over every moved symbol and it runs HERE -- inside agent
+        # construction, before MiniSweAdapter builds the journal and before the
+        # first provider call.  Unbounded it took ~24 minutes of a 1,500s budget
+        # on arktype (run 34062325608) and the run was SIGTERMed having written
+        # no journal row, no delivery and no verdict.  A cache may cost a tenth
+        # of the run; it may not cost the run.
         index_receipt = ensure_index_with_receipt(
             cwd, layout=layout, excluded_roots=layout.excluded_roots,
+            embedding_budget_seconds=(
+                min(300.0, 0.10 * wall_time_limit_seconds)
+                if wall_time_limit_seconds and wall_time_limit_seconds > 0
+                else None
+            ),
         )
         graph_db = index_receipt.graph_db if index_receipt.success else None
         if not index_receipt.success and index_receipt.error_type:

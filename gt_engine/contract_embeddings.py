@@ -62,6 +62,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,6 +93,7 @@ __all__ = [
     "UNBOUND_GRAPH_REVISION",
     "Binding",
     "ContractEmbeddingStore",
+    "EmbeddingBudgetExhausted",
     "EmbeddingPlan",
     "DocumentVectorLookup",
     "StoreLookup",
@@ -141,6 +143,32 @@ CONTRACT_SOURCE_REVISION = contract.CONTRACT_SCHEMA
 UNBOUND_GRAPH_REVISION = "gt.contract_embedding.unbound.v1"
 
 DEFAULT_BATCH_SIZE = 32
+
+
+class EmbeddingBudgetExhausted(RuntimeError):
+    """The refresh ran out of wall clock before every planned vector existed.
+
+    This is a *cache* refresh: the retrieval side degrades from a stale or
+    absent store with a named reason.  It is not, however, free -- on the
+    arktype reference graph it embeds ~3.5k contract texts through a 110M
+    parameter ONNX model on two vCPU, and it runs inside agent construction,
+    before the session journal exists and before the first provider call.  An
+    unbounded refresh therefore spends the *run's* wall budget on a cache and
+    the run dies having produced no evidence at all, which is exactly what run
+    34062325608 did: 1,500s budget, 36s of graph build, ~24 minutes here, SIGTERM,
+    zero journal rows.
+
+    The partial work is deliberately discarded rather than published.  The store
+    commits a plan and its bindings in one transaction so a reader never sees a
+    new vector against an old source location; publishing a truncated plan would
+    trade a bounded delay for that invariant.
+    """
+
+    def __init__(self, embedded: int, planned: int) -> None:
+        super().__init__(f"contract_embedding_budget_exhausted:{embedded}/{planned}")
+        self.embedded = int(embedded)
+        self.planned = int(planned)
+
 
 _FINGERPRINT_KIND = "fingerprint"
 
@@ -513,6 +541,7 @@ class ContractEmbeddingStore:
         *,
         embed_fn: Embedder,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         """Bring the store level with ``db_path`` and report exactly what moved."""
         inputs = embedding_inputs(db_path)
@@ -527,7 +556,7 @@ class ContractEmbeddingStore:
             model_id=self.model_id,
             dimension=self.dimension,
         )
-        vectors = self._embed_plan(plan, embed_fn, batch_size)
+        vectors = self._embed_plan(plan, embed_fn, batch_size, deadline)
         # Vector bytes and their current graph bindings are one SQLite commit.
         # A crash or callback failure rolls both back, so readers never observe
         # a new vector with an old source location (or the inverse).
@@ -537,10 +566,17 @@ class ContractEmbeddingStore:
         )
 
     def _embed_plan(
-        self, plan: EmbeddingPlan, embed_fn: Embedder, batch_size: int
+        self, plan: EmbeddingPlan, embed_fn: Embedder, batch_size: int,
+        deadline: float | None = None,
     ) -> dict[str, tuple[float, ...]]:
         vectors: dict[str, tuple[float, ...]] = {}
+        planned = len(plan.to_embed)
         for batch in _batched(plan.to_embed, batch_size):
+            # Checked between batches, never inside one: a batch is a single
+            # opaque call into the ONNX session and cannot be interrupted, so
+            # the real bound is the deadline plus one batch.
+            if deadline is not None and time.monotonic() >= deadline:
+                raise EmbeddingBudgetExhausted(len(vectors), planned)
             produced = embed_fn([item.text for item in batch])
             if len(produced) != len(batch):
                 raise ValueError("contract_embedding_batch_size_mismatch")

@@ -1867,6 +1867,7 @@ def certify_graph_artifact(
 def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None = None,
                               source_revision: str = "",
                               excluded_roots: tuple[Path, ...] = (),
+                              embedding_budget_seconds: float | None = None,
                               layout: RuntimeLayout | None = None) -> IndexBuildReceipt:
     root_path = Path(root)
     if layout is not None:
@@ -2065,17 +2066,34 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         try:
             from gt_engine.contract_embeddings import (
                 ContractEmbeddingStore,
+                EmbeddingBudgetExhausted,
                 default_store_path,
                 onnx_embedder,
             )
 
             store_path = os.environ.get("GT_CONTRACT_EMBEDDING_INDEX") or default_store_path(graph_path)
             store = ContractEmbeddingStore(store_path)
+            # The refresh is a cache the retrieval side degrades from, but it
+            # is CPU-bound ONNX inference over every moved contract and it runs
+            # inside agent construction, ahead of the session journal and the
+            # first provider call.  Left unbounded it spends the run's whole
+            # wall budget and the run dies with no evidence at all.  The caller
+            # owns the bound; the state below is what the receipt reports.
+            deadline = (
+                time.monotonic() + float(embedding_budget_seconds)
+                if embedding_budget_seconds and float(embedding_budget_seconds) > 0
+                else None
+            )
             try:
-                store.refresh(graph_path, embed_fn=onnx_embedder(model_dir))
+                store.refresh(
+                    graph_path, embed_fn=onnx_embedder(model_dir), deadline=deadline,
+                )
             finally:
                 store.close()
             embedding_state = "refreshed"
+        except EmbeddingBudgetExhausted as exc:
+            embedding_state = "budget_exhausted"
+            embedding_failure = f"{exc.embedded}/{exc.planned}"
         except Exception as exc:
             embedding_state = "failed"
             embedding_failure = type(exc).__name__
