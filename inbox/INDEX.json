@@ -1,5 +1,5 @@
 {
-  "live_packets":[
+  "live_packets": [
     "bugbot-pr24-20260901",
     "bugbot-pr25-20260901",
     "bugbot-pr26-20260901",
@@ -137,6 +137,7 @@
     "har83-final-hardening-exact-build-08fe997d0",
     "har83-final-hardening-producer-9d0d8079f",
     "har83-unified-source-1ecd03674",
+    "har87-groundtruth-green-ci-193b9d93b",
     "merge-har70-ff578719",
     "merge-har70-ff578719-v2",
     "merge-har76-701a8472",
@@ -167,16 +168,16 @@
     "rev-222-har69-interim",
     "rev-222-reviewer-interim"
   ],
-  "schema":"gt.review_inbox.v1",
-  "tickets":{
-    "HAR-57":[
+  "schema": "gt.review_inbox.v1",
+  "tickets": {
+    "HAR-57": [
       "rev-222-reviewer-interim"
     ],
-    "HAR-62":[
+    "HAR-62": [
       "bugbot-pr24-20260901",
       "merge-pr24-ad022ba4"
     ],
-    "HAR-63":[
+    "HAR-63": [
       "bugbot-pr25-20260901",
       "finder-f1",
       "finder-f1-fixed",
@@ -184,51 +185,51 @@
       "finder-f2-fixed",
       "merge-pr25-cc52917d"
     ],
-    "HAR-64":[
+    "HAR-64": [
       "bugbot-pr26-20260901",
       "finder-f2",
       "finder-f2-fixed",
       "merge-pr26-bd099b88"
     ],
-    "HAR-65":[
+    "HAR-65": [
       "bugbot-pr27-20260901",
       "merge-pr27-990a8281"
     ],
-    "HAR-66":[
+    "HAR-66": [
       "bugbot-pr28-20260901",
       "merge-pr28-fb6ccf2e"
     ],
-    "HAR-67":[
+    "HAR-67": [
       "bugbot-pr29-20260901",
       "finder-f2",
       "finder-f2-fixed",
       "merge-pr29-58032bda"
     ],
-    "HAR-69":[
+    "HAR-69": [
       "bugbot-pr31-20260901",
       "merge-pr31-65194707",
       "rev-222-har69-interim"
     ],
-    "HAR-70":[
+    "HAR-70": [
       "har70-groundtruth-7b4d7043",
       "har70-groundtruth-db9daf9e",
       "har70-harness-ff578719",
       "merge-har70-ff578719",
       "merge-har70-ff578719-v2"
     ],
-    "HAR-73":[
+    "HAR-73": [
       "bugbot-pr30-20260901",
       "merge-pr30-326d0045",
       "rev-219-har73-interim"
     ],
-    "HAR-74":[
+    "HAR-74": [
       "bugbot-pr32-20260901",
       "rev-220-har74-interim"
     ],
-    "HAR-75":[
+    "HAR-75": [
       "rev-221-transport-rewind-fixed"
     ],
-    "HAR-76":[
+    "HAR-76": [
       "ci-ci-feature-matrix-33461611679",
       "ci-ci-feature-matrix-33461810532",
       "ci-ci-feature-matrix-33462550650",
@@ -324,17 +325,17 @@
       "merge-har76-701a8472",
       "merge-har76-701a8472-v2"
     ],
-    "HAR-77":[
+    "HAR-77": [
       "har77-harness-1bf89072",
       "har77-harness-aa6577a0",
       "merge-har77-aa6577a0",
       "merge-har77-aa6577a0-v2"
     ],
-    "HAR-78":[
+    "HAR-78": [
       "har78-harness-5893a3ba",
       "merge-har78-5893a3ba"
     ],
-    "HAR-79":[
+    "HAR-79": [
       "ci-ci-feature-matrix-33471965968",
       "ci-ci-feature-matrix-33472150074",
       "ci-ci-pytest-33471965968-py3.12",
@@ -346,7 +347,7 @@
       "har79-inbox-validator-65385991",
       "merge-har79-d599a084"
     ],
-    "HAR-80":[
+    "HAR-80": [
       "har80-groundtruth-43c6d723",
       "har80-harness-a4af3484",
       "har80-harness-b98ef05c",
@@ -354,7 +355,7 @@
       "har80-route-b-701a8472",
       "merge-har80-a4af3484"
     ],
-    "HAR-81":[
+    "HAR-81": [
       "har81-a18-check-0ad5c41c",
       "har81-a19-check-0ad5c41c",
       "har81-a19-delivery-measurement-d39a5a7b",
@@ -389,11 +390,14 @@
       "merge-har81-e4e8c580",
       "merge-har81-resource-c6e5a47d"
     ],
-    "HAR-83":[
+    "HAR-83": [
       "har83-benchmark-producer-84e19be70",
       "har83-final-hardening-exact-build-08fe997d0",
       "har83-final-hardening-producer-9d0d8079f",
       "har83-unified-source-1ecd03674"
+    ],
+    "HAR-87": [
+      "har87-groundtruth-green-ci-193b9d93b"
     ]
   }
 }
