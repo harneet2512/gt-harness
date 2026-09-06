@@ -210,6 +210,16 @@ def test_sigterm_during_agent_run_conserves_patch_and_terminal_artifacts(
 
     class FakeAgent:
         model = SimpleNamespace()
+        # The patch exporter reads agent.env.runtime_layout.excluded_roots
+        # (miniswe_gt_run.py:991) to keep generated cache out of the patch.
+        # Without an env this fake could never reach export at all: the run
+        # recorded patch_export_error AttributeError and wrote no patch, so
+        # the conservation property this test exists to prove was never
+        # actually exercised - the assertion below failed on a missing file
+        # rather than on missing content.
+        env = SimpleNamespace(
+            runtime_layout=SimpleNamespace(excluded_roots=())
+        )
         n_calls = 0
         cost = 0
 
@@ -247,5 +257,9 @@ def test_sigterm_during_agent_run_conserves_patch_and_terminal_artifacts(
 
     assert runner.main() == TERMINAL_EXIT_CODES["timeout"]
     assert "after = 2" in patch.read_text(encoding="utf-8")
-    assert json.loads(metrics.read_text(encoding="utf-8"))["terminal"] == "timeout"
+    report = json.loads(metrics.read_text(encoding="utf-8"))
+    assert report["terminal"] == "timeout"
+    # An export that failed is recorded, not silent. Asserting its absence
+    # keeps "the patch exists" from being satisfied by a stale file.
+    assert "patch_export_error" not in report
     assert json.loads(manifest.read_text(encoding="utf-8"))["research_valid"] is False

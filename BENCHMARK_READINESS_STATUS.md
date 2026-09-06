@@ -184,14 +184,21 @@ and real receipt-bound LSP consumers. Green CI does not close those items.
 
 ## User smoke authorization
 
-The user wrote on 2026-09-05:
+Authorization is **not** recorded here. The verbatim owner record lives in
+Linear HAR-81, *Block DeepSWE smoke20 until provider, receipt, and workflow
+gates are repaired*
+(<https://linear.app/harneet2512/issue/HAR-81/block-deepswe-smoke20-until-provider-receipt-and-workflow>),
+and that record governs. A document repeating an owner's words becomes a second
+source of authority that can drift from the first, and a reader cannot tell
+which one binds. Read HAR-81 for the wording and its date.
 
-> yes document everything and go jext and u have approval for one smome and if that works 19 too
-
-This records approval for one GT-on smoke and conditional approval for the
-remaining 19 canonical tasks. It does not authorize an immediate dispatch before
-technical gates pass, a baseline rerun, additional tasks, alternate routes,
-automatic paid retries, or an unrestricted benchmark.
+What this document records is the *scope* the authorization is exercised under,
+which is a technical constraint and belongs with the technical status: approval
+covers one GT-on smoke, and the remaining 19 canonical tasks only conditionally.
+It does not authorize dispatch before the technical gates pass, a baseline
+rerun, additional tasks, alternate routes, automatic paid retries, or an
+unrestricted benchmark. Where this paragraph and HAR-81 disagree, HAR-81 is
+correct and this paragraph is a defect.
 
 The one-task stage is `gate-one`, task
 `arktype-json-schema-refs-dependencies`, with the existing 1,800-second agent
