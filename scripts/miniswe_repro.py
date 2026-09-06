@@ -84,6 +84,39 @@ RECEIPT_SCHEMA = "gt.provider-receipt.v2"
 RESPONSE_DIGEST_SUBJECT = "provider_response.model_dump(mode=json)"
 
 
+def _non_retryable_provider_errors() -> tuple[type[BaseException], ...]:
+    """Provider rejections that cannot become acceptable by trying again.
+
+    Recorded run 33567358689 spent ten attempts on one BadRequestError -
+    "The total text input size exceeds 8 MB" - because tenacity retries any
+    exception not named in abort_exceptions, and BadRequestError is not
+    named there. Ten identical 8 MB bodies were billed, behind
+    wait_exponential(min=4, max=60), for a rejection that was deterministic
+    from the first attempt.
+
+    Upstream already aborts on ContextWindowExceededError and
+    UnsupportedParamsError, and BOTH are subclasses of BadRequestError - so
+    the intent that a 400 is terminal is already there, enumerated as two
+    instances rather than as the class. This widens it to the class, and to
+    422, and stops there: 429 (RateLimitError), 5xx (InternalServerError,
+    ServiceUnavailableError, BadGatewayError), timeouts and connection
+    errors are all genuinely transient and must keep retrying.
+
+    No evidence is lost. The failure row still lands; only the repeats stop.
+    """
+    try:
+        from litellm import exceptions
+    except ImportError:  # a non-litellm model keeps its own policy
+        return ()
+    return tuple(
+        kind for kind in (
+            getattr(exceptions, "BadRequestError", None),
+            getattr(exceptions, "UnprocessableEntityError", None),
+        )
+        if isinstance(kind, type) and issubclass(kind, BaseException)
+    )
+
+
 class RunReceiptObserver:
     """Pass-through receipt seam installed identically in both A/B arms."""
 
@@ -275,8 +308,10 @@ class RunReceiptObserver:
         # request/failure pairs - before reaching the caller. Shadowed on the
         # instance so other models keep the class default.
         aborts = list(getattr(model, "abort_exceptions", ()) or ())
-        if ResearchModelMismatch not in aborts:
-            model.abort_exceptions = [*aborts, ResearchModelMismatch]
+        for kind in (ResearchModelMismatch, *_non_retryable_provider_errors()):
+            if kind not in aborts:
+                aborts.append(kind)
+        model.abort_exceptions = aborts
         model._research_receipt_observer = self
 
     def _seam_issues(self) -> list[str]:

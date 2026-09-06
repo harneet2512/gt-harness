@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -936,3 +937,113 @@ def test_recorded_retry_ledger_carries_a_permanently_failing_payload():
     assert len(failures) == 1
     assert failures[0]["error_type"] == "BadRequestError"
     assert "exceeds 8 MB" in failures[0]["error"]
+
+
+# REV-384 spend ruling. A deterministic 4xx rejection must cost one attempt,
+# not ten. Recorded run 33567358689 burned ten identical 8 MB bodies on a
+# single BadRequestError because tenacity retries anything not named in
+# abort_exceptions.
+
+
+def _litellm_error(name: str, message: str):
+    import httpx
+    from litellm import exceptions
+
+    kind = getattr(exceptions, name)
+    kwargs = {"message": message, "model": "deepseek-v4-flash",
+              "llm_provider": "openai"}
+    # Some litellm exception types require the originating response object.
+    if "response" in inspect.signature(kind.__init__).parameters:
+        kwargs["response"] = httpx.Response(
+            422, request=httpx.Request("POST", "https://provider.invalid/v1")
+        )
+    return kind(**kwargs)
+
+
+def test_deterministic_rejection_costs_one_attempt(tmp_path):
+    """One request row, one failure row, and the error reaches the caller."""
+    model = FakeModel(
+        failures=FakeModel.max_attempts,
+        error=_litellm_error("BadRequestError", "The total text input size exceeds 8 MB"),
+    )
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    with pytest.raises(Exception, match="exceeds 8 MB"):
+        model.query([{"role": "user", "content": "oversize"}])
+    rows = _rows(observer)
+    assert [row["event"] for row in rows] == ["provider_request", "provider_failure"]
+    assert model.transport_calls == 1
+    # Evidence is not lost by aborting - the failure is still recorded.
+    assert rows[1]["error_type"] == "BadRequestError"
+    assert observer.receipt()["valid"] is True
+
+
+def test_unprocessable_entity_also_costs_one_attempt(tmp_path):
+    model = FakeModel(
+        failures=FakeModel.max_attempts,
+        error=_litellm_error("UnprocessableEntityError", "unprocessable"),
+    )
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    with pytest.raises(Exception, match="unprocessable"):
+        model.query([{"role": "user", "content": "task"}])
+    assert model.transport_calls == 1
+
+
+@pytest.mark.parametrize(
+    "name", ["RateLimitError", "InternalServerError", "ServiceUnavailableError"],
+)
+def test_transient_provider_errors_still_retry(name, tmp_path):
+    """The control. Aborting everything would be a worse defect than retrying
+    everything: a 429 or a 5xx is exactly what retries exist for."""
+    model = FakeModel(failures=2, error=_litellm_error(name, "transient"))
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    assert model.transport_calls == 3
+    rows = _rows(observer)
+    assert [row["event"] for row in rows] == [
+        "provider_request", "provider_failure",
+        "provider_request", "provider_failure",
+        "provider_request", "provider_response",
+    ]
+    assert observer.receipt()["valid"] is True
+
+
+def test_recorded_oversize_rejection_would_now_cost_one_attempt(tmp_path):
+    """Tie the ruling to the run that motivated it.
+
+    The recorded ledger shows ten request rows for one BadRequestError. The
+    same error under the current abort set produces one.
+    """
+    recorded = [json.loads(line) for line in
+                RECORDED_RETRY_LEDGER.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+    recorded_attempts = len([
+        row for row in recorded
+        if row["event"] == "provider_request"
+        and row["request_sha256"] == recorded[-2]["request_sha256"]
+    ]) if recorded[-2]["event"] == "provider_request" else 10
+    assert recorded_attempts == 10
+
+    model = FakeModel(
+        failures=FakeModel.max_attempts,
+        error=_litellm_error("BadRequestError", "The total text input size exceeds 8 MB"),
+    )
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    with pytest.raises(Exception):
+        model.query([{"role": "user", "content": "oversize"}])
+    assert model.transport_calls == 1
