@@ -257,6 +257,30 @@ gh codespace ports forward 80:18080 -c "$NAME" &   # then use localhost:18080
 Expect it to drop (`websocket: close 1006 (abnormal closure)`) on a flaky link.
 It is the interim, not the mechanism.
 
+### A tunnel-id URL goes stale, and a stale one can answer as somebody else
+
+Every start of a codespace creates a **new** dev tunnel with a new id, and the
+old id does not simply stop resolving — it can later answer as a different
+tunnel. Seen 2026-09-06: requests to a tunnel URL from twenty minutes earlier
+returned `200` on one route and `404` on another while **the server logged
+nothing at all**, which is what a request reaching a different tunnel looks
+like from the outside.
+
+Two consequences worth knowing before debugging anything else:
+
+- **When the app answers but its log is silent, you are talking to the wrong
+  tunnel.** Compare `gh api 'user/codespaces/<name>?internal=true'
+  --jq .connection.tunnelProperties.tunnelId` against the host you are using
+  before believing any other symptom.
+- **`PUBLIC_BASE_URL` must be re-set after every restart** while the deployment
+  is reached by tunnel id, because it is what the server puts in the
+  `ingest_url` handed to somebody's laptop. A stale one sends an external
+  agent's events into the void, or worse, at a host that is no longer yours.
+
+This is a consequence of using the tunnel id at all, which is itself the
+workaround for the codespace name not resolving. A plain VM with a stable DNS
+name retires the whole class of problem.
+
 ### A new codespace comes up with no docker and no ports (recovery container)
 
 Seen 2026-09-06, both `EastUs` and `WestUs2`, on two different base images:
@@ -502,6 +526,7 @@ Note the script hard-codes `cd /workspaces/gt-harness` and
 | Symptom | Cause | What to do |
 |---|---|---|
 | Public URL 302s to GitHub sign-in | Codespaces port visibility reset by the deploy. | `gh codespace ports visibility 80:public -c <name>` from a machine with a `codespace`-scoped `gh` login. |
+| The app answers but the server log shows none of your requests | A stale tunnel-id URL now resolves to a different tunnel. | Re-read the tunnel id (see [A tunnel-id URL goes stale](#a-tunnel-id-url-goes-stale-and-a-stale-one-can-answer-as-somebody-else)) and re-set `PUBLIC_BASE_URL`. |
 | A new codespace has no `docker` and no forwarded ports | GitHub substituted a **recovery container**; the devcontainer failed to start (creation.log: error 1302). | Not fixable in the codespace — see [A new codespace comes up with no docker and no ports](#a-new-codespace-comes-up-with-no-docker-and-no-ports-recovery-container). Deploy to an existing one and retry later. |
 | Public URL returns **404, empty body** | The Codespaces edge: port not registered. nginx is fine. | `forwardPorts` in the devcontainer (takes effect on the next codespace), or hold `gh codespace ports forward 80:18080 -c <name>`. |
 | **Every** `<name>-<port>.app.github.dev` URL 404s after a cold start, private ports included, ports listed and stack healthy | The codespace name no longer resolves to its (new) tunnel. | See [The codespace name can stop resolving after a cold start](#the-codespace-name-can-stop-resolving-after-a-cold-start): confirm with the id-based URL, then wait for GitHub or re-point the OAuth app's callback URL at the tunnel id. |
