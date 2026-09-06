@@ -1,4 +1,17 @@
-import type { FinishReason, Message, SessionEvent } from "./api";
+import { agentIdOf, type FinishReason, type Message, type Session, type SessionEvent } from "./api";
+import { fromFrame, type GtAction } from "./gt";
+import {
+  applyMirrored,
+  applyWorkerEvent,
+  emptyWorkers,
+  hydrateReport,
+  hydrateWorkers,
+  markApplied,
+  markApplyError,
+  markApplying,
+  markConflict,
+  type WorkersState,
+} from "./workers";
 
 /* ------------------------------------------------------------------ *
  * Thread state: the messages of a session plus the per-turn activity
@@ -32,7 +45,9 @@ export type ActivityItem =
       messageId: string | null;
       content: string;
     }
-  | { key: string; kind: "error"; error: string };
+  | { key: string; kind: "error"; error: string }
+  /** One typed GroundTruth query. Not a shell command, and never drawn as one. */
+  | { key: string; kind: "gt_action"; action: GtAction };
 
 export interface TurnState {
   id: string;
@@ -61,6 +76,11 @@ export interface ChatState {
    * already de-duplicated by envelope id.
    */
   events: SessionEvent[];
+  /**
+   * The worker agents this session spawned, as cards. Every frame carrying
+   * an `agent_id` lands here and **nowhere else** — see `applyEvent`.
+   */
+  workers: WorkersState;
 }
 
 export const emptyChat: ChatState = {
@@ -71,11 +91,18 @@ export const emptyChat: ChatState = {
   turnByMessage: {},
   steeringIds: {},
   events: [],
+  workers: emptyWorkers,
 };
 
 export type ChatAction =
   | { type: "hydrate"; messages: Message[] }
   | { type: "event"; event: SessionEvent }
+  /** `GET /api/sessions/:id/agents` — the cards, rebuilt after a reload. */
+  | { type: "workers"; rows: readonly Session[] }
+  | { type: "worker_applying"; workerId: string }
+  | { type: "worker_applied"; workerId: string; files: readonly string[] }
+  | { type: "worker_conflict"; workerId: string; conflicts: readonly string[]; detail: string }
+  | { type: "worker_apply_error"; workerId: string; error: string }
   | { type: "optimistic"; message: Message }
   | { type: "settle"; tempId: string; message: Message }
   | { type: "drop"; id: string };
@@ -179,8 +206,29 @@ function linkMessage(
   };
 }
 
+/** The four frame types a parent gets *about* its workers. */
+const WORKER_EVENTS: ReadonlySet<string> = new Set([
+  "agent_spawned",
+  "agent_report",
+  "agent_applied",
+  "agent_closed",
+]);
+
 function applyEvent(state: ChatState, event: SessionEvent): ChatState {
   const key = `ev-${event.id}`;
+
+  /* A mirrored frame belongs to the worker that produced it. It must never
+     reach the primary turn: the transmission strip, the trail and the step
+     count all read `turns`, and a worker's commands there would read as the
+     session's own work. `agent_id` is present on exactly those frames. */
+  const agentId = agentIdOf(event);
+  if (agentId) {
+    return { ...state, workers: applyMirrored(state.workers, agentId, event) };
+  }
+  if (WORKER_EVENTS.has(event.type)) {
+    return { ...state, workers: applyWorkerEvent(state.workers, event) };
+  }
+
   switch (event.type) {
     case "turn_started": {
       const turnId = str(event.data.turn_id);
@@ -249,6 +297,22 @@ function applyEvent(state: ChatState, event: SessionEvent): ChatState {
         command,
         nCalls: num(event.data.n_calls),
       });
+    }
+
+    /**
+     * A GroundTruth query. The frame carries no `turn_id` on every server
+     * that emits it, so it falls back to the turn that is running — which
+     * is the only turn that can have produced it.
+     */
+    case "gt_action": {
+      const turnId =
+        str(event.data.turn_id) ||
+        state.turnOrder[state.turnOrder.length - 1] ||
+        "";
+      if (!turnId) return state;
+      const action = fromFrame(event.data as Record<string, unknown>);
+      if (!action) return state;
+      return appendItem(state, turnId, { key, kind: "gt_action", action });
     }
 
     case "tool_result": {
@@ -394,8 +458,50 @@ export const SANDBOX_RESTARTED_NOTE = "sandbox restarted";
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
-    case "hydrate":
-      return action.messages.reduce(upsert, state);
+    case "hydrate": {
+      /* A `role: "agent"` message carrying `meta.agent_id` is a worker's
+         report, not the session's own reply: it rebuilds that worker's card
+         and stays out of the thread. This is what makes a reload show the
+         cards again (HAR-84 worker agents). */
+      let next = state;
+      for (const incoming of action.messages) {
+        if (typeof incoming.meta?.agent_id === "string" && incoming.meta.agent_id) {
+          next = { ...next, workers: hydrateReport(next.workers, incoming) };
+          continue;
+        }
+        next = upsert(next, incoming);
+      }
+      return next;
+    }
+
+    case "workers":
+      return { ...state, workers: hydrateWorkers(state.workers, action.rows) };
+
+    case "worker_applying":
+      return { ...state, workers: markApplying(state.workers, action.workerId) };
+
+    case "worker_applied":
+      return {
+        ...state,
+        workers: markApplied(state.workers, action.workerId, action.files),
+      };
+
+    case "worker_conflict":
+      return {
+        ...state,
+        workers: markConflict(
+          state.workers,
+          action.workerId,
+          action.conflicts,
+          action.detail,
+        ),
+      };
+
+    case "worker_apply_error":
+      return {
+        ...state,
+        workers: markApplyError(state.workers, action.workerId, action.error),
+      };
 
     case "event":
       return applyEvent(

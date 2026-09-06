@@ -1,3 +1,5 @@
+import type { WorkerTrail } from "../useGraphView";
+
 export interface TurnOption {
   id: string;
   no: number;
@@ -20,6 +22,11 @@ interface Props {
   onTogglePanel: () => void;
   gt: boolean;
   folded: number;
+  /** The worker agents, each with the colour its trail is drawn in. */
+  workers: readonly WorkerTrail[];
+  /** The worker the map is narrowed to, or null for everything at once. */
+  isolated: string | null;
+  onIsolate: (workerId: string | null) => void;
   /** Hide the whole panel. The conversation is the page; this is a detour. */
   onCollapse: () => void;
 }
@@ -48,6 +55,9 @@ export default function GraphToolbar({
   onTogglePanel,
   gt,
   folded,
+  workers,
+  isolated,
+  onIsolate,
   onCollapse,
 }: Props) {
   return (
@@ -108,6 +118,24 @@ export default function GraphToolbar({
           <span className="legend-line is-cotouch" />
           <span className="cap">co-touch</span>
         </span>
+        {/* One chip per worker, in the colour its trail is drawn in. Click
+            to narrow the map to what that worker touched. */}
+        {workers.map((worker) => (
+          <button
+            type="button"
+            key={worker.id}
+            className={`legend-worker ${isolated === worker.id ? "is-on" : ""}`}
+            style={{ ["--worker-hue" as string]: worker.css }}
+            aria-pressed={isolated === worker.id}
+            title={worker.task || `worker ${worker.no}`}
+            onClick={() =>
+              onIsolate(isolated === worker.id ? null : worker.id)
+            }
+          >
+            <span className="legend-dot is-worker" />
+            <span className="cap">worker {worker.no}</span>
+          </button>
+        ))}
       </span>
 
       <span className="spacer" />

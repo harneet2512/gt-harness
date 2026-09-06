@@ -204,6 +204,7 @@ describe("trail — stepKind", () => {
     files: [],
     steering: [],
     errors: [],
+    gt: null,
     ...over,
   });
 

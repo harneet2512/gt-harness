@@ -17,11 +17,13 @@ import {
   callCount,
   EMPTY_INDEX,
   indexFiles,
+  matchFiles,
   trailView,
   WRITES,
   type Attention,
   type TrailStep,
 } from "./trail";
+import { hueFor, workerList, type WorkerState } from "./workers";
 
 /** How often a settled layout is written back to localStorage. */
 const LAYOUT_SAVE_MS = 5000;
@@ -76,6 +78,30 @@ export interface GraphView {
   attentionById: ReadonlyMap<string, Attention>;
   trailIds: readonly string[];
   positionId: string | null;
+  /** One per worker agent, in spawn order, each in its own colour. */
+  workerTrails: readonly WorkerTrail[];
+}
+
+/**
+ * A worker's walk across the same field. Built exactly like the primary
+ * trail — commands resolved against the tree — but from the worker's own
+ * mirrored activity, so the two never mix.
+ */
+export interface WorkerTrail {
+  id: string;
+  /** 1-based spawn position: the number on the legend chip. */
+  no: number;
+  task: string;
+  status: WorkerState["status"];
+  /** `r, g, b` for the canvas, and the same colour as CSS for the chip. */
+  rgb: string;
+  css: string;
+  trailIds: readonly string[];
+  attention: ReadonlyMap<string, Attention>;
+  positionId: string | null;
+  /** Every particle this worker touched — what "isolate" narrows to. */
+  ids: ReadonlySet<string>;
+  steps: number;
 }
 
 /**
@@ -289,6 +315,58 @@ export function useGraphView(input: Input): GraphView {
     : `diff at step ${hereCall} is approximate — showing files ` +
       "written up to this step";
 
+  /* ---- the workers' trails --------------------------------------- *
+   * A worker's frames arrive mirrored on this session's stream and were
+   * kept out of `chat.turns` on the way in, so there is nothing to filter
+   * here: its activity is its own, and it walks the parent's field because
+   * it is a clone of the same repository at the same ref.
+   * ----------------------------------------------------------------- */
+  const workers = chat.workers;
+  const workerTrails = useMemo<WorkerTrail[]>(() => {
+    return workerList(workers).map((worker, i) => {
+      const hue = hueFor(i);
+      const attention = new Map<string, Attention>();
+      const trailIds: string[] = [];
+      const ids = new Set<string>();
+
+      worker.activity.forEach((item, index) => {
+        const step = index + 1;
+        const files = matchFiles(item.command, fileIndex);
+        for (const path of files) {
+          const id = particleId(path);
+          ids.add(id);
+          const seen = attention.get(id);
+          if (seen) {
+            seen.reads += 1;
+            seen.last = step;
+          } else {
+            attention.set(id, { reads: 1, last: step });
+          }
+        }
+        const head = files[0];
+        if (!head) return;
+        const id = particleId(head);
+        if (trailIds.length === 0 || trailIds[trailIds.length - 1] !== id) {
+          trailIds.push(id);
+        }
+      });
+
+      return {
+        id: worker.id,
+        no: i + 1,
+        task: worker.task,
+        status: worker.status,
+        rgb: hue.rgb,
+        css: hue.css,
+        trailIds,
+        attention,
+        positionId: trailIds.length > 0 ? trailIds[trailIds.length - 1] : null,
+        ids,
+        steps: worker.activity.length,
+      };
+    });
+  }, [workers, fileIndex, particleId]);
+
   const pickTurn = useCallback((turnId: string) => {
     setPickedTurnId(turnId);
     setScrub(null);
@@ -321,5 +399,6 @@ export function useGraphView(input: Input): GraphView {
     attentionById,
     trailIds,
     positionId: view.position ? particleId(view.position) : null,
+    workerTrails,
   };
 }

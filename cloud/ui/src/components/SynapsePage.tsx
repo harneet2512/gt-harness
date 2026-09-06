@@ -1,36 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { COMPOSER_LOCKED } from "../api";
-import { failedReason } from "../format";
+import { Link } from "react-router-dom";
+import { COMPOSER_LOCKED, isWorker } from "../api";
+import { failedReason, repoShort } from "../format";
 import { shouldAutoOpenGraph, turnFileCount } from "../launch";
 import { isOverlayMode, useLayoutMode } from "../layoutMode";
+import { refreshPalette } from "../palette";
 import { loadGraphOpen, loadPrefs, savePrefs, saveGraphOpen, type Prefs } from "../prefs";
-import { helpText, type ParsedSlash } from "../slash";
+import { helpText, parseSpawn, type ParsedSlash } from "../slash";
+import { applyTheme, loadTheme, saveTheme, themeFromArg, type Theme } from "../theme";
 import { useDragSize } from "../useDragSize";
 import { useGraphView } from "../useGraphView";
 import { useSessionData } from "../useSessionData";
 import { useSessions } from "../useSessions";
+import { workerList } from "../workers";
 import Conversation, { type LocalNote } from "./Conversation";
 import GraphPanel from "./GraphPanel";
-import ResumeRail from "./ResumeRail";
-import SessionHeader from "./SessionHeader";
-import type { StatusMode } from "./StatusLine";
+import ResumePicker from "./ResumePicker";
 
-const GRAPH_DEFAULT = 560;
+const GRAPH_DEFAULT = 620;
 const GRAPH_MIN = 360;
-const GRAPH_MAX = 900;
+const GRAPH_MAX = 1000;
 
-const SPAWN_SOON =
-  "spawning worker agents is coming — the server side is being built";
+/** The split, as a column of box-drawing characters. */
+const SPLIT_BAR = Array.from({ length: 400 }, () => "│").join("\n");
 
-/** SYNAPSE — a transcript, with the graph a keystroke away. */
+/** GT Cloud Agent — a terminal, with the graph a keystroke away. */
 export default function SynapsePage() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? null;
   const location = useLocation();
   const data = useSessionData(sessionId);
   const { session, chat, graph, diff } = data;
-  const { sessions, error: listError } = useSessions();
+  const { sessions } = useSessions();
 
   const view = useGraphView({
     sessionId,
@@ -42,17 +44,29 @@ export default function SynapsePage() {
     turnEpoch: data.turnEpoch,
   });
 
-  /* ---- the first message, typed on the landing page ----
-     The session was created a moment ago and the server answers 409 until
-     the workspace is up, so the prompt waits here — on screen — and is
-     posted the instant the session reaches `idle`. */
-  const firstMessage =
-    (location.state as { firstMessage?: string } | null)?.firstMessage ?? null;
+  /* ---- the first message, typed on the landing page ---- */
+  const launched =
+    (location.state as
+      | { firstMessage?: string; alreadySent?: boolean; spawnTasks?: string[] }
+      | null) ?? null;
+  const firstMessage = launched?.firstMessage ?? null;
   const [pendingFirst, setPendingFirst] = useState<string | null>(firstMessage);
-  const sentFirst = useRef(false);
+  /* `SessionCreate.first_message` means the server already has the prompt and
+     starts the turn itself, so nothing is posted from here. The copy above is
+     on screen only so the wait belongs to the prompt rather than to a blank
+     page; the fallback path — a server that would not take the field — is the
+     one that still sends it at `idle`. */
+  const sentFirst = useRef(launched?.alreadySent === true);
+  /* `/spawn` typed on the landing page: the server refuses a spawn while a
+     session is `creating`, so the tasks wait here. */
+  const [pendingSpawn, setPendingSpawn] = useState<readonly string[] | null>(
+    launched?.spawnTasks ?? null,
+  );
 
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
-  const [gearSignal, setGearSignal] = useState(0);
+  const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
   const [notes, setNotes] = useState<readonly LocalNote[]>([]);
   const noteId = useRef(0);
@@ -61,7 +75,7 @@ export default function SynapsePage() {
   const overlay = isOverlayMode(layout);
   const width = useDragSize(GRAPH_DEFAULT, GRAPH_MIN, GRAPH_MAX, "x-left");
 
-  /* ---- the graph panel ---- */
+  /* ---- the graph pane ---- */
   const remembered = useMemo(
     () => (sessionId ? loadGraphOpen(sessionId) : null),
     [sessionId],
@@ -83,12 +97,22 @@ export default function SynapsePage() {
     view.stepsByTurn[session?.current_turn_id ?? ""] ?? view.steps;
   const touched = turnFileCount(liveSteps);
 
+  const workers = useMemo(() => workerList(chat.workers), [chat.workers]);
+
   useEffect(() => {
     if (autoDone.current || graphOpen) return;
     if (!shouldAutoOpenGraph(touched)) return;
     autoDone.current = true;
     setGraphOpen(true);
   }, [touched, graphOpen]);
+
+  /* A worker is a second trail on the same map, and the map is the only
+     place two of them can be watched at once: the pane opens itself the
+     moment the first one exists. An explicit choice still wins. */
+  useEffect(() => {
+    if (autoDone.current || graphOpen || workers.length === 0) return;
+    setGraphOpen(true);
+  }, [workers.length, graphOpen]);
 
   /* ---- selection ---- */
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -122,43 +146,38 @@ export default function SynapsePage() {
 
   /* ---- status ---- */
   const status = String(session?.status ?? (sessionId ? "creating" : "idle"));
-  const lastAgent = useMemo(() => {
-    for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
-      if (chat.messages[i].role === "agent") return chat.messages[i];
-    }
-    return null;
-  }, [chat.messages]);
-
-  const mode: StatusMode = data.isRunning
-    ? "working"
-    : status === "creating"
-      ? "preparing"
-      : status === "failed"
-        ? "failed"
-        : status === "closed"
-          ? "closed"
-          : lastAgent?.meta.finish_reason === "question"
-            ? "waiting"
-            : "idle";
-
-  const currentTurn = session?.current_turn_id
-    ? chat.turns[session.current_turn_id]
-    : undefined;
-  const elapsed =
-    data.isRunning && currentTurn?.startedAt != null
-      ? data.now - currentTurn.startedAt
-      : null;
 
   /* ---- deliver the landing page's prompt ---- */
   const send = data.send;
   useEffect(() => {
-    if (!pendingFirst || sentFirst.current) return;
+    if (!pendingFirst) return;
+    if (sentFirst.current) {
+      // The real message is in the thread now; never show the prompt twice.
+      if (chat.messages.some((m) => m.content === pendingFirst)) {
+        setPendingFirst(null);
+      }
+      return;
+    }
     if (status !== "idle") return;
     sentFirst.current = true;
     const content = pendingFirst;
     setPendingFirst(null);
     void send(content);
-  }, [pendingFirst, status, send]);
+  }, [pendingFirst, status, send, chat.messages]);
+
+  const note = useCallback((role: LocalNote["role"], text: string) => {
+    setNotes((prev) => [...prev, { id: (noteId.current += 1), role, text }]);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingSpawn || status !== "idle") return;
+    const tasks = pendingSpawn;
+    setPendingSpawn(null);
+    note("user", tasks.map((task) => `/spawn ${task}`).join("\n"));
+    void data.spawn(tasks).then((error) => {
+      if (error) note("system", error);
+    });
+  }, [pendingSpawn, status, data, note]);
 
   /* ---- keyboard ---- */
   const stop = data.stop;
@@ -176,24 +195,24 @@ export default function SynapsePage() {
         setGraph(!graphOpen);
         return;
       }
-      if (e.key === "Backspace" && e.shiftKey && data.isRunning) {
+      if (e.key === "r" || e.key === "R") {
         e.preventDefault();
-        stop();
+        setResumeOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data.isRunning, stop, graphOpen, setGraph]);
-
-  const note = useCallback((role: LocalNote["role"], text: string) => {
-    setNotes((prev) => [...prev, { id: (noteId.current += 1), role, text }]);
-  }, []);
+  }, [stop, graphOpen, setGraph]);
 
   const onCommand = useCallback(
-    ({ command, arg }: ParsedSlash) => {
+    ({ command, arg, raw }: ParsedSlash) => {
       /* The command is echoed the way a shell echoes it: what you typed
-         stays in the transcript, above whatever it did. */
-      note("user", `/${command.name}${arg ? ` ${arg}` : ""}`);
+         stays in the transcript, above whatever it did. A multi-line
+         `/spawn` is echoed whole — each line is a worker. */
+      note(
+        "user",
+        command.name === "spawn" ? raw : `/${command.name}${arg ? ` ${arg}` : ""}`,
+      );
       switch (command.name) {
         case "stop":
           if (data.isRunning) stop();
@@ -206,46 +225,54 @@ export default function SynapsePage() {
           setGraph(!graphOpen);
           break;
         case "settings":
-          setGearSignal((n) => n + 1);
+          setSettingsOpen(true);
           break;
-        case "spawn":
-          note("system", SPAWN_SOON);
+        case "resume":
+          setResumeOpen(true);
           break;
+        case "theme": {
+          const next = themeFromArg(arg, theme);
+          setTheme(next);
+          applyTheme(next);
+          saveTheme(next);
+          refreshPalette();
+          note("system", `theme: ${next}`);
+          break;
+        }
+        case "spawn": {
+          const draft = parseSpawn(raw);
+          if (draft.error) {
+            note("system", draft.error);
+            break;
+          }
+          void data.spawn(draft.tasks).then((error) => {
+            if (error) note("system", error);
+          });
+          break;
+        }
         case "help":
           note("system", helpText());
           break;
       }
     },
-    [data, stop, graphOpen, setGraph, note],
+    [data, stop, graphOpen, setGraph, note, theme],
   );
+
+  const worker = session ? isWorker(session) : false;
 
   return (
     <div className={`shell ${overlay ? "is-narrow" : ""}`}>
-      <ResumeRail
-        activeId={sessionId}
-        sessions={sessions}
-        error={listError}
-      />
-
       <main className="work">
-        <SessionHeader
-          session={session}
-          mode={mode}
-          phase={data.phase}
-          elapsed={elapsed}
-          liveSteps={view.calls}
-          running={data.isRunning}
-          stopping={data.isStopping}
-          graphOpen={graphOpen}
-          onToggleGraph={() => setGraph(!graphOpen)}
-          onStop={stop}
-          prefs={prefs}
-          gearSignal={gearSignal}
-          onPrefs={(next) => {
-            setPrefs(next);
-            savePrefs(next);
-          }}
-        />
+        {worker && session?.parent_id && (
+          <header className="head">
+            <Link className="head-back" to={`/sessions/${session.parent_id}`}>
+              ← back to parent
+            </Link>
+            <span className="dim">
+              {"  "}worker of {repoShort(session.repo)}
+            </span>
+          </header>
+        )}
 
         <div className="work-body">
           <div className="work-talk">
@@ -260,7 +287,6 @@ export default function SynapsePage() {
               currentTurnId={session?.current_turn_id ?? null}
               onSelectTurn={view.pickTurn}
               cutoff={view.cutoff}
-              hereStep={view.hereStep}
               running={data.isRunning}
               stopping={data.isStopping}
               steeringQueued={data.steeringQueued}
@@ -273,6 +299,16 @@ export default function SynapsePage() {
               failureError={data.failureError}
               pendingFirst={pendingFirst}
               notes={notes}
+              workers={workers}
+              canApply={status === "idle"}
+              onApplyWorker={(workerId) => void data.applyWorker(workerId)}
+              settingsOpen={settingsOpen}
+              prefs={prefs}
+              onPrefs={(next) => {
+                setPrefs(next);
+                savePrefs(next);
+              }}
+              onCloseSettings={() => setSettingsOpen(false)}
               focusSignal={focusSignal}
               onSend={data.send}
               onCommand={onCommand}
@@ -284,20 +320,16 @@ export default function SynapsePage() {
 
           {graphOpen && (
             <>
-              {overlay ? (
+              {overlay ? null : (
                 <div
-                  className="scrim is-graph"
-                  role="presentation"
-                  onClick={() => setGraph(false)}
-                />
-              ) : (
-                <div
-                  className="grip is-x"
+                  className="split"
                   role="separator"
                   aria-orientation="vertical"
                   aria-label="Resize the graph"
                   {...width.handlers}
-                />
+                >
+                  {SPLIT_BAR}
+                </div>
               )}
               <div
                 className="work-graph"
@@ -322,6 +354,14 @@ export default function SynapsePage() {
           )}
         </div>
       </main>
+
+      {resumeOpen && (
+        <ResumePicker
+          sessions={sessions}
+          activeId={sessionId}
+          onClose={() => setResumeOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -335,18 +375,18 @@ function lockedReason(
     case "creating":
       switch (phase) {
         case "cloning":
-          return "Cloning the repository…";
+          return "cloning the repository…";
         case "sandbox_starting":
-          return "Starting the sandbox…";
+          return "starting the sandbox…";
         case "sandbox_ready":
-          return "Sandbox ready — indexing next…";
+          return "sandbox ready — indexing next…";
         case "indexing":
-          return "Indexing the workspace…";
+          return "indexing the workspace…";
         default:
-          return "Preparing the workspace…";
+          return "preparing the workspace…";
       }
     case "closed":
-      return "This session is closed.";
+      return "this session is closed";
     case "failed":
       return failedReason(failureError);
     default:

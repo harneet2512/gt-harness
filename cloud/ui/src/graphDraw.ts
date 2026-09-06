@@ -11,12 +11,10 @@ import { endsOf } from "./graphSim";
 import { curveOf, pointOn, TAIL, type Curve, type LiveSignal } from "./signals";
 import { attentionAlpha, type Attention } from "./trail";
 
-const PAPER = "#FAFAF8";
-const GRID = "#E9E7E1";
-const INK = "#1A1B1E";
-const INK_2 = "#5B5D63";
-const ORANGE = "240, 102, 47";
-const TEAL = "21, 154, 135";
+/* The canvas cannot read a CSS variable, so it reads them through
+   `palette.ts` — once per theme change, never per frame. */
+import { palette } from "./palette";
+
 const GRID_PITCH = 24;
 
 const FILAMENT_ALPHA: Record<string, number> = {
@@ -45,6 +43,22 @@ const LABEL_CELL_W = 26;
 const LABEL_CELL_H = 13;
 const HALO_MS = 1400;
 
+/**
+ * One worker's walk through the same field, drawn in its own colour so two
+ * agents on one map never read as one. Everything here is keyed by particle
+ * id, exactly as the primary trail is.
+ */
+export interface WorkerLayer {
+  id: string;
+  /** `r, g, b`. */
+  rgb: string;
+  attention: ReadonlyMap<string, Attention>;
+  /** Steps walked, so the attention decay has a clock of its own. */
+  steps: number;
+  positionId: string | null;
+  running: boolean;
+}
+
 export interface DrawInput {
   ctx: CanvasRenderingContext2D;
   width: number;
@@ -66,8 +80,20 @@ export interface DrawInput {
   dim: number;
   labels: boolean;
   signals: readonly LiveSignal[];
+  /** The worker agents' trails. Empty on a session that spawned none. */
+  workers: readonly WorkerLayer[];
   now: number;
 }
+
+/* Set from the palette at the top of every frame. They are the theme, and
+   the painter below reads them exactly as it read the constants they
+   replaced. */
+let PAPER = "#0f1113";
+let GRID = "#1a1d21";
+let INK = "#e6e6e6";
+let INK_2 = "#8b8f97";
+let ORANGE = "217, 119, 87";
+let TEAL = "86, 182, 194";
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -75,6 +101,13 @@ function lerp(a: number, b: number, t: number): number {
 
 export function draw(input: DrawInput): void {
   const { ctx, width, height } = input;
+  const skin = palette();
+  PAPER = skin.paper;
+  GRID = skin.grid;
+  INK = skin.ink;
+  INK_2 = skin.ink2;
+  ORANGE = skin.accent;
+  TEAL = skin.change;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = PAPER;
@@ -86,12 +119,14 @@ export function draw(input: DrawInput): void {
   paintFilaments(input);
   paintSignals(input);
   paintParticles(input);
+  paintWorkers(input);
   paintLabels(input);
 }
 
 /* ---------------- background ---------------- */
 
 let patternFor: CanvasRenderingContext2D | null = null;
+let patternInk = "";
 let pattern: CanvasPattern | null = null;
 
 function paintGrid(
@@ -99,7 +134,8 @@ function paintGrid(
   width: number,
   height: number,
 ): void {
-  if (patternFor !== ctx || pattern === null) {
+  if (patternFor !== ctx || pattern === null || patternInk !== GRID) {
+    patternInk = GRID;
     const tile = document.createElement("canvas");
     tile.width = GRID_PITCH;
     tile.height = GRID_PITCH;
@@ -186,7 +222,7 @@ function offscreen(curve: Curve, width: number, height: number): boolean {
 }
 
 function hexAlpha(hex: string, alpha: number): string {
-  const value = Number.parseInt(hex.slice(1), 16);
+  const value = Number.parseInt(hex.replace("#", ""), 16);
   const r = (value >> 16) & 255;
   const g = (value >> 8) & 255;
   const b = value & 255;
@@ -214,9 +250,10 @@ function paintSignals(input: DrawInput): void {
     const tailStart = Math.max(0, signal.progress - TAIL);
     const tail = pointOn(curve, tailStart);
 
+    const rgb = signal.rgb || ORANGE;
     const gradient = ctx.createLinearGradient(tail[0], tail[1], head[0], head[1]);
-    gradient.addColorStop(0, `rgba(${ORANGE}, 0)`);
-    gradient.addColorStop(1, `rgba(${ORANGE}, 0.85)`);
+    gradient.addColorStop(0, `rgba(${rgb}, 0)`);
+    gradient.addColorStop(1, `rgba(${rgb}, 0.85)`);
 
     ctx.beginPath();
     ctx.moveTo(tail[0], tail[1]);
@@ -233,11 +270,59 @@ function paintSignals(input: DrawInput): void {
 
     ctx.beginPath();
     ctx.arc(head[0], head[1], 2.4, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${ORANGE}, 0.95)`;
+    ctx.fillStyle = `rgba(${rgb}, 0.95)`;
     ctx.fill();
   }
 
   ctx.lineCap = "butt";
+}
+
+/* ---------------- worker trails ---------------- */
+
+/**
+ * A second pass over the particles, once per worker. The primary agent owns
+ * the fill; a worker only ever adds a ring in its own colour, so a file two
+ * agents are both standing on shows both rather than the last one drawn.
+ */
+function paintWorkers(input: DrawInput): void {
+  if (input.workers.length === 0) return;
+  const { ctx } = input;
+  const halo = (input.now % HALO_MS) / HALO_MS;
+
+  input.workers.forEach((worker, layer) => {
+    // Concentric, so overlapping workers are countable rather than merged.
+    const spread = 3 + layer * 2.5;
+
+    for (const [id, seen] of worker.attention) {
+      const particle = input.field.byId.get(id);
+      if (!particle || particle.x === undefined || particle.y === undefined) {
+        continue;
+      }
+      const heat = attentionAlpha(seen.last, worker.steps);
+      const here = id === worker.positionId;
+      if (heat <= 0 && !here) continue;
+
+      const sx = screenX(input.transform, particle.x);
+      const sy = screenY(input.transform, particle.y);
+      if (sx < -40 || sx > input.width + 40) continue;
+      if (sy < -40 || sy > input.height + 40) continue;
+
+      const r = particle.r * input.transform.k;
+      const alpha = here ? 0.95 : 0.3 + heat * 0.5;
+      ring(ctx, sx, sy, r + spread, `rgba(${worker.rgb}, ${alpha.toFixed(3)})`, here ? 2 : 1.25);
+
+      if (here && worker.running) {
+        ring(
+          ctx,
+          sx,
+          sy,
+          r * (1 + 1.2 * halo) + spread,
+          `rgba(${worker.rgb}, ${(0.5 * (1 - halo)).toFixed(3)})`,
+          1.25,
+        );
+      }
+    }
+  });
 }
 
 /* ---------------- particles ---------------- */

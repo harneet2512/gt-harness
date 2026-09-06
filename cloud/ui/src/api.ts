@@ -89,7 +89,45 @@ export interface Session {
   closed_reason?: ClosedReason | string | null;
   /** Wall-clock seconds spent across every turn of the session. */
   total_wall_seconds?: number | null;
+
+  /* ---- worker agents (HAR-84) ---------------------------------- *
+   * A worker *is* a session: same shape, same routes, one extra set of
+   * fields saying whose it is and what it was asked to do. On a session a
+   * person created they are `null` / `"primary"`. Optional throughout, so
+   * a server that predates them still parses.
+   * -------------------------------------------------------------- */
+
+  /** The session that spawned this one. Null on a primary session. */
+  parent_id?: string | null;
+  role?: SessionRole | string;
+  /** The task a worker was spawned with; its opening message. */
+  task?: string | null;
+  /** The worker's last report to its parent. Null until a turn of its own ends. */
+  report?: WorkerReport | null;
+  /** When this worker's patch was merged into the parent workspace. */
+  applied_at?: number | null;
 }
+
+export type SessionRole = "primary" | "worker";
+
+/** What a worker told its parent when a turn of its own ended. */
+export interface WorkerReport {
+  finish_reason: FinishReason | string;
+  /** The opening of the reply, bounded by the server for a list view. */
+  reply_excerpt?: string;
+  patch_sha256?: string | null;
+  files_changed?: string[];
+  /** Whether this worker's patch is already in the parent workspace. */
+  applied?: boolean;
+}
+
+/** True for a session that was spawned by another one. */
+export function isWorker(session: Pick<Session, "role" | "parent_id">): boolean {
+  return session.role === "worker" || Boolean(session.parent_id);
+}
+
+/** The most tasks one `/spawn` may carry, as the server enforces it. */
+export const MAX_TASKS_PER_SPAWN = 4;
 
 export interface SessionCreate {
   repo: string;
@@ -104,6 +142,12 @@ export interface SessionCreate {
    * live. Running past it ends the turn with `finish_reason: "time_limit"`.
    */
   wall_seconds?: number;
+  /**
+   * The first turn's prompt. The server starts it by itself the moment the
+   * workspace is ready, so creating and sending are one call rather than a
+   * create, a poll for `idle`, and a POST that races it. Blank is a 422.
+   */
+  first_message?: string;
 }
 
 /** The bounds the server enforces on `SessionCreate.wall_seconds`. */
@@ -141,6 +185,12 @@ export interface MessageMeta {
   cost?: number;
   patch_sha256?: string;
   files_changed?: string[];
+  /**
+   * Set on a `role: "agent"` message a **worker** reported into its parent's
+   * conversation. Absent on the parent's own replies — which is the whole
+   * protocol: a message that has it belongs to that worker's card.
+   */
+  agent_id?: string;
   /** Local-only marker for an optimistically appended message. */
   pending?: boolean;
   [key: string]: unknown;
@@ -282,6 +332,16 @@ export const EVENT_TYPES = [
   "turn_finished",
   "agent_error",
   "system_note",
+  /* One per typed GroundTruth action: what was asked, what scope was really
+     searched, and what the evidence was. Mirrored like the other four. */
+  "gt_action",
+  /* Worker agents. The first four are the parent's own frames about its
+     workers; the mirrored `assistant`/`tool_call`/`tool_result`/
+     `turn_started`/`turn_finished` frames above carry `agent_id` instead. */
+  "agent_spawned",
+  "agent_report",
+  "agent_applied",
+  "agent_closed",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -346,6 +406,13 @@ export interface LifecycleData {
 }
 
 export interface TurnStartedData {
+  /**
+   * Present on every frame a **worker** produced, copied onto its parent's
+   * stream. Absent — not null — on the parent's own frames. A frame that has
+   * it belongs to that worker and to nothing else: never to the primary
+   * turn, never to the primary step count.
+   */
+  agent_id?: string;
   turn_id: string;
   message_id: string;
   /**
@@ -369,6 +436,8 @@ export interface SystemNoteData {
 }
 
 export interface AssistantData {
+  /** Set when this frame was mirrored from a worker. See `TurnStartedData`. */
+  agent_id?: string;
   turn_id?: string;
   content?: string;
   actions?: string[];
@@ -384,12 +453,16 @@ export interface AssistantData {
 }
 
 export interface ToolCallData {
+  /** Set when this frame was mirrored from a worker. See `TurnStartedData`. */
+  agent_id?: string;
   turn_id?: string;
   command?: string;
   n_calls?: number;
 }
 
 export interface ToolResultData {
+  /** Set when this frame was mirrored from a worker. See `TurnStartedData`. */
+  agent_id?: string;
   turn_id?: string;
   command?: string;
   output?: string;
@@ -415,6 +488,8 @@ export interface AgentReplyData {
 }
 
 export interface TurnFinishedData {
+  /** Set when this frame was mirrored from a worker. See `TurnStartedData`. */
+  agent_id?: string;
   turn_id?: string;
   finish_reason?: FinishReason | string;
   n_calls?: number;
@@ -424,6 +499,61 @@ export interface TurnFinishedData {
 export interface AgentErrorData {
   turn_id?: string;
   error?: string;
+}
+
+/**
+ * `gt_action` — one typed GroundTruth query and its answer.
+ *
+ * `semantics`/`coverage` characterise the evidence (`exact` · `complete`);
+ * `reason_codes` and `omissions` are why the producer would not answer.
+ * A frame with none of those is a query whose result is not in yet.
+ */
+export interface GtActionData {
+  agent_id?: string;
+  turn_id?: string;
+  step?: number;
+  kind?: string;
+  arguments?: Record<string, unknown>;
+  scope?: string[] | string;
+  returncode?: number;
+  semantics?: string;
+  coverage?: string;
+  match_count?: number;
+  omissions?: string[];
+  reason_codes?: string[];
+  duration_ms?: number;
+  evidence_artifact_id?: string;
+}
+
+/** `agent_spawned` — one per worker, on the parent's stream, as it is created. */
+export interface AgentSpawnedData {
+  worker_id?: string;
+  task?: string;
+}
+
+/** `agent_report` — a worker's turn ended; this is the whole reply. */
+export interface AgentReportData {
+  worker_id?: string;
+  message_id?: string;
+  finish_reason?: FinishReason | string;
+  content?: string;
+  patch_sha256?: string;
+  files_changed?: string[];
+  n_calls?: number;
+  cost?: number;
+}
+
+/** `agent_applied` — a worker's patch landed in the parent's workspace. */
+export interface AgentAppliedData {
+  worker_id?: string;
+  files?: string[];
+  patch_sha256?: string;
+}
+
+/** `agent_closed` — a worker closed, by itself, by its parent, or by the reaper. */
+export interface AgentClosedData {
+  worker_id?: string;
+  reason?: ClosedReason | string;
 }
 
 export type SessionEvent =
@@ -437,7 +567,31 @@ export type SessionEvent =
   | Envelope<"turn_finished", TurnFinishedData>
   | Envelope<"agent_error", AgentErrorData>
   | Envelope<"system_note", SystemNoteData>
+  | Envelope<"gt_action", GtActionData>
+  | Envelope<"agent_spawned", AgentSpawnedData>
+  | Envelope<"agent_report", AgentReportData>
+  | Envelope<"agent_applied", AgentAppliedData>
+  | Envelope<"agent_closed", AgentClosedData>
   | Envelope<"unknown", Record<string, unknown>>;
+
+/**
+ * Whose frame this is. A mirrored worker frame carries `agent_id` inside
+ * `data`; a primary session's frame does not carry the key at all.
+ */
+export function agentIdOf(event: SessionEvent): string | null {
+  const value = (event.data as { agent_id?: unknown }).agent_id;
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+/** Frame types the server mirrors from a worker onto its parent's stream. */
+export const MIRRORED_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "assistant",
+  "tool_call",
+  "tool_result",
+  "gt_action",
+  "turn_started",
+  "turn_finished",
+]);
 
 function isEventType(value: unknown): value is EventType {
   return (
@@ -482,11 +636,31 @@ export function parseEventFrame(raw: unknown): SessionEvent | null {
 
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * The paths a 3-way merge could not reconcile. The server puts `conflicts`
+   * at the top level of the 409 body, beside `detail`, because it is the
+   * answer rather than a decoration on the error string.
+   */
+  readonly conflicts: readonly string[];
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, conflicts: readonly string[] = []) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.conflicts = conflicts;
+  }
+}
+
+/** `conflicts: ["a", "b"]` out of an error body, or nothing. */
+export function conflictsOf(body: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) return [];
+    const list = (parsed as { conflicts?: unknown }).conflicts;
+    if (!Array.isArray(list)) return [];
+    return list.filter((path): path is string => typeof path === "string");
+  } catch {
+    return [];
   }
 }
 
@@ -498,7 +672,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
-    throw new ApiError(resp.status, describe(body) || resp.statusText);
+    throw new ApiError(
+      resp.status,
+      describe(body) || resp.statusText,
+      conflictsOf(body),
+    );
   }
   if (resp.status === 204) return undefined as T;
   const text = await resp.text();
@@ -577,6 +755,60 @@ export function stopSession(id: string): Promise<unknown> {
 
 export function closeSession(id: string): Promise<unknown> {
   return request(`${path(id)}/close`, { method: "POST" });
+}
+
+/* ------------------------------------------------------------------ *
+ * Worker agents
+ * ------------------------------------------------------------------ */
+
+export interface AgentsSpawned {
+  workers: Session[];
+}
+
+export interface AgentApplied {
+  worker_id: string;
+  files: string[];
+  patch_sha256?: string | null;
+}
+
+/**
+ * One worker per task, 1..4 of them, **all of them or none**: the server
+ * takes the creation slots for the whole set up front and answers 429 with
+ * nothing created if it cannot cover them.
+ */
+export function spawnAgents(
+  id: string,
+  tasks: readonly string[],
+  over?: { model?: string; gt_mode?: string },
+): Promise<AgentsSpawned> {
+  return request(`${path(id)}/agents`, {
+    method: "POST",
+    body: JSON.stringify({ tasks, ...(over ?? {}) }),
+  });
+}
+
+/** This session's workers, oldest first. Full `Session` rows. */
+export function listAgents(id: string): Promise<Session[]> {
+  return request(`${path(id)}/agents`);
+}
+
+/**
+ * Merge a worker's cumulative diff into this session's workspace. A 409
+ * carries `conflicts` and leaves the workspace byte-for-byte as it was.
+ */
+export function applyAgent(id: string, workerId: string): Promise<AgentApplied> {
+  return request(
+    `${path(id)}/agents/${encodeURIComponent(workerId)}/apply`,
+    { method: "POST" },
+  );
+}
+
+/** Close one worker. Identical to closing it as a session. */
+export function closeAgent(id: string, workerId: string): Promise<Session> {
+  return request(
+    `${path(id)}/agents/${encodeURIComponent(workerId)}/close`,
+    { method: "POST" },
+  );
 }
 
 /** Resolves to the signed-in user, or null when the server answers 401. */

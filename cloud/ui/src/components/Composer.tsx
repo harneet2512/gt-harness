@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { lockedRows } from "../format";
-import { parseSlash, slashSuggestions, type ParsedSlash } from "../slash";
+import {
+  parseSlash,
+  slashSuggestions,
+  SLASH_COMMANDS,
+  type ParsedSlash,
+} from "../slash";
+import { BoxBottom, BoxRow, BoxTop } from "./Box";
 
 interface Props {
   /** `landing` is the blank prompt at `/`; `thread` sits under a transcript. */
@@ -14,7 +19,7 @@ interface Props {
   /**
    * Stop was pressed and the turn has not reached a step boundary yet. It
    * can take as long as the model call in flight (HAR-84 G-14), so the
-   * button has to show it was heard rather than invite a second press.
+   * hint has to show it was heard rather than invite a second esc.
    */
   stopping?: boolean;
   /** A sent message is queued and has not reached the agent yet. */
@@ -27,17 +32,26 @@ interface Props {
   onCommand?: (parsed: ParsedSlash) => void;
   /** Bumped to pull focus back here — Ctrl/Cmd+K, and after a command. */
   focusSignal?: number;
-  /** Replaces the keyboard hint: the landing puts the repo chip here. */
-  footLeft?: React.ReactNode;
-  /** Sits before Stop and Send: the gear. */
-  footRight?: React.ReactNode;
+  /** The right half of the hint line: repo, model, GT. */
+  status?: string;
   autoFocus?: boolean;
 }
 
 const MAX_ROWS = 10;
-const LANDING_ROWS = 3;
 
-/** Your side of the conversation — and, on `/`, the whole page. */
+const HINT = "? for shortcuts · /help · ⏎ send · shift+⏎ newline · esc interrupt";
+
+/**
+ * The input, as a terminal draws one:
+ *
+ *     ╭──────────────────────────────────────────╮
+ *     │ > █                                      │
+ *     ╰──────────────────────────────────────────╯
+ *     ? for shortcuts · /help · ⏎ send      click@main · GT advisory
+ *
+ * The frame is box-drawing characters, the caret is the accent, and the
+ * hint line under it is the only chrome on the page.
+ */
 export default function Composer({
   variant = "thread",
   placeholder,
@@ -51,8 +65,7 @@ export default function Composer({
   onStop,
   onCommand,
   focusSignal = 0,
-  footLeft,
-  footRight,
+  status,
   autoFocus = false,
 }: Props) {
   const [text, setText] = useState("");
@@ -61,9 +74,13 @@ export default function Composer({
   const [menuOff, setMenuOff] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const landing = variant === "landing";
-  const baseRows = landing ? LANDING_ROWS : 1;
 
-  const suggestions = menuOff ? [] : slashSuggestions(text);
+  /* `?` on an empty line is the whole menu — the shortcut the hint names. */
+  const suggestions = menuOff
+    ? []
+    : text === "?"
+      ? SLASH_COMMANDS
+      : slashSuggestions(text);
   const canSend = !locked && !busy && text.trim().length > 0;
 
   useEffect(() => {
@@ -75,10 +92,12 @@ export default function Composer({
   }, [text]);
 
   function complete(name: string) {
-    const next = `/${name} `;
+    const lines = text.split("\n");
+    lines[lines.length - 1] = `/${name} `;
+    const next = lines.join("\n");
     setText(next);
     setMenuOff(true);
-    resize(areaRef.current, next, baseRows);
+    resize(areaRef.current, next);
     areaRef.current?.focus();
   }
 
@@ -91,7 +110,7 @@ export default function Composer({
     const command = onCommand ? parseSlash(content) : null;
     if (command) {
       setText("");
-      resize(areaRef.current, "", baseRows);
+      resize(areaRef.current, "");
       onCommand?.(command);
       areaRef.current?.focus();
       return;
@@ -101,7 +120,7 @@ export default function Composer({
     try {
       if (await onSend(content)) {
         setText("");
-        resize(areaRef.current, "", baseRows);
+        resize(areaRef.current, "");
       }
     } finally {
       setBusy(false);
@@ -132,6 +151,14 @@ export default function Composer({
       }
     }
 
+    /* esc interrupts the turn — the hint line says so, and it is the only
+       way to stop one now that the header is gone. */
+    if (e.key === "Escape" && isRunning && onStop) {
+      e.preventDefault();
+      onStop();
+      return;
+    }
+
     if (e.key !== "Enter" || e.shiftKey) return;
     // Do not steal Enter from an active IME composition.
     if (e.nativeEvent.isComposing) return;
@@ -139,33 +166,54 @@ export default function Composer({
     void submit();
   }
 
+  const hint = locked
+    ? lockedReason
+    : stopping
+      ? "stopping at the end of the model call in flight…"
+      : steeringQueued
+        ? "delivered at the next step"
+        : busy
+          ? "sending…"
+          : HINT;
+
   return (
     <div className={`composer ${landing ? "is-landing" : ""}`}>
-      {error && <div className="notice">{error}</div>}
+      {error && (
+        <div className="cont is-error">
+          <span className="cont-mark" aria-hidden="true">
+            ⎿
+          </span>
+          <span className="cont-body">{error}</span>
+        </div>
+      )}
 
       <div className="composer-box">
-        <textarea
-          ref={areaRef}
-          className="composer-input"
-          /* A locked composer's placeholder is the whole explanation — a
-             failed session's reason is a sentence, not a word — and a
-             one-row box clips it. */
-          rows={locked && !landing ? lockedRows(lockedReason) : baseRows}
-          value={text}
-          disabled={locked}
-          placeholder={
-            locked ? lockedReason : (placeholder ?? "Message the agent…")
-          }
-          title={locked ? lockedReason : undefined}
-          aria-label={landing ? "What should I work on?" : "Message the agent"}
-          autoFocus={autoFocus}
-          onChange={(e) => {
-            setMenuOff(false);
-            setText(e.target.value);
-            resize(e.target, e.target.value, baseRows);
-          }}
-          onKeyDown={onKeyDown}
-        />
+        <BoxTop />
+        <BoxRow>
+          <span className="composer-caret" aria-hidden="true">
+            &gt;
+          </span>{" "}
+          <textarea
+            ref={areaRef}
+            className="composer-input"
+            rows={1}
+            value={text}
+            disabled={locked}
+            placeholder={
+              locked ? lockedReason : (placeholder ?? "what should I work on?")
+            }
+            title={locked ? lockedReason : undefined}
+            aria-label={landing ? "What should I work on?" : "Message the agent"}
+            autoFocus={autoFocus}
+            onChange={(e) => {
+              setMenuOff(false);
+              setText(e.target.value);
+              resize(e.target, e.target.value);
+            }}
+            onKeyDown={onKeyDown}
+          />
+        </BoxRow>
+        <BoxBottom />
 
         {suggestions.length > 0 && (
           <ul className="slash" role="listbox" aria-label="Commands">
@@ -179,7 +227,7 @@ export default function Composer({
                   onMouseEnter={() => setPick(i)}
                   onClick={() => complete(command.name)}
                 >
-                  <span className="mono slash-name">
+                  <span className="slash-name">
                     /{command.name}
                     {command.arg ? ` ${command.arg}` : ""}
                   </span>
@@ -191,51 +239,15 @@ export default function Composer({
         )}
       </div>
 
-      <div className="composer-foot">
-        {footLeft ?? (
-          <span className="cap cap-muted">
-            {/* Only while something is actually waiting. Bound to `isRunning`
-                alone it kept claiming a delivery that had already happened. */}
-            {steeringQueued && !locked
-              ? "Delivered at the next step"
-              : "Enter to send · Shift+Enter newline"}
-          </span>
-        )}
-        <span className="spacer" />
-        {footRight}
-        {isRunning && onStop && (
-          <button
-            type="button"
-            className="btn-text"
-            disabled={stopping}
-            title={
-              stopping
-                ? "Stopping at the end of the model call in flight"
-                : "Ctrl/Cmd + Shift + Backspace"
-            }
-            onClick={onStop}
-          >
-            {stopping ? "Stopping…" : "Stop"}
-          </button>
-        )}
-        <button
-          type="button"
-          className="composer-send"
-          disabled={!canSend}
-          onClick={() => void submit()}
-        >
-          {busy ? "sending…" : "Send"}
-          <span className="composer-arrow" aria-hidden="true">
-            →
-          </span>
-        </button>
+      <div className="termfoot">
+        <span>{hint}</span>
+        {status && <span className="termfoot-right">{status}</span>}
       </div>
     </div>
   );
 }
 
-function resize(el: HTMLTextAreaElement | null, value: string, base: number) {
+function resize(el: HTMLTextAreaElement | null, value: string) {
   if (!el) return;
-  const rows = Math.min(MAX_ROWS, value.split("\n").length);
-  el.rows = Math.max(base, rows);
+  el.rows = Math.max(1, Math.min(MAX_ROWS, value.split("\n").length));
 }

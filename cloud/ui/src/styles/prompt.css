@@ -475,3 +475,22 @@
   color: var(--muted);
   opacity: 0.7;
 }
+
+/* A worker sits under the session that spawned it, not beside it. */
+.rail-list > li.is-worker {
+  margin-left: 14px;
+  border-left: 1px solid var(--rule);
+}
+.rail-item.is-nested {
+  padding-left: 10px;
+}
+
+/* The only way back out of a worker's own page. */
+.head-back {
+  color: var(--orange);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.head-back:hover {
+  text-decoration: underline;
+}

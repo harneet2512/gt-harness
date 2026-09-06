@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CAP_REASONS, capLabel, type Message, type Session } from "../api";
+import { CAP_REASONS, capLabel, type Session } from "../api";
 import {
   orphanSteering,
   type ChatState,
@@ -8,23 +7,28 @@ import {
   type TurnGroup,
 } from "../chatState";
 import {
-  formatClock,
+  costUntracked,
   formatCost,
+  formatDuration,
   repoShort,
   sessionClosedBlurb,
   shortSha,
   turnOutcomeNote,
 } from "../format";
+import type { Prefs } from "../prefs";
+import type { ParsedSlash } from "../slash";
 import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
-import type { ParsedSlash } from "../slash";
+import type { WorkerState } from "../workers";
 import Composer from "./Composer";
-import CreationLine from "./CreationLine";
 import Prose from "./Prose";
-import TrailPanel from "./TrailPanel";
-import TransmissionStrip from "./TransmissionStrip";
+import TermActivity from "./TermActivity";
+import TermSettings from "./TermSettings";
+import TermStatus, { verbFor } from "./TermStatus";
+import TermWorker from "./TermWorker";
+import { Cont, Line } from "./TermLine";
 
-/** A line this page wrote itself: `/help`, `/spawn`, a refused command. */
+/** A line this page wrote itself: `/help`, a refused command, a spawn echo. */
 export interface LocalNote {
   id: number;
   role: "user" | "agent" | "system";
@@ -43,7 +47,6 @@ interface Props {
   onSelectTurn: (turnId: string) => void;
   /** Steps visible at the scrub position, for the selected turn only. */
   cutoff: number;
-  hereStep: number | null;
   running: boolean;
   /** Stop was pressed; the turn is winding down. */
   stopping: boolean;
@@ -59,13 +62,17 @@ interface Props {
   gtError: string | null;
   /** Why the session failed, in the server's words, when it has. */
   failureError: string | null;
-  /**
-   * The first message, typed on the landing page and not yet accepted: the
-   * server answers 409 until the workspace is up. Shown the moment the page
-   * opens, so the wait belongs to the prompt rather than to a blank screen.
-   */
+  /** The first message, typed on the landing page and not yet in the thread. */
   pendingFirst: string | null;
   notes: readonly LocalNote[];
+  workers: readonly WorkerState[];
+  canApply: boolean;
+  onApplyWorker: (workerId: string) => void;
+  /** `/settings`, drawn in the transcript rather than over it. */
+  settingsOpen: boolean;
+  prefs: Prefs;
+  onPrefs: (next: Prefs) => void;
+  onCloseSettings: () => void;
   onSend: (content: string) => Promise<boolean>;
   onCommand: (parsed: ParsedSlash) => void;
   onStop: () => void;
@@ -86,7 +93,6 @@ export default function Conversation({
   currentTurnId,
   onSelectTurn,
   cutoff,
-  hereStep,
   running,
   stopping,
   steeringQueued,
@@ -99,6 +105,13 @@ export default function Conversation({
   failureError,
   pendingFirst,
   notes,
+  workers,
+  canApply,
+  onApplyWorker,
+  settingsOpen,
+  prefs,
+  onPrefs,
+  onCloseSettings,
   onSend,
   onCommand,
   onStop,
@@ -108,112 +121,81 @@ export default function Conversation({
 }: Props) {
   const navigate = useNavigate();
   const scroll = useAutoScroll();
-  const [gtDismissed, setGtDismissed] = useState(false);
-  const [failDismissed, setFailDismissed] = useState(false);
   let turnNo = 0;
 
   const gtMode = String(session?.gt_mode ?? "off");
   const gtStatus = String(session?.gt_status ?? "off");
-  // Asked for ground truth and did not get it: say so, once, until dismissed.
   const gtFailed = gtStatus === "unavailable" && gtMode !== "off";
 
   const sessionStatus = String(session?.status ?? "");
   const closedBlurb = sessionClosedBlurb(sessionStatus, session?.closed_reason);
-  const failNotice =
-    sessionStatus === "failed" && Boolean(failureError) && !failDismissed;
   const creating = sessionStatus === "creating";
+  const repo = session ? repoShort(session.repo) : "";
+
+  const liveSteps = stepsByTurn[currentTurnId ?? ""] ?? [];
+  const last = liveSteps[liveSteps.length - 1];
+  const currentTurn = currentTurnId ? chat.turns[currentTurnId] : undefined;
+  const elapsed =
+    running && currentTurn?.startedAt != null ? now - currentTurn.startedAt : null;
+  const agentsWorking = workers.filter((w) => w.status === "running").length;
+
+  const gtLabel =
+    gtMode === "off" ? "GT off" : `GT ${gtMode}${gtStatus ? ` (${gtStatus})` : ""}`;
+  const statusLine = session
+    ? [`${repo}@${session.ref}`, session.model, gtLabel].join(" · ")
+    : "";
 
   return (
     <section className="talk">
       <div className="talk-wrap">
         <div className="talk-scroll" ref={scroll.ref}>
-          {/* The server said why. Saying it is the difference between a
-              dead end and something the reader can act on. */}
-          {failNotice && (
-            <div className="gt-warn is-fail">
-              <div className="gt-warn-line">
-                <span>This session failed.</span>
-                <button
-                  type="button"
-                  className="btn-text"
-                  aria-label="Dismiss this notice"
-                  onClick={() => setFailDismissed(true)}
-                >
-                  ✕
-                </button>
-              </div>
-              <p className="mono gt-warn-detail">{failureError}</p>
-            </div>
+          {sessionStatus === "failed" && failureError && (
+            <Cont tone="error">This session failed: {failureError}</Cont>
           )}
 
-          {gtFailed && !gtDismissed && (
-            <div className="gt-warn">
-              <div className="gt-warn-line">
-                <span>
-                  GroundTruth index unavailable for this session — running
-                  without graph evidence
-                </span>
-                <button
-                  type="button"
-                  className="btn-text"
-                  aria-label="Dismiss this notice"
-                  onClick={() => setGtDismissed(true)}
-                >
-                  ✕
-                </button>
-              </div>
-              {gtError && (
-                <details className="gt-warn-why">
-                  <summary className="cap">why</summary>
-                  <p className="mono">{gtError}</p>
-                </details>
-              )}
-            </div>
+          {gtFailed && (
+            <>
+              <Cont tone="dim">
+                GroundTruth index unavailable — running without graph evidence
+              </Cont>
+              {gtError && <Cont tone="dim">{gtError}</Cont>}
+            </>
           )}
 
-          {closedBlurb !== null && session && !failNotice && (
-            <div className="closed-note">
-              <div className="closed-note-line">
-                <span>{closedBlurb}</span>
-                <button
-                  type="button"
-                  className="btn btn-orange btn-restart"
-                  onClick={() =>
-                    navigate(
-                      `/?repo=${encodeURIComponent(session.repo)}&ref=${encodeURIComponent(session.ref)}`,
-                    )
-                  }
-                >
-                  Start a new session on this repo
-                </button>
-              </div>
-            </div>
+          {closedBlurb !== null && session && sessionStatus !== "failed" && (
+            <Cont tone="dim">
+              {closedBlurb}{" "}
+              <button
+                type="button"
+                className="bracket"
+                onClick={() =>
+                  navigate(
+                    `/?repo=${encodeURIComponent(session.repo)}&ref=${encodeURIComponent(session.ref)}`,
+                  )
+                }
+              >
+                [new session on this repo]
+              </button>
+            </Cont>
           )}
 
-          {/* The prompt that created this session, before the server will
-              take it. It is already the first thing in the transcript. */}
-          {pendingFirst && <p className="said is-pending">{pendingFirst}</p>}
-
-          {creating && session && (
-            <CreationLine repo={repoShort(session.repo)} phase={phase} />
-          )}
+          {/* The prompt that created this session, before the server has it. */}
+          {pendingFirst && <Said text={pendingFirst} pending />}
 
           {sessionId && groups.length === 0 && !pendingFirst && !creating && (
-            <p className="talk-empty">
+            <Line tone="dim">
               Tell the agent what to do. Every message walks the graph once.
-            </p>
+            </Line>
           )}
 
           {groups.map((group) => {
             if (group.kind === "note") {
               return group.message.role === "user" ? (
-                <div className="exchange arrives" key={group.message.id}>
-                  <Said message={group.message} />
-                </div>
+                <Said key={group.message.id} text={group.message.content} />
               ) : (
-                <p className="talk-note arrives" key={group.message.id}>
-                  {group.message.content}
-                </p>
+                <Cont key={group.message.id} tone="dim">
+                  ✱ {group.message.content}
+                </Cont>
               );
             }
 
@@ -229,9 +211,9 @@ export default function Conversation({
                 steps={steps}
                 edited={edited}
                 selected={selected}
+                gtStatus={gtStatus}
                 running={running && group.turnId === currentTurnId}
                 cutoff={selected ? cutoff : steps.length}
-                hereStep={selected ? hereStep : null}
                 now={now}
                 onSelect={() => onSelectTurn(group.turnId)}
                 onContinue={onContinue}
@@ -240,44 +222,87 @@ export default function Conversation({
             );
           })}
 
+          {/* What you typed comes before what it did — including the
+              `/spawn` lines that produced the agents below them. */}
           {notes.map((note) =>
             note.role === "user" ? (
-              <p className="said arrives" key={note.id}>
-                {note.text}
-              </p>
+              <Said key={note.id} text={note.text} />
             ) : (
-              <p
-                className={`landing-say arrives ${note.role === "system" ? "is-system" : ""}`}
-                key={note.id}
-              >
+              <Cont key={note.id} tone="dim">
                 {note.text}
-              </p>
+              </Cont>
             ),
+          )}
+
+          {workers.map((worker, i) => (
+            <TermWorker
+              key={worker.id}
+              worker={worker}
+              no={i + 1}
+              canApply={canApply}
+              onApply={() => onApplyWorker(worker.id)}
+            />
+          ))}
+
+          {settingsOpen && (
+            <TermSettings
+              prefs={prefs}
+              onChange={onPrefs}
+              onClose={onCloseSettings}
+              note={
+                sessionId
+                  ? "this session keeps the settings it started with"
+                  : undefined
+              }
+            />
           )}
         </div>
 
         {scroll.detached && (
-          <button type="button" className="jump" onClick={scroll.jumpToLatest}>
-            Jump to latest ↓
+          <button type="button" className="bracket jump" onClick={scroll.jumpToLatest}>
+            [jump to latest ↓]
           </button>
         )}
       </div>
 
+      <TermStatus
+        running={running}
+        preparing={creating}
+        phase={phase}
+        repo={repo}
+        stopping={stopping}
+        elapsed={elapsed}
+        steps={callCount(liveSteps, currentTurn?.nCalls ?? null)}
+        verb={verbFor(last?.command)}
+        agents={agentsWorking}
+      />
+
       <Composer
         stopping={stopping}
         locked={locked || !sessionId}
-        lockedReason={
-          sessionId ? lockedReason : "Pick a session to start talking."
-        }
+        lockedReason={sessionId ? lockedReason : "pick a session to start talking"}
         isRunning={running}
         steeringQueued={steeringQueued}
         error={sendError}
         focusSignal={focusSignal}
+        status={statusLine}
         onSend={onSend}
         onCommand={onCommand}
         onStop={onStop}
       />
     </section>
+  );
+}
+
+/** `> the prompt` */
+function Said({ text, pending = false }: { text: string; pending?: boolean }) {
+  return (
+    <p className={`termsaid ${pending ? "is-pending" : ""}`}>
+      <span className="termsaid-mark" aria-hidden="true">
+        &gt;
+      </span>
+      <span>{text}</span>
+    </p>
   );
 }
 
@@ -288,9 +313,9 @@ function Exchange({
   steps,
   edited,
   selected,
+  gtStatus,
   running,
   cutoff,
-  hereStep,
   now,
   onSelect,
   onContinue,
@@ -302,9 +327,9 @@ function Exchange({
   steps: TrailStep[];
   edited: ReadonlySet<string>;
   selected: boolean;
+  gtStatus: string;
   running: boolean;
   cutoff: number;
-  hereStep: number | null;
   now: number;
   onSelect: () => void;
   onContinue: () => void;
@@ -314,9 +339,6 @@ function Exchange({
   const endedAt = turn?.finishedAt ?? (running ? now : null);
   const elapsed =
     turn?.startedAt != null && endedAt != null ? endedAt - turn.startedAt : null;
-
-  /* A turn that ended without an answer still has to end on screen.
-     HAR-84 G-08: a restart left the card reading "Working" for 300 s. */
   const outcome = turnOutcomeNote(turn?.finishReason ?? null);
 
   const extraSteering: StepSteering[] = orphanSteering(group, turn).map((m) => ({
@@ -324,122 +346,118 @@ function Exchange({
     content: m.content,
   }));
 
+  const reply = group.replies[group.replies.length - 1];
+  const finish = String(reply?.meta.finish_reason ?? turn?.finishReason ?? "");
+  const capped = CAP_REASONS.has(finish);
+
   return (
-    <section className="exchange arrives">
-      {group.prompt && <Said message={group.prompt} />}
+    <section className="exchange">
+      {group.prompt && <Said text={group.prompt.content} />}
 
-      <TransmissionStrip
-        no={no}
-        steps={steps}
-        calls={callCount(steps, turn?.nCalls ?? null)}
-        edited={edited}
-        running={running}
-        selected={selected}
-        cutoff={cutoff}
-        cost={turn?.cost ?? null}
-        elapsed={elapsed}
-        extraSteering={extraSteering}
-        outcome={group.replies.length === 0 ? outcome : null}
-        onSelect={onSelect}
-      />
-
-      {/* The terminal part: thought, `$ command`, output, in the thread
-          where it happened rather than in a panel you have to go and find. */}
-      {(steps.length > 0 || running) && (
-        <div className="acts-inline">
-          <TrailPanel
-            steps={steps}
-            cutoff={cutoff}
-            hereStep={hereStep}
-            edited={edited}
-            running={running}
-            onPickFile={onPickFile}
-          />
-        </div>
-      )}
-
-      {group.replies.map((message) => (
-        <Reply key={message.id} message={message} onContinue={onContinue} />
-      ))}
-      {group.notes.map((message) => (
-        <p className="talk-note" key={message.id}>
-          {message.content}
+      {extraSteering.map((message) => (
+        <p className="termsaid is-mid" key={message.key}>
+          <span className="termsaid-mark" aria-hidden="true">
+            &gt;
+          </span>
+          <span>(mid-turn) {message.content}</span>
         </p>
       ))}
+
+      <TermActivity
+        steps={steps}
+        cutoff={cutoff}
+        edited={edited}
+        running={running}
+        onPickFile={onPickFile}
+      />
+
+      {group.replies.map((message) => (
+        <Line key={message.id}>
+          <Prose text={message.content} />
+        </Line>
+      ))}
+
+      {group.notes.map((message) => (
+        <Cont key={message.id} tone="dim">
+          ✱ {message.content}
+        </Cont>
+      ))}
+
+      {!running && (
+        <button
+          type="button"
+          className={`receipt ${selected ? "is-selected" : ""}`}
+          aria-pressed={selected}
+          onClick={onSelect}
+        >
+          <span className="tline-bullet" aria-hidden="true">
+            ⏺
+          </span>{" "}
+          <span className="tname">Receipt</span>
+          <span className="targ">(turn {no})</span>
+          {" · "}
+          {receiptTail({
+            calls: callCount(steps, turn?.nCalls ?? null),
+            elapsed,
+            cost: turn?.cost ?? null,
+            patch: reply?.meta.patch_sha256 ?? null,
+            gtStatus,
+            outcome: group.replies.length === 0 ? outcome : null,
+            finish,
+          })}
+        </button>
+      )}
+
+      {capped && (
+        <Cont tone="dim">
+          {capLabel(finish)} reached{" "}
+          <button
+            type="button"
+            className="bracket"
+            onClick={(e) => {
+              e.stopPropagation();
+              onContinue();
+            }}
+          >
+            [continue]
+          </button>
+        </Cont>
+      )}
     </section>
   );
 }
 
-function Said({ message }: { message: Message }) {
-  return (
-    <p className={`said ${message.meta.pending ? "is-pending" : ""}`}>
-      {message.content}
-    </p>
-  );
-}
-
-function Reply({
-  message,
-  onContinue,
+/** `12 steps · 1m 20s · $0.000 (untracked) · patch a80d4c46 · GT ready` */
+function receiptTail({
+  calls,
+  elapsed,
+  cost,
+  patch,
+  gtStatus,
+  outcome,
+  finish,
 }: {
-  message: Message;
-  onContinue: () => void;
-}) {
-  const { finish_reason, n_calls, cost, patch_sha256, files_changed } =
-    message.meta;
-
-  return (
-    <div className="reply">
-      <Prose text={message.content} />
-
-      <div className="reply-tail">
-        {finish_reason === "question" && (
-          <span className="cap cap-orange">waiting for you</span>
-        )}
-        {finish_reason === "stopped" && <span className="cap">stopped</span>}
-        {finish_reason === "interrupted" && (
-          <span className="cap">interrupted by a server restart</span>
-        )}
-        {finish_reason === "error" && (
-          <span className="cap cap-error">turn failed</span>
-        )}
-        {/* Out of steps and out of time are the same event to the reader:
-            the agent stopped at a cap, not at an answer, and the only
-            question is whether to spend another one. */}
-        {typeof finish_reason === "string" &&
-          CAP_REASONS.has(finish_reason) && (
-            <>
-              <span className="cap">{capLabel(finish_reason)} reached</span>
-              <button
-                type="button"
-                className="link"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onContinue();
-                }}
-              >
-                continue
-              </button>
-            </>
-          )}
-
-        <span className="spacer" />
-        <span className="mono muted">
-          {[
-            typeof n_calls === "number"
-              ? `${n_calls} step${n_calls === 1 ? "" : "s"}`
-              : null,
-            typeof cost === "number" ? formatCost(cost) : null,
-            Array.isArray(files_changed) && files_changed.length > 0
-              ? `${files_changed.length} file${files_changed.length === 1 ? "" : "s"}`
-              : null,
-            patch_sha256 ? shortSha(patch_sha256) : null,
-            formatClock(message.created_at),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-      </div>
-    </div>
-  );
+  calls: number;
+  elapsed: number | null;
+  cost: number | null;
+  patch: string | null | undefined;
+  gtStatus: string;
+  outcome: string | null;
+  finish: string;
+}): string {
+  const parts = [
+    `${calls} step${calls === 1 ? "" : "s"}`,
+    elapsed !== null ? formatDuration(elapsed) : null,
+    cost !== null
+      ? `${formatCost(cost)}${costUntracked([cost]) ? " (untracked)" : ""}`
+      : null,
+    patch ? `patch ${shortSha(patch)}` : null,
+    gtStatus && gtStatus !== "off" ? `GT ${gtStatus}` : null,
+    finish === "question" ? "waiting for you" : null,
+    outcome,
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
+
+/** Named so the strip's old export site keeps compiling. */
+export { Said };

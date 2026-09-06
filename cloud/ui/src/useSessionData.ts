@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
+  agentIdOf,
   ApiError,
+  applyAgent,
   closeSession,
   EMPTY_GRAPH,
   getDiff,
@@ -10,7 +12,9 @@ import {
   getSession,
   getTree,
   lifecycleToSessionStatus,
+  listAgents,
   sendMessage,
+  spawnAgents,
   stopSession,
   type Message,
   type Receipt,
@@ -100,6 +104,17 @@ export interface SessionData {
   close: () => void;
   reloadDiff: () => void;
   reloadReceipts: () => void;
+
+  /* ---- worker agents ---- */
+  /**
+   * Spawn one worker per task. Resolves to null when they were created, or
+   * to the server's own `detail` when it refused — a 429 over a cap, a 409
+   * on a worker trying to spawn workers.
+   */
+  spawn: (tasks: readonly string[]) => Promise<string | null>;
+  /** 3-way merge a worker's diff into this workspace. Conflicts land on the card. */
+  applyWorker: (workerId: string) => Promise<void>;
+  reloadWorkers: () => void;
 }
 
 /**
@@ -203,6 +218,18 @@ export function useSessionData(sessionId: string | null): SessionData {
     }
   }, [sessionId]);
 
+  /* The record behind the worker cards. A reload has them back from here
+     before a single frame arrives; the stream then fills in the live
+     detail. Failure is silent: no workers is the normal case. */
+  const loadWorkers = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      dispatch({ type: "workers", rows: await listAgents(sessionId) });
+    } catch {
+      /* a server without /agents simply has none */
+    }
+  }, [sessionId]);
+
   const loadReceipts = useCallback(async () => {
     if (!sessionId) return;
     setReceiptsLoading(true);
@@ -239,11 +266,12 @@ export function useSessionData(sessionId: string | null): SessionData {
 
     void loadDiff();
     void loadReceipts();
+    void loadWorkers();
 
     return () => {
       cancelled = true;
     };
-  }, [sessionId, refreshKey, loadDiff, loadReceipts]);
+  }, [sessionId, refreshKey, loadDiff, loadReceipts, loadWorkers]);
 
   /* ---- the diff, while the agent is still writing ---- */
   const diffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -288,6 +316,12 @@ export function useSessionData(sessionId: string | null): SessionData {
   const onEvent = useCallback(
     (event: SessionEvent) => {
       dispatch({ type: "event", event });
+
+      /* A mirrored worker frame is not this session's work. It has already
+         gone to that worker's card; letting it fall through would set the
+         parent "running" on a turn that is not its own, bump the turn epoch
+         and refetch the parent's diff for a write in another workspace. */
+      if (agentIdOf(event)) return;
 
       switch (event.type) {
         case "lifecycle": {
@@ -390,11 +424,31 @@ export function useSessionData(sessionId: string | null): SessionData {
           break;
         }
 
+        /* The parent's own frames about its workers. The cards are already
+           updated; what is left is the records they are backed by. */
+        case "agent_spawned":
+        case "agent_closed":
+          void loadWorkers();
+          break;
+
+        case "agent_report":
+          void loadWorkers();
+          refetchSession();
+          break;
+
+        case "agent_applied":
+          /* A worker's patch is in this workspace now: the diff, the graph
+             and the tree all say something different than they did. */
+          void loadWorkers();
+          void loadDiff();
+          setRefreshKey((k) => k + 1);
+          break;
+
         default:
           break;
       }
     },
-    [refetchSession, scheduleDiff, scheduleMessages],
+    [refetchSession, scheduleDiff, scheduleMessages, loadWorkers, loadDiff],
   );
 
   useSessionStream(sessionId ?? undefined, onEvent);
@@ -480,6 +534,51 @@ export function useSessionData(sessionId: string | null): SessionData {
       .finally(refetchSession);
   }, [sessionId, refetchSession]);
 
+  /* ---- worker agents ---- */
+
+  const spawn = useCallback(
+    async (tasks: readonly string[]): Promise<string | null> => {
+      if (!sessionId) return "There is no session to spawn from.";
+      try {
+        const { workers } = await spawnAgents(sessionId, tasks);
+        dispatch({ type: "workers", rows: workers });
+        return null;
+      } catch (err) {
+        /* 429 over a cap, 409 for a worker-of-worker, 400 for a model the
+           provider will not serve: the server's `detail` says which, and
+           saying it verbatim beats any paraphrase this page could write. */
+        return message(err);
+      }
+    },
+    [sessionId],
+  );
+
+  const applyWorker = useCallback(
+    async (workerId: string): Promise<void> => {
+      if (!sessionId) return;
+      dispatch({ type: "worker_applying", workerId });
+      try {
+        const result = await applyAgent(sessionId, workerId);
+        dispatch({ type: "worker_applied", workerId, files: result.files });
+        await loadDiff();
+        setRefreshKey((k) => k + 1);
+        void loadWorkers();
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          dispatch({
+            type: "worker_conflict",
+            workerId,
+            conflicts: err.conflicts,
+            detail: err.message,
+          });
+          return;
+        }
+        dispatch({ type: "worker_apply_error", workerId, error: message(err) });
+      }
+    },
+    [sessionId, loadDiff, loadWorkers],
+  );
+
   const close = useCallback(() => {
     if (!sessionId) return;
     if (!window.confirm("Close this session? The workspace is discarded.")) {
@@ -516,5 +615,8 @@ export function useSessionData(sessionId: string | null): SessionData {
     close,
     reloadDiff: () => void loadDiff(),
     reloadReceipts: () => void loadReceipts(),
+    spawn,
+    applyWorker,
+    reloadWorkers: () => void loadWorkers(),
   };
 }

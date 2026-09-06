@@ -6,3 +6,5 @@
 @import "./styles/graph.css";
 @import "./styles/inspector.css";
 @import "./styles/panel.css";
+/* Last: the terminal owns the presentation. */
+@import "./styles/term.css";

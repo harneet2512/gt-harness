@@ -158,3 +158,27 @@
   line-height: 1;
   padding: 4px 7px;
 }
+
+/* One chip per worker agent, in the colour its trail is drawn in. */
+.legend-worker {
+  --worker-hue: var(--orange);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+.legend-worker:hover,
+.legend-worker.is-on {
+  border-color: var(--worker-hue);
+}
+.legend-worker .cap {
+  color: var(--worker-hue);
+}
+.legend-dot.is-worker {
+  background: var(--worker-hue);
+  border-color: var(--worker-hue);
+}

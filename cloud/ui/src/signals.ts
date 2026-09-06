@@ -11,11 +11,16 @@ export const SIGNAL_MS = 420;
 export const SIGNAL_GAP_MS = 140;
 export const TAIL = 0.16;
 
+/** The primary agent's own colour, as `r, g, b`. */
+export const PRIMARY_RGB = "240, 102, 47";
+
 export interface LiveSignal {
   from: string;
   to: string;
   /** 0 at the source, 1 at the target. */
   progress: number;
+  /** `r, g, b` — whose trail this is. Workers each get their own. */
+  rgb: string;
 }
 
 interface Queued {
@@ -32,6 +37,13 @@ interface Travelling extends Queued {
  * an animation never costs a React render.
  */
 export class SignalQueue {
+  /** Every signal this queue emits is painted in this colour. */
+  readonly rgb: string;
+
+  constructor(rgb: string = PRIMARY_RGB) {
+    this.rgb = rgb;
+  }
+
   private pending: Queued[] = [];
   private travelling: Travelling[] = [];
   /** Negative infinity so the first signal leaves without waiting a gap. */
@@ -78,7 +90,12 @@ export class SignalQueue {
       const progress = (now - signal.startedAt) / SIGNAL_MS;
       if (progress >= 1) continue;
       still.push(signal);
-      live.push({ from: signal.from, to: signal.to, progress });
+      live.push({
+        from: signal.from,
+        to: signal.to,
+        progress,
+        rgb: this.rgb,
+      });
     }
 
     this.travelling = still;

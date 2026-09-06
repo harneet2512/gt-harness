@@ -82,6 +82,7 @@ describe("slash commands", () => {
     expect(parseSlash("/spawn  write the migration ")).toEqual({
       command: SLASH_COMMANDS.find((c) => c.name === "spawn"),
       arg: "write the migration",
+      raw: "/spawn  write the migration",
     });
   });
 

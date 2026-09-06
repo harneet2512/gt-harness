@@ -9,6 +9,7 @@
  * ------------------------------------------------------------------ */
 
 import type { TreeFile } from "./api";
+import type { GtAction } from "./gt";
 import type { ActivityItem, TurnState } from "./chatState";
 import { stripFences } from "./fences";
 
@@ -40,6 +41,11 @@ export interface TrailStep {
   files: string[];
   steering: StepSteering[];
   errors: string[];
+  /**
+   * The typed GroundTruth query this step ran, when it ran one. A step with
+   * a `gt` is a GroundTruth line in the transcript, never a `Bash(...)` one.
+   */
+  gt: GtAction | null;
 }
 
 export type StepKind = "read" | "edit" | "error";
@@ -178,6 +184,7 @@ export function buildSteps(
       files: [],
       steering: [],
       errors: [],
+      gt: null,
     };
     steps.push(step);
     return step;
@@ -221,6 +228,13 @@ export function buildSteps(
         if (current === null) current = make(item);
         current.errors.push(item.error);
         current.isError = true;
+        break;
+      }
+
+      case "gt_action": {
+        // A GT query is the step's action, exactly as a command would be.
+        if (current === null || current.gt !== null) current = make(item);
+        current.gt = item.action;
         break;
       }
 

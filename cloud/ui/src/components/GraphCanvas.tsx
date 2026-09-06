@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Simulation } from "d3-force";
 import type { DiffFile } from "../api";
 import type { Filament, Particle, ParticleField } from "../graph";
-import { draw } from "../graphDraw";
+import { draw, type WorkerLayer } from "../graphDraw";
+import { onPalette } from "../palette";
 import {
   clusterAnchors,
   createSim,
@@ -12,6 +13,7 @@ import {
 } from "../graphSim";
 import { SignalQueue } from "../signals";
 import type { Attention } from "../trail";
+import type { WorkerTrail } from "../useGraphView";
 import { useGraphCamera } from "../useGraphCamera";
 import GraphOverlay, { type HoverInfo } from "./GraphOverlay";
 
@@ -40,6 +42,14 @@ interface Props {
   /** Identity of that walk: a change means replay, which never animates. */
   trailToken: string;
   animate: boolean;
+  /** Every worker agent's walk across the same field, in its own colour. */
+  workerTrails: readonly WorkerTrail[];
+  /**
+   * Whether a worker's new waypoints animate. Separate from `animate`: a
+   * worker runs on its own clock, so its trail moves while the primary
+   * session sits idle.
+   */
+  animateWorkers: boolean;
   /** Incremented by the toolbar to ask for a fit. */
   fitToken: number;
   onZoom: (k: number) => void;
@@ -59,6 +69,10 @@ export default function GraphCanvas(props: Props) {
 
   const simRef = useRef<Simulation<Particle, Filament> | null>(null);
   const signals = useRef(new SignalQueue());
+  /* One queue per worker, so their signals travel independently and each
+     keeps its own colour. Keyed by worker id and created on first sight. */
+  const workerSignals = useRef(new Map<string, SignalQueue>());
+  const workerWalked = useRef(new Map<string, number>());
   const hoverId = useRef<string | null>(null);
   const dim = useRef(0);
   const raf = useRef<number | null>(null);
@@ -102,8 +116,28 @@ export default function GraphCanvas(props: Props) {
           : Math.max(0, dim.current - step);
     }
     const tweening = dim.current !== target;
-    const travelling = signals.current.update(now);
-    const halo = state.running && state.positionId !== null;
+    let travelling = signals.current.update(now);
+    let queuesBusy = signals.current.busy;
+    const layers: WorkerLayer[] = [];
+    for (const worker of state.workerTrails) {
+      const queue = workerSignals.current.get(worker.id);
+      if (queue) {
+        const live = queue.update(now);
+        if (live.length > 0) travelling = [...travelling, ...live];
+        queuesBusy = queuesBusy || queue.busy;
+      }
+      layers.push({
+        id: worker.id,
+        rgb: worker.rgb,
+        attention: worker.attention,
+        steps: worker.steps,
+        positionId: worker.positionId,
+        running: worker.status === "running",
+      });
+    }
+    const halo =
+      (state.running && state.positionId !== null) ||
+      layers.some((layer) => layer.running && layer.positionId !== null);
 
     draw({
       ctx,
@@ -123,10 +157,11 @@ export default function GraphCanvas(props: Props) {
       dim: dim.current,
       labels: state.labels,
       signals: travelling,
+      workers: layers,
       now,
     });
 
-    if (settling || tweening || halo || signals.current.busy) kick();
+    if (settling || tweening || halo || queuesBusy) kick();
     else lastFrame.current = 0;
   };
 
@@ -137,6 +172,10 @@ export default function GraphCanvas(props: Props) {
     },
     [],
   );
+
+  /* A theme change is a repaint: the canvas reads its colours from the same
+     custom properties the sheet does, but nothing else would ask it to. */
+  useEffect(() => onPalette(kick), [kick]);
 
   /* Anything the painter reads should land on screen. */
   useEffect(kick, [
@@ -214,6 +253,38 @@ export default function GraphCanvas(props: Props) {
     walked.current = { token: trailToken, length: trailIds.length };
     kick();
   }, [trailIds, trailToken, animate, kick]);
+
+  /* A worker's signals, on the same rule as the primary trail's: only new
+     waypoints fire, and a trail that shrank (a card rebuilt from a reload)
+     replays without animating. */
+  const { workerTrails, animateWorkers } = props;
+  useEffect(() => {
+    const live = new Set<string>();
+    for (const worker of workerTrails) {
+      live.add(worker.id);
+      let queue = workerSignals.current.get(worker.id);
+      if (!queue) {
+        queue = new SignalQueue(worker.rgb);
+        workerSignals.current.set(worker.id, queue);
+      }
+      const seen = workerWalked.current.get(worker.id) ?? 0;
+      if (worker.trailIds.length < seen) {
+        queue.clear();
+      } else if (worker.trailIds.length > seen && animateWorkers) {
+        for (let i = Math.max(1, seen); i < worker.trailIds.length; i += 1) {
+          queue.push(worker.trailIds[i - 1], worker.trailIds[i]);
+        }
+      }
+      workerWalked.current.set(worker.id, worker.trailIds.length);
+    }
+    for (const id of [...workerSignals.current.keys()]) {
+      if (!live.has(id)) {
+        workerSignals.current.delete(id);
+        workerWalked.current.delete(id);
+      }
+    }
+    kick();
+  }, [workerTrails, animateWorkers, kick]);
 
   useEffect(() => {
     if (props.fitToken === 0) return;

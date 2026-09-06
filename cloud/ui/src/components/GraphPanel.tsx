@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "../api";
 import { relationsFor } from "../graph";
 import { useDragSize } from "../useDragSize";
 import type { GraphView } from "../useGraphView";
 import type { SessionData } from "../useSessionData";
+import { Rule } from "./Box";
 import BottomPanel from "./BottomPanel";
 import GraphCanvas from "./GraphCanvas";
 import GraphToolbar, { type TurnOption } from "./GraphToolbar";
@@ -54,8 +55,20 @@ export default function GraphPanel({
   const [fitToken, setFitToken] = useState(0);
   const [zoomK, setZoomK] = useState(1);
   const [search, setSearch] = useState("");
+  const [isolated, setIsolated] = useState<string | null>(null);
+
+  /* A worker that no longer exists cannot be the thing the map is narrowed
+     to, or the canvas would dim every particle and show nothing. */
+  const workerIds = view.workerTrails.map((worker) => worker.id).join("|");
+  useEffect(() => {
+    if (isolated && !workerIds.split("|").includes(isolated)) setIsolated(null);
+  }, [workerIds, isolated]);
 
   const matches = useMemo(() => {
+    if (isolated) {
+      const worker = view.workerTrails.find((w) => w.id === isolated);
+      if (worker) return worker.ids;
+    }
     const query = search.trim().toLowerCase();
     if (!query) return null;
     const out = new Set<string>();
@@ -63,7 +76,7 @@ export default function GraphPanel({
       if (particle.path.toLowerCase().includes(query)) out.add(particle.id);
     }
     return out;
-  }, [search, view.field]);
+  }, [search, view.field, isolated, view.workerTrails]);
 
   const inspected = inspectedId
     ? (view.field.byId.get(inspectedId) ?? null)
@@ -90,6 +103,23 @@ export default function GraphPanel({
 
   return (
     <aside className="gpanel" aria-label="Graph">
+      {/* A pane title, the way tmux writes one. */}
+      <div className="panetitle">
+        <Rule />
+        <span>
+          {" graph · "}
+          {view.field.particles.length} files
+          {data.graph.gt ? " · GT ready" : ""}
+          {view.workerTrails.length > 0
+            ? ` · ${view.workerTrails.length} worker${
+                view.workerTrails.length === 1 ? "" : "s"
+              }`
+            : ""}
+          {" "}
+        </span>
+        <Rule />
+      </div>
+
       <GraphToolbar
         turns={turnOptions}
         selectedTurnId={view.selectedTurnId}
@@ -110,6 +140,9 @@ export default function GraphPanel({
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         gt={data.graph.gt}
         folded={view.field.folded}
+        workers={view.workerTrails}
+        isolated={isolated}
+        onIsolate={setIsolated}
         onCollapse={onCollapse}
       />
 
@@ -129,6 +162,8 @@ export default function GraphPanel({
             matches={matches}
             labels={labels}
             trailIds={view.trailIds}
+            workerTrails={view.workerTrails}
+            animateWorkers={view.live}
             trailToken={`${view.selectedTurnId ?? ""}|${
               view.live ? "live" : "scrub"
             }`}

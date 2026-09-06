@@ -1,25 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createSession } from "../api";
-import { combinePrompt } from "../launch";
+import { combinePrompt, createAndStart } from "../launch";
+import { refreshPalette } from "../palette";
 import { loadPrefs, savePrefs, type Prefs } from "../prefs";
-import { parseRepoRef, type RepoRef } from "../repoUrl";
+import { parseRepoRef, repoChipLabel, type RepoRef } from "../repoUrl";
+import { helpText, parseSpawn, type ParsedSlash } from "../slash";
+import { applyTheme, loadTheme, saveTheme, themeFromArg, type Theme } from "../theme";
 import { useSessions } from "../useSessions";
-import { helpText, type ParsedSlash } from "../slash";
 import Composer from "./Composer";
-import RepoChip from "./RepoChip";
-import ResumeRail from "./ResumeRail";
-import SettingsGear from "./SettingsGear";
+import ResumePicker from "./ResumePicker";
+import TermBanner from "./TermBanner";
+import TermSettings from "./TermSettings";
+import { Cont } from "./TermLine";
 
 const DEFAULT_REF = "main";
 /* Not offered anywhere: the backend owns it and nothing here has an opinion. */
 const TEMPERATURE = 0;
 
 const ASK_REPO = "Which repository should I work in? Paste a GitHub URL.";
-const SPAWN_SOON =
-  "spawning worker agents is coming — the server side is being built";
+const ASK_REPO_SPAWN =
+  "Which repository should the workers clone? Paste a GitHub URL, then " +
+  "send the /spawn lines again.";
 const NO_SESSION =
-  "There is no session yet. Send a task first; /stop, /close and /graph belong to a running one.";
+  "There is no session yet. Send a task first; /stop, /close and /graph " +
+  "belong to a running one.";
 
 interface Line {
   id: number;
@@ -28,11 +33,11 @@ interface Line {
 }
 
 /**
- * `/` — a prompt, and nothing else.
+ * `/` — a banner, four tips, and a prompt.
  *
- * You type the task. The repository is inferred from the message or from the
- * chip beneath it; the model and the budgets live behind the gear. Sending
- * creates the session and runs the first turn in one action.
+ * You type the task. The repository is inferred from the message or from
+ * the last session; the model and the budgets live behind `/settings`.
+ * Sending creates the session and runs the first turn in one call.
  */
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -40,19 +45,23 @@ export default function LandingPage() {
   const { sessions, error: listError } = useSessions();
 
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
-  const [chosen, setChosen] = useState<RepoRef | null>(() => {
+  const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  /* `/?repo=…&ref=…` — the link a closed session offers, so "start again on
+     this repo" lands on a prompt that is already pointed at it. */
+  const chosen = useMemo<RepoRef | null>(() => {
     const repo = params.get("repo");
     return repo ? { repo, ref: params.get("ref") } : null;
-  });
+  }, [params]);
   const [lines, setLines] = useState<Line[]>([]);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
-  const [gearSignal, setGearSignal] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
   const nextId = useRef(0);
 
   /* No explicit choice: work where you last worked. */
-  const recent = sessions[0];
+  const recent = sessions.find((session) => !session.parent_id) ?? sessions[0];
   const repo: RepoRef | null =
     chosen ?? (recent?.repo ? { repo: recent.repo, ref: recent.ref } : null);
 
@@ -69,22 +78,75 @@ export default function LandingPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  function onCommand({ command, arg }: ParsedSlash) {
+  function onCommand({ command, raw }: ParsedSlash) {
     switch (command.name) {
       case "help":
         push("system", helpText());
         break;
       case "settings":
-        setGearSignal((n) => n + 1);
+        push("user", raw);
+        setSettingsOpen(true);
+        break;
+      case "theme": {
+        const next = themeFromArg(raw.replace(/^\/theme\s*/, ""), theme);
+        setTheme(next);
+        applyTheme(next);
+        saveTheme(next);
+        refreshPalette();
+        push("system", `theme: ${next}`);
+        break;
+      }
+      case "resume":
+        setResumeOpen(true);
         break;
       case "spawn":
-        push("user", arg ? `/spawn ${arg}` : "/spawn");
-        push("system", SPAWN_SOON);
+        push("user", raw);
+        void spawnHere(raw);
         break;
       default:
         push("system", NO_SESSION);
         break;
     }
+  }
+
+  /**
+   * `/spawn` before there is anything to spawn from. The session is created
+   * on the repository the page already knows about, and the tasks travel
+   * with the navigation: the server refuses a spawn while a session is
+   * still `creating`, so the session page sends them once it is `idle`.
+   */
+  async function spawnHere(raw: string) {
+    const draft = parseSpawn(raw);
+    if (draft.error) {
+      push("system", draft.error);
+      return;
+    }
+    if (!repo) {
+      push("agent", ASK_REPO_SPAWN);
+      setFocusSignal((n) => n + 1);
+      return;
+    }
+    setError(null);
+    try {
+      const session = await createSession(sessionBody(repo));
+      navigate(`/sessions/${session.id}`, { state: { spawnTasks: draft.tasks } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      push("system", "The session could not be created.");
+    }
+  }
+
+  /** Everything a session is created with, bar the first message. */
+  function sessionBody(target: RepoRef) {
+    return {
+      repo: target.repo,
+      ref: target.ref || DEFAULT_REF,
+      model: prefs.model.trim() || "",
+      gt_mode: prefs.gtMode,
+      step_limit: prefs.stepLimit,
+      temperature: TEMPERATURE,
+      ...(prefs.wallSeconds ? { wall_seconds: prefs.wallSeconds } : {}),
+    };
   }
 
   async function send(text: string): Promise<boolean> {
@@ -110,17 +172,18 @@ export default function LandingPage() {
     const content = combinePrompt(pending, text);
     setError(null);
     try {
-      const session = await createSession({
-        repo: target.repo,
-        ref: target.ref || DEFAULT_REF,
-        model: prefs.model.trim() || "",
-        gt_mode: prefs.gtMode,
-        step_limit: prefs.stepLimit,
-        temperature: TEMPERATURE,
-        ...(prefs.wallSeconds ? { wall_seconds: prefs.wallSeconds } : {}),
-      });
+      /* One call: `first_message` starts the first turn as soon as the
+         workspace is ready. The create → poll → POST path is still there and
+         is used only if the server will not take the field. */
+      const started = await createAndStart(
+        sessionBody(target),
+        content,
+        createSession,
+      );
       setPending(null);
-      navigate(`/sessions/${session.id}`, { state: { firstMessage: content } });
+      navigate(`/sessions/${started.session.id}`, {
+        state: { firstMessage: content, alreadySent: started.sent },
+      });
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -129,70 +192,77 @@ export default function LandingPage() {
     }
   }
 
-  const chip = useMemo(
-    () => (
-      <span className="landing-foot-left">
-        <RepoChip
-          value={repo}
-          sessions={sessions}
-          onPick={(next) => setChosen(next)}
-        />
-      </span>
-    ),
-    [repo, sessions],
-  );
-
   return (
     <div className="shell">
-      <ResumeRail activeId={null} sessions={sessions} error={listError} />
-
       <main className="landing">
         <div className="landing-mid">
-          <p className="landing-mark cap cap-muted">synapse</p>
+          <TermBanner
+            repo={repo ? repoChipLabel(repo.repo, repo.ref ?? "").split("@")[0] : ""}
+            gitRef={repo?.ref ?? DEFAULT_REF}
+            gtMode={prefs.gtMode}
+            model={prefs.model}
+          />
+
+          {listError && <Cont tone="error">{listError}</Cont>}
 
           {lines.length > 0 && (
             <div className="landing-thread">
               {lines.map((line) =>
                 line.role === "user" ? (
-                  <p className="said" key={line.id}>
-                    {line.text}
+                  <p className="termsaid" key={line.id}>
+                    <span className="termsaid-mark" aria-hidden="true">
+                      &gt;
+                    </span>
+                    <span>{line.text}</span>
                   </p>
                 ) : (
-                  <p
-                    className={`landing-say ${line.role === "system" ? "is-system" : ""}`}
-                    key={line.id}
-                  >
+                  <Cont key={line.id} tone={line.role === "system" ? "dim" : ""}>
                     {line.text}
-                  </p>
+                  </Cont>
                 ),
               )}
             </div>
           )}
 
+          {settingsOpen && (
+            <TermSettings
+              prefs={prefs}
+              onChange={(next) => {
+                setPrefs(next);
+                savePrefs(next);
+              }}
+              onClose={() => setSettingsOpen(false)}
+            />
+          )}
+
           <Composer
             variant="landing"
-            placeholder="What should I work on?"
+            placeholder="what should I work on?"
             locked={false}
             lockedReason=""
             error={error}
             autoFocus
             focusSignal={focusSignal}
+            status={
+              repo
+                ? `${repoChipLabel(repo.repo, repo.ref ?? DEFAULT_REF)} · ${
+                    prefs.model
+                  } · GT ${prefs.gtMode}`
+                : `no repo yet · ${prefs.model} · GT ${prefs.gtMode}`
+            }
             onSend={send}
             onCommand={onCommand}
-            footLeft={chip}
-            footRight={
-              <SettingsGear
-                prefs={prefs}
-                openSignal={gearSignal}
-                onChange={(next) => {
-                  setPrefs(next);
-                  savePrefs(next);
-                }}
-              />
-            }
           />
         </div>
       </main>
+
+      {resumeOpen && (
+        <ResumePicker
+          sessions={sessions}
+          activeId={null}
+          onClose={() => setResumeOpen(false)}
+        />
+      )}
     </div>
   );
 }

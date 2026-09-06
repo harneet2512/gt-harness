@@ -7,6 +7,8 @@
  * module's job to describe, and the page's job to show.
  * ------------------------------------------------------------------ */
 
+import { ApiError, type Session, type SessionCreate } from "./api";
+
 /** The three visible phases of a session coming up, in order. */
 export const CREATION_STEPS = ["cloning", "sandbox", "indexing"] as const;
 
@@ -78,4 +80,44 @@ export function creationLabel(repoShortName: string, stage: number): string {
   if (stage >= CREATION_STEPS.length) return "workspace ready";
   if (stage === 0) return `cloning ${repoShortName}…`;
   return `${CREATION_STEPS[stage]}…`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Create and run, in one call
+ *
+ * `SessionCreate.first_message` starts the first turn by itself the moment
+ * the workspace is ready. The old path — create, poll for `idle`, then POST
+ * the message — is kept as a fallback for a server that predates the field
+ * and answers 4xx for it. Nothing else changes: the creation lines still
+ * animate off the lifecycle frames, because that is where they come from.
+ * ------------------------------------------------------------------ */
+
+export interface Started {
+  session: Session;
+  /** True when the server took the prompt with the creation. */
+  sent: boolean;
+}
+
+/**
+ * A 4xx that is specifically about `first_message`, rather than a bad model
+ * or a bad ref. Only that is worth retrying without the field: retrying a
+ * real rejection would create a session the reader never asked for.
+ */
+export function rejectsFirstMessage(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 400 && err.status !== 422) return false;
+  return /first_message/i.test(err.message);
+}
+
+export async function createAndStart(
+  body: SessionCreate,
+  content: string,
+  create: (body: SessionCreate) => Promise<Session>,
+): Promise<Started> {
+  try {
+    return { session: await create({ ...body, first_message: content }), sent: true };
+  } catch (err) {
+    if (!rejectsFirstMessage(err)) throw err;
+    return { session: await create(body), sent: false };
+  }
 }

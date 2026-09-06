@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Session } from "../api";
 import { BUILD_SHA } from "../build";
@@ -8,6 +8,7 @@ import {
   sessionClosedLabel,
   truncate,
 } from "../format";
+import { nestSessions } from "../workers";
 
 interface Props {
   activeId: string | null;
@@ -29,6 +30,9 @@ function dotClass(status: string): string {
 export default function ResumeRail({ activeId, sessions, error }: Props) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  /* Workers are sessions, but they are not sessions *you* started: they sit
+     under the one that spawned them, labelled with the task. */
+  const rows = useMemo(() => nestSessions(sessions), [sessions]);
 
   return (
     <nav className={`rail ${open ? "is-open" : ""}`} aria-label="Sessions">
@@ -74,16 +78,17 @@ export default function ResumeRail({ activeId, sessions, error }: Props) {
             <p className="rail-empty">No sessions yet.</p>
           )}
           <ul className="rail-list">
-            {sessions.map((session) => {
+            {rows.map(({ session, depth }) => {
               const closed = sessionClosedLabel(
                 String(session.status),
                 session.closed_reason,
               );
+              const worker = depth === 1;
               return (
-                <li key={session.id}>
+                <li key={session.id} className={worker ? "is-worker" : ""}>
                   <button
                     type="button"
-                    className={`rail-item ${
+                    className={`rail-item ${worker ? "is-nested" : ""} ${
                       session.id === activeId ? "is-active" : ""
                     }`}
                     aria-current={session.id === activeId ? "page" : undefined}
@@ -96,18 +101,24 @@ export default function ResumeRail({ activeId, sessions, error }: Props) {
                       <span
                         className={`status-dot ${dotClass(String(session.status))}`}
                       />
-                      <span className="rail-repo">{repoShort(session.repo)}</span>
+                      <span className="rail-repo">
+                        {worker ? "worker" : repoShort(session.repo)}
+                      </span>
                       <span className="spacer" />
                       <span className="cap cap-muted">
                         {formatRelative(session.updated_at)}
                       </span>
                     </span>
-                    <span className="rail-ref mono">{session.ref}</span>
+                    {!worker && <span className="rail-ref mono">{session.ref}</span>}
                     <span className="rail-last">
-                      {closed ??
-                        (session.last_message
-                          ? truncate(session.last_message, 90)
-                          : "no messages yet")}
+                      {/* A worker's label is the task it was given; that is
+                          the only thing anyone would recognise it by. */}
+                      {worker
+                        ? truncate(session.task || "no task", 90)
+                        : (closed ??
+                          (session.last_message
+                            ? truncate(session.last_message, 90)
+                            : "no messages yet"))}
                     </span>
                   </button>
                 </li>

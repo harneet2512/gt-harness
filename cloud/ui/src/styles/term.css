@@ -1,0 +1,967 @@
+/* ------------------------------------------------------------------ *
+ * The terminal.
+ *
+ * Loaded last, and it owns the presentation: one monospace column, box
+ * drawing instead of borders, no cards, no radius, no shadow. Everything
+ * above it still owns the layout it always did — this sheet re-dresses it.
+ * ------------------------------------------------------------------ */
+
+/* ---------------- tokens ---------------- */
+
+:root,
+:root[data-theme="dark"] {
+  --paper: #0f1113;
+  --surface: #0f1113;
+  --rule: #2a2e33;
+  --grid: #1a1d21;
+
+  --ink: #e6e6e6;
+  --ink-2: #b3b7bd;
+  --muted: #8b8f97;
+
+  --orange: #d97757;
+  --orange-soft: rgba(217, 119, 87, 0.12);
+  --green: #7fb069;
+  --teal: #56b6c2;
+  --teal-soft: rgba(86, 182, 194, 0.12);
+  --purple: #b784e0;
+  --error: #e06c75;
+
+  --accent-rgb: 217, 119, 87;
+  --change-rgb: 86, 182, 194;
+
+  --diff-add: rgba(127, 176, 105, 0.14);
+  --diff-del: rgba(224, 108, 117, 0.14);
+
+  --font-ui: var(--font-mono);
+  --radius: 0;
+  --col: 100ch;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --paper: #fbfaf8;
+  --surface: #fbfaf8;
+  --rule: #d8d4cc;
+  --grid: #ecebe6;
+
+  --ink: #1b1c1e;
+  --ink-2: #45484d;
+  --muted: #7a7e86;
+
+  --orange: #c25c34;
+  --orange-soft: rgba(194, 92, 52, 0.1);
+  --green: #4f7a3a;
+  --teal: #10707f;
+  --teal-soft: rgba(16, 112, 127, 0.1);
+  --purple: #7c4fae;
+  --error: #b3372f;
+
+  --accent-rgb: 194, 92, 52;
+  --change-rgb: 16, 112, 127;
+
+  --diff-add: rgba(79, 122, 58, 0.12);
+  --diff-del: rgba(179, 55, 47, 0.1);
+
+  color-scheme: light;
+}
+
+/* ---------------- type ---------------- */
+
+body,
+button,
+input,
+textarea,
+select,
+.cap {
+  font-family: var(--font-mono);
+  font-variant: normal;
+  letter-spacing: 0;
+}
+
+body {
+  font-size: 13.5px;
+  line-height: 1.45;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.mono {
+  font-size: 13.5px;
+}
+
+.cap {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.dim {
+  color: var(--muted);
+}
+
+/* Nothing in a terminal is a card. */
+.box,
+.talk,
+.composer,
+.reply,
+.strip,
+.notice,
+.gt-warn,
+.closed-note,
+.worker,
+.signin-card,
+.start-card {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+button,
+input,
+textarea,
+select {
+  border-radius: 0;
+}
+
+:focus-visible {
+  outline: 1px solid var(--orange);
+  outline-offset: 1px;
+  border-radius: 0;
+}
+
+/* ---------------- box drawing ---------------- */
+
+.box {
+  color: var(--rule);
+}
+.boxline,
+.boxrow {
+  display: flex;
+  align-items: baseline;
+  white-space: pre;
+  min-width: 0;
+}
+.boxglyph {
+  color: var(--rule);
+  flex: 0 0 auto;
+}
+.boxrule {
+  color: var(--rule);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.boxtitle {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.boxbody {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 1ch;
+  color: var(--ink);
+  white-space: normal;
+}
+.boxrow.is-pick .boxbody {
+  background: var(--orange-soft);
+}
+
+/* ---------------- the shell ---------------- */
+
+.shell {
+  background: var(--paper);
+}
+
+/* The permanent rail is gone: `/resume` asks for the list instead. */
+.rail {
+  display: none !important;
+}
+
+.head {
+  border-bottom: none;
+  background: transparent;
+  padding: 6px 0 0;
+  min-height: 0;
+}
+.head-back {
+  color: var(--orange);
+}
+
+.work,
+.work-body,
+.work-talk {
+  background: var(--paper);
+}
+
+/* One column, left-aligned, as wide as a terminal is comfortable. */
+.talk-scroll,
+.composer,
+.termfoot,
+.termstatus {
+  max-width: var(--col);
+}
+
+.talk-wrap,
+.talk-scroll {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.talk {
+  border: none;
+  background: transparent;
+  padding: 0 2ch;
+}
+
+/* ---------------- transcript grammar ---------------- */
+
+.exchange {
+  margin: 0 0 1.45em;
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+/* `> the prompt` */
+.said,
+.termsaid {
+  display: flex;
+  gap: 1ch;
+  margin: 0 0 0.6em;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.termsaid-mark {
+  color: var(--orange);
+  flex: 0 0 auto;
+}
+.termsaid.is-mid {
+  color: var(--muted);
+}
+.termsaid.is-pending {
+  color: var(--muted);
+}
+
+/* `⏺ text…` — the agent, a tool, a worker, a receipt. */
+.tline {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tline-bullet {
+  color: var(--orange);
+  flex: 0 0 auto;
+}
+.tline-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tline.is-gt > .tline-bullet {
+  color: var(--purple);
+}
+.tline.is-gt .tname {
+  color: var(--purple);
+}
+.tline.is-dim,
+.tline.is-dim .tline-bullet {
+  color: var(--muted);
+}
+.tname {
+  font-weight: 600;
+  color: var(--ink);
+}
+.targ {
+  color: var(--ink-2);
+}
+
+/* `  ⎿  continuation` */
+.cont {
+  display: flex;
+  gap: 1ch;
+  margin: 0;
+  padding-left: 2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+}
+.cont-mark {
+  color: var(--rule);
+  flex: 0 0 auto;
+}
+.cont-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cont.is-error .cont-body {
+  color: var(--error);
+}
+.cont.is-dim .cont-body {
+  color: var(--muted);
+}
+.cont.is-gt .cont-body {
+  color: var(--purple);
+}
+.cont.is-ok .cont-body {
+  color: var(--green);
+}
+.cont-more {
+  padding: 0;
+  border: none;
+  color: var(--muted);
+  font-size: inherit;
+}
+.cont-more:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* The agent's prose wraps under itself, two columns in. */
+.tprose {
+  margin: 0;
+  padding-left: 2ch;
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reply {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+.reply .heard-prose {
+  margin: 0 0 0.6em;
+}
+.reply .heard-code,
+.termcode {
+  margin: 0.4em 0;
+  padding: 0 0 0 2ch;
+  border: none;
+  border-left: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* `⏺ Receipt(turn 3) · 12 steps · …` — one dim line ending the turn. */
+.receipt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.receipt:hover {
+  color: var(--ink-2);
+}
+.receipt.is-selected {
+  color: var(--ink-2);
+}
+.receipt.is-selected .tname {
+  color: var(--orange);
+}
+
+/* ---------------- the status line ---------------- */
+
+.termstatus {
+  padding: 0.3em 2ch 0.6em;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.termstatus-spin {
+  color: var(--orange);
+}
+.termstatus-verb {
+  color: var(--ink);
+}
+.termstatus-agents {
+  padding-left: 2ch;
+  color: var(--muted);
+}
+.termstatus-agents .tline-bullet {
+  color: var(--orange);
+}
+
+/* ---------------- the input ---------------- */
+
+.composer {
+  border: none;
+  background: transparent;
+  padding: 0 2ch 0.8em;
+}
+.composer-box {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.composer .boxrow .boxbody {
+  padding: 0 1ch;
+}
+.composer-caret {
+  color: var(--orange);
+  flex: 0 0 auto;
+}
+.composer-input {
+  border: none !important;
+  background: transparent !important;
+  color: var(--ink);
+  padding: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  caret-color: var(--orange);
+}
+.composer-input::placeholder {
+  color: var(--muted);
+}
+.composer-input:focus {
+  outline: none;
+}
+
+.termfoot {
+  display: flex;
+  gap: 2ch;
+  align-items: baseline;
+  padding: 0.3em 2ch 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.termfoot-right {
+  margin-left: auto;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-foot {
+  display: none;
+}
+
+/* ---------------- the slash menu ---------------- */
+
+.slash {
+  position: absolute;
+  left: 1ch;
+  right: 1ch;
+  bottom: 100%;
+  z-index: 20;
+  margin-bottom: 2px;
+  list-style: none;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  box-shadow: none;
+  max-height: 16em;
+  overflow-y: auto;
+}
+.slash-item {
+  display: flex;
+  gap: 2ch;
+  width: 100%;
+  padding: 1px 1ch;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-2);
+  text-align: left;
+}
+.slash-item.is-on {
+  background: var(--orange-soft);
+  color: var(--ink);
+}
+.slash-name {
+  color: var(--orange);
+  flex: 0 0 22ch;
+}
+.slash-hint {
+  color: var(--muted);
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------- the landing ---------------- */
+
+.landing {
+  display: block;
+  background: var(--paper);
+  overflow-y: auto;
+}
+.landing-mid {
+  max-width: var(--col);
+  margin: 0;
+  padding: 2em 0 0;
+}
+.landing-mark {
+  display: none;
+}
+.banner {
+  padding: 0 2ch;
+  margin-bottom: 1em;
+}
+.banner-mark {
+  color: var(--orange);
+}
+.tips {
+  padding: 0 2ch;
+  margin-bottom: 1.4em;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.landing-thread {
+  padding: 0 2ch;
+  margin-bottom: 1em;
+}
+.landing-say {
+  display: flex;
+  gap: 1ch;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.landing-say.is-system {
+  color: var(--muted);
+}
+.landing-foot-left {
+  display: none;
+}
+
+/* ---------------- workers ---------------- */
+
+.worker {
+  margin: 0 0 0.6em;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.worker.is-closed {
+  opacity: 1;
+}
+.worker-actions {
+  display: inline-flex;
+  gap: 1ch;
+  /* A flex container swallows the whitespace before it. */
+  margin-left: 2ch;
+}
+.bracket {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--orange);
+  font-size: inherit;
+}
+.bracket:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.bracket:disabled {
+  color: var(--muted);
+}
+
+/* ---------------- settings, as a form in the transcript ---------------- */
+
+.termform {
+  margin: 0 0 1em;
+}
+.termform .boxbody {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+}
+.termform label {
+  color: var(--muted);
+  flex: 0 0 14ch;
+}
+.termform input,
+.termform select {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+}
+.termform input:focus,
+.termform select:focus {
+  outline: none;
+  color: var(--orange);
+}
+
+/* ---------------- `/resume`, full screen ---------------- */
+
+.resume {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--paper);
+  overflow-y: auto;
+  padding: 2em 2ch;
+}
+.resume-inner {
+  max-width: var(--col);
+  outline: none;
+}
+.resume-row {
+  display: flex;
+  gap: 1ch;
+  width: 100%;
+  cursor: pointer;
+  min-width: 0;
+}
+.resume-caret {
+  color: var(--orange);
+  flex: 0 0 1ch;
+}
+.resume-dot.is-running {
+  color: var(--orange);
+}
+.resume-dot.is-failed {
+  color: var(--error);
+}
+.resume-name {
+  flex: 0 0 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-when {
+  flex: 0 0 10ch;
+  text-align: right;
+}
+.hintline {
+  padding-top: 0.4em;
+  color: var(--muted);
+}
+
+/* ---------------- the graph: a tmux split ---------------- */
+
+.work-body {
+  gap: 0;
+}
+.work-graph {
+  border-left: none;
+  background: var(--paper);
+  position: relative;
+}
+/* The separator is a column of │, not a border. */
+.split {
+  flex: 0 0 1ch;
+  color: var(--rule);
+  overflow: hidden;
+  white-space: pre;
+  line-height: 1.45;
+  user-select: none;
+  cursor: col-resize;
+  text-align: center;
+}
+
+.gpanel {
+  border: none;
+  background: transparent;
+}
+.panetitle {
+  display: flex;
+  gap: 1ch;
+  padding: 0 1ch;
+  color: var(--muted);
+  white-space: pre;
+  overflow: hidden;
+}
+.panetitle .boxrule {
+  color: var(--rule);
+}
+
+.bar {
+  border-bottom: none;
+  background: transparent;
+  padding: 2px 1ch;
+  gap: 1ch;
+}
+.bar-select,
+.bar-search input {
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 0;
+  padding: 0 0.5ch;
+}
+
+.graph-canvas {
+  background: var(--paper);
+}
+
+.gpanel-bottom {
+  border-top: none;
+  background: transparent;
+}
+
+/* The panels below the canvas are text, not chrome. */
+.panel,
+.panel-head,
+.panel-body,
+.ins,
+.ins-head,
+.ins-body {
+  background: transparent;
+  border-radius: 0;
+}
+.panel-head,
+.ins-head {
+  border-bottom: 1px solid var(--rule);
+}
+.tab {
+  border-radius: 0;
+}
+
+/* `git diff` colours, and nothing else. */
+.dl.is-add {
+  background: var(--diff-add);
+  color: var(--green);
+}
+.dl.is-del {
+  background: var(--diff-del);
+  color: var(--error);
+}
+.dl.is-hunk {
+  color: var(--purple);
+  background: transparent;
+}
+.dl.is-meta {
+  color: var(--muted);
+  background: transparent;
+}
+.dl.is-ctx {
+  color: var(--ink-2);
+}
+
+.out {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+/* ---------------- responsive ---------------- */
+
+/* Below 1100px the split stacks: the graph goes under the transcript
+   rather than floating over it, which is what the old panel did. */
+@media (max-width: 1100px) {
+  .work-body {
+    flex-direction: column;
+  }
+  .work-talk {
+    flex: 1 1 auto;
+    min-height: 38vh;
+    height: auto;
+  }
+  .shell.is-narrow .work-graph,
+  .work-graph {
+    position: static;
+    width: auto !important;
+    height: 55vh;
+    flex: 0 0 auto;
+    box-shadow: none;
+    border-left: none;
+    border-top: 1px solid var(--rule);
+  }
+  .split {
+    display: none;
+  }
+}
+
+/* Nothing may scroll the page sideways. */
+html,
+body {
+  overflow-x: hidden;
+}
+
+/* The slash menu hangs off the input box. */
+.composer-box {
+  position: relative;
+}
+
+/* A step the scrubber is holding back. */
+.tacts .is-future {
+  opacity: 0.4;
+}
+
+/* The graph pane, stacked under its title. */
+.gpanel-stage {
+  background: var(--paper);
+}
+
+/* ------------------------------------------------------------------ *
+ * The input, laid out
+ *
+ * `base.css` gives every field `width: 100%`, which puts the textarea on
+ * its own line under the caret. In a terminal the caret and what you are
+ * typing are the same line.
+ * ------------------------------------------------------------------ */
+
+.composer.is-landing,
+.composer.is-landing .composer-box,
+.composer.is-landing .composer-box:focus-within {
+  border: none;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+.composer.is-landing {
+  padding: 0 2ch 0.8em;
+}
+.composer.is-landing .composer-input,
+.composer .composer-input {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  font-size: 13.5px;
+  line-height: 1.45;
+  padding: 0;
+  border: none;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+}
+.composer .boxrow > .boxbody {
+  display: flex;
+  align-items: baseline;
+  gap: 1ch;
+}
+
+/* Everything in the column starts and ends on the same two columns. */
+.banner,
+.tips,
+.landing-thread,
+.termform,
+.composer,
+.termfoot,
+.termstatus,
+.talk-scroll {
+  width: 100%;
+  max-width: var(--col);
+}
+
+.termfoot > span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The right half of the hint line is the identity of the session: it keeps
+   its width, and the shortcuts on the left give way. */
+.termfoot-right {
+  flex: 0 0 auto;
+}
+.termfoot > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The command list spans the input box, the way a completion menu does. */
+.slash {
+  width: auto;
+  padding: 0;
+}
+.slash-item {
+  align-items: baseline;
+  font-size: 13px;
+}
+
+/* The hint line wraps rather than eating itself: both halves are readable
+   at 100ch, one under the other, when they do not fit side by side. */
+.termfoot {
+  flex-wrap: wrap;
+}
+.termfoot > span:first-child {
+  flex: 1 1 40ch;
+}
+
+/* The graph toolbar is a status row, not a set of pills. */
+.bar .btn-text,
+.bar button {
+  border-radius: 0;
+  border: none;
+  padding: 0 0.5ch;
+  color: var(--muted);
+}
+.bar .btn-text.is-on {
+  background: transparent;
+  color: var(--orange);
+  text-decoration: underline;
+}
+.bar .btn-text:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+.legend-dot,
+.legend-line {
+  border-radius: 0;
+}
+
+/* Tabs under the canvas: text, underlined when on. */
+.tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+.tab.is-on,
+.tab[aria-selected="true"] {
+  color: var(--orange);
+  background: transparent;
+  border-bottom: 1px solid var(--orange);
+}
+
+/* A little air at the top of the transcript. */
+.talk-scroll {
+  padding-top: 0.8em;
+}
+
+/* The pane title keeps its words; only the rules either side give way. */
+.panetitle > span:not(.boxrule) {
+  flex: 0 0 auto;
+}
+.panetitle > .boxrule:first-child {
+  flex: 0 0 2ch;
+}
+
+/* The receipt is one dim line, name included. */
+.receipt .tname,
+.receipt .targ {
+  color: inherit;
+}
+
+/* A form in a terminal is label, value, note — not a stack of full-width
+   controls. */
+.termform input,
+.termform select {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 24ch;
+  max-width: 46ch;
+}
+.termform .boxbody > span.dim {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.termform select {
+  appearance: none;
+  padding-right: 1ch;
+}

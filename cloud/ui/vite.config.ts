@@ -11,19 +11,25 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      "/api": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
-      },
-      "/auth": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
-      },
-      "/health": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
-      },
-    },
+    proxy: proxyTable(),
   },
 });
+
+/*
+ * The dev server talks to a local API by default. Point it at a deployed one
+ * — a codespace, say — with GT_API_TARGET, and hand it a token with
+ * GT_API_TOKEN when that deployment wants one: the header is added by the
+ * proxy, so the browser never holds a credential for another origin. Dev
+ * only; the production bundle is served same-origin behind nginx.
+ */
+function proxyTable() {
+  const target = process.env.GT_API_TARGET ?? "http://localhost:8000";
+  const token = process.env.GT_API_TOKEN ?? "";
+  const one = {
+    target,
+    changeOrigin: true,
+    secure: true,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  };
+  return { "/api": one, "/auth": one, "/health": one };
+}
