@@ -353,7 +353,20 @@ class MiniSweAgent(BaseInstalledAgent):
             # non-zero exit fails the install.
             f"{_REMOTE_LSP_BIN}/gopls version >/dev/null && "
             f"{_REMOTE_LSP_BIN}/rust-analyzer --version >/dev/null && "
-            f"{_REMOTE_LSP_BIN}/pyright-langserver --version >/dev/null && "
+            # pyright-langserver has no non-server invocation: --version,
+            # --help and --stdio --version all exit 1 with "Connection input
+            # stream is not set", because it only speaks LSP. Executed in the
+            # gate task's own image, that exit killed the && chain and the
+            # install with it. The same node runtime and the same package are
+            # exercised through pyright's CLI entry, and node --check proves
+            # the langserver entry itself parses under this node without
+            # starting a server that would never return.
+            f'"{_REMOTE_LSP_BIN}/node-runtime/bin/node" '
+            f"{_REMOTE_LSP_BIN}/node-runtime/servers/node_modules/pyright/index.js "
+            "--version >/dev/null && "
+            f'"{_REMOTE_LSP_BIN}/node-runtime/bin/node" --check '
+            f"{_REMOTE_LSP_BIN}/node-runtime/servers/node_modules/pyright/"
+            "langserver.index.js >/dev/null && "
             f"{_REMOTE_LSP_BIN}/typescript-language-server --version >/dev/null && "
             # The embedder likewise: loading the pinned ONNX graph and the
             # tokenizer is what proves retrieval can actually embed. An
