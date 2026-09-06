@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Simulation } from "d3-force";
 import type { DiffFile } from "../api";
 import type { Filament, Particle, ParticleField } from "../graph";
@@ -11,7 +11,8 @@ import {
   hitTest,
   RESTART_ALPHA,
 } from "../graphSim";
-import { SignalQueue } from "../signals";
+import { useReducedMotion } from "../motion";
+import { PRIMARY_AGENT, PRIMARY_RGB, SignalDirector } from "../signals";
 import type { Attention } from "../trail";
 import type { WorkerTrail } from "../useGraphView";
 import { useGraphCamera } from "../useGraphCamera";
@@ -44,6 +45,10 @@ interface Props {
   animate: boolean;
   /** Every worker agent's walk across the same field, in its own colour. */
   workerTrails: readonly WorkerTrail[];
+  /** Particle id → the agents on it, so a shared one shows all of them. */
+  presence: ReadonlyMap<string, readonly string[]>;
+  /** The agent drawn at full strength — hover or isolate. Null for all. */
+  focusAgent: string | null;
   /**
    * Whether a worker's new waypoints animate. Separate from `animate`: a
    * worker runs on its own clock, so its trail moves while the primary
@@ -99,11 +104,33 @@ export default function GraphCanvas(props: Props) {
   const live = useRef(props);
   live.current = props;
 
+  const reduced = useReducedMotion();
+  const reducedRef = useRef(reduced);
+  reducedRef.current = reduced;
+
+  /* The painter's view of the agents, folded once per render. Rebuilding
+     this inside the loop was an allocation per frame per agent, which is
+     exactly the thing a 60fps budget cannot afford (HAR-84). */
+  const layers = useMemo<WorkerLayer[]>(
+    () =>
+      props.workerTrails.map((worker) => ({
+        id: worker.id,
+        rgb: worker.rgb,
+        attention: worker.attention,
+        steps: worker.steps,
+        positionId: worker.positionId,
+        running: worker.status === "running",
+      })),
+    [props.workerTrails],
+  );
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
+
   const simRef = useRef<Simulation<Particle, Filament> | null>(null);
-  const signals = useRef(new SignalQueue());
-  /* One queue per worker, so their signals travel independently and each
-     keeps its own colour. Keyed by worker id and created on first sight. */
-  const workerSignals = useRef(new Map<string, SignalQueue>());
+  /* Every agent travels through one director: a queue each so the hues
+     never mix, one release clock so no two of them pulse on the same
+     frame, and one ceiling on what may be in the air at once. */
+  const director = useRef(new SignalDirector());
   const workerWalked = useRef(new Map<string, number>());
   const hoverId = useRef<string | null>(null);
   const dim = useRef(0);
@@ -148,28 +175,16 @@ export default function GraphCanvas(props: Props) {
           : Math.max(0, dim.current - step);
     }
     const tweening = dim.current !== target;
-    let travelling = signals.current.update(now);
-    let queuesBusy = signals.current.busy;
-    const layers: WorkerLayer[] = [];
-    for (const worker of state.workerTrails) {
-      const queue = workerSignals.current.get(worker.id);
-      if (queue) {
-        const live = queue.update(now);
-        if (live.length > 0) travelling = [...travelling, ...live];
-        queuesBusy = queuesBusy || queue.busy;
-      }
-      layers.push({
-        id: worker.id,
-        rgb: worker.rgb,
-        attention: worker.attention,
-        steps: worker.steps,
-        positionId: worker.positionId,
-        running: worker.status === "running",
-      });
-    }
+    /* One array, reused: the director hands back the same buffer every
+       frame rather than a fresh concatenation per agent. */
+    const travelling = director.current.update(now);
+    const queuesBusy = director.current.busy;
+    const layers = layersRef.current;
+    const still = reducedRef.current;
     const halo =
-      (state.running && state.positionId !== null) ||
-      layers.some((layer) => layer.running && layer.positionId !== null);
+      !still &&
+      ((state.running && state.positionId !== null) ||
+        layers.some((layer) => layer.running && layer.positionId !== null));
 
     draw({
       ctx,
@@ -190,6 +205,9 @@ export default function GraphCanvas(props: Props) {
       labels: state.labels,
       signals: travelling,
       workers: layers,
+      presence: state.presence,
+      focusAgent: state.focusAgent,
+      reduced: still,
       now,
     });
 
@@ -221,7 +239,17 @@ export default function GraphCanvas(props: Props) {
     props.selectedId,
     props.matches,
     props.labels,
+    props.presence,
+    props.focusAgent,
+    layers,
   ]);
+
+  /* Turning the preference on mid-flight drops whatever was travelling
+     rather than letting it finish its arc. */
+  useEffect(() => {
+    director.current.setReduced(reduced);
+    kick();
+  }, [reduced, kick]);
 
   /* ---------------- the simulation ---------------- */
 
@@ -275,30 +303,26 @@ export default function GraphCanvas(props: Props) {
 
   useEffect(() => {
     const state = walked.current;
+    const queue = director.current.queue(PRIMARY_AGENT, PRIMARY_RGB);
     if (state.token !== trailToken || trailIds.length < state.length) {
-      signals.current.clear();
+      queue.clear();
     } else if (trailIds.length > state.length && animate) {
       for (let i = Math.max(1, state.length); i < trailIds.length; i += 1) {
-        signals.current.push(trailIds[i - 1], trailIds[i]);
+        queue.push(trailIds[i - 1], trailIds[i]);
       }
     }
     walked.current = { token: trailToken, length: trailIds.length };
     kick();
   }, [trailIds, trailToken, animate, kick]);
 
-  /* A worker's signals, on the same rule as the primary trail's: only new
-     waypoints fire, and a trail that shrank (a card rebuilt from a reload)
-     replays without animating. */
+  /* Every other agent's signals, on the same rule as the primary trail's:
+     only new waypoints fire, and a trail that shrank (a card rebuilt from
+     a reload) replays without animating. The director does the rest —
+     whose turn it is, and how much may be in the air at once. */
   const { workerTrails, animateWorkers } = props;
   useEffect(() => {
-    const live = new Set<string>();
     for (const worker of workerTrails) {
-      live.add(worker.id);
-      let queue = workerSignals.current.get(worker.id);
-      if (!queue) {
-        queue = new SignalQueue(worker.rgb);
-        workerSignals.current.set(worker.id, queue);
-      }
+      const queue = director.current.queue(worker.id, worker.rgb);
       const seen = workerWalked.current.get(worker.id) ?? 0;
       if (worker.trailIds.length < seen) {
         queue.clear();
@@ -309,11 +333,11 @@ export default function GraphCanvas(props: Props) {
       }
       workerWalked.current.set(worker.id, worker.trailIds.length);
     }
-    for (const id of [...workerSignals.current.keys()]) {
-      if (!live.has(id)) {
-        workerSignals.current.delete(id);
-        workerWalked.current.delete(id);
-      }
+
+    const alive = new Set(workerTrails.map((worker) => worker.id));
+    director.current.retain(alive);
+    for (const id of [...workerWalked.current.keys()]) {
+      if (!alive.has(id)) workerWalked.current.delete(id);
     }
     kick();
   }, [workerTrails, animateWorkers, kick]);

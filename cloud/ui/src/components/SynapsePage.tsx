@@ -195,6 +195,17 @@ export default function SynapsePage() {
     [setGraph],
   );
 
+  /* Agents whose files are not on this map at all. Folded here because the
+     transcript needs it as much as the legend does, and neither should be
+     recomputing it. */
+  const outsideRepo = useMemo(() => {
+    const out = new Set<string>();
+    for (const trail of view.workerTrails) {
+      if (trail.outsideRepo) out.add(trail.id);
+    }
+    return out;
+  }, [view.workerTrails]);
+
   /* An agent that no longer exists cannot be the thing the map is narrowed
      to, or the canvas would dim every particle and show nothing. */
   const agentIds = view.workerTrails.map((trail) => trail.id).join("|");
@@ -429,6 +440,7 @@ export default function SynapsePage() {
               canApply={status === "idle"}
               onApplyWorker={(workerId) => void data.applyWorker(workerId)}
               onFocusAgent={focusAgent}
+              outsideRepo={outsideRepo}
               settingsOpen={settingsOpen}
               prefs={prefs}
               onPrefs={(next) => {

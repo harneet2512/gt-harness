@@ -34,6 +34,8 @@ const FILAMENT_WIDTH: Record<string, number> = {
 };
 
 const DIMMED = 0.18;
+/** What an agent fades to while another one is focused. */
+const FOCUS_DIM = 0.14;
 const LABEL_ZOOM = 1.8;
 /** A file particle never exceeds r 9 (see `fileRadius`), so with labels off
     only the folded directory particles carry a name of their own. */
@@ -42,6 +44,28 @@ const LABEL_MIN_R = 10;
 const LABEL_CELL_W = 26;
 const LABEL_CELL_H = 13;
 const HALO_MS = 1400;
+/**
+ * A worker breathes slower than the primary agent and at half the depth.
+ * Four of these on screen at once is the case that has to stay calm, and
+ * calm is mostly a matter of how slow you are willing to be.
+ */
+const WORKER_HALO_MS = 2600;
+/** How far outside a particle an agent's ring sits, in screen pixels. */
+const RING_GAP = 3;
+/** The wedge cut out between two agents' arcs, in radians. */
+const SLOT_GAP = 0.2;
+/** The soft under-glow: radius past the particle, and its strongest alpha. */
+const GLOW_SPREAD = 7;
+const GLOW_ALPHA = 0.13;
+/**
+ * Where an agent is, and where it just was — and nowhere else.
+ *
+ * The rings already carry the whole decaying trail. If the glow decayed on
+ * the same curve it would only be a second, blurrier copy of them, and
+ * four agents' worth of that is the christmas tree. `attentionAlpha` falls
+ * one sixth per step, so two thirds is the last two.
+ */
+const GLOW_MIN_HEAT = 0.66;
 
 /**
  * One worker's walk through the same field, drawn in its own colour so two
@@ -82,6 +106,15 @@ export interface DrawInput {
   signals: readonly LiveSignal[];
   /** The worker agents' trails. Empty on a session that spawned none. */
   workers: readonly WorkerLayer[];
+  /**
+   * Particle id → the agents on it, in trail order. Folded once per
+   * render in `useGraphView`: the painter walks it, it never builds it.
+   */
+  presence: ReadonlyMap<string, readonly string[]>;
+  /** The one agent drawn at full strength; every other one fades back. */
+  focusAgent: string | null;
+  /** `prefers-reduced-motion`: nothing pulses and nothing travels. */
+  reduced: boolean;
   now: number;
 }
 
@@ -117,6 +150,9 @@ export function draw(input: DrawInput): void {
   if (input.field.particles.length === 0) return;
 
   paintFilaments(input);
+  /* Under the particles, so a particle someone is working in glows from
+     beneath rather than being covered up by the news that it does. */
+  paintAgentGlow(input);
   paintSignals(input);
   paintParticles(input);
   paintWorkers(input);
@@ -245,15 +281,24 @@ function paintSignals(input: DrawInput): void {
       screenX(input.transform, to.x),
       screenY(input.transform, to.y ?? 0),
     );
+    if (offscreen(curve, input.width, input.height)) continue;
+
+    const rgb = signal.rgb || ORANGE;
+    const focus = agentAlpha(input, signal.agentId);
+    if (focus <= 0.02) continue;
+
+    if (signal.still) {
+      paintStillSignal(ctx, curve, rgb, signal.fade * focus);
+      continue;
+    }
 
     const head = pointOn(curve, signal.progress);
     const tailStart = Math.max(0, signal.progress - TAIL);
     const tail = pointOn(curve, tailStart);
 
-    const rgb = signal.rgb || ORANGE;
     const gradient = ctx.createLinearGradient(tail[0], tail[1], head[0], head[1]);
     gradient.addColorStop(0, `rgba(${rgb}, 0)`);
-    gradient.addColorStop(1, `rgba(${rgb}, 0.85)`);
+    gradient.addColorStop(1, `rgba(${rgb}, ${(0.85 * focus).toFixed(3)})`);
 
     ctx.beginPath();
     ctx.moveTo(tail[0], tail[1]);
@@ -270,59 +315,230 @@ function paintSignals(input: DrawInput): void {
 
     ctx.beginPath();
     ctx.arc(head[0], head[1], 2.4, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${rgb}, 0.95)`;
+    ctx.fillStyle = `rgba(${rgb}, ${(0.95 * focus).toFixed(3)})`;
     ctx.fill();
   }
 
   ctx.lineCap = "butt";
 }
 
-/* ---------------- worker trails ---------------- */
+/**
+ * The same hop, at rest.
+ *
+ * With `prefers-reduced-motion` a signal says *this agent went from here
+ * to there* by lighting the filament and marking the far end, and then
+ * leaving. Nothing moves along it, nothing pulses, and the only change
+ * over its life is the alpha it goes out on.
+ */
+function paintStillSignal(
+  ctx: CanvasRenderingContext2D,
+  curve: Curve,
+  rgb: string,
+  alpha: number,
+): void {
+  if (alpha <= 0.02) return;
+  ctx.beginPath();
+  ctx.moveTo(curve.ax, curve.ay);
+  ctx.quadraticCurveTo(curve.cx, curve.cy, curve.bx, curve.by);
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = `rgba(${rgb}, ${(0.5 * alpha).toFixed(3)})`;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(curve.bx, curve.by, 2.4, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${rgb}, ${(0.85 * alpha).toFixed(3)})`;
+  ctx.fill();
+}
+
+/* ---------------- worker trails ---------------- *
+ *
+ * Two passes, both driven by `presence` — particle id to the agents on it,
+ * folded once per render. Walking the particles rather than the agents is
+ * what makes a shared particle answerable: by the time anything is drawn
+ * we already know how many agents are standing there, so the ring can be
+ * split between them instead of one hue silently overdrawing another.
+ * --------------------------------------------------------------------- */
+
+/** Agent id → layer, rebuilt only when the layer list itself changes. */
+let indexedLayers: readonly WorkerLayer[] | null = null;
+const layerIndex = new Map<string, WorkerLayer>();
+
+function layersById(
+  workers: readonly WorkerLayer[],
+): ReadonlyMap<string, WorkerLayer> {
+  if (indexedLayers === workers) return layerIndex;
+  layerIndex.clear();
+  for (const worker of workers) layerIndex.set(worker.id, worker);
+  indexedLayers = workers;
+  return layerIndex;
+}
+
+/* Scratch for one particle's occupants. Module level and grown in place:
+   the hot loop must not allocate, and no more than `MAX_SLOTS` agents ever
+   land in here at once. */
+const slotLayer: WorkerLayer[] = [];
+const slotHeat: number[] = [];
+const slotHere: boolean[] = [];
+/** Which wedge of the shared ring this occupant owns. See `occupants`. */
+const slotAt: number[] = [];
+
+/** How strongly this agent draws while another one has the focus. */
+function agentAlpha(input: DrawInput, agentId: string): number {
+  if (input.focusAgent === null || input.focusAgent === agentId) return 1;
+  return FOCUS_DIM;
+}
 
 /**
- * A second pass over the particles, once per worker. The primary agent owns
- * the fill; a worker only ever adds a ring in its own colour, so a file two
- * agents are both standing on shows both rather than the last one drawn.
+ * The occupants of one particle worth drawing this frame, into the scratch
+ * arrays. Returns how many. An agent whose attention here has decayed to
+ * nothing and which has moved on is not an occupant.
+ */
+function occupants(
+  id: string,
+  agents: readonly string[],
+  index: ReadonlyMap<string, WorkerLayer>,
+): number {
+  let n = 0;
+  for (let slot = 0; slot < agents.length; slot += 1) {
+    const layer = index.get(agents[slot]);
+    if (!layer) continue;
+    const seen = layer.attention.get(id);
+    const here = id === layer.positionId;
+    const heat = seen ? attentionAlpha(seen.last, layer.steps) : 0;
+    if (heat <= 0 && !here) continue;
+    slotLayer[n] = layer;
+    slotHeat[n] = heat;
+    slotHere[n] = here;
+    /* The wedge belongs to the agent, not to whoever happens to be lit
+       this frame: an agent decaying off a particle must not rotate the
+       one beside it into a different quarter of the ring. */
+    slotAt[n] = slot;
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * A particle under active work, glowing from underneath in the hue of
+ * whoever is working in it.
+ *
+ * Deliberately faint, and deliberately short — this is the line between
+ * tasteful and a christmas tree. It is drawn at a tenth of the opacity of
+ * everything else on the map, and only where an agent is standing or has
+ * just been. It says *someone is in here now*, it goes out as that agent
+ * moves on, and it is a different statement from the orange read-flare,
+ * which says the primary agent has been here.
+ */
+function paintAgentGlow(input: DrawInput): void {
+  if (input.workers.length === 0 || input.presence.size === 0) return;
+  const { ctx } = input;
+  const index = layersById(input.workers);
+
+  for (const [id, agents] of input.presence) {
+    const particle = input.field.byId.get(id);
+    if (!particle || particle.x === undefined || particle.y === undefined) {
+      continue;
+    }
+    const sx = screenX(input.transform, particle.x);
+    const sy = screenY(input.transform, particle.y);
+    if (sx < -60 || sx > input.width + 60) continue;
+    if (sy < -60 || sy > input.height + 60) continue;
+
+    const n = occupants(id, agents, index);
+    if (n === 0) continue;
+
+    const r = particle.r * input.transform.k;
+    for (let i = 0; i < n; i += 1) {
+      const layer = slotLayer[i];
+      /* Full strength where the agent is standing, once behind it, then
+         nothing: the rings are what carry the rest of the trail. */
+      if (!slotHere[i] && slotHeat[i] < GLOW_MIN_HEAT) continue;
+      const strength = slotHere[i] ? 1 : slotHeat[i];
+      const alpha =
+        (GLOW_ALPHA * strength * agentAlpha(input, layer.id)) / Math.max(1, n);
+      if (alpha < 0.008) continue;
+      /* Two flat discs rather than a gradient: no per-frame gradient
+         object, and at these opacities the step is invisible anyway. */
+      disc(ctx, sx, sy, r + GLOW_SPREAD, `rgba(${layer.rgb}, ${alpha.toFixed(3)})`);
+      disc(
+        ctx,
+        sx,
+        sy,
+        r + GLOW_SPREAD * 0.5,
+        `rgba(${layer.rgb}, ${alpha.toFixed(3)})`,
+      );
+    }
+  }
+}
+
+/**
+ * The rings. One agent gets a whole ring; two or more share one, a wedge
+ * each, at the same radius — so four agents on a file read as a quartered
+ * circle you can count, rather than as four rings creeping outwards or as
+ * whichever hue happened to be painted last.
  */
 function paintWorkers(input: DrawInput): void {
-  if (input.workers.length === 0) return;
+  if (input.workers.length === 0 || input.presence.size === 0) return;
   const { ctx } = input;
-  const halo = (input.now % HALO_MS) / HALO_MS;
+  const index = layersById(input.workers);
+  const pulse = input.reduced ? 0 : (input.now % WORKER_HALO_MS) / WORKER_HALO_MS;
 
-  input.workers.forEach((worker, layer) => {
-    // Concentric, so overlapping workers are countable rather than merged.
-    const spread = 3 + layer * 2.5;
+  for (const [id, agents] of input.presence) {
+    const particle = input.field.byId.get(id);
+    if (!particle || particle.x === undefined || particle.y === undefined) {
+      continue;
+    }
+    const sx = screenX(input.transform, particle.x);
+    const sy = screenY(input.transform, particle.y);
+    if (sx < -40 || sx > input.width + 40) continue;
+    if (sy < -40 || sy > input.height + 40) continue;
 
-    for (const [id, seen] of worker.attention) {
-      const particle = input.field.byId.get(id);
-      if (!particle || particle.x === undefined || particle.y === undefined) {
-        continue;
-      }
-      const heat = attentionAlpha(seen.last, worker.steps);
-      const here = id === worker.positionId;
-      if (heat <= 0 && !here) continue;
+    const n = occupants(id, agents, index);
+    if (n === 0) continue;
 
-      const sx = screenX(input.transform, particle.x);
-      const sy = screenY(input.transform, particle.y);
-      if (sx < -40 || sx > input.width + 40) continue;
-      if (sy < -40 || sy > input.height + 40) continue;
+    const r = particle.r * input.transform.k + RING_GAP;
+    const slots = Math.max(1, agents.length);
+    const segment = (Math.PI * 2) / slots;
+    const gap = slots === 1 ? 0 : Math.min(SLOT_GAP, segment * 0.18);
 
-      const r = particle.r * input.transform.k;
-      const alpha = here ? 0.95 : 0.3 + heat * 0.5;
-      ring(ctx, sx, sy, r + spread, `rgba(${worker.rgb}, ${alpha.toFixed(3)})`, here ? 2 : 1.25);
+    for (let i = 0; i < n; i += 1) {
+      const layer = slotLayer[i];
+      const here = slotHere[i];
+      const alpha =
+        (here ? 0.9 : 0.28 + slotHeat[i] * 0.45) * agentAlpha(input, layer.id);
+      if (alpha < 0.02) continue;
 
-      if (here && worker.running) {
-        ring(
+      /* Slot 0 starts at the top and they run clockwise, so the order on
+         screen is the order in the legend. A wedge left empty is an agent
+         that has been here and is not here now, which is the truth. */
+      const from = -Math.PI / 2 + slotAt[i] * segment + gap / 2;
+      const to = from + segment - gap;
+      arc(
+        ctx,
+        sx,
+        sy,
+        r,
+        from,
+        to,
+        `rgba(${layer.rgb}, ${alpha.toFixed(3)})`,
+        here ? 1.9 : 1.25,
+      );
+
+      /* Breathing, once, slowly, and only where an agent actually is. */
+      if (here && layer.running && !input.reduced) {
+        arc(
           ctx,
           sx,
           sy,
-          r * (1 + 1.2 * halo) + spread,
-          `rgba(${worker.rgb}, ${(0.5 * (1 - halo)).toFixed(3)})`,
-          1.25,
+          r + pulse * 5,
+          from,
+          to,
+          `rgba(${layer.rgb}, ${(0.34 * (1 - pulse) * agentAlpha(input, layer.id)).toFixed(3)})`,
+          1.1,
         );
       }
     }
-  });
+  }
 }
 
 /* ---------------- particles ---------------- */
@@ -330,7 +546,8 @@ function paintWorkers(input: DrawInput): void {
 function paintParticles(input: DrawInput): void {
   const { ctx, hoverId, dim, matches } = input;
   const near = hoverId ? input.neighbours.get(hoverId) : undefined;
-  const halo = input.running ? (input.now % HALO_MS) / HALO_MS : null;
+  const halo =
+    input.running && !input.reduced ? (input.now % HALO_MS) / HALO_MS : null;
 
   for (const particle of input.field.particles) {
     if (particle.x === undefined || particle.y === undefined) continue;
@@ -431,6 +648,37 @@ function ring(
   ctx.lineWidth = width;
   ctx.strokeStyle = stroke;
   ctx.stroke();
+}
+
+/** One agent's wedge of a shared ring. */
+function arc(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  from: number,
+  to: number,
+  stroke: string,
+  width: number,
+): void {
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(0.5, r), from, to);
+  ctx.lineWidth = width;
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+}
+
+function disc(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  fill: string,
+): void {
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(0.5, r), 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
 }
 
 /* ---------------- labels ---------------- */

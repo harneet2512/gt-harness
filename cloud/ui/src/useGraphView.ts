@@ -26,11 +26,12 @@ import {
 } from "./trail";
 import {
   agentLabel,
-  hueFor,
-  workerList,
+  agentRows,
+  agentState,
   type WorkerActivity,
   type WorkerState,
 } from "./workers";
+import { presenceOf, repoFit, type RepoFit } from "./agentField";
 
 /** How often a settled layout is written back to localStorage. */
 const LAYOUT_SAVE_MS = 5000;
@@ -87,6 +88,12 @@ export interface GraphView {
   positionId: string | null;
   /** One per worker agent, in spawn order, each in its own colour. */
   workerTrails: readonly WorkerTrail[];
+  /**
+   * Particle id → the agents standing on it, in trail order. The painter
+   * splits a particle's ring between them, so two agents on one file are
+   * both visible rather than one quietly overdrawing the other.
+   */
+  agentPresence: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
@@ -100,10 +107,14 @@ export interface WorkerTrail {
   no: number;
   task: string;
   status: WorkerState["status"];
+  /** The state in that agent's own vocabulary: `running`, `working`, … */
+  state: string;
   /** True for an agent we watch but do not run. Same field, same hue. */
   isExternal: boolean;
   /** `claude-code` / `codex`, for the chip. Null for a worker of ours. */
   kind: string | null;
+  /** 0 for a top-level agent, 1 for a subagent drawn under its parent. */
+  depth: 0 | 1;
   /** `r, g, b` for the canvas, and the same colour as CSS for the chip. */
   rgb: string;
   css: string;
@@ -113,6 +124,15 @@ export interface WorkerTrail {
   /** Every particle this worker touched — what "isolate" narrows to. */
   ids: ReadonlySet<string>;
   steps: number;
+  /**
+   * How much of what this agent says it touched exists on this map. An
+   * external agent may be running in a different checkout entirely, in
+   * which case none of its paths resolve and the honest thing to draw is
+   * a sentence, not a dead hue. See `repoFit`.
+   */
+  fit: RepoFit;
+  /** Shorthand for `fit.outside`, which is what the chip and card read. */
+  outsideRepo: boolean;
 }
 
 /**
@@ -354,14 +374,21 @@ export function useGraphView(input: Input): GraphView {
    * ----------------------------------------------------------------- */
   const workers = chat.workers;
   const workerTrails = useMemo<WorkerTrail[]>(() => {
-    return workerList(workers).map((worker, i) => {
-      const hue = hueFor(i);
+    /* `agentRows` is the same flat spawn order the cards number and colour
+       by, with each subagent drawn under its parent. Taking it here rather
+       than the flat list is what lets the legend show the nesting without
+       inventing a second ordering for the graph to disagree about. */
+    return agentRows(workers).map(({ worker, no, depth, hue }) => {
       const attention = new Map<string, Attention>();
       const trailIds: string[] = [];
       const ids = new Set<string>();
+      /* Every path this agent has *claimed*, whether or not it is here.
+         The denominator of "is this agent even working on our repo". */
+      const claimed: string[] = [...worker.files];
 
       worker.activity.forEach((item, index) => {
         const step = index + 1;
+        for (const path of item.files) claimed.push(path);
         const files = stepFiles(
           worker.isExternal,
           item,
@@ -387,13 +414,17 @@ export function useGraphView(input: Input): GraphView {
         }
       });
 
+      const fit = repoFit(worker.isExternal, claimed, field.resolve);
+
       return {
         id: worker.id,
-        no: i + 1,
+        no,
         task: agentLabel(worker),
         status: worker.status,
+        state: agentState(worker),
         isExternal: worker.isExternal,
         kind: worker.agentKind,
+        depth,
         rgb: hue.rgb,
         css: hue.css,
         trailIds,
@@ -401,9 +432,17 @@ export function useGraphView(input: Input): GraphView {
         positionId: trailIds.length > 0 ? trailIds[trailIds.length - 1] : null,
         ids,
         steps: worker.activity.length,
+        fit,
+        outsideRepo: fit.outside,
       };
     });
   }, [workers, fileIndex, particleId, field]);
+
+  /* Who is standing where, folded once per render rather than per frame. */
+  const agentPresence = useMemo(
+    () => presenceOf(workerTrails),
+    [workerTrails],
+  );
 
   const pickTurn = useCallback((turnId: string) => {
     setPickedTurnId(turnId);
@@ -438,5 +477,6 @@ export function useGraphView(input: Input): GraphView {
     trailIds,
     positionId: view.position ? particleId(view.position) : null,
     workerTrails,
+    agentPresence,
   };
 }

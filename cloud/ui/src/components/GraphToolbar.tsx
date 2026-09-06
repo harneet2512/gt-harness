@@ -1,3 +1,4 @@
+import { agentChip } from "../agentField";
 import type { WorkerTrail } from "../useGraphView";
 
 export interface TurnOption {
@@ -27,6 +28,9 @@ interface Props {
   /** The worker the map is narrowed to, or null for everything at once. */
   isolated: string | null;
   onIsolate: (workerId: string | null) => void;
+  /** The chip under the pointer: a look, not a choice. */
+  hovered: string | null;
+  onHover: (workerId: string | null) => void;
   /** Hide the whole panel. The conversation is the page; this is a detour. */
   onCollapse: () => void;
 }
@@ -58,6 +62,8 @@ export default function GraphToolbar({
   workers,
   isolated,
   onIsolate,
+  hovered,
+  onHover,
   onCollapse,
 }: Props) {
   return (
@@ -119,24 +125,71 @@ export default function GraphToolbar({
           <span className="cap">co-touch</span>
         </span>
         {/* One chip per agent, in the colour its trail is drawn in — a
-            worker of ours or an external one, on the same rule. Click to
-            narrow the map to what that agent touched. */}
-        {workers.map((worker) => (
-          <button
-            type="button"
-            key={worker.id}
-            className={`legend-worker ${isolated === worker.id ? "is-on" : ""}`}
-            style={{ ["--worker-hue" as string]: worker.css }}
-            aria-pressed={isolated === worker.id}
-            title={worker.task || chipLabel(worker)}
-            onClick={() =>
-              onIsolate(isolated === worker.id ? null : worker.id)
-            }
-          >
-            <span className="legend-dot is-worker" />
-            <span className="cap">{chipLabel(worker)}</span>
-          </button>
-        ))}
+            worker of ours or an external one, on the same rule, and a
+            subagent hung off its parent the way the transcript hangs it.
+            Point at one to focus that agent; click to isolate it. */}
+        {workers.map((worker) => {
+          const chip = agentChip(worker);
+          const on = isolated === worker.id;
+          const className = [
+            "legend-worker",
+            on ? "is-on" : "",
+            hovered === worker.id ? "is-near" : "",
+            chip.child ? "is-child" : "",
+            chip.note ? "is-elsewhere" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const hue = { ["--worker-hue" as string]: worker.css };
+          const body = (
+            <>
+              {chip.child && (
+                <span className="legend-nest" aria-hidden="true">
+                  ⎿
+                </span>
+              )}
+              <span className="legend-dot is-worker" />
+              <span className="cap">{chip.text}</span>
+              {chip.note && <span className="cap cap-muted">· {chip.note}</span>}
+            </>
+          );
+
+          /* An agent whose files are not on this map is not an agent doing
+             nothing — but there is nothing here to isolate it to either,
+             and a click that dims every particle at once is precisely the
+             "looks broken" this is meant to replace. So it keeps its hue
+             and its number, says where it is, and is not a button. */
+          if (chip.note) {
+            return (
+              <span
+                key={worker.id}
+                className={className}
+                style={hue}
+                title={chip.title}
+              >
+                {body}
+              </span>
+            );
+          }
+
+          return (
+            <button
+              type="button"
+              key={worker.id}
+              className={className}
+              style={hue}
+              aria-pressed={on}
+              title={chip.title}
+              onClick={() => onIsolate(on ? null : worker.id)}
+              onPointerEnter={() => onHover(worker.id)}
+              onPointerLeave={() => onHover(null)}
+              onFocus={() => onHover(worker.id)}
+              onBlur={() => onHover(null)}
+            >
+              {body}
+            </button>
+          );
+        })}
       </span>
 
       <span className="spacer" />
@@ -176,10 +229,4 @@ export default function GraphToolbar({
       </button>
     </div>
   );
-}
-
-/** `worker 2` for one of ours; the kind for an agent we only watch. */
-function chipLabel(worker: WorkerTrail): string {
-  if (!worker.isExternal) return `worker ${worker.no}`;
-  return worker.kind || "external";
 }

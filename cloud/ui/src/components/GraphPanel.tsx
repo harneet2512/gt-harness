@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { agentMatches, focusAgent } from "../agentField";
 import type { Session } from "../api";
 import { relationsFor } from "../graph";
 import { useDragSize } from "../useDragSize";
@@ -60,12 +61,15 @@ export default function GraphPanel({
   const [fitToken, setFitToken] = useState(0);
   const [zoomK, setZoomK] = useState(1);
   const [search, setSearch] = useState("");
+  /* Pointing at a legend chip focuses that agent; clicking pins it. A
+     hover is a look, so it never survives the pointer leaving, and it
+     never overrides something the reader deliberately isolated. */
+  const [hovered, setHovered] = useState<string | null>(null);
+  const focused = focusAgent(isolated, hovered);
 
   const matches = useMemo(() => {
-    if (isolated) {
-      const worker = view.workerTrails.find((w) => w.id === isolated);
-      if (worker) return worker.ids;
-    }
+    const agent = agentMatches(view.workerTrails, isolated, hovered);
+    if (agent) return agent;
     const query = search.trim().toLowerCase();
     if (!query) return null;
     const out = new Set<string>();
@@ -73,7 +77,7 @@ export default function GraphPanel({
       if (particle.path.toLowerCase().includes(query)) out.add(particle.id);
     }
     return out;
-  }, [search, view.field, isolated, view.workerTrails]);
+  }, [search, view.field, isolated, hovered, view.workerTrails]);
 
   const inspected = inspectedId
     ? (view.field.byId.get(inspectedId) ?? null)
@@ -138,6 +142,8 @@ export default function GraphPanel({
         workers={view.workerTrails}
         isolated={isolated}
         onIsolate={onIsolate}
+        hovered={hovered}
+        onHover={setHovered}
         onCollapse={onCollapse}
       />
 
@@ -158,6 +164,8 @@ export default function GraphPanel({
             labels={labels}
             trailIds={view.trailIds}
             workerTrails={view.workerTrails}
+            presence={view.agentPresence}
+            focusAgent={focused}
             animateWorkers={view.live}
             trailToken={`${view.selectedTurnId ?? ""}|${
               view.live ? "live" : "scrub"

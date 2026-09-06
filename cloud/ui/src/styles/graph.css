@@ -172,8 +172,13 @@
   cursor: pointer;
 }
 .legend-worker:hover,
+.legend-worker.is-near,
 .legend-worker.is-on {
   border-color: var(--worker-hue);
+}
+/* Isolated is a state you chose, so it reads heavier than a hover. */
+.legend-worker.is-on {
+  background: color-mix(in srgb, var(--worker-hue) 12%, transparent);
 }
 .legend-worker .cap {
   color: var(--worker-hue);
@@ -181,4 +186,30 @@
 .legend-dot.is-worker {
   background: var(--worker-hue);
   border-color: var(--worker-hue);
+}
+
+/* A subagent hangs off the agent before it, the same glyph the transcript
+   uses for a line that belongs to the line above it. */
+.legend-nest {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  margin-right: -1px;
+}
+
+/* An agent whose files are nowhere on this map: the hue stays — it is
+   still that agent — but the dot is hollow, because there is nothing of
+   its work here to point at. */
+.legend-worker.is-elsewhere {
+  cursor: default;
+}
+.legend-worker.is-elsewhere:hover {
+  border-color: transparent;
+}
+.legend-worker.is-elsewhere .legend-dot.is-worker {
+  background: none;
+}
+.legend-worker.is-elsewhere .cap-muted {
+  color: var(--muted);
 }

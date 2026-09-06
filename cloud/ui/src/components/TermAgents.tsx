@@ -1,3 +1,4 @@
+import { OUTSIDE_REPO } from "../agentField";
 import { formatDuration, formatTokens, truncate } from "../format";
 import {
   fleetMark,
@@ -16,6 +17,12 @@ interface Props {
   root: RootLine | null;
   /** Narrow the graph to one agent. Omitted where there is no graph. */
   onFocus?: (agentId: string) => void;
+  /**
+   * Agents whose files are not on this graph at all — see `repoFit`. They
+   * say so in place of their state, and they are not offered a focus that
+   * could only narrow the map to nothing.
+   */
+  outside?: ReadonlySet<string>;
 }
 
 /**
@@ -36,7 +43,7 @@ interface Props {
  * now. It changes length constantly, so it is clipped and never wrapped:
  * the row's height is fixed and nothing below it may move as it updates.
  */
-export default function TermAgents({ lines, root, onFocus }: Props) {
+export default function TermAgents({ lines, root, onFocus, outside }: Props) {
   return (
     <section className="agents" aria-label="agents">
       <Call tool="Agents" arg={String(lines.length)} />
@@ -60,25 +67,28 @@ export default function TermAgents({ lines, root, onFocus }: Props) {
 
       {lines.length === 0 && <Cont tone="dim">{NO_AGENTS}</Cont>}
 
-      {lines.map((line) => (
-        <Cont key={line.id} tone="dim">
-          <Row
-            depth={line.depth}
-            mark={fleetMark(line.state)}
-            hue={line.hue.css}
-            name={`${line.no} ${line.kind}${
-              line.collapsed > 0 ? ` (+${line.collapsed})` : ""
-            }`}
-            doing={line.doing || line.label}
-            state={line.state}
-            steps={line.steps}
-            elapsed={line.elapsed}
-            tokens={line.tokens}
-            file={line.file}
-            onFocus={onFocus ? () => onFocus(line.id) : undefined}
-          />
-        </Cont>
-      ))}
+      {lines.map((line) => {
+        const elsewhere = outside?.has(line.id) === true;
+        return (
+          <Cont key={line.id} tone="dim">
+            <Row
+              depth={line.depth}
+              mark={fleetMark(line.state)}
+              hue={line.hue.css}
+              name={`${line.no} ${line.kind}${
+                line.collapsed > 0 ? ` (+${line.collapsed})` : ""
+              }`}
+              doing={line.doing || line.label}
+              state={elsewhere ? `${line.state} · ${OUTSIDE_REPO}` : line.state}
+              steps={line.steps}
+              elapsed={line.elapsed}
+              tokens={line.tokens}
+              file={line.file}
+              onFocus={onFocus && !elsewhere ? () => onFocus(line.id) : undefined}
+            />
+          </Cont>
+        );
+      })}
 
       {lines.length > 0 && (
         <ContMore>

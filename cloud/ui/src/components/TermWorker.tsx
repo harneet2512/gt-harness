@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { OUTSIDE_REPO } from "../agentField";
 import { filesLine } from "../external";
 import { shortSha, truncate } from "../format";
 import {
@@ -29,6 +30,12 @@ interface Props {
   onApply: () => void;
   /** Narrow the graph to what this agent touched. */
   onFocus?: () => void;
+  /**
+   * This agent has said which files it is in, and not one of them is a
+   * particle on our graph — it is working in a different checkout. The
+   * card says so rather than showing a trail that is silently empty.
+   */
+  outsideRepo?: boolean;
 }
 
 /**
@@ -61,6 +68,7 @@ export default function TermWorker({
   canApply,
   onApply,
   onFocus,
+  outsideRepo = false,
 }: Props) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -160,6 +168,19 @@ export default function TermWorker({
           not run: the files, in the order it last touched them. */}
       {seen.length > 0 && <Cont tone="dim">{filesLine(seen, 2)}</Cont>}
 
+      {/* …and where that is, when it is not here. An external agent may be
+          running against a different checkout entirely, in which case none
+          of its paths resolve to a particle and its hue would otherwise sit
+          on the map doing nothing at all. */}
+      {outsideRepo && (
+        <ContMore>
+          <span className="dim">
+            {OUTSIDE_REPO} — none of these files are in this session&apos;s
+            checkout, so nothing of this agent&apos;s work is on the graph
+          </span>
+        </ContMore>
+      )}
+
       {worker.reply && (
         <Cont tone={worker.status === "applied" ? "ok" : ""}>
           {truncate(worker.reply, 220)}
@@ -189,7 +210,7 @@ export default function TermWorker({
               </button>
             )
           )}{" "}
-          {seen.length > 0 && onFocus && (
+          {seen.length > 0 && !outsideRepo && onFocus && (
             <button
               type="button"
               className="bracket"

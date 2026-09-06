@@ -90,6 +90,12 @@ interface Props {
   onApplyWorker: (workerId: string) => void;
   /** Narrow the graph to one agent — the `[focus]` on a card and a row. */
   onFocusAgent: (agentId: string) => void;
+  /**
+   * Agents that have said where they are working and whose files are not
+   * on this graph at all — a Claude Code or Codex session on a different
+   * checkout. Their cards say so; see `repoFit`.
+   */
+  outsideRepo: ReadonlySet<string>;
   /** `/settings`, drawn in the transcript rather than over it. */
   settingsOpen: boolean;
   prefs: Prefs;
@@ -133,6 +139,7 @@ export default function Conversation({
   canApply,
   onApplyWorker,
   onFocusAgent,
+  outsideRepo,
   settingsOpen,
   prefs,
   onPrefs,
@@ -281,6 +288,7 @@ export default function Conversation({
                   lines={lines}
                   root={fleetRoot}
                   onFocus={onFocusAgent}
+                  outside={outsideRepo}
                 />
               );
             }
@@ -328,6 +336,7 @@ export default function Conversation({
               canApply={canApply}
               onApply={() => onApplyWorker(row.worker.id)}
               onFocus={() => onFocusAgent(row.worker.id)}
+              outsideRepo={outsideRepo.has(row.worker.id)}
             />
           ))}
 
