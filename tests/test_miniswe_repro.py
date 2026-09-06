@@ -846,3 +846,39 @@ def test_duplicated_terminal_row_is_rejected(tmp_path):
     assert receipt["valid"] is False
     assert any("multiple provider terminals" in issue
                for issue in receipt["issues"])
+
+
+def test_seam_replaced_after_install_is_named_not_inferred(tmp_path):
+    """Terminal capture shares model._query with GT's own runtime hooks.
+
+    Installing in the wrong order replaces this hook silently: request rows
+    keep arriving from the surviving prepare hook, terminals stop, and the
+    ledger reports N orphaned requests - a true symptom that points at the
+    provider instead of at the seam.
+    """
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "before"}])
+    assert observer.receipt()["valid"] is True
+
+    model._query = FakeModel._query.__get__(model, FakeModel)  # a later hook wins
+    receipt = observer.receipt()
+    assert receipt["valid"] is False
+    assert any("seam replaced after install: _query" in issue
+               for issue in receipt["issues"])
+
+
+def test_intact_seams_raise_no_issue(tmp_path):
+    """The positive case: without it the negative above proves nothing."""
+    model = FakeModel()
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.install(model)
+    model.query([{"role": "user", "content": "task"}])
+    assert observer.receipt()["issues"] == []

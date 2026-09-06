@@ -111,6 +111,8 @@ class RunReceiptObserver:
         self._installed_model: Any | None = None
         self._original_prepare: Any | None = None
         self._original_transport: Any | None = None
+        self._installed_prepare: Any | None = None
+        self._installed_transport: Any | None = None
 
     def _append(self, event: str, **payload: Any) -> None:
         row = {
@@ -264,8 +266,10 @@ class RunReceiptObserver:
             self._record_response(result)
             return result
 
-        model._prepare_messages_for_api = MethodType(prepare_messages, model)
-        model._query = MethodType(send_transport, model)
+        self._installed_prepare = MethodType(prepare_messages, model)
+        self._installed_transport = MethodType(send_transport, model)
+        model._prepare_messages_for_api = self._installed_prepare
+        model._query = self._installed_transport
         # A model mismatch is now raised from inside the retry loop. Without
         # this it would be retried up to ten times - ten billed calls and ten
         # request/failure pairs - before reaching the caller. Shadowed on the
@@ -275,9 +279,30 @@ class RunReceiptObserver:
             model.abort_exceptions = [*aborts, ResearchModelMismatch]
         model._research_receipt_observer = self
 
+    def _seam_issues(self) -> list[str]:
+        """Name a seam that was replaced after installation.
+
+        Terminal capture lives on model._query, which GT's runtime hooks also
+        wrap. Installing in the wrong order would replace this hook and the
+        ledger would lose every terminal row - surfacing downstream as N
+        requests lacking terminals, a true symptom pointing at the wrong
+        cause. Say which seam went instead of leaving a reader to infer it.
+        """
+        model = self._installed_model
+        if model is None:
+            return []
+        return [
+            f"provider receipt seam replaced after install: {name}"
+            for name, installed in (
+                ("_prepare_messages_for_api", self._installed_prepare),
+                ("_query", self._installed_transport),
+            )
+            if installed is not None and getattr(model, name, None) != installed
+        ]
+
     def receipt(self) -> dict[str, Any]:
         payload = self.events_path.read_bytes() if self.events_path.exists() else b""
-        issues: list[str] = []
+        issues: list[str] = self._seam_issues()
         requests: dict[str, dict[str, Any]] = {}
         terminals: set[str] = set()
         try:
