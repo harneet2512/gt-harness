@@ -119,6 +119,16 @@ WORKER_ROLE = "worker"
 EXTERNAL_ROLE = "external"
 #: how many live workers one session may have at a time
 DEFAULT_MAX_WORKERS_PER_SESSION = 4
+#: how many live EXTERNAL agents one session may have. A separate ceiling from
+#: the worker one on purpose: a worker costs a clone, a container and a turn
+#: slot, so four is generous; an external agent costs a row, and one Claude
+#: Code session with a dozen subagents is the case this feature exists for.
+#: It is still a ceiling, because the ingest token can now create children and
+#: a leaked one must not be able to fan out without bound.
+DEFAULT_MAX_EXTERNAL_AGENTS_PER_SESSION = 32
+#: how deep the external agent tree may go below a root agent. Two, matching
+#: what the fleet list renders: a root, its subagents, and theirs. A chain
+#: nobody can see is not a feature, it is a leak with a nice name.
 #: how many WORKER turns may run at once, across the whole deployment.
 #:
 #: Worker turns used to draw from ``MAX_CONCURRENT_SESSIONS`` (default 3), the
@@ -130,6 +140,7 @@ DEFAULT_MAX_WORKERS_PER_SESSION = 4
 #: thread via ``asyncio.to_thread`` — the *admission counter* was the whole
 #: limit.
 DEFAULT_MAX_CONCURRENT_WORKER_TURNS = 4
+MAX_EXTERNAL_AGENT_DEPTH = 2
 #: how many ingest events one external agent may push per minute. Over it,
 #: the surplus is DROPPED and the response says how many were taken: a 500 (or
 #: a 429) would make a chatty adapter retry the whole batch and cost more.
@@ -164,6 +175,18 @@ def max_workers_per_session() -> int:
     return _positive_int_env(
         "MAX_WORKERS_PER_SESSION", DEFAULT_MAX_WORKERS_PER_SESSION
     ) or DEFAULT_MAX_WORKERS_PER_SESSION
+
+
+def max_external_agents_per_session() -> int:
+    """Live external agents one session may have.
+
+    ``MAX_EXTERNAL_AGENTS_PER_SESSION``; counted over agents that are not
+    closed or failed, which is the number a token could actually create,
+    because an ingest token cannot close anything.
+    """
+    return _positive_int_env(
+        "MAX_EXTERNAL_AGENTS_PER_SESSION", DEFAULT_MAX_EXTERNAL_AGENTS_PER_SESSION
+    ) or DEFAULT_MAX_EXTERNAL_AGENTS_PER_SESSION
 
 
 def max_concurrent_worker_turns() -> int:
@@ -1221,6 +1244,23 @@ class SessionManager:
                 raise ExternalAgentRefused(
                     "parent_agent_id must name an external agent of this session"
                 )
+            depth = await self._external_depth(owner) + 1
+            if depth > MAX_EXTERNAL_AGENT_DEPTH:
+                raise ExternalAgentLimit(
+                    f"an external agent may nest at most "
+                    f"{MAX_EXTERNAL_AGENT_DEPTH} levels below its root"
+                )
+        cap = max_external_agents_per_session()
+        live = [
+            child for child in await self._store.list_children(parent_id)
+            if str(child.get("role") or "") == EXTERNAL_ROLE
+            and str(child["status"]) not in {"closed", "failed"}
+        ]
+        if len(live) >= cap:
+            raise ExternalAgentLimit(
+                f"a session may have at most {cap} live external agents "
+                f"(MAX_EXTERNAL_AGENTS_PER_SESSION)"
+            )
         agent_id = await self._store.create_session(
             repo=str(parent["repo"]),
             ref=str(parent["ref"]),
@@ -1256,6 +1296,27 @@ class SessionManager:
         if row is None:  # pragma: no cover - the insert just succeeded
             raise ExternalAgentRefused("the agent row disappeared")
         return row
+
+    async def _external_depth(self, agent: dict) -> int:
+        """How far below its root ``agent`` sits. A root is 0.
+
+        The walk is bounded rather than trusting the chain to be a tree: the
+        rows are written by this server, but a bounded walk costs nothing and
+        a cycle would otherwise hang a request instead of refusing it.
+        """
+        depth = 0
+        current = agent
+        for _ in range(MAX_EXTERNAL_AGENT_DEPTH + 1):
+            nested = str(current.get("parent_agent_id") or "")
+            if not nested:
+                return depth
+            row = await self._store.get_session(nested)
+            if row is None:
+                return depth
+            depth += 1
+            current = row
+        # deeper than we are willing to walk: deep enough to refuse
+        return depth + 1
 
     async def ingest_external_events(self, agent: dict, events: list) -> int:
         """Mirror an external agent's own events onto its parent's stream.
@@ -2270,6 +2331,10 @@ class ConcurrencyLimit(RuntimeError):
 
 class ExternalAgentRefused(RuntimeError):
     """An external agent cannot be registered, or cannot be talked to."""
+
+
+class ExternalAgentLimit(ExternalAgentRefused):
+    """A session's external agent tree is as wide, or as deep, as it may be."""
 
 
 class ApplyRefused(RuntimeError):

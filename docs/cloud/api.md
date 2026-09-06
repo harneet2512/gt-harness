@@ -301,6 +301,52 @@ The same thing as closing the worker directly. Returns the worker's `Session`.
 
 ---
 
+## External agents
+
+Agents we do **not** run: a local Claude Code or Codex session that registers
+itself and pushes its own events at us. See
+[external-agents.md](external-agents.md) for the full contract; the route
+below is the one a *registered agent* uses, and it is authenticated by that
+agent's ingest token rather than by a signed-in user.
+
+### `POST /api/external-agents/{agent_id}/children` — 201
+
+Registers a subagent **of the calling agent**. Auth is
+`Authorization: Bearer <ingest_token>` — the agent's own, from its
+registration — and **not** the user's JWT or session cookie.
+
+```json
+{"agent_kind": "claude-code", "label": "Explore subagent",
+ "task": "find where VALUE is defined", "cwd": "/home/me/work/repo"}
+```
+
+The body is `ExternalAgentCreate` **minus `parent_agent_id`**: the parent is
+the token's own agent and cannot be named, so a token can create children
+under itself, in its own session, or nowhere. The response is the same
+`ExternalAgentRegistered` shape as the user-authed registration route — the
+child's own `Session`, its own `ingest_token` and its own `ingest_url` — so a
+subagent is a first-class agent with a scoped credential rather than one
+sharing its parent's.
+
+```json
+{"agent": { }, "ingest_token": "eyJ...", "ingest_url": "https://.../events"}
+```
+
+This exists because the browser holds an httpOnly cookie: the UI cannot hand a
+local agent the user's own JWT, and should not. Without it the `/connect`
+button could register a root agent and nothing under it, so nesting worked in
+the documented `GT_CLOUD_TOKEN` setup and silently did not from the button.
+
+| Status | When |
+|---|---|
+| 201 | Created, parented to the caller, in the caller's session. |
+| 401 | No ingest token, a user JWT, a `link`-scoped token, or a token whose `aid` is not this `agent_id`. |
+| 404 | No such external agent. |
+| 409 | The calling agent is closed; the session is `closed`/`failed`; over `MAX_EXTERNAL_AGENTS_PER_SESSION` (default 32) live agents; or deeper than 2 levels below the root agent. |
+| 422 | `agent_kind` outside `[a-z0-9-]{1,32}`, a blank `label`, or an oversized field. |
+
+---
+
 ## Workspace views
 
 ### `GET /api/sessions/{id}/diff` — 200

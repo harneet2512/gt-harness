@@ -129,6 +129,23 @@ def _wait_worker_idle(h: Harness, worker_id: str) -> dict:
     return _wait_status(h, worker_id, {"idle"}, timeout=POLL_TIMEOUT)
 
 
+def _wait_creations_settled(timeout: float = POLL_TIMEOUT) -> None:
+    """Block until no creation slot is still held.
+
+    ``_create_idle`` returns the moment the ROW says ``idle``, which is a
+    little before ``_create_blocking`` reaches its ``finally`` and hands the
+    creation slot back — the slot covers the whole creation on purpose,
+    indexing and opening turn included. A spawn that asks for the WHOLE pool
+    is the one caller that can tell those two instants apart, so it is the one
+    caller that has to wait for them to be the same.
+    """
+    manager = chat.deps.get_manager()
+    deadline = time.monotonic() + timeout
+    while manager.creating_count and time.monotonic() < deadline:
+        time.sleep(POLL_INTERVAL)
+    assert manager.creating_count == 0, "a creation slot was never released"
+
+
 def _wait_report(h: Harness, worker_id: str) -> dict:
     """The worker row, once its report has landed on it."""
     deadline = time.monotonic() + POLL_TIMEOUT
@@ -445,6 +462,7 @@ def test_a_spawn_over_the_creation_cap_creates_nothing(harness: Harness) -> None
     """
     harness.set_script(list(DEFAULT_SCRIPT))
     parent_id = _create_idle(harness)
+    _wait_creations_settled()
     free = runner_module.DEFAULT_MAX_CONCURRENT_CREATIONS - 1
     harness.hold_worker()
     try:
@@ -608,6 +626,7 @@ def test_a_parents_workers_think_at_the_same_time(
     monkeypatch.setattr(manager, "_max_concurrent", 1, raising=False)
     harness.set_script([_reply("nothing to change.")])
     parent_id = _create_idle(harness)
+    _wait_creations_settled()
     # every model built from here on stops inside its first call
     harness.block_model_at(1)
 
@@ -662,6 +681,7 @@ def test_a_full_spawn_is_accepted_on_stock_defaults(harness: Harness) -> None:
     """
     harness.set_script([_reply("nothing to do.")])
     parent_id = _create_idle(harness)
+    _wait_creations_settled()
 
     workers = _spawn_ok(harness, parent_id, *[f"task {i}" for i in range(4)])
 

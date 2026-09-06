@@ -304,16 +304,20 @@ def _clip_files(files: list[str] | None) -> list[str] | None:
     ]
 
 
-class ExternalAgentCreate(BaseModel):
-    """``POST /api/sessions/{id}/external-agents`` — register, never execute."""
+class ExternalChildCreate(BaseModel):
+    """``POST /api/external-agents/{id}/children`` — a subagent of the caller.
+
+    The same body as :class:`ExternalAgentCreate` minus ``parent_agent_id``,
+    which is not a parameter here: the parent IS the token's own agent. A
+    token that could name its own parent could graft a card anywhere in the
+    tree, and the token is the only thing this route authenticates.
+    """
 
     agent_kind: str = Field(..., max_length=MAX_AGENT_KIND_CHARS)
     label: str = Field(..., max_length=MAX_AGENT_LABEL_CHARS)
     task: str | None = Field(None, max_length=100_000)
     #: the absolute path the agent runs in, as *it* reported it. Display only.
     cwd: str | None = Field(None, max_length=MAX_AGENT_CWD_CHARS)
-    #: the external agent this one is a subagent of, if any
-    parent_agent_id: str | None = Field(None, max_length=64)
 
     @field_validator("agent_kind")
     @classmethod
@@ -329,6 +333,13 @@ class ExternalAgentCreate(BaseModel):
         if not value.strip():
             raise ValueError("label must not be blank")
         return value.strip()
+
+
+class ExternalAgentCreate(ExternalChildCreate):
+    """``POST /api/sessions/{id}/external-agents`` — register, never execute."""
+
+    #: the external agent this one is a subagent of, if any
+    parent_agent_id: str | None = Field(None, max_length=64)
 
 
 class ExternalAgentRegistered(BaseModel):

@@ -27,6 +27,7 @@ from .models import (
     ExternalAgentCreate,
     ExternalAgentFinish,
     ExternalAgentRegistered,
+    ExternalChildCreate,
     IngestAccepted,
     IngestBatch,
     Message,
@@ -46,6 +47,7 @@ from .runner import (
     ApplyConflict,
     ApplyRefused,
     ConcurrencyLimit,
+    ExternalAgentLimit,
     ExternalAgentRefused,
     ModelUnavailable,
     SessionManager,
@@ -367,7 +369,6 @@ async def register_external_agent(
     body: ExternalAgentCreate,
     request: Request,
     store: StoreDep,
-    manager: ManagerDep,
 ) -> dict[str, Any]:
     """Register an agent we do not run, as a child of this session.
 
@@ -381,6 +382,26 @@ async def register_external_agent(
             409,
             f"session is {session['status']} and cannot host external agents",
         )
+    return await _register(
+        request, session, body, parent_agent_id=body.parent_agent_id
+    )
+
+
+async def _register(
+    request: Request,
+    session: dict,
+    body: ExternalChildCreate,
+    *,
+    parent_agent_id: str | None,
+) -> dict[str, Any]:
+    """Register one external agent and hand back its own scoped credential.
+
+    Both doors come through here — the user-authed one and the ingest-token
+    one — so a child is a first-class agent with a token of its own rather
+    than something that shares its parent's.
+    """
+    manager = get_manager()
+    session_id = str(session["id"])
     try:
         agent = await manager.register_external_agent(
             session,
@@ -388,8 +409,11 @@ async def register_external_agent(
             label=body.label,
             task=body.task,
             cwd=body.cwd,
-            parent_agent_id=body.parent_agent_id,
+            parent_agent_id=parent_agent_id,
         )
+    except ExternalAgentLimit as exc:
+        # A ceiling, not a malformed request: 409, never a 500.
+        raise HTTPException(409, str(exc)) from exc
     except ExternalAgentRefused as exc:
         raise HTTPException(400, str(exc)) from exc
     agent_id = str(agent["id"])
@@ -473,6 +497,40 @@ async def ingest_external_events(
     batch = await _ingest_batch(request)
     accepted = await manager.ingest_external_events(agent, batch.events)
     return {"accepted": accepted}
+
+
+@external_router.post(
+    "/external-agents/{agent_id}/children",
+    response_model=ExternalAgentRegistered,
+    status_code=201,
+)
+async def register_external_child(
+    agent_id: str,
+    body: ExternalChildCreate,
+    request: Request,
+    store: StoreDep,
+    _claims: IngestDep,
+) -> dict[str, Any]:
+    """Register a subagent OF the calling agent, on the calling agent's token.
+
+    This is what makes the ``/connect`` button able to draw a tree at all. The
+    browser holds an httpOnly cookie, so the UI cannot hand a local agent the
+    user's own JWT — and should not — which left the user-authed registration
+    route usable only by somebody who had already been given a server-side
+    token out of band. Nesting therefore worked in the documented setup and
+    silently did not from the button.
+
+    The parent is the token's own agent and cannot be named: a token creates
+    children under itself, in its own session, or nowhere.
+    """
+    agent = await _require_external_agent(store, agent_id)
+    session = await _require_session(store, str(agent.get("parent_id") or ""))
+    if session["status"] in _CLOSED_TO_EXTERNAL:
+        raise HTTPException(
+            409,
+            f"session is {session['status']} and cannot host external agents",
+        )
+    return await _register(request, session, body, parent_agent_id=agent_id)
 
 
 @external_router.post(

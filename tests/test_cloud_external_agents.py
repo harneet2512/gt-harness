@@ -808,3 +808,177 @@ def test_an_external_agent_never_runs_a_turn(harness: Harness) -> None:
     assert response.status_code == 409, response.text
     assert "does not run turns" in response.json()["detail"]
     assert harness.models == {} and harness.agents == {}
+
+
+# --------------------------------------------------------------------------
+# 7: a token can create its own children (the /connect tree)
+# --------------------------------------------------------------------------
+def _child(h: Harness, agent_id: str, token: str, **body: Any):
+    payload = {"agent_kind": "claude-code", "label": "subagent"}
+    payload.update(body)
+    return h.client.post(
+        f"/api/external-agents/{agent_id}/children",
+        json=payload,
+        headers=_ingest_headers(token),
+    )
+
+
+def test_an_agent_creates_its_own_subagent_with_its_own_token(
+    harness: Harness,
+) -> None:
+    """The browser holds an httpOnly cookie, so the token is the only door.
+
+    Without this route the ``/connect`` flow could register a root agent and
+    nothing under it: nesting worked for whoever had a server-side JWT and
+    silently did not for anyone who used the button.
+    """
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id, label="Claude Code")
+    root_id, root_token = root["agent"]["id"], root["ingest_token"]
+
+    response = _child(
+        harness, root_id, root_token, label="Explore subagent", task="find it"
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    child = body["agent"]
+    assert child["parent_agent_id"] == root_id
+    assert child["parent_id"] == parent_id, "same session as the caller"
+    assert child["role"] == "external" and child["status"] == "running"
+    assert child["label"] == "Explore subagent" and child["task"] == "find it"
+
+    # its own scoped token, not a share of its parent's
+    assert body["ingest_token"] != root_token
+    assert body["ingest_url"].endswith(
+        f"/api/external-agents/{child['id']}/events"
+    )
+    assert _ingest_ok(
+        harness, child["id"], body["ingest_token"],
+        {"type": "assistant", "text": "found it"},
+    ) == 1
+
+    frames = _read_sse(
+        harness, parent_id, until=_has("agent_spawned", worker_id=child["id"])
+    )
+    spawned = [
+        s for s in _payloads(frames, "agent_spawned")
+        if s["worker_id"] == child["id"]
+    ][0]
+    assert spawned["external"] is True and spawned["parent_agent_id"] == root_id
+
+
+def test_a_childs_token_cannot_act_as_its_parent(harness: Harness) -> None:
+    """Every agent's token is scoped to that agent, parent or not."""
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id)
+    child = _child(harness, root["agent"]["id"], root["ingest_token"]).json()
+
+    posted = _ingest(
+        harness,
+        root["agent"]["id"],
+        child["ingest_token"],
+        {"type": "assistant", "text": "I am my parent"},
+    )
+    grafted = _child(harness, root["agent"]["id"], child["ingest_token"])
+
+    assert posted.status_code == 401, posted.text
+    assert grafted.status_code == 401, grafted.text
+    assert "different agent" in grafted.json()["detail"]
+
+
+def test_a_token_cannot_create_a_child_under_another_agent(
+    harness: Harness,
+) -> None:
+    parent_id = _create_idle(harness)
+    mine = _registered(harness, parent_id, label="mine")
+    theirs = _registered(harness, parent_id, label="theirs")
+
+    response = _child(harness, theirs["agent"]["id"], mine["ingest_token"])
+
+    assert response.status_code == 401, response.text
+    assert len(_agents(harness, parent_id)) == 2, "nothing was created"
+
+
+def test_the_tree_is_capped_at_two_levels_below_the_root(
+    harness: Harness,
+) -> None:
+    """A chain nobody can render is a leak with a nice name."""
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id, label="root")
+
+    first = _child(harness, root["agent"]["id"], root["ingest_token"]).json()
+    second = _child(harness, first["agent"]["id"], first["ingest_token"])
+    assert second.status_code == 201, second.text
+    grandchild = second.json()
+
+    too_deep = _child(
+        harness, grandchild["agent"]["id"], grandchild["ingest_token"]
+    )
+
+    assert too_deep.status_code == 409, too_deep.text
+    assert "levels below its root" in too_deep.json()["detail"]
+    assert len(_agents(harness, parent_id)) == 3
+    assert runner_module.MAX_EXTERNAL_AGENT_DEPTH == 2
+
+
+def test_a_token_cannot_fan_out_without_bound(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAX_EXTERNAL_AGENTS_PER_SESSION", "3")
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id, label="root")
+    root_id, token = root["agent"]["id"], root["ingest_token"]
+    assert _child(harness, root_id, token, label="one").status_code == 201
+    assert _child(harness, root_id, token, label="two").status_code == 201
+
+    refused = _child(harness, root_id, token, label="three")
+
+    assert refused.status_code == 409, refused.text
+    assert "MAX_EXTERNAL_AGENTS_PER_SESSION" in refused.json()["detail"]
+    assert len(_agents(harness, parent_id)) == 3
+    assert runner_module.DEFAULT_MAX_EXTERNAL_AGENTS_PER_SESSION == 32
+
+
+def test_a_closed_caller_cannot_create_children(harness: Harness) -> None:
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id)
+    root_id, token = root["agent"]["id"], root["ingest_token"]
+    harness.client.post(
+        f"/api/sessions/{parent_id}/agents/{root_id}/close", headers=harness.auth
+    )
+
+    response = _child(harness, root_id, token)
+
+    assert response.status_code == 409, response.text
+    assert len(_agents(harness, parent_id)) == 1
+
+
+def test_a_closed_session_cannot_take_children_either(harness: Harness) -> None:
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id)
+    root_id, token = root["agent"]["id"], root["ingest_token"]
+    harness.client.post(f"/api/sessions/{parent_id}/close", headers=harness.auth)
+
+    response = _child(harness, root_id, token)
+
+    assert response.status_code == 409, response.text
+
+
+def test_the_user_authed_route_still_works_unchanged(harness: Harness) -> None:
+    """The new door is an addition, not a replacement."""
+    parent_id = _create_idle(harness)
+    root = _registered(harness, parent_id, label="root")["agent"]
+
+    nested = _registered(
+        harness, parent_id, label="by jwt", parent_agent_id=root["id"]
+    )["agent"]
+
+    assert nested["parent_agent_id"] == root["id"]
+    # ...and the children route is still not open to the user's own JWT
+    by_jwt = harness.client.post(
+        f"/api/external-agents/{root['id']}/children",
+        json={"agent_kind": "codex", "label": "nope"},
+        headers=harness.auth,
+    )
+    assert by_jwt.status_code == 401, by_jwt.text
