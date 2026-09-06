@@ -642,3 +642,20 @@ storage does not.
 > the public URL 302s to GitHub sign-in. After each deploy run
 > `gh codespace ports visibility 80:public -c <codespace-name>` from a machine
 > with a `codespace`-scoped `gh` login (the codespace's own token lacks it).
+
+## Documentation
+
+The full as-built documentation lives in [`docs/cloud/`](../docs/cloud/):
+
+| Document | What is in it |
+|---|---|
+| [Index and overview](../docs/cloud/README.md) | What the product is, the thesis, and a map of these docs. |
+| [Architecture](../docs/cloud/architecture.md) | Components and boundaries, the session state machine, the turn loop, the event bus, diff snapshots, the file graph, worker agents, GroundTruth, concurrency. |
+| [User guide](../docs/cloud/user-guide.md) | Signing in, the prompt-first landing, steering, stop, workers, the graph, receipts, GT modes, slash commands and keys. |
+| [API reference](../docs/cloud/api.md) | Every REST endpoint and status code, every SSE event and payload field, the schemas, and the auth rules. |
+| [Operations](../docs/cloud/operations.md) | Prerequisites, the OAuth app, every environment variable, `deploy.sh`, Codespaces specifics, images, restart policy, the reaper, quotas, logs, verification and recovery. |
+| [Security](../docs/cloud/security.md) | The threat model as built: what is isolated, what is not, secrets, egress, resource caps, authorisation and the known gaps. |
+| [Testing and CI](../docs/cloud/testing-and-ci.md) | Every suite and what it covers, how to run them, what skips, the CI workflow, live verification and the QA rounds. |
+| [Decisions](../docs/cloud/decisions.md) | The dated decision log, with the commit that carries each one. |
+| [Changelog](../docs/cloud/changelog.md) | Every commit on this branch, grouped by day. |
+| [Known limitations](../docs/cloud/known-limitations.md) | Everything deferred or not done, with the reason and where it lives. |
