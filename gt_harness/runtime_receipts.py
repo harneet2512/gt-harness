@@ -43,6 +43,8 @@ def _validate_delivery_boundaries(deliveries: list[dict]) -> None:
             raise ValueError("duplicate_delivery_identity")
         if len(rows) > MAX_BOUNDARY_CLAIMS:
             raise ValueError("delivery_boundary_claim_limit_exceeded")
+        if sum(int(row.get("context_byte_count") or 0) for row in rows) > TOTAL_DELIVERY_BYTE_LIMIT:
+            raise ValueError("delivery_request_budget_exceeded")
     # The prompt lane's guarantee is RUN-scoped, not decision-scoped: the
     # runtime's _model_visible_delivery_identities is initialised once and
     # never cleared, so byte-identical content reaches the model's prompt at
@@ -60,8 +62,6 @@ def _validate_delivery_boundaries(deliveries: list[dict]) -> None:
     ]
     if len(prompt_identities) != len(set(prompt_identities)):
         raise ValueError("prompt_delivery_repeated_in_run")
-        if sum(int(row.get("context_byte_count") or 0) for row in rows) > TOTAL_DELIVERY_BYTE_LIMIT:
-            raise ValueError("delivery_request_budget_exceeded")
 
 
 def _dense_execution_receipts(events: list[dict]) -> list[dict]:
