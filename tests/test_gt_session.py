@@ -644,7 +644,17 @@ def test_later_execution_supersedes_same_revision_outcome(tmp_path):
     assert '"supersedes":["pass-1"]' in batch.context_additions[0]
 
 
-def _capability_rows(tmp_path, rows):
+def _promoted(edges, *, digest="a" * 64):
+    """A published terminal row plus the receipt blob that quantifies it."""
+    return (
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r0",
+         "artifact_sha256": digest, "artifact_blob": f"lsp_receipts/{digest}.json"},
+        {digest: {"verified": edges, "corrected": 0, "deleted": 0}},
+    )
+
+
+def _capability_rows(tmp_path, rows, blobs=None):
     """Drive _mandatory_capability_rows against a journal written by hand.
 
     Called unbound on purpose. This helper reads only the journal, and the one
@@ -658,8 +668,14 @@ def _capability_rows(tmp_path, rows):
     journal.write_text(
         "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
     )
+    for digest, payload in (blobs or {}).items():
+        blob = tmp_path / "lsp_receipts" / f"{digest}.json"
+        blob.parent.mkdir(parents=True, exist_ok=True)
+        blob.write_text(json.dumps(payload), encoding="utf-8")
     stub = SimpleNamespace(
-        _engine=SimpleNamespace(store=SimpleNamespace(path=str(journal)))
+        _engine=SimpleNamespace(
+            store=SimpleNamespace(path=str(journal), root=tmp_path)
+        )
     )
     return {
         name: (str(state), evidence)
@@ -680,14 +696,15 @@ def test_successful_promotion_is_not_reported_as_a_capability_that_failed(tmp_pa
     not work. The benchmark tap reports through the journal, so that is the
     only record this may read.
     """
+    terminal, blobs = _promoted(3)
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
-        {"event": "lsp_promotion_scheduled", "task_id": "t1"},
-        {"event": "lsp_promotion_terminal", "status": "succeeded",
-         "disposition": "published"},
-    ])
+        {"event": "lsp_promotion_scheduled", "task_id": "t1",
+         "graph_revision": "r0"},
+        terminal,
+    ], blobs)
 
-    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published")
+    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published:3_edges")
     assert rows["dense_retrieval"][0] == "WORKING"
 
 
@@ -759,35 +776,38 @@ def test_a_superseded_enrichment_does_not_override_the_final_one(tmp_path):
     Taking the literal last row would report DEGRADED for a run that promoted -
     the same misreport this whole helper exists to prevent.
     """
+    digest = "b" * 64
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
         {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
         {"event": "lsp_promotion_scheduled", "graph_revision": "r1"},
         {"event": "lsp_promotion_terminal", "status": "succeeded",
-         "disposition": "published", "input_graph_revision": "r1"},
+         "disposition": "published", "input_graph_revision": "r1",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
         {"event": "lsp_promotion_terminal", "status": "cancelled",
          "disposition": "obsolete", "input_graph_revision": "r0"},
-    ])
+    ], {digest: {"verified": 1, "corrected": 1, "deleted": 0}})
 
     assert rows["lsp_promotion"] == (
-        "WORKING", "terminal_succeeded:published:last_of_2"
+        "WORKING", "terminal_succeeded:published:2_edges:last_of_2"
     )
 
 
 def test_repeated_failures_before_a_success_are_not_hidden(tmp_path):
     """One success after several failures must not read as an unblemished run."""
+    terminal, blobs = _promoted(6)
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
         {"event": "lsp_promotion_terminal", "status": "failed",
-         "disposition": "factory_exception"},
+         "disposition": "factory_exception", "input_graph_revision": "r0"},
         {"event": "lsp_promotion_terminal", "status": "failed",
-         "disposition": "certification_failed"},
-        {"event": "lsp_promotion_terminal", "status": "succeeded",
-         "disposition": "published"},
-    ])
+         "disposition": "certification_failed", "input_graph_revision": "r0"},
+        terminal,
+    ], blobs)
 
     assert rows["lsp_promotion"] == (
-        "WORKING", "terminal_succeeded:published:last_of_3"
+        "WORKING", "terminal_succeeded:published:6_edges:last_of_3"
     )
 
 
@@ -871,6 +891,7 @@ def test_agreeing_terminals_do_not_raise_a_count_alarm(tmp_path):
     A bare count fired on every clean multi-edit run, which trains a reader to
     ignore the field. The suffix now marks disagreement, not volume.
     """
+    digest = "c" * 64
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
         {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
@@ -878,7 +899,71 @@ def test_agreeing_terminals_do_not_raise_a_count_alarm(tmp_path):
         {"event": "lsp_promotion_terminal", "status": "succeeded",
          "disposition": "obsolete", "input_graph_revision": "r0"},
         {"event": "lsp_promotion_terminal", "status": "succeeded",
-         "disposition": "published", "input_graph_revision": "r1"},
+         "disposition": "published", "input_graph_revision": "r1",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+    ], {digest: {"verified": 4, "corrected": 0, "deleted": 0}})
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:4_edges"
+    )
+
+
+def test_a_failure_that_never_reached_the_scheduler_is_not_outranked(tmp_path):
+    """factory_exception terminals carry no scheduled row, and must rank newest.
+
+    _schedule_lsp_candidate raises lsp_base_uncertified, unsafe_lsp_source_path
+    and lsp_source_input_mismatch BEFORE it journals lsp_promotion_scheduled,
+    and consider_enrichment converts any such raise into a factory_exception
+    terminal. So the rows with no scheduled row are exactly the failures.
+    Ranking an unknown revision oldest let a healthier earlier revision outrank
+    the news that the factory had started throwing on every graph - a run that
+    broke halfway through reported the state it had before it broke.
+    """
+    terminal, blobs = _promoted(5)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "lsp_promotion_terminal", "status": "failed",
+         "disposition": "factory_exception", "input_graph_revision": "r1"},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == (
+        "FAILED", "terminal_failed:factory_exception:last_of_2"
+    )
+
+
+def test_a_published_graph_with_no_promoted_edges_is_not_working(tmp_path):
+    """Publication is necessary and not sufficient.
+
+    A receipt can return succeeded with verified/corrected/deleted all zero:
+    edge_mutations is 0, the closure is never rebuilt, and the candidate is a
+    semantically identical copy of the base that certifies and publishes
+    cleanly. WORKING there would reproduce the original complaint - an empty
+    highest-precision tier described as healthy - inside the reporter written
+    to catch it.
+    """
+    terminal, blobs = _promoted(0)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+    ], blobs)
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:published:0_edges"
+    )
+
+
+def test_an_unreadable_receipt_blob_is_not_reported_as_success(tmp_path):
+    """"We could not tell" and "it worked" must not look alike here either."""
+    terminal, _ = _promoted(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
     ])
 
-    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published")
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:published:yield_unknown"
+    )

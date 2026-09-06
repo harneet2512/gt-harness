@@ -1172,6 +1172,33 @@ class GTSession:
         store = getattr(self._engine, "store", None)
         journal = getattr(store, "path", None)
 
+        def _promotion_yield(row: dict[str, object]) -> int | None:
+            """Edges the promotion actually added, or None if it cannot be told.
+
+            The journal row carries only status and disposition; the counts
+            that say whether the tier was populated live in the terminal
+            receipt blob _record_lsp_terminal writes beside the journal. None
+            means unreadable, which must not be reported as success - the whole
+            point of this helper is that "we could not tell" and "it worked"
+            do not look alike.
+            """
+            relative = str(row.get("artifact_blob") or "")
+            root = getattr(store, "root", None)
+            if not relative or root is None:
+                return None
+            try:
+                receipt = _json.loads(
+                    (_Path(root) / relative).read_text(encoding="utf-8")
+                )
+            except Exception:  # noqa: BLE001 - an unreadable receipt is unknown
+                return None
+            if not isinstance(receipt, dict):
+                return None
+            return sum(
+                int(receipt.get(key) or 0)
+                for key in ("verified", "corrected", "deleted")
+            )
+
         dense_state = CapabilityState.FAILED
         dense_evidence = "dense_index_receipt_absent"
         lsp_state = CapabilityState.FAILED
@@ -1230,10 +1257,19 @@ class GTSession:
                 # revision describes a graph that has already been replaced.
                 def _recency(row: dict[str, object]) -> int:
                     revision = str(row.get("input_graph_revision") or "")
-                    return (
-                        schedule_order.index(revision)
-                        if revision in schedule_order else -1
-                    )
+                    if revision in schedule_order:
+                        return schedule_order.index(revision)
+                    # An unscheduled revision is NEWER than any scheduled one,
+                    # never older. _schedule_lsp_candidate raises
+                    # lsp_base_uncertified, unsafe_lsp_source_path and
+                    # lsp_source_input_mismatch BEFORE it journals
+                    # lsp_promotion_scheduled, and consider_enrichment turns
+                    # any such raise into a factory_exception terminal - so the
+                    # rows with no scheduled row are exactly the failures. This
+                    # returned -1 first, which ranked them oldest and let a
+                    # healthier earlier revision outrank the news that the
+                    # factory had started throwing on every graph.
+                    return len(schedule_order)
 
                 newest = max(_recency(row) for row in terminals)
                 current = [row for row in terminals if _recency(row) == newest]
@@ -1251,16 +1287,25 @@ class GTSession:
                     lsp_evidence = (
                         f"terminal_{status or 'unknown'}:{disposition or 'none'}"
                     )
-                if len({str(row.get("status") or "") for row in terminals}) > 1:
-                    # Only when the terminals DISAGREE. Every published graph
-                    # gets an enrichment, so a healthy five-edit task produces
-                    # five terminals; a bare count would fire on every clean
-                    # run and train the reader to ignore the field.
-                    lsp_evidence += f":last_of_{len(terminals)}"
                 if disposition == "published":
-                    # The only outcome that actually put promoted edges into
-                    # the graph the agent went on to use.
-                    lsp_state = CapabilityState.WORKING
+                    # Publication is necessary and NOT sufficient. A receipt can
+                    # come back succeeded with verified/corrected/deleted all
+                    # zero: edge_mutations is then 0, the closure is never
+                    # rebuilt, and the candidate is a semantically identical
+                    # copy of the base that certifies and publishes cleanly.
+                    # Reporting WORKING there would reproduce the original
+                    # complaint - an empty highest-precision tier described as
+                    # healthy - inside the reporter built to catch it.
+                    yielded = _promotion_yield(terminal)
+                    if yielded is None:
+                        lsp_state = CapabilityState.DEGRADED
+                        lsp_evidence += ":yield_unknown"
+                    elif yielded > 0:
+                        lsp_state = CapabilityState.WORKING
+                        lsp_evidence += f":{yielded}_edges"
+                    else:
+                        lsp_state = CapabilityState.DEGRADED
+                        lsp_evidence += ":0_edges"
                 elif status == "succeeded":
                     # Promotion worked and the enriched graph never became the
                     # published one - obsolete, obsolete_after_certification or
@@ -1280,6 +1325,12 @@ class GTSession:
                     # failed both mean the highest-precision edge tier is empty
                     # for a reason the run could have prevented.
                     lsp_state = CapabilityState.FAILED
+                if len({str(row.get("status") or "") for row in terminals}) > 1:
+                    # Only when the terminals DISAGREE. Every published graph
+                    # gets an enrichment, so a healthy five-edit task produces
+                    # five terminals; a bare count would fire on every clean
+                    # run and train the reader to ignore the field.
+                    lsp_evidence += f":last_of_{len(terminals)}"
             elif scheduled:
                 lsp_state = CapabilityState.DEGRADED
                 lsp_evidence = "scheduled_no_terminal"
