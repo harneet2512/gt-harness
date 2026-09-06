@@ -579,11 +579,14 @@ export function useSessionData(sessionId: string | null): SessionData {
     [sessionId, loadDiff, loadWorkers],
   );
 
+  /**
+   * Close the session. The confirmation is **not** here: everything else in
+   * this release asks in the transcript, and the one destructive action
+   * opening an OS modal was both off-key and untestable from a headless
+   * client (HAR-84 P2-9). `SynapsePage` asks; this does it.
+   */
   const close = useCallback(() => {
     if (!sessionId) return;
-    if (!window.confirm("Close this session? The workspace is discarded.")) {
-      return;
-    }
     closeSession(sessionId)
       .catch((err: unknown) => setSendError(message(err)))
       .finally(refetchSession);

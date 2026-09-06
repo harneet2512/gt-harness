@@ -34,9 +34,19 @@ export function verbFor(command: string | null | undefined): Verb {
   return "Running";
 }
 
-/** While the workspace is still coming up, the phase is the verb. */
+/**
+ * While the workspace is still coming up, the phase is the verb.
+ *
+ * No frame yet means the session has just been created, and the first thing
+ * a session does is clone — so that is what it says, rather than waiting
+ * for a frame that on a small repo arrives after the clone is already done
+ * (HAR-84 P2-14).
+ */
 export function phaseLine(phase: string | null, repo: string): string {
   switch (phase) {
+    case null:
+    case "":
+    case "creating":
     case "cloning":
       return `Cloning ${repo || "the repository"}…`;
     case "sandbox_starting":

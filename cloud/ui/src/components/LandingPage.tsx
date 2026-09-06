@@ -79,12 +79,15 @@ export default function LandingPage() {
   }, []);
 
   function onCommand({ command, raw }: ParsedSlash) {
+    /* Every command is echoed before whatever it did, exactly as the
+       session page echoes it: an output block with no `>` line above it is
+       output from nowhere (HAR-84 P2-6). */
+    push("user", raw);
     switch (command.name) {
       case "help":
         push("system", helpText());
         break;
       case "settings":
-        push("user", raw);
         setSettingsOpen(true);
         break;
       case "theme": {
@@ -100,7 +103,6 @@ export default function LandingPage() {
         setResumeOpen(true);
         break;
       case "spawn":
-        push("user", raw);
         void spawnHere(raw);
         break;
       default:
@@ -197,7 +199,7 @@ export default function LandingPage() {
       <main className="landing">
         <div className="landing-mid">
           <TermBanner
-            repo={repo ? repoChipLabel(repo.repo, repo.ref ?? "").split("@")[0] : ""}
+            repo={repo?.repo ?? ""}
             gitRef={repo?.ref ?? DEFAULT_REF}
             gtMode={prefs.gtMode}
             model={prefs.model}

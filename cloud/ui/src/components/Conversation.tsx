@@ -1,5 +1,6 @@
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { CAP_REASONS, capLabel, type Session } from "../api";
+import { CAP_REASONS, capLabel, type Receipt, type Session } from "../api";
 import {
   orphanSteering,
   type ChatState,
@@ -10,15 +11,18 @@ import {
   costUntracked,
   formatCost,
   formatDuration,
+  gtCountsLabel,
   repoShort,
   sessionClosedBlurb,
   shortSha,
   turnOutcomeNote,
 } from "../format";
+import { repoChipLabel } from "../repoUrl";
 import type { Prefs } from "../prefs";
 import type { ParsedSlash } from "../slash";
 import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
+import { useSize } from "../useSize";
 import type { WorkerState } from "../workers";
 import Composer from "./Composer";
 import Prose from "./Prose";
@@ -39,6 +43,8 @@ interface Props {
   sessionId: string | null;
   session: Session | null;
   chat: ChatState;
+  /** One per finished turn, keyed by `turn_id` — the GT counts live here. */
+  receipts: readonly Receipt[];
   groups: ThreadGroup[];
   stepsByTurn: Record<string, TrailStep[]>;
   edited: ReadonlySet<string>;
@@ -65,6 +71,9 @@ interface Props {
   /** The first message, typed on the landing page and not yet in the thread. */
   pendingFirst: string | null;
   notes: readonly LocalNote[];
+  /** `/close` is waiting for a yes or a no, in the transcript. */
+  closeAsk: boolean;
+  onCloseAnswer: (confirmed: boolean) => void;
   workers: readonly WorkerState[];
   canApply: boolean;
   onApplyWorker: (workerId: string) => void;
@@ -86,6 +95,7 @@ export default function Conversation({
   sessionId,
   session,
   chat,
+  receipts,
   groups,
   stepsByTurn,
   edited,
@@ -105,6 +115,8 @@ export default function Conversation({
   failureError,
   pendingFirst,
   notes,
+  closeAsk,
+  onCloseAnswer,
   workers,
   canApply,
   onApplyWorker,
@@ -121,6 +133,18 @@ export default function Conversation({
 }: Props) {
   const navigate = useNavigate();
   const scroll = useAutoScroll();
+  /* The composer is a solid block under the scroll area; the transcript
+     keeps that much clear space beneath its last line (HAR-84 P1-5). */
+  const [composerRef, composerSize] = useSize<HTMLDivElement>();
+  const talkRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    talkRef.current?.style.setProperty(
+      "--composer-h",
+      `${Math.round(composerSize.height)}px`,
+    );
+  }, [composerSize.height]);
+
+  const byTurn = new Map(receipts.map((receipt) => [receipt.turn_id, receipt]));
   let turnNo = 0;
 
   const gtMode = String(session?.gt_mode ?? "off");
@@ -141,12 +165,14 @@ export default function Conversation({
 
   const gtLabel =
     gtMode === "off" ? "GT off" : `GT ${gtMode}${gtStatus ? ` (${gtStatus})` : ""}`;
+  /* `owner/name @ ref`, the way the banner and the landing status line
+     write it. One spelling everywhere (HAR-84 P2-11). */
   const statusLine = session
-    ? [`${repo}@${session.ref}`, session.model, gtLabel].join(" · ")
+    ? [repoChipLabel(session.repo, session.ref), session.model, gtLabel].join(" · ")
     : "";
 
   return (
-    <section className="talk">
+    <section className="talk" ref={talkRef}>
       <div className="talk-wrap">
         <div className="talk-scroll" ref={scroll.ref}>
           {sessionStatus === "failed" && failureError && (
@@ -208,6 +234,7 @@ export default function Conversation({
                 no={turnNo}
                 group={group}
                 chat={chat}
+                receipt={byTurn.get(group.turnId) ?? null}
                 steps={steps}
                 edited={edited}
                 selected={selected}
@@ -232,6 +259,28 @@ export default function Conversation({
                 {note.text}
               </Cont>
             ),
+          )}
+
+          {/* The one destructive command asks where every other command
+              answers: in the transcript (HAR-84 P2-9). */}
+          {closeAsk && (
+            <Cont tone="dim">
+              close this session?{" "}
+              <button
+                type="button"
+                className="bracket"
+                onClick={() => onCloseAnswer(true)}
+              >
+                [y]
+              </button>{" "}
+              <button
+                type="button"
+                className="bracket"
+                onClick={() => onCloseAnswer(false)}
+              >
+                [n]
+              </button>
+            </Cont>
           )}
 
           {workers.map((worker, i) => (
@@ -277,6 +326,7 @@ export default function Conversation({
         agents={agentsWorking}
       />
 
+      <div className="composer-measure" ref={composerRef}>
       <Composer
         stopping={stopping}
         locked={locked || !sessionId}
@@ -290,6 +340,7 @@ export default function Conversation({
         onCommand={onCommand}
         onStop={onStop}
       />
+      </div>
     </section>
   );
 }
@@ -310,6 +361,7 @@ function Exchange({
   no,
   group,
   chat,
+  receipt,
   steps,
   edited,
   selected,
@@ -324,6 +376,7 @@ function Exchange({
   no: number;
   group: TurnGroup;
   chat: ChatState;
+  receipt: Receipt | null;
   steps: TrailStep[];
   edited: ReadonlySet<string>;
   selected: boolean;
@@ -402,6 +455,10 @@ function Exchange({
             cost: turn?.cost ?? null,
             patch: reply?.meta.patch_sha256 ?? null,
             gtStatus,
+            gtCounts: gtCountsLabel(
+              receipt?.gt_actions,
+              receipt?.gt_exact_matches,
+            ),
             outcome: group.replies.length === 0 ? outcome : null,
             finish,
           })}
@@ -427,13 +484,14 @@ function Exchange({
   );
 }
 
-/** `12 steps · 1m 20s · $0.000 (untracked) · patch a80d4c46 · GT ready` */
+/** `12 steps · 1m 20s · patch a80d4c46 · GT ready · GT 3 actions / 2 exact` */
 function receiptTail({
   calls,
   elapsed,
   cost,
   patch,
   gtStatus,
+  gtCounts,
   outcome,
   finish,
 }: {
@@ -442,17 +500,21 @@ function receiptTail({
   cost: number | null;
   patch: string | null | undefined;
   gtStatus: string;
+  gtCounts: string | null;
   outcome: string | null;
   finish: string;
 }): string {
+  /* A provider that reports no price is not a run that was free. The
+     receipts pane says so in as many words, in a column that has the room;
+     here the honest thing is to leave the number out (HAR-84 P2-13). */
+  const untracked = cost !== null && costUntracked([cost]);
   const parts = [
     `${calls} step${calls === 1 ? "" : "s"}`,
     elapsed !== null ? formatDuration(elapsed) : null,
-    cost !== null
-      ? `${formatCost(cost)}${costUntracked([cost]) ? " (untracked)" : ""}`
-      : null,
+    cost !== null && !untracked ? formatCost(cost) : null,
     patch ? `patch ${shortSha(patch)}` : null,
     gtStatus && gtStatus !== "off" ? `GT ${gtStatus}` : null,
+    gtCounts,
     finish === "question" ? "waiting for you" : null,
     outcome,
   ].filter(Boolean);

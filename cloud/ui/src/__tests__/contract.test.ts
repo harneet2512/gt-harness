@@ -5,6 +5,7 @@ import {
   EVENT_TYPES,
   GT_MODE_HELP,
   GT_MODES,
+  expiryNotice,
   isGtMode,
   lifecycleToSessionStatus,
   streamUrl,
@@ -19,6 +20,7 @@ import {
   lockedRows,
   formatDuration,
   gtBadgeLabel,
+  gtCountsLabel,
   receiptWall,
   sessionClosedBlurb,
   sessionClosedLabel,
@@ -293,6 +295,39 @@ describe("failure wording", () => {
     expect(exitNote(1)).toBeNull();
     expect(exitNote(0)).toBeNull();
     expect(exitNote(null)).toBeNull();
+  });
+
+  /* HAR-84 P1-3: esc kills the command, the command returns 137, and the
+     transcript said the sandbox had run out of memory. */
+  it("calls a stopped command stopped, and never guesses OOM", () => {
+    expect(exitNote(137, "interrupted by user stop")).toBe("stopped");
+    // Case and surrounding output do not matter; the phrase does.
+    expect(exitNote(137, "Interrupted by user stop (rc 137)")).toBe("stopped");
+    // No evidence either way: name both causes, claim neither.
+    expect(exitNote(137, "")).toBe("killed (memory limit or stop)");
+    expect(exitNote(137, "Killed")).toBe("killed (memory limit or stop)");
+    expect(exitNote(137)).not.toMatch(/^killed: /);
+  });
+
+  it("says how much GroundTruth a turn used, and stays quiet when none", () => {
+    expect(gtCountsLabel(3, 2)).toBe("GT 3 actions / 2 exact");
+    expect(gtCountsLabel(1, 0)).toBe("GT 1 action / 0 exact");
+    expect(gtCountsLabel(0, 0)).toBeNull();
+    expect(gtCountsLabel(undefined, undefined)).toBeNull();
+    // A server that sends the count but not the subset still says something.
+    expect(gtCountsLabel(2, undefined)).toBe("GT 2 actions / 0 exact");
+  });
+
+  it("turns the 401 for an expired sign-in into a sentence", () => {
+    expect(expiryNotice("sign-in expired; sign in again")).toBe(
+      "your sign-in expired — sign in again",
+    );
+    // The wording the deployed server still uses.
+    expect(expiryNotice("session expired")).toBe(
+      "your sign-in expired — sign in again",
+    );
+    expect(expiryNotice("invalid session")).toBeNull();
+    expect(expiryNotice("not authenticated")).toBeNull();
   });
 });
 

@@ -61,6 +61,7 @@ describe("GroundTruth — the frame", () => {
     const action = fromFrame({
       ...frame,
       match_count: 0,
+      coverage: "partial",
       semantics: "incomplete",
       reason_codes: ["COVERAGE_NOT_COMPLETE"],
     })!;
@@ -72,12 +73,112 @@ describe("GroundTruth — the frame", () => {
   it("falls back to the omissions when there is no reason code", () => {
     const action = fromFrame({
       ...frame,
+      coverage: "partial",
       reason_codes: [],
       omissions: ["missing_scope:src/click/**"],
     })!;
     expect(evidenceLine(action.evidence)).toBe(
       "abstained: missing_scope:src/click/**",
     );
+  });
+
+  /* ---------------------------------------------------------------- *
+   * HAR-84 P0-1. The three frames below are verbatim from the live QA
+   * run (session 9835bc1682c5, turn b50d08ade21c): every one of them
+   * printed as `abstained: …`, including the two that answered.
+   * ---------------------------------------------------------------- */
+
+  const SYNTAX = {
+    turn_id: "b50d08ade21c",
+    step: 1,
+    kind: "syntax",
+    arguments: { file_extension: ".py", pattern: "class Command" },
+    scope: [],
+    returncode: 2,
+    semantics: "incomplete",
+    coverage: "",
+    match_count: 0,
+    omissions: ["syntax_language_removed"],
+    reason_codes: ["syntax_language_removed"],
+  };
+
+  const ANSWERED = {
+    turn_id: "b50d08ade21c",
+    step: 2,
+    kind: "exact_literal_search",
+    arguments: { literal: "class Command", paths: ["src"] },
+    scope: ["src"],
+    returncode: 0,
+    semantics: "exact",
+    coverage: "complete",
+    match_count: 2,
+    omissions: [],
+    reason_codes: ["EXACT_COMPLETE_EQUIVALENCE"],
+  };
+
+  const TRUNCATED = {
+    turn_id: "b50d08ade21c",
+    step: 3,
+    kind: "exact_literal_search",
+    arguments: { literal: ".invoke(", paths: ["src"] },
+    scope: ["src"],
+    returncode: 2,
+    semantics: "exact",
+    coverage: "complete",
+    match_count: 12,
+    omissions: ["query_result_byte_limit"],
+    reason_codes: ["EXACT_COMPLETE_EQUIVALENCE"],
+  };
+
+  it("reports the evidence of an action that answered", () => {
+    const action = fromFrame(ANSWERED)!;
+    expect(action.evidence?.answered).toBe(true);
+    expect(evidenceLine(action.evidence)).toBe("2 matches · exact · complete");
+  });
+
+  it("does not read EXACT_COMPLETE_EQUIVALENCE as a refusal", () => {
+    // It is the code for an *answer* — `cloud/README.md`, "GroundTruth
+    // typed actions". Any reason code used to make the line an abstention.
+    expect(evidenceLine(fromFrame(ANSWERED)!.evidence)).not.toContain(
+      "abstained",
+    );
+  });
+
+  it("abstains on a non-zero returncode, and names the omission", () => {
+    const action = fromFrame(TRUNCATED)!;
+    expect(action.evidence?.answered).toBe(false);
+    expect(evidenceLine(action.evidence)).toBe(
+      "abstained: query_result_byte_limit",
+    );
+  });
+
+  it("abstains when the semantics are not exact", () => {
+    const action = fromFrame(SYNTAX)!;
+    expect(evidenceLine(action.evidence)).toBe(
+      "abstained: syntax_language_removed",
+    );
+  });
+
+  it("keeps a syntax action's pattern as the query", () => {
+    // `pattern` was not in QUERY_KEYS, so the line read `GroundTruth(syntax)`
+    // with the arguments dropped entirely (HAR-84 P2-10).
+    const action = fromFrame(SYNTAX)!;
+    expect(action.query).toBe("class Command");
+    expect(actionLine(action)).toBe('syntax "class Command"');
+  });
+
+  it("never lets an omission flip an action that answered", () => {
+    const action = fromFrame({ ...ANSWERED, omissions: ["capability_disabled"] })!;
+    expect(evidenceLine(action.evidence)).toBe("2 matches · exact · complete");
+  });
+
+  it("treats a path argument as scope, never as the query", () => {
+    const action = fromFrame({
+      ...SYNTAX,
+      arguments: { path: "src/click/core.py", pattern: "class Command" },
+    })!;
+    expect(action.query).toBe("class Command");
+    expect(action.scope).toEqual(["src/click/core.py"]);
   });
 
   it("is nothing at all without a kind", () => {

@@ -176,7 +176,10 @@ def verify_jwt(token: str | None) -> dict[str, Any]:
         payload = jwt.decode(token, _jwt_secret(), algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(401, "session expired") from exc
+        # Not "session expired": a *session* here is a workspace, and the
+        # reaper collects those. What has run out is the sign-in, and the
+        # UI shows this string (HAR-84 P2-7).
+        raise HTTPException(401, "sign-in expired; sign in again") from exc
     except jwt.InvalidTokenError as exc:
         raise HTTPException(401, "invalid session") from exc
 

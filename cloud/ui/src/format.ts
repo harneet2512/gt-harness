@@ -201,15 +201,33 @@ export function lockedRows(reason: string): number {
 }
 
 /**
- * What a bare exit code meant, where the runtime says nothing else. rc 137
- * with empty output is the container's memory cap and reads as silence
- * otherwise (HAR-84 G-20); 128 is the docker exec that could not start at
- * all (G-03). Null where the number speaks for itself.
+ * The text the sandbox puts in the observation when *this* client stopped
+ * the command — `cloud/server/environment.py:INTERRUPT_MESSAGE`. It is the
+ * only evidence that separates a stop from a memory kill.
  */
-export function exitNote(returncode: number | null | undefined): string | null {
+const INTERRUPT_MESSAGE = "interrupted by user stop";
+
+/**
+ * What a bare exit code meant, where the runtime says nothing else. 128 is
+ * the docker exec that could not start at all (G-03). Null where the number
+ * speaks for itself.
+ *
+ * rc 137 is SIGKILL and the sandbox sends it for two unrelated reasons: the
+ * container's memory cap, and the kill behind `/stop` and the wall-clock
+ * limit. Telling someone who pressed esc that their sandbox ran out of
+ * memory is a lie the transcript cannot take back (HAR-84 P1-3), so the
+ * note names the stop when the observation says so and otherwise says both
+ * and claims neither.
+ */
+export function exitNote(
+  returncode: number | null | undefined,
+  output?: string | null,
+): string | null {
   switch (returncode) {
     case 137:
-      return "killed: the sandbox hit its memory limit";
+      return (output ?? "").toLowerCase().includes(INTERRUPT_MESSAGE)
+        ? "stopped"
+        : "killed (memory limit or stop)";
     case 143:
       return "terminated";
     case 124:
@@ -276,4 +294,23 @@ export function receiptWall(receipt: Receipt): string {
   const end = toEpochSeconds(receipt.finished_at);
   if (start === null || end === null) return "—";
   return formatDuration(end - start);
+}
+
+/**
+ * `GT 3 actions / 2 exact` — how much GroundTruth a turn actually used.
+ * The server counts both per turn and per session; a reader who cannot see
+ * them cannot tell a turn where GT paid from one where it never ran
+ * (HAR-84 P1-2). Null when GT ran nothing, which is the common case and
+ * does not deserve a line.
+ */
+export function gtCountsLabel(
+  actions: number | null | undefined,
+  exact: number | null | undefined,
+): string | null {
+  if (typeof actions !== "number" || !Number.isFinite(actions) || actions <= 0) {
+    return null;
+  }
+  const matches =
+    typeof exact === "number" && Number.isFinite(exact) ? Math.max(0, exact) : 0;
+  return `GT ${actions} action${actions === 1 ? "" : "s"} / ${matches} exact`;
 }

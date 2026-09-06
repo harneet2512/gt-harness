@@ -12,6 +12,14 @@ import { useMedia } from "./useSize";
 /** Below this the graph cannot share the row with two side panels. */
 export const NARROW_MAX_PX = 1100;
 
+/**
+ * Below this the graph stops sharing the row with the transcript at all and
+ * stacks under it. Quoted by the `max-width: 1199.98px` block in
+ * `styles/term.css`; nothing in JS branches on it, because the split is
+ * laid out entirely in CSS (HAR-84 P1-5).
+ */
+export const SPLIT_STACK_MAX_PX = 1200;
+
 /** Below this there is no row left to share: the panes stack. */
 export const STACK_MAX_PX = 760;
 

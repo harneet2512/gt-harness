@@ -9,6 +9,10 @@
  *
  *     ⏺ GroundTruth(exact_literal_search "class Command" in src/click)
  *       ⎿  2 matches · exact · complete
+ *
+ * or, when the producer would not answer, that line and only that line:
+ *
+ *     ⏺ GroundTruth(syntax "class Command")
  *       ⎿  abstained: COVERAGE_NOT_COMPLETE
  *
  * When it is not — the deployment at HAR-84's HEAD does not emit it yet —
@@ -21,13 +25,30 @@
 /** The GT tool name the typed-action protocol uses. */
 export const GT_TOOL = "groundtruth";
 
+/**
+ * The `reason_codes` entry GT puts on an action that **answered**. The
+ * abstention codes are the other three — `SEMANTICS_NOT_EXACT`,
+ * `COVERAGE_NOT_COMPLETE`, `EVIDENCE_HAS_OMISSIONS`.
+ */
+export const ANSWER_CODE = "EXACT_COMPLETE_EQUIVALENCE";
+
 export interface GtEvidence {
   /** `exact`, `incomplete`, … — how the producer characterised its answer. */
   semantics: string | null;
   /** `complete`, `partial`, … */
   coverage: string | null;
   matches: number | null;
-  /** Why it would not answer: reason codes, or the omissions it recorded. */
+  /**
+   * True when the producer **answered**: it exited 0, the semantics are
+   * `exact` and the coverage is `complete`. Anything else is an abstention,
+   * whatever codes came with it (`cloud/README.md`, "GroundTruth typed
+   * actions"). `EXACT_COMPLETE_EQUIVALENCE` is the code for an *answer*, so
+   * a reason code on its own never means "refused" — HAR-84 P0-1, where
+   * every answering action printed as an abstention.
+   */
+  answered: boolean;
+  /** Why it would not answer. Null on an answer, and on an abstention that
+   * carried no code of its own. */
   abstained: string | null;
 }
 
@@ -57,10 +78,15 @@ function num(value: unknown): number | null {
 
 /**
  * The literal the action is about. `exact_literal_search` calls it
- * `literal`; the other kinds name a symbol or a file. First one wins, and
- * nothing is invented.
+ * `literal`, `syntax` calls it `pattern`; the other kinds name a symbol or
+ * a file. First one wins, and nothing is invented.
+ *
+ * `path` is deliberately **not** here: it is a scope key (`scopeOf` reads
+ * it), and having it in both lists printed the same value as the query and
+ * as the scope — HAR-84 P2-10, where `GroundTruth(syntax)` lost its
+ * `pattern` argument entirely.
  */
-const QUERY_KEYS = ["literal", "query", "symbol", "name", "text", "path"];
+const QUERY_KEYS = ["literal", "pattern", "query", "symbol", "name", "text"];
 
 function queryOf(args: Record<string, unknown>): string | null {
   for (const key of QUERY_KEYS) {
@@ -83,14 +109,22 @@ export function fromFrame(data: Record<string, unknown>): GtAction | null {
       ? (data.arguments as Record<string, unknown>)
       : {};
   const scope = strings(data.scope);
-  const reasons = strings(data.reason_codes);
   const omissions = strings(data.omissions);
   const semantics = str(data.semantics) || null;
+  const coverage = str(data.coverage) || null;
   const matches = num(data.match_count);
-  /* "Abstained" is the producer refusing to answer rather than answering
-     nothing: a reason code, or an omission it recorded on the way. */
-  const abstained =
-    reasons.length > 0
+  /* Absent means "the frame did not say", which is not a failure. */
+  const returncode = num(data.returncode) ?? 0;
+  const answered =
+    returncode === 0 && semantics === "exact" && coverage === "complete";
+  /* The answer code is not a reason for refusing; on an abstention that
+     carries nothing else, the omissions are what there is to say. */
+  const reasons = strings(data.reason_codes).filter(
+    (code) => code !== ANSWER_CODE,
+  );
+  const abstained = answered
+    ? null
+    : reasons.length > 0
       ? reasons.join(", ")
       : omissions.length > 0
         ? omissions.join(", ")
@@ -102,8 +136,9 @@ export function fromFrame(data: Record<string, unknown>): GtAction | null {
     scope: scope.length > 0 ? scope : scopeOf(args),
     evidence: {
       semantics,
-      coverage: str(data.coverage) || null,
+      coverage,
       matches,
+      answered,
       abstained,
     },
   };
@@ -153,7 +188,9 @@ export function actionLine(action: GtAction): string {
 /** `2 matches · exact · complete`, or `abstained: COVERAGE_NOT_COMPLETE`. */
 export function evidenceLine(evidence: GtEvidence | null): string | null {
   if (!evidence) return null;
-  if (evidence.abstained) return `abstained: ${evidence.abstained}`;
+  if (!evidence.answered) {
+    return evidence.abstained ? `abstained: ${evidence.abstained}` : "abstained";
+  }
   const parts: string[] = [];
   if (evidence.matches !== null) {
     parts.push(`${evidence.matches} match${evidence.matches === 1 ? "" : "es"}`);

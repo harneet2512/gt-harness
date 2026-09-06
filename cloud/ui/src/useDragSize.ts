@@ -33,7 +33,13 @@ export function useDragSize(
           at: axis === "y" ? e.clientY : e.clientX,
           size,
         };
-        e.currentTarget.setPointerCapture(e.pointerId);
+        /* A pointer that is already gone throws here; the drag survives
+           without capture, and an uncaught throw does not (HAR-84 P2-12). */
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* nothing to capture */
+        }
       },
       onPointerMove: (e) => {
         const from = start.current;
@@ -45,8 +51,12 @@ export function useDragSize(
       },
       onPointerUp: (e) => {
         start.current = null;
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        } catch {
+          /* already released */
         }
       },
       onDoubleClick: () => setSize(initial),

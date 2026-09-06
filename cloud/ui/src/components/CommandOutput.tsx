@@ -27,7 +27,7 @@ export default function CommandOutput({
   const failed = returncode !== null && returncode !== 0;
   /* HAR-84 G-20: an OOM kill is rc 137 and an empty string. Left as-is the
      agent — and the reader — have to guess what happened. */
-  const note = failed ? exitNote(returncode) : null;
+  const note = failed ? exitNote(returncode, output) : null;
 
   if (lines.length === 0 && !failed) return null;
 

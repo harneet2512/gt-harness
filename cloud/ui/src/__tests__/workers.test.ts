@@ -15,6 +15,7 @@ import {
   shortId,
   workerCalls,
   workerList,
+  workerNo,
   WORKER_HUES,
 } from "../workers";
 import { ev, msg, session } from "./helpers";
@@ -263,6 +264,83 @@ describe("workers — reconstructed after a reload", () => {
     expect(state.messages.map((m) => m.id)).toEqual(["m0", "m2"]);
     expect(buildGroups(state)).toHaveLength(1);
     expect(workerList(state.workers)[0].reply).toBe("worker says");
+  });
+
+  /* ---------------------------------------------------------------- *
+   * HAR-84 P1-4. Live, worker-1 was the one spawned first. After a reload
+   * the labels — and the graph hues that follow the same index — swapped,
+   * because the report messages hydrate before the `/agents` rows and the
+   * number was the order of first touch.
+   * ---------------------------------------------------------------- */
+
+  const spawnedFirst = session({
+    id: "w-old",
+    parent_id: "s1",
+    role: "worker",
+    task: "31 steps of work",
+    status: "idle",
+    created_at: 1_700_000_232.6488,
+  });
+  const spawnedSecond = session({
+    id: "w-new",
+    parent_id: "s1",
+    role: "worker",
+    task: "4 steps of work",
+    status: "idle",
+    created_at: 1_700_000_232.6617,
+  });
+
+  /** The reload order the QA run hit: the fast worker reported first. */
+  const reportsFirst = [
+    {
+      type: "hydrate" as const,
+      messages: [
+        msg({ id: "m2", role: "agent", content: "done", meta: { agent_id: "w-new" } }),
+        msg({ id: "m1", role: "agent", content: "done", meta: { agent_id: "w-old" } }),
+      ],
+    },
+    { type: "workers" as const, rows: [spawnedFirst, spawnedSecond] },
+  ];
+
+  it("numbers workers by created_at however the records arrive", () => {
+    const reloaded = run(reportsFirst);
+    expect(workerList(reloaded.workers).map((w) => w.id)).toEqual([
+      "w-old",
+      "w-new",
+    ]);
+    expect(workerNo(reloaded.workers, "w-old")).toBe(1);
+    expect(workerNo(reloaded.workers, "w-new")).toBe(2);
+  });
+
+  it("gives a reload the same numbers and hues the live page had", () => {
+    /* Live: the frames arrive in spawn order and there are no rows yet. */
+    const live = run([
+      { type: "event", event: ev(1, "agent_spawned", { worker_id: "w-old", task: "a" }) },
+      { type: "event", event: ev(2, "agent_spawned", { worker_id: "w-new", task: "b" }) },
+      { type: "event", event: ev(3, "agent_report", { worker_id: "w-new", content: "done" }) },
+    ]);
+    const reloaded = run(reportsFirst);
+
+    const ids = (state: ChatState) => workerList(state.workers).map((w) => w.id);
+    expect(ids(reloaded)).toEqual(ids(live));
+    expect(ids(live)).toEqual(["w-old", "w-new"]);
+    // The hue is picked by position in that list, so it follows.
+    expect(hueFor(ids(reloaded).indexOf("w-old"))).toEqual(
+      hueFor(ids(live).indexOf("w-old")),
+    );
+  });
+
+  it("puts a worker spawned after a reload last, not first", () => {
+    const state = run([
+      ...reportsFirst,
+      { type: "event", event: ev(9, "agent_spawned", { worker_id: "w-third", task: "c" }) },
+    ]);
+    expect(workerList(state.workers).map((w) => w.id)).toEqual([
+      "w-old",
+      "w-new",
+      "w-third",
+    ]);
+    expect(workerNo(state.workers, "w-third")).toBe(3);
   });
 
   it("does not resurrect a closed worker from its row", () => {

@@ -57,6 +57,38 @@ interface Props {
 }
 
 /** The living particle graph: files as particles, relations as filaments. */
+/**
+ * Pointer capture, for a pointer that may already be gone.
+ *
+ * `setPointerCapture` throws `NotFoundError`/`InvalidPointerId` the moment
+ * the pointer it names is no longer active — a pen lifted, a cancelled
+ * touch, a very fast release — and one uncaught throw inside a React
+ * handler is a broken drag (HAR-84 P2-12). Neither call is worth a page
+ * error: capture is an optimisation, and losing it costs a drag, not the
+ * app.
+ */
+function capture(el: Element, pointerId: number): void {
+  if (pointerId === undefined || typeof el.setPointerCapture !== "function") {
+    return;
+  }
+  try {
+    el.setPointerCapture(pointerId);
+  } catch {
+    /* the pointer is already gone */
+  }
+}
+
+function release(el: Element, pointerId: number): void {
+  if (pointerId === undefined || typeof el.hasPointerCapture !== "function") {
+    return;
+  }
+  try {
+    if (el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId);
+  } catch {
+    /* the pointer is already gone */
+  }
+}
+
 export default function GraphCanvas(props: Props) {
   const { field, attention, edited, onSelect, onZoom, emptyText } = props;
   const { trailIds, trailToken, animate } = props;
@@ -316,7 +348,7 @@ export default function GraphCanvas(props: Props) {
       return;
     }
     emptyDown.current = null;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    capture(event.currentTarget, event.pointerId);
     drag.current = { particle: found, moved: false };
     simRef.current?.alphaTarget(0.25);
     kick();
@@ -373,9 +405,7 @@ export default function GraphCanvas(props: Props) {
     drag.current = null;
     simRef.current?.alphaTarget(0);
     if (!held) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
+    release(event.currentTarget, event.pointerId);
     held.particle.fx = null;
     held.particle.fy = null;
     if (!held.moved) onSelect(held.particle.id);

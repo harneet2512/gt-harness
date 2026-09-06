@@ -69,6 +69,7 @@ export default function SynapsePage() {
   const [resumeOpen, setResumeOpen] = useState(false);
   const [focusSignal, setFocusSignal] = useState(0);
   const [notes, setNotes] = useState<readonly LocalNote[]>([]);
+  const [closeAsk, setCloseAsk] = useState(false);
   const noteId = useRef(0);
 
   const layout = useLayoutMode();
@@ -181,8 +182,22 @@ export default function SynapsePage() {
 
   /* ---- keyboard ---- */
   const stop = data.stop;
+  const isRunning = data.isRunning;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      /* esc interrupts wherever the caret is. A terminal's interrupt is
+         global; bound to the textarea it was a promise the footer made and
+         the page did not keep (HAR-84 P2-15). The composer still handles
+         its own Escape — dismissing the slash menu — and calls
+         `preventDefault`, which is how that case is told apart. */
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        if (isRunning) {
+          e.preventDefault();
+          stop();
+        }
+        return;
+      }
+
       const meta = e.ctrlKey || e.metaKey;
       if (!meta) return;
       if (e.key === "k" || e.key === "K") {
@@ -202,7 +217,7 @@ export default function SynapsePage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stop, graphOpen, setGraph]);
+  }, [stop, isRunning, graphOpen, setGraph]);
 
   const onCommand = useCallback(
     ({ command, arg, raw }: ParsedSlash) => {
@@ -219,7 +234,7 @@ export default function SynapsePage() {
           else note("system", "Nothing is running.");
           break;
         case "close":
-          data.close();
+          setCloseAsk(true);
           break;
         case "graph":
           setGraph(!graphOpen);
@@ -258,6 +273,15 @@ export default function SynapsePage() {
     [data, stop, graphOpen, setGraph, note, theme],
   );
 
+  const answerClose = useCallback(
+    (confirmed: boolean) => {
+      setCloseAsk(false);
+      note("system", confirmed ? "closing…" : "kept open");
+      if (confirmed) data.close();
+    },
+    [data, note],
+  );
+
   const worker = session ? isWorker(session) : false;
 
   return (
@@ -280,6 +304,7 @@ export default function SynapsePage() {
               sessionId={sessionId}
               session={session}
               chat={chat}
+              receipts={data.receipts}
               groups={view.groups}
               stepsByTurn={view.stepsByTurn}
               edited={view.editedPaths}
@@ -299,6 +324,8 @@ export default function SynapsePage() {
               failureError={data.failureError}
               pendingFirst={pendingFirst}
               notes={notes}
+              closeAsk={closeAsk}
+              onCloseAnswer={answerClose}
               workers={workers}
               canApply={status === "idle"}
               onApplyWorker={(workerId) => void data.applyWorker(workerId)}
@@ -374,6 +401,12 @@ function lockedReason(
   switch (status) {
     case "creating":
       switch (phase) {
+        /* No lifecycle frame has arrived yet — and the first thing a
+           session does is clone. Waiting for the frame meant the documented
+           first line was never seen at all (HAR-84 P2-14). */
+        case null:
+        case "":
+        case "creating":
         case "cloning":
           return "cloning the repository…";
         case "sandbox_starting":

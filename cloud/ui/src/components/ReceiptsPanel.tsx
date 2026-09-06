@@ -3,6 +3,7 @@ import {
   costUntracked,
   formatClock,
   formatCost,
+  gtCountsLabel,
   receiptWall,
   shortSha,
 } from "../format";
@@ -84,6 +85,14 @@ export default function ReceiptsPanel({
                       : undefined
                 }
               />
+              {/* "ready" says the index existed; these say it was used, and
+                  how often it paid (HAR-84 P1-2). */}
+              {gtCountsLabel(receipt.gt_actions, receipt.gt_exact_matches) && (
+                <Line
+                  term="gt actions"
+                  value={`${receipt.gt_actions} · ${receipt.gt_exact_matches ?? 0} exact`}
+                />
+              )}
               <Line term="at" value={formatClock(receipt.finished_at)} />
             </dl>
           ))}

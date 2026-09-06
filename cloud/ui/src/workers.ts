@@ -14,6 +14,7 @@
  * ------------------------------------------------------------------ */
 
 import type { Message, Session, SessionEvent } from "./api";
+import { toEpochSeconds } from "./format";
 import { actionLine, fromFrame, type GtAction } from "./gt";
 
 /** Where a worker is, in the four words the card shows. */
@@ -57,6 +58,15 @@ export interface WorkerState {
   /** True between pressing Apply and the server answering. */
   applying: boolean;
   closedReason: string | null;
+  /**
+   * When the server created this worker, in epoch seconds. It is what
+   * `worker-N` counts by: a reload rebuilds the cards out of two records
+   * that arrive in whatever order they finish in, and numbering by arrival
+   * swapped worker-1 and worker-2 — and the graph hues with them — every
+   * time the second worker reported first (HAR-84 P1-4). Null until the
+   * `/agents` rows land, when spawn order is all there is.
+   */
+  createdAt: number | null;
 }
 
 export interface WorkersState {
@@ -84,12 +94,34 @@ export function emptyWorker(id: string, task = ""): WorkerState {
     applyError: null,
     applying: false,
     closedReason: null,
+    createdAt: null,
   };
 }
 
-/** The cards, in spawn order. */
+/**
+ * The ids in the order the cards are drawn and numbered: by `created_at`
+ * where the server has told us one, by first touch where it has not. Both
+ * keys are used together rather than either alone — the first is the truth
+ * and survives a reload, the second is all a live spawn has until the rows
+ * arrive, and a worker spawned now is younger than one already hydrated.
+ */
+export function orderedIds(state: WorkersState): string[] {
+  return state.order
+    .map((id, index) => ({ id, index, at: state.byId[id]?.createdAt ?? null }))
+    .sort((a, b) => {
+      const left = a.at ?? Number.POSITIVE_INFINITY;
+      const right = b.at ?? Number.POSITIVE_INFINITY;
+      if (left !== right) return left - right;
+      return a.index - b.index;
+    })
+    .map((row) => row.id);
+}
+
+/** The cards, oldest first. */
 export function workerList(state: WorkersState): WorkerState[] {
-  return state.order.map((id) => state.byId[id]).filter(Boolean);
+  return orderedIds(state)
+    .map((id) => state.byId[id])
+    .filter(Boolean);
 }
 
 /** Model calls to show: the server's count once it exists, ours until then. */
@@ -314,6 +346,7 @@ export function hydrateWorkers(
     if (!row?.id) continue;
     next = put(next, row.id, (worker) => ({
       ...worker,
+      createdAt: toEpochSeconds(row.created_at) ?? worker.createdAt,
       task: row.task || worker.task,
       status: statusOfRow(row),
       reply: worker.reply || row.report?.reply_excerpt || "",
@@ -451,9 +484,9 @@ export function hueFor(index: number): WorkerHue {
   return WORKER_HUES[n % WORKER_HUES.length];
 }
 
-/** 1-based, for the "worker N" chips. */
+/** 1-based, for the "worker N" chips. Stable across a reload. */
 export function workerNo(state: WorkersState, id: string): number {
-  return state.order.indexOf(id) + 1;
+  return orderedIds(state).indexOf(id) + 1;
 }
 
 /* ------------------------------------------------------------------ *

@@ -34,7 +34,7 @@ export default function TermOutput({
   const lines = output.length > 0 ? output.replace(/\n+$/, "").split("\n") : [];
   const failed = returncode !== null && returncode !== 0;
   const bad = failed || isError;
-  const note = failed ? exitNote(returncode) : null;
+  const note = failed ? exitNote(returncode, output) : null;
 
   if (lines.length === 0 && !failed) return null;
 

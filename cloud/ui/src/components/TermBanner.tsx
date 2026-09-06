@@ -1,7 +1,12 @@
+import { repoChipLabel } from "../repoUrl";
 import Box, { BoxRow } from "./Box";
 
 interface Props {
-  /** `owner/name`, or empty when nothing has been chosen yet. */
+  /**
+   * The clone URL or `owner/name` — `repoChipLabel` shortens it. Empty when
+   * nothing has been chosen yet. One spelling of `owner/name @ ref` on
+   * every surface (HAR-84 P2-11), so the caller never formats it itself.
+   */
   repo: string;
   /* Never call this `ref`: React reserves the prop name. */
   gitRef: string;
@@ -31,7 +36,8 @@ export default function TermBanner({ repo, gitRef, gtMode, model }: Props) {
           </BoxRow>
           <BoxRow>
             <span className="dim">
-              repo: {repo ? `${repo}@${gitRef || "main"}` : "none yet"} · GT:{" "}
+              repo: {repo ? repoChipLabel(repo, gitRef || "main") : "none yet"} ·
+              GT:{" "}
               {gtMode} · model: {model || "server default"}
             </span>
           </BoxRow>

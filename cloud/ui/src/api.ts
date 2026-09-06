@@ -89,6 +89,8 @@ export interface Session {
   closed_reason?: ClosedReason | string | null;
   /** Wall-clock seconds spent across every turn of the session. */
   total_wall_seconds?: number | null;
+  /** Typed GroundTruth actions across every turn of the session. */
+  gt_actions?: number;
 
   /* ---- worker agents (HAR-84) ---------------------------------- *
    * A worker *is* a session: same shape, same routes, one extra set of
@@ -301,6 +303,14 @@ export interface Receipt {
   model: string;
   /** Wall-clock seconds the turn took, as the server measured it. */
   wall_seconds?: number | null;
+  /**
+   * How many typed GroundTruth actions this turn ran, and how many of them
+   * actually **answered** (`semantics == "exact"` and `match_count > 0`).
+   * Optional: a server that predates them sends neither, and 0 actions is
+   * a turn where GT never ran rather than one where it failed.
+   */
+  gt_actions?: number;
+  gt_exact_matches?: number;
 }
 
 export interface User {
@@ -811,12 +821,37 @@ export function closeAgent(id: string, workerId: string): Promise<Session> {
   );
 }
 
-/** Resolves to the signed-in user, or null when the server answers 401. */
-export async function getMe(): Promise<User | null> {
+/**
+ * Who is signed in, and — when nobody is — why. A 401 whose `detail` names
+ * an expired sign-in is not the same as never having signed in, and the
+ * card that comes up has to say so rather than let someone mid-task
+ * conclude the app broke (HAR-84 P2-7).
+ */
+export interface AuthState {
+  user: User | null;
+  /** The sentence the sign-in card shows above the button, or null. */
+  notice: string | null;
+}
+
+/** The server's own words for a token whose `exp` has passed. */
+const EXPIRED_DETAILS = ["sign-in expired", "session expired"];
+
+/** `sign-in expired; sign in again` → the line a reader needs. */
+export function expiryNotice(detail: string): string | null {
+  const text = detail.toLowerCase();
+  return EXPIRED_DETAILS.some((phrase) => text.includes(phrase))
+    ? "your sign-in expired — sign in again"
+    : null;
+}
+
+/** Resolves to the signed-in user, or to why there is not one. */
+export async function getMe(): Promise<AuthState> {
   try {
-    return await request<User>(`${AUTH}/me`);
+    return { user: await request<User>(`${AUTH}/me`), notice: null };
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) return null;
+    if (err instanceof ApiError && err.status === 401) {
+      return { user: null, notice: expiryNotice(err.message) };
+    }
     throw err;
   }
 }

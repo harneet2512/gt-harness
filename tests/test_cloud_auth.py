@@ -85,7 +85,9 @@ def test_verify_jwt_expired() -> None:
     with pytest.raises(HTTPException) as exc_info:
         verify_jwt(token)
     assert exc_info.value.status_code == 401
-    assert "expired" in exc_info.value.detail.lower()
+    # The sign-in expired, not the workspace: "session expired" reads like a
+    # session the reaper collected, which is a different thing entirely.
+    assert exc_info.value.detail == "sign-in expired; sign in again"
 
 
 def test_verify_jwt_none_token() -> None:

@@ -44,6 +44,12 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
   const hidden = activity.length - shown.length;
   const files = worker.filesChanged;
   const applied = worker.appliedFiles;
+  /* A button whose only possible outcome is a 400 is not an offer. A worker
+     that changed nothing has nothing to merge, and one that already landed
+     must not invite a re-merge of a patch that is in the tree (HAR-84
+     P2-8). */
+  const offersApply =
+    worker.status !== "closed" && worker.reply !== "" && files.length > 0;
 
   const summary = [
     `${MARK[worker.status] ?? "·"} ${worker.status}`,
@@ -100,20 +106,24 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
         {summary}
         <span className="worker-actions">
           {"   "}
-          {worker.status !== "closed" && worker.reply !== "" && (
-            <button
-              type="button"
-              className="bracket"
-              disabled={worker.applying || !canApply}
-              title={
-                canApply
-                  ? "3-way merge this worker's diff into this workspace"
-                  : "the session has to be idle to take a worker's changes"
-              }
-              onClick={onApply}
-            >
-              [{worker.applying ? "applying…" : applied ? "apply again" : "apply"}]
-            </button>
+          {applied ? (
+            <span className="is-ok">✓ applied</span>
+          ) : (
+            offersApply && (
+              <button
+                type="button"
+                className="bracket"
+                disabled={worker.applying || !canApply}
+                title={
+                  canApply
+                    ? "3-way merge this worker's diff into this workspace"
+                    : "the session has to be idle to take a worker's changes"
+                }
+                onClick={onApply}
+              >
+                [{worker.applying ? "applying…" : "apply"}]
+              </button>
+            )
           )}{" "}
           <button
             type="button"
