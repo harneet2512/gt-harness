@@ -13,7 +13,10 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.gt_installed_rehearsal import shape_mismatch  # noqa: E402
+from scripts.gt_installed_rehearsal import (  # noqa: E402
+    accepts_synthetic_repair,
+    shape_mismatch,
+)
 
 
 def test_matching_shape_returns_none() -> None:
@@ -64,37 +67,63 @@ def test_verdict_shape_mismatch_is_reported_like_a_predicate() -> None:
     assert entry["commands"] == 9 and entry["expected_commands"] == 8
 
 
-@pytest.mark.parametrize("blocker", ["predicates_not_evaluated", "acceptance_shape_mismatch"])
-def test_declining_receipt_withholds_acceptance(blocker: str) -> None:
-    """Both blockers must withhold VERIFIED_SYNTHETIC_REPAIR.
+class _Audit:
+    verdict = "GREEN-delivered"
+    synthetic_transport = True
 
-    Mirrors the gate: acceptance requires every other condition AND an empty
-    blocker. A recorded reason that still permitted acceptance would leave the
-    original hole with better documentation.
-    """
-    receipt: dict[str, object] = {
+
+def _accepting_receipt() -> dict[str, object]:
+    return {
         "verifier_patch_matches": True,
         "predicates_not_evaluated": [],
         "reproduction_verified": True,
         "execution_evidence_verified": True,
         "native_graph_refresh_verified": True,
         "pre_repair_source_stable": True,
+        "runtime_receipt_errors": ["synthetic_transport_not_paid_evidence"],
     }
 
-    def accepts(r: dict[str, object]) -> bool:
-        return bool(
-            r.get("verifier_patch_matches")
-            and not r.get("predicates_not_evaluated")
-            and not r.get("acceptance_shape_mismatch")
-            and r.get("reproduction_verified")
-            and r.get("execution_evidence_verified")
-            and r.get("native_graph_refresh_verified")
-            and r.get("pre_repair_source_stable")
-        )
 
-    assert accepts(receipt) is True
+def _gate(receipt: dict[str, object], **over: object) -> bool:
+    kwargs: dict[str, object] = {
+        "exception_info": None,
+        "rewards": {"reward": 1},
+        "command_count": 8,
+        "audits": [_Audit()],
+        "exit_status": "Submitted",
+    }
+    kwargs.update(over)
+    return accepts_synthetic_repair(receipt, **kwargs)  # type: ignore[arg-type]
+
+
+def test_gate_accepts_a_clean_run() -> None:
+    """Guards the negatives: if this ever fails, the blockers prove nothing."""
+    assert _gate(_accepting_receipt()) is True
+
+
+@pytest.mark.parametrize("blocker", ["predicates_not_evaluated", "acceptance_shape_mismatch"])
+def test_declining_receipt_withholds_acceptance(blocker: str) -> None:
+    """REV-375: drives the REAL gate, not a restatement of it.
+
+    A recorded reason that still permitted acceptance would leave the original
+    hole with better documentation.
+    """
+    receipt = _accepting_receipt()
     receipt[blocker] = (
         [shape_mismatch("k", "p", a=(1, 2))] if blocker == "predicates_not_evaluated"
         else shape_mismatch("acceptance_shape_mismatch", "status", commands=(9, 8))
     )
-    assert accepts(receipt) is False
+    assert _gate(receipt) is False
+
+
+def test_gate_blocks_on_scenario_drift() -> None:
+    """The literal 8 is the scenario definition; drift must not be accepted."""
+    assert _gate(_accepting_receipt(), command_count=9) is False
+
+
+def test_gate_blocks_on_unexpected_receipt_error() -> None:
+    receipt = _accepting_receipt()
+    receipt["runtime_receipt_errors"] = [
+        "synthetic_transport_not_paid_evidence", "treatment_provider_receipts_invalid",
+    ]
+    assert _gate(receipt) is False

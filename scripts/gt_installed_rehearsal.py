@@ -371,6 +371,44 @@ def shape_mismatch(kind: str, predicate: str, **observed_expected: Any) -> dict[
     return {"predicate": predicate, "reason": kind, **fields}
 
 
+def accepts_synthetic_repair(
+    receipt: dict[str, Any],
+    *,
+    exception_info: Any,
+    rewards: Any,
+    command_count: int,
+    audits: list[Any],
+    exit_status: str,
+) -> bool:
+    """The sole authority on whether a repair rehearsal is accepted.
+
+    REV-375: extracted so the gate itself is testable. A test that restates
+    these conditions proves only that the restatement agrees with itself; the
+    gate could drift and the test would still pass.
+    """
+    return bool(
+        exception_info is None
+        and isinstance(rewards, dict)
+        and rewards.get("reward") == 1
+        and receipt.get("verifier_patch_matches")
+        # F11: an unevaluated predicate must block acceptance. Without this, a
+        # run whose shape the auditor did not recognise reaches the same
+        # verdict as one it audited and passed.
+        and not receipt.get("predicates_not_evaluated")
+        and not receipt.get("acceptance_shape_mismatch")
+        and command_count == 8
+        and len(audits) == 1
+        and audits[0].verdict == "GREEN-delivered"
+        and audits[0].synthetic_transport
+        and receipt.get("reproduction_verified")
+        and receipt.get("execution_evidence_verified")
+        and receipt.get("native_graph_refresh_verified")
+        and receipt.get("pre_repair_source_stable")
+        and receipt.get("runtime_receipt_errors") == ["synthetic_transport_not_paid_evidence"]
+        and exit_status == "Submitted"
+    )
+
+
 def write_fixture(root: Path, image: str) -> None:
     (root / "environment").mkdir(parents=True)
     (root / "tests").mkdir()
@@ -643,21 +681,14 @@ async def run(args) -> dict:
                 receipt["acceptance_shape_mismatch"] = verdict_entry
         if forced_interruption:
             pass
-        elif (result.exception_info is None and isinstance(rewards, dict)
-                and rewards.get("reward") == 1 and receipt.get("verifier_patch_matches")
-                # F11: an unevaluated predicate must block acceptance. Without
-                # this, a run whose shape the auditor did not recognise reaches
-                # the same verdict as one it audited and passed.
-                and not receipt.get("predicates_not_evaluated")
-                and not receipt.get("acceptance_shape_mismatch")
-                and len(handler.commands) == 8 and len(audits) == 1
-                and audits[0].verdict == "GREEN-delivered" and audits[0].synthetic_transport
-                and receipt["reproduction_verified"]
-                and receipt["execution_evidence_verified"]
-                and receipt["native_graph_refresh_verified"]
-                and receipt["pre_repair_source_stable"]
-                and receipt["runtime_receipt_errors"] == ["synthetic_transport_not_paid_evidence"]
-                and trajectory.get("info", {}).get("exit_status") == "Submitted"):
+        elif accepts_synthetic_repair(
+                receipt,
+                exception_info=result.exception_info,
+                rewards=rewards,
+                command_count=len(handler.commands),
+                audits=audits,
+                exit_status=str(trajectory.get("info", {}).get("exit_status") or ""),
+        ):
             receipt["status"] = "VERIFIED_SYNTHETIC_REPAIR"
     except Exception as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
