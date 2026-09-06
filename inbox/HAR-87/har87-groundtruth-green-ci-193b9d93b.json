@@ -1,17 +1,16 @@
 {
-  "authority": "HAR-87_OWNER_DIRECTIVE",
   "basis": "exact_ci_full_matrix_green",
   "detail": {
     "conclusion": "success",
     "confidence": "high",
     "jobs_green": [
-      "lint",
-      "go-build",
       "benchmark",
-      "test (ubuntu-latest, 3.11)",
-      "test (ubuntu-latest, 3.12)",
+      "go-build",
+      "lint",
       "test (macos-latest, 3.11)",
       "test (macos-latest, 3.12)",
+      "test (ubuntu-latest, 3.11)",
+      "test (ubuntu-latest, 3.12)",
       "test (windows-latest, 3.11)",
       "test (windows-latest, 3.12)"
     ],
