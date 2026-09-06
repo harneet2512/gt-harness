@@ -14,6 +14,7 @@ import pytest
 from gt_harness.product import (
     BundleError,
     _assert_committed_source_closure,
+    _digest,
     _groundtruth_release_blockers,
     _prove_container_install,
     aggregate_results,
@@ -353,3 +354,34 @@ def test_provider_free_acceptance_executes_both_parity_arms(
     assert install["smoke_checks"]["source_checkout_not_imported"] is True
     canonical = json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     assert hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_filed_lineage_exception_seal_matches_its_own_content():
+    """The seal is recomputed from the FILED manifest, not from a fixture.
+
+    This pin has now carried two different wrong values: one that never
+    matched its block, and one that pinned the install attestation's digest -
+    a self-seal pointing at an unrelated document. Both survived because
+    nothing recomputed the filed value through the verifier's own path.
+    Every other test here builds a bundle and checks the builder; this one
+    checks the artifact that actually ships.
+    """
+    lineage = json.loads(MANIFEST.read_text(encoding="utf-8"))["groundtruth"][
+        "lineage_exception"
+    ]
+    unsigned = dict(lineage)
+    supplied = unsigned.pop("attestation_digest_sha256", None)
+    # _digest is the function product.py:329 compares against - not a
+    # re-implementation of it, so the two cannot drift apart.
+    assert supplied == _digest(unsigned)
+
+
+def test_filed_lineage_seal_rejects_a_mutated_block():
+    """The positive case above proves nothing if the seal ignores content."""
+    lineage = json.loads(MANIFEST.read_text(encoding="utf-8"))["groundtruth"][
+        "lineage_exception"
+    ]
+    mutated = dict(lineage)
+    supplied = mutated.pop("attestation_digest_sha256", None)
+    mutated["ancestry_path"] = list(mutated["ancestry_path"])[:-1]
+    assert supplied != _digest(mutated)
