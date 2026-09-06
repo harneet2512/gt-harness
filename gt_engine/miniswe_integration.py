@@ -1573,16 +1573,6 @@ class MiniSweAdapter(GroundtruthController):
         pending_identities = {item.identity for item in self._pending_provider_deliveries}
         if delivery_identity in pending_identities:
             return True
-        # Both counters below are written at COMMIT, so during a decision's
-        # admissions they carry only what earlier decisions committed - which
-        # the boundary reset has just cleared. Counting the decision's own
-        # pending partners is what makes the ceiling bind within the decision
-        # it is scoped to; without it the reset would not relax the ceiling,
-        # it would remove it.
-        pending_cochange = sum(
-            1 for item in self._pending_provider_deliveries
-            if item.kind == "cochange_partner"
-        )
         # The two lanes mean different things, so they dedup over different
         # spans. Prompt-lane bytes are CONTEXT: re-sending identical context
         # in a later prompt is waste however relevant it still is, so that
@@ -1598,8 +1588,7 @@ class MiniSweAdapter(GroundtruthController):
             reason = "duplicate_delivery_identity"
         elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
-        elif (kind == "cochange_partner"
-                and self._cochange_delivery_count + pending_cochange >= 2):
+        elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
             reason = "cochange_task_ceiling"
         elif rendered_bytes > per_delivery_limit:
             reason = "delivery_byte_ceiling"

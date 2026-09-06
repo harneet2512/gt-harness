@@ -247,7 +247,16 @@ def test_duplicate_identity_still_refused_within_one_decision(tmp_path):
     assert len(adapter._pending_provider_deliveries) == pending
 
 
-def test_cochange_ceiling_still_binds_within_one_decision(tmp_path):
+def test_boundary_ceiling_governs_cochange_within_one_decision(tmp_path):
+    """What actually limits a decision, now that the run-scoped count is gone.
+
+    An earlier version of this test asserted a two-per-decision cochange
+    limit. That threshold was invented here, not in the product: it
+    contradicted test_before_model_reorders_queued_history_behind_current_
+    obligation_and_retries, which delivers THREE cochange partners in one
+    decision and was green. The real intra-decision limit is
+    MAX_BOUNDARY_CLAIMS, shared by every kind.
+    """
     adapter = adapter_for(tmp_path)
 
     def offer(iteration, text):
@@ -256,16 +265,12 @@ def test_cochange_ceiling_still_binds_within_one_decision(tmp_path):
             action_index=iteration, iteration=iteration, dedup_key=text,
         )
 
-    assert offer(0, "partner one")
-    assert offer(0, "partner two")
-    # Two per decision is the ceiling; the third is refused.
-    assert not offer(0, "partner three")
-    assert _refusals(adapter, "cochange_task_ceiling")
+    assert [offer(0, f"partner {index}") for index in range(5)] == [True] * 4 + [False]
+    assert _refusals(adapter, "boundary_claim_ceiling")
+    assert not _refusals(adapter, "cochange_task_ceiling")
 
-    # A new decision restores the allowance, and it binds again there.
+    # A new decision restores the whole allowance.
     adapter.bind_provider_payload({
-        "messages": [{"role": "tool", "content": "partner one"}]
+        "messages": [{"role": "tool", "content": "partner 0"}]
     })
-    assert offer(1, "partner four")
-    assert offer(1, "partner five")
-    assert not offer(1, "partner six")
+    assert [offer(1, f"later {index}") for index in range(5)] == [True] * 4 + [False]
