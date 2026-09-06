@@ -21,6 +21,7 @@ from gt_engine.delivery_budget import (
     DELIVERY_REFUSAL_REASONS,
     MAX_BOUNDARY_CLAIMS,
     MAX_TASK_DELIVERIES,
+    PROMPT_DELIVERY_KINDS,
     TOTAL_DELIVERY_BYTE_LIMIT,
     delivery_byte_limit,
 )
@@ -201,7 +202,7 @@ def _delivery_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if lane not in {"prompt", "sealed"}:
             raise ValueError("invalid_delivery_lane")
         if lane == "prompt" and (
-            kind not in {"context_contract", "context_delta"}
+            kind not in PROMPT_DELIVERY_KINDS
             or not _SHA64.fullmatch(payload_sha256)
         ):
             raise ValueError("invalid_prompt_delivery_kind")
@@ -1182,7 +1183,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         except ValueError:
             expected_limit = 0
             errors.append("treatment_delivery_context_kind_invalid")
-        if lane == "prompt" and delivery_kind not in {"context_contract", "context_delta"}:
+        if lane == "prompt" and delivery_kind not in PROMPT_DELIVERY_KINDS:
             errors.append("treatment_prompt_context_budget_exceeded")
         if observed > expected_limit or delivery.get("byte_limit") != expected_limit:
             errors.append("treatment_delivery_context_budget_exceeded")

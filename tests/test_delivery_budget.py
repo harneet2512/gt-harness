@@ -212,52 +212,128 @@ def test_refusal_reasons_match_what_the_runtime_can_emit():
     RAISES on an unlisted reason, so the missing entry failed receipt
     construction on a run where GT had correctly declined to over-deliver.
 
-    This walks the function that writes delivery_refused and asserts the
-    literals its `reason` variable can hold are exactly the constant the
-    harness imports - the derivation that makes one list an authority rather
-    than a third copy.
+    Scope is asserted rather than assumed, because the first version of this
+    test derived its answer one level short in two ways: it parsed a single
+    file while claiming the emission domain is closed repo-wide, and it
+    collected only `Assign`-with-a-string-`Constant`, silently skipping every
+    other assignment form. A sixth reason returned from a helper -
+    `reason = self._new_ceiling(...)` - would have left the five literals
+    intact, the set equal, the build green, and the runtime emitting a value
+    the gate raises on: the defect this test exists to prevent, reintroduced
+    underneath it.
     """
     import ast
     from pathlib import Path as _Path
 
     from gt_engine.delivery_budget import DELIVERY_REFUSAL_REASONS
 
-    source = (
-        _Path(__file__).resolve().parent.parent
-        / "gt_engine" / "miniswe_integration.py"
-    ).read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    root = _Path(__file__).resolve().parent.parent
+    scopes = (ast.FunctionDef, ast.AsyncFunctionDef)
+    writers: list[tuple[str, ast.AST]] = []
+    scanned = 0
 
-    emitters = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        for call in ast.walk(node):
-            if not isinstance(call, ast.Call):
-                continue
-            if getattr(call.func, "attr", None) != "append" or not call.args:
-                continue
-            first = call.args[0]
-            if isinstance(first, ast.Constant) and first.value == "delivery_refused":
-                emitters.append(node)
+    for directory in ("gt_engine", "scripts", "eval", "gt_harness"):
+        for path in (root / directory).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            scanned += 1
+            parents = {}
+            for node in ast.walk(tree):
+                for child in ast.iter_child_nodes(node):
+                    parents[child] = node
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if getattr(node.func, "attr", None) != "append" or not node.args:
+                    continue
+                first = node.args[0]
+                if not (isinstance(first, ast.Constant)
+                        and first.value == "delivery_refused"):
+                    continue
+                # Walk up to the enclosing def. A module-level or lambda write
+                # would leave this None and must fail loudly rather than
+                # vanish from the census.
+                scope = parents.get(node)
+                while scope is not None and not isinstance(scope, scopes):
+                    scope = parents.get(scope)
+                writers.append((path.relative_to(root).as_posix(), scope))
 
-    assert len(emitters) == 1, (
-        f"expected one delivery_refused writer, found {len(emitters)} - the "
-        f"emission domain is only closed while there is exactly one"
+    assert scanned > 100, f"only {scanned} files parsed - the scan lost files"
+    assert len(writers) == 1, (
+        f"the emission domain is closed only while there is exactly one "
+        f"delivery_refused writer; found {[w[0] for w in writers]}"
     )
+    where, scope = writers[0]
+    assert scope is not None, f"{where}: delivery_refused written outside any def"
 
-    emitted = set()
-    for node in ast.walk(emitters[0]):
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+    emitted: set[str] = set()
+    offenders: list[str] = []
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            targets = [node.target]
+        else:
             continue
-        target = node.targets[0]
-        if getattr(target, "id", None) != "reason":
+        names = [
+            inner for target in targets for inner in ast.walk(target)
+            if isinstance(inner, ast.Name) and inner.id == "reason"
+        ]
+        if not names:
             continue
-        if isinstance(node.value, ast.Constant) and node.value.value:
+        simple = (
+            len(targets) == 1
+            and isinstance(targets[0], ast.Name)
+            and isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        )
+        if not simple:
+            # The one shape that defeats this test, so it is the loudest thing
+            # it reports rather than something it passes over.
+            offenders.append(f"{where}:{node.lineno}")
+        elif node.value.value:
             emitted.add(node.value.value)
 
+    assert not offenders, (
+        f"`reason` must be assigned a plain string literal so the emission "
+        f"domain stays extractable; non-literal assignments at {offenders}"
+    )
     assert emitted == set(DELIVERY_REFUSAL_REASONS), (
         f"runtime emits {sorted(emitted - set(DELIVERY_REFUSAL_REASONS))} that "
         f"the harness rejects, and allows "
         f"{sorted(set(DELIVERY_REFUSAL_REASONS) - emitted)} that nothing emits"
+    )
+
+
+def test_prompt_delivery_kinds_match_the_kind_the_session_can_produce():
+    """The gate's prompt-kind set must track the expression that produces it.
+
+    The same pair was hand-copied in four places, two of which raise, and the
+    producer is a two-valued expression in gt_session. Being one expression
+    from the emission makes a copy easy to VERIFY; it does not make it unable
+    to DRIFT. A third prompt kind would have lost runs with nothing going red.
+    """
+    import ast
+    from pathlib import Path as _Path
+
+    from gt_engine.delivery_budget import PROMPT_DELIVERY_KINDS
+
+    source = (
+        _Path(__file__).resolve().parent.parent / "gt_engine" / "gt_session.py"
+    ).read_text(encoding="utf-8")
+
+    produced = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        if getattr(node.targets[0], "id", None) != "contract_kind":
+            continue
+        for inner in ast.walk(node.value):
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                produced.add(inner.value)
+
+    assert produced, "no contract_kind assignment found - the scan is broken"
+    assert produced == set(PROMPT_DELIVERY_KINDS), (
+        f"session produces {sorted(produced)} but the budget table and every "
+        f"gate keyed on it allow {sorted(PROMPT_DELIVERY_KINDS)}"
     )

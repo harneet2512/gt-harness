@@ -10,6 +10,15 @@ DELIVERY_BYTE_LIMITS = {
     "context_delta": 1_400,
 }
 PROMPT_CONTEXT_BYTE_LIMIT = DELIVERY_BYTE_LIMITS["context_delta"]
+# The kinds a prompt-lane delivery may carry, derived from the budget table
+# rather than restated. The same pair was hand-copied in four places - the
+# lookup below, both prompt-kind checks in gt_harness/runtime_receipts.py, and
+# the two-valued expression in gt_session that produces it - and two of those
+# copies RAISE. All four are correct today; none was defended, so adding a
+# third prompt kind would have lost runs with nothing going red. That is the
+# same defect class as the refusal allow-list, caught before it was wrong
+# rather than after.
+PROMPT_DELIVERY_KINDS = frozenset(DELIVERY_BYTE_LIMITS) - {"sealed"}
 TOTAL_DELIVERY_BYTE_LIMIT = 9_600
 # This is a pathological re-offer-loop backstop, not a context dose policy.
 # Legitimate distinct deliveries are controlled by content identity and bytes.
@@ -65,7 +74,7 @@ def delivery_byte_limit(*, lane: str, kind: str) -> int:
 
     if lane == "sealed":
         return DELIVERY_BYTE_LIMITS["sealed"]
-    if lane == "prompt" and kind in {"context_contract", "context_delta"}:
+    if lane == "prompt" and kind in PROMPT_DELIVERY_KINDS:
         return DELIVERY_BYTE_LIMITS[kind]
     raise ValueError(f"unsupported delivery budget lane/kind: {lane}/{kind}")
 
