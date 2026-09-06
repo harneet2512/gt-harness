@@ -699,26 +699,29 @@ def test_promotion_that_never_scheduled_is_failed_not_silent(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("status", "expected_state"),
+    ("status", "expected_state", "expected_evidence"),
     [
         # Adds zero edges, exactly like cancelled: on the axis the report is
         # for - is the highest-precision tier populated - both are degraded.
-        ("no_op", "DEGRADED"),
+        # no_op names its own reason: its coordinator disposition is the
+        # generic not_publishable bucket, which implies something existed that
+        # could not be published, and nothing did.
+        ("no_op", "DEGRADED", "terminal_no_op:nothing_promotable"),
         # No language server for a language the graph could have promoted.
-        ("unavailable", "FAILED"),
-        ("failed", "FAILED"),
-        ("cancelled", "DEGRADED"),
+        ("unavailable", "FAILED", "terminal_unavailable:d"),
+        ("failed", "FAILED", "terminal_failed:d"),
+        ("cancelled", "DEGRADED", "terminal_cancelled:d"),
     ],
 )
 def test_each_terminal_status_maps_to_a_distinguishable_state(
-    tmp_path, status, expected_state
+    tmp_path, status, expected_state, expected_evidence
 ):
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
         {"event": "lsp_promotion_terminal", "status": status, "disposition": "d"},
     ])
 
-    assert rows["lsp_promotion"] == (expected_state, f"terminal_{status}:d")
+    assert rows["lsp_promotion"] == (expected_state, expected_evidence)
 
 
 def test_scheduled_without_a_terminal_is_degraded(tmp_path):
@@ -758,13 +761,17 @@ def test_a_superseded_enrichment_does_not_override_the_final_one(tmp_path):
     """
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r1"},
         {"event": "lsp_promotion_terminal", "status": "succeeded",
          "disposition": "published", "input_graph_revision": "r1"},
         {"event": "lsp_promotion_terminal", "status": "cancelled",
          "disposition": "obsolete", "input_graph_revision": "r0"},
     ])
 
-    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published")
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:last_of_2"
+    )
 
 
 def test_repeated_failures_before_a_success_are_not_hidden(tmp_path):
@@ -810,3 +817,68 @@ def test_a_truncated_final_line_fails_the_dense_capability_closed(tmp_path):
 
     assert rows["dense_retrieval"] == ("FAILED", "dense_index_receipt_unreadable")
     assert rows["lsp_promotion"] == ("FAILED", "promotion_journal_unreadable")
+
+
+def test_promotion_that_lost_the_publication_race_is_reported_not_erased(tmp_path):
+    """An active enrichment can terminate `obsolete`, and it must still speak.
+
+    graph_coordinator.py emits the bare string "obsolete" from TWO places: the
+    draining path at :395 and the ACTIVE path at :312, where it fires whenever
+    _state.source_revision advanced while the enrichment ran - which it does on
+    every action boundary, because record_repository_snapshot rebinds a
+    content-addressed revision. Promotion succeeding and losing the race to the
+    next rebuild is therefore a common outcome, not an exotic one.
+
+    A previous version dropped every disposition prefixed obsolete, which
+    erased exactly these rows and reported `scheduled_no_terminal` - promotion
+    never ran - for a run where it ran and succeeded every time. The two point
+    at completely different fixes and must never read alike.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "obsolete", "input_graph_revision": "r0"},
+    ])
+
+    assert rows["lsp_promotion"] == ("DEGRADED", "terminal_succeeded:obsolete")
+
+
+def test_a_certified_candidate_that_lost_the_race_is_degraded_not_working(tmp_path):
+    """obsolete_after_certification is the strongest positive evidence there is.
+
+    By that point the candidate certifier has already returned success: the
+    enriched graph exists and is certified, and only publish_graph lost the
+    race. It is still not WORKING, because the graph the agent used carries
+    none of those edges - but it is emphatically not a failure either.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "obsolete_after_certification",
+         "input_graph_revision": "r0"},
+    ])
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:obsolete_after_certification"
+    )
+
+
+def test_agreeing_terminals_do_not_raise_a_count_alarm(tmp_path):
+    """Every published graph gets an enrichment, so N terminals is normal.
+
+    A bare count fired on every clean multi-edit run, which trains a reader to
+    ignore the field. The suffix now marks disagreement, not volume.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r1"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "obsolete", "input_graph_revision": "r0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r1"},
+    ])
+
+    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published")

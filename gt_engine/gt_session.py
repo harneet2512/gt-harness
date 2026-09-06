@@ -1178,6 +1178,7 @@ class GTSession:
         lsp_evidence = "promotion_never_scheduled"
         scheduled = False
         terminals: list[dict[str, object]] = []
+        schedule_order: list[str] = []
         try:
             for line in _Path(journal).read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -1193,20 +1194,24 @@ class GTSession:
                         dense_evidence = "dense_index_ready_not_query_ready"
                 elif event == "lsp_promotion_scheduled":
                     scheduled = True
+                    revision = str(row.get("graph_revision") or "")
+                    if revision and revision not in schedule_order:
+                        schedule_order.append(revision)
                 elif event == "lsp_promotion_terminal":
                     # A run enriches every graph revision it publishes, so
-                    # several terminals are normal. Rows about a SUPERSEDED
-                    # graph are dropped here rather than ranked, because poll()
-                    # observes the active enrichment before the draining ones
-                    # (graph_coordinator.py:430-433): a stale cancelled receipt
-                    # for revision r0 is journalled AFTER r1's success, so
-                    # taking the literal last row reports DEGRADED for a run
-                    # that promoted. Every draining disposition is prefixed
-                    # obsolete (_poll_draining_enrichment emits obsolete,
-                    # obsolete_handle_exception, obsolete_receipt_exception;
-                    # the active path adds obsolete_after_certification).
-                    if not str(row.get("disposition") or "").startswith("obsolete"):
-                        terminals.append(row)
+                    # several terminals are normal, and poll() journals the
+                    # draining ones AFTER the active one
+                    # (graph_coordinator.py:430-433) - a stale receipt for r0
+                    # lands after r1's success, so the literal last row is the
+                    # wrong answer. Rows are therefore ranked by which graph
+                    # they describe, never by disposition: filtering on the
+                    # obsolete prefix looked equivalent and is not, because
+                    # "obsolete" is emitted by BOTH the draining path (:395)
+                    # and the ACTIVE path (:312) on the same literal. Dropping
+                    # it discarded the most common real outcome - promotion
+                    # succeeded and lost the publication race - and reported it
+                    # as though promotion had never run at all.
+                    terminals.append(row)
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
             # Both must fail closed. The journal is parsed line by line, so a
             # truncated final line - the likeliest corruption when a process is
@@ -1220,24 +1225,55 @@ class GTSession:
             terminals = []
         else:
             if terminals:
-                terminal = terminals[-1]
+                # The newest graph the run scheduled an enrichment for is the
+                # one whose fate the report is about; a terminal for an older
+                # revision describes a graph that has already been replaced.
+                def _recency(row: dict[str, object]) -> int:
+                    revision = str(row.get("input_graph_revision") or "")
+                    return (
+                        schedule_order.index(revision)
+                        if revision in schedule_order else -1
+                    )
+
+                newest = max(_recency(row) for row in terminals)
+                current = [row for row in terminals if _recency(row) == newest]
+                terminal = current[-1]
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
-                lsp_evidence = f"terminal_{status or 'unknown'}:{disposition or 'none'}"
-                if len(terminals) > 1:
-                    # One success after nine failures must not read as clean.
+                if status == "no_op":
+                    # no_op IS languages_promotable == [] - that is the branch
+                    # condition. Its coordinator disposition is the generic
+                    # not_publishable bucket, which implies something existed
+                    # that could not be published, so the true reason is named
+                    # here instead of borrowing a string that misleads.
+                    lsp_evidence = "terminal_no_op:nothing_promotable"
+                else:
+                    lsp_evidence = (
+                        f"terminal_{status or 'unknown'}:{disposition or 'none'}"
+                    )
+                if len({str(row.get("status") or "") for row in terminals}) > 1:
+                    # Only when the terminals DISAGREE. Every published graph
+                    # gets an enrichment, so a healthy five-edit task produces
+                    # five terminals; a bare count would fire on every clean
+                    # run and train the reader to ignore the field.
                     lsp_evidence += f":last_of_{len(terminals)}"
-                if status == "succeeded":
+                if disposition == "published":
+                    # The only outcome that actually put promoted edges into
+                    # the graph the agent went on to use.
                     lsp_state = CapabilityState.WORKING
+                elif status == "succeeded":
+                    # Promotion worked and the enriched graph never became the
+                    # published one - obsolete, obsolete_after_certification or
+                    # not_publishable, i.e. it lost the race with the next
+                    # rebuild. The tier is empty, but for a completely
+                    # different reason than promotion failing, and the two must
+                    # not read alike: this one says tune the race, not fix LSP.
+                    lsp_state = CapabilityState.DEGRADED
                 elif status in {"no_op", "cancelled"}:
-                    # Both add zero edges to the graph. no_op was WORKING here
-                    # on the reasoning that the machinery functioned and the
-                    # empty tier was the repository's doing - but that axis
-                    # makes cancelled WORKING too, and the axis the owner asked
-                    # for is whether the tier is populated. On that axis both
-                    # are degraded. no_op also leaves publishable False, so its
-                    # disposition is not_publishable, and WORKING beside that
-                    # string was a row contradicting its own evidence.
+                    # Both add zero edges. no_op was WORKING here on the
+                    # reasoning that the machinery functioned - but that axis
+                    # makes cancelled WORKING too, and the axis asked for is
+                    # whether the tier is populated.
                     lsp_state = CapabilityState.DEGRADED
                 else:
                     # unavailable (no server for a promotable language) and
