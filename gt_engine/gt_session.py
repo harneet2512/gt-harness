@@ -1441,23 +1441,38 @@ class GTSession:
                 "gt_engine_enabled", CapabilityState.FAILED,
                 f"disabled_at_{stage}:{error_type}", True,
             ))
-        elif self.disabled and self.disabled_stage in CONFIGURED_OFF_STAGES:
-            # Not a fault. __init__ sets disabled when the mode is OFF or the
-            # global kill switch is set, so a baseline arm arrives here having
-            # done exactly what it was asked. Reporting that as FAILED would
-            # cry wolf on every control run and teach the reader to skip the
-            # row on the treatment runs where it matters.
-            # Not required, because it was asked to be off. capability()
-            # defaults required=True, and that default is what made a control
-            # arm raise a CI error and, in smoke_stage's prior-gate check, a
-            # hard ValueError blaming verification rather than naming
-            # configuration. The honest statement is that GT running is not a
-            # requirement of a run configured not to run it - which is a
-            # property of the row, not something each consumer should have to
-            # re-derive from the state.
+        elif self.disabled and self.mode is GTMode.OFF:
+            # Asked to be off, and every other artifact agrees: gt_active is
+            # False, the treatment reports INACTIVE. Not a fault, and not
+            # required - GT running is not a requirement of a run configured
+            # not to run it. capability() defaults required=True, and that
+            # default is what made a control arm raise a CI error and, in
+            # smoke_stage's prior-gate check, a hard ValueError blaming
+            # verification rather than naming configuration. Putting it on the
+            # row means no consumer has to re-derive it from the state.
             rows.append((
                 "gt_engine_enabled", CapabilityState.UNEXERCISED,
                 f"gt_disabled_by_configuration:{self.disabled_stage}", False,
+            ))
+        elif self.disabled and self.disabled_stage in CONFIGURED_OFF_STAGES:
+            # The kill switch fired on a run whose mode is NOT off. Nothing
+            # else in the pipeline notices: miniswe_gt_run computes
+            # gt_active = not gt_off and gt_mode != "off", deliberately
+            # excluding the kill switch ("a kill switch may preserve native
+            # execution but cannot relabel ON as OFF"), so the run reports
+            # gt_mode enforced, treatment groundtruth, treatment_status ACTIVE,
+            # and treatment_not_active never fires. This row is the ONLY
+            # artifact that knows GT did nothing all run.
+            #
+            # So it is required, and it is a failure rather than merely
+            # unexercised: the run asserted GT was on and delivered none of it.
+            # Grouping it with the OFF arm - which CONFIGURED_OFF_STAGES does,
+            # because that constant exists to name the strings __init__ can
+            # produce and not to classify whether GT was required - let a run
+            # with zero GT behaviour past every gate.
+            rows.append((
+                "gt_engine_enabled", CapabilityState.FAILED,
+                f"gt_disabled_by_kill_switch:{self.mode.value}", True,
             ))
         elif self.disabled:
             rows.append((

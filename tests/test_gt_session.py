@@ -655,7 +655,8 @@ def _promoted(edges, *, digest="a" * 64):
 
 
 def _capability_rows(tmp_path, rows, blobs=None, *, disabled=False,
-                     disabled_stage=""):
+                     disabled_stage="", mode=None):
+    mode = GTMode.ENFORCED if mode is None else mode
     """Drive _mandatory_capability_rows against a journal written by hand.
 
     Called unbound on purpose. This helper reads only the journal, and the one
@@ -679,6 +680,7 @@ def _capability_rows(tmp_path, rows, blobs=None, *, disabled=False,
         ),
         disabled=disabled,
         disabled_stage=disabled_stage,
+        mode=mode,
     )
     return {
         name: (str(state), evidence)
@@ -760,7 +762,7 @@ def test_an_unreadable_journal_fails_both_capabilities(tmp_path):
         _engine=SimpleNamespace(
             store=SimpleNamespace(path=str(tmp_path / "absent.jsonl"))
         ),
-        disabled=False, disabled_stage="",
+        disabled=False, disabled_stage="", mode=GTMode.ENFORCED,
     )
     rows = {
         name: (str(state), evidence)
@@ -833,7 +835,7 @@ def test_a_truncated_final_line_fails_the_dense_capability_closed(tmp_path):
     )
     stub = SimpleNamespace(
         _engine=SimpleNamespace(store=SimpleNamespace(path=str(journal))),
-        disabled=False, disabled_stage="",
+        disabled=False, disabled_stage="", mode=GTMode.ENFORCED,
     )
     rows = {
         name: (str(state), evidence)
@@ -1034,21 +1036,62 @@ def test_a_run_that_kept_gt_on_reports_it_working(tmp_path):
     assert rows["gt_engine_enabled"] == ("WORKING", "no_fail_open_recorded")
 
 
-@pytest.mark.parametrize("stage", ["off", "global_kill_switch"])
-def test_gt_disabled_by_configuration_is_not_reported_as_a_fault(tmp_path, stage):
-    """__init__ disables GT when the mode is OFF or the kill switch is set.
+def test_gt_disabled_by_configuration_is_not_reported_as_a_fault(tmp_path):
+    """A baseline arm arrives at close having done exactly what it was asked.
 
-    A baseline arm arrives at close having done exactly what it was asked.
     Calling that FAILED would cry wolf on every control run and train the
     reader to skip the row on the treatment runs where it carries the signal.
     """
     rows = _capability_rows(
-        tmp_path, [_DENSE_READY], disabled=True, disabled_stage=stage
+        tmp_path, [_DENSE_READY], disabled=True, disabled_stage="off",
+        mode=GTMode.OFF,
     )
 
     assert rows["gt_engine_enabled"] == (
-        "UNEXERCISED", f"gt_disabled_by_configuration:{stage}"
+        "UNEXERCISED", "gt_disabled_by_configuration:off"
     )
+
+
+def test_the_kill_switch_on_a_treatment_arm_is_a_required_failure(tmp_path):
+    """The one case no other artifact in the pipeline can see.
+
+    GT_KILL_SWITCH disables GT regardless of mode, but miniswe_gt_run computes
+    gt_active as `not gt_off and gt_mode != "off"` and deliberately excludes
+    the kill switch - "a kill switch may preserve native execution but cannot
+    relabel ON as OFF". So the run reports gt_mode enforced, treatment
+    groundtruth and treatment_status ACTIVE, and treatment_not_active never
+    fires, while GT did nothing at all. This row is the only artifact that
+    knows.
+
+    Grouping it with the OFF arm because both land in CONFIGURED_OFF_STAGES
+    marked it not-required, which made smoke_stage's prior-gate check skip it
+    and let a run with zero GT behaviour past every gate. That constant names
+    the strings __init__ can produce; it does not classify whether GT was
+    required.
+    """
+    rows = _capability_rows(
+        tmp_path, [_DENSE_READY], disabled=True,
+        disabled_stage="global_kill_switch", mode=GTMode.ENFORCED,
+    )
+    required = _capability_required(
+        tmp_path, [_DENSE_READY], disabled=True,
+        disabled_stage="global_kill_switch", mode=GTMode.ENFORCED,
+    )
+
+    assert rows["gt_engine_enabled"] == (
+        "FAILED", "gt_disabled_by_kill_switch:enforced"
+    )
+    assert required["gt_engine_enabled"] is True
+
+
+def test_the_kill_switch_on_an_off_arm_is_still_not_required(tmp_path):
+    """Off either way: the kill switch adds nothing to a run already asked off."""
+    required = _capability_required(
+        tmp_path, [_DENSE_READY], disabled=True,
+        disabled_stage="global_kill_switch", mode=GTMode.OFF,
+    )
+
+    assert required["gt_engine_enabled"] is False
 
 
 def test_an_early_failure_does_not_outrank_later_successes(tmp_path):
@@ -1155,6 +1198,7 @@ def _capability_required(tmp_path, rows, **kwargs):
         ),
         disabled=kwargs.get("disabled", False),
         disabled_stage=kwargs.get("disabled_stage", ""),
+        mode=kwargs.get("mode", GTMode.ENFORCED),
     )
     return {
         name: required
@@ -1172,7 +1216,8 @@ def test_a_capability_asked_to_be_off_is_not_a_required_one(tmp_path):
     consumer should re-derive from the state.
     """
     off = _capability_required(
-        tmp_path, [_DENSE_READY], disabled=True, disabled_stage="off"
+        tmp_path, [_DENSE_READY], disabled=True, disabled_stage="off",
+        mode=GTMode.OFF,
     )
     on = _capability_required(tmp_path, [_DENSE_READY])
 
@@ -1226,12 +1271,20 @@ def test_the_degrade_stage_constant_matches_the_actual_call_sites(tmp_path):
 
     root = _Path(__file__).resolve().parent.parent
     found = set()
-    for directory in ("gt_engine", "scripts", "eval"):
+    test_found = set()
+    scanned = 0
+    for directory in ("gt_engine", "scripts", "eval", "tests"):
         for path in (root / directory).rglob("*.py"):
+            if "fixtures" in path.parts:
+                continue
             try:
                 tree = _ast.parse(path.read_text(encoding="utf-8"))
             except (OSError, SyntaxError):
+                # A file that stops parsing drops its call sites silently while
+                # the rest keep `found` non-empty, so the count is asserted
+                # below rather than trusting that the scan saw everything.
                 continue
+            scanned += 1
             for node in _ast.walk(tree):
                 if not isinstance(node, _ast.Call):
                     continue
@@ -1241,7 +1294,21 @@ def test_the_degrade_stage_constant_matches_the_actual_call_sites(tmp_path):
                     continue
                 first = node.args[0]
                 if isinstance(first, _ast.Constant) and isinstance(first.value, str):
-                    found.add(first.value)
+                    if "tests" in path.parts:
+                        test_found.add(first.value)
+                    else:
+                        found.add(first.value)
 
+    assert scanned > 100, f"only {scanned} files parsed - the scan lost files"
     assert found, "no degrade() call sites found - the scan itself is broken"
     assert found == set(_DEGRADE_STAGES) - set(CONFIGURED_OFF_STAGES)
+    # tests/ is scanned so the count above cannot silently shrink, but its
+    # stages are deliberately NOT asserted to be a subset. degrade() accepts
+    # any string and several tests exercise the mechanism itself with
+    # throwaway stages (evidence, later, injected, fixture) - forcing those to
+    # use production stage names would make them assert less, not more.
+    # The clamp is the structural guard instead: an unknown stage renders
+    # unrecognized_stage, so a REPORTER test written against an invented stage
+    # now fails on its own assertion rather than passing quietly. That is what
+    # caught before_model and submit, and it needs no scan to keep working.
+    assert test_found, "tests exercise degrade() and the scan saw none of it"
