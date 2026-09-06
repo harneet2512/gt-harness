@@ -882,3 +882,57 @@ def test_intact_seams_raise_no_issue(tmp_path):
     observer.install(model)
     model.query([{"role": "user", "content": "task"}])
     assert observer.receipt()["issues"] == []
+
+
+# The retry defect, as it actually happened. Recorded run 33567358689 is one
+# of the three source_runs cited by the lineage exception's product review
+# packet, so this shape reached evidence that was used for review.
+RECORDED_RETRY_LEDGER = (
+    Path(__file__).resolve().parent
+    / "fixtures/har81_attestation/recorded_runs/33567358689/provider_events.jsonl"
+)
+
+
+def test_recorded_retry_ledger_is_rejected_by_the_pairing_invariant(tmp_path):
+    """Drive the real receipt() over the real corrupt ledger.
+
+    Ten request rows share ONE request_sha256, one messages_sha256 and one
+    content-addressed blob - a single logical call retried to tenacity's
+    default stop_after_attempt(10). Nine of them have no terminal row,
+    because v1 emitted request rows inside the retry loop and the terminal
+    row outside it. Synthetic negatives prove the invariant fires; this
+    proves it fires on the shape that actually occurred.
+    """
+    rows = [json.loads(line) for line in
+            RECORDED_RETRY_LEDGER.read_text(encoding="utf-8").splitlines() if line.strip()]
+    requests = [row for row in rows if row["event"] == "provider_request"]
+    retried = requests[4:]
+    assert len(retried) == 10
+    assert len({row["request_sha256"] for row in retried}) == 1
+    assert len({row["request_blob"] for row in retried}) == 1
+
+    observer = RunReceiptObserver(
+        tmp_path, requested_model="deepseek-v4-flash",
+        resolved_model="openai/deepseek-v4-flash",
+    )
+    observer.events_path.write_bytes(RECORDED_RETRY_LEDGER.read_bytes())
+    observer.request_count = len(requests)
+    receipt = observer.receipt()
+    assert receipt["valid"] is False
+    orphaned = [issue for issue in receipt["issues"] if "lacks terminal" in issue]
+    assert len(orphaned) == 9
+
+
+def test_recorded_retry_ledger_carries_a_permanently_failing_payload():
+    """The ten attempts could not have succeeded: the error is deterministic.
+
+    BadRequestError is absent from LitellmModel.abort_exceptions, so
+    retry_if_not_exception_type retried an 8 MB over-size rejection ten
+    times. Recorded here because it is budget and spend, not just noise.
+    """
+    rows = [json.loads(line) for line in
+            RECORDED_RETRY_LEDGER.read_text(encoding="utf-8").splitlines() if line.strip()]
+    failures = [row for row in rows if row["event"] == "provider_failure"]
+    assert len(failures) == 1
+    assert failures[0]["error_type"] == "BadRequestError"
+    assert "exceeds 8 MB" in failures[0]["error"]
