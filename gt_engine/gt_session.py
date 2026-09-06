@@ -1148,11 +1148,22 @@ class GTSession:
     def _mandatory_capability_rows(self) -> list[tuple[str, "CapabilityState", str]]:
         """State of the two capabilities that must never degrade silently.
 
-        Derived from what the run actually recorded, never from configuration:
-        the dense receipt in the journal, and the promotion seal the indexer
-        writes beside the graph. An unreadable or absent record is FAILED, not
-        unknown - "we could not tell" and "it worked" must not look alike in
-        the one summary a human reads at the end of a task.
+        Derived from what the run actually recorded, never from configuration.
+        An unreadable or absent record is FAILED, not unknown - "we could not
+        tell" and "it worked" must not look alike in the one summary a human
+        reads at the end of a task.
+
+        Both readings come from the journal because that is where the code
+        paths that actually do the work report. This first read the promotion
+        seal beside the graph instead, which is written by indexer's
+        start_lsp_promotion - a reporting-only vestige the benchmark path never
+        schedules through. It always says promotion_not_scheduled, so a run
+        whose coordinator promoted successfully would still have been named as
+        a capability that did not work, and the gate built on it enforced
+        language-server presence while claiming to enforce promotion. The
+        benchmark tap is GraphBuildCoordinator.consider_enrichment ->
+        _schedule_lsp_candidate, which journals lsp_promotion_scheduled and
+        then lsp_promotion_terminal, so those are what get read.
         """
         import json as _json
         from pathlib import Path as _Path
@@ -1163,46 +1174,57 @@ class GTSession:
 
         dense_state = CapabilityState.FAILED
         dense_evidence = "dense_index_receipt_absent"
+        lsp_state = CapabilityState.FAILED
+        lsp_evidence = "promotion_never_scheduled"
+        scheduled = False
+        terminal: dict[str, object] | None = None
         try:
             for line in _Path(journal).read_text(encoding="utf-8").splitlines():
                 if not line.strip():
                     continue
                 row = _json.loads(line)
-                if row.get("event") == "dense_index_ready":
+                event = row.get("event")
+                if event == "dense_index_ready":
                     if row.get("query_ready") is True:
                         dense_state = CapabilityState.WORKING
                         dense_evidence = "dense_index_ready_query_ready"
                     else:
                         dense_state = CapabilityState.DEGRADED
                         dense_evidence = "dense_index_ready_not_query_ready"
+                elif event == "lsp_promotion_scheduled":
+                    scheduled = True
+                elif event == "lsp_promotion_terminal":
+                    # Last terminal wins: a run may enrich more than one graph
+                    # revision, and the capability's state is where it ended.
+                    terminal = row
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
             dense_evidence = "dense_index_receipt_unreadable"
-        rows.append(("dense_retrieval", dense_state, dense_evidence))
-
-        lsp_state = CapabilityState.FAILED
-        lsp_evidence = "lsp_promotion_receipt_absent"
-        try:
-            roots = [_Path(getattr(store, "root", journal)).parent]
-            seals = [s for r in roots for s in sorted(r.rglob("lsp-promotion.json"))]
-            if seals:
-                seal = _json.loads(seals[0].read_text(encoding="utf-8"))
-                status = str(seal.get("status") or "")
-                count = int(seal.get("server_count") or 0)
-                lsp_evidence = f"{status}:servers={count}"
-                if count < 1 or status in {
-                    "promotion_unavailable", "promotion_no_servers",
-                }:
-                    lsp_state = CapabilityState.FAILED
-                elif status == "promotion_not_scheduled":
-                    # Servers are present and discoverable but the producer
-                    # exposes no graph-bound scheduling receipt, so promotion
-                    # never runs. Degraded, not working: the highest-precision
-                    # edge tier is still empty and the reader must see that.
+            lsp_evidence = "promotion_journal_unreadable"
+            terminal = None
+            scheduled = False
+        else:
+            if terminal is not None:
+                status = str(terminal.get("status") or "")
+                disposition = str(terminal.get("disposition") or "")
+                lsp_evidence = f"terminal_{status or 'unknown'}:{disposition or 'none'}"
+                if status == "succeeded":
+                    lsp_state = CapabilityState.WORKING
+                elif status == "no_op":
+                    # Promotion ran and had nothing to promote. The capability
+                    # worked; the empty tier is a property of the repository,
+                    # not a degradation, and the evidence string says which.
+                    lsp_state = CapabilityState.WORKING
+                elif status == "cancelled":
                     lsp_state = CapabilityState.DEGRADED
                 else:
-                    lsp_state = CapabilityState.WORKING
-        except Exception:  # noqa: BLE001 - an unreadable seal is a failure
-            lsp_evidence = "lsp_promotion_receipt_unreadable"
+                    # unavailable (no server for a promotable language) and
+                    # failed both mean the highest-precision edge tier is empty
+                    # for a reason the run could have prevented.
+                    lsp_state = CapabilityState.FAILED
+            elif scheduled:
+                lsp_state = CapabilityState.DEGRADED
+                lsp_evidence = "scheduled_no_terminal"
+        rows.append(("dense_retrieval", dense_state, dense_evidence))
         rows.append(("lsp_promotion", lsp_state, lsp_evidence))
         return rows
 

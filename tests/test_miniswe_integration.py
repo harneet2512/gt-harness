@@ -763,6 +763,132 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     assert a.gateway_state().graph_db == str(rebuilt)
 
 
+class _StubEnrichmentHandle:
+    """A scheduled promotion that has not finished, so polling stays a no-op."""
+
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    @property
+    def done(self) -> bool:
+        return False
+
+    def cancel(self) -> bool:
+        self.cancelled = True
+        return True
+
+    def terminal_receipt(self, *, timeout=None):  # pragma: no cover - never done
+        raise AssertionError("terminal_receipt on an unfinished stub handle")
+
+
+def test_enrichment_is_offered_on_a_rebuilt_current_graph(monkeypatch, tmp_path):
+    """Every rebuilt graph is offered for LSP promotion, through the real path.
+
+    Two callers reach consider_enrichment and between them they cover both
+    kinds of graph: refresh_graph offers the INITIAL graph, which the
+    coordinator never built, and poll() offers every graph the coordinator
+    publishes (graph_coordinator.py:181), which is what an edit boundary
+    produces. Every existing test called consider_enrichment directly, so
+    nothing proved the offer survives the route the benchmark actually takes -
+    an edit, a rebuild, and the next refresh_graph. This drives that route.
+    """
+    from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
+    from gt_engine.runtime_observation import capture_workspace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+
+    offers = []
+
+    def stub_factory(request, base):
+        offers.append((request.source_revision, base.graph_revision))
+        return _StubEnrichmentHandle()
+
+    # Bound before the coordinator is built, because refresh_graph captures
+    # this attribute as the coordinator's enrichment factory.
+    monkeypatch.setattr(a, "_schedule_lsp_candidate", stub_factory)
+
+    a.start_task()
+    a.record_repository_snapshot(capture_workspace(repo), boundary="after_action")
+    a.note_edit(["mod.py"])
+
+    rebuilt = tmp_path / "rebuilt.db"
+    rebuilt.write_bytes(b"new")
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt",
+        lambda root, state_dir=None, source_revision="", layout=None: IndexBuildReceipt(
+            IndexBuildStatus.BUILT,
+            graph_db=str(rebuilt),
+            graph_revision="b" * 64,
+            analysis_state="complete",
+        ),
+    )
+
+    assert a.refresh_graph() is False
+    assert a._graph_coordinator.wait_idle(timeout=3)
+    # The second call takes the already-current early return. That is the
+    # branch every later boundary takes, and the one the offer was missing.
+    assert a.refresh_graph() is True
+
+    # The rebuilt graph - not the pre-edit one - is what gets promoted.
+    assert offers == [(a.engine_state.source_revision, "b" * 64)]
+
+
+def test_a_repeated_boundary_does_not_re_offer_the_same_graph(monkeypatch, tmp_path):
+    """The offer is per published graph, not per boundary.
+
+    Scheduling a promotion materialises the whole workspace to a temporary
+    directory and hashes every byte of it twice, on the owner thread. A graph
+    that has not moved must not pay that again at each action.
+    """
+    from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
+    from gt_engine.runtime_observation import capture_workspace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+    offers = []
+    monkeypatch.setattr(
+        a, "_schedule_lsp_candidate",
+        lambda request, base: offers.append(base.graph_revision)
+        or _StubEnrichmentHandle(),
+    )
+    a.start_task()
+    a.record_repository_snapshot(capture_workspace(repo), boundary="after_action")
+    a.note_edit(["mod.py"])
+    rebuilt = tmp_path / "rebuilt.db"
+    rebuilt.write_bytes(b"new")
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt",
+        lambda root, state_dir=None, source_revision="", layout=None: IndexBuildReceipt(
+            IndexBuildStatus.BUILT, graph_db=str(rebuilt),
+            graph_revision="b" * 64, analysis_state="complete",
+        ),
+    )
+    assert a.refresh_graph() is False
+    assert a._graph_coordinator.wait_idle(timeout=3)
+
+    assert a.refresh_graph() is True
+    assert a.refresh_graph() is True
+    assert a.refresh_graph() is True
+
+    # One offer for the one published graph, however many boundaries pass.
+    assert offers == ["b" * 64]
+
+
 @pytest.mark.parametrize("config_name", ["tsconfig.json", "package.json", "go.mod", "Cargo.toml", ".gitignore"])
 def test_frozen_input_and_reuse_key_include_resolver_configuration(tmp_path, config_name):
     from gt_engine.indexer import source_manifest_digest

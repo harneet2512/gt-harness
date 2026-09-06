@@ -88,16 +88,23 @@ def _atomic_json(path: Path, value: object) -> None:
 
 
 def _lsp_promotion_receipt(state_dir: Path) -> dict[str, Any]:
-    """Report whether language servers actually reached the run.
+    """Report whether language servers were discoverable during the run.
 
-    start_lsp_promotion seals lsp-promotion.json beside the graph and
-    deliberately never fails an index that already succeeded - correct at that
-    layer. But nothing read it, so a run that recorded promotion_no_servers or
-    promotion_unavailable looked identical to one with the full edge tier, and
-    the highest-precision edges stayed empty with no gate noticing. Language
-    servers are mandatory capability, so the receipt layer is where their
-    absence has to become an acceptance error, exactly as it already is for
-    the dense index.
+    Scope, stated exactly, because the first version of this comment claimed
+    more than the file can support: lsp-promotion.json is sealed by indexer's
+    start_lsp_promotion, which runs detect_available_servers() and reports.
+    It does NOT schedule promotion on the benchmark path - that is
+    GraphBuildCoordinator.consider_enrichment -> _schedule_lsp_candidate, which
+    reports through the journal, not here. So this receipt proves exactly one
+    thing: whether language servers existed and were discoverable when the
+    graph was published. Its status field always reads promotion_not_scheduled
+    on that path and carries no information about whether promotion fired.
+
+    That one thing is still worth enforcing. Servers are mandatory capability,
+    and without them promotion cannot produce anything no matter how well the
+    coordinator is wired, so their absence has to be an acceptance error the
+    way the dense index already is. Whether promotion actually fired is a
+    separate claim proven from the coordinator's own terminal receipt.
     """
     _, promotion = _single_optional(state_dir, "lsp-promotion.json")
     if not isinstance(promotion, dict):
@@ -1263,9 +1270,12 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         errors.append("treatment_dense_index_not_ready")
     # Language servers are mandatory capability. promotion_unavailable means
     # the producer package was absent; promotion_no_servers means nothing was
-    # on PATH to promote with; a missing receipt means promotion never even
-    # reported. All three are runs that measured GT with its highest-precision
-    # edge tier switched off, which must not be accepted as a normal result.
+    # on PATH to promote with; a missing receipt means discovery never even
+    # reported. All three are runs that could not have populated the
+    # highest-precision edge tier at all, which must not be accepted as a
+    # normal result. This gates server presence, not promotion firing - the
+    # status field is deliberately not asserted on, because on the benchmark
+    # path it always reads promotion_not_scheduled and would reject every run.
     lsp = treatment.get("lsp_promotion")
     if (
         not isinstance(lsp, dict)

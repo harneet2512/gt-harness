@@ -642,3 +642,106 @@ def test_later_execution_supersedes_same_revision_outcome(tmp_path):
 
     assert len(batch.context_additions) == 1
     assert '"supersedes":["pass-1"]' in batch.context_additions[0]
+
+
+def _capability_rows(tmp_path, rows):
+    """Drive _mandatory_capability_rows against a journal written by hand.
+
+    Called unbound on purpose. This helper reads only the journal, and the one
+    defect it has already shipped (a NameError on a name the module never
+    imported) survived a green suite because nothing reached the line. A test
+    that constructs a whole session would not have reached it either.
+    """
+    from types import SimpleNamespace
+
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    stub = SimpleNamespace(
+        _engine=SimpleNamespace(store=SimpleNamespace(path=str(journal)))
+    )
+    return {
+        name: (str(state), evidence)
+        for name, state, evidence in GTSession._mandatory_capability_rows(stub)
+    }
+
+
+_DENSE_READY = {"event": "dense_index_ready", "query_ready": True}
+
+
+def test_successful_promotion_is_not_reported_as_a_capability_that_failed(tmp_path):
+    """The regression this pins: promotion worked, so nothing may say it did not.
+
+    The first version read lsp-promotion.json, which is sealed by indexer's
+    reporting-only start_lsp_promotion and always says promotion_not_scheduled
+    on the benchmark path. Every run - including one whose coordinator promoted
+    successfully - was therefore named at end of task as a capability that did
+    not work. The benchmark tap reports through the journal, so that is the
+    only record this may read.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "task_id": "t1"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published"},
+    ])
+
+    assert rows["lsp_promotion"] == ("WORKING", "terminal_succeeded:published")
+    assert rows["dense_retrieval"][0] == "WORKING"
+
+
+def test_promotion_that_never_scheduled_is_failed_not_silent(tmp_path):
+    """A tap that never fired is the outcome the end-of-task report exists for."""
+    rows = _capability_rows(tmp_path, [_DENSE_READY])
+
+    assert rows["lsp_promotion"] == ("FAILED", "promotion_never_scheduled")
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_state"),
+    [
+        # Promotion ran and had nothing to promote: the capability worked and
+        # the empty edge tier is a property of the repository.
+        ("no_op", "WORKING"),
+        # No language server for a language the graph could have promoted.
+        ("unavailable", "FAILED"),
+        ("failed", "FAILED"),
+        ("cancelled", "DEGRADED"),
+    ],
+)
+def test_each_terminal_status_maps_to_a_distinguishable_state(
+    tmp_path, status, expected_state
+):
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_terminal", "status": status, "disposition": "d"},
+    ])
+
+    assert rows["lsp_promotion"] == (expected_state, f"terminal_{status}:d")
+
+
+def test_scheduled_without_a_terminal_is_degraded(tmp_path):
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY, {"event": "lsp_promotion_scheduled", "task_id": "t1"},
+    ])
+
+    assert rows["lsp_promotion"] == ("DEGRADED", "scheduled_no_terminal")
+
+
+def test_an_unreadable_journal_fails_both_capabilities(tmp_path):
+    """"We could not tell" must never render the same as "it worked"."""
+    from types import SimpleNamespace
+
+    stub = SimpleNamespace(
+        _engine=SimpleNamespace(
+            store=SimpleNamespace(path=str(tmp_path / "absent.jsonl"))
+        )
+    )
+    rows = {
+        name: (str(state), evidence)
+        for name, state, evidence in GTSession._mandatory_capability_rows(stub)
+    }
+
+    assert rows["lsp_promotion"] == ("FAILED", "promotion_journal_unreadable")
+    assert rows["dense_retrieval"] == ("FAILED", "dense_index_receipt_unreadable")
