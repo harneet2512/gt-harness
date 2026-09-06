@@ -502,21 +502,35 @@ async def run(args) -> dict:
             events, handler.commands
         )
         receipt["execution_evidence_verified"] = False
-        if len(checks) == 2 and len(handler.requests) == 8:
+        # Counts are derived, never asserted. A GT-internal bootstrap turn adds a
+        # provider request without adding an agent step, so a hardcoded total
+        # silently switches this predicate off instead of failing it, and a
+        # predicate that declines to evaluate is indistinguishable from one that
+        # found a violation. Commands bind by digest rather than by position.
+        agent_requests = len(handler.requests) - len(handler.bootstrap_requests)
+        commands_by_digest = {
+            hashlib.sha256(item.encode()).hexdigest(): item for item in handler.commands
+        }
+        if len(checks) == 2 and agent_requests == 8:
             chain_valid = True
-            for row, command, outcome, returncode, request_index in (
-                (checks[0], handler.commands[0], "fail", 1, 1),
-                (checks[1], handler.commands[6], "pass", 0, 7),
+            for row, outcome, returncode in (
+                (checks[0], "fail", 1),
+                (checks[1], "pass", 0),
             ):
+                command = commands_by_digest.get(str(row.get("command_sha256") or ""))
+                if command is None:
+                    chain_valid = False
+                    break
                 blob = (state / "execution_evidence" / f"{row['artifact_sha256']}.json").read_bytes()
                 payload = json.loads(blob)
                 raw = (state / row["raw_blob"]).read_bytes()
                 admitted = []
-                for message in handler.requests[request_index].get("messages", []):
-                    content = str(message.get("content") or "")
-                    if "[GT_EXECUTION_EVIDENCE]\n" in content:
-                        suffix = content.split("[GT_EXECUTION_EVIDENCE]\n", 1)[1]
-                        admitted.append(json.JSONDecoder().raw_decode(suffix)[0])
+                for request in handler.requests:
+                    for message in request.get("messages", []):
+                        content = str(message.get("content") or "")
+                        if "[GT_EXECUTION_EVIDENCE]\n" in content:
+                            suffix = content.split("[GT_EXECUTION_EVIDENCE]\n", 1)[1]
+                            admitted.append(json.JSONDecoder().raw_decode(suffix)[0])
                 chain_valid &= (
                     hashlib.sha256(blob).hexdigest() == row["artifact_sha256"]
                     and payload["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()

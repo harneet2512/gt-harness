@@ -968,7 +968,13 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     calls = ((trajectory.get("info") or {}).get("model_stats") or {}).get("api_calls")
     if calls is None:
         errors.append("product_provider_calls_missing")
-    elif int(calls) != int(receipt.get("provider_calls") or 0):
+    elif int(calls) != int(
+        receipt.get("agent_turn_calls", receipt.get("provider_calls")) or 0
+    ):
+        # F10: api_calls is the AGENT's turn count. provider_calls also includes
+        # GT-internal bootstrap turns, so comparing the two populations directly
+        # mismatches whenever a bootstrap fired. Compare like with like; the
+        # bootstrap is reconciled separately against admissions and responses.
         errors.append("product_provider_calls_mismatch")
     attempted_calls = int(receipt.get("provider_calls") or 0)
     completed_calls = int(receipt.get("provider_completed_calls") or 0)
