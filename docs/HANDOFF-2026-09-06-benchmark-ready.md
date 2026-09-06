@@ -24,35 +24,63 @@ has said so directly. Fix code, run it, prove it.
 
 | # | Requirement | State |
 |---|---|---|
-| 1 | Run completes | **Open.** Four dispatches, none reached a verdict. Latest cause was a 25-minute budget; raised to 90. |
-| 2 | GT on and self-reporting | Code done. **Invisible in dispatch** until the export fix lands (see below). |
+| 1 | Run completes | **Cause found and fixed** (`29ca364e`): an unbounded ONNX cache refresh consumed the whole budget before the agent loop. |
+| 2 | GT on and self-reporting | Code done. Invisible so far only because no run ever reached the loop. |
 | 3 | Gates enforce what they claim | Four defects found and fixed today. |
 | 4 | Comparable to baseline | Wired: `deepseek-v4-flash`, official verifier, official leaderboard row. |
 | 5 | Attestable | Pinned producer and wheels; receipts bind run to code. |
 | — | Anti-repetition | Run-scoped prompt-lane uniqueness now **enforced**, not just implemented. |
 
-## The single most important open item
+## The single most important item — SOLVED, and it was not what it looked like
 
-**The journal is written but never reaches the host, so every dispatch reports
-`capabilities: []` regardless of outcome.**
+**A cache refresh was eating the entire run budget before the session existed.**
 
-- `ExternalStateStore` and `DiagnosticJournal` both write to
-  `<state_dir>/<task_id>/` (`miniswe_integration.py:225-226`).
-- That directory **does** reach the artifact — `recovery/` is in it — but
-  `events.jsonl`, `diagnostics.json` and `output_evidence/` are not.
-- `/logs/agent` is a **bind mount** (`harbor .../docker.py:202` `mounted=True`),
-  so Harbor copies nothing and no allowlist is dropping it. The gate image has
-  **no symlink** on that path either. **The mechanism is still unexplained.**
-- Consequence: `diagnostics.json` lands in the same unexported directory, so a
-  *clean, solved* run also reports `capabilities: []`. The capability rows are
-  journal-derived by design, so they cannot even be recomputed offline.
-- `gt-audit.json` corroborates: `gt_deliveries 0`, `ledger_present false`,
-  `graph_refresh_count 0` for a run that built a 912MB graph and ran 25 minutes.
+For most of this ticket the symptom was read as "the journal is written but
+never reaches the host". That was wrong. Nothing is lost in transit; the state
+directory arrives complete. `events.jsonl` was never *created*, because the
+process that creates it was never reached.
 
-**Mitigated in `b2216e69`** by copying the journal, diagnostics and incident
-replay to the receipt directory, which is demonstrably exported. That is a
-workaround, not the root cause. **Finding why the bind mount loses those files
-is still open.**
+The artifact of run `34062325608` says it outright:
+
+| Evidence | Value |
+|---|---|
+| `index-resource.json` | `elapsed_ms 37404`, `exit_code 0`, `build_attempt_count 1` |
+| `graph.manifest.json` | `analysis_state complete`, `core_phase_state committed` |
+| `gt-state/<task>/` | `recovery/` only — no `events.jsonl`, no `diagnostics.json` |
+| `graph.contract-*.sqlite` | 38MB of pages, `-journal` present, **zero rows** |
+| `gt-run.json` | `provider_calls null`, `effective_model null`, `stop_reason timeout` |
+| `miniswe_report.json` | `child_returncode -15`, `elapsed 1500.07s`, `deadline_exceeded` |
+
+The graph built **once**, in 36 seconds — so the repeated-rebuild hypothesis is
+dead, and so is "killed during indexing". The ~24 minutes between the build and
+the SIGTERM went into `ContractEmbeddingStore.refresh`, which embeds every moved
+contract through a 110M-parameter ONNX model on two vCPU (~3.5k texts on
+arktype). It runs inside `build_agent` at `scripts/miniswe_gt_run.py`, *ahead of*
+`MiniSweAdapter` constructing `ExternalStateStore`. No journal exists yet, so the
+run cannot even report where it died. The empty sidecar with a live rollback
+journal is the only witness it leaves.
+
+Everything the "export gap" framing rested on is explained by this and needs no
+second mechanism: `gt_deliveries 0`, `ledger_present false`,
+`graph_refresh_count 0`, `capabilities: []` — all literally true, because
+nothing had happened yet.
+
+**Fixed in `29ca364e`.** `_embed_plan` now takes a deadline and checks it
+*between* batches (never inside one — a batch is a single opaque ONNX call), and
+raises `EmbeddingBudgetExhausted` carrying `embedded/planned`. `build_agent`
+derives the bound from the run's own budget: `min(300s, 10%)`. Partial work is
+discarded rather than published, because the store commits vectors and their
+graph bindings in one transaction; publishing a truncated plan would trade a
+bounded delay for that invariant. The receipt reports
+`embedding_state="budget_exhausted"` with the count.
+
+Executed, not asserted: 320 planned vectors in 10 batches of 32 at 0.2s/batch.
+Unbounded → 320 vectors, 2.01s. Bounded at 0.5s → raised at 96/320 after
+3 batches, 0.59s. Deadline already past → raised at 0/320, zero batches.
+
+`b2216e69` (copying the journal to the receipt directory) remains harmless and
+still worth keeping as a hedge, but it was solving a problem that did not exist.
+It is **not** what makes capability rows visible; reaching the agent loop is.
 
 ## What is fixed and proven
 
@@ -73,7 +101,7 @@ is still open.**
 
 ## Open items, ranked
 
-1. **Journal export root cause** — above. Workaround shipped; mechanism unknown.
+1. **Confirm the fix under dispatch.** The bound is proven by execution locally; it has not yet been observed on a paid run.
 2. **500-edge cap is binding.** `_get_ambiguous_edges` omits `limit`, taking the
    default 500. The gate task has **6,621** ambiguous callsites — 7.5% attempted.
    Worse, the terminal will read `...:N_edges` with positive N and render
