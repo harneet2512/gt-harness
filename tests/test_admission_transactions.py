@@ -274,3 +274,37 @@ def test_boundary_ceiling_governs_cochange_within_one_decision(tmp_path):
         "messages": [{"role": "tool", "content": "partner 0"}]
     })
     assert [offer(1, f"later {index}") for index in range(5)] == [True] * 4 + [False]
+
+
+def test_cochange_ceiling_is_reachable_within_one_decision(tmp_path):
+    """The ceiling is NOT dead, and this pins why it is not.
+
+    I argued on HAR-87 that the per-decision reset made cochange_task_ceiling
+    unreachable, on the assumption that a decision contains exactly one bind
+    and so the committed count is always zero during admissions. That
+    assumption is wrong: a decision can bind more than once, the count is
+    cleared at the DECISION boundary rather than at bind, and two committed
+    partners inside one decision close further cochange within it.
+
+    Without this test the ceiling looks dead to anyone who repeats my
+    reasoning, and the next reader deletes it.
+    """
+    adapter = adapter_for(tmp_path)
+
+    def offer(iteration, text):
+        return adapter.admit_model_visible_delivery(
+            lane="sealed", kind="cochange_partner", rendered=text,
+            action_index=iteration, iteration=iteration, dedup_key=text,
+        )
+
+    assert offer(0, "p1")
+    assert offer(0, "p2")
+    adapter.bind_provider_payload({"messages": [{"role": "tool", "content": "p1 p2"}]})
+    assert adapter._cochange_delivery_count == 2
+
+    # Same decision, and now the ceiling binds.
+    assert not offer(0, "p3")
+    assert _refusals(adapter, "cochange_task_ceiling")
+
+    # A new decision clears it, which is the ruled behaviour.
+    assert offer(1, "p4")
