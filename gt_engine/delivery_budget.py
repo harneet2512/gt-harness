@@ -4,10 +4,23 @@ from __future__ import annotations
 
 import re
 
-DELIVERY_BYTE_LIMITS = {
-    "sealed": 1_400,
+# Split so the prompt-kind domain needs no hand-typed exception. The merged
+# table's key space is a union of one LANE name and two KIND names, so deriving
+# the kinds from it required subtracting "sealed" - one literal doing the work
+# a type boundary should, and correct only while the table stays keyed as
+# "exactly one lane plus every prompt kind", an invariant stated and tested
+# nowhere. Giving the sealed lane a per-kind limit, which its single limit
+# currently covers five kinds' worth of, would have silently promoted each of
+# those kinds into the prompt domain and stopped two raising gates rejecting
+# them.
+SEALED_DELIVERY_BYTE_LIMIT = 1_400
+PROMPT_DELIVERY_BYTE_LIMITS = {
     "context_contract": 2_000,
     "context_delta": 1_400,
+}
+DELIVERY_BYTE_LIMITS = {
+    "sealed": SEALED_DELIVERY_BYTE_LIMIT,
+    **PROMPT_DELIVERY_BYTE_LIMITS,
 }
 PROMPT_CONTEXT_BYTE_LIMIT = DELIVERY_BYTE_LIMITS["context_delta"]
 # The kinds a prompt-lane delivery may carry, derived from the budget table
@@ -18,7 +31,7 @@ PROMPT_CONTEXT_BYTE_LIMIT = DELIVERY_BYTE_LIMITS["context_delta"]
 # third prompt kind would have lost runs with nothing going red. That is the
 # same defect class as the refusal allow-list, caught before it was wrong
 # rather than after.
-PROMPT_DELIVERY_KINDS = frozenset(DELIVERY_BYTE_LIMITS) - {"sealed"}
+PROMPT_DELIVERY_KINDS = frozenset(PROMPT_DELIVERY_BYTE_LIMITS)
 TOTAL_DELIVERY_BYTE_LIMIT = 9_600
 # This is a pathological re-offer-loop backstop, not a context dose policy.
 # Legitimate distinct deliveries are controlled by content identity and bytes.

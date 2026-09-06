@@ -494,9 +494,17 @@ def validate_product_bundle(bundle: Mapping[str, Any], *, root: str | Path) -> N
         raise BundleError("python_wheel_identity_invalid")
 
 
+# The two arms, named once. The pair was hand-typed three times in this file -
+# both accept-validators below and the loop that drives them - and both
+# validators RAISE inside the paid per-task window. All three were correct;
+# none was defended, which is the same shape as the prompt-kind pair and the
+# refusal allow-list. Adding a third arm would have raised on it in setup.
+BENCHMARK_ARMS = ("bare", "groundtruth")
+
+
 def project_task_environment(host: Mapping[str, str], *, treatment: str) -> dict[str, str]:
     """Project a closed, typed, credential-free environment into task tools."""
-    if treatment not in {"bare", "groundtruth"}:
+    if treatment not in BENCHMARK_ARMS:
         raise ValueError(f"unsupported_treatment:{treatment}")
     projected = {
         name: str(host[name]).strip()
@@ -514,7 +522,7 @@ def project_task_environment(host: Mapping[str, str], *, treatment: str) -> dict
 
 
 def build_benchmark_plan(bundle: Mapping[str, Any], *, arm: str) -> dict[str, Any]:
-    if arm not in {"bare", "groundtruth"}:
+    if arm not in BENCHMARK_ARMS:
         raise ValueError(f"unsupported_arm:{arm}")
     tasks = [
         {
@@ -1058,7 +1066,7 @@ def run_provider_free_acceptance(
     fake_provider_proof = _prove_fake_openai_transport()
     arms: list[dict[str, Any]] = []
     plans: list[dict[str, Any]] = []
-    for arm in ("bare", "groundtruth"):
+    for arm in BENCHMARK_ARMS:
         plan = build_benchmark_plan(bundle, arm=arm)
         # The frozen provider-free fixture is deliberately one task; the released
         # DeepSWE task list remains immutable in structural_identity.
