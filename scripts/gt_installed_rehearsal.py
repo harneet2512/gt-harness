@@ -521,16 +521,26 @@ async def run(args) -> dict:
                 if command is None:
                     chain_valid = False
                     break
+                # Evidence must reach the request that FOLLOWS its check, not
+                # merely appear somewhere in the run: a late delivery is a real
+                # defect this predicate exists to catch. The index is derived -
+                # the agent's Nth command is answered by request N, and every
+                # GT-internal bootstrap request shifts that by one.
+                request_index = (
+                    handler.commands.index(command) + 1 + len(handler.bootstrap_requests)
+                )
+                if request_index >= len(handler.requests):
+                    chain_valid = False
+                    break
                 blob = (state / "execution_evidence" / f"{row['artifact_sha256']}.json").read_bytes()
                 payload = json.loads(blob)
                 raw = (state / row["raw_blob"]).read_bytes()
                 admitted = []
-                for request in handler.requests:
-                    for message in request.get("messages", []):
-                        content = str(message.get("content") or "")
-                        if "[GT_EXECUTION_EVIDENCE]\n" in content:
-                            suffix = content.split("[GT_EXECUTION_EVIDENCE]\n", 1)[1]
-                            admitted.append(json.JSONDecoder().raw_decode(suffix)[0])
+                for message in handler.requests[request_index].get("messages", []):
+                    content = str(message.get("content") or "")
+                    if "[GT_EXECUTION_EVIDENCE]\n" in content:
+                        suffix = content.split("[GT_EXECUTION_EVIDENCE]\n", 1)[1]
+                        admitted.append(json.JSONDecoder().raw_decode(suffix)[0])
                 chain_valid &= (
                     hashlib.sha256(blob).hexdigest() == row["artifact_sha256"]
                     and payload["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()
