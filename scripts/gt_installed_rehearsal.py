@@ -506,32 +506,23 @@ async def run(args) -> dict:
         # provider request without adding an agent step, so a hardcoded total
         # silently switches this predicate off instead of failing it, and a
         # predicate that declines to evaluate is indistinguishable from one that
-        # found a violation. Commands bind by digest rather than by position.
+        # found a violation.
         agent_requests = len(handler.requests) - len(handler.bootstrap_requests)
-        commands_by_digest = {
-            hashlib.sha256(item.encode()).hexdigest(): item for item in handler.commands
-        }
-        if len(checks) == 2 and agent_requests == 8:
+        if len(checks) == 2 and agent_requests == len(handler.commands):
             chain_valid = True
-            for row, outcome, returncode in (
-                (checks[0], "fail", 1),
-                (checks[1], "pass", 0),
+            # Bind by scenario position, never by command-string identity: two
+            # steps issuing the same command would make an identity lookup
+            # return the first match and audit the wrong request. The digest
+            # comparison below then VERIFIES the binding instead of forming it.
+            for row, step_ordinal, outcome, returncode in (
+                (checks[0], 0, "fail", 1),
+                (checks[1], 6, "pass", 0),
             ):
-                command = commands_by_digest.get(str(row.get("command_sha256") or ""))
-                if command is None:
+                request_index = step_ordinal + 1 + len(handler.bootstrap_requests)
+                if step_ordinal >= len(handler.commands) or request_index >= len(handler.requests):
                     chain_valid = False
                     break
-                # Evidence must reach the request that FOLLOWS its check, not
-                # merely appear somewhere in the run: a late delivery is a real
-                # defect this predicate exists to catch. The index is derived -
-                # the agent's Nth command is answered by request N, and every
-                # GT-internal bootstrap request shifts that by one.
-                request_index = (
-                    handler.commands.index(command) + 1 + len(handler.bootstrap_requests)
-                )
-                if request_index >= len(handler.requests):
-                    chain_valid = False
-                    break
+                command = handler.commands[step_ordinal]
                 blob = (state / "execution_evidence" / f"{row['artifact_sha256']}.json").read_bytes()
                 payload = json.loads(blob)
                 raw = (state / row["raw_blob"]).read_bytes()
