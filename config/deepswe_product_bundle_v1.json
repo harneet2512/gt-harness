@@ -967,7 +967,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "7adb1cedd71cd18e3f9c94f7c3566ed3988ab40ed7fe43498a836bea0bdc273c"
+      "attestation_digest_sha256": "d5ff8f22b11d6a3d2d0002b6c504f8586062a9021ba62e12267d6f431ff25160"
     }
   },
   "capabilities": [
