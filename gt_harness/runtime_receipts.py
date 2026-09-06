@@ -136,19 +136,31 @@ def _lsp_promotion_receipt(
     # on every real task: the smoke goes red after the spend. The multiplicity
     # was harmless for as long as nothing read the seal; adding this reader is
     # what made it fatal. Same selection the graph manifest already uses.
+    # Matched against EVERY publication, newest first - not only the last one.
+    # A successful enrichment publishes the candidate graph from enrichments/,
+    # and only _ensure_index_unlocked writes a seal, into revisions/. So the
+    # newest publication on a run where promotion WORKED has no seal at all,
+    # nothing matched, and the fallback below raised on a task with more than
+    # one revision. That fired on exactly the outcome this gate exists to
+    # observe: promotion succeeding. Walking back to the most recent published
+    # graph that does have a seal finds the base the enrichment was built from,
+    # which is the graph whose indexing discovered the servers.
+    seals: dict[str, dict[str, Any]] = {}
+    for path in sorted(state_dir.rglob("lsp-promotion.json")):
+        candidate = _read_object(path)
+        if isinstance(candidate, dict):
+            seals.setdefault(str(candidate.get("graph_sha256") or ""), candidate)
     promotion = None
-    if events:
-        publications = [r for r in events if r.get("event") == "graph_publication"]
-        if publications:
-            published = str(publications[-1].get("graph_sha256") or "")
-            for path in sorted(state_dir.rglob("lsp-promotion.json")):
-                candidate = _read_object(path)
-                if isinstance(candidate, dict) and str(
-                    candidate.get("graph_sha256") or ""
-                ) == published:
-                    promotion = candidate
-                    break
-    if promotion is None:
+    for row in reversed(events or []):
+        if row.get("event") != "graph_publication":
+            continue
+        match = seals.get(str(row.get("graph_sha256") or ""))
+        if match is not None:
+            promotion = match
+            break
+    if promotion is None and len(seals) == 1:
+        promotion = next(iter(seals.values()))
+    if promotion is None and not seals:
         _, promotion = _single_optional(state_dir, "lsp-promotion.json")
     if not isinstance(promotion, dict):
         return {"schema": "gt.lsp_promotion.v1", "status": "promotion_receipt_missing",
