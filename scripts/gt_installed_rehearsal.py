@@ -502,13 +502,28 @@ async def run(args) -> dict:
             events, handler.commands
         )
         receipt["execution_evidence_verified"] = False
+        # F11: a predicate that declines to evaluate must say so. Returning
+        # False for "the run did not have the shape I know how to audit" is
+        # indistinguishable from "I audited it and it violated", and the caller
+        # cannot tell an unproven property from a broken one.
+        receipt["predicates_not_evaluated"] = []
         # Counts are derived, never asserted. A GT-internal bootstrap turn adds a
         # provider request without adding an agent step, so a hardcoded total
         # silently switches this predicate off instead of failing it, and a
         # predicate that declines to evaluate is indistinguishable from one that
         # found a violation.
         agent_requests = len(handler.requests) - len(handler.bootstrap_requests)
-        if len(checks) == 2 and agent_requests == len(handler.commands):
+        if len(checks) != 2 or agent_requests != len(handler.commands):
+            receipt["predicates_not_evaluated"].append({
+                "predicate": "execution_evidence_verified",
+                "reason": "unaudited_run_shape",
+                "checks": len(checks),
+                "expected_checks": 2,
+                "agent_requests": agent_requests,
+                "expected_agent_requests": len(handler.commands),
+                "bootstrap_requests": len(handler.bootstrap_requests),
+            })
+        else:
             chain_valid = True
             # Bind by scenario position, never by command-string identity: two
             # steps issuing the same command would make an identity lookup
@@ -588,6 +603,10 @@ async def run(args) -> dict:
                 receipt["status"] = "VERIFIED_SYNTHETIC_INTERRUPTION"
         elif (result.exception_info is None and isinstance(rewards, dict)
                 and rewards.get("reward") == 1 and receipt.get("verifier_patch_matches")
+                # F11: an unevaluated predicate must block acceptance. Without
+                # this, a run whose shape the auditor did not recognise reaches
+                # the same verdict as one it audited and passed.
+                and not receipt.get("predicates_not_evaluated")
                 and len(handler.commands) == 8 and len(audits) == 1
                 and audits[0].verdict == "GREEN-delivered" and audits[0].synthetic_transport
                 and receipt["reproduction_verified"]
