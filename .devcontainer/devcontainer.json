@@ -1,6 +1,9 @@
 {
   "name": "gt-cloud-agent",
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  // A slim, reliably-starting base. The universal image was failing to start
+  // on the Codespaces host (error 1302, recovery container), which silently
+  // cost us docker-in-docker and every forwarded port with it.
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
