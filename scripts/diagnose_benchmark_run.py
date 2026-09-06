@@ -41,6 +41,18 @@ def main(argv: list[str] | None = None) -> int:
     # A run whose language servers or embedder never came up finishes looking
     # normal otherwise, and the person reading the result is the last one who
     # should have to reconstruct that GT ran with less than GT has.
+    def _worked(row: dict) -> str:
+        """Tri-valued: a capability never asked to run did not fail to run.
+
+        This column asks "did this work", and bold NO is the loudest cell in
+        the table. For a capability deliberately switched off the answer is
+        not no, it is not-applicable - printing NO moved the cry-wolf out of
+        stderr and left it in the widget a human actually reads.
+        """
+        if row.get("verified"):
+            return "yes"
+        return "n/a" if not row.get("triggered") else "**NO**"
+
     capabilities = [row for row in payload.get("capabilities", [])
                     if isinstance(row, dict)]
     # Keyed on refused/degraded, not on `not verified`. UNEXERCISED also has
@@ -80,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
             lines.extend(
                 f"| {row.get('capability')} | {row.get('state')} | "
                 f"{'yes' if row.get('required') else 'no'} | "
-                f"{'yes' if row.get('verified') else '**NO**'} | "
+                f"{_worked(row)} | "
                 f"{row.get('evidence')} |"
                 for row in capabilities
             )

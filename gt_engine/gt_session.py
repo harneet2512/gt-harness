@@ -1166,7 +1166,9 @@ class GTSession:
         finally:
             self._open_executions.discard(execution_id)
 
-    def _mandatory_capability_rows(self) -> list[tuple[str, "CapabilityState", str]]:
+    def _mandatory_capability_rows(
+        self,
+    ) -> list[tuple[str, "CapabilityState", str, bool]]:
         """State of the capabilities that must never degrade silently.
 
         Derived from what the run actually recorded, never from configuration.
@@ -1189,7 +1191,7 @@ class GTSession:
         import json as _json
         from pathlib import Path as _Path
 
-        rows: list[tuple[str, CapabilityState, str]] = []
+        rows: list[tuple[str, CapabilityState, str, bool]] = []
         store = getattr(self._engine, "store", None)
         journal = getattr(store, "path", None)
 
@@ -1246,10 +1248,23 @@ class GTSession:
         terminals: list[dict[str, object]] = []
         schedule_order: list[str] = []
         try:
-            for line in _Path(journal).read_text(encoding="utf-8").splitlines():
+            for position, line in enumerate(
+                _Path(journal).read_text(encoding="utf-8").splitlines()
+            ):
                 if not line.strip():
                     continue
                 row = _json.loads(line)
+                # Journal order IS chronological order: append-only, single
+                # writer, under a lock, fsynced per row. So the parse position
+                # is the ordering, and it is always present. Deriving it from
+                # the row's own `sequence` field needed a default for rows that
+                # lack one, and every default collides with a real position -
+                # zero sorts a sequence-less row oldest, exactly as -1 and
+                # len(schedule_order) each mis-sorted an unscheduled revision
+                # earlier in this function's history. Mixed journals are not
+                # hypothetical: ExternalStateStore.__init__ contemplates them
+                # and hands them to a verifier rather than blessing them.
+                row["_position"] = position
                 event = row.get("event")
                 if event == "gt_degraded_fail_open":
                     # degrade() is idempotent, so the first row is the causal
@@ -1295,9 +1310,6 @@ class GTSession:
                         schedule_order.index(revision)
                         if revision in schedule_order else len(schedule_order)
                     )
-                    # Ties within a revision break on the journal's own
-                    # monotonic sequence rather than on list position.
-                    row["_sequence"] = int(row.get("sequence") or 0)
                     terminals.append(row)
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
             # Both must fail closed. The journal is parsed line by line, so a
@@ -1322,8 +1334,7 @@ class GTSession:
                 # should raise here rather than silently tie with the first
                 # revision. This is a function whose entire history is silent
                 # wrong answers.
-                terminal = max(current, key=lambda row: row["_sequence"]) \
-                    if any(row["_sequence"] for row in current) else current[-1]
+                terminal = max(current, key=lambda row: row["_position"])
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
                 if status == "no_op":
@@ -1387,8 +1398,8 @@ class GTSession:
             elif scheduled:
                 lsp_state = CapabilityState.DEGRADED
                 lsp_evidence = "scheduled_no_terminal"
-        rows.append(("dense_retrieval", dense_state, dense_evidence))
-        rows.append(("lsp_promotion", lsp_state, lsp_evidence))
+        rows.append(("dense_retrieval", dense_state, dense_evidence, True))
+        rows.append(("lsp_promotion", lsp_state, lsp_evidence, True))
 
         # A run in which GT switched itself off partway through is the single
         # case a reader most needs told, and it was the one they were least
@@ -1417,12 +1428,18 @@ class GTSession:
             stage = str(fail_open.get("stage") or "")
             if stage not in _DEGRADE_STAGES:
                 stage = "unrecognized_stage"
+            # An exception class name is always an identifier, but an
+            # identifier is unbounded in length and this field is
+            # agent-writable, so the shape check is paired with a length bound.
+            # stage is clamped against a closed SET and this against a SHAPE;
+            # the bound is what stops the two from being different kinds of
+            # promise about what can reach a diagnostics artifact.
             error_type = str(fail_open.get("error_type") or "")
-            if not error_type.isidentifier():
+            if not error_type.isidentifier() or len(error_type) > 64:
                 error_type = "unrecognized_error"
             rows.append((
                 "gt_engine_enabled", CapabilityState.FAILED,
-                f"disabled_at_{stage}:{error_type}",
+                f"disabled_at_{stage}:{error_type}", True,
             ))
         elif self.disabled and self.disabled_stage in CONFIGURED_OFF_STAGES:
             # Not a fault. __init__ sets disabled when the mode is OFF or the
@@ -1430,19 +1447,27 @@ class GTSession:
             # done exactly what it was asked. Reporting that as FAILED would
             # cry wolf on every control run and teach the reader to skip the
             # row on the treatment runs where it matters.
+            # Not required, because it was asked to be off. capability()
+            # defaults required=True, and that default is what made a control
+            # arm raise a CI error and, in smoke_stage's prior-gate check, a
+            # hard ValueError blaming verification rather than naming
+            # configuration. The honest statement is that GT running is not a
+            # requirement of a run configured not to run it - which is a
+            # property of the row, not something each consumer should have to
+            # re-derive from the state.
             rows.append((
                 "gt_engine_enabled", CapabilityState.UNEXERCISED,
-                f"gt_disabled_by_configuration:{self.disabled_stage}",
+                f"gt_disabled_by_configuration:{self.disabled_stage}", False,
             ))
         elif self.disabled:
             rows.append((
                 "gt_engine_enabled", CapabilityState.FAILED,
-                f"disabled_at_{self.disabled_stage or 'unknown'}:unrecorded",
+                f"disabled_at_{self.disabled_stage or 'unknown'}:unrecorded", True,
             ))
         else:
             rows.append((
                 "gt_engine_enabled", CapabilityState.WORKING,
-                "no_fail_open_recorded",
+                "no_fail_open_recorded", True,
             ))
         return rows
 
@@ -1474,8 +1499,12 @@ class GTSession:
                 # no embedder finished looking normal, and the person reading
                 # the result had nothing telling them GT ran with less than GT
                 # has. Reported here so the end-of-task summary names them.
-                for name, state, evidence in self._mandatory_capability_rows():
-                    diagnostics.capability(name, state, evidence)
+                for name, state, evidence, required in (
+                    self._mandatory_capability_rows()
+                ):
+                    diagnostics.capability(
+                        name, state, evidence, required=required
+                    )
                 if self.assurance_state is Assurance.DEGRADED:
                     diagnostics.record(
                         DiagnosticEvent.create(

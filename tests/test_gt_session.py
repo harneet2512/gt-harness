@@ -682,7 +682,7 @@ def _capability_rows(tmp_path, rows, blobs=None, *, disabled=False,
     )
     return {
         name: (str(state), evidence)
-        for name, state, evidence in GTSession._mandatory_capability_rows(stub)
+        for name, state, evidence, _ in GTSession._mandatory_capability_rows(stub)
     }
 
 
@@ -764,7 +764,7 @@ def test_an_unreadable_journal_fails_both_capabilities(tmp_path):
     )
     rows = {
         name: (str(state), evidence)
-        for name, state, evidence in GTSession._mandatory_capability_rows(stub)
+        for name, state, evidence, _ in GTSession._mandatory_capability_rows(stub)
     }
 
     assert rows["lsp_promotion"] == ("FAILED", "promotion_journal_unreadable")
@@ -837,7 +837,7 @@ def test_a_truncated_final_line_fails_the_dense_capability_closed(tmp_path):
     )
     rows = {
         name: (str(state), evidence)
-        for name, state, evidence in GTSession._mandatory_capability_rows(stub)
+        for name, state, evidence, _ in GTSession._mandatory_capability_rows(stub)
     }
 
     assert rows["dense_retrieval"] == ("FAILED", "dense_index_receipt_unreadable")
@@ -1139,3 +1139,109 @@ def test_a_stage_this_build_does_not_define_is_not_echoed(tmp_path):
     assert rows["gt_engine_enabled"] == (
         "FAILED", "disabled_at_unrecognized_stage:unrecognized_error"
     )
+
+
+def _capability_required(tmp_path, rows, **kwargs):
+    """The required flag alone, which decides CI severity and the gate."""
+    from types import SimpleNamespace
+
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text(
+        "".join(json.dumps(row) + chr(10) for row in rows), encoding="utf-8"
+    )
+    stub = SimpleNamespace(
+        _engine=SimpleNamespace(
+            store=SimpleNamespace(path=str(journal), root=tmp_path)
+        ),
+        disabled=kwargs.get("disabled", False),
+        disabled_stage=kwargs.get("disabled_stage", ""),
+    )
+    return {
+        name: required
+        for name, _s, _e, required in GTSession._mandatory_capability_rows(stub)
+    }
+
+
+def test_a_capability_asked_to_be_off_is_not_a_required_one(tmp_path):
+    """capability() defaults required=True, and that default was the root cause.
+
+    It made a GT-off control arm raise a CI error annotation, and in
+    smoke_stage's prior-gate check a hard ValueError blaming verification
+    rather than naming configuration. GT running is not a requirement of a run
+    configured not to run it - a property of the row, not something each
+    consumer should re-derive from the state.
+    """
+    off = _capability_required(
+        tmp_path, [_DENSE_READY], disabled=True, disabled_stage="off"
+    )
+    on = _capability_required(tmp_path, [_DENSE_READY])
+
+    assert off["gt_engine_enabled"] is False
+    assert on["gt_engine_enabled"] is True
+    # The two that are mandatory stay mandatory in both arms.
+    assert off["dense_retrieval"] is True and off["lsp_promotion"] is True
+
+
+def test_terminal_order_survives_a_journal_with_missing_sequences(tmp_path):
+    """Ordering must not depend on a field that some rows may lack.
+
+    ExternalStateStore.__init__ explicitly contemplates a mixed journal and
+    hands it to a verifier rather than blessing it. Ranking on the row's own
+    `sequence` needed a default for rows without one, and zero sorts such a row
+    oldest - so a genuinely newest terminal lacking the field lost to every row
+    that had it. That is the same shape as the -1 and len(schedule_order)
+    defaults this function has already shipped twice. Parse position is always
+    present, so there is no default to get wrong.
+    """
+    digest = "9" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0",
+         "sequence": 2},
+        {"event": "lsp_promotion_terminal", "status": "failed",
+         "disposition": "certification_failed", "input_graph_revision": "r0",
+         "sequence": 3},
+        # Newest, and carries no sequence at all.
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "r0",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+    ], {digest: {"verified": 2, "corrected": 0, "deleted": 0}})
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:2_edges:last_of_2"
+    )
+
+
+def test_the_degrade_stage_constant_matches_the_actual_call_sites(tmp_path):
+    """Automate the hand-check that already caught two invented stages.
+
+    Nothing referenced _DEGRADE_STAGES outside the module, so adding a
+    degrade() call site with a new stage would have made the reporter say
+    unrecognized_stage on a real fault - a quiet failure, on the fault path.
+    """
+    import ast as _ast
+    from pathlib import Path as _Path
+
+    from gt_engine.gt_session import CONFIGURED_OFF_STAGES, _DEGRADE_STAGES
+
+    root = _Path(__file__).resolve().parent.parent
+    found = set()
+    for directory in ("gt_engine", "scripts", "eval"):
+        for path in (root / directory).rglob("*.py"):
+            try:
+                tree = _ast.parse(path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                continue
+            for node in _ast.walk(tree):
+                if not isinstance(node, _ast.Call):
+                    continue
+                func = node.func
+                name = getattr(func, "attr", None) or getattr(func, "id", None)
+                if name != "degrade" or not node.args:
+                    continue
+                first = node.args[0]
+                if isinstance(first, _ast.Constant) and isinstance(first.value, str):
+                    found.add(first.value)
+
+    assert found, "no degrade() call sites found - the scan itself is broken"
+    assert found == set(_DEGRADE_STAGES) - set(CONFIGURED_OFF_STAGES)
