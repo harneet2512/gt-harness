@@ -30,7 +30,13 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
+def _fixture(
+    root: Path,
+    *,
+    source_sha: str = "f" * 40,
+    bootstrap_calls: int = 0,
+    declare_bootstrap: bool = True,
+) -> tuple[Path, Path]:
     repo_root = Path(__file__).resolve().parents[1]
     bundle = json.loads(
         (repo_root / "config" / "deepswe_product_bundle_v1.json").read_text()
@@ -138,7 +144,11 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "gt_mode": "advisory",
             "research_valid": True,
             "gt": {
-                "terminal_requests": 3,
+                "terminal_requests": 3 + bootstrap_calls,
+                **(
+                    {"select_catalog_bootstrap_calls": bootstrap_calls}
+                    if declare_bootstrap else {}
+                ),
                 "contract_shipped": True,
                 "delivered_evidence": 1,
                 "provider_reported_model": REQUESTED,
@@ -151,6 +161,15 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
         },
     )
     state = agent / "gt-state" / "task-state"
+    bootstrap_admissions = [
+        {
+            "event": "provider_admission", "event_hash": "f" * 64,
+            "status": "admitted", "reason": "within_provider_window",
+            "request_tokens": 300, "request_bytes": 1200,
+            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+        }
+    ] * bootstrap_calls
     events = [
         {
             "event": "provider_response", "event_hash": "1" * 64,
@@ -205,6 +224,8 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
         },
         {"event": "session_closed", "event_hash": "b" * 64, "sequence": 7},
     ]
+    # session_closed must stay last: the journal head is pinned to the final row.
+    events = events[:-1] + bootstrap_admissions + events[-1:]
     state.mkdir(parents=True, exist_ok=True)
     (state / "events.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in events), encoding="utf-8"
@@ -216,9 +237,9 @@ def _fixture(root: Path, *, source_sha: str = "f" * 40) -> tuple[Path, Path]:
             "gt_mode": "advisory",
             "engine_integrity": {"schema": "gt.engine_integrity.v1", "valid": True,
                                  "mode": "advisory", "issues": [], "disabled_stage": ""},
-            "provider_receipts": {"request_count": 3, "valid": True},
+            "provider_receipts": {"request_count": 3 + bootstrap_calls, "valid": True},
             "event_journal": {
-                "event_count": 10, "event_head": "b" * 64, "valid": True, "issues": [],
+                "event_count": 10 + bootstrap_calls, "event_head": "b" * 64, "valid": True, "issues": [],
             },
         },
     )
@@ -1098,3 +1119,32 @@ def test_attestation_mutation_matrix(
     mutation(row)
     _write(path, row)
     assert any(expected in error for error in _attest(tmp_path)["errors"])
+
+
+def test_f10_bootstrap_certified_reconciles(tmp_path: Path) -> None:
+    """A fired select_catalog bootstrap reconciles: api_calls + 1 == terminal_requests."""
+    _, product_path = _fixture(tmp_path, bootstrap_calls=1)
+    product = json.loads(product_path.read_text(encoding="utf-8"))
+    assert product["agent_turn_calls"] == 3
+    assert product["select_catalog_bootstrap_calls"] == 1
+    assert product["provider_calls"] == 4
+
+
+def test_f10_bootstrap_absent_reconciles(tmp_path: Path) -> None:
+    """An abstaining bootstrap makes no call: the pre-F10 balance is unchanged."""
+    _, product_path = _fixture(tmp_path, bootstrap_calls=0)
+    product = json.loads(product_path.read_text(encoding="utf-8"))
+    assert product["agent_turn_calls"] == 3
+    assert product["select_catalog_bootstrap_calls"] == 0
+    assert product["provider_calls"] == 3
+
+
+def test_f10_uncounted_real_call_still_fails_closed(tmp_path: Path) -> None:
+    """An unattributed provider call must still fail the gate.
+
+    This is the negative case: the bootstrap fires and is NOT declared, which is
+    exactly the pre-F10 defect. Tagging must not become a way to launder an
+    uncounted call.
+    """
+    with pytest.raises(ValueError, match="provider_call_count_mismatch"):
+        _fixture(tmp_path, bootstrap_calls=1, declare_bootstrap=False)

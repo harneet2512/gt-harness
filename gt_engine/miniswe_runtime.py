@@ -925,6 +925,7 @@ def install_runtime_hooks(
             adapter.bind_provider_response(
                 response, usage=usage, model=model_id, next_actions=()
             )
+            adapter.note_select_catalog_bootstrap()
             session.accept_select_catalog(captured["arguments"])
         except Exception as exc:  # noqa: BLE001 - selection is advisory
             adapter.bind_provider_failure(exc)

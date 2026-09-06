@@ -611,9 +611,19 @@ def issue_runtime_receipts(
     info = info if isinstance(info, dict) else {}
     model_stats = info.get("model_stats")
     model_stats = model_stats if isinstance(model_stats, dict) else {}
-    provider_calls = int(model_stats.get("api_calls") or 0)
+    agent_turn_calls = int(model_stats.get("api_calls") or 0)
     gt = report.get("gt")
     gt = gt if isinstance(gt, dict) else {}
+    # F10: api_calls is the AGENT's n_calls and never counts a GT-internal
+    # bootstrap turn, which bypasses agent.query(). n_calls also bounds the
+    # agent's steps and cost, so it must not be inflated. Reconcile instead by
+    # adding the separately recorded bootstrap calls, so every count compared
+    # below is measured at the same transport boundary. Usage and cost sums are
+    # untouched and continue to include the bootstrap: it is real spend.
+    bootstrap_calls = int(gt.get("select_catalog_bootstrap_calls") or 0)
+    if bootstrap_calls < 0:
+        raise ValueError("select_catalog_bootstrap_calls_invalid")
+    provider_calls = agent_turn_calls + bootstrap_calls
     terminal_requests = gt.get("terminal_requests")
     if terminal_requests is not None and int(terminal_requests) != provider_calls:
         raise ValueError("provider_call_count_mismatch")
@@ -774,6 +784,8 @@ def issue_runtime_receipts(
         "product_source_sha": product_source_sha,
         "time_budget_seconds": time_budget_seconds,
         "provider_calls": provider_calls,
+        "agent_turn_calls": agent_turn_calls,
+        "select_catalog_bootstrap_calls": bootstrap_calls,
         **provider_usage,
         "research_valid": bool(report.get("research_valid")),
         "treatment_receipt": treatment_receipt,

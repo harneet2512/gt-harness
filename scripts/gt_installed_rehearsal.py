@@ -18,14 +18,23 @@ from pathlib import Path
 class RehearsalTransport(BaseHTTPRequestHandler):
     requests: list[dict] = []
     commands: list[str] = []
+    bootstrap_requests: list[dict] = []
     interrupt_at_ordinal: int | None = None
     provider_wait_started = threading.Event()
     release_provider_wait = threading.Event()
 
     def do_POST(self):  # noqa: N802
         request = json.loads(self.rfile.read(int(self.headers["content-length"])))
-        ordinal = len(self.requests)
         self.requests.append(request)
+        # F10 companion: the select_catalog bootstrap is a GT-internal turn that
+        # precedes the agent's first action. It must be answered on its own terms
+        # and must NOT consume a scenario ordinal, or every later canned response
+        # is served to the wrong agent step and the whole repair scenario shifts.
+        if self._is_select_catalog_request(request):
+            self.bootstrap_requests.append(request)
+            self._respond_select_catalog(len(self.bootstrap_requests) - 1)
+            return
+        ordinal = len(self.requests) - 1 - len(self.bootstrap_requests)
         if ordinal == 0:
             command = "python3 -m unittest -v"
         elif ordinal == 1:
@@ -76,6 +85,39 @@ class RehearsalTransport(BaseHTTPRequestHandler):
             }}],
             # Synthetic values exercise the wire schema; they are never billed
             # usage evidence. The rehearsal receipt labels the entire result.
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2,
+                      "prompt_tokens_details": {"cached_tokens": 0}},
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    @staticmethod
+    def _is_select_catalog_request(request: dict) -> bool:
+        """A bootstrap turn is identified by its offered tool, not by position."""
+        for tool in request.get("tools") or ():
+            function = tool.get("function") if isinstance(tool, dict) else None
+            if isinstance(function, dict) and function.get("name") == "select_catalog":
+                return True
+        return False
+
+    def _respond_select_catalog(self, ordinal: int) -> None:
+        """Answer the bootstrap with a real tool call over the offered catalog."""
+        request = self.bootstrap_requests[ordinal]
+        visible = re.findall(r"\"id\": *\"(focus-[0-9a-f]+)\"", json.dumps(request))
+        arguments = json.dumps({"ids": visible[:1]})
+        payload = json.dumps({
+            "id": f"synthetic-bootstrap-{ordinal}", "object": "chat.completion",
+            "model": "synthetic-transport", "created": 0,
+            "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+                "role": "assistant", "content": "Synthetic transport catalog selection.",
+                "tool_calls": [{"id": f"synthetic-bootstrap-call-{ordinal}",
+                                "type": "function",
+                                "function": {"name": "select_catalog",
+                                             "arguments": arguments}}],
+            }}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2,
                       "prompt_tokens_details": {"cached_tokens": 0}},
         }).encode()
@@ -362,7 +404,7 @@ async def run(args) -> dict:
     write_fixture(fixture, args.image)
     forced_interruption = args.scenario == "forced-interruption"
     handler = type("RunTransport", (RehearsalTransport,), {
-        "requests": [], "commands": [],
+        "requests": [], "commands": [], "bootstrap_requests": [],
         "interrupt_at_ordinal": 6 if forced_interruption else None,
         "provider_wait_started": threading.Event(),
         "release_provider_wait": threading.Event(),

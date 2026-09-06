@@ -247,6 +247,11 @@ class MiniSweAdapter(GroundtruthController):
         self._latest_delivery: ProviderDelivery | None = None
         self._last_graph_publication: tuple[str, str] | None = None
         self._terminal_request_ids: set[str] = set()
+        # F10: a GT-internal bootstrap turn is a real provider call the agent's
+        # own n_calls never sees, because it bypasses agent.query(). Counting it
+        # here keeps "api_calls = agent turns" intact while letting receipt
+        # reconciliation compare like with like at the transport boundary.
+        self._select_catalog_bootstrap_calls = 0
         self._contract_shipped = False
         self._last_delta_signature: tuple[tuple[str, str], ...] = ()
         self._prepared_contract_delta: tuple[str, tuple[tuple[str, str], ...]] | None = None
@@ -2319,12 +2324,23 @@ class MiniSweAdapter(GroundtruthController):
         if predicate.predicate_id in result:
             green.append(predicate.predicate_id)
 
+    def note_select_catalog_bootstrap(self) -> None:
+        """Record one GT-internal bootstrap provider call at the transport boundary.
+
+        The agent's n_calls doubles as its step and cost limit, so a GT-internal
+        turn must never increment it. Receipt reconciliation therefore compares
+        api_calls + bootstrap calls against admissions and responses. Usage and
+        cost continue to include this call: it is real spend.
+        """
+        self._select_catalog_bootstrap_calls += 1
+
     def final_state(self) -> dict[str, Any]:
         state = {"phase": self.phase, "epoch": self.workspace_epoch,
                  "unmet_predicates": list(self.unmet_predicates),
                  "iterations": self.iteration,
                  "delivered_evidence": self._accepted_sealed_delivery_count,
                  "terminal_requests": len(self._terminal_request_ids),
+                 "select_catalog_bootstrap_calls": self._select_catalog_bootstrap_calls,
                  "contract_shipped": self._contract_shipped,
                  "requested_model": self.requested_model,
                  "resolved_model": self.resolved_model,
