@@ -35,6 +35,7 @@ def write_certifiable_graph(
     source_manifest_sha256: str = "c" * 64,
     identity_scope: str = "benchmark_bound",
     cochange_rows: int = 2,
+    lsp_servers: tuple[str, ...] = ("gopls", "pyright-langserver"),
 ) -> dict[str, Any]:
     """Write graph.db, index-resource.json and graph.manifest.json as a set.
 
@@ -85,5 +86,18 @@ def write_certifiable_graph(
     }
     (graph_state / "graph.manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
+    )
+    # A real index seals this beside the graph, and the receipt layer now
+    # enforces it: language servers are mandatory capability, so a staged
+    # graph without a promotion receipt is a run that measured GT with its
+    # highest-precision edge tier switched off.
+    _sealed_json(
+        graph_state / "lsp-promotion.json",
+        {"schema": "gt.lsp_promotion.v1", **binding,
+         "graph_sha256": manifest["graph_sha256"],
+         "status": "promotion_not_scheduled",
+         "servers_detected": sorted(lsp_servers),
+         "server_count": len(lsp_servers)},
+        "promotion_sha256",
     )
     return manifest

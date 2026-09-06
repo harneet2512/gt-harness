@@ -260,6 +260,16 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "cochange_rows": 2,
         },
     )
+    # Language servers are mandatory capability and the receipt layer enforces
+    # it, so a run without this seal is one that measured GT with the
+    # highest-precision edge tier off.
+    _sealed_json(
+        graph_state / "lsp-promotion.json",
+        {"schema": "gt.lsp_promotion.v1", **binding,
+         "graph_sha256": graph_digest, "status": "promotion_not_scheduled",
+         "servers_detected": ["gopls", "pyright-langserver"], "server_count": 2},
+        "promotion_sha256",
+    )
 
     issued = issue_runtime_receipts(
         report_path=report,
@@ -339,6 +349,19 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert verify_runtime_receipt(product) == (
         ["synthetic_transport_not_paid_evidence"] if synthetic_transport else []
     )
+    # Language servers are mandatory capability, so a run that reports none
+    # must not be accepted. Driven through the real validator on the real
+    # receipt: a gate nothing exercises is the defect it exists to prevent.
+    intact = product.read_text(encoding="utf-8")
+    degraded = json.loads(intact)
+    degraded["treatment_receipt"]["lsp_promotion"] = {
+        "schema": "gt.lsp_promotion.v1", "status": "promotion_no_servers",
+        "servers_detected": [], "server_count": 0,
+    }
+    product.write_text(json.dumps(degraded), encoding="utf-8")
+    assert "treatment_lsp_servers_absent" in verify_runtime_receipt(product)
+    product.write_text(intact, encoding="utf-8")
+    assert "treatment_lsp_servers_absent" not in verify_runtime_receipt(product)
     original_resource = resource_path.read_bytes()
     resource_path.unlink()
     assert "treatment_graph_artifact_invalid:index_resource_mismatch" in verify_runtime_receipt(product)

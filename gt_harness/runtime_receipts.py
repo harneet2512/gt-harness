@@ -87,6 +87,30 @@ def _atomic_json(path: Path, value: object) -> None:
     _atomic_bytes(path, payload)
 
 
+def _lsp_promotion_receipt(state_dir: Path) -> dict[str, Any]:
+    """Report whether language servers actually reached the run.
+
+    start_lsp_promotion seals lsp-promotion.json beside the graph and
+    deliberately never fails an index that already succeeded - correct at that
+    layer. But nothing read it, so a run that recorded promotion_no_servers or
+    promotion_unavailable looked identical to one with the full edge tier, and
+    the highest-precision edges stayed empty with no gate noticing. Language
+    servers are mandatory capability, so the receipt layer is where their
+    absence has to become an acceptance error, exactly as it already is for
+    the dense index.
+    """
+    _, promotion = _single_optional(state_dir, "lsp-promotion.json")
+    if not isinstance(promotion, dict):
+        return {"schema": "gt.lsp_promotion.v1", "status": "promotion_receipt_missing",
+                "servers_detected": [], "server_count": 0}
+    return {
+        "schema": str(promotion.get("schema") or ""),
+        "status": str(promotion.get("status") or ""),
+        "servers_detected": list(promotion.get("servers_detected") or []),
+        "server_count": int(promotion.get("server_count") or 0),
+    }
+
+
 def _single_optional(root: Path, name: str) -> tuple[Path | None, dict[str, Any] | None]:
     paths = sorted(root.rglob(name)) if root.is_dir() else []
     if len(paths) > 1:
@@ -757,6 +781,7 @@ def issue_runtime_receipts(
         "provider_admissions": provider_admissions,
         "retrieval_mode": "hybrid_required",
         "dense_index_receipt": dense_index,
+        "lsp_promotion": _lsp_promotion_receipt(Path(state_dir)),
         "dense_execution_receipts": dense_runs,
         "event_journal": event_journal,
         "completion_state_event_journal": dict(gt.get("event_journal") or {}),
@@ -1236,6 +1261,22 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         )
     ):
         errors.append("treatment_dense_index_not_ready")
+    # Language servers are mandatory capability. promotion_unavailable means
+    # the producer package was absent; promotion_no_servers means nothing was
+    # on PATH to promote with; a missing receipt means promotion never even
+    # reported. All three are runs that measured GT with its highest-precision
+    # edge tier switched off, which must not be accepted as a normal result.
+    lsp = treatment.get("lsp_promotion")
+    if (
+        not isinstance(lsp, dict)
+        or lsp.get("schema") != "gt.lsp_promotion.v1"
+        or int(lsp.get("server_count") or 0) < 1
+        or lsp.get("status") in {
+            "promotion_receipt_missing", "promotion_unavailable",
+            "promotion_no_servers",
+        }
+    ):
+        errors.append("treatment_lsp_servers_absent")
     identity = treatment.get("provider_identity")
     if not isinstance(identity, dict) or identity.get("match") is not True:
         errors.append("treatment_provider_identity_mismatch")
