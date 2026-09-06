@@ -272,6 +272,7 @@ class MiniSweAdapter(GroundtruthController):
         self._pending_verification_candidate = ""
         self._pending_verification_metadata: dict[str, str] = {}
         self._model_visible_delivery_identities: set[str] = set()
+        self._decision_delivery_identities: set[str] = set()
         self._accepted_sealed_delivery_count = 0
         self._cochange_delivery_count = 0
         self._pending_delivery_metadata: dict[str, str] = {}
@@ -1155,6 +1156,7 @@ class MiniSweAdapter(GroundtruthController):
             self._model_visible_delivery_count += 1
             self._model_visible_delivery_bytes += len(item.rendered.encode("utf-8"))
             self._model_visible_delivery_identities.add(item.identity)
+            self._decision_delivery_identities.add(item.identity)
             if (item.kind == "recovery" and self._pending_recovery is not None
                     and item.rendered == self.pending_transient):
                 fingerprint, epoch = self._pending_recovery
@@ -1554,18 +1556,50 @@ class MiniSweAdapter(GroundtruthController):
             self._admission_iteration = iteration
             self._boundary_delivery_count = 0
             self._boundary_delivery_bytes = 0
+            # These two ceilings are per DECISION, like the boundary counters
+            # above, and were the only admission state that outlived one.
+            # Run-scoped, they silently stop GT contributing: after two
+            # cochange partners anywhere in a task no further partner is ever
+            # offered, and a fact delivered once is refused at every later
+            # decision even when it is the currently relevant fact. The effect
+            # grows with run length, so it is worst on exactly the long tasks
+            # where the evidence matters most, and it is invisible in the
+            # result - the run simply receives less.
+            self._decision_delivery_identities.clear()
+            self._cochange_delivery_count = 0
         candidate_ordinal = self._boundary_delivery_count + 1
         per_delivery_limit = delivery_byte_limit(lane=lane, kind=kind)
 
         pending_identities = {item.identity for item in self._pending_provider_deliveries}
         if delivery_identity in pending_identities:
             return True
+        # Both counters below are written at COMMIT, so during a decision's
+        # admissions they carry only what earlier decisions committed - which
+        # the boundary reset has just cleared. Counting the decision's own
+        # pending partners is what makes the ceiling bind within the decision
+        # it is scoped to; without it the reset would not relax the ceiling,
+        # it would remove it.
+        pending_cochange = sum(
+            1 for item in self._pending_provider_deliveries
+            if item.kind == "cochange_partner"
+        )
+        # The two lanes mean different things, so they dedup over different
+        # spans. Prompt-lane bytes are CONTEXT: re-sending identical context
+        # in a later prompt is waste however relevant it still is, so that
+        # lane dedups over the run. Sealed-lane bytes are EVIDENCE about the
+        # decision at hand: the same current fact can be the right thing to
+        # deliver again later, so that lane dedups over the decision.
+        seen_identities = (
+            self._model_visible_delivery_identities if lane == "prompt"
+            else self._decision_delivery_identities
+        )
         reason = ""
-        if delivery_identity in self._model_visible_delivery_identities:
+        if delivery_identity in seen_identities:
             reason = "duplicate_delivery_identity"
         elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
-        elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
+        elif (kind == "cochange_partner"
+                and self._cochange_delivery_count + pending_cochange >= 2):
             reason = "cochange_task_ceiling"
         elif rendered_bytes > per_delivery_limit:
             reason = "delivery_byte_ceiling"

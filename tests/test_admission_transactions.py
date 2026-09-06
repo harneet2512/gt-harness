@@ -214,3 +214,58 @@ def test_multidose_request_retains_per_fact_delivery_provenance(tmp_path, monkey
     assert [row["dedup_key"] for row in delivered] == ["failure-key", "location-key"]
     assert len({row["payload_sha256"] for row in delivered}) == 2
     assert adapter._dedup_chain == {"failure-key", "location-key"}
+
+
+# The two ceilings are per DECISION, not per run. Clearing them at a decision
+# boundary is only correct if they still BIND inside one - otherwise the fix
+# for "GT stops contributing" becomes "GT has no ceilings at all".
+
+
+def _refusals(adapter, reason):
+    return [
+        row for row in (
+            json.loads(line)
+            for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+        )
+        if row.get("event") == "delivery_refused" and row.get("reason") == reason
+    ]
+
+
+def test_duplicate_identity_still_refused_within_one_decision(tmp_path):
+    adapter = adapter_for(tmp_path)
+    rendered = "same current failure"
+    assert admit(adapter, 0, rendered)
+    adapter.bind_provider_payload({
+        "messages": [{"role": "tool", "content": rendered}]
+    })
+    # A later decision may re-offer it - that is the point of the reset.
+    assert admit(adapter, 1, rendered)
+    # Inside one decision the same bytes are idempotent, not duplicated:
+    # accepted again, but they do not become a second pending delivery.
+    pending = len(adapter._pending_provider_deliveries)
+    assert admit(adapter, 1, rendered)
+    assert len(adapter._pending_provider_deliveries) == pending
+
+
+def test_cochange_ceiling_still_binds_within_one_decision(tmp_path):
+    adapter = adapter_for(tmp_path)
+
+    def offer(iteration, text):
+        return adapter.admit_model_visible_delivery(
+            lane="sealed", kind="cochange_partner", rendered=text,
+            action_index=iteration, iteration=iteration, dedup_key=text,
+        )
+
+    assert offer(0, "partner one")
+    assert offer(0, "partner two")
+    # Two per decision is the ceiling; the third is refused.
+    assert not offer(0, "partner three")
+    assert _refusals(adapter, "cochange_task_ceiling")
+
+    # A new decision restores the allowance, and it binds again there.
+    adapter.bind_provider_payload({
+        "messages": [{"role": "tool", "content": "partner one"}]
+    })
+    assert offer(1, "partner four")
+    assert offer(1, "partner five")
+    assert not offer(1, "partner six")
