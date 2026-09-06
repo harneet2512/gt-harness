@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { Link } from "react-router-dom";
-import { COMPOSER_LOCKED, isWorker } from "../api";
+import {
+  COMPOSER_LOCKED,
+  isExternalSession,
+  isWorker,
+  agentIdOfRegistration,
+  tokenOf,
+} from "../api";
 import { failedReason, repoShort } from "../format";
 import { shouldAutoOpenGraph, turnFileCount } from "../launch";
 import { isOverlayMode, useLayoutMode } from "../layoutMode";
 import { refreshPalette } from "../palette";
 import { loadGraphOpen, loadPrefs, savePrefs, saveGraphOpen, type Prefs } from "../prefs";
+import { connectBlock, connectKind } from "../external";
 import { helpText, parseSpawn, type ParsedSlash } from "../slash";
 import { applyTheme, loadTheme, saveTheme, themeFromArg, type Theme } from "../theme";
 import { useDragSize } from "../useDragSize";
@@ -14,7 +21,7 @@ import { useGraphView } from "../useGraphView";
 import { useSessionData } from "../useSessionData";
 import { useSessions } from "../useSessions";
 import { workerList } from "../workers";
-import Conversation, { type LocalNote } from "./Conversation";
+import Conversation, { type LocalNote, type NoteBlock } from "./Conversation";
 import GraphPanel from "./GraphPanel";
 import ResumePicker from "./ResumePicker";
 
@@ -166,9 +173,34 @@ export default function SynapsePage() {
     void send(content);
   }, [pendingFirst, status, send, chat.messages]);
 
-  const note = useCallback((role: LocalNote["role"], text: string) => {
-    setNotes((prev) => [...prev, { id: (noteId.current += 1), role, text }]);
-  }, []);
+  const note = useCallback(
+    (role: LocalNote["role"], text: string, block?: NoteBlock) => {
+      setNotes((prev) => [
+        ...prev,
+        { id: (noteId.current += 1), role, text, block },
+      ]);
+    },
+    [],
+  );
+
+  /* The graph, narrowed to one agent — `[focus]` on a card and on an
+     `/agents` row. It lives here rather than in the panel because the
+     transcript is what asks for it, and the panel may not even be open. */
+  const [isolated, setIsolated] = useState<string | null>(null);
+  const focusAgent = useCallback(
+    (agentId: string) => {
+      setGraph(true);
+      setIsolated(agentId);
+    },
+    [setGraph],
+  );
+
+  /* An agent that no longer exists cannot be the thing the map is narrowed
+     to, or the canvas would dim every particle and show nothing. */
+  const agentIds = view.workerTrails.map((trail) => trail.id).join("|");
+  useEffect(() => {
+    if (isolated && !agentIds.split("|").includes(isolated)) setIsolated(null);
+  }, [agentIds, isolated]);
 
   useEffect(() => {
     if (!pendingSpawn || status !== "idle") return;
@@ -265,12 +297,74 @@ export default function SynapsePage() {
           });
           break;
         }
+        /* The fleet, drawn where it was asked for. It is a block rather
+           than a line of text because a hue swatch is half of what it
+           says, and it stays live once it is on screen. */
+        case "agents":
+          note("system", "", { kind: "agents" });
+          break;
+
+        /* `/connect` is the one command that produces a secret. The token
+           is written into exactly one string — the copyable line — and
+           into nothing else: not this note's text, not a log, not a
+           title. */
+        case "connect": {
+          const kind = connectKind(arg);
+          if (!kind) {
+            note(
+              "system",
+              "I can attach a claude-code or a codex session. " +
+                `I do not know what to do with "${arg}".`,
+            );
+            break;
+          }
+          if (!sessionId) {
+            note("system", "There is no session to connect to.");
+            break;
+          }
+          void data.connectExternal(kind).then((result) => {
+            if (result.error !== null) {
+              note("system", result.error);
+              return;
+            }
+            const token = tokenOf(result.registration);
+            if (!token) {
+              note(
+                "system",
+                "The server registered the agent but sent no token, " +
+                  "so there is nothing to run yet.",
+              );
+              return;
+            }
+            const agentId = agentIdOfRegistration(result.registration);
+            if (!agentId) {
+              note(
+                "system",
+                "The server registered the agent but sent no id, " +
+                  "so there is nothing to stream into yet.",
+              );
+              return;
+            }
+            note("system", "", {
+              kind: "connect",
+              connect: connectBlock({
+                origin: window.location.origin,
+                ingestUrl: result.registration.ingest_url ?? "",
+                agentId,
+                token,
+                kind,
+              }),
+            });
+          });
+          break;
+        }
+
         case "help":
           note("system", helpText());
           break;
       }
     },
-    [data, stop, graphOpen, setGraph, note, theme],
+    [data, stop, graphOpen, setGraph, note, theme, sessionId],
   );
 
   const answerClose = useCallback(
@@ -282,18 +376,24 @@ export default function SynapsePage() {
     [data, note],
   );
 
-  const worker = session ? isWorker(session) : false;
+  /* A session opened from a card: one of our workers, or an agent we only
+     watch. Both belong under the session they were attached to, and both
+     need the way back to it. */
+  const external = session ? isExternalSession(session) : false;
+  const nested = session ? isWorker(session) || external : false;
 
   return (
     <div className={`shell ${overlay ? "is-narrow" : ""}`}>
       <main className="work">
-        {worker && session?.parent_id && (
+        {nested && session?.parent_id && (
           <header className="head">
             <Link className="head-back" to={`/sessions/${session.parent_id}`}>
               ← back to parent
             </Link>
             <span className="dim">
-              {"  "}worker of {repoShort(session.repo)}
+              {"  "}
+              {external ? "external agent on" : "worker of"}{" "}
+              {repoShort(session.repo)}
             </span>
           </header>
         )}
@@ -326,9 +426,9 @@ export default function SynapsePage() {
               notes={notes}
               closeAsk={closeAsk}
               onCloseAnswer={answerClose}
-              workers={workers}
               canApply={status === "idle"}
               onApplyWorker={(workerId) => void data.applyWorker(workerId)}
+              onFocusAgent={focusAgent}
               settingsOpen={settingsOpen}
               prefs={prefs}
               onPrefs={(next) => {
@@ -374,6 +474,8 @@ export default function SynapsePage() {
                   onSelectPath={(path) => select(particleId(path))}
                   onTogglePin={() => setPinned(!pinned)}
                   onCloseInspector={closeInspector}
+                  isolated={isolated}
+                  onIsolate={setIsolated}
                   onCollapse={() => setGraph(false)}
                 />
               </div>

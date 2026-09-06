@@ -11,6 +11,12 @@ git log --format='%h %ad %s' --date=short cloud/internal-harness ^origin/main
 
 ---
 
+## 2026-09-06 — external agent adapters
+
+| Commit | Change |
+|---|---|
+| _(uncommitted)_ | **Client-side adapters for local Claude Code and Codex sessions (HAR-84).** `cloud/adapters/gt_cloud_bridge.py` is the stdlib-only transport: registration with reuse through a temp-dir state file, a bounded queue that drops the oldest and counts it, batching and coalescing on a background thread, retry on 5xx and quiet surrender on 4xx, a 3 s ceiling on every network call that configuration can only lower, and repo-relative path conversion that drops anything outside `cwd`. One hook script serves both tools - Codex 0.153.3 embeds JSON Schemas for its hook payloads whose fields are Claude Code's plus `model` and `turn_id` - and attributes a tool call to the subagent that ran it via `agent_id`, verified by running Claude Code 2.1.263 against a capturing hook. `cloud/adapters/codex/gt_cloud_codex.py` tails the session rollout and registers each subagent rollout under its `parent_thread_id`, covering both `paginated` and `legacy` history modes; `cloud/adapters/gt_cloud_tail.py` is the generic JSONL fallback. Live: a real `claude -p` run produced a parent and a correctly-attributed nested child, and a real Codex session produced one parent and seven nested subagents with repo-relative paths and monotonic token counts - which caught a batch-ordering race between `finish()` and the flush thread, now fixed and regression-tested. A circuit breaker keyed by origin, in the shared state file, stops an unreachable deployment from taxing every tool call in a local session: three consecutive failures open it for five minutes (a fatal 401/403/404/410 opens it at once for twenty), and hook mode drops to one attempt at 1.5 s. Measured against a black-holed host: 2.06 / 2.66 / 2.22 s for the first three tool calls, then 0.39-0.55 s, which is the Python interpreter rather than the network. `docs/cloud/decisions.md` gains decision 17, recording that the bridge is deliberately one 940-line file so it stays copyable. 57 tests. `docs/cloud/external-agents.md`. |
+
 ## 2026-09-05 — sandboxing, the audit, budgets, workers, prompt-first, the terminal look
 
 | Commit | Change |

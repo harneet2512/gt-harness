@@ -1,40 +1,67 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { filesLine } from "../external";
 import { shortSha, truncate } from "../format";
-import { shortId, workerCalls, type WorkerState } from "../workers";
+import {
+  agentKindLabel,
+  agentLabel,
+  agentState,
+  offersApply,
+  statusMark,
+  workerCalls,
+  type WorkerHue,
+  type WorkerState,
+} from "../workers";
 import { Call, Cont, ContMore } from "./TermLine";
 
-/** How much of a worker's own trail shows before you ask for the rest. */
+/** How much of an agent's own trail shows before you ask for the rest. */
 export const WORKER_TAIL = 3;
 
 interface Props {
   worker: WorkerState;
   /** 1-based spawn position — the `worker-1` in the line. */
   no: number;
+  /** The colour this agent's trail is drawn in on the graph. */
+  hue: WorkerHue;
+  /** 0 for a top-level agent, 1 for a subagent drawn under its parent. */
+  depth?: 0 | 1;
   canApply: boolean;
   onApply: () => void;
+  /** Narrow the graph to what this agent touched. */
+  onFocus?: () => void;
 }
 
-const MARK: Record<string, string> = {
-  running: "…",
-  reported: "✓",
-  applied: "✓",
-  closed: "·",
-};
-
 /**
- * A worker agent, as one call in the parent's transcript:
+ * An agent, as one call in the parent's transcript.
+ *
+ * A worker of ours:
  *
  *     ⏺ Agent(worker-1 · Add a one-line docstring to Command.invoke)
  *       ⎿  $ rg -n "def invoke" src/click/core.py
  *          … +7 earlier commands
  *       ⎿  ✓ reported · 2 files · a80d4c46  [apply] [open]
  *
- * Its own activity is folded to the last few lines: the primary transcript
- * is the thing you read, and a worker that ran forty commands must not
- * take forty lines of it.
+ * And one we only watch — a Claude Code or Codex session on someone's
+ * machine, mirrored onto this stream:
+ *
+ *     ⏺ Agent(claude-code · fix the flaky test)  external
+ *       ⎿  Edit src/click/core.py
+ *       ⎿  3 files · src/click/core.py, src/click/parser.py …
+ *       ⎿  … working · 12 steps  [focus] [open]
+ *
+ * Same grammar, same hues, one difference that matters: an external agent
+ * has no patch, so it is never offered `[apply]`. Everything it prints was
+ * written on a machine we do not control and is rendered as text, clipped.
  */
-export default function TermWorker({ worker, no, canApply, onApply }: Props) {
+export default function TermWorker({
+  worker,
+  no,
+  hue,
+  depth = 0,
+  canApply,
+  onApply,
+  onFocus,
+}: Props) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
@@ -44,36 +71,56 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
   const hidden = activity.length - shown.length;
   const files = worker.filesChanged;
   const applied = worker.appliedFiles;
+  const external = worker.isExternal;
   /* A button whose only possible outcome is a 400 is not an offer. A worker
-     that changed nothing has nothing to merge, and one that already landed
-     must not invite a re-merge of a patch that is in the tree (HAR-84
-     P2-8). */
-  const offersApply =
-    worker.status !== "closed" && worker.reply !== "" && files.length > 0;
+     that changed nothing has nothing to merge, one that already landed must
+     not invite a re-merge of a patch that is in the tree (HAR-84 P2-8), and
+     an external agent has no patch at all. */
+  const canOfferApply = offersApply(worker);
+  /* Where it works. Known only for an external agent — the graph focus is
+     offered exactly when there is something to focus on. */
+  const seen = worker.files;
 
   const summary = [
-    `${MARK[worker.status] ?? "·"} ${worker.status}`,
+    `${statusMark(worker.status)} ${agentState(worker)}`,
     calls > 0 ? `${calls} step${calls === 1 ? "" : "s"}` : null,
-    files.length > 0
+    !external && files.length > 0
       ? `${files.length} file${files.length === 1 ? "" : "s"}`
       : null,
-    worker.patchSha ? shortSha(worker.patchSha) : null,
+    !external && worker.patchSha ? shortSha(worker.patchSha) : null,
+    external && worker.externalCwd ? truncate(worker.externalCwd, 40) : null,
     worker.closedReason ? worker.closedReason : null,
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
-    <section className={`worker is-${worker.status}`} aria-label={`worker ${no}`}>
+    <section
+      className={`worker is-${worker.status} ${external ? "is-external" : ""} ${
+        depth > 0 ? "is-child" : ""
+      }`}
+      aria-label={external ? `external agent ${no}` : `worker ${no}`}
+    >
       <Call
         tool="Agent"
-        arg={`worker-${no} · ${truncate(worker.task || shortId(worker.id), 72)}`}
+        arg={`${agentKindLabel(worker, no)} · ${truncate(agentLabel(worker), 72)}`}
+        after={
+          external ? (
+            <span
+              className="worker-ext"
+              style={{ ["--worker-hue" as string]: hue.css }}
+            >
+              {"  "}external
+            </span>
+          ) : undefined
+        }
       />
 
       {hidden > 0 && (
         <ContMore>
           <button type="button" className="cont-more" onClick={() => setOpen(true)}>
-            … +{hidden} earlier command{hidden === 1 ? "" : "s"}
+            … +{hidden} earlier {external ? "step" : "command"}
+            {hidden === 1 ? "" : "s"}
           </button>
         </ContMore>
       )}
@@ -83,7 +130,10 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
           key={item.key}
           tone={item.gt ? "gt" : item.isError ? "error" : "dim"}
         >
-          {item.gt ? "GroundTruth " : "$ "}
+          {/* A worker of ours only ever runs a shell command, so its line
+              is a `$`. An external agent names the tool it called, and a
+              `$` in front of `Read` would be a lie. */}
+          {item.gt ? "GroundTruth " : item.tool ? `${item.tool} ` : "$ "}
           {truncate(item.command, 88)}
         </Cont>
       ))}
@@ -95,6 +145,20 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
           </button>
         </ContMore>
       )}
+
+      {/* What it is doing right now, in its own words, updated from the
+          stream rather than from a poll. It changes length constantly, so
+          it is clipped on one line: nothing below it may move as it
+          updates. */}
+      {worker.doing && (
+        <Cont tone="dim">
+          <span className="worker-doing">{truncate(worker.doing, 96)}</span>
+        </Cont>
+      )}
+
+      {/* Where it is working. The whole point of watching an agent we do
+          not run: the files, in the order it last touched them. */}
+      {seen.length > 0 && <Cont tone="dim">{filesLine(seen, 2)}</Cont>}
 
       {worker.reply && (
         <Cont tone={worker.status === "applied" ? "ok" : ""}>
@@ -109,7 +173,7 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
           {applied ? (
             <span className="is-ok">✓ applied</span>
           ) : (
-            offersApply && (
+            canOfferApply && (
               <button
                 type="button"
                 className="bracket"
@@ -124,6 +188,16 @@ export default function TermWorker({ worker, no, canApply, onApply }: Props) {
                 [{worker.applying ? "applying…" : "apply"}]
               </button>
             )
+          )}{" "}
+          {seen.length > 0 && onFocus && (
+            <button
+              type="button"
+              className="bracket"
+              title="show only what this agent has touched, on the graph"
+              onClick={onFocus}
+            >
+              [focus]
+            </button>
           )}{" "}
           <button
             type="button"

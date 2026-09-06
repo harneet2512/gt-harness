@@ -1017,3 +1017,73 @@ body {
   appearance: none;
   padding-right: 1ch;
 }
+
+/* ---------------- external agents, and the fleet list ---------------- */
+
+/* A subagent belongs to the agent above it. One `⎿` of indent says so;
+   two would start a column of its own, which is why the list clamps at
+   this depth (see `agentRows`). */
+.worker.is-child,
+.agent-row.is-child {
+  margin-left: 3ch;
+}
+
+/* The kind badge on an external agent's card, in that agent's own hue —
+   the same colour its trail is drawn in on the graph. */
+.worker-ext {
+  --worker-hue: var(--orange);
+  color: var(--worker-hue);
+}
+
+/* What it is doing right now. The text changes length constantly, so the
+   line is clipped rather than wrapped: nothing under it may move. */
+.worker-doing,
+.agent-doing {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* One fleet row: who · what it is doing · what it has spent. Only the
+   middle column is elastic, and it is the only one that may be cut. */
+.agent-row {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+.agent-mark {
+  --worker-hue: var(--orange);
+  color: var(--worker-hue);
+  flex: 0 0 auto;
+}
+.agent-name {
+  flex: 0 0 auto;
+  color: var(--ink);
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-doing {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+}
+.agent-spent {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+/* The one line that carries a token. It is a command, so it is allowed to
+   wrap — a clipped command copies wrong. */
+.connect-line {
+  font: inherit;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

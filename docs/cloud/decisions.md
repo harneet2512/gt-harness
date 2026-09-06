@@ -22,6 +22,7 @@ the commit that carries it. Dates are the commit dates on
 | [14](#14-the-ui-directions) | UI: dashboard → Survey → Synapse → prompt-first → terminal | 2026-09-04 → 09-05 | `dd41057f`, `4bde9d98`, `54532f86`, `e12f5b65`, `645fe276` |
 | [15](#15-the-free-model-choice) | Run on a free tool-calling model | 2026-09-04 | `docs/cloud-e2e-run.md` |
 | [16](#16-drop-and-recreate-on-a-schema-bump) | Drop and recreate the database on a schema bump | 2026-09-04 | `a26d02a6` |
+| [17](#17-the-bridge-is-one-file-on-purpose) | The adapter bridge is one file, over the 800-line rule | 2026-09-06 | _(uncommitted)_ |
 
 ---
 
@@ -299,3 +300,32 @@ The cost is real and is documented under
 [operations.md](operations.md#the-database-is-dropped-on-a-schema-bump):
 deploying a schema-bumping commit erases every session, message, receipt and
 event, and leaves the workspace directories orphaned on disk.
+
+## 17. The bridge is one file, on purpose
+
+`cloud/adapters/gt_cloud_bridge.py` is **940 lines**, against the repository's
+800-line ceiling for a single file. That is deliberate, and this row exists so
+it reads as a decision rather than as an oversight.
+
+The adapters do not run here. They run on a **user's own machine**, beside their
+Claude Code or Codex session, on whatever Python that machine has — frequently
+with no virtualenv, no `pip install`, and no checkout of this repository. The
+property that makes them adoptable is that somebody can copy **one file** onto
+that machine and write their own reporter against it, or copy the two or three
+files an adapter needs and have them work with nothing on `sys.path`. Splitting
+the bridge along its natural seam — the path helpers, or the state file and the
+HTTP layer — would buy a smaller file and cost that property, replacing "copy
+this file" with "copy this directory, and keep the relative imports intact".
+
+The file is also not 940 lines of code: 121 are blank and 28 are comments, and a
+large share of the rest is docstring recording what was verified against the
+installed Claude Code and Codex binaries and why each defensive choice is there
+— the same as the rest of this documentation set. The `Bridge` class itself is
+about 465 lines and every method in it is short.
+
+**What would change this:** if a third adapter needs only the path helpers, or
+if the bridge grows a second transport, the seam stops being hypothetical and
+the file should split into `gt_cloud_bridge.py` plus a `paths.py` that
+`payloads.py` also uses. The single-file property is worth protecting only for
+as long as somebody would actually copy the single file; when the adapters ship
+as an installable package, this decision expires with it.

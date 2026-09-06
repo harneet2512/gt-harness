@@ -6,20 +6,29 @@ which is attached once at the router so no endpoint can forget it.
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import ValidationError
 
-from .auth import require_user
+from .auth import issue_ingest_token, require_ingest, require_user
 from .deps import get_event_bus, get_manager, get_store
 from .events import EventBus
 from .models import (
+    MAX_INGEST_BATCH,
     MAX_TASKS_PER_SPAWN,
     AgentApplied,
     AgentSpawn,
     AgentsSpawned,
+    ExternalAgentCreate,
+    ExternalAgentFinish,
+    ExternalAgentRegistered,
+    IngestAccepted,
+    IngestBatch,
     Message,
     MessageAccepted,
     MessageCreate,
@@ -31,21 +40,35 @@ from .models import (
     TurnReceipt,
 )
 from .runner import (
+    EXTERNAL_ROLE,
+    MAX_INGEST_BODY_BYTES,
     PRIMARY_ROLE,
     ApplyConflict,
     ApplyRefused,
     ConcurrencyLimit,
+    ExternalAgentRefused,
     ModelUnavailable,
     SessionManager,
 )
 from .store import SessionStore
 
 router = APIRouter(dependencies=[Depends(require_user)])
+#: The external agents' own routes. A SEPARATE router because ``router``
+#: attaches ``require_user`` to every endpoint on it, and these two are
+#: authenticated by an agent's ingest token instead — the one credential a
+#: signed-in browser does not have and an adapter does.
+external_router = APIRouter()
 
 _GITHUB_REPO_RE = re.compile(r"^https://github\.com/[\w\-\.]+/[\w\-\.]+(?:\.git)?$")
 
 #: a message cannot start or steer a turn in these states
 _CLOSED_TO_MESSAGES = {"creating", "closed", "failed"}
+#: a session cannot take on new external agents in these states. ``creating``
+#: is fine, unlike for a message: registering an agent we do not run needs
+#: nothing from the workspace that is still cloning.
+_CLOSED_TO_EXTERNAL = {"closed", "failed"}
+
+IngestDep = Annotated[dict[str, Any], Depends(require_ingest)]
 
 #: one worker per line: ``/spawn <task>``. A message whose first non-blank
 #: line is one of these is a spawn command and never reaches a model.
@@ -96,6 +119,12 @@ def _session_view(row: dict) -> dict[str, Any]:
         "task": row.get("task"),
         "report": _worker_report(row),
         "applied_at": row.get("applied_at"),
+        "agent_kind": row.get("agent_kind"),
+        "parent_agent_id": row.get("parent_agent_id"),
+        "external_cwd": row.get("external_cwd"),
+        "label": row.get("label"),
+        "activity": row.get("activity"),
+        "tokens": row.get("tokens"),
     }
 
 
@@ -241,6 +270,8 @@ async def post_message(
         return {"message": message, "delivery": "spawned"}
     try:
         message, delivery = await manager.post_message(session_id, body.content)
+    except ExternalAgentRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ConcurrencyLimit as exc:
         raise HTTPException(429, str(exc)) from exc
     return {"message": message, "delivery": delivery}
@@ -272,6 +303,11 @@ async def spawn_agents(
 async def list_agents(
     session_id: str, store: StoreDep, manager: ManagerDep
 ) -> list[dict[str, Any]]:
+    """Every agent of this session, oldest first.
+
+    Workers *and* external agents: both are child rows of the same session and
+    both render as a card, so one list answers "what is working on this?".
+    """
     await _require_session(store, session_id)
     return [_session_view(w) for w in await manager.list_workers(session_id)]
 
@@ -316,6 +352,143 @@ async def close_agent(
     await _require_worker(store, session_id, worker_id)
     await manager.close(worker_id)
     return _session_view(await store.get_session(worker_id))  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------
+# external agents: agents we watch but never run
+# --------------------------------------------------------------------------
+@router.post(
+    "/sessions/{session_id}/external-agents",
+    response_model=ExternalAgentRegistered,
+    status_code=201,
+)
+async def register_external_agent(
+    session_id: str,
+    body: ExternalAgentCreate,
+    request: Request,
+    store: StoreDep,
+    manager: ManagerDep,
+) -> dict[str, Any]:
+    """Register an agent we do not run, as a child of this session.
+
+    Nothing is executed here and nothing ever will be: no workspace, no
+    sandbox, no model call, no concurrency slot. The answer is the row plus
+    the only credential that can push events into it.
+    """
+    session = await _require_session(store, session_id)
+    if session["status"] in _CLOSED_TO_EXTERNAL:
+        raise HTTPException(
+            409,
+            f"session is {session['status']} and cannot host external agents",
+        )
+    try:
+        agent = await manager.register_external_agent(
+            session,
+            agent_kind=body.agent_kind,
+            label=body.label,
+            task=body.task,
+            cwd=body.cwd,
+            parent_agent_id=body.parent_agent_id,
+        )
+    except ExternalAgentRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    agent_id = str(agent["id"])
+    return {
+        "agent": _session_view(agent),
+        "ingest_token": issue_ingest_token(agent_id, session_id),
+        "ingest_url": _ingest_url(request, agent_id),
+    }
+
+
+def _ingest_url(request: Request, agent_id: str) -> str:
+    """Where this agent posts its events.
+
+    ``PUBLIC_BASE_URL`` wins when it is set, because the URL is handed to a
+    process on somebody's laptop: behind a TLS-terminating proxy the request's
+    own scheme and host are the *internal* ones, and a http://app:8000/... URL
+    is useless to the adapter that has to call it.
+    """
+    base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if base:
+        return f"{base}/api/external-agents/{agent_id}/events"
+    return str(request.url_for("ingest_external_events", agent_id=agent_id))
+
+
+async def _require_external_agent(store: SessionStore, agent_id: str) -> dict:
+    agent = await store.get_session(agent_id)
+    if agent is None or str(agent.get("role") or "") != EXTERNAL_ROLE:
+        raise HTTPException(404, "external agent not found")
+    if str(agent["status"]) == "closed":
+        raise HTTPException(409, "external agent is closed")
+    return agent
+
+
+async def _ingest_batch(request: Request) -> IngestBatch:
+    """Read and bound the body before it becomes objects.
+
+    Both caps answer 413 rather than 422: they are about the SIZE of what was
+    sent, not its shape, and an adapter that can read one status code can
+    halve its batch and carry on.
+    """
+    raw = await request.body()
+    if len(raw) > MAX_INGEST_BODY_BYTES:
+        raise HTTPException(
+            413,
+            f"an ingest batch may be at most {MAX_INGEST_BODY_BYTES} bytes",
+        )
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError as exc:
+        raise HTTPException(400, "body must be JSON") from exc
+    if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+        if len(payload["events"]) > MAX_INGEST_BATCH:
+            raise HTTPException(
+                413, f"an ingest batch may carry at most {MAX_INGEST_BATCH} events"
+            )
+    try:
+        return IngestBatch.model_validate(payload)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
+
+@external_router.post(
+    "/external-agents/{agent_id}/events",
+    response_model=IngestAccepted,
+    status_code=202,
+)
+async def ingest_external_events(
+    agent_id: str,
+    request: Request,
+    store: StoreDep,
+    manager: ManagerDep,
+    _claims: IngestDep,
+) -> dict[str, Any]:
+    """Take an external agent's own events onto its parent's stream.
+
+    Authenticated by the ingest token ALONE — a signed-in user's JWT is
+    refused here, and this token is refused everywhere else. The events are
+    data: they are mirrored and stored, never interpreted as instructions.
+    """
+    agent = await _require_external_agent(store, agent_id)
+    batch = await _ingest_batch(request)
+    accepted = await manager.ingest_external_events(agent, batch.events)
+    return {"accepted": accepted}
+
+
+@external_router.post(
+    "/external-agents/{agent_id}/finish", response_model=Session
+)
+async def finish_external_agent(
+    agent_id: str,
+    body: ExternalAgentFinish,
+    store: StoreDep,
+    manager: ManagerDep,
+    _claims: IngestDep,
+) -> dict[str, Any]:
+    """The agent says it is done: report to the parent and settle the row."""
+    agent = await _require_external_agent(store, agent_id)
+    row = await manager.finish_external_agent(agent, body.status, body.summary)
+    return _session_view(row)
 
 
 @router.get("/sessions/{session_id}/events")

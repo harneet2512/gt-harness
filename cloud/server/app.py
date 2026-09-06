@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from . import deps  # noqa: E402
 from .auth import auth_router  # noqa: E402
 from .events import EventBus  # noqa: E402
-from .routes import router  # noqa: E402
+from .routes import external_router, router  # noqa: E402
 from .runner import SessionManager  # noqa: E402
 from .store import SessionStore  # noqa: E402
 
@@ -81,6 +81,9 @@ def create_app() -> FastAPI:
         )
     app.include_router(auth_router)
     app.include_router(router, prefix="/api")
+    # The external agents' ingest routes: same /api prefix, different
+    # credential (an agent's ingest token, never the user's sign-in).
+    app.include_router(external_router, prefix="/api")
 
     @app.get("/health")
     async def health() -> dict:

@@ -118,8 +118,9 @@ export default function GraphToolbar({
           <span className="legend-line is-cotouch" />
           <span className="cap">co-touch</span>
         </span>
-        {/* One chip per worker, in the colour its trail is drawn in. Click
-            to narrow the map to what that worker touched. */}
+        {/* One chip per agent, in the colour its trail is drawn in — a
+            worker of ours or an external one, on the same rule. Click to
+            narrow the map to what that agent touched. */}
         {workers.map((worker) => (
           <button
             type="button"
@@ -127,13 +128,13 @@ export default function GraphToolbar({
             className={`legend-worker ${isolated === worker.id ? "is-on" : ""}`}
             style={{ ["--worker-hue" as string]: worker.css }}
             aria-pressed={isolated === worker.id}
-            title={worker.task || `worker ${worker.no}`}
+            title={worker.task || chipLabel(worker)}
             onClick={() =>
               onIsolate(isolated === worker.id ? null : worker.id)
             }
           >
             <span className="legend-dot is-worker" />
-            <span className="cap">worker {worker.no}</span>
+            <span className="cap">{chipLabel(worker)}</span>
           </button>
         ))}
       </span>
@@ -175,4 +176,10 @@ export default function GraphToolbar({
       </button>
     </div>
   );
+}
+
+/** `worker 2` for one of ours; the kind for an agent we only watch. */
+function chipLabel(worker: WorkerTrail): string {
+  if (!worker.isExternal) return `worker ${worker.no}`;
+  return worker.kind || "external";
 }

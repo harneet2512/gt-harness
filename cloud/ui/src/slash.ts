@@ -1,7 +1,7 @@
 /* ------------------------------------------------------------------ *
  * Slash commands.
  *
- * Six of them, all client-side. A message that merely starts with a slash
+ * Ten of them, all client-side. A message that merely starts with a slash
  * (`/usr/bin/env`, `/api/sessions returns 409`) is a message, not a
  * command: only a known name followed by end-of-line or a space counts.
  * ------------------------------------------------------------------ */
@@ -13,6 +13,8 @@ export type SlashName =
   | "resume"
   | "settings"
   | "spawn"
+  | "agents"
+  | "connect"
   | "theme"
   | "help";
 
@@ -33,6 +35,16 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     name: "spawn",
     arg: "<task>",
     hint: "hand a task to a worker agent — one /spawn line per worker, up to 4",
+  },
+  {
+    name: "agents",
+    arg: null,
+    hint: "list every agent on this session — workers and the ones you attached",
+  },
+  {
+    name: "connect",
+    arg: "[claude-code|codex]",
+    hint: "attach a Claude Code or Codex session on your machine to this one",
   },
   { name: "theme", arg: "[dark|light]", hint: "switch the terminal theme" },
   { name: "help", arg: null, hint: "list these commands" },

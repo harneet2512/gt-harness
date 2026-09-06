@@ -15,12 +15,14 @@ Run: ``python -m pytest tests/test_cloud_agents.py -q`` from the repo root.
 """
 from __future__ import annotations
 
+import itertools
 import time
 from typing import Any
 
 import pytest
 
 from cloud.server import runner as runner_module
+from cloud.server.models import MAX_TASKS_PER_SPAWN
 from tests import test_cloud_chat as chat
 from tests.test_cloud_chat import (
     DEFAULT_SCRIPT,
@@ -434,15 +436,30 @@ def test_a_worker_can_be_closed_on_its_own(harness: Harness) -> None:
 # 5: caps
 # --------------------------------------------------------------------------
 def test_a_spawn_over_the_creation_cap_creates_nothing(harness: Harness) -> None:
-    """All four or none: a half-spawned set is worse than a refusal."""
+    """All of them or none: a half-spawned set is worse than a refusal.
+
+    The pool is FILLED first rather than asking for more than the default
+    allows: the default now covers a whole spawn (see
+    ``test_a_full_spawn_is_accepted_on_stock_defaults``), so a spawn is only
+    over the cap when somebody else is already cloning.
+    """
     harness.set_script(list(DEFAULT_SCRIPT))
     parent_id = _create_idle(harness)
+    free = runner_module.DEFAULT_MAX_CONCURRENT_CREATIONS - 1
+    harness.hold_worker()
+    try:
+        held = [_create(harness) for _ in range(free)]
+        assert [r.status_code for r in held] == [201] * free
 
-    response = _spawn(harness, parent_id, "a", "b", "c", "d")
+        response = _spawn(harness, parent_id, *[f"task {i}" for i in range(2)])
 
-    assert response.status_code == 429, response.text
-    assert "creations" in response.json()["detail"]
-    assert _agents(harness, parent_id) == []
+        assert response.status_code == 429, response.text
+        assert "creations" in response.json()["detail"]
+        assert _agents(harness, parent_id) == []
+    finally:
+        harness.release_worker()
+    for response in held:
+        _wait_status(harness, response.json()["id"], {"idle"})
 
 
 def test_a_spawn_over_the_worker_cap_creates_nothing(
@@ -567,3 +584,109 @@ def test_a_message_that_only_mentions_spawn_is_an_ordinary_turn(
     assert response.status_code == 202, response.text
     assert response.json()["delivery"] == "turn_started"
     assert _agents(harness, parent_id) == []
+
+
+# --------------------------------------------------------------------------
+# 6: real parallelism
+# --------------------------------------------------------------------------
+def test_a_parents_workers_think_at_the_same_time(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three workers, three model calls in flight at once — not a queue.
+
+    Worker turns used to draw on ``MAX_CONCURRENT_SESSIONS`` (default 3), the
+    same pool as the humans' own turns, so "spawn four" could not mean four
+    agents working. The primary pool is squeezed to ONE here: if a worker turn
+    still took a slot from it, only one of the three would ever reach its
+    model and the gate below would time out.
+
+    Overlap is proved twice over — every worker is inside a model call at the
+    same instant, and afterwards their ``turn_started``/``turn_finished``
+    wall-clock windows are asserted to intersect pairwise.
+    """
+    manager = chat.deps.get_manager()
+    monkeypatch.setattr(manager, "_max_concurrent", 1, raising=False)
+    harness.set_script([_reply("nothing to change.")])
+    parent_id = _create_idle(harness)
+    # every model built from here on stops inside its first call
+    harness.block_model_at(1)
+
+    workers = _spawn_ok(harness, parent_id, "one", "two", "three")
+    worker_ids = [w["id"] for w in workers]
+    for worker_id in worker_ids:
+        harness.wait_blocked(worker_id)
+
+    # the instant of proof: three worker turns, three blocked model calls
+    assert manager.running_worker_count == 3
+    assert manager.running_count == 0, "no worker took a primary turn slot"
+    harness.release_model()
+
+    frames = _wait_reports(harness, parent_id, 3)
+    spans = _turn_spans(frames, worker_ids)
+    assert len(spans) == 3, f"expected three worker turns, saw {sorted(spans)}"
+    for (one, first), (two, second) in itertools.combinations(spans.items(), 2):
+        assert first[0] < second[1] and second[0] < first[1], (
+            f"workers {one} and {two} did not overlap: {first} vs {second}"
+        )
+
+
+def _turn_spans(
+    frames: list[dict], worker_ids: list[str]
+) -> dict[str, tuple[float, float]]:
+    """``{worker_id: (started_at, finished_at)}`` off the parent's own stream."""
+    started: dict[str, float] = {}
+    finished: dict[str, float] = {}
+    for frame in frames:
+        data = frame["payload"]["data"]
+        worker_id = data.get("agent_id")
+        if worker_id not in worker_ids:
+            continue
+        timestamp = float(frame["payload"]["timestamp"])
+        if frame["event"] == "turn_started":
+            started.setdefault(worker_id, timestamp)
+        elif frame["event"] == "turn_finished":
+            finished[worker_id] = timestamp
+    return {
+        worker_id: (started[worker_id], finished[worker_id])
+        for worker_id in started
+        if worker_id in finished
+    }
+
+
+def test_a_full_spawn_is_accepted_on_stock_defaults(harness: Harness) -> None:
+    """``MAX_TASKS_PER_SPAWN`` workers is a number the defaults can serve.
+
+    It was not: the creation cap was 3 against a spawn limit of 4, and a spawn
+    takes its slots all-or-nothing, so the largest spawn the API advertises
+    was refused 429 on every stock deployment before any work began.
+    """
+    harness.set_script([_reply("nothing to do.")])
+    parent_id = _create_idle(harness)
+
+    workers = _spawn_ok(harness, parent_id, *[f"task {i}" for i in range(4)])
+
+    assert len(workers) == MAX_TASKS_PER_SPAWN
+    assert runner_module.max_concurrent_worker_turns() >= MAX_TASKS_PER_SPAWN
+    assert runner_module.DEFAULT_MAX_CONCURRENT_CREATIONS >= MAX_TASKS_PER_SPAWN
+    _wait_reports(harness, parent_id, 4)
+
+
+def test_external_agents_do_not_spend_the_worker_budget(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """They run nothing, so they cost nothing — not even a slot in the cap."""
+    monkeypatch.setenv("MAX_WORKERS_PER_SESSION", "1")
+    harness.set_script(list(DEFAULT_SCRIPT))
+    parent_id = _create_idle(harness)
+    for label in ("claude code", "codex"):
+        registered = harness.client.post(
+            f"/api/sessions/{parent_id}/external-agents",
+            json={"agent_kind": "other", "label": label},
+            headers=harness.auth,
+        )
+        assert registered.status_code == 201, registered.text
+
+    response = _spawn(harness, parent_id, "the one worker this session may have")
+
+    assert response.status_code == 202, response.text
+    assert len(_agents(harness, parent_id)) == 3

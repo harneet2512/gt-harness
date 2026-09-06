@@ -55,6 +55,28 @@ export function formatStopwatch(seconds: number): string {
   return `${m}:${ss}`;
 }
 
+/**
+ * `169.1k` / `2.4M` / `847` — a token count, in the width a fleet row has.
+ *
+ * Null is not zero and must not read as one: a client that never reported
+ * a count gets an empty string, and the row prints nothing rather than a
+ * confident `0`. One decimal, and a trailing `.0` is dropped, so the
+ * column does not jitter between `169k` and `169.0k`.
+ */
+export function formatTokens(tokens: number | null | undefined): string {
+  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0) {
+    return "";
+  }
+  if (tokens < 1000) return String(Math.round(tokens));
+  const scale =
+    tokens < 1_000_000
+      ? { by: 1000, suffix: "k" }
+      : { by: 1_000_000, suffix: "M" };
+  const value = tokens / scale.by;
+  const text = value.toFixed(1).replace(/\.0$/, "");
+  return `${text}${scale.suffix}`;
+}
+
 export function formatCost(cost: number | undefined | null): string {
   if (typeof cost !== "number" || !Number.isFinite(cost)) return "$0.000";
   return `$${cost.toFixed(3)}`;

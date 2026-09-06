@@ -9,7 +9,17 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from cloud.server.auth import auth_router, jwt_ttl_seconds, require_user, verify_jwt
+from cloud.server import auth as auth_module
+from cloud.server import link_token
+from cloud.server.auth import (
+    auth_router,
+    issue_ingest_token,
+    issue_link_token,
+    jwt_ttl_seconds,
+    require_ingest,
+    require_user,
+    verify_jwt,
+)
 
 
 @pytest.fixture
@@ -206,3 +216,183 @@ def test_the_token_lifetime_is_configurable(monkeypatch: pytest.MonkeyPatch) -> 
     assert jwt_ttl_seconds() == 3600
     monkeypatch.setenv("JWT_TTL_SECONDS", "nonsense")
     assert jwt_ttl_seconds() == 86400
+
+
+# --------------------------------------------------------------------------
+# operator sign-in links (host-independent front door)
+# --------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _forget_redeemed_links():
+    """Redeemed ``jti``s are process state; no test may inherit another's."""
+    auth_module._redeemed_links.clear()
+    yield
+    auth_module._redeemed_links.clear()
+
+
+def _link(client: TestClient, token: str):
+    return client.get(f"/auth/link?t={token}")
+
+
+def _mint(login: str = "tester", **claims) -> str:
+    """A link token, with individual claims overridden for the bad cases."""
+    issued_at = int(time.time())
+    payload = {
+        "login": login,
+        "scope": "link",
+        "jti": f"jti-{issued_at}-{login}",
+        "iat": issued_at,
+        "exp": issued_at + 600,
+    }
+    payload.update(claims)
+    return jwt.encode(payload, "test-jwt-secret", algorithm="HS256")
+
+
+def test_a_minted_link_signs_you_in(client: TestClient) -> None:
+    """The door that does not depend on the hostname."""
+    token = issue_link_token("tester")
+
+    resp = _link(client, token)
+
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/"
+    cookie = resp.cookies.get("session")
+    assert cookie, "the link set the same cookie /auth/callback sets"
+    claims = jwt.decode(cookie, "test-jwt-secret", algorithms=["HS256"])
+    assert claims["login"] == "tester"
+    # the cookie is a SIGN-IN, so it carries no scope for require_user to refuse
+    assert "scope" not in claims
+
+
+def test_the_cookie_a_link_sets_is_accepted_by_require_user(
+    client: TestClient,
+) -> None:
+    resp = _link(client, issue_link_token("tester"))
+
+    me = client.get("/auth/me", cookies={"session": resp.cookies["session"]})
+
+    assert me.status_code == 200, me.text
+    assert me.json()["login"] == "tester"
+
+
+def test_a_link_is_single_use(client: TestClient) -> None:
+    """It will end up in a chat log; a replay is a refusal, not a session."""
+    token = issue_link_token("tester")
+    assert _link(client, token).status_code == 307
+
+    replay = _link(client, token)
+
+    assert replay.status_code == 400, replay.text
+    assert "already been used" in replay.json()["detail"]
+
+
+def test_an_expired_link_is_refused(client: TestClient) -> None:
+    issued_at = int(time.time()) - 3600
+    token = _mint(iat=issued_at, exp=issued_at + 600)
+
+    resp = _link(client, token)
+
+    assert resp.status_code == 401, resp.text
+
+
+def test_a_link_that_lives_too_long_is_refused(client: TestClient) -> None:
+    """The ceiling is enforced at redemption, not only at minting."""
+    issued_at = int(time.time())
+    token = _mint(iat=issued_at, exp=issued_at + 86_400)
+
+    resp = _link(client, token)
+
+    assert resp.status_code == 400, resp.text
+    assert "too long" in resp.json()["detail"]
+    assert auth_module.link_ttl_seconds() <= auth_module.MAX_LINK_TTL_SECONDS
+
+
+def test_a_link_for_an_unlisted_login_is_refused(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link minted last week for somebody since removed is worth nothing."""
+    token = issue_link_token("stranger")
+    monkeypatch.setenv("ALLOWED_GITHUB_LOGINS", "tester,someone-else")
+
+    resp = _link(client, token)
+
+    assert resp.status_code == 403, resp.text
+    assert "ALLOWED_GITHUB_LOGINS" in resp.json()["detail"]
+    # ...and refusing it did not burn the jti, but nothing was signed in either
+    assert "session" not in resp.cookies
+
+
+def test_a_session_or_ingest_token_is_not_a_sign_in_link(
+    client: TestClient,
+) -> None:
+    session_token = jwt.encode(
+        {"sub": "1", "login": "tester", "exp": int(time.time()) + 3600},
+        "test-jwt-secret",
+        algorithm="HS256",
+    )
+    ingest_token = issue_ingest_token("agent1", "session1")
+
+    assert _link(client, session_token).status_code == 400
+    assert _link(client, ingest_token).status_code == 400
+    assert "not a sign-in link" in _link(client, ingest_token).json()["detail"]
+
+
+def test_a_link_without_a_jti_cannot_be_redeemed(client: TestClient) -> None:
+    """No jti, no single-use guarantee — so no sign-in."""
+    resp = _link(client, _mint(jti=""))
+
+    assert resp.status_code == 400, resp.text
+    assert "single use" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_a_link_token_cannot_be_used_as_a_credential() -> None:
+    """The other direction: redeeming a link makes a session, it is not one."""
+    token = issue_link_token("tester")
+
+    with pytest.raises(HTTPException) as user_exc:
+        await require_user(session=None, authorization=f"Bearer {token}")
+    with pytest.raises(HTTPException) as ingest_exc:
+        await require_ingest("agent1", authorization=f"Bearer {token}")
+
+    assert user_exc.value.status_code == 401
+    assert "link token" in user_exc.value.detail
+    assert ingest_exc.value.status_code == 401
+
+
+def test_redeemed_link_ids_do_not_accumulate_forever(client: TestClient) -> None:
+    """Same discipline as _pending_states: the set is swept, not grown."""
+    assert _link(client, issue_link_token("tester")).status_code == 307
+    assert len(auth_module._redeemed_links) == 1
+    for jti in list(auth_module._redeemed_links):
+        auth_module._redeemed_links[jti] = (
+            time.time() - auth_module.MAX_LINK_TTL_SECONDS - 1
+        )
+
+    assert _link(client, issue_link_token("tester")).status_code == 307
+
+    assert len(auth_module._redeemed_links) == 1, "the stale id was swept"
+
+
+def test_the_operator_entry_point_prints_the_url_and_nothing_else(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://gt.example.test/")
+
+    assert link_token.main(["tester"]) == 0
+
+    captured = capsys.readouterr()
+    lines = [line for line in captured.out.splitlines() if line.strip()]
+    assert len(lines) == 1, captured.out
+    url = lines[0]
+    assert url.startswith("https://gt.example.test/auth/link?t=")
+    # the secret never leaves the process, in either stream
+    assert "test-jwt-secret" not in captured.out
+    assert "test-jwt-secret" not in captured.err
+    claims = jwt.decode(url.split("t=", 1)[1], "test-jwt-secret", algorithms=["HS256"])
+    assert claims["login"] == "tester" and claims["scope"] == "link"
+
+
+def test_the_operator_entry_point_refuses_a_missing_login(capsys) -> None:
+    assert link_token.main([]) == 2
+    assert link_token.main(["   "]) == 2
+    assert capsys.readouterr().out == "", "usage goes to stderr, not stdout"

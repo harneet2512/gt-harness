@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { Session } from "../api";
 import { relationsFor } from "../graph";
 import { useDragSize } from "../useDragSize";
@@ -27,6 +27,9 @@ interface Props {
   onSelectPath: (path: string) => void;
   onTogglePin: () => void;
   onCloseInspector: () => void;
+  /** The agent the map is narrowed to, or null for everything at once. */
+  isolated: string | null;
+  onIsolate: (agentId: string | null) => void;
   onCollapse: () => void;
 }
 
@@ -47,6 +50,8 @@ export default function GraphPanel({
   onSelectPath,
   onTogglePin,
   onCloseInspector,
+  isolated,
+  onIsolate,
   onCollapse,
 }: Props) {
   const panel = useDragSize(PANEL_DEFAULT, PANEL_MIN, PANEL_MAX, "y");
@@ -55,14 +60,6 @@ export default function GraphPanel({
   const [fitToken, setFitToken] = useState(0);
   const [zoomK, setZoomK] = useState(1);
   const [search, setSearch] = useState("");
-  const [isolated, setIsolated] = useState<string | null>(null);
-
-  /* A worker that no longer exists cannot be the thing the map is narrowed
-     to, or the canvas would dim every particle and show nothing. */
-  const workerIds = view.workerTrails.map((worker) => worker.id).join("|");
-  useEffect(() => {
-    if (isolated && !workerIds.split("|").includes(isolated)) setIsolated(null);
-  }, [workerIds, isolated]);
 
   const matches = useMemo(() => {
     if (isolated) {
@@ -111,9 +108,7 @@ export default function GraphPanel({
           {view.field.particles.length} files
           {data.graph.gt ? " · GT ready" : ""}
           {view.workerTrails.length > 0
-            ? ` · ${view.workerTrails.length} worker${
-                view.workerTrails.length === 1 ? "" : "s"
-              }`
+            ? ` · ${view.workerTrails.length} ${agentWord(view.workerTrails)}`
             : ""}
           {" "}
         </span>
@@ -142,7 +137,7 @@ export default function GraphPanel({
         folded={view.field.folded}
         workers={view.workerTrails}
         isolated={isolated}
-        onIsolate={setIsolated}
+        onIsolate={onIsolate}
         onCollapse={onCollapse}
       />
 
@@ -250,4 +245,10 @@ function emptyText(
   if (!sessionId) return "pick a session";
   if (status === "creating") return "indexing…";
   return "no files indexed";
+}
+
+/** "worker"/"workers" while they are all ours; "agents" once one is not. */
+function agentWord(trails: readonly GraphView["workerTrails"][number][]): string {
+  if (trails.some((trail) => trail.isExternal)) return "agents";
+  return trails.length === 1 ? "worker" : "workers";
 }

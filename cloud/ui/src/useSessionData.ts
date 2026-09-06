@@ -13,11 +13,13 @@ import {
   getTree,
   lifecycleToSessionStatus,
   listAgents,
+  registerExternalAgent,
   sendMessage,
   spawnAgents,
   stopSession,
   type Message,
   type Receipt,
+  type ExternalAgentRegistration,
   type Session,
   type SessionDiff,
   type SessionEvent,
@@ -115,7 +117,17 @@ export interface SessionData {
   /** 3-way merge a worker's diff into this workspace. Conflicts land on the card. */
   applyWorker: (workerId: string) => Promise<void>;
   reloadWorkers: () => void;
+  /**
+   * Register a Claude Code / Codex session against this one. Resolves to
+   * the ingest URL and the token a local bridge authenticates with, or to
+   * the server's own words for why it would not.
+   */
+  connectExternal: (kind: string) => Promise<ConnectResult>;
 }
+
+export type ConnectResult =
+  | { registration: ExternalAgentRegistration; error: null }
+  | { registration: null; error: string };
 
 /**
  * Everything one session is: its record, its thread, and the four workspace
@@ -580,6 +592,36 @@ export function useSessionData(sessionId: string | null): SessionData {
   );
 
   /**
+   * A local agent attaching itself to this session. The row it creates is
+   * an agent like any other, so the list is reloaded the moment it exists
+   * rather than waiting for its first frame.
+   */
+  const connectExternal = useCallback(
+    async (kind: string): Promise<ConnectResult> => {
+      if (!sessionId) {
+        return { registration: null, error: "There is no session to connect to." };
+      }
+      try {
+        /* `label` is required and may not be blank: it is what the card
+           is called until the agent says something better. The kind is
+           the honest default — we do not know yet what it will work on. */
+        const registration = await registerExternalAgent(sessionId, {
+          agent_kind: kind,
+          label: kind,
+        });
+        void loadWorkers();
+        return { registration, error: null };
+      } catch (err) {
+        /* A 404 is a server without the route, a 409 a session that cannot
+           take one, a 429 a cap. The server's `detail` says which, and
+           saying it verbatim beats any paraphrase this page could write. */
+        return { registration: null, error: message(err) };
+      }
+    },
+    [sessionId, loadWorkers],
+  );
+
+  /**
    * Close the session. The confirmation is **not** here: everything else in
    * this release asks in the transcript, and the one destructive action
    * opening an OS modal was both off-key and untestable from a headless
@@ -621,5 +663,6 @@ export function useSessionData(sessionId: string | null): SessionData {
     spawn,
     applyWorker,
     reloadWorkers: () => void loadWorkers(),
+    connectExternal,
   };
 }

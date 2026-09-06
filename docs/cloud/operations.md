@@ -257,6 +257,31 @@ gh codespace ports forward 80:18080 -c "$NAME" &   # then use localhost:18080
 Expect it to drop (`websocket: close 1006 (abnormal closure)`) on a flaky link.
 It is the interim, not the mechanism.
 
+### A new codespace comes up with no docker and no ports (recovery container)
+
+Seen 2026-09-06, both `EastUs` and `WestUs2`, on two different base images:
+`gh codespace create` reports success and the codespace reaches *Available*,
+but `docker` is missing, `gh codespace ports` lists nothing, and
+`/workspaces/.codespaces/shared/merged_devcontainer.json` shows
+`mcr.microsoft.com/devcontainers/base:alpine` with `features: []` — none of
+this repo's devcontainer. The creation log says what happened:
+
+```
+Using image: mcr.microsoft.com/devcontainers/universal
+Error code: 1302 (UnifiedContainersErrorFatalCreatingContainer)
+Creating recovery container.
+```
+
+The devcontainer failed to start and GitHub substituted its **recovery
+container**. That container is unprivileged, so installing docker by hand does
+not help either — `dockerd` dies with `iptables ... Permission denied (you must
+be root)`. `gh codespace rebuild --full` re-lands in recovery.
+
+Check `/workspaces/.codespaces/.persistedshare/creation.log` before debugging
+anything else; if it names error 1302, the codespace is not salvageable and the
+fault is upstream. Deploy to an existing healthy codespace and retry creation
+later.
+
 ### The codespace name can stop resolving after a cold start
 
 Seen 2026-09-06 after the codespace had been *Shutdown* (idle timeout) and was
@@ -477,6 +502,7 @@ Note the script hard-codes `cd /workspaces/gt-harness` and
 | Symptom | Cause | What to do |
 |---|---|---|
 | Public URL 302s to GitHub sign-in | Codespaces port visibility reset by the deploy. | `gh codespace ports visibility 80:public -c <name>` from a machine with a `codespace`-scoped `gh` login. |
+| A new codespace has no `docker` and no forwarded ports | GitHub substituted a **recovery container**; the devcontainer failed to start (creation.log: error 1302). | Not fixable in the codespace — see [A new codespace comes up with no docker and no ports](#a-new-codespace-comes-up-with-no-docker-and-no-ports-recovery-container). Deploy to an existing one and retry later. |
 | Public URL returns **404, empty body** | The Codespaces edge: port not registered. nginx is fine. | `forwardPorts` in the devcontainer (takes effect on the next codespace), or hold `gh codespace ports forward 80:18080 -c <name>`. |
 | **Every** `<name>-<port>.app.github.dev` URL 404s after a cold start, private ports included, ports listed and stack healthy | The codespace name no longer resolves to its (new) tunnel. | See [The codespace name can stop resolving after a cold start](#the-codespace-name-can-stop-resolving-after-a-cold-start): confirm with the id-based URL, then wait for GitHub or re-point the OAuth app's callback URL at the tunnel id. |
 | Public URL returns **502** | `ui` came up before `server` was answering, or `server` is down. | `$DC ps`; the compose file already makes `ui` depend on `server` being *healthy*. `docker compose restart server`. |

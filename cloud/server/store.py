@@ -7,12 +7,39 @@ table when they differ.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
+
+#: How many events one session keeps. The stream is append-only and nothing
+#: ever deleted from it, so a long-lived session was an unbounded table — and
+#: an external agent pushing at its 600-events-per-minute ceiling makes that
+#: arithmetic rather than a worry. The NEWEST this many survive.
+DEFAULT_MAX_STORED_EVENTS_PER_SESSION = 20_000
+#: appends between trims. Trimming on a counter, not on every insert: the
+#: delete is a ranged scan and paying it 20 000 times to drop 20 000 rows
+#: would cost more than the rows do.
+EVENT_TRIM_INTERVAL = 200
+
+
+def max_stored_events_per_session() -> int:
+    """Events one session keeps (``MAX_STORED_EVENTS_PER_SESSION``). 0 = all."""
+    try:
+        return max(
+            0,
+            int(
+                os.environ.get(
+                    "MAX_STORED_EVENTS_PER_SESSION",
+                    DEFAULT_MAX_STORED_EVENTS_PER_SESSION,
+                )
+            ),
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_STORED_EVENTS_PER_SESSION
 
 #: ``stopped`` is a lifecycle *event*, not a persisted status: after a stop the
 #: reply is written and the session goes straight back to ``idle``.
@@ -68,7 +95,19 @@ CREATE TABLE sessions (
     -- when this worker's patch was applied to the parent workspace, and the
     -- sha256 of the patch that was applied
     applied_at REAL,
-    applied_sha256 TEXT
+    applied_sha256 TEXT,
+    -- EXTERNAL agents (role='external'): an agent we do not run. The kind of
+    -- agent reporting in ('claude-code', 'codex', ...), the external agent
+    -- this one is a subagent OF (parent_id still names the owning session),
+    -- the path it says it runs in (display only) and its display name.
+    agent_kind TEXT,
+    parent_agent_id TEXT,
+    external_cwd TEXT,
+    label TEXT,
+    -- EXTERNAL agents: the one-line "doing right now" of the fleet list, and
+    -- the cumulative token count the client reports (NULL when it never has)
+    activity TEXT,
+    tokens INTEGER
 );
 
 CREATE TABLE messages (
@@ -153,6 +192,8 @@ _SESSION_FIELDS = (
     "report_json",
     "applied_at",
     "applied_sha256",
+    "activity",
+    "tokens",
 )
 
 
@@ -164,6 +205,8 @@ class SessionStore:
     def __init__(self, db_path: str = "cloud_harness.db") -> None:
         self._db_path = db_path
         self._db: aiosqlite.Connection = None  # type: ignore[assignment]
+        #: appends since this session's event table was last trimmed
+        self._since_trim: dict[str, int] = {}
 
     async def init(self) -> None:
         self._db = await aiosqlite.connect(self._db_path)
@@ -195,14 +238,28 @@ class SessionStore:
         parent_id: str | None = None,
         role: str = "primary",
         task: str | None = None,
+        status: str = "creating",
+        agent_kind: str | None = None,
+        parent_agent_id: str | None = None,
+        external_cwd: str | None = None,
+        label: str | None = None,
     ) -> str:
+        """Insert a session row.
+
+        ``status`` is a parameter because an EXTERNAL agent is born
+        ``running``: there is nothing to create for it (no clone, no sandbox,
+        no index), so ``creating`` would be a state it never leaves, and
+        ``VALID_TRANSITIONS`` has no ``creating -> running`` edge for the good
+        reason that a real session becomes ``idle`` first.
+        """
         session_id = new_id()
         now = time.time()
         await self._db.execute(
             """INSERT INTO sessions
                (id, repo, ref, model, gt_mode, gt_status, status,
-                created_at, updated_at, config_json, parent_id, role, task)
-               VALUES (?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?)""",
+                created_at, updated_at, config_json, parent_id, role, task,
+                agent_kind, parent_agent_id, external_cwd, label)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 repo,
@@ -210,12 +267,17 @@ class SessionStore:
                 model,
                 gt_mode,
                 "off" if gt_mode == "off" else "pending",
+                status,
                 now,
                 now,
                 json.dumps(config or {}),
                 parent_id,
                 role,
                 task,
+                agent_kind,
+                parent_agent_id,
+                external_cwd,
+                label,
             ),
         )
         await self._db.commit()
@@ -529,7 +591,52 @@ class SessionStore:
             ),
         )
         await self._db.commit()
-        return int(cursor.lastrowid or 0)
+        event_id = int(cursor.lastrowid or 0)
+        since = self._since_trim.get(session_id, 0) + 1
+        if since >= EVENT_TRIM_INTERVAL:
+            self._since_trim[session_id] = 0
+            await self.trim_events(session_id)
+        else:
+            self._since_trim[session_id] = since
+        return event_id
+
+    async def trim_events(self, session_id: str) -> int:
+        """Drop all but the newest ``cap`` events of a session. Returns how many.
+
+        The oldest id to KEEP is found by offset over the session's own index
+        (``idx_events_session``), then everything below it goes in one ranged
+        delete — so the cost is the rows actually removed, not the table.
+        """
+        cap = max_stored_events_per_session()
+        if cap <= 0:
+            return 0
+        cursor = await self._db.execute(
+            "SELECT id FROM events WHERE session_id = ?"
+            " ORDER BY id DESC LIMIT 1 OFFSET ?",
+            (session_id, cap - 1),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return 0
+        cursor = await self._db.execute(
+            "DELETE FROM events WHERE session_id = ? AND id < ?",
+            (session_id, int(row[0])),
+        )
+        await self._db.commit()
+        return int(cursor.rowcount or 0)
+
+    async def oldest_event_id(self, session_id: str) -> int | None:
+        """The lowest event id this session still has, or ``None`` if it has none.
+
+        This is what makes a trimmed replay *sayable*: a subscriber resuming
+        from an id below it has a hole, and would otherwise be handed the
+        remaining history as though it were the whole of it.
+        """
+        cursor = await self._db.execute(
+            "SELECT MIN(id) FROM events WHERE session_id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        return None if row is None or row[0] is None else int(row[0])
 
     async def get_events(
         self, session_id: str, after_id: int = 0, limit: int = 5000

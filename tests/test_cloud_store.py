@@ -10,7 +10,11 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from cloud.server.store import SCHEMA_VERSION, SessionStore
+from cloud.server.store import (
+    EVENT_TRIM_INTERVAL,
+    SCHEMA_VERSION,
+    SessionStore,
+)
 
 REPO = "https://github.com/owner/repo"
 
@@ -388,3 +392,77 @@ async def test_a_truncated_snapshot_round_trips_its_flag(
     snapshot = await store.latest_diff_snapshot(session_id, 10)
     assert snapshot["truncated"] is True
     assert snapshot["patch"] == "x" * 100
+
+
+# --------------------------------------------------------------------------
+# event retention
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_events_are_trimmed_to_the_cap_on_a_counter(
+    store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The newest N survive; the trim runs per interval, not per insert."""
+    monkeypatch.setenv("MAX_STORED_EVENTS_PER_SESSION", "30")
+    session_id = await _session(store)
+
+    ids = [
+        await store.append_event(session_id, "assistant", {"n": n})
+        for n in range(EVENT_TRIM_INTERVAL)
+    ]
+
+    kept = await store.get_events(session_id)
+    assert len(kept) == 30, "the trim fired once, at the interval"
+    assert [e["data"]["n"] for e in kept] == list(
+        range(EVENT_TRIM_INTERVAL - 30, EVENT_TRIM_INTERVAL)
+    )
+    assert await store.oldest_event_id(session_id) == ids[-30]
+
+
+@pytest.mark.asyncio
+async def test_trimming_leaves_other_sessions_alone(
+    store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAX_STORED_EVENTS_PER_SESSION", "2")
+    loud = await _session(store)
+    quiet = await _session(store)
+    await store.append_event(quiet, "lifecycle", {"status": "idle"})
+
+    for n in range(10):
+        await store.append_event(loud, "assistant", {"n": n})
+    assert await store.trim_events(loud) == 8
+
+    assert len(await store.get_events(loud)) == 2
+    assert len(await store.get_events(quiet)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_zero_cap_keeps_every_event(
+    store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAX_STORED_EVENTS_PER_SESSION", "0")
+    session_id = await _session(store)
+
+    for n in range(EVENT_TRIM_INTERVAL + 5):
+        await store.append_event(session_id, "assistant", {"n": n})
+
+    assert len(await store.get_events(session_id)) == EVENT_TRIM_INTERVAL + 5
+
+
+@pytest.mark.asyncio
+async def test_trimming_below_the_cap_deletes_nothing(
+    store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MAX_STORED_EVENTS_PER_SESSION", "1000")
+    session_id = await _session(store)
+    for n in range(5):
+        await store.append_event(session_id, "assistant", {"n": n})
+
+    assert await store.trim_events(session_id) == 0
+    assert len(await store.get_events(session_id)) == 5
+
+
+@pytest.mark.asyncio
+async def test_oldest_event_id_is_none_for_a_silent_session(
+    store: SessionStore,
+) -> None:
+    assert await store.oldest_event_id(await _session(store)) is None

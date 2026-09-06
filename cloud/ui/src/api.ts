@@ -108,9 +108,41 @@ export interface Session {
   report?: WorkerReport | null;
   /** When this worker's patch was merged into the parent workspace. */
   applied_at?: number | null;
+
+  /* ---- external agents (HAR-84) -------------------------------- *
+   * An agent we do not run: a Claude Code or Codex session on someone's
+   * machine, mirrored onto this session's stream. Same row, same routes,
+   * `role: "external"` and three fields saying what it is and where it
+   * lives. Optional throughout — an older server sends none of them.
+   * -------------------------------------------------------------- */
+
+  /** `"claude-code" | "codex" | "other"`. Null on a worker we run. */
+  agent_kind?: string | null;
+  /**
+   * The external agent this one is a **subagent** of. Distinct from
+   * `parent_id`, which is the session both of them are attached to.
+   */
+  parent_agent_id?: string | null;
+  /** The directory the external agent is running in, on its own machine. */
+  external_cwd?: string | null;
+
+  /* ---- the fleet line ------------------------------------------- *
+   * What `/agents` prints beside an agent: what it is doing right now,
+   * and what it has spent. Both optional; both untrusted on an external
+   * agent, because the words are its own.
+   * -------------------------------------------------------------- */
+
+  /** One line, max 200: what this agent is doing right now. */
+  activity?: string | null;
+  /**
+   * Cumulative tokens. **Null is not zero**: it means the client never
+   * reported a count, and the row must print nothing rather than a `0`
+   * that reads as "did no work".
+   */
+  tokens?: number | null;
 }
 
-export type SessionRole = "primary" | "worker";
+export type SessionRole = "primary" | "worker" | "external";
 
 /** What a worker told its parent when a turn of its own ended. */
 export interface WorkerReport {
@@ -123,8 +155,20 @@ export interface WorkerReport {
   applied?: boolean;
 }
 
-/** True for a session that was spawned by another one. */
-export function isWorker(session: Pick<Session, "role" | "parent_id">): boolean {
+/** True for an agent we watch but do not run. */
+export function isExternalSession(session: Pick<Session, "role">): boolean {
+  return session.role === "external";
+}
+
+/**
+ * True for a session that was spawned by another one. An external agent is
+ * attached rather than spawned: it has a `parent_id` too, and it is not a
+ * worker — nothing may offer to apply a patch it does not have.
+ */
+export function isWorker(
+  session: Pick<Session, "role" | "parent_id">,
+): boolean {
+  if (isExternalSession(session)) return false;
   return session.role === "worker" || Boolean(session.parent_id);
 }
 
@@ -468,6 +512,23 @@ export interface ToolCallData {
   turn_id?: string;
   command?: string;
   n_calls?: number;
+  /**
+   * The tool the agent called, by name — `Read`, `Edit`, `Bash`. Sent on a
+   * frame mirrored from an **external** agent, whose steps are not all
+   * shell commands. Absent on our own workers, which only run one tool.
+   */
+  tool_name?: string;
+  /**
+   * Repo-relative paths this step touched, sanitised server-side. This is
+   * the "where they work" signal: an external agent runs on a checkout we
+   * cannot inspect, so it says which files it is in rather than leaving us
+   * to infer them from a command string.
+   */
+  files?: string[];
+  /** One line: what the agent is doing right now. See `Session.activity`. */
+  activity?: string;
+  /** Cumulative tokens. See `Session.tokens` — null is not zero. */
+  tokens?: number;
 }
 
 export interface ToolResultData {
@@ -478,6 +539,20 @@ export interface ToolResultData {
   output?: string;
   returncode?: number;
   is_error?: boolean;
+  /** See `ToolCallData.tool_name`. */
+  tool_name?: string;
+  /** See `ToolCallData.files`. */
+  files?: string[];
+  /**
+   * Whether the step succeeded, as the external agent judged it. An
+   * external tool has no exit code, so this is what `returncode` is for
+   * one of ours. Absent means "no opinion", which is not a failure.
+   */
+  ok?: boolean;
+  /** See `ToolCallData.activity`. */
+  activity?: string;
+  /** See `ToolCallData.tokens`. */
+  tokens?: number;
 }
 
 export interface SteeringData {
@@ -535,18 +610,36 @@ export interface GtActionData {
   evidence_artifact_id?: string;
 }
 
-/** `agent_spawned` — one per worker, on the parent's stream, as it is created. */
+/**
+ * `agent_spawned` — one per agent, on the parent's stream, as it appears.
+ * For a worker that is the moment it is created; for an external agent the
+ * moment it registers. `external: true` is what tells the two apart.
+ */
 export interface AgentSpawnedData {
   worker_id?: string;
   task?: string;
+  /** `"claude-code" | "codex" | "other"` — set on an external agent. */
+  agent_kind?: string;
+  /** What to call it on the card, where the task is not the whole story. */
+  label?: string;
+  /** True for an agent this server mirrors but does not run. */
+  external?: boolean;
+  /** Set when this external agent is a subagent of another external one. */
+  parent_agent_id?: string | null;
 }
 
-/** `agent_report` — a worker's turn ended; this is the whole reply. */
+/**
+ * `agent_report` — an agent's turn ended; for a worker this is the whole
+ * reply. An external agent has no patch and no diff, so its report carries
+ * a `reply_excerpt` summary and no `patch_sha256`.
+ */
 export interface AgentReportData {
   worker_id?: string;
   message_id?: string;
   finish_reason?: FinishReason | string;
   content?: string;
+  /** An external agent's summary, where a worker sends `content`. */
+  reply_excerpt?: string;
   patch_sha256?: string;
   files_changed?: string[];
   n_calls?: number;
@@ -797,9 +890,73 @@ export function spawnAgents(
   });
 }
 
-/** This session's workers, oldest first. Full `Session` rows. */
+/**
+ * This session's agents — workers **and** external ones — ordered by
+ * `created_at`. Full `Session` rows; `role` says which kind each is.
+ */
 export function listAgents(id: string): Promise<Session[]> {
   return request(`${path(id)}/agents`);
+}
+
+/**
+ * What `POST /agents/external` hands back: where a local agent posts its
+ * events, and the bearer token that lets it. The token is a secret and is
+ * written in exactly one place in this UI — the copyable `/connect` line.
+ */
+export interface ExternalAgentRegistration {
+  /** The row that was created, where the server answers with it. */
+  agent?: Session;
+  agent_id?: string;
+  ingest_url?: string;
+  /**
+   * The bearer token, under either of the two names the contract and the
+   * server have used for it. `tokenOf` reads whichever arrived rather than
+   * making the two halves agree on a spelling before anything works.
+   */
+  token?: string;
+  ingest_token?: string;
+  /** Seconds until the token stops being accepted, where the server caps it. */
+  expires_in?: number | null;
+}
+
+/** The token out of a registration, whichever field carried it. */
+export function tokenOf(registration: ExternalAgentRegistration): string {
+  const value = registration.ingest_token ?? registration.token ?? "";
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * The agent's id out of a registration — the row where the server answers
+ * with one, the flat field otherwise. It is the other half of the adapters'
+ * "already registered, stream straight in": without it there is nothing to
+ * export and nothing to stream into.
+ */
+export function agentIdOfRegistration(
+  registration: ExternalAgentRegistration,
+): string {
+  const value = registration.agent?.id ?? registration.agent_id ?? "";
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * Register a Claude Code / Codex session against this one. The server
+ * creates the external agent row and answers with the ingest URL and the
+ * token the local bridge authenticates with.
+ */
+export function registerExternalAgent(
+  id: string,
+  body: {
+    agent_kind: string;
+    /** Required, and never blank: it is what the card is called. */
+    label: string;
+    task?: string;
+    parent_agent_id?: string;
+  },
+): Promise<ExternalAgentRegistration> {
+  return request(`${path(id)}/external-agents`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 /**

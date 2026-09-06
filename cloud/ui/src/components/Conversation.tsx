@@ -17,14 +17,17 @@ import {
   shortSha,
   turnOutcomeNote,
 } from "../format";
+import type { ConnectBlock } from "../external";
 import { repoChipLabel } from "../repoUrl";
 import type { Prefs } from "../prefs";
 import type { ParsedSlash } from "../slash";
 import { callCount, type StepSteering, type TrailStep } from "../trail";
 import { useAutoScroll } from "../useAutoScroll";
 import { useSize } from "../useSize";
-import type { WorkerState } from "../workers";
+import { agentLines, agentRows, rootLine } from "../workers";
 import Composer from "./Composer";
+import TermAgents from "./TermAgents";
+import TermConnect from "./TermConnect";
 import Prose from "./Prose";
 import TermActivity from "./TermActivity";
 import TermSettings from "./TermSettings";
@@ -32,11 +35,20 @@ import TermStatus, { verbFor } from "./TermStatus";
 import TermWorker from "./TermWorker";
 import { Cont, Line } from "./TermLine";
 
+/**
+ * A block this page drew rather than a line it wrote. `/agents` is a live
+ * listing; `/connect` is the one-liner and the one place its token exists.
+ */
+export type NoteBlock =
+  | { kind: "agents" }
+  | { kind: "connect"; connect: ConnectBlock };
+
 /** A line this page wrote itself: `/help`, a refused command, a spawn echo. */
 export interface LocalNote {
   id: number;
   role: "user" | "agent" | "system";
   text: string;
+  block?: NoteBlock;
 }
 
 interface Props {
@@ -74,9 +86,10 @@ interface Props {
   /** `/close` is waiting for a yes or a no, in the transcript. */
   closeAsk: boolean;
   onCloseAnswer: (confirmed: boolean) => void;
-  workers: readonly WorkerState[];
   canApply: boolean;
   onApplyWorker: (workerId: string) => void;
+  /** Narrow the graph to one agent — the `[focus]` on a card and a row. */
+  onFocusAgent: (agentId: string) => void;
   /** `/settings`, drawn in the transcript rather than over it. */
   settingsOpen: boolean;
   prefs: Prefs;
@@ -117,9 +130,9 @@ export default function Conversation({
   notes,
   closeAsk,
   onCloseAnswer,
-  workers,
   canApply,
   onApplyWorker,
+  onFocusAgent,
   settingsOpen,
   prefs,
   onPrefs,
@@ -161,7 +174,16 @@ export default function Conversation({
   const currentTurn = currentTurnId ? chat.turns[currentTurnId] : undefined;
   const elapsed =
     running && currentTurn?.startedAt != null ? now - currentTurn.startedAt : null;
-  const agentsWorking = workers.filter((w) => w.status === "running").length;
+  /* Workers and external agents are one list, in `created_at` order, each
+     subagent under its parent. The number and the hue stay the flat spawn
+     position, so a card and its trail on the graph are the same colour
+     however the tree indents them. */
+  const rows = agentRows(chat.workers);
+  const lines = agentLines(chat.workers, now);
+  const fleetRoot = rootLine(session, now);
+  const agentsWorking = rows.filter(
+    (row) => row.worker.status === "running",
+  ).length;
 
   const gtLabel =
     gtMode === "off" ? "GT off" : `GT ${gtMode}${gtStatus ? ` (${gtStatus})` : ""}`;
@@ -251,15 +273,28 @@ export default function Conversation({
 
           {/* What you typed comes before what it did — including the
               `/spawn` lines that produced the agents below them. */}
-          {notes.map((note) =>
-            note.role === "user" ? (
+          {notes.map((note) => {
+            if (note.block?.kind === "agents") {
+              return (
+                <TermAgents
+                  key={note.id}
+                  lines={lines}
+                  root={fleetRoot}
+                  onFocus={onFocusAgent}
+                />
+              );
+            }
+            if (note.block?.kind === "connect") {
+              return <TermConnect key={note.id} block={note.block.connect} />;
+            }
+            return note.role === "user" ? (
               <Said key={note.id} text={note.text} />
             ) : (
               <Cont key={note.id} tone="dim">
                 {note.text}
               </Cont>
-            ),
-          )}
+            );
+          })}
 
           {/* The one destructive command asks where every other command
               answers: in the transcript (HAR-84 P2-9). */}
@@ -283,13 +318,16 @@ export default function Conversation({
             </Cont>
           )}
 
-          {workers.map((worker, i) => (
+          {rows.map((row) => (
             <TermWorker
-              key={worker.id}
-              worker={worker}
-              no={i + 1}
+              key={row.worker.id}
+              worker={row.worker}
+              no={row.no}
+              hue={row.hue}
+              depth={row.depth}
               canApply={canApply}
-              onApply={() => onApplyWorker(worker.id)}
+              onApply={() => onApplyWorker(row.worker.id)}
+              onFocus={() => onFocusAgent(row.worker.id)}
             />
           ))}
 

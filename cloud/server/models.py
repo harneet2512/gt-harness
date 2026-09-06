@@ -1,7 +1,8 @@
 """Pydantic request/response schemas for the cloud chat API."""
 from __future__ import annotations
 
-from typing import Any, Literal
+import re
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,7 +24,11 @@ GtModeName = Literal["off", "advisory", "assistive", "enforced"]
 RoleName = Literal["user", "agent", "system"]
 #: ``primary`` is a session a user created; ``worker`` is one a session
 #: spawned with ``POST /api/sessions/{id}/agents`` (see ``Session.parent_id``).
-SessionRole = Literal["primary", "worker"]
+#: ``external`` is an agent we do **not** run — a local Claude Code or Codex
+#: session (or one of *their* subagents) that registers itself and pushes its
+#: own events at us. It is a worker we never execute: same row, same mirror
+#: path, no workspace, no sandbox, no model call, no concurrency slot.
+SessionRole = Literal["primary", "worker", "external"]
 #: how many tasks one spawn call may carry
 MAX_TASKS_PER_SPAWN = 4
 FinishReason = Literal[
@@ -154,6 +159,26 @@ class Session(BaseModel):
     report: WorkerReport | None = None
     #: when this worker's patch was applied to the parent workspace
     applied_at: float | None = None
+    #: EXTERNAL agents only — what kind of agent is reporting in
+    #: (``claude-code`` | ``codex`` | ``other``; a free lowercase slug)
+    agent_kind: str | None = None
+    #: EXTERNAL agents only — set when this agent is a **subagent of another
+    #: external agent**. ``parent_id`` still points at the owning *session*,
+    #: so nesting is a second edge, not a different parent.
+    parent_agent_id: str | None = None
+    #: EXTERNAL agents only — the absolute path the external agent says it
+    #: runs in. Display only: the server never touches the filesystem with it.
+    external_cwd: str | None = None
+    #: EXTERNAL agents only — the human-readable name of the agent, so a
+    #: reload of ``GET /sessions/{id}/agents`` can still label the card.
+    label: str | None = None
+    #: EXTERNAL agents only — one line saying what this agent is doing right
+    #: now, as it last reported it. Display only.
+    activity: str | None = None
+    #: EXTERNAL agents only — cumulative tokens the client has reported.
+    #: ``null`` when it never reported any: a token count is never
+    #: synthesised, because a made-up number is worse than a blank.
+    tokens: int | None = None
 
 
 class MessageMeta(BaseModel):
@@ -227,6 +252,206 @@ class AgentApplied(BaseModel):
     worker_id: str
     files: list[str] = Field(default_factory=list)
     patch_sha256: str | None = None
+
+
+# --------------------------------------------------------------------------
+# external agents: agents we do not run
+# --------------------------------------------------------------------------
+#: what an ``agent_kind`` may look like. A free string on purpose (the owner
+#: will point this at things we have not heard of yet), but a bounded, boring
+#: one: it is rendered as a CSS class and a badge, and it is client-supplied.
+AGENT_KIND_RE = re.compile(r"^[a-z0-9-]+$")
+MAX_AGENT_KIND_CHARS = 32
+MAX_AGENT_LABEL_CHARS = 80
+MAX_AGENT_CWD_CHARS = 512
+MAX_FINISH_SUMMARY_CHARS = 4_000
+#: one line of "what it is doing right now", for the fleet list
+MAX_ACTIVITY_CHARS = 200
+
+#: ingest event caps. Every one of these TRUNCATES rather than rejects: a
+#: chatty adapter losing a whole batch to a 422 is worse than a clipped line.
+MAX_INGEST_TEXT_CHARS = 20_000
+MAX_INGEST_TOOL_NAME_CHARS = 64
+MAX_INGEST_COMMAND_CHARS = 4_000
+MAX_INGEST_OUTPUT_CHARS = 8_000
+MAX_INGEST_NOTE_CHARS = 4_000
+#: files per event, and characters per path
+MAX_INGEST_FILES = 50
+MAX_INGEST_PATH_CHARS = 512
+#: events per ``POST /api/external-agents/{id}/events`` body
+MAX_INGEST_BATCH = 100
+
+ExternalAgentState = Literal["working", "idle", "done", "error"]
+ExternalFinishStatus = Literal["done", "error"]
+
+
+def _clip(value: str | None, limit: int) -> str | None:
+    return value if value is None else value[:limit]
+
+
+def _clip_files(files: list[str] | None) -> list[str] | None:
+    """Bound the LIST here; the paths themselves are the runner's business.
+
+    Truncation, never rejection: a client that names 80 files still has 50
+    useful ones. The per-path cap is deliberately NOT applied here — an
+    over-long path must be *dropped* by ``runner._clean_file``, not silently
+    clipped into a 512-character label that names a file nobody touched.
+    """
+    if files is None:
+        return None
+    return [
+        str(path) for path in files[:MAX_INGEST_FILES] if isinstance(path, str)
+    ]
+
+
+class ExternalAgentCreate(BaseModel):
+    """``POST /api/sessions/{id}/external-agents`` — register, never execute."""
+
+    agent_kind: str = Field(..., max_length=MAX_AGENT_KIND_CHARS)
+    label: str = Field(..., max_length=MAX_AGENT_LABEL_CHARS)
+    task: str | None = Field(None, max_length=100_000)
+    #: the absolute path the agent runs in, as *it* reported it. Display only.
+    cwd: str | None = Field(None, max_length=MAX_AGENT_CWD_CHARS)
+    #: the external agent this one is a subagent of, if any
+    parent_agent_id: str | None = Field(None, max_length=64)
+
+    @field_validator("agent_kind")
+    @classmethod
+    def _check_kind(cls, value: str) -> str:
+        kind = value.strip().lower()
+        if not AGENT_KIND_RE.match(kind):
+            raise ValueError("agent_kind must match [a-z0-9-]+")
+        return kind
+
+    @field_validator("label")
+    @classmethod
+    def _check_label(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("label must not be blank")
+        return value.strip()
+
+
+class ExternalAgentRegistered(BaseModel):
+    """The registration answer: the row, and how to push events into it."""
+
+    agent: Session
+    #: a stateless JWT scoped to this agent — the ONLY credential the events
+    #: and finish endpoints accept, and it is not accepted anywhere else
+    ingest_token: str
+    ingest_url: str
+
+
+class IngestAssistant(BaseModel):
+    type: Literal["assistant"]
+    text: str = ""
+    #: the client's own clock. Advisory: the server always stamps its own.
+    ts: float | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _clip_text(cls, value: str) -> str:
+        return value[:MAX_INGEST_TEXT_CHARS]
+
+
+class IngestToolCall(BaseModel):
+    type: Literal["tool_call"]
+    name: str = ""
+    command: str | None = None
+    files: list[str] | None = None
+    #: the fleet list's "doing right now" line, so a tool call can set it
+    #: without a second event
+    activity: str | None = None
+    ts: float | None = None
+
+    @field_validator("activity")
+    @classmethod
+    def _clip_activity(cls, value: str | None) -> str | None:
+        return _clip(value, MAX_ACTIVITY_CHARS)
+
+    @field_validator("name")
+    @classmethod
+    def _clip_name(cls, value: str) -> str:
+        return value[:MAX_INGEST_TOOL_NAME_CHARS]
+
+    @field_validator("command")
+    @classmethod
+    def _clip_command(cls, value: str | None) -> str | None:
+        return _clip(value, MAX_INGEST_COMMAND_CHARS)
+
+    @field_validator("files")
+    @classmethod
+    def _bound_files(cls, value: list[str] | None) -> list[str] | None:
+        return _clip_files(value)
+
+
+class IngestToolResult(BaseModel):
+    type: Literal["tool_result"]
+    name: str = ""
+    ok: bool = True
+    output: str | None = None
+    files: list[str] | None = None
+    ts: float | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _clip_name(cls, value: str) -> str:
+        return value[:MAX_INGEST_TOOL_NAME_CHARS]
+
+    @field_validator("output")
+    @classmethod
+    def _clip_output(cls, value: str | None) -> str | None:
+        return _clip(value, MAX_INGEST_OUTPUT_CHARS)
+
+    @field_validator("files")
+    @classmethod
+    def _bound_files(cls, value: list[str] | None) -> list[str] | None:
+        return _clip_files(value)
+
+
+class IngestStatus(BaseModel):
+    type: Literal["status"]
+    state: ExternalAgentState
+    note: str | None = None
+    #: what the agent is doing right now, for the fleet list
+    activity: str | None = None
+    #: cumulative tokens the client has spent. Monotonic on the server: a
+    #: value below the stored one is ignored rather than moving it backwards.
+    tokens: int | None = Field(None, ge=0)
+    ts: float | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _clip_note(cls, value: str | None) -> str | None:
+        return _clip(value, MAX_INGEST_NOTE_CHARS)
+
+    @field_validator("activity")
+    @classmethod
+    def _clip_activity(cls, value: str | None) -> str | None:
+        return _clip(value, MAX_ACTIVITY_CHARS)
+
+
+#: There is deliberately no ``subagent`` event type: a nested subagent
+#: registers as its own external agent with ``parent_agent_id`` set, so it is
+#: a row and a card like any other rather than a special frame.
+IngestEvent = Annotated[
+    IngestAssistant | IngestToolCall | IngestToolResult | IngestStatus,
+    Field(discriminator="type"),
+]
+
+
+class IngestBatch(BaseModel):
+    events: list[IngestEvent] = Field(..., max_length=MAX_INGEST_BATCH)
+
+
+class IngestAccepted(BaseModel):
+    """How many of the batch's events actually reached the parent's stream."""
+
+    accepted: int = 0
+
+
+class ExternalAgentFinish(BaseModel):
+    status: ExternalFinishStatus
+    summary: str | None = Field(None, max_length=MAX_FINISH_SUMMARY_CHARS)
 
 
 class DiffFile(BaseModel):

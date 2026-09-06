@@ -39,6 +39,7 @@ agent that can be told *"the evidence must be exact and complete or abstain"*
 | [testing-and-ci.md](testing-and-ci.md) | Every test suite and what it covers, how to run them, what skips without Docker or the GT wheel, the CI workflow, the live verification scripts and the QA rounds. |
 | [decisions.md](decisions.md) | The decision log, dated, with the commit that carries each decision. |
 | [changelog.md](changelog.md) | Every commit on the branch, grouped by day. |
+| [external-agents.md](external-agents.md) | The client-side adapters that put a local Claude Code or Codex session on the UI as a live card, with its subagents nested under it: the event contract, the three adapters, copy-paste setup for both tools, what each one can and cannot see, how both hook contracts were verified against the installed binaries, the security model and the failure modes. |
 | [known-limitations.md](known-limitations.md) | Everything deferred or not done, with the reason and where it lives. |
 
 ## The notes these consolidate

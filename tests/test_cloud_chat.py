@@ -44,12 +44,14 @@ import uvicorn
 from minisweagent.exceptions import FormatError
 
 from cloud.server import deps
+from cloud.server import events as events_module
 from cloud.server import runner as runner_module
 from cloud.server import workspace as workspace_module
 from cloud.server.app import create_app
 from cloud.server.conversational_agent import ConversationalAgent
 from cloud.server.environment import CloudLocalEnvironment
 from cloud.server.gt_events import install_gt_action_events
+from cloud.server.models import MAX_TASKS_PER_SPAWN
 from cloud.server.runner import SessionManager
 from cloud.server.workspace import DIFF_PATCH_CAP
 
@@ -415,7 +417,11 @@ class Harness:
         except Exception:
             return
         deadline = time.monotonic() + 15.0
-        while manager.running_count > 0 and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            # both pools: worker turns have their own since HAR-84's external
+            # agents work, and a worker turn still running is a live thread
+            if not manager.running_count and not manager.running_worker_count:
+                break
             time.sleep(POLL_INTERVAL)
 
 
@@ -1760,6 +1766,73 @@ def test_last_event_id_header_replays_like_after_id(harness: Harness) -> None:
 
 
 # --------------------------------------------------------------------------
+# 10b: event retention and honest replay
+# --------------------------------------------------------------------------
+def test_a_resume_from_a_trimmed_event_is_told_so(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gap the client is told about is recoverable; a silent one is a lie.
+
+    The stream is append-only and capped, so a client that was away long
+    enough cannot be given what it asks for. It is told that in the way the
+    stream already says everything else about itself — a ``lifecycle`` frame —
+    and the notice carries no ``id:``, so it can never become the resume point
+    of the reconnect after this one.
+    """
+    monkeypatch.setenv("MAX_STORED_EVENTS_PER_SESSION", "5")
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "do the thing")
+    _wait_status(harness, session_id, {"idle"})
+    harness.client.post(f"/api/sessions/{session_id}/close", headers=harness.auth)
+    store = deps.get_store()
+    assert harness.on_server_loop(store.trim_events(session_id)) > 0
+    oldest = harness.on_server_loop(store.oldest_event_id(session_id))
+
+    truncated = _read_sse(
+        harness, session_id, until=lambda _f: False, params={"after_id": 1}
+    )
+
+    assert truncated[0]["event"] == "lifecycle"
+    notice = truncated[0]["payload"]["data"]
+    assert notice["status"] == "replay_truncated"
+    assert notice["after_id"] == 1 and notice["oldest_id"] == oldest
+    assert "id" not in truncated[0], "the notice must not become a resume point"
+    assert len(truncated) == 6, "the notice, then everything that survived"
+
+    # ...and a resume that IS still covered is not told anything
+    intact = _read_sse(
+        harness, session_id, until=lambda _f: False, params={"after_id": oldest}
+    )
+    assert len(intact) == 4
+    assert all(
+        f["payload"]["data"].get("status") != "replay_truncated" for f in intact
+    )
+
+
+def test_the_replay_pages_instead_of_stopping_at_one_query(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single store read is capped; the replay must not inherit that cap.
+
+    With a 20 000-event retention and a 5 000-row read, a long session's
+    replay used to stop at the read limit and hand the client the *start* of
+    its history as though it were all of it — the same silent gap, from the
+    other end.
+    """
+    monkeypatch.setattr(events_module, "REPLAY_PAGE", 2, raising=True)
+    session_id = _create_idle(harness)
+    _post_message(harness, session_id, "do the thing")
+    _wait_status(harness, session_id, {"idle"})
+    harness.client.post(f"/api/sessions/{session_id}/close", headers=harness.auth)
+    stored = harness.on_server_loop(deps.get_store().get_events(session_id))
+    assert len(stored) > 4, "the paging is only meaningful past one page"
+
+    replayed = _read_sse(harness, session_id, until=lambda _f: False)
+
+    assert [f["id"] for f in replayed] == [e["id"] for e in stored]
+
+
+# --------------------------------------------------------------------------
 # 11: infrastructure failure
 # --------------------------------------------------------------------------
 def test_environment_failure_ends_the_turn_and_keeps_the_session(
@@ -2184,14 +2257,21 @@ def test_recover_ends_an_interrupted_turn_on_the_wire(harness: Harness) -> None:
 # HAR-84 G-21: creation takes a slot too
 # --------------------------------------------------------------------------
 def test_session_creation_is_bounded(harness: Harness) -> None:
-    """4 simultaneous creations all succeeded: 4 clones, 4 sandboxes, 4 indexes.
+    """Simultaneous creations used to all succeed: N clones, sandboxes, indexes.
 
     MAX_CONCURRENT_SESSIONS only ever gated *turns*.
+
+    The cap is asserted at its default rather than at a hard-coded 3, because
+    the default is load-bearing elsewhere: a spawn takes its creation slots
+    all-or-nothing, so a cap below ``MAX_TASKS_PER_SPAWN`` made a full spawn
+    impossible on a stock deployment.
     """
+    cap = runner_module.DEFAULT_MAX_CONCURRENT_CREATIONS
+    assert cap >= MAX_TASKS_PER_SPAWN, "the default must cover one whole spawn"
     harness.hold_worker()
     try:
-        accepted = [_create(harness) for _ in range(3)]
-        assert [r.status_code for r in accepted] == [201, 201, 201]
+        accepted = [_create(harness) for _ in range(cap)]
+        assert [r.status_code for r in accepted] == [201] * cap
 
         refused = _create(harness)
 

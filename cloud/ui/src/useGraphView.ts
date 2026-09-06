@@ -21,9 +21,16 @@ import {
   trailView,
   WRITES,
   type Attention,
+  type FileIndex,
   type TrailStep,
 } from "./trail";
-import { hueFor, workerList, type WorkerState } from "./workers";
+import {
+  agentLabel,
+  hueFor,
+  workerList,
+  type WorkerActivity,
+  type WorkerState,
+} from "./workers";
 
 /** How often a settled layout is written back to localStorage. */
 const LAYOUT_SAVE_MS = 5000;
@@ -93,6 +100,10 @@ export interface WorkerTrail {
   no: number;
   task: string;
   status: WorkerState["status"];
+  /** True for an agent we watch but do not run. Same field, same hue. */
+  isExternal: boolean;
+  /** `claude-code` / `codex`, for the chip. Null for a worker of ours. */
+  kind: string | null;
   /** `r, g, b` for the canvas, and the same colour as CSS for the chip. */
   rgb: string;
   css: string;
@@ -102,6 +113,26 @@ export interface WorkerTrail {
   /** Every particle this worker touched — what "isolate" narrows to. */
   ids: ReadonlySet<string>;
   steps: number;
+}
+
+/**
+ * The particles one row of an agent's trail lands on.
+ *
+ * An external agent says which files it is in; a worker of ours never
+ * does, so its command is resolved against the tree exactly as the primary
+ * trail's is. A file the external agent named that is **not** a particle
+ * here — it may be running on a different checkout entirely — is dropped
+ * without a word: `resolve` is the only authority on what this graph
+ * contains, and a phantom id would break both the layout and the isolate.
+ */
+export function stepFiles(
+  isExternal: boolean,
+  item: WorkerActivity,
+  fileIndex: FileIndex,
+  resolve: ReadonlyMap<string, string>,
+): string[] {
+  if (!isExternal) return matchFiles(item.command, fileIndex);
+  return item.files.filter((path) => resolve.has(path));
 }
 
 /**
@@ -331,7 +362,12 @@ export function useGraphView(input: Input): GraphView {
 
       worker.activity.forEach((item, index) => {
         const step = index + 1;
-        const files = matchFiles(item.command, fileIndex);
+        const files = stepFiles(
+          worker.isExternal,
+          item,
+          fileIndex,
+          field.resolve,
+        );
         for (const path of files) {
           const id = particleId(path);
           ids.add(id);
@@ -354,8 +390,10 @@ export function useGraphView(input: Input): GraphView {
       return {
         id: worker.id,
         no: i + 1,
-        task: worker.task,
+        task: agentLabel(worker),
         status: worker.status,
+        isExternal: worker.isExternal,
+        kind: worker.agentKind,
         rgb: hue.rgb,
         css: hue.css,
         trailIds,
@@ -365,7 +403,7 @@ export function useGraphView(input: Input): GraphView {
         steps: worker.activity.length,
       };
     });
-  }, [workers, fileIndex, particleId]);
+  }, [workers, fileIndex, particleId, field]);
 
   const pickTurn = useCallback((turnId: string) => {
     setPickedTurnId(turnId);

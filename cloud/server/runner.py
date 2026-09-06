@@ -13,8 +13,10 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,12 @@ from .conversational_agent import (
     turn_wall_seconds,
 )
 from .events import EventBus
+from .models import (
+    MAX_ACTIVITY_CHARS,
+    MAX_INGEST_FILES,
+    MAX_INGEST_PATH_CHARS,
+    MAX_TASKS_PER_SPAWN,
+)
 from .prompts import CHAT_BRIEF_TEMPLATE, CHAT_SYSTEM_TEMPLATE
 from .sandbox import (
     SANDBOX_WORKDIR,
@@ -84,7 +92,12 @@ SUBMIT_REPLY_FALLBACK = "Done — I submitted my changes."
 #: how many sessions may be cloning/indexing at once. Creation used to take no
 #: slot at all, so any number of clones + GT indexes could start together
 #: (HAR-84 G-21).
-DEFAULT_MAX_CONCURRENT_CREATIONS = 3
+#:
+#: HAR-84 (external agents): this was 3 while ``MAX_TASKS_PER_SPAWN`` was 4 and
+#: a spawn takes its creation slots all-or-nothing — so a **full** four-worker
+#: spawn was refused 429 every single time, on a stock deployment, before any
+#: work started. The default now covers one whole spawn by construction.
+DEFAULT_MAX_CONCURRENT_CREATIONS = MAX_TASKS_PER_SPAWN
 #: seconds a creation-time model preflight may take before it is a failure
 MODEL_PREFLIGHT_TIMEOUT = 30
 #: how long one workspace measurement may take before the quota check starts
@@ -99,8 +112,38 @@ DEFAULT_MODEL_REQUEST_TIMEOUT = 300
 #: ``Session.role`` values
 PRIMARY_ROLE = "primary"
 WORKER_ROLE = "worker"
+#: an agent we do NOT run: a local Claude Code / Codex session (or one of
+#: their subagents) that registers itself and pushes its own events at us.
+#: Nothing is ever executed for one — no workspace, no sandbox, no model call,
+#: and, crucially, no concurrency slot.
+EXTERNAL_ROLE = "external"
 #: how many live workers one session may have at a time
 DEFAULT_MAX_WORKERS_PER_SESSION = 4
+#: how many WORKER turns may run at once, across the whole deployment.
+#:
+#: Worker turns used to draw from ``MAX_CONCURRENT_SESSIONS`` (default 3), the
+#: same pool as the humans' own turns, so a parent spawning its maximum of
+#: four workers could not get four turns and ``spawn_agents`` refused the set
+#: outright. Workers now have their own pool, sized to a full spawn, so
+#: "spawn four" means four agents thinking at the same time rather than a
+#: queue. The turns themselves were never serialised — each runs on its own
+#: thread via ``asyncio.to_thread`` — the *admission counter* was the whole
+#: limit.
+DEFAULT_MAX_CONCURRENT_WORKER_TURNS = 4
+#: how many ingest events one external agent may push per minute. Over it,
+#: the surplus is DROPPED and the response says how many were taken: a 500 (or
+#: a 429) would make a chatty adapter retry the whole batch and cost more.
+DEFAULT_MAX_INGEST_EVENTS_PER_MINUTE = 600
+INGEST_WINDOW_SECONDS = 60.0
+#: largest ``POST .../events`` body, before parsing
+MAX_INGEST_BODY_BYTES = 256 * 1024
+#: how much of an external agent's assistant text the row's ``last_message``
+#: keeps
+EXTERNAL_LAST_MESSAGE_CHARS = 400
+#: control characters never belong in a display label or a path
+_CONTROL_CHARS = frozenset(chr(c) for c in [*range(0x20), 0x7F])
+#: a path that starts like ``C:\`` or ``C:/`` — absolute, on the client's box
+_WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 #: worker frames copied onto the parent's stream, with ``agent_id`` added, so
 #: the parent's graph can draw every trail from one subscription
 MIRRORED_EVENT_TYPES = frozenset({
@@ -121,6 +164,20 @@ def max_workers_per_session() -> int:
     return _positive_int_env(
         "MAX_WORKERS_PER_SESSION", DEFAULT_MAX_WORKERS_PER_SESSION
     ) or DEFAULT_MAX_WORKERS_PER_SESSION
+
+
+def max_concurrent_worker_turns() -> int:
+    """Worker turns that may run at once (``MAX_CONCURRENT_WORKER_TURNS``)."""
+    return _positive_int_env(
+        "MAX_CONCURRENT_WORKER_TURNS", DEFAULT_MAX_CONCURRENT_WORKER_TURNS
+    ) or DEFAULT_MAX_CONCURRENT_WORKER_TURNS
+
+
+def max_ingest_events_per_minute() -> int:
+    """Ingest events one external agent may push per minute."""
+    return _positive_int_env(
+        "MAX_INGEST_EVENTS_PER_MINUTE", DEFAULT_MAX_INGEST_EVENTS_PER_MINUTE
+    ) or DEFAULT_MAX_INGEST_EVENTS_PER_MINUTE
 
 
 class ModelUnavailable(RuntimeError):
@@ -250,6 +307,14 @@ class SessionManager:
         self._count_lock = threading.Lock()
         self._running_count = 0
         self._max_concurrent = int(os.environ.get("MAX_CONCURRENT_SESSIONS", "3"))
+        #: worker turns have their own pool, so a full spawn genuinely runs at
+        #: once instead of queueing behind the humans' own turns
+        self._running_worker_count = 0
+        self._max_worker_turns = max_concurrent_worker_turns()
+        #: per external agent: the monotonic timestamps of the ingest events
+        #: taken in the last minute (the rate window)
+        self._ingest_window: dict[str, deque[float]] = {}
+        self._ingest_lock = threading.Lock()
         self._creating_count = 0
         self._max_creations = _positive_int_env(
             "MAX_CONCURRENT_CREATIONS", DEFAULT_MAX_CONCURRENT_CREATIONS
@@ -293,18 +358,40 @@ class SessionManager:
 
     @property
     def running_count(self) -> int:
+        """Turns of PRIMARY sessions running now (the humans' own pool)."""
         with self._count_lock:
             return self._running_count
 
-    def _acquire_slot(self) -> bool:
+    @property
+    def running_worker_count(self) -> int:
+        """Worker turns running now. Its own pool — see the constant."""
         with self._count_lock:
+            return self._running_worker_count
+
+    def _acquire_slot(self, role: str = PRIMARY_ROLE) -> bool:
+        """Take a turn slot from the pool this role draws on.
+
+        An EXTERNAL agent never gets here: it runs nothing, so it takes
+        nothing. Its events are pushed at us, not executed by us.
+        """
+        with self._count_lock:
+            if role == WORKER_ROLE:
+                if self._running_worker_count >= self._max_worker_turns:
+                    return False
+                self._running_worker_count += 1
+                return True
             if self._running_count >= self._max_concurrent:
                 return False
             self._running_count += 1
             return True
 
-    def _release_slot(self) -> None:
+    def _release_slot(self, role: str = PRIMARY_ROLE) -> None:
         with self._count_lock:
+            if role == WORKER_ROLE:
+                self._running_worker_count = max(
+                    0, self._running_worker_count - 1
+                )
+                return
             self._running_count = max(0, self._running_count - 1)
 
     @property
@@ -339,6 +426,10 @@ class SessionManager:
     @property
     def max_concurrent(self) -> int:
         return self._max_concurrent
+
+    @property
+    def max_worker_turns(self) -> int:
+        return self._max_worker_turns
 
     # -- model preflight ------------------------------------------------------
 
@@ -540,6 +631,14 @@ class SessionManager:
 
     async def post_message(self, session_id: str, content: str) -> tuple[dict, str]:
         """Deliver a user message: start a turn, or steer the running one."""
+        row = await self._store.get_session(session_id)
+        if row is not None and str(row.get("role") or PRIMARY_ROLE) == EXTERNAL_ROLE:
+            # Checked before the steering branch, not after: an external agent
+            # is permanently ``running``, so it would otherwise swallow the
+            # message as steering for a turn that does not exist.
+            raise ExternalAgentRefused(
+                "an external agent does not run turns; push events instead"
+            )
         state = self._state(session_id)
         # The status read and the steering hand-off are one atomic step, and
         # the turn worker takes the same lock *after* it has flipped the row to
@@ -563,9 +662,15 @@ class SessionManager:
                 await self._store.update_session(session_id, last_message=content)
                 return message, "queued_for_running_turn"
 
-        if not self._acquire_slot():
+        role = str(session.get("role") or PRIMARY_ROLE)
+        if not self._acquire_slot(role):
+            cap = (
+                self._max_worker_turns
+                if role == WORKER_ROLE
+                else self._max_concurrent
+            )
             raise ConcurrencyLimit(
-                f"max concurrent turns ({self._max_concurrent}) reached"
+                f"max concurrent {role} turns ({cap}) reached"
             )
         try:
             turn_id = new_id()
@@ -599,7 +704,7 @@ class SessionManager:
                 },
             })
         except Exception:
-            self._release_slot()
+            self._release_slot(role)
             raise
 
         state = self._state(session_id)
@@ -643,7 +748,7 @@ class SessionManager:
         except Exception as exc:  # noqa: BLE001 - a crash ends the TURN, not the session
             self._fail_turn(session, state, turn_id, exc, loop)
         finally:
-            self._release_slot()
+            self._release_slot(str(session.get("role") or PRIMARY_ROLE))
             state.turn_done.set()
 
     def _settle_idle(
@@ -909,7 +1014,10 @@ class SessionManager:
 
         live = [
             child for child in await self._store.list_children(parent_id)
-            if str(child["status"]) not in {"closed", "failed"}
+            # external agents are children too, and they run nothing: they
+            # must not spend the worker budget of a session that does
+            if str(child.get("role") or WORKER_ROLE) == WORKER_ROLE
+            and str(child["status"]) not in {"closed", "failed"}
         ]
         cap = max_workers_per_session()
         if len(live) + len(tasks) > cap:
@@ -925,12 +1033,14 @@ class SessionManager:
             )
         # A worker whose clone finishes with no turn slot free would sit idle
         # holding a workspace, which is not what "spawn" means. Check the turn
-        # budget here, where the whole set can still be refused.
-        if self.running_count + len(tasks) > self._max_concurrent:
+        # budget here, where the whole set can still be refused — against the
+        # WORKER pool, so a spawn is not rationed by how many humans happen to
+        # be mid-turn.
+        if self.running_worker_count + len(tasks) > self._max_worker_turns:
             self._release_creation_slots(len(tasks))
             raise ConcurrencyLimit(
-                f"max concurrent turns ({self._max_concurrent}) reached; "
-                f"{len(tasks)} workers need one each"
+                f"max concurrent worker turns ({self._max_worker_turns}) "
+                f"reached; {len(tasks)} workers need one each"
             )
 
         config = _session_config(parent)
@@ -1079,6 +1189,318 @@ class SessionManager:
             except Exception:  # noqa: BLE001 - one worker, not the close
                 log.exception("could not close worker %s", child["id"])
 
+    # -- external agents: agents we do not run --------------------------------
+
+    async def register_external_agent(
+        self,
+        parent: dict,
+        *,
+        agent_kind: str,
+        label: str,
+        task: str | None = None,
+        cwd: str | None = None,
+        parent_agent_id: str | None = None,
+    ) -> dict:
+        """Register an agent we will never execute, as a child of ``parent``.
+
+        This is the whole trick of the feature: an external agent is a WORKER
+        WE DO NOT RUN. It gets the same row, the same ``agent_id``-tagged
+        frames on the parent's stream and the same card in the UI — but no
+        workspace, no clone, no sandbox, no model call and no concurrency
+        slot, because the only thing we ever do for it is receive.
+        """
+        parent_id = str(parent["id"])
+        nested = (parent_agent_id or "").strip() or None
+        if nested is not None:
+            owner = await self._store.get_session(nested)
+            if (
+                owner is None
+                or str(owner.get("role") or "") != EXTERNAL_ROLE
+                or str(owner.get("parent_id") or "") != parent_id
+            ):
+                raise ExternalAgentRefused(
+                    "parent_agent_id must name an external agent of this session"
+                )
+        agent_id = await self._store.create_session(
+            repo=str(parent["repo"]),
+            ref=str(parent["ref"]),
+            # There is no model: we are not calling one. An empty string is
+            # the honest answer; borrowing the parent's would be a claim.
+            model="",
+            gt_mode="off",
+            config={},
+            parent_id=parent_id,
+            role=EXTERNAL_ROLE,
+            task=task,
+            # born running: there is nothing to create, so there is no
+            # `creating` phase for it to sit in
+            status="running",
+            agent_kind=agent_kind,
+            parent_agent_id=nested,
+            external_cwd=_clean_cwd(cwd),
+            label=label,
+        )
+        self._state(agent_id).parent_id = parent_id
+        await self._bus.publish(parent_id, {
+            "type": "agent_spawned",
+            "data": {
+                "worker_id": agent_id,
+                "agent_kind": agent_kind,
+                "label": label,
+                "task": task,
+                "external": True,
+                "parent_agent_id": nested,
+            },
+        })
+        row = await self._store.get_session(agent_id)
+        if row is None:  # pragma: no cover - the insert just succeeded
+            raise ExternalAgentRefused("the agent row disappeared")
+        return row
+
+    async def ingest_external_events(self, agent: dict, events: list) -> int:
+        """Mirror an external agent's own events onto its parent's stream.
+
+        Everything here is *translation*: each accepted event becomes one of
+        the frames a worker already publishes, with ``agent_id`` set, so the
+        browser's worker code path draws an external agent without knowing
+        that anything is different about it.
+
+        The text is DATA. It is stored and forwarded, never interpreted: no
+        model is called with it and no command is derived from it.
+        """
+        agent_id = str(agent["id"])
+        parent_id = str(agent.get("parent_id") or "")
+        allowed = self._take_ingest_budget(agent_id, len(events))
+        accepted = list(events)[:allowed]
+        if not accepted:
+            return 0
+        self._bind(agent)
+        cwd = str(agent.get("external_cwd") or "")
+        step = int(agent.get("steps") or 0)
+        tool_calls = 0
+        last_text = ""
+        #: the fleet list's two live columns, folded over the whole batch:
+        #: the LAST activity line wins, the HIGHEST token count wins
+        activity = ""
+        tokens: int | None = None
+        for event in accepted:
+            kind = str(getattr(event, "type", ""))
+            reported = str(getattr(event, "activity", "") or "").strip()
+            if reported:
+                activity = reported
+            if kind == "tool_call":
+                step += 1
+                tool_calls += 1
+            if kind == "status":
+                note = _external_status_note(event)
+                if note:
+                    last_text = note
+                claimed = getattr(event, "tokens", None)
+                if claimed is not None:
+                    tokens = max(tokens or 0, int(claimed))
+                if str(getattr(event, "state", "")) == "error":
+                    # `agent_activity` is not a frame type the UI knows, and
+                    # inventing one would need UI work for a line of text. An
+                    # error is the only state worth interrupting for.
+                    await self._publish_external_note(agent_id, parent_id, note)
+                continue
+            frame = _external_frame(event, cwd=cwd, step=step)
+            if frame is None:
+                continue
+            if kind == "assistant":
+                last_text = str(frame["data"].get("content") or "") or last_text
+            # the mirror path, verbatim: the agent's own stream first, then
+            # the parent's copy with `agent_id` attached
+            await self._publish_async(agent_id, frame)
+        await self._touch_external(
+            agent_id,
+            steps=tool_calls,
+            text=last_text,
+            activity=activity,
+            tokens=tokens,
+            stored_tokens=agent.get("tokens"),
+        )
+        return len(accepted)
+
+    async def finish_external_agent(
+        self, agent: dict, status: str, summary: str | None
+    ) -> dict:
+        """Close an external agent out the way a worker's finished turn does.
+
+        Same three places as ``_report_to_parent``: the row (so a list view
+        has it), the parent's ``messages`` (so a reload still shows it) and
+        the parent's stream (so a client watching sees it happen).
+        """
+        agent_id = str(agent["id"])
+        parent_id = str(agent.get("parent_id") or "")
+        new_status = "idle" if status == "done" else "failed"
+        # The frames a worker publishes carry a ``FinishReason``, and every
+        # consumer of them (the message meta, the worker card) validates
+        # against that vocabulary — so the outcome is said in it, and the
+        # external-only word goes in its own ``status`` field beside it.
+        finish_reason = "reply" if status == "done" else "error"
+        excerpt = (summary or "")[:REPORT_EXCERPT_CHARS]
+        report = {
+            "finish_reason": finish_reason,
+            "reply_excerpt": excerpt,
+            "patch_sha256": None,
+            "files_changed": [],
+            "applied": False,
+        }
+        fields: dict[str, Any] = {"report_json": json.dumps(report)}
+        if excerpt:
+            fields["last_message"] = excerpt
+        activity = str(agent.get("activity") or "") or None
+        tokens = agent.get("tokens")
+        try:
+            await self._store.update_status(agent_id, new_status, **fields)
+        except ValueError:
+            # Finishing twice (or finishing an agent that already failed) is
+            # bookkeeping, not an error the adapter can do anything about.
+            await self._store.update_session(agent_id, **fields)
+        if parent_id:
+            message = None
+            if excerpt:
+                message = await self._store.add_message(
+                    parent_id,
+                    role="agent",
+                    content=excerpt,
+                    meta={
+                        "agent_id": agent_id,
+                        "finish_reason": finish_reason,
+                        "files_changed": [],
+                    },
+                )
+            await self._bus.publish(parent_id, {
+                "type": "agent_report",
+                "data": {
+                    "worker_id": agent_id,
+                    "message_id": (message or {}).get("id"),
+                    "finish_reason": finish_reason,
+                    #: the external agent's own word for how it ended
+                    "status": status,
+                    "content": excerpt,
+                    "patch_sha256": None,
+                    "files_changed": [],
+                    "n_calls": 0,
+                    "cost": 0.0,
+                    "external": True,
+                    # so a reload still shows the last live state of the row
+                    "activity": activity,
+                    "tokens": int(tokens) if tokens is not None else None,
+                },
+            })
+            await self._bus.publish(parent_id, {
+                "type": "agent_closed",
+                "data": {
+                    "worker_id": agent_id,
+                    "reason": status,
+                    "external": True,
+                },
+            })
+        row = await self._store.get_session(agent_id) or dict(agent)
+        return row
+
+    async def _publish_external_note(
+        self, agent_id: str, parent_id: str, note: str
+    ) -> None:
+        """One ``system_note`` about an external agent, on both streams."""
+        await self._bus.publish(
+            agent_id, {"type": "system_note", "data": {"content": note}}
+        )
+        if parent_id:
+            await self._bus.publish(parent_id, {
+                "type": "system_note",
+                "data": {"agent_id": agent_id, "content": note},
+            })
+
+    async def _touch_external(
+        self,
+        agent_id: str,
+        *,
+        steps: int,
+        text: str,
+        activity: str = "",
+        tokens: int | None = None,
+        stored_tokens: Any = None,
+    ) -> None:
+        """Keep the row's live columns honest: one write per ingest batch.
+
+        ``updated_at`` moves on every batch (the UI measures idleness from
+        it), the activity line is replaced by the newest one the batch
+        carried, and the token counter only ever goes UP — a client that
+        restarts its own counter must not make the fleet list count down.
+        """
+        fields: dict[str, Any] = {}
+        if text:
+            fields["last_message"] = text[:EXTERNAL_LAST_MESSAGE_CHARS]
+        if activity:
+            fields["activity"] = activity[:MAX_ACTIVITY_CHARS]
+        if tokens is not None:
+            previous = int(stored_tokens or 0)
+            if tokens > previous:
+                fields["tokens"] = tokens
+        with contextlib.suppress(Exception):
+            if steps:
+                await self._store.bump_totals(agent_id, steps=steps)
+            if fields:
+                await self._store.update_session(agent_id, **fields)
+            elif not steps:
+                await self._store.touch(agent_id)
+
+    def _take_ingest_budget(self, agent_id: str, count: int) -> int:
+        """How many of ``count`` events this agent may push right now.
+
+        A sliding one-minute window per agent. Over the limit the surplus is
+        dropped and the response says how many were taken, because a 429 on a
+        batch makes a chatty adapter retry the whole thing and cost more than
+        it did the first time.
+        """
+        limit = max_ingest_events_per_minute()
+        now = time.monotonic()
+        with self._ingest_lock:
+            window = self._ingest_window.setdefault(agent_id, deque())
+            cutoff = now - INGEST_WINDOW_SECONDS
+            while window and window[0] < cutoff:
+                window.popleft()
+            allowed = max(0, min(count, limit - len(window)))
+            window.extend([now] * allowed)
+            return allowed
+
+    async def _close_external(self, session: dict, reason: str) -> None:
+        """Close an external agent: a row and a frame, nothing to kill.
+
+        There is no container and no workspace — the agent runs on somebody
+        else's machine — so closing one is exactly the bookkeeping half of
+        ``close()`` and none of the teardown.
+        """
+        session_id = str(session["id"])
+        parent_id = str(session.get("parent_id") or "")
+        state = self._state(session_id)
+        state.closed = True
+        with self._states_lock:
+            self._states.pop(session_id, None)
+        with self._ingest_lock:
+            self._ingest_window.pop(session_id, None)
+        if str(session["status"]) != "closed":
+            await self._store.update_status(
+                session_id, "closed", current_turn_id=None, closed_reason=reason
+            )
+            if parent_id:
+                await self._bus.publish(parent_id, {
+                    "type": "agent_closed",
+                    "data": {
+                        "worker_id": session_id,
+                        "reason": reason,
+                        "external": True,
+                    },
+                })
+            await self._bus.publish(
+                session_id,
+                {"type": "lifecycle", "data": {"status": "closed", "reason": reason}},
+            )
+        self._bus.finish(session_id)
+
     # -- stop / close ---------------------------------------------------------
 
     async def stop(self, session_id: str) -> bool:
@@ -1110,6 +1532,11 @@ class SessionManager:
         # A session that already died of something keeps that cause: closing a
         # failed session is bookkeeping, not the reason it ended.
         reason = str(session.get("closed_reason") or "") or reason
+        if str(session.get("role") or PRIMARY_ROLE) == EXTERNAL_ROLE:
+            # No container, no workspace, no turn to wait for — an external
+            # agent is a row and a stream, so closing one is only that.
+            await self._close_external(session, reason)
+            return
         # Workers first, while this session's stream is still open: each of
         # them publishes `agent_closed` onto it on the way out.
         await self._close_workers(session_id, reason)
@@ -1216,6 +1643,10 @@ class SessionManager:
     async def recover(self) -> None:
         """After a restart: no agent survives, so no turn can still be running."""
         for session in await self._store.sessions_with_status("running"):
+            if str(session.get("role") or PRIMARY_ROLE) == EXTERNAL_ROLE:
+                # Nothing of ours was interrupted: the agent is somebody
+                # else's process and is very likely still going.
+                continue
             await self._recover_running(session)
         for session in await self._store.sessions_with_status("creating"):
             session_id = str(session["id"])
@@ -1837,6 +2268,10 @@ class ConcurrencyLimit(RuntimeError):
     """Raised when a new turn or creation would exceed its concurrency cap."""
 
 
+class ExternalAgentRefused(RuntimeError):
+    """An external agent cannot be registered, or cannot be talked to."""
+
+
 class ApplyRefused(RuntimeError):
     """A worker's patch cannot be applied: there is none, or nowhere to put it."""
 
@@ -1880,6 +2315,152 @@ def _preflight_blocking(model: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 - any refusal is "not available"
         raise ModelUnavailable(_short_error(exc)) from exc
+
+
+def _external_status_note(event: Any) -> str:
+    """The one line a ``status`` event is worth on a stream."""
+    state = str(getattr(event, "state", "") or "")
+    note = str(getattr(event, "note", "") or "").strip()
+    if not state:
+        return note
+    return f"agent {state}: {note}" if note else f"agent {state}"
+
+
+def _external_frame(event: Any, *, cwd: str, step: int) -> dict | None:
+    """Translate one ingest event into the frame a worker would publish.
+
+    The frame types are the EXISTING ones — ``assistant``, ``tool_call``,
+    ``tool_result`` — so the browser needs no new concepts: ``_mirror`` adds
+    ``agent_id`` on the way to the parent and the worker code path takes it
+    from there. Everything here is client-supplied data, and it stays data.
+    """
+    kind = str(getattr(event, "type", ""))
+    if kind == "assistant":
+        text = str(getattr(event, "text", "") or "")
+        if not text.strip():
+            return None
+        return {
+            "type": "assistant",
+            "data": {
+                "content": text,
+                "actions": [],
+                "step": step,
+                "n_calls": step,
+                "external": True,
+            },
+        }
+    if kind == "tool_call":
+        name = str(getattr(event, "name", "") or "tool")
+        files = _clean_files(getattr(event, "files", None), cwd)
+        command = str(getattr(event, "command", "") or "").strip()
+        return {
+            "type": "tool_call",
+            "data": {
+                # the same field a worker's tool_call uses, so the UI's
+                # existing renderer has something human to show
+                "command": command or _synthetic_command(name, files),
+                "step": step,
+                "n_calls": step,
+                "tool_name": name,
+                "files": files,
+                "external": True,
+            },
+        }
+    if kind == "tool_result":
+        name = str(getattr(event, "name", "") or "tool")
+        files = _clean_files(getattr(event, "files", None), cwd)
+        ok = bool(getattr(event, "ok", True))
+        return {
+            "type": "tool_result",
+            "data": {
+                "command": _synthetic_command(name, files),
+                "output": str(getattr(event, "output", "") or ""),
+                "returncode": 0 if ok else 1,
+                "is_error": not ok,
+                "ok": ok,
+                "step": step,
+                "tool_name": name,
+                "files": files,
+                "external": True,
+            },
+        }
+    return None
+
+
+def _synthetic_command(name: str, files: list[str]) -> str:
+    """What to show when the client sent no command: the tool and its files."""
+    return " ".join([name, *files]).strip() or name
+
+
+def _clean_cwd(cwd: str | None) -> str | None:
+    """The path an external agent SAYS it runs in. Display only, ever.
+
+    Kept as the client sent it (minus control characters and a length cap)
+    because it is a label, not a location: nothing on this server opens it,
+    stats it, or joins anything onto it.
+    """
+    if not cwd:
+        return None
+    text = "".join(ch for ch in str(cwd) if ch not in _CONTROL_CHARS).strip()
+    return text[:MAX_INGEST_PATH_CHARS] or None
+
+
+def _clean_files(files: Any, cwd: str) -> list[str]:
+    """Repo-relative display labels, out of untrusted client paths.
+
+    These become node labels on a force-directed graph and nothing else — no
+    filesystem call is ever made with one — but "nothing else" has to stay
+    true after the next person edits this file, so the hygiene is done once,
+    here, at the boundary:
+
+    * a leading ``external_cwd`` prefix is stripped (the agent reports
+      absolute paths inside its own checkout);
+    * anything still absolute is DROPPED, not "fixed" — a path outside the
+      agent's own tree is not something we can label honestly;
+    * so is anything with a ``..`` segment, a NUL byte, or over
+      ``MAX_INGEST_PATH_CHARS`` characters;
+    * at most ``MAX_INGEST_FILES`` survive, de-duplicated, in order.
+    """
+    if not isinstance(files, list):
+        return []
+    prefix = _cwd_prefix(cwd)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in files[:MAX_INGEST_FILES]:
+        path = _clean_file(raw, prefix)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        cleaned.append(path)
+        if len(cleaned) >= MAX_INGEST_FILES:
+            break
+    return cleaned
+
+
+def _cwd_prefix(cwd: str) -> str:
+    """``external_cwd`` as a comparable, slash-separated directory prefix."""
+    text = str(cwd or "").replace("\\", "/").rstrip("/")
+    return f"{text}/" if text else ""
+
+
+def _clean_file(raw: Any, prefix: str) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    path = raw.replace("\\", "/").strip()
+    if not path or "\x00" in path or len(path) > MAX_INGEST_PATH_CHARS:
+        return None
+    if prefix and path.startswith(prefix):
+        path = path[len(prefix):]
+    while path.startswith("./"):
+        path = path[2:]
+    if not path or path.startswith("/") or _WINDOWS_ABSOLUTE_RE.match(path):
+        return None
+    segments = path.split("/")
+    if any(segment == ".." for segment in segments):
+        return None
+    if any(ch in _CONTROL_CHARS for ch in path):
+        return None
+    return path
 
 
 def _tree_signature(base_sha: str, files: list[dict]) -> str:
