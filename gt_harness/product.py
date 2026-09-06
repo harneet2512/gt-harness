@@ -494,11 +494,17 @@ def validate_product_bundle(bundle: Mapping[str, Any], *, root: str | Path) -> N
         raise BundleError("python_wheel_identity_invalid")
 
 
-# The two arms, named once. The pair was hand-typed three times in this file -
-# both accept-validators below and the loop that drives them - and both
-# validators RAISE inside the paid per-task window. All three were correct;
-# none was defended, which is the same shape as the prompt-kind pair and the
-# refusal allow-list. Adding a third arm would have raised on it in setup.
+# The two arms, named once and imported by every consumer. The pair was
+# hand-typed FIVE times across four modules: both accept-validators below, the
+# loop that drives them, and gt_harness/runtime_receipts.py's own raising
+# validator. Three writers produce it - miniswe_gt_run.py:1128 and :1159, and
+# miniswe_supervisor.py:328 - each as its own conditional expression.
+#
+# Two of the five copies raise, and project_task_environment runs per task
+# inside the paid window, so a third arm would have raised during setup on
+# every task with spend already committed. All five agreed, which is why no
+# sweep flagged them: this is the same defect class as the refusal allow-list
+# and the prompt-kind pair, caught before it was wrong rather than after.
 BENCHMARK_ARMS = ("bare", "groundtruth")
 
 

@@ -557,3 +557,55 @@ def test_runtime_receipt_rejects_provider_count_disagreement(tmp_path: Path) -> 
         assert str(exc) == "provider_call_count_mismatch"
     else:
         raise AssertionError("provider-call disagreement was accepted")
+
+
+def test_benchmark_arms_match_what_the_writers_produce():
+    """The arm domain crosses four modules; the writers are the authority.
+
+    Five hand-typed copies agreed, which is why no sweep flagged them - two of
+    them raise, and project_task_environment runs per task inside the paid
+    window, so a third arm would have raised during setup on every task with
+    spend committed. Same defect class as the refusal allow-list, caught before
+    it was wrong instead of after.
+
+    Scope is stated rather than assumed: this asserts the literals in every
+    `treatment=` conditional across the two supervisor entry points, not that
+    no other producer exists.
+    """
+    import ast
+    from pathlib import Path as _Path
+
+    from gt_harness.product import BENCHMARK_ARMS
+
+    root = _Path(__file__).resolve().parent.parent
+    produced = set()
+    sites = 0
+    for name in ("scripts/miniswe_gt_run.py", "scripts/miniswe_supervisor.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.keyword) or node.arg != "treatment":
+                continue
+            # Only the BRANCHES of a conditional, never its test. Walking the
+            # whole node collected "off" from
+            # `"bare" if args.gt_off or args.gt_mode == "off" else "groundtruth"`
+            # - a string that is compared, not produced. An extraction wider
+            # than the thing it claims to extract is the same error as a
+            # domain restated instead of derived.
+            def _values(expr):
+                if isinstance(expr, ast.IfExp):
+                    return _values(expr.body) | _values(expr.orelse)
+                if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+                    return {expr.value}
+                return set()
+
+            literals = _values(node.value)
+            if not literals:
+                continue
+            sites += 1
+            produced |= literals
+
+    assert sites >= 3, f"expected the three treatment writers, found {sites}"
+    assert produced == set(BENCHMARK_ARMS), (
+        f"writers produce {sorted(produced)} but every validator keyed on "
+        f"BENCHMARK_ARMS allows {sorted(BENCHMARK_ARMS)}"
+    )

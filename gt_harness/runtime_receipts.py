@@ -628,7 +628,11 @@ def issue_runtime_receipts(
         raise ValueError("task_id_required")
     if not _SHA40.fullmatch(product_source_sha):
         raise ValueError("product_source_sha_invalid")
-    if treatment not in {"bare", "groundtruth"}:
+    # Imported rather than restated. Function-local to match the existing
+    # gt_harness.product imports in this module, which are deliberately lazy.
+    from gt_harness.product import BENCHMARK_ARMS
+
+    if treatment not in BENCHMARK_ARMS:
         raise ValueError("treatment_invalid")
     if time_budget_seconds < 1:
         raise ValueError("time_budget_seconds_invalid")
