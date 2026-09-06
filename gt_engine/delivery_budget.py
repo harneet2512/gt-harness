@@ -17,6 +17,27 @@ MAX_TASK_DELIVERIES = 24
 # The legacy constant above is retained for historical receipt readers only.
 MAX_BOUNDARY_CLAIMS = 4
 
+# Every reason the runtime can write to a delivery_refused row. The authority
+# is here, beside the ceilings the reasons name, and the harness imports it
+# rather than keeping its own copy.
+#
+# It used to be two hand-written copies in gt_harness/runtime_receipts.py, and
+# they were stale in BOTH directions: they omitted cochange_task_ceiling, which
+# the runtime does emit, and admitted three task_delivery_* reasons that
+# nothing emits. Since the harness RAISES on an unlisted reason rather than
+# skipping it, a run that legitimately hit the co-change ceiling failed receipt
+# construction outright or failed acceptance - a correct refusal by GT losing
+# the run. A list wrong in both directions was never derived from the code; it
+# was an out-of-date copy of a design note, and the dead entries are what made
+# the missing one hard to see.
+DELIVERY_REFUSAL_REASONS = frozenset({
+    "boundary_claim_ceiling",
+    "cochange_task_ceiling",
+    "delivery_byte_ceiling",
+    "duplicate_delivery_identity",
+    "request_delivery_byte_ceiling",
+})
+
 
 def compact_localization(value: str, limit: int = 1_400) -> str:
     """Drop whole ranked location items; never slice a factual statement.

@@ -201,3 +201,63 @@ def test_total_budget_refusal_is_journaled_with_conservation_fields(tmp_path, mo
     assert refusal["admitted_count"] == 7
     assert refusal["admitted_bytes"] == 9_100
     assert refusal["request_byte_limit"] == 9_600
+
+
+def test_refusal_reasons_match_what_the_runtime_can_emit():
+    """The constant must be DERIVED from the emission, not typed beside it.
+
+    A product test proved the co-change ceiling fires and a gate test proved
+    the gate on a different reason; both passed forever while the pair was
+    broken, because nothing asserted the two enumerations agree. The gate
+    RAISES on an unlisted reason, so the missing entry failed receipt
+    construction on a run where GT had correctly declined to over-deliver.
+
+    This walks the function that writes delivery_refused and asserts the
+    literals its `reason` variable can hold are exactly the constant the
+    harness imports - the derivation that makes one list an authority rather
+    than a third copy.
+    """
+    import ast
+    from pathlib import Path as _Path
+
+    from gt_engine.delivery_budget import DELIVERY_REFUSAL_REASONS
+
+    source = (
+        _Path(__file__).resolve().parent.parent
+        / "gt_engine" / "miniswe_integration.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    emitters = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            if getattr(call.func, "attr", None) != "append" or not call.args:
+                continue
+            first = call.args[0]
+            if isinstance(first, ast.Constant) and first.value == "delivery_refused":
+                emitters.append(node)
+
+    assert len(emitters) == 1, (
+        f"expected one delivery_refused writer, found {len(emitters)} - the "
+        f"emission domain is only closed while there is exactly one"
+    )
+
+    emitted = set()
+    for node in ast.walk(emitters[0]):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if getattr(target, "id", None) != "reason":
+            continue
+        if isinstance(node.value, ast.Constant) and node.value.value:
+            emitted.add(node.value.value)
+
+    assert emitted == set(DELIVERY_REFUSAL_REASONS), (
+        f"runtime emits {sorted(emitted - set(DELIVERY_REFUSAL_REASONS))} that "
+        f"the harness rejects, and allows "
+        f"{sorted(set(DELIVERY_REFUSAL_REASONS) - emitted)} that nothing emits"
+    )

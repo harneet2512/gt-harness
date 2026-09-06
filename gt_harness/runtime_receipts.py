@@ -18,6 +18,7 @@ from typing import Any
 
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
+    DELIVERY_REFUSAL_REASONS,
     MAX_BOUNDARY_CLAIMS,
     MAX_TASK_DELIVERIES,
     TOTAL_DELIVERY_BYTE_LIMIT,
@@ -305,15 +306,10 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def _delivery_refusals(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    allowed_reasons = {
-        "boundary_claim_ceiling",
-        "request_delivery_byte_ceiling",
-        "delivery_byte_ceiling",
-        "task_delivery_byte_ceiling",
-        "task_delivery_dose_ceiling",
-        "task_delivery_storm_backstop",
-        "duplicate_delivery_identity",
-    }
+    # Imported, not restated: the runtime owns which refusals it can emit, and
+    # a second copy here was stale in both directions and raised on a reason
+    # the product legitimately writes.
+    allowed_reasons = DELIVERY_REFUSAL_REASONS
     refusals: list[dict[str, Any]] = []
     for row in events:
         if row.get("event") != "delivery_refused":
@@ -1196,15 +1192,7 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             errors.append("treatment_delivery_identity_invalid")
     if not decision_scoped and total_bytes > _TOTAL_DELIVERY_BYTE_LIMIT:
         errors.append("treatment_total_context_budget_exceeded")
-    allowed_refusals = {
-        "boundary_claim_ceiling",
-        "request_delivery_byte_ceiling",
-        "delivery_byte_ceiling",
-        "task_delivery_byte_ceiling",
-        "task_delivery_dose_ceiling",
-        "task_delivery_storm_backstop",
-        "duplicate_delivery_identity",
-    }
+    allowed_refusals = DELIVERY_REFUSAL_REASONS
     for refusal in refused_deliveries:
         if not isinstance(refusal, dict):
             errors.append("treatment_delivery_refusal_invalid")
