@@ -208,10 +208,19 @@ def test_failed_capabilities_are_named_at_the_end_of_the_task(tmp_path, monkeypa
     payload = {
         "tasks": [{"task_id": "t", "primary_diagnostic": "none", "fingerprint": "a" * 40}],
         "capabilities": [
+            # refused/degraded are what capability() derives and what the
+            # renderer keys on, so the fixture carries them rather than
+            # standing in for them with verified alone - UNEXERCISED also has
+            # verified False and must not render as a failure.
             {"capability": "dense_retrieval", "state": "WORKING", "required": True,
-             "verified": True, "evidence": "dense_index_ready_query_ready"},
+             "verified": True, "refused": False, "degraded": False,
+             "evidence": "dense_index_ready_query_ready"},
             {"capability": "lsp_promotion", "state": "FAILED", "required": True,
-             "verified": False, "evidence": "promotion_no_servers:servers=0"},
+             "verified": False, "refused": True, "degraded": False,
+             "evidence": "promotion_no_servers:servers=0"},
+            {"capability": "gt_engine_enabled", "state": "UNEXERCISED",
+             "required": True, "verified": False, "refused": False,
+             "degraded": False, "evidence": "gt_disabled_by_configuration:off"},
         ],
     }
 
@@ -235,3 +244,7 @@ def test_failed_capabilities_are_named_at_the_end_of_the_task(tmp_path, monkeypa
     assert "### Capabilities" in rendered
     assert "| lsp_promotion | FAILED | yes | **NO** |" in rendered
     assert "**These did not work: lsp_promotion**" in rendered
+    # A capability deliberately switched off is shown in the table but is not
+    # named as a failure and raises no CI error.
+    assert "gt_engine_enabled" not in stderr
+    assert "| gt_engine_enabled | UNEXERCISED |" in rendered

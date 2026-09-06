@@ -42,6 +42,27 @@ from .request_history import load_history_evidence, store_history_evidence
 from .run_diagnostics import CapabilityState, DiagnosticCode, DiagnosticEvent
 
 # Capabilities a host can declare (see the verdict's negotiation list).
+# The two stages __init__ can disable GT with. Neither is a fault: one is the
+# OFF mode, the other the global kill switch. Shared so the constructor and the
+# capability report cannot drift - and the drift directions are not symmetric,
+# since a new non-fault stage would merely be reported loudly while a fault
+# stage colliding with one of these would be reported as normal and silent.
+CONFIGURED_OFF_STAGES = ("off", "global_kill_switch")
+
+# Every stage GTSession.degrade() is called with, across gt_engine, scripts and
+# eval. Used to constrain what a journal row may put into a capability evidence
+# string: the journal lives inside the task container and the benchmarked agent
+# can write to it, so a stage is admitted only if this build defines it. Drift
+# here fails loudly as unrecognized_stage rather than quietly as wrong data.
+_DEGRADE_STAGES = frozenset({
+    "action_identity", "after_action", "before_action", "execution_identity",
+    "execution_receipt", "execution_result_identity", "observation_splice",
+    "prepare_messages", "provider_failure_receipt", "provider_response_receipt",
+    "session_start", "submit_detection", "submit_gate",
+    "submitted_result_missing", "suppression_receipt",
+    "terminal_refusal_authority", *CONFIGURED_OFF_STAGES,
+})
+
 HOST_CAPABILITIES = (
     "exact_provider_payload",     # finalized logical request bytes are exact
     "provider_response_ids",      # real provider request/response ids bound
@@ -215,8 +236,8 @@ class GTSession:
         }
         self.disabled = self.mode is GTMode.OFF or global_killed
         self.disabled_stage = (
-            "global_kill_switch" if global_killed
-            else "off" if self.disabled else ""
+            CONFIGURED_OFF_STAGES[1] if global_killed
+            else CONFIGURED_OFF_STAGES[0] if self.disabled else ""
         )
         self._terminal: str | None = None
         self._task_start_shipped = False
@@ -1274,6 +1295,9 @@ class GTSession:
                         schedule_order.index(revision)
                         if revision in schedule_order else len(schedule_order)
                     )
+                    # Ties within a revision break on the journal's own
+                    # monotonic sequence rather than on list position.
+                    row["_sequence"] = int(row.get("sequence") or 0)
                     terminals.append(row)
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
             # Both must fail closed. The journal is parsed line by line, so a
@@ -1291,11 +1315,15 @@ class GTSession:
                 # The newest graph the run scheduled an enrichment for is the
                 # one whose fate the report is about; a terminal for an older
                 # revision describes a graph that has already been replaced.
-                newest = max(int(row.get("_rank") or 0) for row in terminals)
-                current = [
-                    row for row in terminals if int(row.get("_rank") or 0) == newest
-                ]
-                terminal = current[-1]
+                newest = max(row["_rank"] for row in terminals)
+                current = [row for row in terminals if row["_rank"] == newest]
+                # Direct indexing, not .get(... or 0): every appended row is
+                # stamped one line earlier, so a missing stamp is a defect and
+                # should raise here rather than silently tie with the first
+                # revision. This is a function whose entire history is silent
+                # wrong answers.
+                terminal = max(current, key=lambda row: row["_sequence"]) \
+                    if any(row["_sequence"] for row in current) else current[-1]
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
                 if status == "no_op":
@@ -1378,13 +1406,25 @@ class GTSession:
             # run content and never goes in evidence; capability() asserts the
             # evidence is secret-free. A stage and an exception type name are
             # enough to say what stopped observing and where.
-            stage = str(fail_open.get("stage") or "unknown")
-            error_type = str(fail_open.get("error_type") or "unknown")
+            # Read back from the journal, which lives inside the task
+            # container at <state_dir>/<task_id>/events.jsonl - a path the
+            # benchmarked agent can write. So neither field is trusted as
+            # text: each is admitted only if it matches a value this codebase
+            # authored, and is otherwise reported as unrecognised. That makes
+            # the question of whether the evidence could carry a secret moot
+            # rather than argued, and it is the honest reading anyway, since a
+            # stage this build does not define is not a stage.
+            stage = str(fail_open.get("stage") or "")
+            if stage not in _DEGRADE_STAGES:
+                stage = "unrecognized_stage"
+            error_type = str(fail_open.get("error_type") or "")
+            if not error_type.isidentifier():
+                error_type = "unrecognized_error"
             rows.append((
                 "gt_engine_enabled", CapabilityState.FAILED,
                 f"disabled_at_{stage}:{error_type}",
             ))
-        elif self.disabled and self.disabled_stage in {"off", "global_kill_switch"}:
+        elif self.disabled and self.disabled_stage in CONFIGURED_OFF_STAGES:
             # Not a fault. __init__ sets disabled when the mode is OFF or the
             # global kill switch is set, so a baseline arm arrives here having
             # done exactly what it was asked. Reporting that as FAILED would

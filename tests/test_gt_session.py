@@ -985,12 +985,12 @@ def test_a_run_where_gt_switched_itself_off_says_so(tmp_path):
     """
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
-        {"event": "gt_degraded_fail_open", "stage": "before_model",
+        {"event": "gt_degraded_fail_open", "stage": "before_action",
          "error_type": "SQLiteError", "error": "database is locked"},
-    ], disabled=True, disabled_stage="before_model")
+    ], disabled=True, disabled_stage="before_action")
 
     assert rows["gt_engine_enabled"] == (
-        "FAILED", "disabled_at_before_model:SQLiteError"
+        "FAILED", "disabled_at_before_action:SQLiteError"
     )
 
 
@@ -1003,13 +1003,13 @@ def test_the_fail_open_row_never_carries_the_exception_message(tmp_path):
     """
     rows = _capability_rows(tmp_path, [
         _DENSE_READY,
-        {"event": "gt_degraded_fail_open", "stage": "submit",
+        {"event": "gt_degraded_fail_open", "stage": "submit_gate",
          "error_type": "ValueError",
          "error": "token sk-do-not-leak-this failed to parse"},
-    ], disabled=True, disabled_stage="submit")
+    ], disabled=True, disabled_stage="submit_gate")
 
     assert "sk-do-not-leak-this" not in rows["gt_engine_enabled"][1]
-    assert rows["gt_engine_enabled"] == ("FAILED", "disabled_at_submit:ValueError")
+    assert rows["gt_engine_enabled"] == ("FAILED", "disabled_at_submit_gate:ValueError")
 
 
 def test_gt_disabled_without_a_journal_row_is_still_reported(tmp_path):
@@ -1115,4 +1115,27 @@ def test_promoted_edges_and_tombstones_are_both_reported(tmp_path):
 
     assert rows["lsp_promotion"] == (
         "WORKING", "terminal_succeeded:published:12_edges:3_tombstoned"
+    )
+
+
+def test_a_stage_this_build_does_not_define_is_not_echoed(tmp_path):
+    """The journal is inside the task container and the agent can write to it.
+
+    --state-dir /logs/agent/gt-state puts events.jsonl where the benchmarked
+    agent's shell can append to it, so neither field read back from a row is
+    trusted as text. A stage this build never passes to degrade() is not a
+    stage, and an error_type that is not an identifier is not a type name.
+    Clamping on read means the evidence string can only contain values this
+    codebase authored - which settles the question of what could be smuggled
+    into it rather than arguing about which patterns a denylist catches.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "gt_degraded_fail_open",
+         "stage": "sk-not-a-real-stage-and-not-a-token-either",
+         "error_type": "Bearer smuggled", "error": "x"},
+    ], disabled=True, disabled_stage="before_action")
+
+    assert rows["gt_engine_enabled"] == (
+        "FAILED", "disabled_at_unrecognized_stage:unrecognized_error"
     )

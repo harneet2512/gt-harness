@@ -43,7 +43,14 @@ def main(argv: list[str] | None = None) -> int:
     # should have to reconstruct that GT ran with less than GT has.
     capabilities = [row for row in payload.get("capabilities", [])
                     if isinstance(row, dict)]
-    degraded = [row for row in capabilities if not row.get("verified")]
+    # Keyed on refused/degraded, not on `not verified`. UNEXERCISED also has
+    # verified False, and it is what a capability deliberately switched off
+    # reports - so a GT-off control run was named in the did-not-work line and
+    # raised a CI error for doing exactly what it was asked. The table below
+    # still shows it as not-worked, which is honest; being called out as a
+    # failure is not.
+    degraded = [row for row in capabilities
+                if row.get("refused") or row.get("degraded")]
     for row in degraded:
         line = (
             f"[GT][CAPABILITY][{row.get('state')}] {row.get('capability')} "
