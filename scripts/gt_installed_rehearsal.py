@@ -350,6 +350,27 @@ def _pre_repair_source_stable(events: list[dict], commands: list[str]) -> bool:
     )
 
 
+def shape_mismatch(kind: str, predicate: str, **observed_expected: Any) -> dict[str, Any] | None:
+    """Name a shape the auditor cannot audit, or return None when it can.
+
+    Pairs are (observed, expected). A predicate that declines because the run
+    did not match the shape it knows must say so: silently returning False is
+    indistinguishable from having audited the run and found a violation, and a
+    blocked verdict that gives no reason is indistinguishable from a considered
+    refusal. This is diagnostic only - every caller still fails closed.
+    """
+    fields: dict[str, Any] = {}
+    mismatched = False
+    for name, (observed, expected) in observed_expected.items():
+        fields[name] = observed
+        fields[f"expected_{name}"] = expected
+        if observed != expected:
+            mismatched = True
+    if not mismatched:
+        return None
+    return {"predicate": predicate, "reason": kind, **fields}
+
+
 def write_fixture(root: Path, image: str) -> None:
     (root / "environment").mkdir(parents=True)
     (root / "tests").mkdir()
@@ -513,16 +534,14 @@ async def run(args) -> dict:
         # predicate that declines to evaluate is indistinguishable from one that
         # found a violation.
         agent_requests = len(handler.requests) - len(handler.bootstrap_requests)
-        if len(checks) != 2 or agent_requests != len(handler.commands):
-            receipt["predicates_not_evaluated"].append({
-                "predicate": "execution_evidence_verified",
-                "reason": "unaudited_run_shape",
-                "checks": len(checks),
-                "expected_checks": 2,
-                "agent_requests": agent_requests,
-                "expected_agent_requests": len(handler.commands),
-                "bootstrap_requests": len(handler.bootstrap_requests),
-            })
+        entry = shape_mismatch(
+            "unaudited_run_shape", "execution_evidence_verified",
+            checks=(len(checks), 2),
+            agent_requests=(agent_requests, len(handler.commands)),
+        )
+        if entry is not None:
+            entry["bootstrap_requests"] = len(handler.bootstrap_requests)
+            receipt["predicates_not_evaluated"].append(entry)
         else:
             chain_valid = True
             # Bind by scenario position, never by command-string identity: two
@@ -560,6 +579,14 @@ async def run(args) -> dict:
                 chain_valid and checks[0]["repository_revision"] != checks[1]["repository_revision"]
             )
         publications = [row for row in events if row.get("event") == "graph_publication"]
+        refresh_entry = shape_mismatch(
+            "unaudited_run_shape", "native_graph_refresh_verified",
+            checks=(len(checks), 2),
+        )
+        if refresh_entry is not None:
+            refresh_entry["publications"] = len(publications)
+            refresh_entry["minimum_publications"] = 2
+            receipt["predicates_not_evaluated"].append(refresh_entry)
         receipt["native_graph_refresh_verified"] = (
             len(publications) >= 2 and len(checks) == 2
             and publications[-1]["repository_revision"] == checks[-1]["repository_revision"]
@@ -601,12 +628,28 @@ async def run(args) -> dict:
             receipt["interruption_issues"] = issues
             if not issues:
                 receipt["status"] = "VERIFIED_SYNTHETIC_INTERRUPTION"
+        else:
+            # F11: a blocked verdict must say why. The scenario step count and
+            # audit arity are the scenario's own definition, so the literals
+            # stay - what changes is that a mismatch names observed vs expected
+            # instead of failing mute. Diagnostic only: the gate below still
+            # fails closed on every mismatch.
+            verdict_entry = shape_mismatch(
+                "acceptance_shape_mismatch", "status",
+                commands=(len(handler.commands), 8),
+                audits=(len(audits), 1),
+            )
+            if verdict_entry is not None:
+                receipt["acceptance_shape_mismatch"] = verdict_entry
+        if forced_interruption:
+            pass
         elif (result.exception_info is None and isinstance(rewards, dict)
                 and rewards.get("reward") == 1 and receipt.get("verifier_patch_matches")
                 # F11: an unevaluated predicate must block acceptance. Without
                 # this, a run whose shape the auditor did not recognise reaches
                 # the same verdict as one it audited and passed.
                 and not receipt.get("predicates_not_evaluated")
+                and not receipt.get("acceptance_shape_mismatch")
                 and len(handler.commands) == 8 and len(audits) == 1
                 and audits[0].verdict == "GREEN-delivered" and audits[0].synthetic_transport
                 and receipt["reproduction_verified"]
