@@ -25,6 +25,28 @@ export const MODELS = [
 export const STEP_LIMIT_MIN = 1;
 export const STEP_LIMIT_MAX = 500;
 
+/* ------------------------------------------------------------------ *
+ * How the graph is drawn
+ * ------------------------------------------------------------------ */
+
+/** Flat, or in depth. Two drawings of one field; the data is the same. */
+export type GraphMode = "2d" | "3d";
+
+export const GRAPH_MODES: readonly GraphMode[] = ["2d", "3d"];
+
+export function isGraphMode(value: unknown): value is GraphMode {
+  return value === "2d" || value === "3d";
+}
+
+/**
+ * `/graph 3d` names a mode; `/graph` on its own is still the toggle it
+ * has always been, and says so by returning null rather than guessing.
+ */
+export function graphModeFromArg(arg: string): GraphMode | null {
+  const wanted = arg.trim().toLowerCase();
+  return isGraphMode(wanted) ? wanted : null;
+}
+
 export interface Prefs {
   model: string;
   gtMode: GtMode;
@@ -32,6 +54,13 @@ export interface Prefs {
   stepLimit: number;
   /** Wall-clock seconds per turn; null means "whatever the server defaults to". */
   wallSeconds: number | null;
+  /**
+   * Flat or in depth. Remembered like everything else the reader chose
+   * once — and defaulting to flat, because the 3D renderer is a separate
+   * download and a session that never asks for it should never pay for
+   * it.
+   */
+  graphMode: GraphMode;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -39,6 +68,7 @@ export const DEFAULT_PREFS: Prefs = {
   gtMode: "advisory",
   stepLimit: 60,
   wallSeconds: null,
+  graphMode: "2d",
 };
 
 function clampInt(
@@ -91,11 +121,16 @@ export function normalizePrefs(raw: unknown): Prefs {
       ? null
       : clampInt(rec.wallSeconds, WALL_SECONDS_MIN, WALL_SECONDS_MAX, -1);
 
+  const graphMode = isGraphMode(rec.graphMode)
+    ? rec.graphMode
+    : DEFAULT_PREFS.graphMode;
+
   return {
     model,
     gtMode,
     stepLimit,
     wallSeconds: wallSeconds === -1 ? null : wallSeconds,
+    graphMode,
   };
 }
 

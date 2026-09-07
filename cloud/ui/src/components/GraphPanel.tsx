@@ -2,12 +2,13 @@ import { useMemo, useState } from "react";
 import { agentMatches, focusAgent } from "../agentField";
 import type { Session } from "../api";
 import { relationsFor } from "../graph";
+import type { GraphMode } from "../prefs";
 import { useDragSize } from "../useDragSize";
 import type { GraphView } from "../useGraphView";
 import type { SessionData } from "../useSessionData";
 import { Rule } from "./Box";
 import BottomPanel from "./BottomPanel";
-import GraphCanvas from "./GraphCanvas";
+import GraphStage from "./GraphStage";
 import GraphToolbar, { type TurnOption } from "./GraphToolbar";
 import Inspector from "./Inspector";
 import Scrubber from "./Scrubber";
@@ -31,6 +32,9 @@ interface Props {
   /** The agent the map is narrowed to, or null for everything at once. */
   isolated: string | null;
   onIsolate: (agentId: string | null) => void;
+  /** Flat or in depth, remembered in `prefs` alongside the others. */
+  mode: GraphMode;
+  onMode: (mode: GraphMode) => void;
   onCollapse: () => void;
 }
 
@@ -53,6 +57,8 @@ export default function GraphPanel({
   onCloseInspector,
   isolated,
   onIsolate,
+  mode,
+  onMode,
   onCollapse,
 }: Props) {
   const panel = useDragSize(PANEL_DEFAULT, PANEL_MIN, PANEL_MAX, "y");
@@ -135,6 +141,8 @@ export default function GraphPanel({
         onFit={() => setFitToken((n) => n + 1)}
         labels={labels}
         onToggleLabels={() => setLabels(!labels)}
+        mode={mode}
+        onMode={onMode}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         gt={data.graph.gt}
@@ -149,7 +157,8 @@ export default function GraphPanel({
 
       <div className="gpanel-row">
         <div className="gpanel-stage">
-          <GraphCanvas
+          <GraphStage
+            mode={mode}
             sessionId={sessionId}
             field={view.field}
             neighbours={view.neighbours}

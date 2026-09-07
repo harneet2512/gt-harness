@@ -2,6 +2,12 @@
  * The painter. One pure pass over the field per frame: filaments, then
  * signals, then particles, then labels. Everything is computed in screen
  * space so hairlines stay hairlines at any zoom.
+ *
+ * The constants below are the *vocabulary* — how faint an import is
+ * against a GT relation, how far an agent's ring sits off a particle, how
+ * slowly a worker breathes. The 3D view imports them from here rather
+ * than choosing its own, because two views of one session that disagree
+ * about what a colour means are two different maps.
  * ------------------------------------------------------------------ */
 
 import type { ZoomTransform } from "d3-zoom";
@@ -9,6 +15,7 @@ import type { DiffFile } from "./api";
 import { hueFill, idOf, type Filament, type ParticleField } from "./graph";
 import { endsOf } from "./graphSim";
 import { curveOf, pointOn, TAIL, type Curve, type LiveSignal } from "./signals";
+import { occupantsOf, type Occupant } from "./agentField";
 import { attentionAlpha, type Attention } from "./trail";
 
 /* The canvas cannot read a CSS variable, so it reads them through
@@ -17,7 +24,7 @@ import { palette } from "./palette";
 
 const GRID_PITCH = 24;
 
-const FILAMENT_ALPHA: Record<string, number> = {
+export const FILAMENT_ALPHA: Record<string, number> = {
   import: 0.14,
   gt_call: 0.26,
   gt_ref: 0.26,
@@ -33,9 +40,9 @@ const FILAMENT_WIDTH: Record<string, number> = {
   cotouch: 0.8,
 };
 
-const DIMMED = 0.18;
+export const DIMMED = 0.18;
 /** What an agent fades to while another one is focused. */
-const FOCUS_DIM = 0.14;
+export const FOCUS_DIM = 0.14;
 const LABEL_ZOOM = 1.8;
 /** A file particle never exceeds r 9 (see `fileRadius`), so with labels off
     only the folded directory particles carry a name of their own. */
@@ -43,20 +50,20 @@ const LABEL_MIN_R = 10;
 /** Label collision grid, in screen pixels: one row per line of type. */
 const LABEL_CELL_W = 26;
 const LABEL_CELL_H = 13;
-const HALO_MS = 1400;
+export const HALO_MS = 1400;
 /**
  * A worker breathes slower than the primary agent and at half the depth.
  * Four of these on screen at once is the case that has to stay calm, and
  * calm is mostly a matter of how slow you are willing to be.
  */
-const WORKER_HALO_MS = 2600;
+export const WORKER_HALO_MS = 2600;
 /** How far outside a particle an agent's ring sits, in screen pixels. */
-const RING_GAP = 3;
+export const RING_GAP = 3;
 /** The wedge cut out between two agents' arcs, in radians. */
-const SLOT_GAP = 0.2;
+export const SLOT_GAP = 0.2;
 /** The soft under-glow: radius past the particle, and its strongest alpha. */
-const GLOW_SPREAD = 7;
-const GLOW_ALPHA = 0.13;
+export const GLOW_SPREAD = 7;
+export const GLOW_ALPHA = 0.13;
 /**
  * Where an agent is, and where it just was — and nowhere else.
  *
@@ -65,7 +72,7 @@ const GLOW_ALPHA = 0.13;
  * four agents' worth of that is the christmas tree. `attentionAlpha` falls
  * one sixth per step, so two thirds is the last two.
  */
-const GLOW_MIN_HEAT = 0.66;
+export const GLOW_MIN_HEAT = 0.66;
 
 /**
  * One worker's walk through the same field, drawn in its own colour so two
@@ -375,47 +382,14 @@ function layersById(
 
 /* Scratch for one particle's occupants. Module level and grown in place:
    the hot loop must not allocate, and no more than `MAX_SLOTS` agents ever
-   land in here at once. */
-const slotLayer: WorkerLayer[] = [];
-const slotHeat: number[] = [];
-const slotHere: boolean[] = [];
-/** Which wedge of the shared ring this occupant owns. See `occupants`. */
-const slotAt: number[] = [];
+   land in here at once. `occupantsOf` is shared with the 3D view, so both
+   pictures agree about who is standing where. */
+const slotScratch: Occupant<WorkerLayer>[] = [];
 
 /** How strongly this agent draws while another one has the focus. */
 function agentAlpha(input: DrawInput, agentId: string): number {
   if (input.focusAgent === null || input.focusAgent === agentId) return 1;
   return FOCUS_DIM;
-}
-
-/**
- * The occupants of one particle worth drawing this frame, into the scratch
- * arrays. Returns how many. An agent whose attention here has decayed to
- * nothing and which has moved on is not an occupant.
- */
-function occupants(
-  id: string,
-  agents: readonly string[],
-  index: ReadonlyMap<string, WorkerLayer>,
-): number {
-  let n = 0;
-  for (let slot = 0; slot < agents.length; slot += 1) {
-    const layer = index.get(agents[slot]);
-    if (!layer) continue;
-    const seen = layer.attention.get(id);
-    const here = id === layer.positionId;
-    const heat = seen ? attentionAlpha(seen.last, layer.steps) : 0;
-    if (heat <= 0 && !here) continue;
-    slotLayer[n] = layer;
-    slotHeat[n] = heat;
-    slotHere[n] = here;
-    /* The wedge belongs to the agent, not to whoever happens to be lit
-       this frame: an agent decaying off a particle must not rotate the
-       one beside it into a different quarter of the ring. */
-    slotAt[n] = slot;
-    n += 1;
-  }
-  return n;
 }
 
 /**
@@ -444,16 +418,16 @@ function paintAgentGlow(input: DrawInput): void {
     if (sx < -60 || sx > input.width + 60) continue;
     if (sy < -60 || sy > input.height + 60) continue;
 
-    const n = occupants(id, agents, index);
+    const n = occupantsOf(id, agents, index, slotScratch);
     if (n === 0) continue;
 
     const r = particle.r * input.transform.k;
     for (let i = 0; i < n; i += 1) {
-      const layer = slotLayer[i];
+      const { layer, here, heat } = slotScratch[i];
       /* Full strength where the agent is standing, once behind it, then
          nothing: the rings are what carry the rest of the trail. */
-      if (!slotHere[i] && slotHeat[i] < GLOW_MIN_HEAT) continue;
-      const strength = slotHere[i] ? 1 : slotHeat[i];
+      if (!here && heat < GLOW_MIN_HEAT) continue;
+      const strength = here ? 1 : heat;
       const alpha =
         (GLOW_ALPHA * strength * agentAlpha(input, layer.id)) / Math.max(1, n);
       if (alpha < 0.008) continue;
@@ -493,7 +467,7 @@ function paintWorkers(input: DrawInput): void {
     if (sx < -40 || sx > input.width + 40) continue;
     if (sy < -40 || sy > input.height + 40) continue;
 
-    const n = occupants(id, agents, index);
+    const n = occupantsOf(id, agents, index, slotScratch);
     if (n === 0) continue;
 
     const r = particle.r * input.transform.k + RING_GAP;
@@ -502,16 +476,15 @@ function paintWorkers(input: DrawInput): void {
     const gap = slots === 1 ? 0 : Math.min(SLOT_GAP, segment * 0.18);
 
     for (let i = 0; i < n; i += 1) {
-      const layer = slotLayer[i];
-      const here = slotHere[i];
+      const { layer, here, heat, slot } = slotScratch[i];
       const alpha =
-        (here ? 0.9 : 0.28 + slotHeat[i] * 0.45) * agentAlpha(input, layer.id);
+        (here ? 0.9 : 0.28 + heat * 0.45) * agentAlpha(input, layer.id);
       if (alpha < 0.02) continue;
 
       /* Slot 0 starts at the top and they run clockwise, so the order on
          screen is the order in the legend. A wedge left empty is an agent
          that has been here and is not here now, which is the truth. */
-      const from = -Math.PI / 2 + slotAt[i] * segment + gap / 2;
+      const from = -Math.PI / 2 + slot * segment + gap / 2;
       const to = from + segment - gap;
       arc(
         ctx,

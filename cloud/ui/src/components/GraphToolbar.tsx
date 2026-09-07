@@ -1,4 +1,5 @@
 import { agentChip } from "../agentField";
+import { GRAPH_MODES, type GraphMode } from "../prefs";
 import type { WorkerTrail } from "../useGraphView";
 
 export interface TurnOption {
@@ -19,6 +20,9 @@ interface Props {
   onFit: () => void;
   labels: boolean;
   onToggleLabels: () => void;
+  /** Flat, or in depth. The same field either way. */
+  mode: GraphMode;
+  onMode: (mode: GraphMode) => void;
   panelOpen: boolean;
   onTogglePanel: () => void;
   gt: boolean;
@@ -55,6 +59,8 @@ export default function GraphToolbar({
   onFit,
   labels,
   onToggleLabels,
+  mode,
+  onMode,
   panelOpen,
   onTogglePanel,
   gt,
@@ -210,6 +216,26 @@ export default function GraphToolbar({
       >
         labels
       </button>
+      {/* Two drawings of one field. The choice is remembered, and taking
+          it never reloads the session or drops the selection. */}
+      <span className="bar-mode" role="group" aria-label="How the graph is drawn">
+        {GRAPH_MODES.map((one) => (
+          <button
+            key={one}
+            type="button"
+            className={`btn-text ${mode === one ? "is-on" : ""}`}
+            aria-pressed={mode === one}
+            title={
+              one === "3d"
+                ? "Draw the graph in depth"
+                : "Draw the graph flat"
+            }
+            onClick={() => onMode(one)}
+          >
+            {one}
+          </button>
+        ))}
+      </span>
       <button
         type="button"
         className={`btn-text ${panelOpen ? "is-on" : ""}`}

@@ -101,6 +101,32 @@ export function hueFill(hue: number, alpha = 1): string {
     : `hsl(${hue} 35% 78% / ${alpha})`;
 }
 
+/** Saturation and lightness of a cluster hue. `hueFill` writes the same two. */
+const HUE_S = 0.35;
+const HUE_L = 0.78;
+
+/**
+ * The same colour `hueFill` names, as 0..1 channels — what a shader takes.
+ * One definition of the region colour, two ways of spelling it, so the
+ * flat view and the 3D one cannot end up painting different maps.
+ */
+export function hueRgb(hue: number): { r: number; g: number; b: number } {
+  const c = (1 - Math.abs(2 * HUE_L - 1)) * HUE_S;
+  const h = (((hue % 360) + 360) % 360) / 60;
+  const x = c * (1 - Math.abs((h % 2) - 1));
+  const m = HUE_L - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 1) [r, g, b] = [c, x, 0];
+  else if (h < 2) [r, g, b] = [x, c, 0];
+  else if (h < 3) [r, g, b] = [0, c, x];
+  else if (h < 4) [r, g, b] = [0, x, c];
+  else if (h < 5) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return { r: r + m, g: g + m, b: b + m };
+}
+
 function clamp(value: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, value));
 }

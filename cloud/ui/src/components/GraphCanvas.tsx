@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Simulation } from "d3-force";
-import type { DiffFile } from "../api";
-import type { Filament, Particle, ParticleField } from "../graph";
+import type { Filament, Particle } from "../graph";
 import { draw, type WorkerLayer } from "../graphDraw";
+import type { GraphViewProps } from "../graphProps";
 import { onPalette } from "../palette";
 import {
   clusterAnchors,
@@ -12,9 +12,7 @@ import {
   RESTART_ALPHA,
 } from "../graphSim";
 import { useReducedMotion } from "../motion";
-import { PRIMARY_AGENT, PRIMARY_RGB, SignalDirector } from "../signals";
-import type { Attention } from "../trail";
-import type { WorkerTrail } from "../useGraphView";
+import { useSignals } from "../useSignals";
 import { useGraphCamera } from "../useGraphCamera";
 import GraphOverlay, { type HoverInfo } from "./GraphOverlay";
 
@@ -23,43 +21,7 @@ const CLICK_SLOP = 3;
 /** Ticks run before the first paint so the field arrives already legible. */
 const PRESETTLE = 90;
 
-interface Props {
-  /** Persistence key for the camera; null outside a session. */
-  sessionId: string | null;
-  field: ParticleField;
-  neighbours: ReadonlyMap<string, ReadonlySet<string>>;
-  /** Keyed by particle id. */
-  attention: ReadonlyMap<string, Attention>;
-  currentStep: number;
-  edited: ReadonlyMap<string, DiffFile>;
-  positionId: string | null;
-  running: boolean;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  matches: ReadonlySet<string> | null;
-  labels: boolean;
-  /** Particle ids the agent walked, in order, up to the scrub cutoff. */
-  trailIds: readonly string[];
-  /** Identity of that walk: a change means replay, which never animates. */
-  trailToken: string;
-  animate: boolean;
-  /** Every worker agent's walk across the same field, in its own colour. */
-  workerTrails: readonly WorkerTrail[];
-  /** Particle id → the agents on it, so a shared one shows all of them. */
-  presence: ReadonlyMap<string, readonly string[]>;
-  /** The agent drawn at full strength — hover or isolate. Null for all. */
-  focusAgent: string | null;
-  /**
-   * Whether a worker's new waypoints animate. Separate from `animate`: a
-   * worker runs on its own clock, so its trail moves while the primary
-   * session sits idle.
-   */
-  animateWorkers: boolean;
-  /** Incremented by the toolbar to ask for a fit. */
-  fitToken: number;
-  onZoom: (k: number) => void;
-  emptyText: string | null;
-}
+type Props = GraphViewProps;
 
 /** The living particle graph: files as particles, relations as filaments. */
 /**
@@ -127,11 +89,6 @@ export default function GraphCanvas(props: Props) {
   layersRef.current = layers;
 
   const simRef = useRef<Simulation<Particle, Filament> | null>(null);
-  /* Every agent travels through one director: a queue each so the hues
-     never mix, one release clock so no two of them pulse on the same
-     frame, and one ceiling on what may be in the air at once. */
-  const director = useRef(new SignalDirector());
-  const workerWalked = useRef(new Map<string, number>());
   const hoverId = useRef<string | null>(null);
   const dim = useRef(0);
   const raf = useRef<number | null>(null);
@@ -150,6 +107,20 @@ export default function GraphCanvas(props: Props) {
   const getParticles = useCallback(() => live.current.field.particles, []);
   const camera = useGraphCamera(getParticles, onZoom, kick, props.sessionId);
   const { canvasRef, transform } = camera;
+
+  /* Every agent travels through one director: a queue each so the hues
+     never mix, one release clock so no two of them pulse on the same
+     frame, and one ceiling on what may be in the air at once. The 3D view
+     uses the same hook, so there is one set of those rules and not two. */
+  const { director } = useSignals({
+    trailIds,
+    trailToken,
+    animate,
+    workerTrails: props.workerTrails,
+    animateWorkers: props.animateWorkers,
+    reduced,
+    kick,
+  });
 
   tick.current = (now: number) => {
     raf.current = null;
@@ -244,13 +215,6 @@ export default function GraphCanvas(props: Props) {
     layers,
   ]);
 
-  /* Turning the preference on mid-flight drops whatever was travelling
-     rather than letting it finish its arc. */
-  useEffect(() => {
-    director.current.setReduced(reduced);
-    kick();
-  }, [reduced, kick]);
-
   /* ---------------- the simulation ---------------- */
 
   const fitRef = useRef(camera.fit);
@@ -296,51 +260,6 @@ export default function GraphCanvas(props: Props) {
       sim.stop();
     };
   }, [field, kick, camera.framed]);
-
-  /* ---------------- signals ---------------- */
-
-  const walked = useRef({ token: "", length: 0 });
-
-  useEffect(() => {
-    const state = walked.current;
-    const queue = director.current.queue(PRIMARY_AGENT, PRIMARY_RGB);
-    if (state.token !== trailToken || trailIds.length < state.length) {
-      queue.clear();
-    } else if (trailIds.length > state.length && animate) {
-      for (let i = Math.max(1, state.length); i < trailIds.length; i += 1) {
-        queue.push(trailIds[i - 1], trailIds[i]);
-      }
-    }
-    walked.current = { token: trailToken, length: trailIds.length };
-    kick();
-  }, [trailIds, trailToken, animate, kick]);
-
-  /* Every other agent's signals, on the same rule as the primary trail's:
-     only new waypoints fire, and a trail that shrank (a card rebuilt from
-     a reload) replays without animating. The director does the rest —
-     whose turn it is, and how much may be in the air at once. */
-  const { workerTrails, animateWorkers } = props;
-  useEffect(() => {
-    for (const worker of workerTrails) {
-      const queue = director.current.queue(worker.id, worker.rgb);
-      const seen = workerWalked.current.get(worker.id) ?? 0;
-      if (worker.trailIds.length < seen) {
-        queue.clear();
-      } else if (worker.trailIds.length > seen && animateWorkers) {
-        for (let i = Math.max(1, seen); i < worker.trailIds.length; i += 1) {
-          queue.push(worker.trailIds[i - 1], worker.trailIds[i]);
-        }
-      }
-      workerWalked.current.set(worker.id, worker.trailIds.length);
-    }
-
-    const alive = new Set(workerTrails.map((worker) => worker.id));
-    director.current.retain(alive);
-    for (const id of [...workerWalked.current.keys()]) {
-      if (!alive.has(id)) workerWalked.current.delete(id);
-    }
-    kick();
-  }, [workerTrails, animateWorkers, kick]);
 
   useEffect(() => {
     if (props.fitToken === 0) return;

@@ -15,6 +15,8 @@
  * All of it is pure, and none of it knows about canvases or React.
  * ------------------------------------------------------------------ */
 
+import { attentionAlpha } from "./trail";
+
 /* ------------------------------------------------------------------ *
  * Working outside this repo
  * ------------------------------------------------------------------ */
@@ -115,6 +117,71 @@ export function presenceOf(
     if (here && !out.has(here)) out.set(here, [agent.id]);
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * The occupants of one particle
+ * ------------------------------------------------------------------ */
+
+/** Just enough of an agent's layer to say how warm this particle is to it. */
+export interface Occupiable {
+  attention: ReadonlyMap<string, { last: number }>;
+  /** Steps walked, so the decay has a clock of its own per agent. */
+  steps: number;
+  positionId: string | null;
+}
+
+/** One agent standing on, or lately standing on, one particle. */
+export interface Occupant<L> {
+  layer: L;
+  /** 1 at the moment of the visit, falling to 0. See `attentionAlpha`. */
+  heat: number;
+  /** True where the agent is *now*, as opposed to lately. */
+  here: boolean;
+  /**
+   * Which wedge of the shared ring this occupant owns. The wedge belongs
+   * to the agent, not to whoever happens to be lit this frame: an agent
+   * decaying off a particle must not rotate the one beside it into a
+   * different quarter of the ring.
+   */
+  slot: number;
+}
+
+/**
+ * The occupants of one particle worth drawing this frame, into `out`.
+ * Returns how many. An agent whose attention here has decayed to nothing
+ * and which has moved on is not an occupant.
+ *
+ * `out` belongs to the caller and its entries are reused: this runs once
+ * per touched particle per frame in both views, and neither of them can
+ * afford an allocation there. Nothing beyond the returned count is valid.
+ */
+export function occupantsOf<L extends Occupiable>(
+  id: string,
+  agents: readonly string[],
+  index: ReadonlyMap<string, L>,
+  out: Occupant<L>[],
+): number {
+  let n = 0;
+  for (let slot = 0; slot < agents.length; slot += 1) {
+    const layer = index.get(agents[slot]);
+    if (!layer) continue;
+    const seen = layer.attention.get(id);
+    const here = id === layer.positionId;
+    const heat = seen ? attentionAlpha(seen.last, layer.steps) : 0;
+    if (heat <= 0 && !here) continue;
+    const entry = out[n];
+    if (entry) {
+      entry.layer = layer;
+      entry.heat = heat;
+      entry.here = here;
+      entry.slot = slot;
+    } else {
+      out[n] = { layer, heat, here, slot };
+    }
+    n += 1;
+  }
+  return n;
 }
 
 /* ------------------------------------------------------------------ *

@@ -79,3 +79,47 @@ export function refreshPalette(): Palette {
   for (const fn of listeners) fn();
   return current;
 }
+
+/* ------------------------------------------------------------------ *
+ * The same colours, as numbers.
+ *
+ * A canvas takes `rgba(...)` strings; a shader takes floats. Parsing is
+ * therefore not a 3D concern that happens to live here — it is the other
+ * half of what this module already does, and keeping it here is what
+ * stops the two views reading the same token differently.
+ * ------------------------------------------------------------------ */
+
+export interface Rgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+const BLACK: Rgb = { r: 0, g: 0, b: 0 };
+
+/** `#0f1113` or `#abc`, to 0..1 channels. Black for anything else. */
+export function hexRgb(hex: string): Rgb {
+  const raw = hex.trim().replace("#", "");
+  const full =
+    raw.length === 3
+      ? raw[0] + raw[0] + raw[1] + raw[1] + raw[2] + raw[2]
+      : raw;
+  if (full.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(full)) return BLACK;
+  const value = Number.parseInt(full, 16);
+  return {
+    r: ((value >> 16) & 255) / 255,
+    g: ((value >> 8) & 255) / 255,
+    b: (value & 255) / 255,
+  };
+}
+
+/** `"217, 119, 87"` — the form the painter interpolates alpha into. */
+export function listRgb(list: string): Rgb {
+  const parts = list.split(",");
+  if (parts.length < 3) return BLACK;
+  const channel = (at: number): number => {
+    const n = Number.parseFloat(parts[at]);
+    return Number.isFinite(n) ? Math.min(1, Math.max(0, n / 255)) : 0;
+  };
+  return { r: channel(0), g: channel(1), b: channel(2) };
+}

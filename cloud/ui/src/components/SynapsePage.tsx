@@ -12,7 +12,15 @@ import { failedReason, repoShort } from "../format";
 import { shouldAutoOpenGraph, turnFileCount } from "../launch";
 import { isOverlayMode, useLayoutMode } from "../layoutMode";
 import { refreshPalette } from "../palette";
-import { loadGraphOpen, loadPrefs, savePrefs, saveGraphOpen, type Prefs } from "../prefs";
+import {
+  graphModeFromArg,
+  loadGraphOpen,
+  loadPrefs,
+  savePrefs,
+  saveGraphOpen,
+  type GraphMode,
+  type Prefs,
+} from "../prefs";
 import { connectBlock, connectKind } from "../external";
 import { helpText, parseSpawn, type ParsedSlash } from "../slash";
 import { applyTheme, loadTheme, saveTheme, themeFromArg, type Theme } from "../theme";
@@ -100,6 +108,19 @@ export default function SynapsePage() {
     },
     [sessionId],
   );
+
+  /* Flat or in depth. Remembered the way the model and the budgets are —
+     one blob, written once — so the choice survives a reload and is not
+     asked again. Nothing else changes: the panel stays open, the turn
+     stays selected, and whatever was inspected stays inspected. */
+  const setGraphMode = useCallback((graphMode: GraphMode) => {
+    setPrefs((before) => {
+      if (before.graphMode === graphMode) return before;
+      const next = { ...before, graphMode };
+      savePrefs(next);
+      return next;
+    });
+  }, []);
 
   const liveSteps =
     view.stepsByTurn[session?.current_turn_id ?? ""] ?? view.steps;
@@ -279,9 +300,21 @@ export default function SynapsePage() {
         case "close":
           setCloseAsk(true);
           break;
-        case "graph":
-          setGraph(!graphOpen);
+        /* `/graph` on its own is the toggle it has always been.
+           `/graph 3d` names a drawing, and naming one opens the panel:
+           asking for depth and getting a closed pane would be a
+           non-answer. */
+        case "graph": {
+          const wanted = graphModeFromArg(arg);
+          if (wanted) {
+            setGraphMode(wanted);
+            setGraph(true);
+            note("system", `graph: ${wanted}`);
+          } else {
+            setGraph(!graphOpen);
+          }
           break;
+        }
         case "settings":
           setSettingsOpen(true);
           break;
@@ -488,6 +521,8 @@ export default function SynapsePage() {
                   onCloseInspector={closeInspector}
                   isolated={isolated}
                   onIsolate={setIsolated}
+                  mode={prefs.graphMode}
+                  onMode={setGraphMode}
                   onCollapse={() => setGraph(false)}
                 />
               </div>

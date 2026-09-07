@@ -137,6 +137,7 @@ describe("prefs", () => {
       gtMode: "advisory",
       stepLimit: 12,
       wallSeconds: null,
+      graphMode: "2d",
     });
   });
 

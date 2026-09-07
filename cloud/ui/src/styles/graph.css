@@ -114,6 +114,37 @@
   touch-action: none;
 }
 
+/* The names, on a flat canvas over the 3D field. It never takes the
+   pointer: the picking happens against the GL canvas underneath. */
+.graph-labels {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+/* One line, under the graph, when depth was asked for and could not be
+   given. It is a sentence rather than an empty pane on purpose. */
+.graph-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  margin: 0;
+  padding: 4px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+}
+
+/* `2d` / `3d`, as one control rather than two loose buttons. */
+.bar-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
 .graph-empty {
   position: absolute;
   inset: 0;

@@ -28,7 +28,11 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "stop", arg: null, hint: "stop the turn in flight" },
   { name: "close", arg: null, hint: "close the session and discard its workspace" },
-  { name: "graph", arg: null, hint: "show or hide the code graph — ctrl+g" },
+  {
+    name: "graph",
+    arg: "[2d|3d]",
+    hint: "show or hide the code graph, or name how it is drawn — ctrl+g",
+  },
   { name: "resume", arg: null, hint: "pick up a previous session — ctrl+r" },
   { name: "settings", arg: null, hint: "model, ground truth and the per-turn budgets" },
   {
