@@ -123,9 +123,13 @@ describe("slash commands", () => {
 });
 
 describe("prefs", () => {
-  it("defaults to nemotron, advisory, 60 steps and the server's wall clock", () => {
+  it("defaults to the first offered model, advisory, 60 steps and the server's wall clock", () => {
     expect(DEFAULT_PREFS.model).toBe(MODELS[0]);
-    expect(DEFAULT_PREFS.model).toBe("nvidia/nemotron-3-super-120b-a12b:free");
+    /* Named rather than pinned: a provider retires a free model without
+       warning, and the only rule that has to hold is that the default is
+       one we actually offer. Pinning the string here is what let a retired
+       model sit in the list as the default. */
+    expect(MODELS).toContain(DEFAULT_PREFS.model);
     expect(DEFAULT_PREFS.gtMode).toBe("advisory");
     expect(DEFAULT_PREFS.stepLimit).toBe(60);
     expect(DEFAULT_PREFS.wallSeconds).toBeNull();

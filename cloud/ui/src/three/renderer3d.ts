@@ -114,8 +114,14 @@ const FLARE_SLOTS = 24;
  * once, with everything behind everything else, so the same alpha adds up
  * to a denser picture. The ratios between the kinds are what carry the
  * distinction, and those are untouched.
+ *
+ * Raised from 0.86 after looking at it: depth costs a relation twice, once
+ * to the fog and once to being seen end-on, and at the flat view's alpha
+ * the connections simply were not there — a field of unconnected dots,
+ * which is the one thing this view exists not to be. The kinds keep their
+ * ratio, so a call still reads louder than an import.
  */
-const EDGE_SCALE = 0.86;
+const EDGE_SCALE = 1.8;
 
 export interface Frame3DState {
   field: ParticleField;

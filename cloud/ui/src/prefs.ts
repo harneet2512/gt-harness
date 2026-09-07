@@ -14,11 +14,17 @@ export const PREFS_KEY = "synapse:prefs";
 /** Per-session "is the graph panel open", keyed by session id. */
 export const GRAPH_KEY = "synapse:graph";
 
-/** The models the picker offers by name. Anything else is free text. */
+/** The models the picker offers by name. Anything else is free text.
+ *
+ * The first is the default a new session gets, so it has to be one the
+ * provider still serves: `nvidia/nemotron-3-super-120b-a12b:free` was
+ * retired upstream and every creation preflight against it came back a
+ * 502, which the browser could only report as "the session could not be
+ * created". A default that does not exist is not a default. */
 export const MODELS = [
-  "nvidia/nemotron-3-super-120b-a12b:free",
-  "google/gemma-4-31b-it:free",
   "minimax/minimax-m3:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "google/gemma-4-31b-it:free",
   "deepseek/deepseek-v4-flash",
 ] as const;
 
