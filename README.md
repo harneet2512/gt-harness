@@ -1,6 +1,16 @@
 # GT-Harness
 
-GT-Harness is a host-owned repository-intelligence layer for coding agents. The active benchmark runtime augments Mini-SWE-Agent with bounded, source-grounded repository context instead of asking the model to rediscover the repository from scratch.
+## The evolution of GroundTruth into a complete agent harness
+
+GroundTruth began as an MCP server for giving AI coding agents verified structural evidence about the repositories they edit. AI agents often work from partial context: they see a few files, guess the rest, and produce plausible code that silently breaks callers, misuses APIs, or invents imports that do not exist.
+
+GroundTruth addresses this by pre-computing repository structure and delivering verified evidence at the moment it matters: before generation and after edits. It uses deterministic facts from the codebase rather than additional model calls or embeddings.
+
+GT-Harness extends that foundation into a complete, host-owned agent system with live sessions, repository-aware planning, hybrid retrieval, bounded evidence delivery, worker coordination, verification, replayable receipts, and benchmark integrations.
+
+The current harness implementation is maintained here:
+
+**[GT-Harness on GitHub](https://github.com/harneet2512/gt-harness)**
 
 ## Active agent and benchmark scaffold
 
@@ -27,6 +37,20 @@ The current system combines:
 The goal is not to force a model's answer. The goal is to give the model less context, but better-grounded context, at the moment it can use it.
 
 ## Measured results
+
+### GroundTruth evidence results
+
+The original GroundTruth evidence layer was evaluated on SWE-bench Verified using the same model, harness, and compute within each comparison:
+
+| Model | Without GT | With GT | Delta |
+|---|---:|---:|---:|
+| GPT-5 Mini | 277/500 (55.4%) | **289/500 (57.8%)** | **+12 tasks (+2.4pp)** |
+| Gemini 2.5 Flash | ~343/500 | **~357/500** | **+14 tasks (+2.8pp)** |
+| Gemini 3 Flash | 379/500 (75.80%) | **382/500 (76.4%)** | **+3 tasks (+0.6pp)** |
+
+Across the reported comparisons, the average improvement in operating efficiency was **19.5%**. These are benchmark observations, not a universal guarantee for every model or repository.
+
+The evidence layer provides caller patterns, import paths, test assertions, git precedent, blast radius, type contracts, and sibling conventions. The harness delivers that evidence without requiring the model to rediscover the repository from scratch.
 
 ### Retrieval benchmark
 
