@@ -1,10 +1,10 @@
 # Project operating context
 
 For HAR-83, Mini-SWE integration, GT architecture, benchmark hardening, or
-performance work, read `GT_HARNESS_SESSION_HANDOFF.md` before acting.
-Read `BENCHMARK_READINESS_STATUS.md` for current proof and smoke authorization.
+performance work, read `docs/operations/GT_HARNESS_SESSION_HANDOFF.md` before acting.
+Read `docs/operations/BENCHMARK_READINESS_STATUS.md` for current proof and smoke authorization.
 Before any benchmark dispatch, also read and execute
-`BENCHMARK_DISPATCH_CHECKLIST.md` in priority order. A later green check never
+`docs/operations/BENCHMARK_DISPATCH_CHECKLIST.md` in priority order. A later green check never
 overrides an earlier red or missing check.
 
 The shipping product is the canonical DeepSWE path:
@@ -37,7 +37,8 @@ Do not perform GCP authentication, account switching, credential mutation, or pa
 ## Product identity and semantic conservation
 
 Before GT implementation work, read the current user plan,
-`GT_HARNESS_SESSION_HANDOFF.md`, and `docs/plans/product-completion-contract.md`.
+`docs/operations/GT_HARNESS_SESSION_HANDOFF.md`, and
+`docs/plans/product-completion-contract.md`.
 The Groundtruth master architecture at `D:/Groundtruth/gt_gt.md`, Part I, explains
 the product; its historical run states and older policy limits do not supersede
 the current user plan or this harness's pinned installed execution path.

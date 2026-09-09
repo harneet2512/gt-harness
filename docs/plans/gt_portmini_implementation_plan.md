@@ -187,7 +187,7 @@ and semantic negative separately.
 
 ### W6 — Implement and audit all 17 features
 
-Use the canonical names in `gt_features.md` and record opportunity, trigger,
+Use the canonical names in `../architecture/gt_features.md` and record opportunity, trigger,
 delivery, consumption, action consistency, and outcome for every task. The mapping
 must include the twelve identities explicitly listed in `portmini.md`:
 
@@ -209,7 +209,7 @@ must include the twelve identities explicitly listed in `portmini.md`:
 The apparent twelve-row versus seventeen-identity difference is intentional:
 five rows pair a semantic identity with its byte-owner alias (for example
 `localization` + `GT_LOC_RESLOT`). Before W1/W2 implementation, reconcile the
-authoritative 17-name list from `gt_features.md` with these 12 trigger rows and
+authoritative 17-name list from `../architecture/gt_features.md` with these 12 trigger rows and
 version the resulting manifest. Do not invent names from historical toggles and
 do not count lifecycle labels as features without an identity. No feature may be
 inferred from a log substring. An eligible feature with no terminal status is an

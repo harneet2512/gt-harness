@@ -87,7 +87,7 @@ GT contract compiler -> typed obligations/predicates -> external GT state/event 
   submit gate -> FINISHED or bounded recovery -> STUCK
 ```
 
-The real executable is [`scripts/miniswe_gt_run.py`](scripts/miniswe_gt_run.py).
+The real executable is [`scripts/miniswe_gt_run.py`](../../scripts/miniswe_gt_run.py).
 It constructs Mini-SWE's `DefaultAgent`, `LitellmModel`, and `LocalEnvironment`, then
 installs GT hooks at the provider/action seams.  The adapter is deliberately a sidecar:
 it does not rewrite commands or silently mutate the task workspace.

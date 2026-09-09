@@ -24,7 +24,7 @@ Primary references:
 
 - Current user plan: finish runtime repairs and declared capabilities, then prove
   Harbor → installed Mini-SWE → GT → real execution → patch → official verifier.
-- `GT_HARNESS_SESSION_HANDOFF.md`: current harness ownership and release path.
+- `../operations/GT_HARNESS_SESSION_HANDOFF.md`: current harness ownership and release path.
 - `D:/Groundtruth/gt_gt.md`, Part I §§1–2 and §7: evidence operating layer,
   canonical event flow, evidence selection versus delivery compilation, and
   semantic conservation. Part II and older handoffs contain historical states.

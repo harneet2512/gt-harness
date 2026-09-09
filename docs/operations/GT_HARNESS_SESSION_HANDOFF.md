@@ -22,10 +22,11 @@ state at commit `1b81dca204f52f86190491707930cd4d2f56ee20` on
 `har81/canonical-task-identity` (2026-09-04 ET).
 
 The detailed independent review is
-[`astra_whole_system_review.md`](astra_whole_system_review.md). Treat that
+[`astra_whole_system_review.md`](../reviews/astra_whole_system_review.md). Treat that
 report as the evidence and performance reference; use this file as the
-execution map. `final_hardening_handoff.md`, `GT_MINISWE_HANDOFF.md`, and
-`GT_MINISWE_CHANGELOG.md` describe earlier milestones and contain stale heads,
+execution map. `../handoffs/final_hardening_handoff.md`,
+`../handoffs/GT_MINISWE_HANDOFF.md`, and `../handoffs/GT_MINISWE_CHANGELOG.md`
+describe earlier milestones and contain stale heads,
 proof states, and next steps. They are historical inputs, not current status.
 
 ## Mission and non-negotiable architecture
@@ -195,7 +196,7 @@ contain the following source repairs:
   delivery, capability non-invention, malformed artifacts, terminal health,
   usage accounting, and truthful LSP scheduling status.
 - The final independent report is committed at
-  `astra_whole_system_review.md`, SHA-256
+  `../reviews/astra_whole_system_review.md`, SHA-256
   `732b2a8202af25ccc9f629f223ca3c2cab23b327477bd568ec4bd7b0d4ab3cea`,
   and attached to HAR-83 as “Astra whole-system review — final at 1b81dca2”.
 
@@ -323,7 +324,7 @@ release prerequisite, not proof of higher solve rate.
 
 ## Safe continuation procedure
 
-1. Read `AGENTS.md`, this handoff, and the Astra report's verdict, architecture,
+1. Read `../../AGENTS.md`, this handoff, and the Astra report's verdict, architecture,
    current-fix review, R25-R29, performance ranking, and final addendum.
 2. Confirm `git rev-parse HEAD` and the branch. Preserve unrelated worktree
    changes. `artifacts/product-closeout-local/` is untracked local evidence and
