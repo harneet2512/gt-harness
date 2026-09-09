@@ -59,23 +59,41 @@ def render_cursor(
     *,
     proven_delta: tuple[str, ...] = (),
 ) -> str:
-    """The tail block. Empty when there is nothing outstanding to say."""
+    """The tail block: what to build next. NEVER a claim about what is done.
+
+    The first version of this reported progress -- "9/12 requirements proven",
+    with the satisfied ones named. It was measured on run 34404529920 and it was
+    a disaster. A row turns GREEN through ``evaluate_passing_observation``, which
+    matches a passing command lexically against an obligation; commands the agent
+    ran while merely EXPLORING were enough to satisfy nine of twelve rows on a
+    task where it had written no code at all. The agent read "9/12 proven", drew
+    the obvious conclusion, and submitted after 208 turns and zero edits. pest
+    went from 85 of 104 tests to none.
+
+    The inaccuracy was not new. Promoting it to the most action-guiding position
+    in the context, phrased as a confident count, is what made it expensive.
+
+    So the cursor no longer counts, and no longer names anything as satisfied. It
+    says which requirement to work on, what the design was, and the command that
+    would demonstrate it. A steering signal may only assert what it can prove,
+    and this one cannot prove completion, so it does not mention completion.
+
+    ``proven_delta`` is still accepted so callers need not change, and is
+    deliberately ignored.
+    """
     if plan.status == "ABSTAINED" or not plan.rows:
         return ""
-    total = len(plan.rows)
     outstanding = tuple(row_id for row_id in unmet if plan.row(row_id) is not None)
-    proven = total - len(outstanding)
 
     lines = [f"[{CURSOR_TAG}]"]
-    for row_id in proven_delta[:3]:
-        row = plan.row(row_id)
-        if row is not None:
-            lines.append(f"  proven: {row_id} {_clip(row.text, 90)}")
-
     if not outstanding:
+        # An empty unmet set is NOT proof the work is done: it is equally the
+        # shape of predicates that never mapped, or of lexical matches on
+        # exploration. Say what is actually known and hand the judgement back.
         lines.append(
-            f"  all {total} requirements have evidence. Re-check the regression "
-            "baseline, then submit."
+            "  GT is not tracking an outstanding requirement right now. That is "
+            "not evidence the change is complete -- check the request yourself "
+            "before submitting."
         )
         return "\n".join(lines)
 
@@ -83,13 +101,14 @@ def render_cursor(
     row = plan.row(row_id)
     if row is None:
         return ""
-    lines.append(f"  {proven}/{total} requirements proven. Now: {row_id}")
+    lines.append(f"  Requirement to work on now: {row_id}")
     lines.append(f"    {_clip(row.text, MAX_TEXT_CHARS)}")
     if row.approach:
         lines.append(f"    design: {_clip(row.approach, MAX_TEXT_CHARS)}")
     if row.verification_command:
         lines.append(
-            f"    prove it with: {_clip(row.verification_command, MAX_COMMAND_CHARS)}"
+            "    when you believe it is done, demonstrate it with: "
+            f"{_clip(row.verification_command, MAX_COMMAND_CHARS)}"
         )
     else:
         lines.append(
@@ -98,7 +117,7 @@ def render_cursor(
         )
     remaining = [r for r in outstanding if r != row_id]
     if remaining:
-        lines.append(f"    then: {', '.join(remaining[:6])}")
+        lines.append(f"    still to satisfy: {', '.join(remaining[:6])}")
     return "\n".join(lines)
 
 

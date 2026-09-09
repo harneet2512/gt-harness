@@ -43,11 +43,24 @@ def test_the_cursor_names_one_row_and_how_to_prove_it():
     plan = _plan()
     text = render_cursor(plan, ("req-1", "req-2", "req-3"))
     assert CURSOR_TAG in text
-    assert "0/3 requirements proven" in text
     assert "req-3" in text
     assert "pytest tests/test_3.py" in text
     # exactly one row is in play
-    assert text.count("Now:") == 1
+    assert text.count("Requirement to work on now:") == 1
+
+
+def test_the_cursor_never_claims_a_requirement_is_satisfied():
+    """It reported "9/12 proven" on a task that had written no code.
+
+    A row turns GREEN by lexical match against a passing command, and commands
+    run while merely exploring were enough. The agent read the count, drew the
+    obvious conclusion and submitted after 208 turns and zero edits.
+    """
+    plan = _plan()
+    text = render_cursor(plan, ("req-1", "req-2"), proven_delta=("req-3",))
+    lowered = text.lower()
+    for claim in ("proven", "satisfied", "complete", "/3"):
+        assert claim not in lowered, claim
 
 
 def test_the_cursor_is_small():
@@ -57,19 +70,20 @@ def test_the_cursor_is_small():
     assert len(text) < 700, len(text)
 
 
-def test_a_proven_row_is_announced_once():
+def test_the_cursor_moves_on_without_announcing_the_row_it_left():
     plan = _plan()
     text = render_cursor(plan, ("req-1", "req-2"), proven_delta=("req-3",))
-    assert "proven: req-3" in text
-    assert "1/3 requirements proven" in text
+    assert "req-3" not in text
+    assert "req-1" in text
 
 
-def test_nothing_outstanding_says_so_and_points_at_the_baseline():
+def test_an_empty_unmet_set_is_not_reported_as_completion():
+    """Empty is equally the shape of predicates that never mapped."""
     plan = _plan()
     text = render_cursor(plan, ())
-    assert "all 3 requirements have evidence" in text
-    assert "regression" in text
-    assert "Now:" not in text
+    assert "not evidence the change is complete" in text
+    assert "check the request yourself" in text
+    assert "Requirement to work on now:" not in text
 
 
 def test_a_row_with_no_check_says_so_rather_than_inventing_one():
@@ -89,5 +103,5 @@ def test_an_unknown_row_id_never_inflates_the_count():
     """Predicates can outlive rows; a stale id must not read as progress."""
     plan = _plan()
     text = render_cursor(plan, ("req-1", "ghost-row"))
-    assert "2/3 requirements proven" in text
+    assert "req-1" in text
     assert "ghost-row" not in text

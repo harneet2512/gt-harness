@@ -286,6 +286,20 @@ The block is 1.94% of a median 80,169-token request and is cached after the
 first call. The cursor across 161 turns is 12,880 tokens, **0.057%** of that
 task's 22.7M prompt tokens. Token cost has never been the constraint here.
 
+**The cursor must never claim completion.** Its first version reported
+progress -- "9/12 requirements proven", naming the satisfied rows. Measured on
+run 34404529920 that was a disaster: a row turns GREEN through
+`evaluate_passing_observation`, which matches a passing command lexically
+against an obligation, and commands the agent ran while merely EXPLORING
+satisfied nine of twelve rows on a task where it had written no code at all.
+The agent read the count, drew the obvious conclusion, and submitted after 208
+turns and zero edits. pest fell from 85 of 104 tests to none, and awilix from a
+pass to 22 of 24. The inaccuracy was not new; promoting it to the most
+action-guiding position in the context, phrased as a confident count, is what
+made it expensive. **A steering signal may only assert what it can prove.** The
+cursor now names the requirement to work on, its design and the command that
+would demonstrate it, and says nothing about what is done.
+
 **The cursor is the part that makes the plan act.** The block alone was a
 document filed at turn one and never mentioned again: across a 300-turn task the
 tail was touched three times. The cursor names one requirement, its design and
