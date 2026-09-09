@@ -166,7 +166,7 @@ def test_registration_is_refused_after_the_first_edit(tmp_path, graph):
     assert adapter.register_plan_predicates(plan) == 0
 
 
-def test_the_gate_refuses_once_then_accepts(tmp_path, graph):
+def test_the_gate_keeps_refusing_until_refusals_stop_buying_evidence(tmp_path, graph):
     adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
     _plan_for(inputs, adapter)
     session = GTSession(
@@ -191,6 +191,17 @@ def test_the_gate_refuses_once_then_accepts(tmp_path, graph):
     assert adapter.pending_directives
     assert "GT PLAN GATE" in adapter.pending_directives[0]
 
+    # It keeps refusing while the budget is healthy and nothing has been proven.
+    # Refusing exactly once let a measured task submit unproven with 71 minutes
+    # and 142 steps still available.
+    assert session.plan_submit_gate() is False
+
+    # ...but it concedes rather than run the task into the deadline with no
+    # submission at all, once refusals have stopped buying evidence.
+    from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
+
+    for _ in range(MAX_REFUSALS_WITHOUT_PROGRESS):
+        session.plan_submit_gate()
     assert session.plan_submit_gate() is True
 
 

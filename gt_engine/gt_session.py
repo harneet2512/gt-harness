@@ -257,6 +257,11 @@ class GTSession:
         self._open_executions: set[str] = set()
         self._select_catalog_attempted = False
         self._plan_gate_refusals = 0
+        # Refusals since a plan row last turned green, and the unmet set as it
+        # stood at the last refusal. Progress resets the first; the second is
+        # what "progress" is measured against.
+        self._plan_gate_stalled_refusals = 0
+        self._plan_gate_last_unmet: tuple[str, ...] | None = None
         self._plan_baseline_report = None
         self._plan_agent = None
         self._plan_progress_shipped: dict[str, str] = {}
@@ -1176,12 +1181,24 @@ class GTSession:
             remaining_seconds=remaining_seconds,
             remaining_steps=remaining_steps,
             refusals=self._plan_gate_refusals,
+            refusals_without_progress=self._plan_gate_stalled_refusals,
             baseline_status=baseline_status,
         )
         self._engine.store.append("plan_gate_decision", **decision.as_row())
         if decision.accepted:
             return True
         self._plan_gate_refusals += 1
+        # Did the previous refusal actually buy anything? A row that has left
+        # the unmet set since then is evidence the agent is acting on the gate,
+        # and it earns another refusal. A refusal that changed nothing counts
+        # toward the stall limit, so the gate concedes rather than run the task
+        # into the deadline with no submission at all.
+        previous = self._plan_gate_last_unmet
+        if previous is not None and set(previous) - set(unmet):
+            self._plan_gate_stalled_refusals = 0
+        else:
+            self._plan_gate_stalled_refusals += 1
+        self._plan_gate_last_unmet = tuple(unmet)
         self._engine.pending_directives.append(decision.directive)
         return False
 

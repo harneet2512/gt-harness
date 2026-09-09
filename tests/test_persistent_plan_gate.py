@@ -56,13 +56,57 @@ def test_unmet_rows_refuse_once_when_there_is_room():
     assert "pytest -k req-a" in decision.directive
 
 
-def test_the_second_submit_is_always_accepted():
-    """The gate is a reminder, not a cage."""
+def test_a_second_submit_is_refused_while_budget_and_progress_remain():
+    """Refusing once made the gate a formality.
+
+    Measured on run 34374028796, task claude-code: refused with rows unmet, then
+    accepted the next attempt 34 seconds later with 4,260 seconds and 142 steps
+    still available and the same rows still unproven. Seventy-one minutes went
+    unused because a counter said the gate had had its turn.
+    """
     decision = decide(
-        plan=_plan(), unmet_rows=("req-a",), regressions=(), refusals=1, **AMPLE
+        plan=_plan(), unmet_rows=("req-a",), regressions=(), refusals=1,
+        refusals_without_progress=0, **AMPLE
+    )
+    assert not decision.accepted
+    assert decision.reason == "unmet_plan_rows"
+
+
+def test_the_gate_concedes_once_refusals_stop_buying_evidence():
+    """A gate that refuses forever turns a partial score into a zero."""
+    from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
+
+    decision = decide(
+        plan=_plan(), unmet_rows=("req-a",), regressions=(),
+        refusals=MAX_REFUSALS_WITHOUT_PROGRESS,
+        refusals_without_progress=MAX_REFUSALS_WITHOUT_PROGRESS, **AMPLE
     )
     assert decision.accepted
-    assert decision.reason == "already_refused_once"
+    assert decision.reason == "refusals_without_progress"
+
+
+def test_progress_earns_another_refusal():
+    """An agent that keeps proving rows is never cut off."""
+    from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
+
+    decision = decide(
+        plan=_plan(), unmet_rows=("req-a",), regressions=(),
+        refusals=MAX_REFUSALS_WITHOUT_PROGRESS + 5,
+        refusals_without_progress=0, **AMPLE
+    )
+    assert not decision.accepted
+
+
+def test_a_caller_that_omits_the_stall_counter_keeps_the_old_shape():
+    """Backward compatible: without the counter every refusal is a stall."""
+    from gt_engine.persistent_plan.gate import MAX_REFUSALS_WITHOUT_PROGRESS
+
+    decision = decide(
+        plan=_plan(), unmet_rows=("req-a",), regressions=(),
+        refusals=MAX_REFUSALS_WITHOUT_PROGRESS, **AMPLE
+    )
+    assert decision.accepted
+    assert decision.reason == "refusals_without_progress"
 
 
 def test_low_time_escapes_rather_than_forcing_a_timeout():

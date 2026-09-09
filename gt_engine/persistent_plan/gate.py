@@ -25,8 +25,27 @@ from dataclasses import dataclass, field
 # scores the same as a wrong answer. The agent needs room to act on the refusal.
 MIN_REMAINING_SECONDS = 600.0
 MIN_REMAINING_STEPS = 20
-MAX_REFUSALS = 1
 MAX_LISTED_ROWS = 12
+
+# How many refusals may pass without the agent proving a single new row.
+#
+# Refusing exactly once made the gate a formality. Measured on run
+# 34374028796, task claude-code: the gate refused with rows unmet, and accepted
+# the very next attempt 34 seconds later with 4,260 seconds and 142 steps still
+# available and the same rows still unproven. Seventy-one minutes went unused
+# because a counter said "you have had your turn". awilix was the same, 1,647
+# seconds and 108 steps left.
+#
+# A plan that yields the moment it is ignored is advice, and thirteen surveyed
+# coding agents already ship advice. So refusal now persists while the budget is
+# healthy AND refusals are still converting into evidence.
+#
+# The stall counter is the safety catch. A gate that refuses forever turns a
+# partial score into a zero, which is worse than submitting an incomplete patch,
+# so when this many consecutive refusals produce no newly proven row the gate
+# concedes and says so. Progress resets it: an agent that keeps proving rows is
+# never cut off.
+MAX_REFUSALS_WITHOUT_PROGRESS = 3
 
 
 @dataclass
@@ -75,6 +94,7 @@ def decide(
     remaining_steps: int,
     refusals: int,
     baseline_status: str = "",
+    refusals_without_progress: int | None = None,
 ) -> GateDecision:
     """The whole gate policy, as a pure function of the facts.
 
@@ -89,9 +109,12 @@ def decide(
     }
     if plan is None or not getattr(plan, "rows", ()):  # nothing to gate on
         return GateDecision(accepted=True, reason="no_plan", **common)
-    if refusals >= MAX_REFUSALS:
+    # Callers that predate the stall counter get the old shape, where every
+    # refusal counted as a stall, so their behaviour is unchanged.
+    stalled = refusals if refusals_without_progress is None else refusals_without_progress
+    if stalled >= MAX_REFUSALS_WITHOUT_PROGRESS:
         return GateDecision(
-            accepted=True, reason="already_refused_once",
+            accepted=True, reason="refusals_without_progress",
             unmet_rows=unmet_rows, regressions=regressions, **common,
         )
     blocking = tuple(unmet_rows) + tuple(regressions)
