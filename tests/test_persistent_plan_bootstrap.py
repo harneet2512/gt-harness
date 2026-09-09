@@ -536,10 +536,13 @@ def test_the_sweep_offers_only_pairs_the_graph_connects(inputs):
 
     anchors_by_row = inputs.anchors.anchors
     for row_id, mode in pairs:
-        reached = set(mode.reached_from)
-        anchored = {anchor.node_id for anchor in anchors_by_row.get(row_id, ())}
-        assert reached & anchored, (
-            f"{row_id} x {mode.symbol} is not a pair the graph connects"
+        anchors = anchors_by_row.get(row_id, ())
+        by_edge = set(mode.reached_from) & {anchor.node_id for anchor in anchors}
+        by_file = mode.file_path in {
+            anchor.file_path.replace("\\", "/").lstrip("./") for anchor in anchors
+        }
+        assert by_edge or by_file, (
+            f"{row_id} x {mode.symbol} is neither reached nor co-located"
         )
 
     # every pair is distinct, so the sweep is never padded with repeats
@@ -600,3 +603,87 @@ def test_gt_only_routing_flags_never_reach_the_provider():
     ).read_text(encoding="utf-8")
     for flag in ("_gt_select_catalog", "_gt_persistent_plan"):
         assert source.count(f'pop("{flag}", None)') >= 2, flag
+
+
+def test_same_file_pairing_is_a_union_not_a_fallback(inputs):
+    """A mode with an edge to one requirement still governs the others.
+
+    Measured on a real 52-requirement task: call edges alone give 27 cells over
+    18 requirements, and adding same-file gives 119 over 34. Running same-file
+    only when a mode has NO edge recovers none of that, because every mode there
+    had an edge -- to somebody else's anchor.
+    """
+    import dataclasses
+
+    from gt_engine.persistent_plan.bootstrap import mode_pairs
+
+    mode = next(m for m in inputs.anchors.modes if m.symbol == "DebugMode")
+    stranded = dataclasses.replace(mode, reached_from=())
+    anchors = dataclasses.replace(inputs.anchors, modes=(stranded,))
+    stranded_inputs = dataclasses.replace(inputs, anchors=anchors)
+
+    pairs = mode_pairs(stranded_inputs)
+    assert pairs, "a mode with no call edge must still be swept by file"
+    assert all(symbol.symbol == "DebugMode" for _row, symbol in pairs)
+    for row_id, _symbol in pairs:
+        files = {
+            anchor.file_path.replace("\\", "/").lstrip("./")
+            for anchor in stranded_inputs.anchors.anchors.get(row_id, ())
+        }
+        assert stranded.file_path in files
+
+
+def test_an_edge_to_one_requirement_does_not_exclude_the_others(inputs):
+    """The union is the whole point: a fallback would stop at the first rule."""
+    from gt_engine.persistent_plan.bootstrap import mode_pairs
+
+    pairs = mode_pairs(inputs)
+    by_symbol: dict[str, set[str]] = {}
+    for row_id, mode in pairs:
+        by_symbol.setdefault(mode.symbol, set()).add(row_id)
+
+    for mode in inputs.anchors.modes:
+        if not mode.reached_from:
+            continue
+        reached_rows = {
+            row_id
+            for row_id, anchors in inputs.anchors.anchors.items()
+            for anchor in anchors
+            if anchor.node_id in mode.reached_from
+        }
+        file_rows = {
+            row_id
+            for row_id, anchors in inputs.anchors.anchors.items()
+            for anchor in anchors
+            if anchor.file_path.replace("\\", "/").lstrip("./") == mode.file_path
+        }
+        if not (file_rows - reached_rows):
+            continue
+        assert by_symbol.get(mode.symbol, set()) >= (reached_rows | file_rows), (
+            f"{mode.symbol} lost the same-file rows to its call edge"
+        )
+        break
+
+
+def test_a_mode_no_pair_reached_is_still_shown(inputs):
+    """Hiding it left the planner unable to see an interaction we mispredicted."""
+    import dataclasses
+
+    from gt_engine.persistent_plan.bootstrap import mode_pairs
+
+    mode = next(m for m in inputs.anchors.modes if m.symbol == "DebugMode")
+    orphan = dataclasses.replace(
+        mode, symbol="OrphanMode", reached_from=(), file_path="nowhere/at/all.py"
+    )
+    anchors = dataclasses.replace(
+        inputs.anchors, modes=(*inputs.anchors.modes, orphan)
+    )
+    widened = dataclasses.replace(inputs, anchors=anchors)
+
+    pairs = mode_pairs(widened)
+    assert pairs, "the fixture still produces pairs"
+    assert "OrphanMode" not in {mode.symbol for _row, mode in pairs}
+
+    rendered = build_planning_messages(widened, PROMPT)[1]["content"]
+    assert "OrphanMode" in rendered, "an unpaired mode must survive into the prompt"
+    assert "OTHER MODES" in rendered

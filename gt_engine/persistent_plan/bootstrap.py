@@ -40,7 +40,10 @@ MAX_CALLERS_SHOWN = 6
 # no interaction cells. The graph already records which anchor each mode was
 # reached from, so the cells that can possibly matter are known without the
 # model enumerating them.
-MAX_PAIRS_OFFERED = 40
+# Sized from the measured rule, not guessed: the union of call edges and
+# same-file yields 119 cells on the 52-requirement task, and a cap of 40 would
+# have silently truncated two thirds of the sweep it exists to carry.
+MAX_PAIRS_OFFERED = 140
 MAX_DERIVED_ROWS = 24
 MAX_COMMAND_CHARS = 300
 
@@ -283,21 +286,41 @@ def mode_pairs(inputs: PlanInputs) -> list[tuple[str, Any]]:
     already known. Emitting it beats asking for a full sweep: the sweep is
     quadratic in inputs the engine controls, and paying for it in the model's
     reasoning budget bought nothing on the one run that tried.
+
+    Both rules run, always. Measured on a real 52-requirement task: call edges
+    alone yield 27 cells reaching 18 requirements and 10 of 24 modes, while
+    adding same-file yields 119 cells reaching 34 requirements and 19 modes --
+    still a tenth of the 1,248-cell product. Treating same-file as a fallback
+    for modes with no edge recovers none of that, because on that task every
+    mode HAS an edge; it just has one to somebody else's anchor. A requirement
+    that edits a file is subject to the switches already living in it.
     """
     rows_by_node: dict[int, list[str]] = {}
+    rows_by_file: dict[str, list[str]] = {}
     for row_id, anchors in inputs.anchors.anchors.items():
         for anchor in anchors:
             rows_by_node.setdefault(anchor.node_id, []).append(row_id)
+            path = str(anchor.file_path or "").replace("\\", "/").lstrip("./")
+            if path and row_id not in rows_by_file.setdefault(path, []):
+                rows_by_file[path].append(row_id)
     pairs: list[tuple[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for mode in inputs.anchors.modes:
-        for node_id in mode.reached_from:
-            for row_id in rows_by_node.get(node_id, ()):
-                key = (row_id, mode.symbol)
-                if key in seen:
-                    continue
-                seen.add(key)
-                pairs.append((row_id, mode))
+        candidates = [
+            row_id
+            for node_id in mode.reached_from
+            for row_id in rows_by_node.get(node_id, ())
+        ]
+        # Union, not fallback. A mode reached from one requirement's anchor
+        # still governs every other requirement editing the file it lives in,
+        # and that second group is the larger one.
+        candidates += list(rows_by_file.get(mode.file_path, ()))
+        for row_id in candidates:
+            key = (row_id, mode.symbol)
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((row_id, mode))
     return pairs
 
 
@@ -349,18 +372,29 @@ def _render_inputs(inputs: PlanInputs) -> str:
         remaining = len(pairs) - MAX_PAIRS_OFFERED
         if remaining > 0:
             lines.append(f"  ... {remaining} further pairs not listed")
-    elif inputs.anchors.modes:
+
+    # Modes that no pair reached are still shown, always. Rendering them only
+    # when the pair list was EMPTY hid 14 of 24 modes on a measured task, which
+    # left the planner unable to notice an interaction the pairing rule failed
+    # to predict. The pairs are what must be decided; this is what may matter.
+    paired = {mode.symbol for _row_id, mode in pairs}
+    unpaired = [mode for mode in inputs.anchors.modes if mode.symbol not in paired]
+    if unpaired:
         lines.append("")
         lines.append(
-            "EXISTING MODES near these definitions. The graph ties none of them "
-            "to a specific requirement, so treat them as context, not as a sweep:"
+            "OTHER MODES in the same neighbourhood, which no requirement above "
+            "was tied to. Not part of the sweep -- raise one only if you see an "
+            "interaction the pairing missed:"
+            if pairs
+            else "EXISTING MODES near these definitions, tied to no specific "
+            "requirement. Treat them as context, not as a sweep:"
         )
-        for mode in inputs.anchors.modes[:MAX_MODES_OFFERED]:
+        for mode in unpaired[:MAX_MODES_OFFERED]:
             members = ", ".join(mode.members[:12])
             lines.append(
                 f"  {mode.symbol} ({mode.kind}) @ {mode.file_path}: {members}"
             )
-    else:
+    elif not pairs:
         lines.append("")
         lines.append("EXISTING MODES: none reachable from these anchors.")
 
