@@ -1,0 +1,21 @@
+command: uv run --no-project --python 3.12.8 --with pytest pytest -vv tests/test_resolution_provenance.py
+python: 3.12.8
+platform: win32
+pytest: 9.1.1
+result: 9 passed in 0.94s
+
+============================= test session starts =============================
+platform win32 -- Python 3.12.8, pytest-9.1.1, pluggy-1.6.0
+collecting ... collected 9 items
+
+tests/test_resolution_provenance.py::test_native_and_normalized_kinds_round_trip_with_explicit_unknown PASSED [ 11%]
+tests/test_resolution_provenance.py::test_stable_ids_are_content_derived_not_transient_row_ids PASSED [ 22%]
+tests/test_resolution_provenance.py::test_unique_candidate_selection_must_be_a_retained_member PASSED [ 33%]
+tests/test_resolution_provenance.py::test_ambiguous_candidates_require_dense_ordinals_and_cannot_verify_selection PASSED [ 44%]
+tests/test_resolution_provenance.py::test_unresolved_states_have_no_candidates_or_selection[zero] PASSED [ 55%]
+tests/test_resolution_provenance.py::test_unresolved_states_have_no_candidates_or_selection[dynamic] PASSED [ 66%]
+tests/test_resolution_provenance.py::test_unresolved_states_have_no_candidates_or_selection[external_unresolved] PASSED [ 77%]
+tests/test_resolution_provenance.py::test_unresolved_states_have_no_candidates_or_selection[parser_incomplete] PASSED [ 88%]
+tests/test_resolution_provenance.py::test_legacy_selected_edge_is_conservatively_reconciled_without_candidate PASSED [100%]
+
+============================== 9 passed in 0.94s ==============================
