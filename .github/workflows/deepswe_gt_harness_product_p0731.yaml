@@ -225,6 +225,10 @@ jobs:
                       ),
                       "task_config_sha256": budget["task_config_sha256"],
                       "container_image": bundle_task["container_image"],
+                      "container_cache_image": (
+                          "ghcr.io/hbali-stack/deepswe-v1-1:"
+                          + bundle_task["container_image"].rsplit(":", 1)[1]
+                      ),
                       "container_digest": bundle_task["container_digest"],
                   }
               )
@@ -354,7 +358,7 @@ jobs:
           set -euo pipefail
           printf '%s' "$TASK_MATRIX" | jq -c '.include[]' | while read -r TASK_ROW; do
             TASK="$(printf '%s' "$TASK_ROW" | jq -r '.task')"
-            IMAGE="$(printf '%s' "$TASK_ROW" | jq -r '.container_image')"
+            IMAGE="$(printf '%s' "$TASK_ROW" | jq -r '.container_cache_image')"
             DIGEST="$(printf '%s' "$TASK_ROW" | jq -r '.container_digest')"
             test -n "$TASK" && test -n "$IMAGE"
             printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
@@ -522,12 +526,13 @@ jobs:
       - name: Pull and verify the exact task image
         env:
           SOURCE_IMAGE: ${{ matrix.container_image }}
+          CACHE_IMAGE: ${{ matrix.container_cache_image }}
           SOURCE_DIGEST: ${{ matrix.container_digest }}
         run: |
           set -euo pipefail
-          docker pull "${SOURCE_IMAGE}@${SOURCE_DIGEST}"
-          docker image inspect "${SOURCE_IMAGE}@${SOURCE_DIGEST}" >/dev/null
-          docker tag "${SOURCE_IMAGE}@${SOURCE_DIGEST}" "$SOURCE_IMAGE"
+          docker pull "${CACHE_IMAGE}@${SOURCE_DIGEST}"
+          docker image inspect "${CACHE_IMAGE}@${SOURCE_DIGEST}" >/dev/null
+          docker tag "${CACHE_IMAGE}@${SOURCE_DIGEST}" "$SOURCE_IMAGE"
           docker image inspect "$SOURCE_IMAGE" >/dev/null
 
       - name: Stage the verified uv installer for the task container

@@ -117,6 +117,8 @@ def test_readiness_workflows_enforce_full_suite_pinned_sources_and_dark_gate() -
 def test_paid_smoke_requires_all_exact_task_image_digests_before_provider_gate() -> None:
     paid = PAID_WORKFLOW.read_text(encoding="utf-8")
     assert '"container_image": bundle_task["container_image"]' in paid
+    assert '"container_cache_image": (' in paid
+    assert '"ghcr.io/hbali-stack/deepswe-v1-1:"' in paid
     assert '"container_digest": bundle_task["container_digest"]' in paid
     assert "image_digest_gate:" in paid
     assert "needs: [plan, readiness, image_digest_gate]" in paid
@@ -125,9 +127,9 @@ def test_paid_smoke_requires_all_exact_task_image_digests_before_provider_gate()
     assert 'docker buildx imagetools inspect --raw "$IMAGE_REF"' in paid
     assert 'test "sha256:${OBSERVED}" = "${DIGEST}"' in paid
     assert "Pull and verify the exact task image" in paid
-    assert 'docker pull "${SOURCE_IMAGE}@${SOURCE_DIGEST}"' in paid
+    assert 'docker pull "${CACHE_IMAGE}@${SOURCE_DIGEST}"' in paid
+    assert 'docker tag "${CACHE_IMAGE}@${SOURCE_DIGEST}" "$SOURCE_IMAGE"' in paid
     assert "image_cache:" not in paid
-    assert "ghcr.io/" not in paid
     assert "secrets.OPENROUTER_API_KEY" not in paid.split(
         "  image_digest_gate:", 1
     )[1].split(
