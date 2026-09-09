@@ -55,6 +55,7 @@ def test_only_closed_supported_workflow_set_is_active() -> None:
         "deepswe_cache_images.yml",
         "deepswe_gt_harness_product.yml",
         "deepswe_gt_harness_product_p0731.yaml",
+        "task_progress.yml",
         "tb2_cache_images.yml",
     ]
 
