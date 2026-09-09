@@ -77,7 +77,21 @@ def default_check(
 def build_deterministic_plan(inputs: PlanInputs) -> PersistentPlan:
     """Every prompt requirement, anchored, with a check, before any model call."""
     rows: list[PlanRow] = []
-    test_command = inputs.baseline.command if inputs.baseline.captured else ()
+    # The DISCOVERED command, not only a successfully parsed baseline run.
+    #
+    # Requiring `captured` tied every row's check to whether the pre-edit
+    # baseline produced parseable output, which is a different question
+    # entirely. Measured on run 34374028796: four of six tasks reported
+    # no_tests_observed, so `captured` was false, so test_command was empty, so
+    # default_check returned nothing and EVERY row in those plans shipped with
+    # no way to prove it. awilix carried 27 requirements and 0 checks; boa
+    # carried 41 and 0. The command itself was known all along -- discovery
+    # populates it even when the run times out or prints nothing parseable.
+    #
+    # A command we discovered is a legitimate check. Whether the suite was green
+    # beforehand is the regression baseline's business, and it is reported
+    # separately.
+    test_command = inputs.baseline.command
     for row in inputs.ledger.rows:
         anchors = inputs.anchors.anchors.get(row.row_id, ())
         covering = inputs.covering.get(row.row_id, ())

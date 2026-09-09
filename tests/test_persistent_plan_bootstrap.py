@@ -5,6 +5,7 @@ offered. Everything else is dropped and recorded, never repaired.
 """
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 
 import pytest
@@ -687,3 +688,55 @@ def test_a_mode_no_pair_reached_is_still_shown(inputs):
     rendered = build_planning_messages(widened, PROMPT)[1]["content"]
     assert "OrphanMode" in rendered, "an unpaired mode must survive into the prompt"
     assert "OTHER MODES" in rendered
+
+
+def test_a_row_keeps_its_check_when_the_baseline_did_not_parse(tmp_path, graph):
+    """A discovered command is a check; a green baseline is a separate question.
+
+    Measured on run 34374028796: four of six tasks reported no_tests_observed,
+    so the baseline was not "captured", so every row in those plans shipped with
+    no way to prove it. awilix carried 27 requirements and zero checks.
+    """
+    from gt_engine.persistent_plan.baseline import BaselineResult
+    from gt_engine.persistent_plan.deterministic import build_deterministic_plan
+
+    inputs = build_plan_inputs(
+        PROMPT, graph_db=graph, source_revision="src1", graph_revision="g1",
+        capture_baseline=False,
+    )
+    unparsed = BaselineResult(
+        status="no_tests_observed",
+        command=("python", "-m", "pytest"),
+        basis="pyproject",
+        confidence="high",
+    )
+    assert not unparsed.captured
+    inputs = dataclasses.replace(inputs, baseline=unparsed)
+
+    plan = build_deterministic_plan(inputs)
+    assert plan.rows
+    proved = [row for row in plan.rows if row.verification_command]
+    assert len(proved) == len(plan.rows), (
+        "every requirement must carry a check when a command was discovered"
+    )
+
+
+def test_a_large_ledger_drops_the_sweep_rather_than_the_designs(inputs):
+    """The budget is finite; design for every row outranks the interaction pass."""
+    from gt_engine.persistent_plan.bootstrap import (
+        MAX_ROWS_FOR_INTERACTION_SWEEP,
+        mode_pairs,
+    )
+
+    assert mode_pairs(inputs), "the fixture normally produces pairs"
+    assert len(inputs.ledger.rows) <= MAX_ROWS_FOR_INTERACTION_SWEEP
+
+    wide = dataclasses.replace(
+        inputs.ledger,
+        rows=inputs.ledger.rows * (MAX_ROWS_FOR_INTERACTION_SWEEP + 1),
+    )
+    big = dataclasses.replace(inputs, ledger=wide)
+    rendered = build_planning_messages(big, PROMPT)[1]["content"]
+    assert "CONFIGURATION PAIRS TO DECIDE" not in rendered
+    # the modes are still visible, just not posed as a sweep
+    assert "MODES" in rendered

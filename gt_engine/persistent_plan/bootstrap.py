@@ -44,6 +44,22 @@ MAX_CALLERS_SHOWN = 6
 # same-file yields 119 cells on the 52-requirement task, and a cap of 40 would
 # have silently truncated two thirds of the sweep it exists to carry.
 MAX_PAIRS_OFFERED = 140
+
+# Above this many requirements the interaction sweep is not offered at all.
+#
+# The call has one output budget and spends it on reasoning before it writes
+# anything. Measured on run 34374028796, every task burned essentially the whole
+# 32,768 tokens thinking: the two with small ledgers (12 and 13 rows) emerged
+# with a tool call, and the two with large ones (27 and 41 rows) never reached
+# it and shipped no design at all. Raising the ceiling from 16,384 had only
+# moved which tasks fell on which side of that line.
+#
+# So the ask shrinks as the ledger grows, rather than the budget growing. Design
+# and acceptance for every requirement is the part the agent cannot get
+# anywhere else; the interaction sweep is the part that is nice to have and the
+# part that scales quadratically. On a large ledger the sweep is dropped and the
+# modes are still listed as context, so nothing is hidden -- only un-asked.
+MAX_ROWS_FOR_INTERACTION_SWEEP = 20
 MAX_DERIVED_ROWS = 24
 MAX_COMMAND_CHARS = 300
 
@@ -98,7 +114,10 @@ PLANNING_SYSTEM_PROMPT = (
     "only where the suite actually covers the requirement. A requirement that "
     "genuinely cannot be verified must carry no_check_reason instead of an "
     "invented command: unverifiable scope has to be visible as unverifiable.\n"
-    "4. CONFIGURATION INTERACTIONS. The pairs to decide are listed for you: "
+    "4. CONFIGURATION INTERACTIONS, only if pairs are listed below. On a large "
+    "change request they are deliberately not offered, because design and "
+    "acceptance for every requirement matters more than this section and the "
+    "budget is finite; in that case skip straight to 4b. When they ARE listed: "
     "each is one requirement crossed with one mode its own definitions already "
     "reach. Decide those pairs only, and do not enumerate the full product -- "
     "the listed pairs are the ones the code can actually reach. REPORT ONLY "
@@ -351,7 +370,11 @@ def _render_inputs(inputs: PlanInputs) -> str:
         if not anchors_by_row.get(row.row_id):
             lines.append("    anchor: NONE - the graph resolved nothing for this row")
 
-    pairs = mode_pairs(inputs)
+    pairs = (
+        mode_pairs(inputs)
+        if len(inputs.ledger.rows) <= MAX_ROWS_FOR_INTERACTION_SWEEP
+        else []
+    )
     if pairs:
         lines.append("")
         lines.append(
