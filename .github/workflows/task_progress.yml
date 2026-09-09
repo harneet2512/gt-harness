@@ -1,0 +1,143 @@
+name: Official verifier task progress
+
+on:
+  workflow_call:
+    inputs:
+      expected_tasks_json:
+        description: "JSON task list or matrix include object"
+        required: true
+        type: string
+      task_job_regex:
+        description: "Regex matching only benchmark task jobs"
+        required: true
+        type: string
+      artifact_regex:
+        description: "Regex matching progress receipt artifacts"
+        required: false
+        type: string
+        default: '^benchmark-progress-'
+      poll_seconds:
+        required: false
+        type: string
+        default: "30"
+      monitor_timeout_minutes:
+        required: false
+        type: string
+        default: "350"
+      checkpoint_every:
+        required: false
+        type: string
+        default: "20"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  monitor:
+    name: Official verifier progress
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.monitor_timeout_minutes) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Publish live official-verifier progress
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          EXPECTED_TASKS_JSON: ${{ inputs.expected_tasks_json }}
+          TASK_JOB_REGEX: ${{ inputs.task_job_regex }}
+          ARTIFACT_REGEX: ${{ inputs.artifact_regex }}
+          POLL_SECONDS: ${{ inputs.poll_seconds }}
+          CHECKPOINT_EVERY: ${{ inputs.checkpoint_every }}
+          MONITOR_TIMEOUT_MINUTES: ${{ inputs.monitor_timeout_minutes }}
+        run: |
+          set -euo pipefail
+          receipts="$RUNNER_TEMP/benchmark-progress-receipts"
+          snapshot="$RUNNER_TEMP/benchmark-progress-snapshot.json"
+          checkpoints="$RUNNER_TEMP/benchmark-progress-checkpoints.jsonl"
+          mkdir -p "$receipts"
+          : > "$checkpoints"
+          checkpoint_every="${CHECKPOINT_EVERY:-20}"
+          [[ "$checkpoint_every" =~ ^[1-9][0-9]*$ ]] || checkpoint_every=20
+          next_checkpoint="$checkpoint_every"
+          monitor_minutes="${MONITOR_TIMEOUT_MINUTES:-350}"
+          [[ "$monitor_minutes" =~ ^[1-9][0-9]*$ ]] || monitor_minutes=350
+          deadline=$(( $(date +%s) + monitor_minutes * 60 ))
+          finalized=false
+
+          refresh_artifacts() {
+            gh api --paginate "repos/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | [.id, .name] | @tsv' \
+              | while IFS=$'\t' read -r artifact_id artifact_name; do
+                  [[ "$artifact_name" =~ $ARTIFACT_REGEX ]] || continue
+                  target="$receipts/$artifact_id"
+                  if [[ ! -f "$target/.downloaded" ]]; then
+                    mkdir -p "$target"
+                    gh api "repos/${REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$target/artifact.zip"
+                    unzip -oq "$target/artifact.zip" -d "$target"
+                    rm -f "$target/artifact.zip"
+                    touch "$target/.downloaded"
+                  fi
+                done
+          }
+
+          render_snapshot() {
+            local finalize_flag="$1"
+            args=(--root "$receipts" --expected-tasks-json "$EXPECTED_TASKS_JSON" --output "$snapshot")
+            [[ "$finalize_flag" == true ]] && args+=(--finalize-missing)
+            python -m scripts.benchmark_progress aggregate "${args[@]}"
+            read -r total completed graded passed verifier_failed infra remaining < <(
+              jq -r '[.total,.completed,.officially_graded,.passed,.verifier_failed,.infrastructure_failed,.remaining] | @tsv' "$snapshot"
+            )
+            echo "OFFICIAL_PROGRESS total=${total} completed=${completed} passed=${passed} reward_0=${verifier_failed} infra_failed=${infra} officially_graded=${graded} tasks_left=${remaining}"
+            while (( completed >= next_checkpoint )); do
+              jq -c --argjson checkpoint "$next_checkpoint" '. + {checkpoint: $checkpoint}' "$snapshot" >> "$checkpoints"
+              echo "::notice title=Benchmark checkpoint::${completed}/${total} completed | ${passed} passed | ${verifier_failed} reward 0 | ${infra} infra failed | ${remaining} left"
+              next_checkpoint=$(( next_checkpoint + checkpoint_every ))
+            done
+          }
+
+          while (( $(date +%s) < deadline )); do
+            refresh_artifacts || echo "::warning::Could not refresh progress artifacts; retrying"
+            jobs_json="$(gh api --paginate "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" | jq -s '{jobs: map(.jobs[]) }')"
+            read -r observed_jobs completed_jobs < <(
+              jq -r --arg regex "$TASK_JOB_REGEX" '
+                [.jobs[] | select(.name | test($regex))] as $tasks |
+                [($tasks|length), ($tasks|map(select(.status == "completed"))|length)] | @tsv' <<< "$jobs_json"
+            )
+            all_jobs_done=false
+            if (( observed_jobs > 0 && completed_jobs == observed_jobs )); then all_jobs_done=true; fi
+            render_snapshot "$all_jobs_done"
+            if [[ "$all_jobs_done" == true ]]; then finalized=true; break; fi
+            sleep "${POLL_SECONDS:-30}"
+          done
+
+          if [[ "$finalized" != true ]]; then
+            echo "::warning::Progress monitor reached its timeout; unreported tasks remain unclassified"
+          fi
+          {
+            echo "## Official verifier task progress"
+            echo
+            echo "| Metric | Count |"
+            echo "|---|---:|"
+            jq -r '"| Total tasks | \(.total) |\n| Completed | \(.completed) |\n| Passed (official reward 1) | \(.passed) |\n| Failed (official reward 0) | \(.verifier_failed) |\n| Failed due to infrastructure | \(.infrastructure_failed) |\n| Tasks left | \(.remaining) |"' "$snapshot"
+            echo
+            echo "A task is counted as passed or failed only when an official verifier reward is present."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload progress ledger
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: official-progress-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/benchmark-progress-snapshot.json
+            ${{ runner.temp }}/benchmark-progress-checkpoints.jsonl
+          if-no-files-found: error

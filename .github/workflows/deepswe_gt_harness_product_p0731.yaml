@@ -757,6 +757,23 @@ jobs:
           sudo chown -R --no-dereference "$(id -u):$(id -g)" results/deepswe
           chmod -R u+rwX results/deepswe
 
+      - name: Create official-verifier progress receipt
+        if: always()
+        run: |
+          python -m scripts.benchmark_progress emit-official \
+            --root results/deepswe \
+            --suite deepswe \
+            --task-id "$TASK" \
+            --output benchmark-progress.json
+
+      - name: Upload official-verifier progress receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-progress-deepswe-${{ matrix.ordinal }}-${{ github.run_id }}
+          path: benchmark-progress.json
+          if-no-files-found: error
+
       - name: Upload DeepSWE verifier and GT Harness product evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -764,6 +781,16 @@ jobs:
           name: gt-harness-deepswe20-task-${{ matrix.ordinal }}-${{ github.run_id }}
           path: results/deepswe/
           if-no-files-found: error
+
+  task_progress:
+    name: Task progress
+    if: ${{ always() && inputs.approve_paid_run == true }}
+    needs: [plan]
+    uses: ./.github/workflows/task_progress.yml
+    with:
+      expected_tasks_json: ${{ needs.plan.outputs.matrix }}
+      task_job_regex: '^task \(.+\)$'
+    secrets: inherit
 
   attest:
     if: ${{ always() && inputs.approve_paid_run == true }}
