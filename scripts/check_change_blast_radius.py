@@ -55,6 +55,7 @@ because the env leak passed in isolation and failed only in aggregate.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -178,9 +179,20 @@ def main() -> int:
     # suppresses the count line outright. The first run of this gate printed a
     # suite list and then nothing at all, which is precisely the failure this
     # file exists to prevent - a check whose output nobody can read.
+    # git exports GIT_DIR, GIT_INDEX_FILE, GIT_PREFIX and friends into every
+    # hook it runs, and this gate runs from a hook. Inherited, they follow
+    # pytest into the fixtures: a test that builds a throwaway repository and
+    # commits to it then writes to the REAL one instead, because its `git` calls
+    # resolve to the committing repository rather than its tmp_path. Measured:
+    # seven suites failing here that pass standalone, fixture commits landing on
+    # the live branch, and core.bare left set in the shared config so that every
+    # later commit in either worktree refused with "must be run in a work tree".
+    # The suite must decide its own repository, so the gate hands it none.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GT_PRECOMMIT_ACTIVE"] = "1"
     proc = subprocess.run([interpreter, "-m", "pytest", "--no-header",
                            "-p", "no:cacheprovider", *ordered],
-                          capture_output=True, text=True, cwd=ROOT)
+                          capture_output=True, text=True, cwd=ROOT, env=env)
     tail = [ln for ln in proc.stdout.splitlines() if ln.startswith("FAILED") or " passed" in ln
             or " failed" in ln or " error" in ln]
     for line in tail[-12:]:

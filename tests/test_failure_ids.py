@@ -204,6 +204,7 @@ def test_pre_commit_direct_command_bootstraps_repository_import_path():
         "construction gate refused",       # reachability refused: hooksPath elsewhere
         "failure-gate.json attests",       # reached the failure gate and reported
         "LINEAGE_MISMATCH",                # reached it and the manifest attests HEAD
+        "already inside a gate run",       # this suite IS the gate's payload
     )), spoke[:400]
 
 def test_final_readiness_requires_verdict_registry(tmp_path):

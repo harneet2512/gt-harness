@@ -11,6 +11,25 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 from scripts.check_failure_ids import main  # noqa: E402
 
+# A gate that runs the test suite cannot also be run BY the test suite.
+# tests/test_failure_ids.py executes this file to prove its import bootstrap
+# works, and the blast-radius gate at the bottom runs that very suite, so any
+# commit whose diff selects it forked hook -> pytest -> hook without bound:
+# measured at 184 live processes, physical memory down to 0.1 GB, three commits
+# killed mid-write and core.bare left corrupted in the shared config, which then
+# refused every later commit with "must be run in a work tree".
+#
+# The guard sits BELOW the import deliberately. What the self-test checks is
+# that the hook reaches its gates without a ModuleNotFoundError, and the line
+# above is that bootstrap; stopping here reports it and declines to recurse.
+if os.environ.get("GT_PRECOMMIT_ACTIVE") == "1":
+    print(
+        "construction gate: already inside a gate run, not re-entering",
+        file=sys.stderr,
+    )
+    raise SystemExit(0)
+os.environ["GT_PRECOMMIT_ACTIVE"] = "1"
+
 
 def _hook_git_will_run() -> Path:
     """The pre-commit file git resolves for THIS worktree, not for the repo."""
