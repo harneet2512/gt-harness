@@ -401,7 +401,7 @@ for."* The correction is in the artefact, not in a summary.
 
 ## 4. The boa investigation — CLOSED. The plan was wrong.
 
-`arch_pipeline.md` and the plan both said boa's *"publication never terminates"*.
+`../architecture/arch_pipeline.md` and the plan both said boa's *"publication never terminates"*.
 **It was an artefact of our own timeout.** boa publishes: `exit=0`,
 **36m02s (2,162 s)**, 883 files, 1,353,067 nodes, 2,700,172 edges, 8.1 GB database,
 at `GT_FLOW_FACT_BUDGET=512`. Every prior run was capped at 1500 s -- roughly ten
@@ -476,7 +476,7 @@ session line. Streams flagged it rather than silently rewriting history. Commits
 before and after the switch carry different trailers; this is cosmetic and no
 history was rewritten to hide it.
 
-**Documentation debt.** `arch_pipeline.md` still states that `cochange_partner` has
+**Documentation debt.** `../architecture/arch_pipeline.md` still states that `cochange_partner` has
 "no emitter anywhere" (lines ~306-307 and ~397-399). Item 6's engine half makes
 that false. The streams correctly did not edit a contended, landing-agent-owned
 file; correcting it is mine.

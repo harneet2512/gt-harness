@@ -1647,7 +1647,7 @@ by 88.9% in the corrected five-way run. Spare context-window capacity is not
 an instruction to refill the request with old observations.
 
 The candidate implementation follows the full contract in
-`gt_delivery_timing.md`:
+`../architecture/gt_delivery_timing.md`:
 
 1. **Step-0 graph orientation.** Task start now renders three to five bounded,
    obligation-linked file/symbol targets into the same sealed block as the
@@ -1874,7 +1874,7 @@ zero executed violations.
 
 ## Repository evidence
 
-- `gt_features.md`: historical/current feature map and live-run diagnoses
+- `../architecture/gt_features.md`: historical/current feature map and live-run diagnoses
   through `30590129776`.
 - `gt_engine/task_contract.py`: contract extraction and lexical matching.
 - `gt_engine/graph_context.py`: 14-surface inventory and task projection.

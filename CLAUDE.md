@@ -1,7 +1,7 @@
 # GT Harness contributor contract
 
 The product is the pinned DeepSWE → Pier/Harbor → Mini-SWE-Agent 2.4.6 → GT Harness →
-Groundtruth lifecycle described in `README.md` and `archdone.md`. The `nano` CLI and historical
+Groundtruth lifecycle described in `README.md` and `docs/architecture/archdone.md`. The `nano` CLI and historical
 benchmark workflows are compatibility artifacts, not the shipping acceptance surface.
 
 Before changing product behavior:

@@ -56,7 +56,7 @@ The only authorized HAR-83 paid route is:
 `config/provider_route.v1.json` is the sole route authority. The preflight,
 immutable run plan, Mini-SWE request body, provider-gate receipt, and final
 attestation must all match it exactly. Source the OpenRouter credential only as
-specified by `AGENTS.md`; never print or persist its value.
+specified by `../../AGENTS.md`; never print or persist its value.
 The task adapter must explicitly project `GT_PROVIDER_ROUTING_JSON` across the
 host/container boundary. An absent policy is a hard startup failure, never an
 invitation to use OpenRouter's default routing.

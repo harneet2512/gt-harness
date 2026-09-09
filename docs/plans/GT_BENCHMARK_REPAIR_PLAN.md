@@ -2,7 +2,7 @@
 
 Status: implementation in progress; **not benchmark ready**. No paid run is
 authorized by this document. Preserve the local closeout artifacts. Follow
-AGENTS.md and the dispatch checklist before any external execution.
+`../../AGENTS.md` and the dispatch checklist before any external execution.
 
 ## Acceptance contract
 
