@@ -329,3 +329,54 @@ def test_a_refused_submit_leaves_the_lifecycle_editable(tmp_path, graph):
     assert adapter.phase == "IMPLEMENT"
     (repo / "mod.py").write_text("x = 1\n", encoding="utf-8")
     adapter.note_edit(["mod.py"])
+
+
+def test_the_carried_snapshot_is_dropped_before_a_submit():
+    """A suite run by the submit gate can write; the carry must not survive it.
+
+    capture_workspace ran twice per action, 601 times on one measured task at
+    1.08s each. The two describe the same tree, so the post-image is reused as
+    the next pre-image -- but a stale pre-image would attribute one action's
+    edit to the next, or lose it, and a lost edit means a missed epoch bump.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "gt_engine" / "miniswe_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "carried_snapshot" in source
+    # reused rather than recaptured
+    assert "pre_snapshot = carried_snapshot" in source
+    # refreshed from every post-image
+    assert "carried_snapshot = post_snapshot" in source
+    # and dropped when GT itself may run the repository's suite
+    assert "carried_snapshot = None" in source
+
+    tree = ast.parse(source)
+    assigns = [
+        node
+        for node in ast.walk(tree)
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "carried_snapshot"
+                for t in node.targets
+            )
+        )
+        or (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "carried_snapshot"
+        )
+    ]
+    # declaration, post-image refresh, and at least one invalidation
+    assert len(assigns) >= 3
+
+    nonlocals = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Nonlocal) and "carried_snapshot" in node.names
+    ]
+    assert nonlocals, "the carry must be shared across actions, not per call"

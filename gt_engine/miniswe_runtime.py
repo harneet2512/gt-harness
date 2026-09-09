@@ -822,6 +822,22 @@ def install_runtime_hooks(
     bootstrap_preparing = False
     plan_started = False
     plan_preparing = False
+    # The previous action's post-image, reused as the next action's pre-image.
+    #
+    # capture_workspace ran twice per action -- 601 times on arktype at 1.08s
+    # each, 652s of a 6,049s task, the largest single piece of GT's own
+    # bookkeeping. The two captures describe the same tree: nothing between an
+    # action's post-image and the next action's pre-image touches the worktree,
+    # because the agent is not running and GT's own writes go to state
+    # directories that capture_workspace already excludes.
+    #
+    # "Reasonably certain" is not good enough for a snapshot, though: a stale
+    # pre-image would attribute one action's edit to the next, or lose it, and
+    # a lost edit means a missed epoch bump and evidence that outlives the code
+    # it described. So the carry is dropped by _drop_carried_snapshot() at every
+    # point where GT itself may run a subprocess against the worktree, and the
+    # capture happens for real on the next action.
+    carried_snapshot: Any = None
 
     def prepare_messages(_model: Any, messages: list[dict]) -> list[dict]:
         if session.disabled:
@@ -1236,6 +1252,7 @@ def install_runtime_hooks(
         return message
 
     def execute_actions(_agent: Any, message: dict) -> list[dict]:
+        nonlocal carried_snapshot
         from .miniswe_typed_actions import (
             execute_typed_action_fail_open,
             is_typed_action,
@@ -1425,6 +1442,13 @@ def install_runtime_hooks(
                     is_submit = is_submit_command(command)
                 except Exception as exc:  # noqa: BLE001 - detection is fail-open
                     session.degrade("submit_detection", exc)
+            if is_submit:
+                # The submit gate may re-run the repository's own suite to check
+                # the regression baseline, and a suite can write to tracked
+                # files. Anything carried from before that is no longer a
+                # description of this worktree, so the next action captures for
+                # real rather than trusting it.
+                carried_snapshot = None
             # Command-level fast path: the marker is literally in the command.
             if is_submit and not submit_allowed(pre_execution=True):
                 outputs.append(session.suppress(action, dict(_NOT_EXECUTED), reason="submit_refused"))
@@ -1445,10 +1469,12 @@ def install_runtime_hooks(
                         adapter.repo_root
                         and session.capability_active("snapshot_authority")
                     ):
-                        pre_snapshot = capture_workspace(
-                            adapter.repo_root,
-                            excluded_roots=_state_exclusions(adapter),
-                        )
+                        pre_snapshot = carried_snapshot
+                        if pre_snapshot is None:
+                            pre_snapshot = capture_workspace(
+                                adapter.repo_root,
+                                excluded_roots=_state_exclusions(adapter),
+                            )
                         adapter.record_repository_snapshot(
                             pre_snapshot, boundary="before_action"
                         )
@@ -1497,6 +1523,9 @@ def install_runtime_hooks(
                         adapter.repo_root,
                         excluded_roots=_state_exclusions(adapter),
                     )
+                    # This tree is the next action's starting tree, unless GT
+                    # runs something against the worktree in between.
+                    carried_snapshot = post_snapshot
                     pre_graph_snapshot = adapter.graph_query_snapshot()
                     transaction = diff_workspace(
                         pre_snapshot,
