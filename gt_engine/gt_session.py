@@ -57,7 +57,7 @@ CONFIGURED_OFF_STAGES = ("off", "global_kill_switch")
 _DEGRADE_STAGES = frozenset({
     "action_identity", "after_action", "before_action", "execution_identity",
     "execution_receipt", "execution_result_identity", "observation_splice",
-    "persistent_plan_delivery",
+    "persistent_plan_delivery", "plan_cursor",
     "prepare_messages", "provider_failure_receipt", "provider_response_receipt",
     "session_start", "submit_detection", "submit_gate",
     "submitted_result_missing", "suppression_receipt",
@@ -249,6 +249,9 @@ class GTSession:
         self._pending_localization_identity = ""
         self._queued_decision_candidates: list[GTDecisionCandidate] = []
         self._active_context_units: dict[str, dict[str, Any]] = {}
+        # None until the first cursor: an empty tuple is a real state (every row
+        # proven) and must not be confused with "never looked".
+        self._last_plan_unmet: tuple[str, ...] | None = None
         self._pending_context_units: dict[str, dict[str, Any]] = {}
         self._execution_sequence = 0
         self._open_executions: set[str] = set()
@@ -574,6 +577,61 @@ class GTSession:
         self._engine.start_task()
         return GTDecisionBatch(provenance=[{"event": "session_started"}])
 
+    def _plan_cursor_candidate(self) -> GTDecisionCandidate | None:
+        """One requirement's worth of steering, when the state has moved.
+
+        Fired on change rather than on a clock. The strongest published design
+        for this, Cursor's, re-anchors on an edit specifically -- the moment the
+        world stopped matching what the model last read. Our equivalent signal
+        is a row gaining or losing evidence, which is what this compares.
+
+        Superseded by key, so the tail carries one cursor and not a growing pile
+        of them. Cline's accretes into conversation history and is paid for
+        forever; this one replaces its predecessor.
+
+        Correct-or-quiet throughout: steering that raises is worse than steering
+        that is absent, and the plan is not load-bearing for the run.
+        """
+        if not self.model_visible or self._engine is None:
+            return None
+        plan = getattr(self._engine, "persistent_plan", None)
+        if plan is None or not getattr(plan, "rows", ()):
+            return None
+        try:
+            from .persistent_plan.cursor import render_cursor
+
+            unmet = tuple(self._engine.unmet_plan_rows())
+            previous = self._last_plan_unmet
+            if previous is not None and unmet == previous:
+                return None
+            proven = tuple(sorted(set(previous or ()) - set(unmet)))
+            rendered = render_cursor(plan, unmet, proven_delta=proven)
+            self._last_plan_unmet = unmet
+            if not rendered:
+                return None
+            payload_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+            supersession_key = "plan_cursor:task"
+            active = self._active_context_units.get(supersession_key)
+            reference = self._store_context_unit(rendered)
+            return GTDecisionCandidate(
+                rendered=rendered,
+                kind="context_delta",
+                dedup_key=f"prompt:{payload_hash}",
+                lane="prompt",
+                target="provider_prompt",
+                unit_id=payload_hash,
+                supersession_key=supersession_key,
+                supersedes=((active["unit_id"],) if active else ()),
+                source_revision=str(
+                    getattr(self._engine, "repository_revision", "") or ""
+                ),
+                artifact_sha256=reference.get("sha256", ""),
+                artifact_reference=reference or None,
+            )
+        except Exception as exc:  # noqa: BLE001 - steering is fail-open
+            self.degrade("plan_cursor", exc)
+            return None
+
     def before_model(self, messages: list[dict], iteration: int) -> GTDecisionBatch:
         """Deliver context additions (contract/localization) before a model call."""
         if self._engine is None or self.disabled:
@@ -625,6 +683,9 @@ class GTSession:
                     iteration=iteration,
                     rendered_bytes=len(rendered.encode("utf-8")),
                 )
+        cursor = self._plan_cursor_candidate()
+        if cursor is not None:
+            candidates.append(cursor)
         if (
             not self._task_start_shipped
             and self.config.delivery_path == "compiled"
