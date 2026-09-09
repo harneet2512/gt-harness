@@ -58,7 +58,7 @@ FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
     ),
     "plan_gate": (
         "tests/test_persistent_plan_integration.py::"
-        "test_the_gate_refuses_once_then_accepts",
+        "test_the_gate_keeps_refusing_until_refusals_stop_buying_evidence",
         "tests/test_persistent_plan_integration.py::"
         "test_the_gate_is_consulted_before_the_command_runs",
     ),
