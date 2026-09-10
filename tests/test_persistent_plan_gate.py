@@ -64,6 +64,25 @@ def test_no_blocking_evidence_does_not_claim_unknown_baseline_is_intact():
     assert decision.as_row()["completion_proven"] is False
 
 
+def test_gate_receipt_keeps_mapping_and_check_evidence_distinct():
+    decision = decide(plan=_plan(), unmet_rows=("req-b",), regressions=(), refusals=0,
+                      baseline_status="unknown", row_states={"req-a": "CHECK_PASSED", "req-b": "UNVERIFIED"},
+                      predicate_mapped_rows=("req-a",), **AMPLE)
+    evidence = decision.as_row()["evidence"]
+    assert evidence["check_passed_rows"] == ["req-a"]
+    assert evidence["unmapped_rows"] == ["req-b"]
+    assert evidence["unverified_rows"] == ["req-b"]
+    assert evidence["completion_assessment"] == "not_established"
+    assert evidence["baseline_assessment"] == "unknown"
+    assert not decision.accepted
+
+
+def test_gate_legacy_call_does_not_invent_mapping_evidence():
+    decision = decide(plan=_plan(), unmet_rows=(), regressions=(), refusals=0, **AMPLE)
+    assert decision.as_row()["evidence"]["mapping_assessment"] == "unavailable"
+    assert decision.as_row()["evidence"]["completion_assessment"] == "not_established"
+
+
 def test_unmet_rows_refuse_once_when_there_is_room():
     decision = decide(
         plan=_plan(), unmet_rows=("req-a",), regressions=(), refusals=0, **AMPLE

@@ -106,6 +106,11 @@ def test_current_failure_is_not_hidden_by_another_evidence_channel(tmp_path, mon
     monkeypatch.setattr(session, "plan_gate_budget", lambda: (1000, None))
     assert row_id in session._plan_cursor_candidate().rendered
     assert session.plan_submit_gate() is False
+    events = [json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    evidence = next(row["evidence"] for row in reversed(events) if row["event"] == "plan_gate_decision")
+    assert evidence["predicate_mapped_rows"] == [row_id]
+    assert evidence["check_passed_rows" if check_passes else "check_failed_rows"] == [row_id]
+    assert evidence["completion_assessment"] == "not_established"
     assert verify_event_journal(adapter.store.path).valid
 
 

@@ -1236,6 +1236,9 @@ class GTSession:
             refusals=self._plan_gate_refusals,
             refusals_without_progress=self._plan_gate_stalled_refusals,
             baseline_status=baseline_status,
+            row_states={row.row_id: self._engine.plan_row_state(row.row_id) for row in plan.rows},
+            predicate_mapped_rows=tuple(key for key, value in getattr(
+                self._engine, "plan_row_predicates", {}).items() if value),
         )
         self._engine.store.append("plan_gate_decision", **decision.as_row())
         if decision.accepted:

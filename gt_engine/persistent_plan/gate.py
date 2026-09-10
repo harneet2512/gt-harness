@@ -73,6 +73,7 @@ class GateDecision:
             "escaped": self.escaped,
             "baseline_status": self.baseline_status,
             "completion_proven": False,
+            "evidence": self.details,
         }
 
 
@@ -95,17 +96,34 @@ def decide(
     refusals: int,
     baseline_status: str = "",
     refusals_without_progress: int | None = None,
+    row_states: dict[str, str] | None = None,
+    predicate_mapped_rows: tuple[str, ...] | None = None,
 ) -> GateDecision:
     """The whole gate policy, as a pure function of the facts.
 
     Kept free of session and adapter objects so the policy can be read and
     tested on its own; the caller supplies the numbers and applies the result.
     """
+    row_ids = {row.row_id for row in getattr(plan, "rows", ())}
+    states = row_states or {}
+    details = {
+        "layout_schema": "gt.plan_gate_evidence.v1",
+        "completion_assessment": "not_established",
+        "baseline_assessment": baseline_status or "unavailable",
+        "mapping_assessment": "available" if predicate_mapped_rows is not None else "unavailable",
+        "predicate_mapped_rows": sorted(row_ids & set(predicate_mapped_rows or ())),
+        "unmapped_rows": sorted(row_ids - set(predicate_mapped_rows)) if predicate_mapped_rows is not None else [],
+        "check_passed_rows": sorted(key for key in row_ids if states.get(key) == "CHECK_PASSED"),
+        "check_failed_rows": sorted(key for key in row_ids if states.get(key) == "CHECK_FAILED"),
+        "deferred_rows": sorted(key for key in row_ids if states.get(key) == "DEFERRED"),
+        "unverified_rows": sorted(key for key in row_ids if states.get(key, "UNVERIFIED") == "UNVERIFIED"),
+    }
     common = {
         "remaining_seconds": remaining_seconds,
         "remaining_steps": remaining_steps,
         "refusals": refusals,
         "baseline_status": baseline_status,
+        "details": details,
     }
     if plan is None or not getattr(plan, "rows", ()):  # nothing to gate on
         return GateDecision(accepted=True, reason="no_plan", **common)

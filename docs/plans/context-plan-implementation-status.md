@@ -151,7 +151,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   integration/gate/adapter run passed 49 tests. Installed 301-query/deadline-stop
   proof passed in candidate 07. Successor canonical acceptance `34426564301`
   passed on `2ef314ad`; wall-time and submission reserve remain enforced.
-- [ ] Finish gate reasons separating verified completion, mapping gaps, check evidence,
+- [x] Finish gate reasons separating verified completion, mapping gaps, check evidence,
   baseline uncertainty, and budget/stall acceptance. Acceptance is not correctness.
 - [x] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
   checks, and progress recovery before a previously reached stall limit.
@@ -175,6 +175,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Gate evidence now records separate predicate mapping, unmapped rows, bound
+  check passes/failures, deferred/unverified rows and baseline assessment. Every
+  branch retains `completion_assessment=not_established`; legacy callers cannot
+  invent mapping evidence. Installed candidate 27: 119 passed, zero skips,
+  54.30 seconds (`gate-evidence-green.xml`), including actual conflicting-evidence
+  cursor/gate/journal paths. Two RED cases retained in `gate-evidence-red.xml`.
 
 - Canonical acceptance `34430421499` failed the strict degrade-stage census:
   the new `plan_check_boundary` call was missing from the registry. Added the
