@@ -30,37 +30,56 @@ from eval.pier_filtered_docker import PierFilteredDockerEnvironment  # noqa: E40
 
 
 class _Stub(PierFilteredDockerEnvironment):
-    """Only `_docker_compose_paths` is under test; Pier's __init__ is not."""
+    """Pier's __init__ needs a task on disk; only the override is under test.
+
+    This subclasses the REAL class and sets only the two attributes the
+    override reads, so `super()._docker_compose_paths` resolves through the
+    genuine descriptor. An earlier version of these tests defined its own
+    method and called it directly. Every assertion passed while the shipped
+    code was broken: the override was written as a method over Pier's
+    PROPERTY, and Pier's `for path in self._docker_compose_paths` got a bound
+    method and killed every trial in setup with `TypeError: 'method' object is
+    not iterable`. The stub has to touch the descriptor or it is testing
+    itself.
+    """
 
     def __init__(self, proxy_compose: Path | None) -> None:
         self._egress_proxy_compose_path = proxy_compose
-        self._base_paths = [Path("base.yaml")]
-
-    def _docker_compose_paths(self):  # type: ignore[override]
-        return PierFilteredDockerEnvironment._docker_compose_paths(self)
-
-    # Stands in for DockerEnvironment._docker_compose_paths.
-    def _super_paths(self):
-        return list(self._base_paths)
 
 
-def _install_super(monkeypatch, stub):
+@pytest.fixture
+def base_paths(monkeypatch):
+    """Stand in for DockerEnvironment's own property, kept a property."""
+    paths = [Path("base.yaml")]
     monkeypatch.setattr(
         "pier.environments.docker.docker.DockerEnvironment._docker_compose_paths",
-        lambda self: stub._super_paths(),
+        property(lambda self: list(paths)),
         raising=True,
     )
+    return paths
 
 
-def test_the_proxy_is_given_a_route_to_the_host(tmp_path, monkeypatch):
+def test_the_override_is_a_property_like_the_one_it_replaces():
+    """The defect the first version of this file could not see.
+
+    Checked on the class, before any instance exists, because the symptom
+    appears deep inside Pier's setup and reads as an environment fault.
+    """
+    from pier.environments.docker.docker import DockerEnvironment
+
+    assert isinstance(
+        PierFilteredDockerEnvironment.__dict__["_docker_compose_paths"], property)
+    assert isinstance(
+        DockerEnvironment.__dict__["_docker_compose_paths"], property)
+
+
+def test_the_proxy_is_given_a_route_to_the_host(tmp_path, base_paths):
     from pier.environments.agent_setup import EGRESS_PROXY_SERVICE
 
     proxy = tmp_path / "docker-compose-egress-proxy.json"
     proxy.write_text("{}", encoding="utf-8")
-    stub = _Stub(proxy)
-    _install_super(monkeypatch, stub)
 
-    paths = stub._docker_compose_paths()
+    paths = _Stub(proxy)._docker_compose_paths
 
     override = Path(paths[-1])
     assert override.name == "docker-compose-egress-host-gateway.json"
@@ -70,7 +89,7 @@ def test_the_proxy_is_given_a_route_to_the_host(tmp_path, monkeypatch):
     assert service["extra_hosts"] == ["host.docker.internal:host-gateway"]
 
 
-def test_the_override_names_the_service_pier_actually_creates(tmp_path, monkeypatch):
+def test_the_override_names_the_service_pier_actually_creates(tmp_path, base_paths):
     """A hand-typed service name would merge into a second, unused service.
 
     Compose does not object to an override for a service nobody declared -- it
@@ -78,25 +97,21 @@ def test_the_override_names_the_service_pier_actually_creates(tmp_path, monkeypa
     would still have no route to the host, which is a silent version of the
     exact failure this override exists to prevent.
     """
-    from pier.environments.agent_setup import EGRESS_PROXY_SERVICE, write_docker_proxy_compose
+    from pier.environments.agent_setup import EGRESS_PROXY_SERVICE
 
     proxy = tmp_path / "docker-compose-egress-proxy.json"
     proxy.write_text("{}", encoding="utf-8")
-    stub = _Stub(proxy)
-    _install_super(monkeypatch, stub)
-    override = json.loads(Path(stub._docker_compose_paths()[-1]).read_text(encoding="utf-8"))
+    override = json.loads(
+        Path(_Stub(proxy)._docker_compose_paths[-1]).read_text(encoding="utf-8"))
 
-    assert callable(write_docker_proxy_compose)
     assert set(override["services"]) == {EGRESS_PROXY_SERVICE}
 
 
-def test_a_task_with_no_filtered_egress_gets_no_override(tmp_path, monkeypatch):
+def test_a_task_with_no_filtered_egress_gets_no_override(base_paths):
     """No proxy, no service to merge onto.
 
     Compose fails a merge onto a service that does not exist in any earlier
     file, so writing this unconditionally would break every unfiltered task
     rather than harmlessly do nothing.
     """
-    stub = _Stub(None)
-    _install_super(monkeypatch, stub)
-    assert stub._docker_compose_paths() == [Path("base.yaml")]
+    assert _Stub(None)._docker_compose_paths == [Path("base.yaml")]

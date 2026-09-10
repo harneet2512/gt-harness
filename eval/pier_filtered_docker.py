@@ -45,8 +45,13 @@ class PierFilteredDockerEnvironment(DockerEnvironment):
     # allowlist is openrouter.ai -- the alias is present and unusable.
     HOST_GATEWAY_ALIAS = "host.docker.internal:host-gateway"
 
+    # A PROPERTY, because that is what it overrides. Pier iterates it directly
+    # (`for path in self._docker_compose_paths`), so declaring this as a plain
+    # method hands that loop a bound method and every trial dies in setup with
+    # `TypeError: 'method' object is not iterable` -- run 34500062648.
+    @property
     def _docker_compose_paths(self) -> list[Path]:
-        paths = super()._docker_compose_paths()
+        paths = list(super()._docker_compose_paths)
         proxy_compose = getattr(self, "_egress_proxy_compose_path", None)
         if proxy_compose is None:
             # No proxy means no filtered egress to reach the host through, and
