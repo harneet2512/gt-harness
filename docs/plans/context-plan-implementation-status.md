@@ -632,6 +632,34 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   task benefit; that remains a separate question.
 - [ ] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
   hashes and update the candidate manifest only from real build evidence.
+  BLOCKED, AND NOW MEASURED RATHER THAN ASSUMED. The certified binary's declared
+  source is not reproducible from the vendored tree or from the commit it names.
+  `vendor/gt-index-linux-amd64.build-info.json` declares `git_commit=efa70e52...`
+  and `source_fingerprint=f7fca174...`, built 2026-09-10T04:16:51Z. Against that:
+    `vendor/gt-index-src/SOURCE-COMMIT`        193b9d93...  (a DIFFERENT commit)
+    vendored tree, producer's own recipe       4f612d4c...  (not f7fca174)
+    `git archive efa70e52 gt-index`, on Linux  367a641a...  (not f7fca174)
+  The recipe is the producer's own, `scripts/swebench/build_gt_index_linux.sh:73`,
+  run from `$REPO_DIR/gt-index` exactly as the build does.
+  WHY they diverge is NOT established and is deliberately not guessed at. A build
+  from a dirty working tree would explain it and so would several other things.
+  What is established is that the artifact binding this item asks for cannot be
+  written from real build evidence today, because no available tree reproduces the
+  certified binary's declared fingerprint.
+  CONSEQUENCE FOR THE PAID DISPATCH: both comparisons above are exactly what
+  `deepswe_gt_harness_product_p0731.yaml` ("GT Harness: DeepSWE paid smoke20")
+  performs, and they live ONLY there -- the free canonical workflow does not check
+  the binding at all. So a paid dispatch would fail its producer-source gate before
+  doing any work. `tests/test_vendored_producer_binding.py` moves both halves onto
+  the free suite as xfail witnesses carrying the measured digests, so the failure
+  is visible without spending anything and turns into XPASS when the artifacts are
+  repinned. A third test verifies the pure-Python fingerprint against the real
+  shell pipeline, so the witness cannot silently redefine what binding means.
+  The candidate manifest itself is INTERNALLY consistent: its `producer_sha256`
+  equals the vendored binary's bytes (`9e2973ea1060fc2c9236...`). The gap is
+  between the binary and its SOURCE, not between the manifest and the binary.
+  No artifact was repinned here. Repinning a certified binary on an unestablished
+  cause is exactly the move this item exists to prevent.
 - [x] Run required installed tests with zero unexplained skips and real journal audit.
   THE SAME DEFECT WAS LIVE IN CANONICAL CI, and that is the worse half.
   `.github/workflows/deepswe_gt_harness_product.yml` installs the vendored
