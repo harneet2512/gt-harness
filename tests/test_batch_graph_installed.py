@@ -19,7 +19,11 @@ def test_installed_batch_preserves_parent_and_reuses_parser_inputs(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "mod.py").write_text("def answer():\n    return 1\n", encoding="utf-8")
-    (root / "caller.py").write_text("from mod import answer\ndef call():\n    return answer()\n", encoding="utf-8")
+    (root / "caller.py").write_text(
+        "from mod import answer\ndef call(value):\n    return answer()\n"
+        "class Stable:\n    def value(self, number):\n        return number + 1\n", encoding="utf-8")
+    (root / "test_caller.py").write_text(
+        "from caller import Stable\ndef test_value():\n    assert Stable().value(1) == 2\n", encoding="utf-8")
     state = tmp_path / "state"
 
     def build(name, parent=None):
@@ -34,11 +38,19 @@ def test_installed_batch_preserves_parent_and_reuses_parser_inputs(tmp_path):
 
     parent, _ = build("parent")
     original = hashlib.sha256(parent.read_bytes()).hexdigest()
+    structural_queries = {
+        "properties": "SELECT p.id,p.node_id,p.kind,p.value FROM properties p JOIN parser_property_inventory i ON i.property_id=p.id JOIN nodes n ON n.id=p.node_id WHERE n.file_path='caller.py'",
+        "assertions": "SELECT a.id,a.test_node_id,a.target_node_id,a.expression FROM assertions a JOIN parser_assertion_inventory i ON i.assertion_id=a.id",
+        "edges": "SELECT e.id,e.source_id,e.target_id,e.type FROM edges e JOIN parser_edge_inventory i ON i.edge_id=e.id JOIN nodes n ON n.id=e.source_id WHERE n.file_path='caller.py'",
+    }
     with closing(sqlite3.connect(f"file:{parent}?mode=ro", uri=True)) as db:
         old_id = db.execute("SELECT id FROM nodes WHERE name='call' AND label='Function'").fetchone()[0]
+        old_facts = {kind: sorted(db.execute(query).fetchall(), key=repr)
+                     for kind, query in structural_queries.items()}
+        assert all(old_facts.values()), old_facts
     (root / "mod.py").write_text("def answer():\n    return 2\n", encoding="utf-8")
     candidate, result = build("candidate", parent)
-    assert "Parse cache: 1 hits, 1 misses" in result.stderr_tail
+    assert "Parse cache: 2 hits, 1 misses" in result.stderr_tail
     assert "Batch structure:" in result.stderr_tail
     with closing(sqlite3.connect(f"file:{candidate}?mode=ro", uri=True)) as db:
         assert db.execute("SELECT id FROM nodes WHERE name='call' AND label='Function'").fetchone()[0] == old_id
@@ -46,6 +58,8 @@ def test_installed_batch_preserves_parent_and_reuses_parser_inputs(tmp_path):
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         receipt = json.loads(db.execute("SELECT value FROM project_meta WHERE key='core_phase_receipt'").fetchone()[0])
         assert receipt["state"] == "committed"
+        for kind, query in structural_queries.items():
+            assert sorted(db.execute(query).fetchall(), key=repr) == old_facts[kind], kind
     assert hashlib.sha256(parent.read_bytes()).hexdigest() == original
 
 

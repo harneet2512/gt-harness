@@ -22,13 +22,13 @@
   },
   "groundtruth": {
     "repository": "https://github.com/harneet2512/groundtruth.git",
-    "source_commit": "350cb156b01bac708c4ca29674e95392efa9ac68",
-    "source_tree": "03afbb192e64c8ed4bd0d39df31530237de9420f",
+    "source_commit": "efa70e52d4e85bff2364b0038ceca2306de218b0",
+    "source_tree": "65964ea2b5c6490ec8e119327e47ca44cb7a43ca",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "wheel_sha256": "62e1dca7046fd3df39e8b63749d10dcb8c645a48c4800898eae37125cb555718",
+    "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
     "producer_path": "vendor/gt-index-linux-amd64",
-    "producer_sha256": "2f283b819928be5e3ea38df0eefee11cb9fc55a23006976a9f0f6d9458875e52",
+    "producer_sha256": "9e2973ea1060fc2c9236b0e81ea39ebb957a0013903d45517e01d4b0b25ef91c",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
@@ -47,11 +47,11 @@
     "producer_build": {
       "schema": "gt.producer_build_binding.v1",
       "status": "VERIFIED",
-      "source_commit": "350cb156b01bac708c4ca29674e95392efa9ac68",
-      "source_tree": "03afbb192e64c8ed4bd0d39df31530237de9420f",
-      "binary_sha256": "2f283b819928be5e3ea38df0eefee11cb9fc55a23006976a9f0f6d9458875e52",
+      "source_commit": "efa70e52d4e85bff2364b0038ceca2306de218b0",
+      "source_tree": "65964ea2b5c6490ec8e119327e47ca44cb7a43ca",
+      "binary_sha256": "9e2973ea1060fc2c9236b0e81ea39ebb957a0013903d45517e01d4b0b25ef91c",
       "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-      "build_info_sha256": "3cf26365831947047392c05471d13af1c9ae2f968e23aed5fdc174429bebef1d",
+      "build_info_sha256": "39d00944df6a6ad7213140d9494d606a5f082d15989f3a85d9ce57e25faa44cd",
       "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
       "build_tags": "netgo,osusergo,sqlite_fts5",
       "static_linking": true
@@ -63,7 +63,7 @@
       "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
       "accepted_default_ref": "origin/gt-trial",
       "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-      "source_commit": "350cb156b01bac708c4ca29674e95392efa9ac68",
+      "source_commit": "efa70e52d4e85bff2364b0038ceca2306de218b0",
       "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
       "ancestry_path": [
         "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -178,9 +178,14 @@
         "3f5e965385a140ebfe18462982df9f5fd6976989",
         "8583930b7d433738c3a4228f19619586338dd174",
         "99a5a55620be01531c8e83b9e29bca4a46a9ac8d",
-        "350cb156b01bac708c4ca29674e95392efa9ac68"
+        "350cb156b01bac708c4ca29674e95392efa9ac68",
+        "ccf489baeac12acd3570c93af7a5ba3e8fd849c1",
+        "efa70e52d4e85bff2364b0038ceca2306de218b0"
       ],
       "post_certification_changed_paths": [
+        "gt-index/internal/store/parsed_facts.go",
+        "gt-index/internal/store/parsed_facts_test.go",
+        "tests/test_test_identity_conservation.py",
         "gt-index/cmd/gt-index/batch_amend.go",
         "gt-index/cmd/gt-index/batch_amend_test.go",
         "gt-index/cmd/gt-index/parse_cache_wiring_test.go",
@@ -903,8 +908,17 @@
         "tests/wrapper/test_router_v2_telemetry.py",
         "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
       ],
-      "review_inbox_commit": "fb1705edf488de25cdfafb7853dcf5e91e896879",
+      "review_inbox_commit": "86293f7122c9c4975ddf9280b8fffab7b4737717",
       "review_packets": [
+        {
+          "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
+          "packet_id": "har83-context-plan-producer-efa70e52",
+          "head_sha": "efa70e52d4e85bff2364b0038ceca2306de218b0",
+          "kind": "check_outcome",
+          "status": "PASS",
+          "basis": "exact_static_build_installed_structural_reuse_and_source_correspondence",
+          "packet_digest_sha256": "13a9333a50e57ceff136107a37d84ef5a067feb9be2d853b6d16c5e90c81bba4"
+        },
         {
           "path": "inbox/HAR-83/har83-context-plan-producer-350cb156.json",
           "packet_id": "har83-context-plan-producer-350cb156",

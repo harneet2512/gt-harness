@@ -186,6 +186,20 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Candidate 44 repins the actual producer `efa70e52` wheel/static binary/build-info
+  and exact source tree after its successful CI and static build. The real lineage
+  verifier passed with 317 matching package files, 11 review packets, clean producer
+  and review checkouts, and matching ancestry/diff. New scoped review packet lives
+  at review branch `86293f71`; historical packets remain intact. Installed combined
+  graph/recovery/baseline/check suites: 200 passed, one explicit source-registry
+  deselection, zero skips, 107.69s (`producer-repin-44.xml`). Extended structural
+  retention proof through the actual harness resource guard passed both installed
+  cases, zero skips, 13.86s (`structural-resource-owner-44.xml`). Source registry and
+  binding/provenance regressions passed 14 tests with zero skips
+  (`producer-repin-source-44.xml`). Current wheel SHA256:
+  `88a763e5202f0f3dcf22d221300d91ff163f621e41c6880f8c30331bc3804e7a`.
+  Full successor acceptance and remaining release/implementation work remain open.
+
 - Candidate 43 adds typed content-addressed checkpoints of the original plan,
   complete inputs and initial baseline. Native restart restores later design
   revisions into actual request bytes without another planning call, and never
