@@ -55,6 +55,7 @@ class BaselineResult:
     output_sha256: str = ""
     restored_paths: tuple[str, ...] = ()
     detail: str = ""
+    environment_sha256: str = ""
 
     @property
     def captured(self) -> bool:
@@ -76,6 +77,7 @@ class BaselineResult:
             "output_sha256": self.output_sha256,
             "restored_paths": list(self.restored_paths),
             "detail": self.detail,
+            "environment_sha256": self.environment_sha256,
         }
 
     def summary(self) -> str:
@@ -107,6 +109,7 @@ class RegressionReport:
             "passed_delta": self.passed_delta,
             "failed_delta": self.failed_delta,
             "detail": self.detail,
+            "after_environment_sha256": self.after.environment_sha256 if self.after else "",
         }
 
 
@@ -213,10 +216,12 @@ def run_baseline(
     """Run the repository's suite once and record what was already green."""
     import hashlib
 
+    from gt_harness.canonical_io import canonical_json_bytes
     from scripts.miniswe_gt_run import _is_sensitive_env_name
 
     child_env = {key: value for key, value in (execution_env if execution_env is not None else os.environ).items()
                  if not _is_sensitive_env_name(key)}
+    environment_sha256 = hashlib.sha256(canonical_json_bytes(child_env)).hexdigest()
 
     if not repo_root or not os.path.isdir(repo_root):
         return BaselineResult(status="no_repository")
@@ -279,6 +284,7 @@ def run_baseline(
         )
     return BaselineResult(
         status="captured",
+        environment_sha256=environment_sha256,
         command=tuple(command),
         basis=basis,
         confidence=confidence,
@@ -316,6 +322,10 @@ def compare_to_baseline(
     )
     if not after.captured:
         return RegressionReport(status="unknown", detail=after.status, after=after)
+    if not baseline.environment_sha256 or not after.environment_sha256:
+        return RegressionReport(status="unknown", detail="baseline environment identity missing", after=after)
+    if baseline.environment_sha256 != after.environment_sha256:
+        return RegressionReport(status="unknown", detail="baseline environment identity changed", after=after)
     newly_failing = tuple(
         name for name in after.failing_names if name in baseline.passing_names
     )

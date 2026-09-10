@@ -213,6 +213,65 @@ def test_a_new_failing_test_is_not_reported_as_previously_passing(repo):
     assert report.after.failed > baseline.failed
 
 
+def test_environment_change_cannot_establish_baseline_conservation(repo):
+    import os
+
+    initial_env = dict(os.environ, WIDGET_MODE="strict")
+    baseline = run_baseline(str(repo), budget_seconds=30, command=_pytest_command(),
+                            execution_env=initial_env)
+    report = compare_to_baseline(baseline, str(repo), budget_seconds=30,
+                                 execution_env=dict(initial_env, WIDGET_MODE="permissive"))
+    assert report.status == "unknown"
+    assert report.detail == "baseline environment identity changed"
+    assert baseline.as_dict()["environment_sha256"]
+    assert report.after.environment_sha256 != baseline.environment_sha256
+    assert report.as_dict()["after_environment_sha256"] == report.after.environment_sha256
+
+
+def test_historical_baseline_without_environment_binding_remains_unknown(repo):
+    from dataclasses import replace
+
+    baseline = run_baseline(str(repo), budget_seconds=30, command=_pytest_command())
+    report = compare_to_baseline(replace(baseline, environment_sha256=""),
+                                 str(repo), budget_seconds=30)
+    assert report.status == "unknown"
+    assert report.detail == "baseline environment identity missing"
+
+
+def test_plan_inputs_forward_the_task_environment(repo, monkeypatch):
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.baseline import BaselineResult
+
+    seen = []
+    def capture(*args, **kwargs):
+        seen.append(kwargs["execution_env"])
+        return BaselineResult(status="no_tests_observed")
+    monkeypatch.setattr("gt_engine.persistent_plan.run_baseline", capture)
+    environment = {"WIDGET_MODE": "strict"}
+    build_plan_inputs("The widget must preserve compatibility.", repo_root=str(repo),
+                      execution_env=environment)
+    assert seen == [environment]
+
+
+def test_real_agent_baseline_uses_its_task_environment(repo, tmp_path, monkeypatch):
+    import hashlib
+
+    from gt_harness.canonical_io import canonical_json_bytes
+    from scripts.miniswe_gt_run import build_agent
+
+    monkeypatch.setenv("GT_PERSISTENT_PLAN", "1")
+    agent, adapter, session = build_agent(
+        task="The widget must preserve compatibility.", model="deepseek-v4-flash",
+        cwd=str(repo), state_dir=str(tmp_path / "state"), output=None,
+        temperature=1.0, gt_off=False, wall_time_limit_seconds=1000,
+    )
+    baseline = adapter.plan_inputs.baseline
+    assert baseline.captured
+    assert agent.env.config.env["GT_PLAN_ROOT"] == str(adapter.store.root / "plan")
+    assert baseline.environment_sha256 == hashlib.sha256(
+        canonical_json_bytes(agent.env.execution_env())).hexdigest()
+
+
 def test_comparison_without_a_baseline_never_blocks(tmp_path):
     from gt_engine.persistent_plan.baseline import BaselineResult
 

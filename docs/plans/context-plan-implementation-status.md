@@ -123,6 +123,10 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Filter sensitive environment names from baseline child execution.
 - [ ] Finish baseline source/config/test/environment identities at initial capture
   and final comparison, including skipped/missing test conservation.
+  Filtered task-environment hashes are now propagated from initial capture to
+  comparison/reporting; changed or missing bindings remain unknown. The digest
+  binds task variables before the private temporary capture-root override, not
+  installed package versions or filesystem dependencies. Those remain open.
 - [x] Route baseline execution through the existing isolated process-tree boundary;
   real installed Linux timeout test confirms the sleeping grandchild is reaped.
 - [ ] Exercise background writers, typed mutations, automatic checks, incomplete
@@ -164,6 +168,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Canonical acceptance `34427398314` PASSED on `e3a4e514`.
+- Baseline environment RED reproduced an `intact` result after WIDGET_MODE
+  changed. Initial capture now receives the actual task environment; the runner
+  establishes GT_PLAN_ROOT before capture. Initial/final environment hashes are
+  serialized, and mismatched or historical missing bindings remain unknown.
+  Actual installed build_agent proof confirms environment identity alignment.
+  Rebuilt wheel 18 passed 105 installed baseline/integrity/integration/check/gate
+  tests, zero skips, in 36.75 seconds (`D:/gt-context-proof/baseline-env-final.xml`).
+  The earlier broad installed attempt passed 141 but failed four source-reading
+  fixture paths; all 45 bootstrap tests then passed separately with source
+  available. These distinct proofs do not close restart or complete baseline
+  dependency identity. No graph builds or extra checks were added by the repair.
 - Final baseline rechecks had the same phase-transition defect as queued checks.
   Real pytest mutations reproduced crashes in VERIFY and SUBMIT. The baseline
   owner now transitions through the existing IMPLEMENT path before invalidating

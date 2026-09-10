@@ -256,6 +256,7 @@ def build_plan_inputs(
     graph_revision: str = "",
     wall_time_limit_seconds: float | None = None,
     capture_baseline: bool = True,
+    execution_env: dict[str, str] | None = None,
 ) -> PlanInputs:
     """Phase 0: everything derivable with no provider call.
 
@@ -280,7 +281,8 @@ def build_plan_inputs(
     if capture_baseline and repo_root:
         try:
             baseline = run_baseline(
-                repo_root, budget_seconds=baseline_budget_seconds(wall_time_limit_seconds)
+                repo_root, budget_seconds=baseline_budget_seconds(wall_time_limit_seconds),
+                execution_env=execution_env,
             )
         except Exception as exc:  # noqa: BLE001
             baseline = BaselineResult(

@@ -761,12 +761,14 @@ def build_agent(
     _plan_setup_error = ""
     if persistent_plan_enabled():
         try:
+            env_obj.config.env["GT_PLAN_ROOT"] = str(layout.task_root / "plan")
             plan_inputs = build_plan_inputs(
                 task,
                 contract=contract,
                 graph_db=graph_db,
                 repo_root=str(cwd),
                 wall_time_limit_seconds=wall_time_limit_seconds,
+                execution_env=env_obj.execution_env(),
             )
             # The ledger-only rows are MERGED INTO the contract rather than
             # appended beside it. evaluate_passing_observation iterates

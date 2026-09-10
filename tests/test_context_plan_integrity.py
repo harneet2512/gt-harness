@@ -85,8 +85,8 @@ def test_baseline_analyzes_summary_after_preview(monkeypatch, tmp_path):
 def test_disappearing_baseline_test_is_incomplete_not_intact(monkeypatch):
     from gt_engine.persistent_plan import baseline
 
-    before = baseline.BaselineResult(status="captured", passed=2, passing_names=("a", "b"))
-    after = baseline.BaselineResult(status="captured", passed=2, passing_names=("a", "c"))
+    before = baseline.BaselineResult(status="captured", passed=2, passing_names=("a", "b"), environment_sha256="env")
+    after = baseline.BaselineResult(status="captured", passed=2, passing_names=("a", "c"), environment_sha256="env")
     monkeypatch.setattr(baseline, "run_baseline", lambda *a, **kw: after)
     assert baseline.compare_to_baseline(before, ".", budget_seconds=1).status == "incomplete"
 
