@@ -94,3 +94,37 @@ def test_one_arm_varying_alone_is_named_for_the_arm_that_varies():
 def test_an_empty_measurement_does_not_claim_parity():
     """No runs is not agreement, and must not read as it."""
     assert classify_parity([])["verdict"] == "unmeasured"
+
+def test_one_arm_with_no_rows_is_not_parity():
+    """The false assurance this branch keeps catching, in my own instrument.
+
+    MEASURED, and it nearly became a headline. A study run with a producer that
+    predates batch amendment exits rc=2 on every candidate invocation -- the
+    `-amend-parent` flag does not exist in that build -- so the candidate arm
+    contributes NO parity rows at all. Only successful runs are recorded, so the
+    digest set held five baseline rows and nothing else, and both
+    `classify_parity` and `semantic_parity` reported agreement.
+
+    They were describing one arm agreeing with itself. Read as written it says
+    "the amend and the rebuild produce identical facts at benchmark scale",
+    which is the exact claim this item is blocked on and would have been
+    supported by a study where the amend never ran.
+    """
+    rows = _rows([_digest("e1")] * 5, [])
+    result = classify_parity(rows)
+    assert result["verdict"] == "one_arm_missing"
+    assert result["arms_present"] == ["baseline"]
+
+
+def test_the_other_arm_missing_is_caught_too():
+    """Symmetric: a rebuild that cannot run is no more measurable."""
+    result = classify_parity(_rows([], [_digest("e1")] * 3))
+    assert result["verdict"] == "one_arm_missing"
+    assert result["arms_present"] == ["candidate"]
+
+
+def test_agreement_still_needs_both_arms_to_have_run():
+    """The positive case must keep working, or the guard is just a refusal."""
+    result = classify_parity(_rows([_digest("e1")] * 3, [_digest("e1")] * 3))
+    assert result["verdict"] == "identical"
+    assert result["arms_present"] == ["baseline", "candidate"]

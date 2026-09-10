@@ -266,7 +266,20 @@ def classify_parity(parity: list[dict]) -> dict:
     assertions were byte-identical in every run of both arms everywhere.
     """
     if not parity:
-        return {"verdict": "unmeasured", "unstable_surfaces": [], "surfaces": {}}
+        return {"verdict": "unmeasured", "unstable_surfaces": [], "surfaces": {},
+                "arms_present": []}
+
+    # Only SUCCESSFUL runs contribute parity rows, so an arm that failed every
+    # invocation contributes none -- and the digests left are one arm agreeing
+    # with itself. Reported as "identical" that reads as "the amend and the
+    # rebuild produce identical facts", which is the claim this study exists to
+    # test. Measured: a producer predating batch amendment exits rc=2 on every
+    # candidate run (`-amend-parent` undefined), and a five-repetition study of
+    # conan then reported parity with the amend never having executed.
+    arms_present = sorted({str(item["arm"]) for item in parity})
+    if len(arms_present) < 2:
+        return {"verdict": "one_arm_missing", "unstable_surfaces": [],
+                "surfaces": {}, "arms_present": arms_present}
 
     surfaces: dict[str, dict] = {}
     names = sorted({name for item in parity for name in item["digest"]})
@@ -284,7 +297,8 @@ def classify_parity(parity: list[dict]) -> dict:
         }
 
     if not surfaces:
-        return {"verdict": "identical", "unstable_surfaces": [], "surfaces": {}}
+        return {"verdict": "identical", "unstable_surfaces": [], "surfaces": {},
+                "arms_present": arms_present}
 
     unstable = sorted(surfaces)
     # Disjoint arms outrank every other reading: it is the only shape that
@@ -298,7 +312,8 @@ def classify_parity(parity: list[dict]) -> dict:
         verdict = "baseline_only"
     else:
         verdict = "shared_nondeterminism"
-    return {"verdict": verdict, "unstable_surfaces": unstable, "surfaces": surfaces}
+    return {"verdict": verdict, "unstable_surfaces": unstable,
+            "surfaces": surfaces, "arms_present": arms_present}
 
 
 def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
@@ -399,7 +414,10 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
         # One distinct digest across every run of both arms is the parity claim.
         "runs_exceeding_budget": sum(1 for r in runs if r.get("timed_out")),
         "budget_seconds": timeout,
-        "semantic_parity": len(digests) == 1,
+        # Both arms must have PRODUCED something. One arm agreeing with itself
+        # is not parity, and the digest set cannot tell the difference.
+        "semantic_parity": (len(digests) == 1
+                            and len({item["arm"] for item in parity}) == 2),
         "distinct_digests": len(digests),
         # Which surface moved, and whether the arms ever agreed. `semantic_parity`
         # alone cannot separate inherited producer noise from the amend and the
