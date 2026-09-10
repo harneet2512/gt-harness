@@ -174,6 +174,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Two installed RED cases exposed failure masking across evidence channels:
+  mapped GREEN hid a failed bound check; a passed bound check hid mapped RED.
+  Outstanding-row calculation now preserves either current failure. Candidate 24:
+  143 installed regressions passed without skips in 26.00 seconds
+  (`evidence-precedence-green.xml`); seven final boundary cases passed in 6.50
+  seconds, including actual cursor selection, gate refusal and journal validation
+  (`evidence-precedence-final.xml`). Predicate receipts are explicit fixture
+  inputs; the bound checks run real pytest. No stronger proof type is introduced.
+- Canonical provider-free acceptance `34429663336` passed at `df9a471a`.
+  Later scheduling/publication/precedence changes need successor acceptance.
+
 - A follow-on installed RED found the CLI plan snapshot remained UNVERIFIED
   after a boundary check changed the in-memory row to CHECK_PASSED. The existing
   queue now publishes its final state once after draining, using the existing

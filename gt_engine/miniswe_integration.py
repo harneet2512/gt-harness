@@ -3195,22 +3195,27 @@ class MiniSweAdapter(GroundtruthController):
     def unmet_plan_rows(self) -> tuple[str, ...]:
         """Plan rows that still have no current evidence.
 
-        A row with no predicate mapped to it is NOT counted: it cannot be
-        proven, so blocking on it would be blocking on our own gap.
+        Unmapped rows remain outstanding. A passing check and a mapped semantic
+        assertion are separate evidence channels; neither cancels a current
+        failure in the other channel.
         """
         mapping = getattr(self, "plan_row_predicates", {}) or {}
         plan = getattr(self, "persistent_plan", None)
         row_ids = {row.row_id for row in getattr(plan, "rows", ())} | set(mapping)
         unmet = set(self.unmet_predicates)
-        return tuple(
-            sorted(
-                row_id
-                for row_id in row_ids
-                if self.plan_row_state(row_id) not in {"CHECK_PASSED", "PROVEN"}
-                and (not mapping.get(row_id)
-                     or any(predicate_id in unmet for predicate_id in mapping[row_id]))
-            )
-        )
+        outstanding = []
+        for row_id in sorted(row_ids):
+            state = self.plan_row_state(row_id)
+            predicates = mapping.get(row_id, ())
+            failed = any(self.predicate_status(key) == PredicateStatus.RED
+                         for key in predicates if key in self.predicates)
+            if state == "CHECK_FAILED" or failed:
+                outstanding.append(row_id)
+            elif state not in {"CHECK_PASSED", "PROVEN"} and (
+                not predicates or any(key in unmet or key not in self.predicates for key in predicates)
+            ):
+                outstanding.append(row_id)
+        return tuple(outstanding)
 
     def note_select_catalog_bootstrap(self) -> None:
         """Record one GT-internal bootstrap provider call at the transport boundary.
