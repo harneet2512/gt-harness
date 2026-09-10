@@ -22,13 +22,13 @@
  },
  "groundtruth": {
   "repository": "https://github.com/harneet2512/groundtruth.git",
-  "source_commit": "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c",
-  "source_tree": "e1ab20e89410aa6f1eae994a59937b81bbac07e7",
+  "source_commit": "c4d4a54f4d9d5cd0cb251fa1fd42d4465f99949e",
+  "source_tree": "15e0c655d45a0118305c6b5220d631cef4d1d83a",
   "graph_schema_version": "v15.2-trust-tier",
   "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
   "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
   "producer_path": "vendor/gt-index-linux-amd64",
-  "producer_sha256": "47e7eecd26ddb23da8b7f9910ebd79c105f146daaaa53a02eaba7d3ea32bc2bd",
+  "producer_sha256": "029629268a6bbba3fc4ac9de5debfda366c157cbee382bb38322bbeccfabd74c",
   "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
   "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
   "accepted_default_ref": "origin/gt-trial",
@@ -47,11 +47,11 @@
   "producer_build": {
    "schema": "gt.producer_build_binding.v1",
    "status": "VERIFIED",
-   "source_commit": "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c",
-   "source_tree": "7b311013c902eadd8b4119554c9a3d478be45ee2",
-   "binary_sha256": "47e7eecd26ddb23da8b7f9910ebd79c105f146daaaa53a02eaba7d3ea32bc2bd",
+   "source_commit": "c4d4a54f4d9d5cd0cb251fa1fd42d4465f99949e",
+   "source_tree": "15e0c655d45a0118305c6b5220d631cef4d1d83a",
+   "binary_sha256": "029629268a6bbba3fc4ac9de5debfda366c157cbee382bb38322bbeccfabd74c",
    "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-   "build_info_sha256": "26470424c47e515ba0e3475f519ac74b8d36aa1036eacb3c2f695ccd1b603ad3",
+   "build_info_sha256": "d93fb3bd90fa2917cd90ccc203dd158b4207379fd35b96ba09eb08a41e9498f6",
    "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
    "build_tags": "netgo,osusergo,sqlite_fts5",
    "static_linking": true
@@ -63,7 +63,7 @@
    "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
    "accepted_default_ref": "origin/gt-trial",
    "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-   "source_commit": "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c",
+   "source_commit": "c4d4a54f4d9d5cd0cb251fa1fd42d4465f99949e",
    "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
    "ancestry_path": [
     "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -185,7 +185,8 @@
     "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
     "d6811825c934ea9754bc7e7892274236b1015752",
     "8685e473da51c0cf6cfaa5c4f741884be17f1636",
-    "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c"
+    "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c",
+    "c4d4a54f4d9d5cd0cb251fa1fd42d4465f99949e"
    ],
    "post_certification_changed_paths": [
     ".gitattributes",
@@ -250,6 +251,7 @@
     "UNIFIED_SOURCE_PROVENANCE.md",
     "artifact_deepswe/gt_mini_patch.py",
     "docs/python-test-runner-boundary.md",
+    "gt-index/cmd/gt-index/amend_layout_red_test.go",
     "gt-index/cmd/gt-index/batch_amend.go",
     "gt-index/cmd/gt-index/batch_amend_test.go",
     "gt-index/cmd/gt-index/budget.go",
@@ -318,9 +320,11 @@
     "gt-index/internal/resolver/overload.go",
     "gt-index/internal/resolver/overload_narrowing_red_test.go",
     "gt-index/internal/resolver/pass_order_red_test.go",
+    "gt-index/internal/resolver/promote.go",
     "gt-index/internal/resolver/relationships.go",
     "gt-index/internal/resolver/relationships_test.go",
     "gt-index/internal/resolver/resolver.go",
+    "gt-index/internal/resolver/resolver_amend_layout_red_test.go",
     "gt-index/internal/resolver/resolver_determinism_red_test.go",
     "gt-index/internal/resolver/resolver_idxfix_test.go",
     "gt-index/internal/specs/cmd/taxonomy-probe/main.go",
@@ -361,6 +365,7 @@
     "gt-index/internal/store/resolution_v2.go",
     "gt-index/internal/store/sqlite.go",
     "gt-index/internal/taxonomy/edges.go",
+    "gt-index/internal/taxonomy/edges_amend_layout_red_test.go",
     "gt-index/internal/taxonomy/edges_test.go",
     "pyproject.toml",
     "scripts/ci/substrate_proof.sh",
@@ -914,7 +919,7 @@
     "tests/wrapper/test_router_v2_telemetry.py",
     "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
    ],
-   "review_inbox_commit": "b2e29b2c2d2db5cc543cf2c102cdbb40f4d7b65d",
+   "review_inbox_commit": "393b4c926b4ada31d2dd813592d61cc3e1ede089",
    "review_packets": [
     {
      "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
@@ -1003,13 +1008,13 @@
      "packet_digest_sha256": "34aaadc2c50ac34450e74d3cf11ea2a9187c640aeccc5bf3d3417f4d1aa16937"
     },
     {
-     "path": "inbox/HAR-83/har83-context-plan-producer-9e42ff28-ci.json",
-     "packet_id": "har83-context-plan-producer-9e42ff28-ci",
-     "head_sha": "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c",
+     "path": "inbox/HAR-83/har83-context-plan-producer-c4d4a54f-ci.json",
+     "packet_id": "har83-context-plan-producer-c4d4a54f-ci",
+     "head_sha": "c4d4a54f4d9d5cd0cb251fa1fd42d4465f99949e",
      "kind": "check_outcome",
      "status": "PASS",
-     "basis": "exact_ci_static_build_last_wins_overload_fix_and_object_fingerprint",
-     "packet_digest_sha256": "45dfeabbb78084c6fb8eef4da0d120daa25f8051b98792a03e28f7b13fcb7c2b"
+     "basis": "exact_ci_static_build_renumbering_invariant_picks_and_mpl_parity",
+     "packet_digest_sha256": "1a41a947174cf8160ff760a2556a0483fc7edbad294b33d2cd7335151750bea7"
     }
    ],
    "product_review_packets": [
@@ -1030,7 +1035,7 @@
      ]
     }
    ],
-   "attestation_digest_sha256": "51565072492b1a3a83249deabaccd70755fce5c3ec29628db71b894295a43395"
+   "attestation_digest_sha256": "f0a7299057d9dd1ca83d1756b9f7548f0cb2630556dc0b11befbb55bd1edac3a"
   }
  },
  "capabilities": [
