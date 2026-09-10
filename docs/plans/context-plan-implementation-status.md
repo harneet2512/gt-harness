@@ -169,7 +169,21 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   so these tests constrain the behaviour instead of describing it.
   Verified installed on wheel 66 against an LF checkout: 42 passed
   (D:/gt-context-proof/protocol-69.xml).
-- [ ] Prove no unbound or unsupported observation can advance the cursor or gate.
+- [x] Prove no unbound or unsupported observation can advance the cursor or gate.
+  DONE, through the REAL adapter rather than a classifier helper. A genuinely
+  passing test that no requirement selected is executed in the real workspace and
+  drained by the real queue; row ids, per-row states and the outstanding set are
+  asserted before and after, and nothing moves. That is the failure mode that
+  matters because it is invisible: the command really passes, so any channel that
+  accepted it would report progress the agent never made and let the gate through.
+  The same test then binds ONE row and drains again, proving the machinery does
+  advance a bound row while the unbound sibling stays outstanding -- so the
+  negative assertions are about binding rather than about a dead code path.
+  Mutation-checked: deleting the 'not predicates' clause from unmet_plan_rows,
+  which is what keeps an unmapped row outstanding, fails this test and four
+  existing installed cases.
+  Verified installed on wheel 66 against an LF checkout: 43 passed, no skips
+  (D:/gt-context-proof/unbound-70.xml).
 
 ## 2. Verification execution and queue — PARTIAL
 

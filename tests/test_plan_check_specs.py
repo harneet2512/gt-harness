@@ -420,3 +420,77 @@ def test_an_unsupported_protocol_abstains_rather_than_inferring_a_pass(tmp_path)
             capture_complete=True, test_ids=("test_widget",),
             test_source_digest="test-source",
         ).state == "UNVERIFIED", observed_protocol
+
+
+def test_an_unbound_passing_command_advances_neither_cursor_nor_gate(tmp_path, monkeypatch):
+    """Run a real passing test that is bound to NOTHING and prove nothing moves.
+
+    This is the failure mode that matters most, because it is invisible: a
+    command that genuinely passes, in the real workspace, observed by the real
+    adapter. If any channel let that advance a row, the plan would report
+    progress the agent never made and the gate would let it submit. The
+    assertions are on row ids and states before and after, and on the gate's own
+    decision, rather than on a helper's return value.
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    from gt_engine.miniswe_integration import MiniSweAdapter
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.bootstrap import build_plan
+    from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Linux process-tree and capture boundary required")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "widget.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "test_widget.py").write_text("def test_widget():\n    assert True\n", encoding="utf-8")
+    # A second, entirely unrelated passing test. Nothing binds it to a row.
+    (repo / "test_unrelated.py").write_text(
+        "def test_unrelated():\n    assert True\n", encoding="utf-8"
+    )
+
+    adapter = MiniSweAdapter(task_id="unbound", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    adapter.persistent_plan = build_plan(None, build_plan_inputs(
+        "The widget must preserve compatibility.\nThe widget must reject invalid input.",
+        repo_root=str(repo), capture_baseline=False))
+    row_ids = [row.row_id for row in adapter.persistent_plan.rows]
+    assert len(row_ids) == 2
+    adapter.start_task()
+    adapter.begin_verify()
+
+    before_states = [adapter.plan_row_state(row_id) for row_id in row_ids]
+    before_unmet = set(adapter.unmet_plan_rows())
+    assert before_unmet == set(row_ids), "every row starts outstanding"
+
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    environment = CredentialIsolatedLocalEnvironment(
+        cwd=str(repo), timeout=10, evidence_root=tmp_path / "evidence",
+        env={"PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]},
+    )
+
+    # An unbound check: a real, passing test run that no requirement selected.
+    # drain has nothing queued for it, so no observation may attach to a row.
+    adapter.drain_plan_checks(environment)
+
+    assert [adapter.plan_row_state(row_id) for row_id in row_ids] == before_states
+    assert set(adapter.unmet_plan_rows()) == before_unmet, (
+        "an unbound passing command advanced a row"
+    )
+
+    # Now bind ONE row properly and prove the same machinery does advance it,
+    # so the assertions above are about binding and not about a dead code path.
+    bound = adapter.bind_plan_check({
+        "argv": [sys.executable, "-m", "pytest", "-v", "test_widget.py"],
+        "requirement_ids": row_ids[:1],
+    })
+    assert bound
+    adapter.drain_plan_checks(environment)
+
+    after = set(adapter.unmet_plan_rows())
+    assert row_ids[0] not in after, "a bound passing check did not advance its row"
+    assert row_ids[1] in after, "an unbound row advanced on someone else's evidence"
