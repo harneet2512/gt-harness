@@ -151,8 +151,24 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Enforce captured test-source/configuration digest matching for bound checks.
   Missing identifiable source remains unverified; implementation edits do not
   silently change the bound test definition.
-- [ ] Complete supported-positive and negative protocol coverage, including skipped
+- [x] Complete supported-positive and negative protocol coverage, including skipped
   tests, no tests, contradictory output, timeouts, and late-output failures.
+  DONE. Timeouts, nonzero exits, environment, command and protocol mismatches
+  already had independent witnesses. The added negatives close the rest:
+    no tests ran, a different test passed, a similarly named test passed --
+      all UNVERIFIED. The observed ids are the PASSING names, so a SKIPPED test
+      never appears among them and the subset guard rejects it. That was true by
+      construction and unasserted; it now fails loudly if a future parser reports
+      collected-or-skipped ids and turns a skip into proof.
+    a partially satisfied selection is UNVERIFIED; every selected test must pass.
+    a fail outcome at returncode 0 stays CHECK_FAILED, so output that ends in
+      failure is never rescued by a green exit code.
+    an unsupported or absent protocol abstains rather than inferring a pass.
+  Mutation-checked rather than merely green: deleting the subset guard from
+  classify_bound_check fails all four new cases plus one existing installed case,
+  so these tests constrain the behaviour instead of describing it.
+  Verified installed on wheel 66 against an LF checkout: 42 passed
+  (D:/gt-context-proof/protocol-69.xml).
 - [ ] Prove no unbound or unsupported observation can advance the cursor or gate.
 
 ## 2. Verification execution and queue — PARTIAL

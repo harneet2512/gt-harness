@@ -329,3 +329,94 @@ def test_installed_queue_execution_outcomes_and_shared_binding(tmp_path, monkeyp
     assert adapter._automatic_check_generation == 1
     assert adapter._pending_check_ids == set()
     assert verify_event_journal(adapter.store.path).valid
+
+
+@pytest.mark.parametrize(("observed", "why"), [
+    ((), "no tests ran at all"),
+    (("test_other",), "a different test passed"),
+    (("test_widget_helper",), "a similarly named test passed"),
+])
+def test_a_passing_command_without_the_selected_test_proves_nothing(tmp_path, observed, why):
+    """A green exit code is not evidence that the bound test ran.
+
+    The observed ids are the PASSING test names, so a selected test that was
+    SKIPPED never appears among them and the subset guard rejects it. That is
+    currently true by construction rather than by assertion: it depends on the
+    parser reporting passes only. These cases pin the property so a future
+    parser that reported collected-or-skipped ids instead would fail here rather
+    than silently convert a skip into proof.
+    """
+    check = replace(spec(tmp_path), test_source_digest="test-source", protocol="pytest")
+    execution = SimpleNamespace(
+        environment_sha256="env", repository_revision="rev",
+        command_sha256=hashlib.sha256(check.command.encode()).hexdigest(),
+        protocol="pytest", timed_out=False, outcome="pass", returncode=0,
+    )
+    result = classify_bound_check(
+        check, execution, before_revision="rev", after_revision="rev",
+        capture_complete=True, test_ids=observed, test_source_digest="test-source",
+    )
+    assert result.state == "UNVERIFIED", why
+
+
+def test_a_partially_satisfied_selection_is_not_a_pass(tmp_path):
+    """Every selected test must pass, not merely one of them."""
+    check = replace(
+        CheckSpec.from_dict({"argv": ["pytest", "-v", "tests/test_widget.py"],
+                             "requirement_ids": ["req-widget"],
+                             "selected_test_ids": ["test_widget", "test_widget_edge"]},
+                            str(tmp_path)),
+        test_source_digest="test-source", protocol="pytest",
+    )
+    execution = SimpleNamespace(
+        environment_sha256="env", repository_revision="rev",
+        command_sha256=hashlib.sha256(check.command.encode()).hexdigest(),
+        protocol="pytest", timed_out=False, outcome="pass", returncode=0,
+    )
+    assert classify_bound_check(
+        check, execution, before_revision="rev", after_revision="rev",
+        capture_complete=True, test_ids=("test_widget",),
+        test_source_digest="test-source",
+    ).state == "UNVERIFIED"
+    assert classify_bound_check(
+        check, execution, before_revision="rev", after_revision="rev",
+        capture_complete=True, test_ids=("test_widget", "test_widget_edge"),
+        test_source_digest="test-source",
+    ).state == "CHECK_PASSED"
+
+
+def test_a_late_failure_under_a_zero_exit_is_still_a_failure(tmp_path):
+    """Output that ends in failure must not be rescued by the exit code.
+
+    A runner can print a passing summary and then fail during teardown, or exit
+    zero while reporting failures. The outcome the evidence compiler derived
+    from the OUTPUT decides, so a fail outcome stays CHECK_FAILED even at
+    returncode 0, and it is never silently upgraded.
+    """
+    check = replace(spec(tmp_path), test_source_digest="test-source", protocol="pytest")
+    execution = SimpleNamespace(
+        environment_sha256="env", repository_revision="rev",
+        command_sha256=hashlib.sha256(check.command.encode()).hexdigest(),
+        protocol="pytest", timed_out=False, outcome="fail", returncode=0,
+    )
+    assert classify_bound_check(
+        check, execution, before_revision="rev", after_revision="rev",
+        capture_complete=True, test_ids=("test_widget",),
+        test_source_digest="test-source",
+    ).state == "CHECK_FAILED"
+
+
+def test_an_unsupported_protocol_abstains_rather_than_inferring_a_pass(tmp_path):
+    """Unsupported output abstains; it never infers proof from a green command."""
+    check = replace(spec(tmp_path), test_source_digest="test-source", protocol="pytest")
+    for observed_protocol in ("", "unittest", "cargo-test", "go-test"):
+        execution = SimpleNamespace(
+            environment_sha256="env", repository_revision="rev",
+            command_sha256=hashlib.sha256(check.command.encode()).hexdigest(),
+            protocol=observed_protocol, timed_out=False, outcome="pass", returncode=0,
+        )
+        assert classify_bound_check(
+            check, execution, before_revision="rev", after_revision="rev",
+            capture_complete=True, test_ids=("test_widget",),
+            test_source_digest="test-source",
+        ).state == "UNVERIFIED", observed_protocol
