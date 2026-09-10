@@ -875,6 +875,16 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   that share does not cover the copy.
   It is also HEAVIER: candidate peak memory median 242.9 MB against baseline
   184.5 MB, about 32% more, with no overlap between the two sets of five.
+  THE PATTERN ACROSS THE CORPUS: every real repository except the smallest fails to
+  build at all inside a 900s budget, and the harness's own budget is 600s.
+    click        105 parsed files   builds in ~6s      amend 0.76x, +32% memory
+    terraform  5,184 tracked files  EXCEEDED 900s      peak 1,600 MB when killed
+    cpython    5,639 tracked files  EXCEEDED 900s      peak 1,717 MB when killed
+    sentry    20,094 tracked files  EXCEEDED 900s      peak 2,072 MB when killed
+  Peak memory grows with repository size and every figure is a floor, because the
+  producer was killed before finishing. `_INDEX_RSS_LIMIT_BYTES` is 4 GB, so sentry
+  was already half of it at the moment it was stopped. grafana (21,412) and
+  kubernetes (29,226) remain.
   SECOND RESULT, `terraform` (5,184 tracked files, Go): THE PRODUCER CANNOT BUILD
   THIS REPOSITORY AT ALL inside the budget. The full build was killed at 900s with
   peak memory 1.6 GB, in `Pass 3: resolving 157492 call references`, having already
