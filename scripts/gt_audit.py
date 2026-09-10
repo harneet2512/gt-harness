@@ -1485,9 +1485,24 @@ def _audit_native_miniswe_task(
     plan_projection, plan_issues = _native_plan_projection(rows, state_dir)
     a.attribution_issues.extend(plan_issues)
     a.feature_attribution = _native_feature_projection(rows, plan_projection=plan_projection)
-    if a.iterations != len(provider_requests):
+    bootstrap_calls = 0
+    report_path = trajectory_path.parent / "miniswe_report.json"
+    if report_path.exists():
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            gt = report.get("gt", {})
+            if not isinstance(gt, dict):
+                raise ValueError("GT state is not an object")
+            for field in ("select_catalog_bootstrap_calls", "persistent_plan_bootstrap_calls"):
+                count = gt.get(field, 0)
+                if type(count) is not int or count < 0:
+                    raise ValueError(f"{field} is not a nonnegative integer")
+                bootstrap_calls += count
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            a.attribution_issues.append(f"bootstrap accounting report invalid: {exc}")
+    if a.iterations + bootstrap_calls != len(provider_requests):
         a.attribution_issues.append(
-            f"trajectory api_calls {a.iterations} != provider requests "
+            f"trajectory api_calls {a.iterations} + bootstrap calls {bootstrap_calls} != provider requests "
             f"{len(provider_requests)}"
         )
 

@@ -344,6 +344,21 @@ def test_native_plan_never_promotes_broken_delivery_chain(tmp_path, damage):
     assert audit.attribution_issues
 
 
+@pytest.mark.parametrize("field", ["select_catalog_bootstrap_calls", "persistent_plan_bootstrap_calls"])
+@pytest.mark.parametrize("count", [1, True, -1, "1", 2])
+def test_native_call_accounting_includes_only_valid_bootstrap_counts(tmp_path, field, count):
+    task = make_native_miniswe_task(tmp_path)
+    path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(path.read_text())
+    trajectory["info"]["model_stats"]["api_calls"] = 0
+    path.write_text(json.dumps(trajectory))
+    (task / "agent" / "miniswe_report.json").write_text(json.dumps({"gt": {field: count}}))
+    audit = gt_audit.audit_task(task)
+    accounting = [issue for issue in audit.attribution_issues
+                  if "provider requests" in issue or "bootstrap" in issue]
+    assert bool(accounting) is not (type(count) is int and count == 1)
+
+
 def test_native_delivery_must_be_on_the_immediate_provider_boundary(tmp_path):
     task = make_native_miniswe_task(tmp_path, delivery_text="inspect sibling.py")
     rewrite_native_events(

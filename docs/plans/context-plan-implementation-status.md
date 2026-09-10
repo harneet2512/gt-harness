@@ -4,6 +4,17 @@ Updated: 2026-09-10. Owner: current implementation session.
 
 ## Scope and release state
 
+Rehearsal 04 now earns verifier reward 1 with the exact official collected
+repair patch, stable pre-edit source, bound execution evidence and native graph
+refresh. Its original audit was RED because it compared agent turns against
+provider calls without adding the two GT bootstrap calls. The audit now uses
+the same population as runtime receipts: agent turns plus separately reported
+catalog/planning calls. Malformed/negative/bool counters and count mismatches
+remain errors. RED: `bootstrap-audit-red.xml`; installed wheel 57: 97 tests
+plus four subtests passed. The actual preserved rehearsal journal re-audits
+GREEN-delivered with zero integrity issues (`rehearsal04-audit57.json`).
+This is synthetic integration evidence, not paid benchmark or all-feature proof.
+
 Continuation: canonical run `34441061328` failed the static planning-off guard
 test because it did not recognize the mandatory flag in an AND expression.
 The checker now recognizes mandatory positive conjunctions, excludes ELSE
