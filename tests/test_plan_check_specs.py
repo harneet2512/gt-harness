@@ -126,6 +126,38 @@ def test_plan_cli_requests_are_applied_by_engine_and_cannot_grant_proof(tmp_path
     assert verify_event_journal(adapter.store.path).valid
 
 
+@pytest.mark.parametrize("value", [[], ["approach"], 7, None, "approach"])
+def test_malformed_revision_is_rejected_without_stopping_request_queue(tmp_path, value):
+    import json
+
+    from gt_engine.event_journal import verify_event_journal
+    from gt_engine.miniswe_integration import MiniSweAdapter
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.bootstrap import build_plan
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MiniSweAdapter(task_id="invalid-request", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    adapter.persistent_plan = build_plan(None, build_plan_inputs(
+        "The widget must preserve compatibility.", repo_root=str(repo), capture_baseline=False))
+    row_id = adapter.persistent_plan.rows[0].row_id
+    request = {"plan_digest": hashlib.sha256(adapter.persistent_plan.canonical_json().encode()).hexdigest(),
+               "row_id": row_id, "operation": "revise", "value": value}
+    inbox = adapter.store.root / "plan" / "requests"
+    inbox.mkdir(parents=True)
+    (inbox / "01-invalid.json").write_text(json.dumps(request), encoding="utf-8")
+    request["value"] = {"approach": "valid subsequent design"}
+    (inbox / "02-valid.json").write_text(json.dumps(request), encoding="utf-8")
+    adapter.apply_plan_requests()
+    assert adapter.persistent_plan.row(row_id).approach == "valid subsequent design"
+    assert adapter.plan_row_state(row_id) == "UNVERIFIED"
+    journal = adapter.store.path.read_text(encoding="utf-8")
+    assert '"plan_revision_rejected"' in journal
+    assert '"plan_revision_applied"' in journal
+    assert verify_event_journal(adapter.store.path).valid
+
+
 def test_revising_one_row_preserves_other_shared_check_bindings(tmp_path):
     import json
 

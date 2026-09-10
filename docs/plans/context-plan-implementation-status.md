@@ -163,6 +163,12 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Malformed plan revision values could crash the engine request queue with an
+  uncaught AttributeError. Installed RED reproduced two list-payload failures;
+  object-shape validation now journals rejection and processes the next valid
+  request. Rebuilt wheel 11 passed 54 installed check/cursor/gate tests, zero
+  skips, in 7.81 seconds (`D:/gt-context-proof/invalid-request-green.xml`).
+  Replay/restart and the complete CLI lifecycle remain open.
 - Independent evidence-guard witnesses passed 18 installed tests, zero skips,
   in 6.74 seconds (`D:/gt-context-proof/check-guards.xml`). Stale source,
   incomplete capture, missing IDs, and environment mismatch now each use an

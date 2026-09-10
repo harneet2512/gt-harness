@@ -710,6 +710,8 @@ class MiniSweAdapter(GroundtruthController):
                 if row is None:
                     raise ValueError("unknown plan row")
                 operation, value = request["operation"], request.get("value", {})
+                if not isinstance(value, dict):
+                    raise ValueError("plan request value must be an object")
                 if operation == "revise":
                     allowed = {"approach", "verification_kind", "verification_command"}
                     if set(value) - allowed or any(not isinstance(v, str) for v in value.values()):
