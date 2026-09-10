@@ -176,6 +176,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Canonical acceptance `34430421499` failed the strict degrade-stage census:
+  the new `plan_check_boundary` call was missing from the registry. Added the
+  stage without weakening the census. All 64 source session tests passed in
+  6.766 seconds (`check-stage-registry.xml`). Candidate 26: 72 installed session/
+  boundary tests passed in 11.22 seconds, with the source-tree census explicitly
+  deselected because it was tested separately against source. The first installed
+  invocation used the wrong deselection node ID and failed that source-only
+  fixture; retained as `check-stage-installed.xml`. Final proof is
+  `check-stage-installed-final.xml`, including real fault-to-capability reporting.
+  Successor canonical acceptance is required; no release-ready claim.
+
 - Agent-run equivalent-check lifecycle: two real source edits coalesce; actual
   isolated pytest execution discharges pending automatic work; an attempted
   duplicate would fail the test. Two pending checks share one pass allowance;

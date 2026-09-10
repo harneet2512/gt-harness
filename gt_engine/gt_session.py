@@ -57,7 +57,7 @@ CONFIGURED_OFF_STAGES = ("off", "global_kill_switch")
 _DEGRADE_STAGES = frozenset({
     "action_identity", "after_action", "before_action", "execution_identity",
     "execution_receipt", "execution_result_identity", "observation_splice",
-    "persistent_plan_delivery", "plan_cursor",
+    "persistent_plan_delivery", "plan_cursor", "plan_check_boundary",
     "prepare_messages", "provider_failure_receipt", "provider_response_receipt",
     "session_start", "submit_detection", "submit_gate",
     "submitted_result_missing", "suppression_receipt",

@@ -71,6 +71,8 @@ def test_boundary_executor_failure_does_not_block_the_model(tmp_path, monkeypatc
     session.before_model([], 1)
     assert adapter._pending_check_ids == {"pending"}
     assert "plan_check_boundary" in adapter.store.path.read_text(encoding="utf-8")
+    capability = next(row for row in session._mandatory_capability_rows() if row[0] == "gt_engine_enabled")
+    assert capability[2] == "disabled_at_plan_check_boundary:RuntimeError"
 
 
 @pytest.mark.parametrize(("predicate_state", "check_passes"), [("GREEN", False), ("RED", True)])
