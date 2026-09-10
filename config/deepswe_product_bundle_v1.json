@@ -911,7 +911,7 @@
     "tests/wrapper/test_router_v2_telemetry.py",
     "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
    ],
-   "review_inbox_commit": "128b46ab1940a0351262add4f25e43741ba46f25",
+   "review_inbox_commit": "ca9a311db8c70072bf46173786894f9760b466f6",
    "review_packets": [
     {
      "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
@@ -1000,13 +1000,13 @@
      "packet_digest_sha256": "34aaadc2c50ac34450e74d3cf11ea2a9187c640aeccc5bf3d3417f4d1aa16937"
     },
     {
-     "path": "inbox/HAR-83/har83-context-plan-producer-87d2e89c.json",
-     "packet_id": "har83-context-plan-producer-87d2e89c",
+     "path": "inbox/HAR-83/har83-context-plan-producer-87d2e89c-ci.json",
+     "packet_id": "har83-context-plan-producer-87d2e89c-ci",
      "head_sha": "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
      "kind": "check_outcome",
      "status": "PASS",
-     "basis": "local_determinism_fix_and_canonical_fingerprint_verified_on_certified_static_build",
-     "packet_digest_sha256": "26433140e4c6d59e19e0d912f5d195fd8e1182187ccfeee99a87b7058a4e9175"
+     "basis": "exact_ci_static_build_determinism_fix_and_canonical_fingerprint",
+     "packet_digest_sha256": "0510d87bae6f07130ffa1847eb43226f322d8763face142daa5c8b4b02267db5"
     }
    ],
    "product_review_packets": [
@@ -1027,7 +1027,7 @@
      ]
     }
    ],
-   "attestation_digest_sha256": "b8f64be13ea2e4161a460e5f51d818273f412c7fefbf84acdf2f751ec5a0ae47"
+   "attestation_digest_sha256": "160289dc615837d7a0ea118e9c1e4b7b84106a3e2b4507cb296f1995828fe13a"
   }
  },
  "capabilities": [
