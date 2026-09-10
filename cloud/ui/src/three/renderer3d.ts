@@ -1,1193 +1,943 @@
-/* ------------------------------------------------------------------ *
- * The field, drawn in depth.
- *
- * Everything the flat painter draws, drawn again against the same data:
- * relations first, then what an agent is doing to a file, then the files
- * themselves, then who is standing on them, then whatever is travelling.
- * The order is the flat painter's order and the colours are the flat
- * painter's colours — imported from it, not copied — because this is one
- * map with two projections and the two must not be able to disagree.
- *
- * Five draw calls, whatever the size of the repository: one run of lines
- * for every relation, one instanced quad for every file, two for the
- * rings around them, one for whatever is in flight. Nothing is allocated
- * inside a frame. React never re-renders because of one.
- *
- * The layout is a force simulation on three axes and the camera is an
- * orbit; both are described where they live. What is decided *here* is
- * how depth is allowed to show: near particles are larger because of the
- * perspective divide, far ones fade toward the paper colour, and that is
- * all. No lights, no bloom, no glow past what the flat view already has.
- * A relation you cannot follow is the only real failure mode of this
- * view, and every one of those effects makes relations harder to follow.
- * ------------------------------------------------------------------ */
-
-import {
+﻿import {
+  BoxGeometry,
+  ACESFilmicToneMapping,
+  SRGBColorSpace,
+  DoubleSide,
+  BufferGeometry,
   Color,
-  ColorManagement,
+  CanvasTexture,
+  ConeGeometry,
+  DirectionalLight,
+  Group,
+  HemisphereLight,
+  InstancedMesh,
   LineBasicMaterial,
+  Line,
+  LineSegments,
+  Float32BufferAttribute,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  Object3D,
   PerspectiveCamera,
+  PlaneGeometry,
+  PCFShadowMap,
+  Raycaster,
   Scene,
-  ShaderMaterial,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from "three";
-
-/* Every colour in this view is a value read straight off the stylesheet —
-   the same `--paper`, `--ink` and agent hues the flat canvas paints with.
-   three treats colours as linear working space and converts on output,
-   which lifted `#0f1113` to a mid grey and washed the particles out. We
-   are not lighting surfaces here, we are reproducing an interface, so the
-   conversion is turned off and the tokens land exactly as authored. */
-ColorManagement.enabled = false;
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import type { Simulation3D } from "d3-force-3d";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import type { GraphViewProps } from "../graphProps";
+import { pathHash, TERRACE_LEVELS, type CityLayout, type CityPlot, type District } from "../city";
+import type { Node3D } from "../graph3d";
+import { palette } from "../palette";
+import { CameraMotion, TIMING, travel } from "../cityMotion";
+import { occupancy, type AgentVisualState } from "../cityAgents";
+import { buildingGeometry, terraceGeometry, roofFootprint } from "./cityGeometry";
+import { SurveyorFactory } from "./surveyor";
 
-import type { DiffFile } from "../api";
-import { occupantsOf, type Occupant } from "../agentField";
-import { hueRgb, type ParticleField } from "../graph";
-import {
-  FILAMENT_ALPHA,
-  DIMMED,
-  FOCUS_DIM,
-  GLOW_ALPHA,
-  GLOW_MIN_HEAT,
-  GLOW_SPREAD,
-  HALO_MS,
-  RING_GAP,
-  SLOT_GAP,
-  WORKER_HALO_MS,
-  type WorkerLayer,
-} from "../graphDraw";
-import {
-  bounds3d,
-  controlOf,
-  depthOrder,
-  drawnSegments,
-  fitDistance,
-  FIT_DIRECTION,
-  hitTest3d,
-  pointOn3d,
-  PROJECT_STRIDE,
-  project3d,
-  type Node3D,
-  type Scene3D,
-  type Vec3,
-} from "../graph3d";
-import { createSim3d, settle3d } from "../graphSim3d";
-import { hexRgb, listRgb, palette, type Palette, type Rgb } from "../palette";
-import {
-  MAX_IN_FLIGHT,
-  PRIMARY_RGB,
-  TAIL,
-  type LiveSignal,
-  type SignalDirector,
-} from "../signals";
-import { flareAt, FLARE_REACH, type ArrivalWatch } from "../signalsView";
-import { attentionAlpha, type Attention } from "../trail";
-import { DiscSet, FULL_TURN, LineSet, RingSet } from "./buffers";
-import { paintLabels3d } from "./labels3d";
-import { applyFieldUniforms, discMaterial, ringMaterial } from "./materials";
-import { Disposer } from "../dispose";
-
-/* ---- the same numbers the flat view uses, in world units ---- */
-
-const FOV = 45;
-/** How long the hover dim takes to come on. The flat view's `DIM_MS`. */
-const DIM_MS = 120;
-/** A whole turn takes about three and a half minutes. */
-const AUTO_ORBIT_SPEED = 0.3;
-/** Devices report 3 and 4; past 2 it is fill rate for nothing. */
-const MAX_DPR = 2;
-/** The tail of a travelling signal, in segments. */
-const TAIL_STEPS = 6;
-/** A still signal lights the whole filament, so it needs the whole arc. */
-const STILL_STEPS = 12;
-/** How many arrivals may be alight at once. */
-const FLARE_SLOTS = 24;
-
-/**
- * Relations are a little fainter here than on the flat canvas.
- *
- * Not a different vocabulary — the same table, scaled once. The flat view
- * shows one plane of the graph at a time; this one shows all of it at
- * once, with everything behind everything else, so the same alpha adds up
- * to a denser picture. The ratios between the kinds are what carry the
- * distinction, and those are untouched.
- *
- * Raised from 0.86 after looking at it: depth costs a relation twice, once
- * to the fog and once to being seen end-on, and at the flat view's alpha
- * the connections simply were not there — a field of unconnected dots,
- * which is the one thing this view exists not to be. The kinds keep their
- * ratio, so a call still reads louder than an import.
- */
-const EDGE_SCALE = 1.8;
-
-export interface Frame3DState {
-  field: ParticleField;
-  neighbours: ReadonlyMap<string, ReadonlySet<string>>;
-  attention: ReadonlyMap<string, Attention>;
-  currentStep: number;
-  edited: ReadonlyMap<string, DiffFile>;
-  positionId: string | null;
-  running: boolean;
-  selectedId: string | null;
+export interface Frame3DState extends GraphViewProps {
   hoverId: string | null;
-  matches: ReadonlySet<string> | null;
-  labels: boolean;
-  workers: readonly WorkerLayer[];
-  presence: ReadonlyMap<string, readonly string[]>;
-  focusAgent: string | null;
   reduced: boolean;
-  director: SignalDirector;
-  arrivals: ArrivalWatch;
 }
-
 export interface Renderer3DOptions {
   canvas: HTMLCanvasElement;
-  /** The flat canvas the names are drawn on, over the field. */
   overlay: HTMLCanvasElement;
   getState: () => Frame3DState;
-  /** How far in the camera is, as a factor of the framing distance. */
   onZoom?: (k: number) => void;
 }
-
-interface Flare {
-  id: string;
-  color: Rgb;
-  at: number;
-  live: boolean;
+interface Vehicle {
+  group: Group;
+  scan: Mesh;
+  from: Vector3;
+  to: Vector3;
+  start: number;
+  duration: number;
+  event: string | null;
+  accent: Mesh;
+  accentMaterial: MeshBasicMaterial;
+  activity: AgentVisualState["activity"];
+  enteredAt: number;
+  trail: Line;
 }
 
-const NO_RGB: Rgb = { r: 0, g: 0, b: 0 };
-
+/** Imperative city renderer. One scheduler owns controls, camera, vehicles and theme. */
 export class Renderer3D {
-  private readonly gl: WebGLRenderer;
-  private readonly scene = new Scene();
-  private readonly camera: PerspectiveCamera;
-  private readonly controls: OrbitControls;
-  private readonly overlay: CanvasRenderingContext2D | null;
-  private readonly getState: () => Frame3DState;
-  private readonly onZoom: ((k: number) => void) | undefined;
-  private readonly bin = new Disposer();
-
-  private readonly particleMaterial: ShaderMaterial;
-  private readonly sparkMaterial: ShaderMaterial;
-  private readonly ringMat: ShaderMaterial;
-  private readonly lineMaterial: LineBasicMaterial;
-
-  private layout: Scene3D | null = null;
-  private sim: Simulation3D<Node3D, unknown> | null = null;
-  private discs: DiscSet | null = null;
-  private sparks: DiscSet | null = null;
-  private under: RingSet | null = null;
-  private over: RingSet | null = null;
-  private edges: LineSet | null = null;
-  private tails: LineSet | null = null;
-
-  private screen = new Float32Array(0);
-  private order = new Uint32Array(0);
-  private readonly slots: Occupant<WorkerLayer>[] = [];
-  private readonly layerIndex = new Map<string, WorkerLayer>();
-  private indexedFor: readonly WorkerLayer[] | null = null;
-
-  private readonly flares: Flare[] = [];
-  private flareAt = 0;
-
-  private raf: number | null = null;
-  private lastFrame = 0;
-  private dim = 0;
+  private gl: WebGLRenderer;
+  private scene = new Scene();
+  private camera = new PerspectiveCamera(38, 1, 0.1, 20000);
+  private overviewDistance = 200;
+  private aoCamera=new PerspectiveCamera();
+  private keyLight = new DirectionalLight(0xffffff, 2.2);
+  private controls: OrbitControls;
+  private composer: EffectComposer;
+  private ao: GTAOPass;
+  private renderPass: RenderPass;
+  private outputPass: OutputPass;
+  private floorMaterial=new MeshStandardMaterial({color:0xf7f8fa,roughness:1,metalness:0});
+  private floorGeometry=new PlaneGeometry(8000,8000);
+  private siteLinesMaterial=new LineBasicMaterial({color:0x8995a4,transparent:true,opacity:.055,depthWrite:false});
+  private walkwayMaterial=new MeshStandardMaterial({color:0xe5e8eb,roughness:.9,metalness:0});
+  private siteMarkTexture:CanvasTexture;
+  private siteMarkMaterial:MeshBasicMaterial;
+  private siteMarkGeometry=new PlaneGeometry(30,15);
+  private layout: CityLayout | null = null;
+  private buildings: InstancedMesh[] = [];
+  private ids: string[][] = [];
+  private terrain = new Group();
+  private solids = new MeshStandardMaterial({
+    roughness: 0.82,
+    metalness: 0.05,
+    vertexColors: true,
+  });
+  private ground = new MeshStandardMaterial({
+    roughness: 0.9,
+    metalness: 0,
+    vertexColors: true,
+  });
+  private contact = new MeshBasicMaterial({
+    color: 0x171b20,
+    transparent: true,
+    opacity: 0.045,
+    depthWrite: false,
+  });
+  private geometry = Array.from({ length: 6 }, (_, i) => buildingGeometry(i));
+  private terraces: BufferGeometry[] = [];
+  private fittedDistance = 300;
+  private box = new BoxGeometry(1, 1, 1);
+  private scanGeometry = new ConeGeometry(1, 1, 24, 1, true);
+  private scanMaterial = new MeshBasicMaterial({
+    color: 0x78afbd,
+    transparent: true,
+    opacity: 0.08,
+    side: DoubleSide,
+    depthWrite: false,
+  });
+  private factory = new SurveyorFactory();
+  private vehicles = new Map<string, Vehicle>();
+  private ray = new Raycaster();
+  private pointer = new Vector2();
+  private matrix = new Object3D();
+  private vector = new Vector3();
+  private cameraMotion = new CameraMotion();
+  private targetMotion = new CameraMotion();
   private width = 1;
   private height = 1;
-  private halfHeight = 1;
-  private framed = false;
-  private frameDistance = 1;
-  private layoutDirty = true;
-  private autoOrbit = true;
-  private reduced = false;
+  private raf: number | null = null;
   private disposed = false;
-  private controlsMoved = true;
-
-  /* Reused every frame. The hot loop allocates nothing. */
-  private readonly a: Vec3 = { x: 0, y: 0, z: 0 };
-  private readonly b: Vec3 = { x: 0, y: 0, z: 0 };
-  private readonly control: Vec3 = { x: 0, y: 0, z: 0 };
-  private readonly point: Vec3 = { x: 0, y: 0, z: 0 };
-  private readonly last: Vec3 = { x: 0, y: 0, z: 0 };
-  private readonly viewProjection = new Float32Array(16);
-  private readonly focus = new Vector3();
-
-  private skin: Palette | null = null;
-  private paper: Rgb = NO_RGB;
-  private ink: Rgb = NO_RGB;
-  private accent: Rgb = NO_RGB;
-  private change: Rgb = NO_RGB;
-  private readonly clear = new Color();
-
-  /* What the edge colours were last computed for. They only change when
-     one of these does, so a settled field re-uploads positions and
-     nothing else. */
-  private edgeFor = {
-    hover: "\u0000",
-    dim: -1,
-    matches: undefined as ReadonlySet<string> | null | undefined,
-    skin: null as Palette | null,
-  };
-
-  constructor(options: Renderer3DOptions) {
-    this.getState = options.getState;
-    this.onZoom = options.onZoom;
-
+  private framed = false;
+  private userOwned = false;
+  private reduced = false;
+  private selected: string | null = null;
+  private followed: string | null = null;
+  private followOffset = new Vector3(65, 75, 90);
+  private skin: ReturnType<typeof palette> | null = null;
+  private themeAt = 0;
+  private themeFrom = [new Color(), new Color(), new Color()];
+  private themeTo = [new Color(), new Color(), new Color()];
+  private edges: LineSegments;
+  private edgeKey = "";
+  private colorsKey = "";
+  private colorAt = 0;
+  private colorFrom: Color[][] = [];
+  private colorTo: Color[][] = [];
+  private lastFrame = 0;
+  private slowFrames = 0;
+  private ratio = 1;
+  private replayToken = "";
+  private input = false;
+  private animationNow = 0;
+  private labelLimit = 12;
+  constructor(private options: Renderer3DOptions) {
     this.gl = new WebGLRenderer({
       canvas: options.canvas,
-      /* The discs and rings antialias themselves analytically, so
-         multisampling would only smooth the hairlines — and it would do
-         it at four times the fill rate, which is exactly the budget a
-         software rasteriser does not have. */
-      antialias: false,
+      antialias: true,
+      depth: true,
       alpha: false,
       stencil: false,
-      depth: false,
-      powerPreference: "default",
     });
-    this.bin.add(this.gl);
-    this.bin.add(() => this.gl.forceContextLoss());
-
-    this.camera = new PerspectiveCamera(FOV, 1, 1, 4000);
+    this.gl.outputColorSpace = SRGBColorSpace;
+    this.gl.toneMapping = ACESFilmicToneMapping;
+    this.gl.toneMappingExposure = 1.1;
+    this.scene.background = new Color("#f7f8fa");
+    this.scene.add(new HemisphereLight(0xffffff, 0xa1a9b5, 1.4));
+    const key = this.keyLight;
+    key.position.set(-100, 220, 100);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    Object.assign(key.shadow.camera, {
+      left: -180,
+      right: 180,
+      top: 180,
+      bottom: -180,
+      near: 1,
+      far: 500,
+    });
+    key.shadow.bias = -0.00015;
+    key.shadow.normalBias = 0.35;
+    key.shadow.radius = 2.5;
+    key.shadow.intensity = 0.55;
+    this.gl.shadowMap.enabled = true;
+    this.gl.shadowMap.type = PCFShadowMap;
+    this.scene.add(key, key.target);
+    const fill = new DirectionalLight(0xe3eafa, 0.6);
+    fill.position.set(150, 100, -90);
+    this.scene.add(fill);
+    const floor=new Mesh(this.floorGeometry,this.floorMaterial);
+    floor.rotation.x=-Math.PI/2;floor.position.y=-.35;floor.receiveShadow=true;
+    this.scene.add(floor);
+    const mark=document.createElement("canvas");mark.width=256;mark.height=128;
+    const ink=mark.getContext("2d")!;ink.fillStyle="#ffffff";ink.font="650 100px Arial";ink.textAlign="center";ink.fillText("GT",128,99);
+    this.siteMarkTexture=new CanvasTexture(mark);
+    this.siteMarkMaterial=new MeshBasicMaterial({map:this.siteMarkTexture,color:0x798698,transparent:true,opacity:.38,depthWrite:false});
+    this.composer=new EffectComposer(this.gl);
+    this.composer.renderTarget1.samples=4;this.composer.renderTarget2.samples=4;
+    this.renderPass=new RenderPass(this.scene,this.camera);
+    this.camera.layers.enable(1);
+    this.ao=new GTAOPass(this.scene,this.aoCamera,1,1);
+    this.ao.blendIntensity=.65;
+    this.ao.updateGtaoMaterial({radius:9,distanceExponent:1,thickness:2,scale:1});
+    this.outputPass=new OutputPass();
+    this.composer.addPass(this.renderPass);this.composer.addPass(this.ao);this.composer.addPass(this.outputPass);
+    this.scene.add(this.terrain);
+    this.edges = new LineSegments(
+      new BufferGeometry(),
+      new LineBasicMaterial({
+        color: 0x718896,
+        transparent: true,
+        opacity: 0.18,
+        depthTest: true,
+      }),
+    );
+    this.scene.add(this.edges);
     this.controls = new OrbitControls(this.camera, options.canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.12;
-    this.controls.rotateSpeed = 0.7;
-    this.controls.zoomSpeed = 0.8;
-    this.controls.autoRotate = true;
-    this.controls.autoRotateSpeed = AUTO_ORBIT_SPEED;
-    this.bin.add(this.controls);
-
-    /* The idle orbit exists so a field that nobody is touching still
-       reads as a volume. The moment somebody touches it, it is theirs:
-       it stops, and it does not come back and take the camera off them
-       later. */
-    const onStart = () => this.stopAutoOrbit();
-    const onChange = () => {
-      this.controlsMoved = true;
-      this.kick();
-    };
-    this.controls.addEventListener("start", onStart);
-    this.controls.addEventListener("change", onChange);
-    this.bin.add(() => {
-      this.controls.removeEventListener("start", onStart);
-      this.controls.removeEventListener("change", onChange);
-    });
-
-    this.particleMaterial = this.bin.add(discMaterial(0.42));
-    this.sparkMaterial = this.bin.add(discMaterial(0));
-    this.ringMat = this.bin.add(ringMaterial());
-    this.lineMaterial = this.bin.add(
-      new LineBasicMaterial({
-        vertexColors: true,
-        transparent: false,
-        depthTest: false,
-        depthWrite: false,
-      }),
-    );
-
-    this.overlay = options.overlay.getContext("2d");
-    this.refreshTheme();
-    for (let i = 0; i < FLARE_SLOTS; i += 1) {
-      this.flares.push({ id: "", color: NO_RGB, at: 0, live: false });
-    }
-    this.bin.add(() => this.scene.clear());
-  }
-
-  /* ---------------- lifecycle ---------------- */
-
-  resize(width: number, height: number, dpr: number): void {
-    if (this.disposed || width < 2 || height < 2) return;
-    this.width = width;
-    this.height = height;
-    const ratio = Math.min(MAX_DPR, Math.max(1, dpr));
-    this.halfHeight = (height * ratio) / 2;
-    this.gl.setPixelRatio(ratio);
-    this.gl.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
-    if (!this.framed) this.fit();
-    this.kick();
-  }
-
-  setReduced(reduced: boolean): void {
-    if (this.reduced === reduced) return;
-    this.reduced = reduced;
-    /* Reduced motion is about motion nobody asked for. Dragging still
-       orbits; the camera just never moves on its own again, and it never
-       glides on after a release. */
-    this.controls.enableDamping = !reduced;
-    if (reduced) this.stopAutoOrbit();
-    this.clearFlares();
-    this.kick();
-  }
-
-  /**
-   * Take a layout. Everything sized by the field is rebuilt here and
-   * nowhere else — a frame never allocates, so a frame never grows a
-   * buffer either.
-   */
-  setLayout(layout: Scene3D, carriedOver: boolean): void {
-    if (this.disposed) return;
-    this.releaseSets();
-    this.layout = layout;
-    this.sim = null;
-
-    const n = layout.nodes.length;
-    if (n === 0) {
-      this.screen = new Float32Array(0);
-      this.order = new Uint32Array(0);
-      this.kick();
-      return;
-    }
-
-    this.screen = new Float32Array(n * PROJECT_STRIDE);
-    this.order = new Uint32Array(n);
-
-    const edgeSegments = Math.max(1, layout.edgeVertices / 2);
-    this.edges = new LineSet(edgeSegments, this.lineMaterial, 0);
-    this.under = new RingSet(n * 2 + FLARE_SLOTS + 32, this.ringMat, 1);
-    this.discs = new DiscSet(n, this.particleMaterial, 2);
-    this.over = new RingSet(n * 3 + 64, this.ringMat, 3);
-    this.tails = new LineSet(MAX_IN_FLIGHT * STILL_STEPS, this.lineMaterial, 4);
-    this.sparks = new DiscSet(MAX_IN_FLIGHT, this.sparkMaterial, 5);
-
-    for (const set of [
-      this.edges,
-      this.under,
-      this.discs,
-      this.over,
-      this.tails,
-      this.sparks,
-    ]) {
-      this.scene.add(set.mesh);
-    }
-
-    this.sim = createSim3d(layout) as unknown as Simulation3D<Node3D, unknown>;
-    settle3d(
-      this.sim as unknown as Parameters<typeof settle3d>[0],
-      carriedOver,
-    );
-    this.layoutDirty = true;
-    this.edgeFor.skin = null;
-    if (!this.framed) this.fit();
-    this.kick();
-  }
-
-  /** Frame the whole field. Explicit: a re-fit is something asked for. */
-  fit(): void {
-    const layout = this.layout;
-    if (!layout) return;
-    const ball = bounds3d(layout.nodes);
-    if (!ball) return;
-
-    const distance = fitDistance(ball.r, FOV, this.camera.aspect);
-    const len =
-      Math.hypot(FIT_DIRECTION.x, FIT_DIRECTION.y, FIT_DIRECTION.z) || 1;
-    this.camera.position.set(
-      ball.x + (FIT_DIRECTION.x / len) * distance,
-      ball.y + (FIT_DIRECTION.y / len) * distance,
-      ball.z + (FIT_DIRECTION.z / len) * distance,
-    );
-    this.controls.target.set(ball.x, ball.y, ball.z);
-    this.camera.near = Math.max(0.5, (distance - ball.r) * 0.2);
-    this.camera.far = distance + ball.r * 6;
-    this.camera.updateProjectionMatrix();
-    this.controls.minDistance = Math.max(1, ball.r * 0.2);
-    this.controls.maxDistance = distance * 3.5;
-    this.controls.update();
-
-    this.frameDistance = distance;
-    this.framed = true;
-    this.controlsMoved = true;
-    this.kick();
-  }
-
-  stopAutoOrbit(): void {
-    if (!this.autoOrbit) return;
-    this.autoOrbit = false;
     this.controls.autoRotate = false;
+    this.controls.minDistance = 35;
+    this.controls.maxDistance = 12000;
+    this.controls.zoomSpeed = .8;
+    this.controls.minPolarAngle = Math.PI / 6;
+    this.controls.maxPolarAngle = (73 * Math.PI) / 180;
+    this.controls.addEventListener("start", this.onStart);
+    this.controls.addEventListener("end", this.onEnd);
+    this.controls.addEventListener("change", this.kick);
   }
-
-  /** The particle under a canvas point, from the last frame's projection. */
+  private onStart = () => {
+    this.input = true;
+    this.userOwned = true;
+    this.cameraMotion.cancel();
+    this.targetMotion.cancel();
+  };
+  private onEnd = () => {
+    this.input = false;
+    if (this.followed) {
+      const v = this.vehicles.get(this.followed);
+      if (v) this.followOffset.copy(this.camera.position).sub(v.group.position);
+    }
+    this.kick();
+  };
+  setReduced(reduced: boolean) {
+    this.reduced = reduced;
+    this.controls.enableDamping = !reduced;
+    this.kick();
+  }
+  resize(w: number, h: number, dpr: number) {
+    if (w < 2 || h < 2) return;
+    this.width = w;
+    this.height = h;
+    this.ratio = Math.min(2, dpr);
+    this.gl.setPixelRatio(this.ratio);
+    this.gl.setSize(w, h, false);
+    this.composer.setPixelRatio(this.ratio);
+    this.composer.setSize(w,h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    if (!this.framed || !this.userOwned) this.fit();
+    this.kick();
+  }
+  setLayout(layout: CityLayout, _carried: boolean) {
+    this.buildings.forEach((m) => {
+      this.scene.remove(m);
+      m.dispose();
+    });
+    this.buildings = [];
+    this.ids = [];
+    this.terrain.traverse((o) => {
+      if (o instanceof InstancedMesh) o.dispose();
+    });
+    this.terrain.clear();
+    this.terraces.forEach(g => g.dispose());
+    this.terraces = [];
+    this.layout = layout;
+    const districts=layout.districts;
+    if(districts.length) {
+      const left=Math.min(...districts.map(d=>d.x))-100,right=Math.max(...districts.map(d=>d.x+d.width))+100;
+      const back=Math.min(...districts.map(d=>d.z))-100,front=Math.max(...districts.map(d=>d.z+d.depth))+100;
+      const step=Math.max(20,(right-left)/60,(front-back)/60),lines:number[]=[];
+      for(let x=Math.floor(left/step)*step;x<right;x+=step)lines.push(x,-.29,back,x,-.29,front);
+      for(let z=Math.floor(back/step)*step;z<front;z+=step)lines.push(left,-.29,z,right,-.29,z);
+      const grid=new BufferGeometry();grid.setAttribute("position",new Float32BufferAttribute(lines,3));this.terraces.push(grid);
+      this.terrain.add(new LineSegments(grid,this.siteLinesMaterial));
+      const mark=new Mesh(this.siteMarkGeometry,this.siteMarkMaterial);mark.rotation.x=-Math.PI/2;mark.rotation.z=Math.PI/4;mark.layers.set(1);
+      mark.position.set((left+right)/2,-.27,(back+front)/2);this.terrain.add(mark);
+      // Walkways belong to the architectural site; graph relations remain separate.
+      const connected=new Set([0]);
+      while(connected.size<districts.length) {
+        let best:{a:number;b:number;distance:number}|null=null;
+        for(const a of connected)for(let b=0;b<districts.length;b++) {
+          if(connected.has(b))continue;
+          const x= districtCenter(districts[a]),z=districtCenter(districts[b]),distance=x.distanceTo(z);
+          if(!best||distance<best.distance)best={a,b,distance};
+        }
+        if(!best)break;
+        const a=districts[best.a],b=districts[best.b],start=districtCenter(a),end=districtCenter(b),direction=end.clone().sub(start).normalize();
+        start.addScaledVector(direction,a.width*.48);end.addScaledVector(direction,-b.width*.48);
+        const bridge=new Mesh(this.box,this.walkwayMaterial);bridge.position.copy(start).add(end).multiplyScalar(.5);bridge.position.y=4.7;
+        bridge.scale.set(3.5,.65,start.distanceTo(end));bridge.rotation.y=Math.atan2(direction.x,direction.z);bridge.castShadow=true;bridge.receiveShadow=true;this.terrain.add(bridge);
+        connected.add(best.b);
+      }
+    }
+    for (let kind = 0; kind < 6; kind++) {
+      const plots = layout.nodes.filter((p) => p.archetype === kind);
+      const mesh = new InstancedMesh(
+        this.geometry[kind],
+        this.solids,
+        plots.length,
+      );
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.ids.push(plots.map((p) => p.id));
+      plots.forEach((p, i) => {
+        this.matrix.position.set(p.x, p.y, p.z);
+        this.matrix.scale.set(p.width, p.height, p.depth);
+        this.matrix.updateMatrix();
+        mesh.setMatrixAt(i, this.matrix.matrix);
+        mesh.setColorAt(i, new Color(0xffffff));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      this.buildings.push(mesh);
+      this.scene.add(mesh);
+    }
+    for (const d of layout.districts) {
+      const geometry = terraceGeometry(pathHash(d.name) % 37);
+      this.terraces.push(geometry);
+      const footing=new Mesh(geometry,this.contact);
+      footing.layers.set(1);
+      footing.position.set(d.x+d.width/2,-.15,d.z+d.depth/2);
+      footing.scale.set(d.width*1.18,.02,d.depth*1.18);
+      this.terrain.add(footing);
+      for (let layer = 0; layer < TERRACE_LEVELS.length; layer++) {
+        const m = new Mesh(geometry, this.ground);
+        m.receiveShadow = true; m.castShadow = true;
+        m.position.set(d.x + d.width / 2, TERRACE_LEVELS[layer].y, d.z + d.depth / 2);
+        const expansion = TERRACE_LEVELS[layer].scale;
+        m.scale.set(d.width * expansion, 1, d.depth * expansion);
+        this.terrain.add(m);
+      }
+    }
+    const contacts = new InstancedMesh(
+      this.box,
+      this.contact,
+      layout.nodes.length,
+    );
+    contacts.layers.set(1);
+    layout.nodes.forEach((p, i) => {
+      this.matrix.position.set(p.x, p.y + 0.03, p.z);
+      this.matrix.scale.set(p.width + 3, 0.02, p.depth + 3);
+      this.matrix.updateMatrix();
+      contacts.setMatrixAt(i, this.matrix.matrix);
+    });
+    this.terrain.add(contacts);
+    this.edgeKey = "";
+    this.colorsKey = "";
+    this.colorFrom = this.ids.map((ids) => ids.map(() => new Color()));
+    this.colorTo = this.ids.map((ids) => ids.map(() => new Color()));
+    if (!this.framed) this.fit();
+    this.kick();
+  }
+  private frame(target: Vector3, distance: number, duration: number) {
+    const direction = this.camera.position.clone().sub(this.controls.target);
+    if (direction.length() < 1) direction.set(1, 1.3, 1.4);
+    direction.normalize().multiplyScalar(distance);
+    const now = this.lastFrame ? this.animationNow : performance.now();
+    this.targetMotion.begin(
+      this.controls.target,
+      target,
+      now,
+      duration,
+      this.reduced,
+    );
+    this.cameraMotion.begin(
+      this.camera.position,
+      target.clone().add(direction),
+      now,
+      duration,
+      this.reduced,
+    );
+    this.kick();
+  }
+  zoomBy(factor: number) {
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    this.onStart();
+    const distance = Math.max(this.controls.minDistance, Math.min(this.controls.maxDistance,
+      this.camera.position.distanceTo(this.controls.target) / factor));
+    if (this.followed) this.followOffset.copy(this.camera.position).sub(this.controls.target).setLength(distance);
+    this.input = false;
+    this.frame(this.controls.target.clone(), distance, TIMING.panel);
+  }
+  private dockPosition(slot:number) {
+    const ds=this.layout?.districts??[];
+    if(!ds.length)return new Vector3(-30,14,slot*40);
+    const centers=ds.map(d=>({u:(d.x+d.width/2-d.z-d.depth/2)*Math.SQRT1_2,v:(d.x+d.width/2+d.z+d.depth/2)*Math.SQRT1_2,r:Math.max(d.width,d.depth)*.62}));
+    const u=Math.min(...centers.map(c=>c.u-c.r))-18;
+    const v=(Math.min(...centers.map(c=>c.v))+Math.max(...centers.map(c=>c.v)))/2+(slot-1)*42;
+    return new Vector3((u+v)*Math.SQRT1_2,14,(v-u)*Math.SQRT1_2);
+  }
+  fit() {
+    this.userOwned = false;
+    if (!this.layout?.nodes.length || this.width < 2 || this.height < 2) return;
+    const ds = this.layout.districts;
+    const minX=Math.min(...ds.map(d=>d.x-d.width*.1)), maxX=Math.max(...ds.map(d=>d.x+d.width*1.1));
+    const minZ=Math.min(...ds.map(d=>d.z-d.depth*.1)), maxZ=Math.max(...ds.map(d=>d.z+d.depth*1.1));
+    const target=new Vector3((minX+maxX)/2,8,(minZ+maxZ)/2);
+    const direction=new Vector3(.50,.7071,.50).normalize();
+    const corners: Vector3[]=[];
+    for(const d of ds) {
+      const geometry=terraceGeometry(pathHash(d.name)%37);
+      const positions=geometry.getAttribute("position");
+      for(let i=0;i<positions.count;i+=3) corners.push(new Vector3(d.x+d.width/2+positions.getX(i)*d.width*1.16,0,d.z+d.depth/2+positions.getZ(i)*d.depth*1.16));
+      geometry.dispose();
+    }
+    for(const p of this.layout.nodes) corners.push(new Vector3(p.x,p.y+p.height+16,p.z));
+    // Fit the actual activity dock, not an imaginary corner outside the city.
+    const agents=this.options.getState().agents??[];
+    for(const a of agents.filter(a=>!a.fileId)) {
+      const slot=occupancy(agents,a.id);
+      corners.push(this.dockPosition(slot).add(new Vector3(-12,12,12)));
+    }
+    const right=new Vector3(direction.z,0,-direction.x).normalize();
+    const up=new Vector3().crossVectors(direction,right).normalize();
+    const midpoint=(axis:Vector3)=>{const values=corners.map(p=>p.dot(axis));return (Math.min(...values)+Math.max(...values))/2;};
+    target.copy(right).multiplyScalar(midpoint(right)).addScaledVector(up,midpoint(up)).addScaledVector(direction,midpoint(direction));
+    const oldPosition=this.camera.position.clone(), oldQuaternion=this.camera.quaternion.clone();
+    let lo=30, hi=Math.hypot(maxX-minX,maxZ-minZ)*5+200;
+    for(let i=0;i<24;i++) {
+      const distance=(lo+hi)/2;
+      this.camera.position.copy(target).addScaledVector(direction,distance);
+      this.camera.lookAt(target); this.camera.updateMatrixWorld();
+      const fits=corners.every(p=>{const q=p.clone().project(this.camera);return Math.abs(q.x)<=.88 && Math.abs(q.y)<=.88 && q.z<1;});
+      if(fits) hi=distance; else lo=distance;
+    }
+    const distance=hi;
+    this.fittedDistance=distance;
+    this.overviewDistance = distance;
+    this.camera.position.copy(oldPosition);this.camera.quaternion.copy(oldQuaternion);this.camera.updateMatrixWorld();
+    this.controls.maxDistance=distance*4;this.controls.minDistance=45;
+    if(!this.framed) {
+      this.camera.position.copy(target).addScaledVector(direction,distance);
+      this.controls.target.copy(target);this.framed=true;this.controls.update();
+    } else this.frame(target,distance,TIMING.district);
+    this.camera.updateMatrixWorld();
+    this.keyLight.position.set(target.x-120,240,target.z+120);
+    this.keyLight.target.position.copy(target);
+    this.kick();
+  }
   pick(px: number, py: number): Node3D | null {
-    const layout = this.layout;
-    if (!layout) return null;
-    const at = hitTest3d(this.screen, layout.nodes.length, px, py);
-    return at < 0 ? null : layout.nodes[at];
+    const hit = this.pickSelection(px, py);
+    return hit?.kind === "file"
+      ? (this.layout?.byId.get(hit.id) ?? null)
+      : null;
   }
-
-  kick(): void {
-    if (this.disposed || this.raf !== null) return;
-    this.raf = requestAnimationFrame((now) => this.tick(now));
+  pickSelection(
+    px: number,
+    py: number,
+  ): { kind: "file" | "agent"; id: string } | null {
+    this.pointer.set((px / this.width) * 2 - 1, 1 - (py / this.height) * 2);
+    this.ray.setFromCamera(this.pointer, this.camera);
+    const hits = this.ray.intersectObjects(
+      [...this.buildings, ...[...this.vehicles.values()].map((v) => v.group)],
+      true,
+    );
+    for (const hit of hits) {
+      let obj = hit.object;
+      while (obj.parent && obj.parent !== this.scene) obj = obj.parent;
+      const agent = obj.userData.agentId as string | undefined;
+      if (agent) return { kind: "agent", id: agent };
+      const mesh = this.buildings.indexOf(hit.object as InstancedMesh);
+      if (mesh >= 0 && hit.instanceId !== undefined)
+        return { kind: "file", id: this.ids[mesh][hit.instanceId] };
+    }
+    return null;
   }
-
-  dispose(): void {
+  kick = () => {
+    if (!this.disposed && this.raf === null)
+      this.raf = requestAnimationFrame(this.tick);
+  };
+  private tick = (now: number) => {
+    this.raf = null;
+    if (this.disposed) return;
+    const state = this.options.getState();
+    const delta = this.lastFrame ? Math.min(64, now - this.lastFrame) : 16;
+    this.animationNow = this.lastFrame ? this.animationNow + delta : now;
+    this.lastFrame = now;
+    if (delta > 24) this.slowFrames++;
+    else this.slowFrames = Math.max(0, this.slowFrames - 1);
+    if (this.slowFrames > 90) {
+      if (this.ratio > 1) {
+        this.ratio = Math.max(1, this.ratio - 0.25);
+        this.gl.setPixelRatio(this.ratio);
+        this.composer.setPixelRatio(this.ratio);
+      } else if (this.ao.enabled) this.ao.enabled=false;
+      else if (this.gl.shadowMap.enabled) this.gl.shadowMap.enabled = false;
+      else this.labelLimit = 8;
+      this.slowFrames = 0;
+    }
+    let busy = this.theme(now);
+    const replay = state.trailToken !== this.replayToken;
+    this.replayToken = state.trailToken;
+    busy =
+      this.paintAgents(
+        state.agents ?? [],
+        this.animationNow,
+        replay || !state.animateWorkers,
+      ) || busy;
+    if (state.selectedId !== this.selected) {
+      this.selected = state.selectedId;
+      const p = this.layout?.byId.get(this.selected ?? "") as
+        | CityPlot
+        | undefined;
+      if (p && !state.followAgent) {
+        const district =
+          state.field.byId.get(p.id)?.kind === "dir"
+            ? this.layout?.districts.find((d) => d.name === p.cluster)
+            : undefined;
+        this.frame(
+          district
+            ? new Vector3(
+                district.x + district.width / 2,
+                p.y,
+                district.z + district.depth / 2,
+              )
+            : new Vector3(p.x, p.y + p.height / 2, p.z),
+          district ? Math.max(district.width, district.depth) * 2 : Math.max(160, this.fittedDistance * .70),
+          district ? TIMING.district : TIMING.building,
+        );
+      }
+    }
+    if ((state.followAgent ?? null) !== this.followed) {
+      this.followed = state.followAgent ?? null;
+      this.cameraMotion.cancel();
+      this.targetMotion.cancel();
+      const v = this.vehicles.get(this.followed ?? "");
+      if (v) {
+        this.followOffset
+          .copy(this.camera.position)
+          .sub(this.controls.target)
+          .normalize()
+          .multiplyScalar(Math.max(110, this.followOffset.length()));
+        this.frame(
+          v.group.position,
+          Math.max(110, this.followOffset.length()),
+          TIMING.follow,
+        );
+      }
+    }
+    const pos = this.cameraMotion.sample(this.animationNow),
+      target = this.targetMotion.sample(this.animationNow);
+    if (pos) this.camera.position.set(pos.x, pos.y, pos.z);
+    if (target) this.controls.target.set(target.x, target.y, target.z);
+    if (this.followed && !this.input && !this.cameraMotion.busy) {
+      const v = this.vehicles.get(this.followed);
+      if (v) {
+        this.controls.target.copy(v.group.position);
+        this.camera.position.copy(v.group.position).add(this.followOffset);
+      }
+    }
+    const moved = this.controls.update();
+    busy = busy || moved || this.cameraMotion.busy || this.targetMotion.busy;
+    busy = this.paintBuildings(state) || busy;
+    this.paintEdges(state);
+    this.aoCamera.copy(this.camera);this.aoCamera.layers.set(0);
+    this.composer.render();
+    this.labels(state);
+    this.options.onZoom?.(
+      this.overviewDistance / Math.max(1, this.camera.position.distanceTo(this.controls.target)),
+    );
+    if (busy) this.kick();
+    else this.lastFrame = 0;
+  };
+  private theme(now: number) {
+    const skin = palette();
+    if (skin !== this.skin) {
+      this.skin = skin;
+      this.themeAt = now;
+      const style = getComputedStyle(document.documentElement);
+      this.themeFrom = [
+        (this.scene.background as Color).clone(),
+        this.solids.color.clone(),
+        this.ground.color.clone(),
+      ];
+      this.themeTo = [
+        new Color(style.getPropertyValue("--city-sky").trim() || skin.paper),
+        new Color(
+          style.getPropertyValue("--city-building").trim() || "#8b9097",
+        ),
+        new Color(style.getPropertyValue("--city-terrain").trim() || "#34383d"),
+      ];
+    }
+    const t = Math.min(1, (now - this.themeAt) / 220);
+    (this.scene.background as Color).lerpColors(
+      this.themeFrom[0],
+      this.themeTo[0],
+      t,
+    );
+    this.solids.color.lerpColors(this.themeFrom[1], this.themeTo[1], t);
+    this.ground.color.lerpColors(this.themeFrom[2], this.themeTo[2], t);
+    this.walkwayMaterial.color.copy(this.ground.color);
+    this.siteLinesMaterial.opacity=document.documentElement.dataset.theme==="dark"?.018:.035;
+    this.floorMaterial.color.copy(this.scene.background as Color).multiplyScalar(2);
+    this.factory.body.color.set(document.documentElement.dataset.theme === "dark" ? "#8795a6" : "#8093aa");
+    return t < 1;
+  }
+  private paintBuildings(state: Frame3DState) {
+    const key = [
+      state.selectedId,
+      state.hoverId,
+      [...state.edited.keys()].join(","),
+      state.matches ? [...state.matches].join(",") : "",
+    ].join("|");
+    if (key !== this.colorsKey) {
+      this.colorsKey = key;
+      this.colorAt = this.animationNow;
+      this.buildings.forEach((mesh, k) =>
+        this.ids[k].forEach((id, i) => {
+          mesh.getColorAt(i, this.colorFrom[k][i]);
+          const p=this.layout?.byId.get(id);
+          const cluster = (p?.cluster ?? "").toLowerCase();
+          // Module identity is stable and legible across sessions; unknown
+          // directories still receive a deterministic neutral pastel.
+          const named: [RegExp, string][] = [
+            [/core|engine|server/, "#b8d2ee"],
+            [/ui|frontend|web|visual/, "#d7c9ee"],
+            [/service|auth|api/, "#e8c5c8"],
+            [/infra|deploy|ops|tool/, "#c8dfd1"],
+            [/test|eval|spec/, "#ead8b6"],
+            [/agent|worker|producer/, "#d1c9e8"],
+          ];
+          const tint = new Color(named.find(([pattern]) => pattern.test(cluster))?.[1] ??
+            ["#c7d8e8", "#d4d5e6", "#d1dfd6"][pathHash(cluster) % 3]);
+          const c=this.colorTo[k][i].set("#ffffff").lerp(tint,.82);
+          if(id === state.selectedId) c.lerp(new Color("#8db6e6"),.45);
+          else if(id === state.hoverId) c.multiplyScalar(1.13);
+          else if(state.hoverId || (state.matches && !state.matches.has(id))) c.multiplyScalar(.76);
+        }),
+      );
+    }
+    const t = Math.min(1, (this.animationNow - this.colorAt) / TIMING.hover);
+    if (t < 1 || this.colorAt !== -Infinity) {
+      const color = new Color();
+      this.buildings.forEach((mesh, k) => {
+        this.ids[k].forEach((_, i) =>
+          mesh.setColorAt(
+            i,
+            color.lerpColors(this.colorFrom[k][i], this.colorTo[k][i], t),
+          ),
+        );
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      });
+      if (t === 1) this.colorAt = -Infinity;
+    }
+    return t < 1;
+  }
+  private paintEdges(state: Frame3DState) {
+    const id = state.hoverId ?? state.selectedId;
+    const key = `${this.layout?.signature}|${id}`;
+    if (key === this.edgeKey) return;
+    this.edgeKey = key;
+    const vertices: number[] = [];
+    if (id && this.layout)
+      for (const l of this.layout.links) {
+        const a = this.layout.byId.get(String(l.source)) as
+            | CityPlot
+            | undefined,
+          b = this.layout.byId.get(String(l.target)) as CityPlot | undefined;
+        if (!a || !b || (a.id !== id && b.id !== id)) continue;
+        const from=new Vector3(a.x,a.y+a.height+1,a.z), to=new Vector3(b.x,b.y+b.height+1,b.z);
+        for(let j=0;j<16;j++) {
+          for(const t of [j/16,(j+1)/16]) {
+            const q=from.clone().lerp(to,t);q.y+=Math.sin(Math.PI*t)*Math.min(16,from.distanceTo(to)*.12);
+            vertices.push(q.x,q.y,q.z);
+          }
+        }
+        if (vertices.length >= 6 * 16 * 80) break;
+      }
+    this.edges.geometry.dispose();
+    this.edges.geometry = new BufferGeometry();
+    this.edges.geometry.setAttribute(
+      "position",
+      new Float32BufferAttribute(vertices, 3),
+    );
+  }
+  private paintAgents(
+    agents: readonly AgentVisualState[],
+    now: number,
+    direct: boolean,
+  ) {
+    let busy = false;
+    const present = new Set(agents.map((a) => a.id));
+    for (const [id, v] of this.vehicles)
+      if (!present.has(id)) {
+        this.scene.remove(v.group);
+        this.scene.remove(v.accent);
+        v.accentMaterial.dispose();
+        this.scene.remove(v.trail);
+        v.trail.geometry.dispose();
+        (v.trail.material as LineBasicMaterial).dispose();
+        (v.scan.material as MeshBasicMaterial).dispose();
+        this.factory.release(v.group);
+        this.vehicles.delete(id);
+      }
+    for (const a of agents) {
+      const p = this.layout?.byId.get(a.fileId ?? "") as CityPlot | undefined;
+      const roof=roofFootprint(p?.archetype??0);
+      const roofX=p?p.x+roof.x*p.width:0,roofZ=p?p.z+roof.z*p.depth:0;
+      const slot = occupancy(agents, a.id);
+      const dock=this.dockPosition(slot);
+      const to = new Vector3(
+        p ? roofX + [0, -14, 14][slot % 3] : dock.x,
+        p ? p.y + p.height + (a.activity === "editing" ? 32 : 42) : dock.y,
+        p ? roofZ + Math.floor(slot / 3) * 13 : dock.z,
+      );
+      let v = this.vehicles.get(a.id);
+      if (!v) {
+        const group = this.factory.create(a.color);
+        group.rotation.order = "YXZ";
+        group.scale.setScalar(1);
+        group.userData.agentId = a.id;
+        const scan = new Mesh(this.scanGeometry, this.scanMaterial.clone());
+        scan.layers.set(1);
+        (scan.material as MeshBasicMaterial).color.set(a.color);
+        scan.position.y = -5;
+        scan.raycast = () => {};
+        group.add(scan);
+        group.position.copy(to);
+        const accentMaterial = new MeshBasicMaterial({
+          color: a.color,
+          transparent: true,
+          opacity: 0.3,
+          depthWrite: false,
+        });
+        const accent = new Mesh(this.box, accentMaterial);
+        accent.layers.set(1);
+        accent.raycast = () => {};
+        this.scene.add(accent);
+        const trailGeometry = new BufferGeometry();
+        trailGeometry.setAttribute(
+          "position",
+          new Float32BufferAttribute(new Float32Array(39), 3),
+        );
+        const trail = new Line(
+          trailGeometry,
+          new LineBasicMaterial({
+            color: a.color,
+            transparent: true,
+            opacity: 0.25,
+            depthTest: true,
+          }),
+        );
+        trail.frustumCulled = false;
+        this.scene.add(trail);
+        v = {
+          group,
+          scan,
+          from: to.clone(),
+          to: to.clone(),
+          start: now,
+          duration: 0,
+          event: a.sourceEvent,
+          accent,
+          accentMaterial,
+          activity: a.activity,
+          enteredAt: now,
+          trail,
+        };
+        this.vehicles.set(a.id, v);
+        this.scene.add(group);
+      }
+      if (v.event !== a.sourceEvent || v.activity !== a.activity) {
+        v.event = a.sourceEvent;
+        v.activity = a.activity;
+        v.enteredAt = now;
+      }
+      if (!v.to.equals(to)) {
+        v.from.copy(v.group.position);
+        v.to.copy(to);
+        v.start = now;
+        const distance = v.from.distanceTo(to);
+        v.duration =
+          this.reduced || direct
+            ? 0
+            : distance < 100
+              ? TIMING.local
+              : distance < 400
+                ? TIMING.neighborhood
+                : TIMING.repository;
+      }
+      if (this.reduced || direct) v.duration = 0;
+      const t = v.duration ? Math.min(1, (now - v.start) / v.duration) : 1;
+      const point = travel(v.from, v.to, t);
+      v.trail.visible = t < 1 && !this.reduced;
+      if (v.trail.visible) {
+        const positions = v.trail.geometry.getAttribute("position");
+        for (let i = 0; i < 13; i++) {
+          const tail = travel(v.from, v.to, Math.max(0, t - 0.12 + i * 0.01));
+          positions.setXYZ(i, tail.x, tail.y, tail.z);
+        }
+        positions.needsUpdate = true;
+      }
+      v.group.position.set(point.x, point.y, point.z);
+      const pixelsPerUnit=this.height/(2*Math.tan(this.camera.fov*Math.PI/360)*Math.max(1,this.camera.position.distanceTo(v.group.position)));
+      const vehicleScale=Math.max(.85,Math.min(3,40/(18*pixelsPerUnit)));
+      v.group.scale.setScalar(vehicleScale);
+      if (t < 1) {
+        const next = travel(v.from, v.to, Math.min(1, t + 0.005));
+        const heading=Math.atan2(-(next.x-point.x),-(next.z-point.z));
+        const difference=Math.atan2(Math.sin(heading-v.group.rotation.y),Math.cos(heading-v.group.rotation.y));
+        v.group.rotation.y+=difference*.18;
+        v.group.rotation.x = Math.atan2(
+          next.y - point.y,
+          Math.hypot(next.x - point.x, next.z - point.z),
+        );
+        busy = true;
+      } else v.group.rotation.x = 0;
+      v.group.children.forEach((child) => {
+        if (child.userData.rotorBlade)
+          child.rotation.y = this.reduced || !a.running ? 0 : now * 0.015;
+      });
+      if (
+        a.running &&
+        a.activity !== "idle" &&
+        a.activity !== "outside" &&
+        !this.reduced &&
+        t === 1
+      ) {
+        v.group.position.y += Math.sin((now / 3200) * Math.PI * 2) * 0.25;
+        busy = true;
+      }
+      v.scan.visible = ["reading", "editing"].includes(a.activity) && !!p && t === 1;
+      if(p) {
+        const distance=Math.max(.1,v.group.position.y-p.y-p.height);
+        v.scan.position.y=-distance/(2*vehicleScale);
+        v.scan.scale.set(p.width*roof.width*.65/vehicleScale,distance/vehicleScale,p.depth*roof.depth*.65/vehicleScale);
+      }
+      if (p) {
+        v.accent.position.set(roofX, p.y + p.height - .12, roofZ);
+        v.accent.scale.set(p.width*roof.width*.92, 0.12, p.depth*roof.depth*.92);
+      }
+      v.accent.visible =
+        !!p &&
+        t === 1 &&
+        ["reading", "editing", "verifying"].includes(a.activity);
+      const pulse =
+        a.activity === "editing" && !this.reduced
+          ? Math.max(0, 1 - (now - v.enteredAt) / 400)
+          : 0;
+      v.accentMaterial.opacity =
+        (a.activity === "reading" ? 0.08 : 0.22) + pulse * 0.25;
+      busy = busy || pulse > 0;
+    }
+    return busy;
+  }
+  private labels(state: Frame3DState) {
+    const ctx = this.options.overlay.getContext("2d");
+    if (!ctx || !this.layout) return;
+    ctx.clearRect(0, 0, this.width, this.height);
+    const boxes: {x:number;y:number;w:number;h:number}[]=[];
+    const label=(title:string, detail:string, x:number,y:number,z:number,color?:string) => {
+      if(boxes.length>=this.labelLimit)return;
+      title=title.length>26?title.slice(0,25)+"…":title;
+      this.vector.set(x,y,z).project(this.camera);
+      if(this.vector.z < -1 || this.vector.z > 1)return;
+      ctx.font="600 12px system-ui";
+      const w=Math.max(ctx.measureText(title).width,Math.min(180,detail.length*5.5))+30,h=detail?48:30;
+      const sx=((this.vector.x+1)*this.width)/2, sy=((1-this.vector.y)*this.height)/2;
+      for(const [dx,dy] of [[14,-36],[-w-14,-36],[14,16],[-w-14,16]]) {
+        const bx=sx+dx,by=Math.max(this.height>400?(this.width<600?185:145):10,sy+dy);
+        if(bx<10||by<10||bx+w>this.width-10||by+h>this.height-10)continue;
+        if(boxes.some(b=>bx<b.x+b.w+8&&bx+w+8>b.x&&by<b.y+b.h+8&&by+h+8>b.y))continue;
+        const dark=document.documentElement.dataset.theme==="dark";
+        ctx.fillStyle=dark?"rgba(20,25,32,.91)":"rgba(255,255,255,.91)";
+        ctx.strokeStyle=dark?"rgba(180,200,220,.12)":"rgba(70,85,105,.10)";
+        ctx.beginPath();ctx.roundRect(bx,by,w,h,7);ctx.fill();ctx.stroke();
+        ctx.fillStyle=color??(dark?"#aebbd0":"#7894b2");ctx.beginPath();ctx.arc(bx+12,by+15,3,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=palette().ink;ctx.font="600 12px system-ui";ctx.fillText(title,bx+22,by+19);
+        if(detail){ctx.font="10px system-ui";ctx.fillStyle=palette().ink2;ctx.fillText(detail.slice(0,33),bx+22,by+35);}
+        boxes.push({x:bx,y:by,w,h});return;
+      }
+    };
+    for(const a of state.agents??[]) {
+      const v=this.vehicles.get(a.id);
+      if(v && (a.running || state.followAgent===a.id)) label(a.label,a.location==="unknown"?"Location unknown":a.activity,v.group.position.x,v.group.position.y+5,v.group.position.z,a.color);
+    }
+    if(state.selectedId) {
+      const p=this.layout.byId.get(state.selectedId) as CityPlot|undefined;
+      if(p)label(state.field.byId.get(p.id)?.label??p.id,"Selected file",p.x,p.y+p.height+3,p.z,"#287df0");
+    }
+    const named=new Set<string>();
+    for(const d of this.layout.districts) {
+      if(named.has(d.name))continue;named.add(d.name);
+      const count=this.layout.nodes.filter(p=>p.cluster===d.name).length;
+      if(!count)continue;
+      label(d.name||"Repository",`${count.toLocaleString()} files`,d.x+d.width*.2,9,d.z+d.depth*.15);
+    }
+  }
+  dispose() {
     if (this.disposed) return;
     this.disposed = true;
     if (this.raf !== null) cancelAnimationFrame(this.raf);
-    this.raf = null;
-    this.sim?.stop();
-    this.sim = null;
-    this.releaseSets();
-    this.bin.dispose();
-  }
-
-  private releaseSets(): void {
-    for (const set of [
-      this.edges,
-      this.under,
-      this.discs,
-      this.over,
-      this.tails,
-      this.sparks,
-    ]) {
-      if (!set) continue;
-      this.scene.remove(set.mesh);
-      set.dispose();
-    }
-    this.edges = null;
-    this.under = null;
-    this.discs = null;
-    this.over = null;
-    this.tails = null;
-    this.sparks = null;
-  }
-
-  /* ---------------- the frame ---------------- */
-
-  private tick(now: number): void {
-    this.raf = null;
-    if (this.disposed) return;
-    const state = this.getState();
-    const layout = this.layout;
-
-    const dt = this.lastFrame === 0 ? 16 : Math.min(64, now - this.lastFrame);
-    this.lastFrame = now;
-
-    this.refreshTheme();
-    this.gl.setClearColor(this.clear, 1);
-
-    if (!layout || layout.nodes.length === 0) {
-      this.gl.clear();
-      this.overlay?.clearRect(0, 0, this.width, this.height);
-      this.lastFrame = 0;
-      return;
-    }
-
-    /* ---- the layout ---- */
-    const sim = this.sim;
-    const settling = sim !== null && sim.alpha() > sim.alphaMin();
-    if (settling) {
-      sim.tick();
-      this.layoutDirty = true;
-    }
-
-    /* ---- the camera ---- */
-    const orbiting = this.controls.autoRotate;
-    this.controlsMoved = false;
-    this.controls.update();
-    const cameraMoved = this.controlsMoved || orbiting;
-    this.focus.copy(this.camera.position).sub(this.controls.target);
-    const distance = Math.max(1, this.focus.length());
-    if (this.onZoom) this.onZoom(this.frameDistance / distance);
-
-    const ball = bounds3d(layout.nodes);
-    const spread = ball ? ball.r : distance;
-    const fogNear = Math.max(1, distance - spread * 0.85);
-    const fogFar = distance + spread * 1.3;
-    for (const material of [
-      this.particleMaterial,
-      this.sparkMaterial,
-      this.ringMat,
-    ]) {
-      applyFieldUniforms(
-        material,
-        this.ink,
-        this.paper,
-        fogNear,
-        fogFar,
-        this.halfHeight,
-      );
-    }
-
-    /* ---- the hover dim, on the flat view's clock ---- */
-    const target = state.hoverId ? 1 : 0;
-    if (this.dim !== target) {
-      const step = dt / DIM_MS;
-      this.dim =
-        target > this.dim
-          ? Math.min(1, this.dim + step)
-          : Math.max(0, this.dim - step);
-    }
-    const tweening = this.dim !== target;
-
-    /* ---- projection, which the labels and the hit test both read ---- */
-    this.camera.updateMatrixWorld();
-    const vp = this.viewProjection;
-    multiply(
-      this.camera.projectionMatrix.elements,
-      this.camera.matrixWorldInverse.elements,
-      vp,
-    );
-    project3d(vp, layout.nodes, this.width, this.height, this.screen);
-    depthOrder(this.screen, layout.nodes.length, this.order);
-
-    /* ---- what is in the air, and what has just landed ---- */
-    const travelling = state.director.update(now);
-    const landed = state.arrivals.observe(travelling, now, state.reduced);
-    for (let i = 0; i < landed.length; i += 1) this.light(landed[i]);
-    const flaring = this.paintFlares(state, now);
-
-    this.paintEdges(state);
-    this.paintParticles(state, now);
-    this.paintRings(state, now);
-    this.paintSignals(state, travelling);
-
-    this.gl.render(this.scene, this.camera);
-
-    if (this.overlay) {
-      paintLabels3d({
-        ctx: this.overlay,
-        width: this.width,
-        height: this.height,
-        field: state.field,
-        nodes: layout.nodes,
-        screen: this.screen,
-        order: this.order,
-        count: layout.nodes.length,
-        labels: state.labels,
-        hoverId: state.hoverId,
-        selectedId: state.selectedId,
-        positionId: state.positionId,
-        fogNear,
-        fogFar,
-        ink: this.skin?.ink ?? "#e6e6e6",
-        ink2: this.skin?.ink2 ?? "#8b8f97",
-      });
-    }
-
-    const halo =
-      !state.reduced &&
-      ((state.running && state.positionId !== null) ||
-        state.workers.some(
-          (layer) => layer.running && layer.positionId !== null,
-        ));
-
-    if (
-      settling ||
-      cameraMoved ||
-      tweening ||
-      flaring ||
-      halo ||
-      state.director.busy
-    ) {
-      this.kick();
-    } else {
-      this.lastFrame = 0;
-    }
-  }
-
-  /* ---------------- theme ---------------- */
-
-  private refreshTheme(): void {
-    const skin = palette();
-    if (skin === this.skin) return;
-    this.skin = skin;
-    this.paper = hexRgb(skin.paper);
-    this.ink = hexRgb(skin.ink);
-    this.accent = listRgb(skin.accent);
-    this.change = listRgb(skin.change);
-    this.clear.setRGB(this.paper.r, this.paper.g, this.paper.b);
-    this.edgeFor.skin = null;
-  }
-
-  /* ---------------- relations ---------------- */
-
-  private paintEdges(state: Frame3DState): void {
-    const edges = this.edges;
-    const layout = this.layout;
-    if (!edges || !layout) return;
-
-    const colorsStale =
-      this.edgeFor.skin !== this.skin ||
-      this.edgeFor.hover !== (state.hoverId ?? "\u0000") ||
-      this.edgeFor.matches !== state.matches ||
-      Math.abs(this.edgeFor.dim - this.dim) > 0.02;
-
-    if (!this.layoutDirty && !colorsStale) return;
-
-    edges.begin();
-    const paper = this.paper;
-
-    for (const link of layout.links) {
-      const a = endOf(layout, link.source);
-      const b = endOf(layout, link.target);
-      if (!a || !b) continue;
-
-      const base = (FILAMENT_ALPHA[link.kind] ?? 0.14) * EDGE_SCALE;
-      const touched =
-        state.hoverId !== null &&
-        (a.id === state.hoverId || b.id === state.hoverId);
-      let alpha = touched
-        ? lerp(base, 0.62, this.dim)
-        : base * lerp(1, DIMMED, this.dim);
-      if (
-        state.matches &&
-        !state.matches.has(a.id) &&
-        !state.matches.has(b.id)
-      ) {
-        alpha *= DIMMED;
-      }
-      if (alpha < 0.01) {
-        /* Still consumes its segments: the buffer layout has to stay put
-           between frames, and a relation that is merely too faint to see
-           is not a relation that has gone away. */
-        skipSegments(edges, link.samples, link.dashed);
-        continue;
-      }
-
-      const tint = link.kind === "cotouch" ? this.change : this.ink;
-      const cr = paper.r + (tint.r - paper.r) * alpha;
-      const cg = paper.g + (tint.g - paper.g) * alpha;
-      const cb = paper.b + (tint.b - paper.b) * alpha;
-
-      this.a.x = a.x;
-      this.a.y = a.y;
-      this.a.z = a.z;
-      this.b.x = b.x;
-      this.b.y = b.y;
-      this.b.z = b.z;
-      controlOf(layout, a, b, link.across, this.control);
-
-      const steps = link.samples - 1;
-      this.last.x = a.x;
-      this.last.y = a.y;
-      this.last.z = a.z;
-      for (let i = 1; i <= steps; i += 1) {
-        pointOn3d(this.a, this.control, this.b, i / steps, this.point);
-        /* Dashed relations draw the even segments only — the flat view's
-           `[3, 3]` dash, in the only currency a line renderer has. */
-        if (!link.dashed || (i - 1) % 2 === 0) {
-          edges.add(
-            this.last.x,
-            this.last.y,
-            this.last.z,
-            this.point.x,
-            this.point.y,
-            this.point.z,
-            cr,
-            cg,
-            cb,
-            cr,
-            cg,
-            cb,
-          );
-        }
-        this.last.x = this.point.x;
-        this.last.y = this.point.y;
-        this.last.z = this.point.z;
-      }
-    }
-
-    edges.end();
-    this.layoutDirty = false;
-    this.edgeFor.skin = this.skin;
-    this.edgeFor.hover = state.hoverId ?? "\u0000";
-    this.edgeFor.matches = state.matches;
-    this.edgeFor.dim = this.dim;
-  }
-
-  /* ---------------- particles ---------------- */
-
-  private paintParticles(state: Frame3DState, _now: number): void {
-    const discs = this.discs;
-    const layout = this.layout;
-    if (!discs || !layout) return;
-
-    const near = state.hoverId
-      ? state.neighbours.get(state.hoverId)
-      : undefined;
-
-    discs.begin();
-    /* Furthest first, so a file in front covers one behind it. */
-    for (let k = 0; k < layout.nodes.length; k += 1) {
-      const node = layout.nodes[this.order[k]];
-      const at = this.order[k] * PROJECT_STRIDE;
-      if (this.screen[at + 2] <= 0) continue;
-
-      const edit = state.edited.get(node.id);
-      const isPosition = node.id === state.positionId;
-
-      let r = node.r;
-      if (edit) r *= 1.2;
-      if (isPosition) r += this.perPixel(this.order[k]) * 2;
-
-      const related =
-        state.hoverId === null ||
-        node.id === state.hoverId ||
-        near?.has(node.id) === true;
-      let alpha = related ? 1 : lerp(1, DIMMED, this.dim);
-      if (state.matches && !state.matches.has(node.id)) alpha *= DIMMED;
-      if (alpha < 0.02) continue;
-
-      let color: Rgb;
-      if (edit) color = this.change;
-      else if (isPosition) color = this.accent;
-      else color = hueRgb(node.hue);
-
-      let cr = color.r;
-      let cg = color.g;
-      let cb = color.b;
-
-      /* The read flare: the same decay the flat view paints over the fill
-         rather than beside it, so a file the agent has just looked at is
-         the same colour in both views. */
-      const seen = state.attention.get(node.id);
-      const heat = seen ? attentionAlpha(seen.last, state.currentStep) : 0;
-      if (heat > 0 && !edit && !isPosition) {
-        const mix = heat * 0.75;
-        cr += (this.accent.r - cr) * mix;
-        cg += (this.accent.g - cg) * mix;
-        cb += (this.accent.b - cb) * mix;
-      }
-
-      discs.add(node.x, node.y, node.z, r, cr, cg, cb, alpha);
-    }
-    discs.end();
-  }
-
-  /* ---------------- rings, halos and wedges ---------------- */
-
-  private paintRings(state: Frame3DState, now: number): void {
-    const under = this.under;
-    const over = this.over;
-    const layout = this.layout;
-    if (!under || !over || !layout) return;
-
-    under.begin();
-    over.begin();
-
-    /* The arrival flares were queued before the rings, so they are drawn
-       under the particles the way the agent glow is. */
-    this.emitFlares(under, state, now);
-
-    const index = this.layersById(state.workers);
-    const halo =
-      state.running && !state.reduced ? (now % HALO_MS) / HALO_MS : null;
-    const workerPulse = state.reduced
-      ? 0
-      : (now % WORKER_HALO_MS) / WORKER_HALO_MS;
-
-    for (let k = 0; k < layout.nodes.length; k += 1) {
-      const i = this.order[k];
-      const node = layout.nodes[i];
-      const at = i * PROJECT_STRIDE;
-      if (this.screen[at + 2] <= 0) continue;
-      const px = this.perPixel(i);
-
-      const edit = state.edited.get(node.id);
-      const isPosition = node.id === state.positionId;
-      const seen = state.attention.get(node.id);
-      const heat = seen ? attentionAlpha(seen.last, state.currentStep) : 0;
-      let r = node.r;
-      if (edit) r *= 1.2;
-      if (isPosition) r += px * 2;
-
-      if (isPosition) {
-        over.add(
-          node.x,
-          node.y,
-          node.z,
-          r + px * 2.5,
-          px * 2,
-          this.accent.r,
-          this.accent.g,
-          this.accent.b,
-          0.95,
-        );
-        if (halo !== null) {
-          over.add(
-            node.x,
-            node.y,
-            node.z,
-            r * (1 + 1.2 * halo),
-            px * 1.25,
-            this.accent.r,
-            this.accent.g,
-            this.accent.b,
-            0.5 * (1 - halo),
-          );
-        }
-      } else if (edit) {
-        over.add(
-          node.x,
-          node.y,
-          node.z,
-          r + px * 2.5,
-          px * 1.25,
-          this.change.r,
-          this.change.g,
-          this.change.b,
-          0.75,
-        );
-      } else if (heat > 0) {
-        over.add(
-          node.x,
-          node.y,
-          node.z,
-          r + px * 3,
-          px * 1.25,
-          this.accent.r,
-          this.accent.g,
-          this.accent.b,
-          0.35 + heat * 0.5,
-        );
-      }
-
-      if (node.id === state.selectedId) {
-        over.add(
-          node.x,
-          node.y,
-          node.z,
-          r + px * 5,
-          px,
-          this.ink.r,
-          this.ink.g,
-          this.ink.b,
-          0.55,
-        );
-      }
-
-      const agents = state.presence.get(node.id);
-      if (!agents || agents.length === 0) continue;
-      const n = occupantsOf(node.id, agents, index, this.slots);
-      if (n === 0) continue;
-
-      const wedges = Math.max(1, agents.length);
-      const segment = FULL_TURN / wedges;
-      const gap = wedges === 1 ? 0 : Math.min(SLOT_GAP, segment * 0.18);
-      const ringR = r + px * RING_GAP;
-
-      for (let s = 0; s < n; s += 1) {
-        const { layer, here, heat: warmth, slot } = this.slots[s];
-        const focus = focusAlpha(state.focusAgent, layer.id);
-        const rgb = listRgb(layer.rgb);
-
-        /* Under the particle: someone is in this file *now*. Faint, and
-           short — the wedges carry the rest of the trail, and a glow that
-           decayed on the same curve would just be a blurrier copy. */
-        if (here || warmth >= GLOW_MIN_HEAT) {
-          const strength = here ? 1 : warmth;
-          under.add(
-            node.x,
-            node.y,
-            node.z,
-            r + px * GLOW_SPREAD * 0.6,
-            px * GLOW_SPREAD * 1.5,
-            rgb.r,
-            rgb.g,
-            rgb.b,
-            (GLOW_ALPHA * strength * focus) / n,
-          );
-        }
-
-        const alpha = (here ? 0.9 : 0.28 + warmth * 0.45) * focus;
-        if (alpha < 0.02) continue;
-        /* Slot 0 starts at the top and they run clockwise, so the order
-           on screen is the order in the legend — and the same order the
-           flat view puts them in. */
-        const from = slot * segment + gap / 2;
-        const span = segment - gap;
-        over.add(
-          node.x,
-          node.y,
-          node.z,
-          ringR,
-          px * (here ? 1.9 : 1.25),
-          rgb.r,
-          rgb.g,
-          rgb.b,
-          alpha,
-          from,
-          span,
-        );
-
-        if (here && layer.running && !state.reduced) {
-          over.add(
-            node.x,
-            node.y,
-            node.z,
-            ringR + workerPulse * px * 5,
-            px * 1.1,
-            rgb.r,
-            rgb.g,
-            rgb.b,
-            0.34 * (1 - workerPulse) * focus,
-            from,
-            span,
-          );
-        }
-      }
-    }
-
-    under.end();
-    over.end();
-  }
-
-  /* ---------------- signals ---------------- */
-
-  private paintSignals(
-    state: Frame3DState,
-    signals: readonly LiveSignal[],
-  ): void {
-    const tails = this.tails;
-    const sparks = this.sparks;
-    const layout = this.layout;
-    if (!tails || !sparks || !layout) return;
-
-    tails.begin();
-    sparks.begin();
-    const paper = this.paper;
-
-    for (let s = 0; s < signals.length; s += 1) {
-      const signal = signals[s];
-      const from = layout.byId.get(signal.from);
-      const to = layout.byId.get(signal.to);
-      if (!from || !to) continue;
-      const focus = focusAlpha(state.focusAgent, signal.agentId);
-      if (focus <= 0.02) continue;
-
-      const rgb = listRgb(signal.rgb || PRIMARY_RGB);
-      this.a.x = from.x;
-      this.a.y = from.y;
-      this.a.z = from.z;
-      this.b.x = to.x;
-      this.b.y = to.y;
-      this.b.z = to.z;
-      /* The same arc the relation between these two lobes takes, so a
-         signal travels the tract rather than cutting across it — even
-         where the two files have no declared relation and there is no
-         line under it. */
-      controlOf(layout, from, to, from.cluster !== to.cluster, this.control);
-
-      const px =
-        (this.perPixelOf(from) + this.perPixelOf(to)) / 2;
-
-      if (signal.still) {
-        const alpha = 0.5 * signal.fade * focus;
-        this.trace(tails, 0, 1, STILL_STEPS, rgb, paper, alpha, alpha);
-        pointOn3d(this.a, this.control, this.b, 1, this.point);
-        sparks.add(
-          this.point.x,
-          this.point.y,
-          this.point.z,
-          px * 2.4,
-          rgb.r,
-          rgb.g,
-          rgb.b,
-          0.85 * signal.fade * focus,
-        );
-        continue;
-      }
-
-      const head = signal.progress;
-      const tailStart = Math.max(0, head - TAIL);
-      this.trace(tails, tailStart, head, TAIL_STEPS, rgb, paper, 0, 0.85 * focus);
-      pointOn3d(this.a, this.control, this.b, head, this.point);
-      sparks.add(
-        this.point.x,
-        this.point.y,
-        this.point.z,
-        px * 2.4,
-        rgb.r,
-        rgb.g,
-        rgb.b,
-        0.95 * focus,
-      );
-    }
-
-    tails.end();
-    sparks.end();
-  }
-
-  /** A run along the current arc, fading from `alphaFrom` to `alphaTo`. */
-  private trace(
-    into: LineSet,
-    from: number,
-    to: number,
-    steps: number,
-    rgb: Rgb,
-    paper: Rgb,
-    alphaFrom: number,
-    alphaTo: number,
-  ): void {
-    pointOn3d(this.a, this.control, this.b, from, this.last);
-    let lastAlpha = alphaFrom;
-    for (let i = 1; i <= steps; i += 1) {
-      const t = from + ((to - from) * i) / steps;
-      pointOn3d(this.a, this.control, this.b, t, this.point);
-      const alpha = alphaFrom + (alphaTo - alphaFrom) * (i / steps);
-      into.add(
-        this.last.x,
-        this.last.y,
-        this.last.z,
-        this.point.x,
-        this.point.y,
-        this.point.z,
-        paper.r + (rgb.r - paper.r) * lastAlpha,
-        paper.g + (rgb.g - paper.g) * lastAlpha,
-        paper.b + (rgb.b - paper.b) * lastAlpha,
-        paper.r + (rgb.r - paper.r) * alpha,
-        paper.g + (rgb.g - paper.g) * alpha,
-        paper.b + (rgb.b - paper.b) * alpha,
-      );
-      this.last.x = this.point.x;
-      this.last.y = this.point.y;
-      this.last.z = this.point.z;
-      lastAlpha = alpha;
-    }
-  }
-
-  /* ---------------- arrivals ---------------- */
-
-  private light(arrival: { id: string; rgb: string; at: number }): void {
-    const slot = this.flares[this.flareAt];
-    this.flareAt = (this.flareAt + 1) % FLARE_SLOTS;
-    slot.id = arrival.id;
-    slot.color = listRgb(arrival.rgb);
-    slot.at = arrival.at;
-    slot.live = true;
-  }
-
-  private clearFlares(): void {
-    for (const flare of this.flares) flare.live = false;
-  }
-
-  /** Whether anything is still alight, so the loop knows to come back. */
-  private paintFlares(state: Frame3DState, now: number): boolean {
-    let alive = false;
-    for (const flare of this.flares) {
-      if (!flare.live) continue;
-      if (flareAt(flare.at, now) <= 0) {
-        flare.live = false;
-        continue;
-      }
-      alive = true;
-    }
-    return alive && !state.reduced;
-  }
-
-  /**
-   * The moment a hop landed, drawn on the file it landed on: a ring that
-   * leaves the particle and goes out. It is the arrival itself and
-   * nothing else — no timer starts it, an idle session produces none of
-   * them, and a busy one produces exactly as many as the agents made.
-   */
-  private emitFlares(into: RingSet, state: Frame3DState, now: number): void {
-    if (state.reduced) return;
-    const layout = this.layout;
-    if (!layout) return;
-
-    for (const flare of this.flares) {
-      if (!flare.live) continue;
-      const strength = flareAt(flare.at, now);
-      if (strength <= 0) continue;
-      const node = layout.byId.get(flare.id);
-      if (!node) continue;
-      const i = node.index;
-      const px = i === undefined ? 1 : this.perPixel(i);
-      const out = 1 - strength;
-      into.add(
-        node.x,
-        node.y,
-        node.z,
-        node.r + out * node.r * FLARE_REACH + px,
-        px * 1.6,
-        flare.color.r,
-        flare.color.g,
-        flare.color.b,
-        strength * 0.6,
-      );
-    }
-  }
-
-  /* ---------------- helpers ---------------- */
-
-  /**
-   * World units per screen pixel at this particle's depth.
-   *
-   * The flat view strokes its rings at a constant number of *pixels*, so
-   * a hairline stays a hairline however far in you zoom. World-sized
-   * rings would fatten as the camera approached, which reads as the file
-   * growing a border rather than as the camera moving.
-   */
-  private perPixel(index: number): number {
-    const at = index * PROJECT_STRIDE;
-    const onScreen = this.screen[at + 3];
-    const node = this.layout?.nodes[index];
-    if (!node || !(onScreen > 0.05)) return 1;
-    return node.r / onScreen;
-  }
-
-  private perPixelOf(node: Node3D): number {
-    const index = node.index;
-    return index === undefined ? 1 : this.perPixel(index);
-  }
-
-  private layersById(
-    workers: readonly WorkerLayer[],
-  ): ReadonlyMap<string, WorkerLayer> {
-    if (this.indexedFor === workers) return this.layerIndex;
-    this.layerIndex.clear();
-    for (const worker of workers) this.layerIndex.set(worker.id, worker);
-    this.indexedFor = workers;
-    return this.layerIndex;
+    this.controls.removeEventListener("start", this.onStart);
+    this.controls.removeEventListener("end", this.onEnd);
+    this.controls.removeEventListener("change", this.kick);
+    this.controls.dispose();
+    this.buildings.forEach((m) => m.dispose());
+    this.terrain.traverse((o) => {
+      if (o instanceof InstancedMesh) o.dispose();
+    });
+    this.terraces.forEach(g => g.dispose());
+    this.geometry.forEach((g) => g.dispose());
+    this.box.dispose();
+    this.scanGeometry.dispose();
+    this.scanMaterial.dispose();
+    this.solids.dispose();
+    this.ground.dispose();
+    this.contact.dispose();
+    this.edges.geometry.dispose();
+    (this.edges.material as LineBasicMaterial).dispose();
+    this.vehicles.forEach((v) => {
+      (v.scan.material as MeshBasicMaterial).dispose();
+      this.factory.release(v.group);
+      v.accentMaterial.dispose();
+      v.trail.geometry.dispose();
+      (v.trail.material as LineBasicMaterial).dispose();
+    });
+    this.keyLight.shadow.map?.dispose();
+    this.factory.dispose();
+    this.floorGeometry.dispose();this.floorMaterial.dispose();
+    this.siteLinesMaterial.dispose();this.siteMarkGeometry.dispose();this.siteMarkMaterial.dispose();this.siteMarkTexture.dispose();
+    this.walkwayMaterial.dispose();
+    this.ao.dispose();this.renderPass.dispose();this.outputPass.dispose();this.composer.dispose();
+    this.scene.clear();
+    this.gl.dispose();
+    this.gl.forceContextLoss();
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Free functions
- * ------------------------------------------------------------------ */
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-/** How strongly an agent draws while another one has the focus. */
-function focusAlpha(focus: string | null, agentId: string): number {
-  if (focus === null || focus === agentId) return 1;
-  return FOCUS_DIM;
-}
-
-function endOf(layout: Scene3D, end: string | Node3D): Node3D | undefined {
-  return typeof end === "string" ? layout.byId.get(end) : end;
-}
-
-/** Leave a link's segments where they were: the layout must stay stable. */
-function skipSegments(edges: LineSet, samples: number, dashed: boolean): void {
-  edges.count = edges.count + drawnSegments(samples, dashed);
-}
-
-/** `out = a * b`, column-major, both 16 long. Allocates nothing. */
-function multiply(
-  a: ArrayLike<number>,
-  b: ArrayLike<number>,
-  out: Float32Array,
-): void {
-  for (let col = 0; col < 4; col += 1) {
-    const c = col * 4;
-    for (let row = 0; row < 4; row += 1) {
-      out[c + row] =
-        a[row] * b[c] +
-        a[row + 4] * b[c + 1] +
-        a[row + 8] * b[c + 2] +
-        a[row + 12] * b[c + 3];
-    }
-  }
-}
+function districtCenter(d:District) { return new Vector3(d.x+d.width/2,0,d.z+d.depth/2); }

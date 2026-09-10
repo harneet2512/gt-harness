@@ -1,3 +1,6 @@
+import WorkspaceNav, { Icon, type WorkspaceView } from "./WorkspaceChrome";
+import Composer from "./Composer";
+import { projectAgents } from "../cityAgents";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { Link } from "react-router-dom";
@@ -23,7 +26,13 @@ import {
 } from "../prefs";
 import { connectBlock, connectKind } from "../external";
 import { helpText, parseSpawn, type ParsedSlash } from "../slash";
-import { applyTheme, loadTheme, saveTheme, themeFromArg, type Theme } from "../theme";
+import {
+  applyTheme,
+  loadTheme,
+  saveTheme,
+  themeFromArg,
+  type Theme,
+} from "../theme";
 import { useDragSize } from "../useDragSize";
 import { useGraphView } from "../useGraphView";
 import { useSessionData } from "../useSessionData";
@@ -33,9 +42,9 @@ import Conversation, { type LocalNote, type NoteBlock } from "./Conversation";
 import GraphPanel from "./GraphPanel";
 import ResumePicker from "./ResumePicker";
 
-const GRAPH_DEFAULT = 620;
-const GRAPH_MIN = 360;
-const GRAPH_MAX = 1000;
+const GRAPH_DEFAULT = 360;
+const GRAPH_MIN = 280;
+const GRAPH_MAX = 600;
 
 /** The split, as a column of box-drawing characters. */
 const SPLIT_BAR = Array.from({ length: 400 }, () => "│").join("\n");
@@ -59,11 +68,17 @@ export default function SynapsePage() {
     turnEpoch: data.turnEpoch,
   });
 
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("Structure");
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [outputRequest, setOutputRequest] = useState<{tab:"changes"|"receipts"|"trail";nonce:number}|null>(null);
+  const agents = useMemo(() => projectAgents(view.field,view.steps,view.cutoff,data.isRunning,view.workerTrails,data.chat.workers,view.live),[view.field,view.steps,view.cutoff,data.isRunning,view.workerTrails,data.chat.workers,view.live]);
   /* ---- the first message, typed on the landing page ---- */
   const launched =
-    (location.state as
-      | { firstMessage?: string; alreadySent?: boolean; spawnTasks?: string[] }
-      | null) ?? null;
+    (location.state as {
+      firstMessage?: string;
+      alreadySent?: boolean;
+      spawnTasks?: string[];
+    } | null) ?? null;
   const firstMessage = launched?.firstMessage ?? null;
   const [pendingFirst, setPendingFirst] = useState<string | null>(firstMessage);
   /* `SessionCreate.first_message` means the server already has the prompt and
@@ -89,14 +104,17 @@ export default function SynapsePage() {
 
   const layout = useLayoutMode();
   const overlay = isOverlayMode(layout);
-  const width = useDragSize(GRAPH_DEFAULT, GRAPH_MIN, GRAPH_MAX, "x-left");
+  const width = useDragSize(GRAPH_DEFAULT, GRAPH_MIN, GRAPH_MAX, "x");
+  const [conversationOpen, setConversationOpen] = useState(
+    () => false,
+  );
 
   /* ---- the graph pane ---- */
   const remembered = useMemo(
     () => (sessionId ? loadGraphOpen(sessionId) : null),
     [sessionId],
   );
-  const [graphOpen, setGraphOpen] = useState(remembered ?? false);
+  const [graphOpen, setGraphOpen] = useState(remembered ?? true);
   /* An explicit choice is never overridden by the auto-expand below. */
   const autoDone = useRef(remembered !== null);
 
@@ -150,6 +168,7 @@ export default function SynapsePage() {
 
   const select = useCallback(
     (nextId: string | null) => {
+      if (nextId && window.innerWidth < 1200) setConversationOpen(false);
       setSelectedId(nextId);
       if (nextId) setInspectedId(nextId);
       else if (!pinned) setInspectedId(null);
@@ -290,7 +309,9 @@ export default function SynapsePage() {
          `/spawn` is echoed whole — each line is a worker. */
       note(
         "user",
-        command.name === "spawn" ? raw : `/${command.name}${arg ? ` ${arg}` : ""}`,
+        command.name === "spawn"
+          ? raw
+          : `/${command.name}${arg ? ` ${arg}` : ""}`,
       );
       switch (command.name) {
         case "stop":
@@ -427,8 +448,25 @@ export default function SynapsePage() {
   const nested = session ? isWorker(session) || external : false;
 
   return (
-    <div className={`shell ${overlay ? "is-narrow" : ""}`}>
+    <div
+      className={`shell city-workspace ${overlay ? "is-narrow" : ""} ${conversationOpen || !graphOpen ? "conversation-open" : "conversation-closed"}`}
+    >
+      <WorkspaceNav session={session} agents={agents} selectedAgent={selectedAgent} view={workspaceView}
+        onAgent={id=>{setSelectedAgent(id);closeInspector();setGraph(true);setConversationOpen(false);}}
+        onView={v=>{setWorkspaceView(v);setGraph(true);setConversationOpen(false);}}
+        onConversation={()=>setConversationOpen(v=>!v)} onSessions={()=>setResumeOpen(true)}
+        onSettings={()=>{setSettingsOpen(true);setConversationOpen(true);}}
+        onOutput={tab=>{setGraph(true);setOutputRequest({tab,nonce:Date.now()});}} />
       <main className="work">
+        <header className="city-workspace-head">
+          <button className="workspace-conversation-toggle" aria-label="Toggle conversation" aria-expanded={conversationOpen} onClick={()=>setConversationOpen(v=>!v)}><Icon name="chat"/></button>
+          <div className="workspace-task-composer"><Icon name="search"/>
+            <Composer locked={COMPOSER_LOCKED.has(status)} lockedReason={lockedReason(status,data.phase,data.failureError)} isRunning={data.isRunning} stopping={data.isStopping} steeringQueued={data.steeringQueued} error={data.sendError} onSend={data.send} onStop={stop} onCommand={onCommand} focusSignal={focusSignal} placeholder="Plan, ask, or give your agents a task…"/>
+          </div>
+          {data.isRunning && <button className="workspace-stop" onClick={stop} disabled={data.isStopping}>{data.isStopping?"Stopping…":"Stop"}</button>}
+          <button className="theme-switch" aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} onClick={()=>{const next=theme==="dark"?"light":"dark";setTheme(next);saveTheme(next);applyTheme(next);refreshPalette();}}><Icon name={theme==="dark"?"sun":"moon"}/></button>
+          <Link className="workspace-new-task" to="/"><Icon name="plus"/>New Task</Link>
+        </header>
         {nested && session?.parent_id && (
           <header className="head">
             <Link className="head-back" to={`/sessions/${session.parent_id}`}>
@@ -443,7 +481,7 @@ export default function SynapsePage() {
         )}
 
         <div className="work-body">
-          <div className="work-talk">
+          <div className="work-talk" style={{ width: width.size }}>
             <Conversation
               sessionId={sessionId}
               session={session}
@@ -492,22 +530,24 @@ export default function SynapsePage() {
 
           {graphOpen && (
             <>
-              {overlay ? null : (
+              {overlay || !conversationOpen ? null : (
                 <div
                   className="split"
                   role="separator"
                   aria-orientation="vertical"
                   aria-label="Resize the graph"
+                  aria-valuemin={GRAPH_MIN}
+                  aria-valuemax={GRAPH_MAX}
+                  aria-valuenow={width.size}
                   {...width.handlers}
                 >
                   {SPLIT_BAR}
                 </div>
               )}
-              <div
-                className="work-graph"
-                style={overlay ? undefined : { width: width.size }}
-              >
+              <div className="work-graph">
                 <GraphPanel
+                  agents={agents} selectedAgent={selectedAgent} onSelectedAgent={setSelectedAgent}
+                  workspaceView={workspaceView} onWorkspaceView={setWorkspaceView} outputRequest={outputRequest}
                   sessionId={sessionId}
                   session={session}
                   data={data}
@@ -524,6 +564,9 @@ export default function SynapsePage() {
                   mode={prefs.graphMode}
                   onMode={setGraphMode}
                   onCollapse={() => setGraph(false)}
+                  onInspect={() => {
+                    if (window.innerWidth < 1200) setConversationOpen(false);
+                  }}
                 />
               </div>
             </>

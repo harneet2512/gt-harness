@@ -8,3 +8,4 @@
 @import "./styles/panel.css";
 /* Last: the terminal owns the presentation. */
 @import "./styles/term.css";
+@import "./styles/city.css";

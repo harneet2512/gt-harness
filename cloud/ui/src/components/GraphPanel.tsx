@@ -1,4 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { AgentVisualState } from "../cityAgents";
+import { Icon, type WorkspaceView } from "./WorkspaceChrome";
+import LiveAgentInspector from "./LiveAgentInspector";
+import { sessionOutput } from "../sessionOutput";
+import { repoShort } from "../format";
+
 import { agentMatches, focusAgent } from "../agentField";
 import type { Session } from "../api";
 import { relationsFor } from "../graph";
@@ -6,18 +12,24 @@ import type { GraphMode } from "../prefs";
 import { useDragSize } from "../useDragSize";
 import type { GraphView } from "../useGraphView";
 import type { SessionData } from "../useSessionData";
-import { Rule } from "./Box";
+
 import BottomPanel from "./BottomPanel";
 import GraphStage from "./GraphStage";
-import GraphToolbar, { type TurnOption } from "./GraphToolbar";
+
 import Inspector from "./Inspector";
 import Scrubber from "./Scrubber";
 
-const PANEL_DEFAULT = 200;
+const PANEL_DEFAULT = 230;
 const PANEL_MIN = 120;
 const PANEL_MAX = 520;
 
 interface Props {
+  agents: readonly AgentVisualState[];
+  selectedAgent: string | null;
+  onSelectedAgent: (id: string | null) => void;
+  workspaceView: WorkspaceView;
+  onWorkspaceView: (v: WorkspaceView) => void;
+  outputRequest: {tab:"changes"|"receipts"|"trail";nonce:number}|null;
   sessionId: string | null;
   session: Session | null;
   data: SessionData;
@@ -36,6 +48,7 @@ interface Props {
   mode: GraphMode;
   onMode: (mode: GraphMode) => void;
   onCollapse: () => void;
+  onInspect?: () => void;
 }
 
 /**
@@ -44,6 +57,7 @@ interface Props {
  * column — the conversation is the page.
  */
 export default function GraphPanel({
+  agents, selectedAgent, onSelectedAgent: setSelectedAgent, workspaceView, onWorkspaceView, outputRequest,
   sessionId,
   session,
   data,
@@ -56,21 +70,42 @@ export default function GraphPanel({
   onTogglePin,
   onCloseInspector,
   isolated,
-  onIsolate,
+  onIsolate: _onIsolate,
   mode,
   onMode,
-  onCollapse,
+  onCollapse: _onCollapse,
+  onInspect,
 }: Props) {
   const panel = useDragSize(PANEL_DEFAULT, PANEL_MIN, PANEL_MAX, "y");
   const [panelOpen, setPanelOpen] = useState(true);
-  const [labels, setLabels] = useState(false);
+  const labels = false;
   const [fitToken, setFitToken] = useState(0);
-  const [zoomK, setZoomK] = useState(1);
+  const [, setZoomK] = useState(1);
   const [search, setSearch] = useState("");
+  const [followedAgent, setFollowedAgent] = useState<string | null>(null);
+  useEffect(()=>{if(outputRequest)setPanelOpen(true);},[outputRequest]);
+  const agent = agents.find((a) => a.id === selectedAgent);
+  const selectFile = (id: string | null) => {
+    setSelectedAgent(null);
+    onSelect(id);
+    if (id) onInspect?.();
+  };
+  const selectAgent = (id: string) => {
+    onCloseInspector();
+    setSelectedAgent(id);
+    onInspect?.();
+  };
+  useEffect(() => {
+    if (inspectedId) setSelectedAgent(null);
+  }, [inspectedId]);
+  useEffect(() => {
+    if (followedAgent && !agents.some((a) => a.id === followedAgent))
+      setFollowedAgent(null);
+  }, [agents, followedAgent]);
   /* Pointing at a legend chip focuses that agent; clicking pins it. A
      hover is a look, so it never survives the pointer leaving, and it
      never overrides something the reader deliberately isolated. */
-  const [hovered, setHovered] = useState<string | null>(null);
+  const hovered: string | null = null;
   const focused = focusAgent(isolated, hovered);
 
   const matches = useMemo(() => {
@@ -101,62 +136,31 @@ export default function GraphPanel({
     return out;
   }, [view.cotouch, inspectedPath]);
 
-  const turnOptions: TurnOption[] = useMemo(
-    () => view.turnIds.map((turnId, i) => ({ id: turnId, no: i + 1 })),
-    [view.turnIds],
-  );
-
+  const outputRows=useMemo(()=>sessionOutput(data.chat.events,view.selectedTurnId,view.steps[view.cutoff]?.eventId ? view.steps[view.cutoff].eventId-1 : Infinity,view.live),[data.chat.events,view.selectedTurnId,view.steps,view.cutoff,view.live]);
   const status = String(session?.status ?? (sessionId ? "creating" : "idle"));
 
   return (
-    <aside className="gpanel" aria-label="Graph">
-      {/* A pane title, the way tmux writes one. */}
-      <div className="panetitle">
-        <Rule />
-        <span>
-          {" graph · "}
-          {view.field.particles.length} files
-          {data.graph.gt ? " · GT ready" : ""}
-          {view.workerTrails.length > 0
-            ? ` · ${view.workerTrails.length} ${agentWord(view.workerTrails)}`
-            : ""}
-          {" "}
-        </span>
-        <Rule />
+    <aside className={`gpanel workspace-${workspaceView.toLowerCase()}`} aria-label="Live repository workspace">
+      <header className="repository-heading">
+        <div><h1>{session ? repoShort(session.repo) : "Repository workspace"}</h1><p>{session?.last_message || "Your code, your agents, one live workspace."}</p>
+          <div className="repository-facts"><span><Icon name="file" size={14}/>{data.graph.nodes.length.toLocaleString()} files</span><span><Icon name="layers" size={14}/>{new Set(data.graph.nodes.map(n=>n.dir)).size} modules</span><span><Icon name="graph" size={14}/>{data.graph.edges.length.toLocaleString()} relations</span><span><Icon name="branch" size={14}/>{session?.ref}</span></div>
+        </div>
+        <nav className="workspace-segments" aria-label="Repository presentation">{(["Structure","Flow","Agents"] as const).map(v=><button key={v} aria-pressed={workspaceView===v} onClick={()=>onWorkspaceView(v)}>{v}</button>)}</nav>
+      </header>
+      <div className="workspace-tools">
+        <label className="workspace-file-search"><Icon name="search" size={14}/><input aria-label="Find files by path" placeholder="Find a file…" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==="Enter" && matches?.size)selectFile([...matches][0]);}}/></label>
+        {view.turnIds.length>0 && <select aria-label="Replay turn" value={view.selectedTurnId??""} onChange={e=>view.pickTurn(e.target.value)}>{view.turnIds.map((id,i)=><option key={id} value={id}>Turn {i+1}{id===session?.current_turn_id?" · current":""}</option>)}</select>}
+        <span className="workspace-data-state">{view.live?"Live workspace":"Replay"}{data.graph.truncated?" · graph truncated":""}</span>
+        <button aria-label="Fit repository" onClick={()=>setFitToken(n=>n+1)}><Icon name="target" size={15}/></button>
+        <button aria-pressed={mode==="2d"} onClick={()=>onMode(mode==="3d"?"2d":"3d")}>{mode==="3d"?"2D view":"3D view"}</button>
+        <button aria-expanded={panelOpen} onClick={()=>setPanelOpen(v=>!v)}><Icon name="log" size={15}/><span>Output</span></button>
       </div>
-
-      <GraphToolbar
-        turns={turnOptions}
-        selectedTurnId={view.selectedTurnId}
-        currentTurnId={session?.current_turn_id ?? null}
-        onSelectTurn={view.pickTurn}
-        search={search}
-        onSearch={setSearch}
-        onSearchEnter={() => {
-          const first = matches ? [...matches][0] : undefined;
-          if (first) onSelect(first);
-        }}
-        matchCount={matches ? matches.size : null}
-        zoom={zoomK}
-        onFit={() => setFitToken((n) => n + 1)}
-        labels={labels}
-        onToggleLabels={() => setLabels(!labels)}
-        mode={mode}
-        onMode={onMode}
-        panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen(!panelOpen)}
-        gt={data.graph.gt}
-        folded={view.field.folded}
-        workers={view.workerTrails}
-        isolated={isolated}
-        onIsolate={onIsolate}
-        hovered={hovered}
-        onHover={setHovered}
-        onCollapse={onCollapse}
-      />
-
       <div className="gpanel-row">
         <div className="gpanel-stage">
+          {search.trim() && <div className="workspace-search-results" role="list" aria-label="Matching files">{[...(matches??[])].slice(0,50).map(id=><button role="listitem" key={id} onClick={()=>{selectFile(id);setSearch("");}}><Icon name="file" size={14}/>{view.field.byId.get(id)?.path}</button>)}{matches?.size===0 && <p>No matching files.</p>}{(matches?.size??0)>50 && <p>Showing 50 of {matches?.size} matches. Refine your search.</p>}</div>}
+          {workspaceView === "Flow" && <div className="workspace-scene-note">Select a file to explore its direct relationships.</div>}
+          {workspaceView === "Agents" && <div className="workspace-agent-cards">{agents.map(a=><button key={a.id} onClick={()=>selectAgent(a.id)}><i style={{background:a.color}}/>{a.label}<small>{a.activity}</small></button>)}</div>}
+
           <GraphStage
             mode={mode}
             sessionId={sessionId}
@@ -168,7 +172,10 @@ export default function GraphPanel({
             positionId={view.positionId}
             running={data.isRunning}
             selectedId={selectedId}
-            onSelect={onSelect}
+            onSelect={selectFile}
+            agents={agents}
+            onSelectAgent={selectAgent}
+            followAgent={followedAgent}
             matches={matches}
             labels={labels}
             trailIds={view.trailIds}
@@ -186,11 +193,19 @@ export default function GraphPanel({
             }
             fitToken={fitToken}
             onZoom={setZoomK}
-            emptyText={emptyText(sessionId, status, view.field.particles.length)}
+            emptyText={emptyText(
+              sessionId,
+              status,
+              view.field.particles.length,
+            )}
           />
         </div>
 
+        {!inspected && <LiveAgentInspector agent={agent??null} agents={agents} view={view} data={data} followedAgent={followedAgent}
+          onSelectAgent={selectAgent} onClose={()=>setSelectedAgent(null)} onFollow={id=>setFollowedAgent(followedAgent===id?null:id)}
+          onPick={path=>{setSelectedAgent(null);onSelectPath(path);}} />}
         <Inspector
+          agents={agents.filter(a=>a.fileId===inspectedId)}
           particle={inspected}
           open={inspected !== null}
           pinned={pinned}
@@ -218,6 +233,9 @@ export default function GraphPanel({
             role="separator"
             aria-orientation="horizontal"
             aria-label="Resize the panel"
+            aria-valuemin={PANEL_MIN}
+            aria-valuemax={PANEL_MAX}
+            aria-valuenow={panel.size}
             {...panel.handlers}
           />
           <Scrubber
@@ -231,6 +249,7 @@ export default function GraphPanel({
             onLive={() => view.setScrub(null)}
           />
           <BottomPanel
+            outputRows={outputRows}
             steps={view.steps}
             cutoff={view.cutoff}
             hereStep={view.hereStep}
@@ -246,6 +265,8 @@ export default function GraphPanel({
             receiptsError={data.receiptsError}
             receiptsLoading={data.receiptsLoading}
             onRefreshReceipts={data.reloadReceipts}
+            agents={agents}
+            requestedTab={outputRequest}
           />
         </div>
       )}
@@ -262,10 +283,4 @@ function emptyText(
   if (!sessionId) return "pick a session";
   if (status === "creating") return "indexing…";
   return "no files indexed";
-}
-
-/** "worker"/"workers" while they are all ours; "agents" once one is not. */
-function agentWord(trails: readonly GraphView["workerTrails"][number][]): string {
-  if (trails.some((trail) => trail.isExternal)) return "agents";
-  return trails.length === 1 ? "worker" : "workers";
 }

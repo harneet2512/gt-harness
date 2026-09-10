@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { getMe, LOGIN_URL, type User } from "./api";
 import { BUILD_SHA } from "./build";
-import Box, { BoxRow } from "./components/Box";
+import { Icon } from "./components/WorkspaceChrome";
 import LandingPage from "./components/LandingPage";
 import SynapsePage from "./components/SynapsePage";
 
@@ -22,15 +22,7 @@ function SignIn({ notice }: { notice: string | null }) {
   return (
     <div className="signin">
       <div className="signin-card">
-        <Box title=" GT Cloud Agent ">
-          <BoxRow>
-            <span className="banner-mark">▐▛</span> GT Cloud Agent — an agent
-            with GroundTruth underneath
-          </BoxRow>
-          <BoxRow>
-            <span className="dim">sign in with GitHub to start a session</span>
-          </BoxRow>
-        </Box>
+        <div className="signin-brand">GT</div><h1>Your code. A shared perspective.</h1><p className="signin-description">Give your agents a task. Follow their work, inspect every change, and keep the whole repository in view.</p>
 
         {notice && (
           <div className="cont is-error signin-notice">
@@ -42,18 +34,15 @@ function SignIn({ notice }: { notice: string | null }) {
         )}
 
         <p className="signin-prompt">
-          <span className="composer-caret" aria-hidden="true">
-            &gt;
-          </span>{" "}
           <button
             type="button"
-            className="bracket"
+            className="signin-button"
             onClick={() => {
               // Full-page navigation: the OAuth redirect must leave the SPA.
               window.location.href = LOGIN_URL;
             }}
           >
-            [continue with GitHub]
+            Continue with GitHub <Icon name="branch"/>
           </button>
         </p>
 

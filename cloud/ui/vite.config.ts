@@ -23,7 +23,7 @@ export default defineConfig({
  * only; the production bundle is served same-origin behind nginx.
  */
 function proxyTable() {
-  const target = process.env.GT_API_TARGET ?? "http://localhost:8000";
+  const target = process.env.GT_API_TARGET ?? "http://127.0.0.1:8000";
   const token = process.env.GT_API_TOKEN ?? "";
   const one = {
     target,

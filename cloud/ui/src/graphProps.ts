@@ -12,8 +12,12 @@ import type { DiffFile } from "./api";
 import type { ParticleField } from "./graph";
 import type { Attention } from "./trail";
 import type { WorkerTrail } from "./useGraphView";
+import type { AgentVisualState } from './cityAgents';
 
 export interface GraphViewProps {
+  agents?: readonly AgentVisualState[];
+  onSelectAgent?: (id: string) => void;
+  followAgent?: string | null;
   /** Persistence key for the camera; null outside a session. */
   sessionId: string | null;
   field: ParticleField;

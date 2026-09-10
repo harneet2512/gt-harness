@@ -10,7 +10,9 @@ import { applyTheme, loadTheme, saveTheme, themeFromArg, type Theme } from "../t
 import { useSessions } from "../useSessions";
 import Composer from "./Composer";
 import ResumePicker from "./ResumePicker";
-import TermBanner from "./TermBanner";
+import { Icon } from "./WorkspaceChrome";
+import { Link } from "react-router-dom";
+import { repoShort } from "../format";
 import TermSettings from "./TermSettings";
 import { Cont } from "./TermLine";
 
@@ -195,16 +197,11 @@ export default function LandingPage() {
   }
 
   return (
-    <div className="shell">
+    <div className="shell cloud-home">
+      <header className="cloud-home-header"><Link className="workspace-brand" to="/"><b>GT</b><span>Cloud Agent</span></Link><span className="spacer"/><button onClick={()=>setResumeOpen(true)}>Sessions</button><button onClick={()=>setSettingsOpen(v=>!v)}><Icon name="settings"/>Settings</button><button aria-label="Switch theme" onClick={()=>{const next=theme==="light"?"dark":"light";setTheme(next);applyTheme(next);saveTheme(next);refreshPalette();}}><Icon name={theme==="light"?"moon":"sun"}/></button></header>
       <main className="landing">
         <div className="landing-mid">
-          <TermBanner
-            repo={repo?.repo ?? ""}
-            gitRef={repo?.ref ?? DEFAULT_REF}
-            gtMode={prefs.gtMode}
-            model={prefs.model}
-          />
-
+          <div className="cloud-home-intro"><span className="eyebrow">GT Cloud Agent</span><h1>Give your code a direction.</h1><p>Plan a change, delegate the work, and follow your agents as it happens.</p></div>
           {listError && <Cont tone="error">{listError}</Cont>}
 
           {lines.length > 0 && (
@@ -239,7 +236,7 @@ export default function LandingPage() {
 
           <Composer
             variant="landing"
-            placeholder="what should I work on?"
+            placeholder="Describe a task and paste your GitHub repository URL…"
             locked={false}
             lockedReason=""
             error={error}
@@ -255,6 +252,7 @@ export default function LandingPage() {
             onSend={send}
             onCommand={onCommand}
           />
+          {sessions.length>0&&<section className="cloud-recent"><h2>Recent workspaces</h2>{sessions.filter(s=>!s.parent_id).slice(0,6).map(s=><Link to={`/sessions/${s.id}`} key={s.id}><Icon name="layers"/><span><strong>{repoShort(s.repo)}</strong><small>{s.last_message||s.ref}</small></span><span className="cloud-session-state">{s.status}</span><span>↗</span></Link>)}</section>}
         </div>
       </main>
 

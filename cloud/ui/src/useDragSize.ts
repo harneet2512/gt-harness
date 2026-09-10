@@ -3,6 +3,9 @@ import { useRef, useState } from "react";
 export interface DragSize {
   size: number;
   handlers: {
+    tabIndex: number;
+    onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void;
+    onPointerCancel: () => void;
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
     onPointerMove: (e: React.PointerEvent<HTMLElement>) => void;
     onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
@@ -28,6 +31,31 @@ export function useDragSize(
   return {
     size,
     handlers: {
+      tabIndex: 0,
+      onKeyDown: (e) => {
+        const direction =
+          axis === "y"
+            ? e.key === "ArrowUp"
+              ? 1
+              : e.key === "ArrowDown"
+                ? -1
+                : 0
+            : (e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0) *
+              (axis === "x-left" ? -1 : 1);
+        if (e.key === "Home" || e.key === "End" || direction) {
+          e.preventDefault();
+          setSize((before) =>
+            e.key === "Home"
+              ? min
+              : e.key === "End"
+                ? max
+                : Math.min(max, Math.max(min, before + direction * 24)),
+          );
+        }
+      },
+      onPointerCancel: () => {
+        start.current = null;
+      },
       onPointerDown: (e) => {
         start.current = {
           at: axis === "y" ? e.clientY : e.clientX,

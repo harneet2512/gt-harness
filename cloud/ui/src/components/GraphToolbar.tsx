@@ -95,7 +95,7 @@ export default function GraphToolbar({
           type="search"
           value={search}
           placeholder="find a file"
-          aria-label="Highlight particles by path"
+          aria-label="Find files by path"
           onChange={(e) => onSearch(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -232,7 +232,7 @@ export default function GraphToolbar({
             }
             onClick={() => onMode(one)}
           >
-            {one}
+            {one === '3d' ? 'City' : '2D'}
           </button>
         ))}
       </span>

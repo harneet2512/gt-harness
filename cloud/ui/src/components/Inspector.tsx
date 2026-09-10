@@ -11,6 +11,7 @@ const TABS = ["diff", "relations", "activity"] as const;
 type TabId = (typeof TABS)[number];
 
 interface Props {
+  agents?: readonly {label:string;activity:string}[];
   particle: Particle | null;
   open: boolean;
   pinned: boolean;
@@ -33,6 +34,7 @@ interface Props {
 
 /** The IDE pane: one file, its patch, its relations, and what touched it. */
 export default function Inspector({
+  agents = [],
   particle,
   open,
   pinned,
@@ -108,6 +110,8 @@ export default function Inspector({
                 <span className="chip is-hot">reads ×{reads}</span>
               )}
             </div>
+            {agents.length>0 && <p className="file-agent-status">{agents.map(a=>`${a.label} · ${a.activity}`).join(" / ")}</p>}
+            <details className="file-metadata"><summary>File metadata</summary><p>LOC: unavailable</p><p>Symbols: unavailable</p><p>Verification: unavailable</p></details>
           </header>
 
           <nav className="ins-tabs" role="tablist">
@@ -128,8 +132,8 @@ export default function Inspector({
           <div className="ins-body">
             {particle.kind === "dir" ? (
               <p className="ins-empty">
-                This particle stands for a whole directory. Individual files
-                are folded away above the particle cap.
+                This building represents a directory. Individual files
+                are grouped above the display limit.
               </p>
             ) : tab === "diff" ? (
               <DiffView

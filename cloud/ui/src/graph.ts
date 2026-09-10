@@ -223,6 +223,7 @@ export function buildField(
   graph: SessionGraph,
   cotouch: ReadonlySet<string>,
   previous?: ParticleField,
+  cap = MAX_PARTICLES,
 ): ParticleField {
   if (graph.nodes.length === 0) return EMPTY_FIELD;
 
@@ -232,7 +233,7 @@ export function buildField(
 
   const resolve = foldPaths(
     graph.nodes.map((node) => node.path),
-    MAX_PARTICLES,
+    cap,
   );
 
   const byId = new Map<string, Particle>();

@@ -21,9 +21,9 @@ export function isTheme(value: unknown): value is Theme {
 export function loadTheme(): Theme {
   try {
     const stored = window.localStorage.getItem(THEME_KEY);
-    return isTheme(stored) ? stored : "dark";
+    return isTheme(stored) ? stored : "light";
   } catch {
-    return "dark";
+    return "light";
   }
 }
 

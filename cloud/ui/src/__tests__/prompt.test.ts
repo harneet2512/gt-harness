@@ -141,8 +141,13 @@ describe("prefs", () => {
       gtMode: "advisory",
       stepLimit: 12,
       wallSeconds: null,
-      graphMode: "2d",
+      graphMode: "3d",
     });
+  });
+
+  it('defaults to City while preserving an explicit 2D preference', () => {
+    expect(normalizePrefs({}).graphMode).toBe('3d');
+    expect(normalizePrefs({graphMode:'2d'}).graphMode).toBe('2d');
   });
 
   it("refuses a gt mode the server would reject", () => {

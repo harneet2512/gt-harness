@@ -62,9 +62,8 @@ export interface Prefs {
   wallSeconds: number | null;
   /**
    * Flat or in depth. Remembered like everything else the reader chose
-   * once — and defaulting to flat, because the 3D renderer is a separate
-   * download and a session that never asks for it should never pay for
-   * it.
+   * once. New preferences open City; an explicit flat preference remains
+   * authoritative. The renderer is still lazy-loaded by GraphStage.
    */
   graphMode: GraphMode;
 }
@@ -74,7 +73,7 @@ export const DEFAULT_PREFS: Prefs = {
   gtMode: "advisory",
   stepLimit: 60,
   wallSeconds: null,
-  graphMode: "2d",
+  graphMode: "3d",
 };
 
 function clampInt(

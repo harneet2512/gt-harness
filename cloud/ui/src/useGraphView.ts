@@ -254,7 +254,7 @@ export function useGraphView(input: Input): GraphView {
   /* ---- the field ---- */
   const fieldRef = useRef<ParticleField | undefined>(undefined);
   const field = useMemo(() => {
-    const next = buildField(graph, cotouch, fieldRef.current);
+    const next = buildField(graph, cotouch, fieldRef.current, Number.MAX_SAFE_INTEGER);
     // Whatever the rebuild could not carry over is looked up in the layout
     // this session last left behind, so a reload opens on the same picture.
     if (next !== fieldRef.current) applySavedLayout(sessionId, next);
