@@ -24,15 +24,15 @@ measured rather than assumed:
     build-info source_fingerprint f7fca174b866cc8c8b0f826aa649aa24f47d718b872c8dae45d0dabd71e5a7a8
     vendored tree, same recipe    4f612d4cdf487a22469765fd23f3500429c10ffea0677860785324c3e2e81551
 
-That divergence was never root-caused: the binary was built 2026-09-10T04:16
-from a tree whose hashed file set matched neither the commit it named nor the
-vendored copy — consistent with a dirty or extra-file build. The resolved state
-is a fresh certified build (d6fdf93d, determinism fix) whose fingerprint recipe
-hashes the build worktree itself, so the vendored tree was synced to the exact
-worktree bytes the recipe hashed — CRLF included, preserved by `.gitattributes
-* -text`. All four identities now agree: build-info git_commit == SOURCE-COMMIT
-== d6fdf93d, and source_fingerprint == 77d8bf97 over both the vendored tree and
-the producer worktree it was built from.
+That divergence's root cause is now established, in two parts. First, the
+recipe hashed worktree BYTES, and `sha256sum`'s mode marker differs by host
+(`hash *path` on MSYS vs `hash  path` on Linux). Second, and deeper: fourteen
+producer files carry LF blobs but CRLF worktrees under autocrlf, so the same
+recipe on a Linux clone could never reproduce the stamp at all. The recipe now
+fingerprints the commit's git OBJECTS (`git ls-tree` blob shas — canonical on
+every platform) and refuses a dirty `gt-index` worktree outright. The vendored
+tree carries producer blob bytes exactly, so the same object computation runs
+over it without a git binary at all: sha1("blob <len>\\0" + content).
 """
 from __future__ import annotations
 
@@ -49,35 +49,39 @@ VENDOR = REPO / "vendor"
 BUILD_INFO = VENDOR / "gt-index-linux-amd64.build-info.json"
 SOURCE = VENDOR / "gt-index-src"
 
-# The producer's own recipe, from scripts/swebench/build_gt_index_linux.sh:73.
-# Relative paths are part of the digest so a rename is an identity change while
-# the checkout location is not.
+# The producer's own recipe filter, from
+# scripts/swebench/build_gt_index_linux.sh: every checked-in compiler input.
 FINGERPRINT_SUFFIXES = (".go", ".c", ".cc", ".cpp", ".h", ".hpp", ".s")
 FINGERPRINT_NAMES = ("go.mod", "go.sum")
+_OVERLAY = {"SOURCE-COMMIT", ".gitattributes"}
 
 
 def _declared() -> dict:
     return json.loads(BUILD_INFO.read_text(encoding="utf-8"))
 
 
-def _source_fingerprint(root: Path) -> str:
-    """Reproduce `sha256sum <files> | sha256sum` without a shell.
+def _blob_sha(data: bytes) -> str:
+    """git's blob identity: sha1 of `blob <len>\\0` + content, no git needed."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
-    coreutils prints "<digest>  <path>\\n" per file, then the outer pass hashes
-    that text. Both details matter: two spaces, and the paths exactly as `find`
-    emitted them under `LC_ALL=C sort`.
+
+def _source_fingerprint(root: Path) -> str:
+    """Reproduce `git ls-tree -r HEAD -- <dir> | <filter> | sha256sum`.
+
+    The producer's recipe reads commit objects because worktree bytes are not
+    canonical (autocrlf writes CRLF where the blob is LF). The vendored tree
+    stores those same blob bytes, so the blob sha is computable in place. All
+    fingerprinted entries are mode 100644 on the producer side.
     """
-    entries = [
-        path for path in root.rglob("*")
-        if path.is_file() and (path.suffix in FINGERPRINT_SUFFIXES
-                               or path.name in FINGERPRINT_NAMES)
-    ]
-    lines = sorted(f"./{path.relative_to(root).as_posix()}" for path in entries)
-    inner = "".join(
-        f"{hashlib.sha256((root / name[2:]).read_bytes()).hexdigest()}  {name}\n"
-        for name in lines
-    )
-    return hashlib.sha256(inner.encode("utf-8")).hexdigest()
+    lines = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name in _OVERLAY:
+            continue
+        if path.suffix in FINGERPRINT_SUFFIXES or path.name in FINGERPRINT_NAMES:
+            rel = path.relative_to(root).as_posix()
+            lines.append(f"100644 blob {_blob_sha(path.read_bytes())}\t{rel}")
+    lines.sort()
+    return hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
 
 
 @pytest.mark.skipif(not BUILD_INFO.is_file(), reason="no vendored producer build info")
@@ -106,22 +110,23 @@ def test_the_vendored_source_reproduces_the_binarys_declared_fingerprint():
 
 @pytest.mark.skipif(not BUILD_INFO.is_file(), reason="no vendored producer build info")
 def test_the_fingerprint_recipe_matches_the_producers_own():
-    """This test reimplements a shell pipeline; guard the reimplementation.
+    """Guard the reimplementation against the real `git ls-tree` stream.
 
-    Run the real pipeline when a POSIX shell with coreutils is available and
-    require the pure-Python version to agree. Without that, a bug here would
-    silently redefine what "binding" means.
+    When a git binary can resolve this repository, compute the object
+    fingerprint the recipe's own way and require agreement. On mounted
+    worktrees whose .git pointer does not resolve in-container the check skips
+    rather than fakes agreement.
     """
-    if sys.platform.startswith("win") or not SOURCE.is_dir():
-        pytest.skip("needs a POSIX shell with GNU coreutils")
+    if not SOURCE.is_dir():
+        pytest.skip("no vendored producer source to fingerprint")
     pipeline = (
-        "find . -type f \\( -name '*.go' -o -name '*.c' -o -name '*.cc' "
-        "-o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.s' "
-        "-o -name 'go.mod' -o -name 'go.sum' \\) -print0 | LC_ALL=C sort -z "
-        "| xargs -0 sha256sum | sha256sum | awk '{print $1}'"
+        "git ls-tree -r HEAD -- vendor/gt-index-src "
+        "| sed 's|\\tvendor/gt-index-src/|\\t|' | LC_ALL=C sort "
+        "| grep -E '\\.(go|c|cc|cpp|h|hpp|s)$|go\\.(mod|sum)[[:space:]]*$' "
+        "| sha256sum"
     )
-    completed = subprocess.run(["sh", "-c", pipeline], cwd=SOURCE,
+    completed = subprocess.run(["sh", "-c", pipeline], cwd=REPO,
                                capture_output=True, text=True)
     if completed.returncode != 0:
-        pytest.skip(f"shell pipeline unavailable: {completed.stderr.strip()[:80]}")
+        pytest.skip(f"git ls-tree unavailable: {completed.stderr.strip()[:80]}")
     assert completed.stdout.strip() == _source_fingerprint(SOURCE)
