@@ -130,6 +130,11 @@ All `/api/*` routes require auth (401 otherwise). `/health` is public.
 | GET | `/api/sessions/:id/agents` | This session's workers, oldest first — `Session` objects, so `task`, `report`, `applied_at` and `status` come with them |
 | POST | `/api/sessions/:id/agents/:worker/apply` | 3-way merge the worker's cumulative diff into this session's workspace → 200 `{worker_id, files, patch_sha256}`. **409** `{detail, conflicts: [paths]}` when it does not merge — and the workspace is then byte-for-byte what it was. **409** unless the session is `idle`; **400** when the worker changed nothing (a closed worker has no workspace left, so apply before closing); **404** when the worker is not this session's. |
 | POST | `/api/sessions/:id/agents/:worker/close` | Close one worker → 200 `Session`. Exactly the same thing as `POST /api/sessions/:worker/close`. |
+| POST | `/api/sessions/:id/publish` | Commit the workspace onto `gt-cloud/:id`, push it, and open a PR → 201 `{branch, commit_sha, pr_url, pr_number}`. The body carries `github_token` (used once, never stored — see [Publish](#publish)) plus optional `title`/`body`/`branch`. **409** while a turn runs, with no workspace, or with an empty diff; **400** on a non-GitHub repo; **502** when the push or PR call fails. |
+| POST | `/api/sessions/:id/external-agents` | Register an agent this server does not run (Claude Code, Codex, Devin, anything else) → 201 `{agent, ingest_token, ingest_url}`. The contract is in [docs/cloud/external-agents.md](../docs/cloud/external-agents.md). |
+| POST | `/api/external-agents/:id/events` | A batch of contract events for one registered external agent, under its ingest token (not the user's JWT). |
+| POST | `/api/external-agents/:id/children` | Register a subagent of an external agent, under the *parent's* ingest token — how a fleet nests without ever holding a user credential. |
+| POST | `/api/external-agents/:id/finish` | Close an external agent's card (`done`/`error` + summary). |
 | GET | `/auth/login`, `/auth/callback`, `/auth/me`, `/auth/logout` | GitHub OAuth |
 | GET | `/health` | Public liveness probe |
 
@@ -219,6 +224,22 @@ so the loop reaches its next boundary immediately instead of after the command
 finally returns. Both endings write a reply that says where the agent got to
 and invite `continue`; the session goes back to `idle` and the transcript is
 intact, so the next turn resumes with a fresh budget.
+
+### Publish
+
+`POST /api/sessions/:id/publish` is how a session's work leaves the box. It
+commits everything in the workspace onto `gt-cloud/<id>` (overridable),
+pushes to the session's repo, and opens a pull request against the session's
+`ref`. If a PR for that head already exists, the answer is the existing PR —
+a republish updates the branch, not a duplicate.
+
+The `github_token` in the body is **request-scoped**: it is written to a
+temporary git credential file for the push (never the command line, never a
+log), used for the `pulls` API call, and deleted. Nothing about it is stored
+or returned. A publish also writes an assistant event onto the session's
+stream — the feed says *"opened PR #9"* next to the work that produced it.
+
+Ownership applies: a session publishes only for its owner.
 
 ### Idle sessions
 
