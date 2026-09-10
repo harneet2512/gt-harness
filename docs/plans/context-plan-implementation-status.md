@@ -378,6 +378,26 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   digests, so this is NOT resolver concurrency; it is a nondeterministic tie-break
   inside resolution, with Go's randomized map iteration the obvious candidate.
   Evidence: `determinism-click.txt`, `study-click.json`.
+  The finding is now a test rather than a note. `tests/test_producer_determinism.py`
+  carries two: a fixture of eight files with the right SHAPE (several classes each
+  defining the same method name, reached through receivers whose type is not
+  locally obvious) which is deterministic today and is kept as a regression guard
+  for that scale -- measured, not assumed, and explicitly NOT evidence that the
+  producer is deterministic; and a real-repository test that reproduces the defect,
+  skipped unless `GT_DETERMINISM_REPO` names a checkout and marked xfail because
+  the producer is a certified binary this project pins. Against `click` the first
+  PASSES and the second XFAILS, so fixing the producer turns it into an XPASS
+  rather than into silence.
+  A static scan of the vendored producer source for first-match-over-a-map
+  selections found 38 range-then-break sites, of which nearly all range over slices
+  that were extracted from a map and then sorted -- the authors clearly made this
+  pass already. One is not: `internal/resolver/promote.go:567` ranges `idx.fnl`
+  (`map[fnlKey]int64`) and takes the first entry matching a (name, line) pair with
+  `break`, which its own comment describes as accepting "any file with that
+  (name,line) pair". That is a genuinely order-dependent target selection. It is
+  NOT attributed to the observed symptom: it emits CO_SERIALIZES and the divergence
+  measured is in CALLS targets and VTA flow facts. It is recorded as a confirmed
+  site of the same class, found while looking for the cause.
   What diverges is receiver selection for same-named methods. Between two arms:
   `AliasedGroup.get_command` calls `Context.fail` in one graph and `ParamType.fail`
   in the other; `_AtomicFile.close` calls `Context.close` or `LazyFile.close`;
