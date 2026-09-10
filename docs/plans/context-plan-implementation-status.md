@@ -417,6 +417,20 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   which would otherwise start failing on all eight mutations with no explanation.
   STILL OPEN: history/cochange reuse is producer work -- the handoff records that
   history, cochange, derived layers and FTS all still recompute on every build.
+  TRACED on producer 87d2e89c: `runDerivedLayers` runs unconditionally on the
+  amend path and `publishCoupling` deletes+rewrites `cochanges`/`communities`
+  wholesale, recomputing over `_freeze_history`'s pinned-HEAD clone -- i.e. the
+  amend recomputes a byte-identical result to its parent. Safe reuse key is the
+  four-tuple (HEAD, shallow-boundary, WindowStart, WindowEnd), all already
+  recorded in the parent's project_meta; HEAD alone is unsafe because grafted
+  checkouts can share HEAD over different windows. When equal, the amend can
+  inherit the parent's derived tables from the copy unchanged. Producer-side
+  change, not yet built.
+  C2 (LSP/amend-parent) TRACED at the same time: `publish_graph` binds the live
+  graph to the current source_revision, and `_frozen_graph_input` reads
+  `engine_state.graph_path` as the next build's parent -- so a promoted
+  (LSP-enriched) graph IS the next amend's parent. One-level invariant confirmed
+  in source.
 - [x] Wire a persistent external cache root and batch API through the harness's
   existing one-active/one-pending coordinator.
 - [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
