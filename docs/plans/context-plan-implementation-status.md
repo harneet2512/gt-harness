@@ -1260,6 +1260,14 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   Determinism on the shipped binary: click 4 runs 1 digest (50957 edges),
   conan 5 runs 1 digest (34460 edges, same Go code as the 8/5-run-verified
   d6811825 build).
+  CANONICAL ACCEPTANCE GREEN on `eeeaec36` (run 34541308789): the full
+  provider-free product gate -- vendored identity, lineage+review
+  provenance (12 packets, exact-source match on c4d4a54f), serial Python
+  suite, RED evidence, recorded delivery -- passes on the pick-fixed
+  artifact. Two earlier dispatches on the way here failed on the stale
+  producer_build.build_info_sha256/source_tree (fixed in the bundle) and
+  the recipe-guard test comparing sha256sum's raw '  -' suffix (fixed in
+  the test); both were instrument bugs, not product regressions.
   THE DIVERGENCE IS CLOSED. `c4d4a54f` orders every cross-file pick by
   (file_path, start_line, id) -- renumbering-invariant by construction; 13 RED
   layout witnesses failed on the pre-fix code and all pass after. Verified on
