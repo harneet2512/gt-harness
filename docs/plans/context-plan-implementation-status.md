@@ -155,6 +155,21 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Harness checkpoint `8f955cd63e222ac22569b582ebb8deab6aeb7631` is pushed on
+  `codex/context-plan-integrity`, with direct parent `ce309e90`.
+- Producer cache checkpoint `2e58cb32e7be31e8eaacf29baaa4b3fc1af435fa` is pushed
+  on `codex/context-plan-producer`, with direct parent `193b9d93`. Author identity
+  is the user-requested `harneet2512`, configured locally to this repository.
+- Provider-free CI run `34420192236` FAILED at the feature-proof matrix:
+  `persistent_plan: disposition is not WITNESSED` and positive witness did not
+  pass. The full Python suite was skipped downstream. This remains unresolved;
+  the targeted installed results below do not override this failure.
+- CI failure reproduced locally: the persistent-plan positive binding referenced
+  a removed test. Rebound it to real isolated queued-check execution and added
+  unbound-suite rejection as a negative witness. Both witnesses passed against
+  installed candidate 02 on Linux (2 passed, 7.05 seconds). Successor CI required.
+- Batch-amendment RED test currently fails because `-amend-parent` is absent.
+  The test is uncommitted; batch amendment is not implemented or release-ready.
 - RED witnesses reproduced lexical/full-suite false GREEN, original-shell replay,
   dropped long requirements, clipped commands, truncated baseline analysis,
   disappearing test identities, and destructive baseline cleanup.

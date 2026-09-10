@@ -53,8 +53,8 @@ FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
     "persistent_plan": (
         "tests/test_persistent_plan_integration.py::"
         "test_a_merged_line_becomes_a_tracked_obligation",
-        "tests/test_persistent_plan_integration.py::"
-        "test_a_real_passing_observation_clears_a_plan_row",
+        "tests/test_plan_check_specs.py::"
+        "test_real_queue_coalesces_edits_and_checks_current_source",
     ),
     "plan_gate": (
         "tests/test_persistent_plan_integration.py::"
@@ -132,6 +132,8 @@ FEATURE_NEGATIVE_EVIDENCE: dict[str, tuple[str, ...]] = {
     "persistent_plan": (
         "tests/test_persistent_plan_off.py::"
         "test_no_plan_journal_rows_without_a_plan",
+        "tests/test_persistent_plan_integration.py::"
+        "test_unbound_passing_suite_does_not_clear_plan_rows",
         "tests/test_persistent_plan_bootstrap.py::"
         "test_a_phantom_node_id_is_dropped_not_believed",
     ),
