@@ -922,11 +922,15 @@ def _native_plan_projection(rows: list[dict], state_dir: Path) -> tuple[list[dic
     synthetic: list[dict] = []
     issues: list[str] = []
     for index, row in enumerate(rows):
-        if row.get("event") != "persistent_plan_delivered":
+        feature_id = {
+            "persistent_plan_delivered": "persistent_plan",
+            "plan_gate_directive_prepared": "plan_gate",
+        }.get(row.get("event"))
+        if feature_id is None:
             continue
         identity = str(row.get("rendered_sha256") or "")
         synthetic.append({"event_type": "decision.committed", "payload": {
-            "decision": "delivered", "feature_id": "persistent_plan",
+            "decision": "delivered", "feature_id": feature_id,
             "delivery_id": identity, "reason": "plan_rendered_without_verified_provider_join",
         }})
         failures = _verify_native_blob(state_dir, row, path_key="rendered_blob",

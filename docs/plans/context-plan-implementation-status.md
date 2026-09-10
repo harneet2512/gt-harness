@@ -32,6 +32,21 @@ test passed alongside the full focused matrix: 153 passed, zero skips,
 late delivery and mismatched responses cannot promote exposure. This fixes
 the plan portion of the census, not plan-gate attribution or semantic use.
 
+Plan-gate continuation: the native runtime now records the exact queued
+directive, and the same independent audit verifies its immediate provider
+request/response exposure. A decision alone never becomes a delivery witness.
+The real hook suppresses submission, delivers the directive and is audited on
+the next native request. Installed wheel 50: 179 passed, zero skips,
+`gate-exposure-installed-50.xml`. Positive and absent-byte negative witnesses
+are bound into the existing feature matrix; no new steering path or provider
+call was introduced.
+Wheel 51 feature/attribution/native checks passed 49 tests, zero skips, with
+the retained historical `gt_all17` marker warning outside repository config.
+Three complementary issuer tests passed from a real Linux Git checkout.
+The earlier installed issuer attempt failed two tests because installed
+site-packages has no checkout HEAD; that artifact is retained, not counted as
+passing evidence (`gate-feature-bindings-51.xml`).
+
 Implement the approved targeted repairs to evidence, persistent planning,
 verification scheduling, incremental graph amendments, snapshots, submission,
 and installed product acceptance. Preserve the existing engine, graph consumers,

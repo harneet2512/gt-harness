@@ -287,14 +287,15 @@ def test_native_delivery_exact_bytes_are_independently_witnessed(tmp_path):
 
 
 @pytest.mark.parametrize("expose", [True, False])
-def test_native_plan_requires_exact_immediate_provider_bytes(tmp_path, expose):
+@pytest.mark.parametrize("feature", ["persistent_plan", "plan_gate"])
+def test_native_plan_requires_exact_immediate_provider_bytes(tmp_path, expose, feature):
     task = make_native_miniswe_task(
         tmp_path, delivery_text="[GT_PERSISTENT_PLAN] fixture design", expose_delivery=expose
     )
 
     def convert(rows):
         plan = rows[0]
-        plan["event"] = "persistent_plan_delivered"
+        plan["event"] = "persistent_plan_delivered" if feature == "persistent_plan" else "plan_gate_directive_prepared"
         plan["rendered_sha256"] = plan["delivery_identity"]
         plan["rendered_blob"] = plan["delivery_blob"]
         for row in rows[1:]:
@@ -303,7 +304,7 @@ def test_native_plan_requires_exact_immediate_provider_bytes(tmp_path, expose):
                 row["matches"] = []
     rewrite_native_events(task, convert)
     audit = gt_audit.audit_task(task)
-    plan = audit.feature_attribution["persistent_plan"]
+    plan = audit.feature_attribution[feature]
     assert plan["status"] == ("WITNESSED" if expose else "DELIVERED_UNEXPOSED")
     assert plan["exposed"] is expose
     if not expose:

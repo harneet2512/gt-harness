@@ -1698,6 +1698,15 @@ def install_runtime_hooks(
                 raise pending_submission
         if not session.disabled and session.model_visible:
             for directive in adapter.pending_directives:
+                try:
+                    encoded = directive.encode("utf-8")
+                    identity = hashlib.sha256(encoded).hexdigest()
+                    adapter.store.put_blob("plan_gate_directives", identity, encoded)
+                    adapter.store.append("plan_gate_directive_prepared",
+                                         rendered_sha256=identity, rendered_bytes=len(encoded),
+                                         rendered_blob=f"plan_gate_directives/{identity}.json")
+                except Exception as exc:  # receipt failure must not discard the gate's guidance
+                    session.degrade("plan_gate_delivery_receipt", exc)
                 directives.append({"role": "user", "content": directive})
         adapter.pending_directives = []
         formatter = getattr(model, "format_observation_messages", None)

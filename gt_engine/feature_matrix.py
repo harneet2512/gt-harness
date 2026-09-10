@@ -51,12 +51,16 @@ FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
         "tests/test_gt_engine.py::test_post_edit_syntax_failure_delivers_immediately",
     ),
     "persistent_plan": (
+        "tests/test_miniswe_runtime.py::"
+        "test_plan_render_receipt_matches_native_request_bytes",
         "tests/test_persistent_plan_integration.py::"
         "test_a_merged_line_becomes_a_tracked_obligation",
         "tests/test_plan_check_specs.py::"
         "test_real_queue_coalesces_edits_and_checks_current_source",
     ),
     "plan_gate": (
+        "tests/test_miniswe_runtime.py::"
+        "test_plan_gate_directive_is_audited_through_native_provider_request",
         "tests/test_persistent_plan_integration.py::"
         "test_the_gate_keeps_refusing_until_refusals_stop_buying_evidence",
         "tests/test_persistent_plan_integration.py::"
@@ -130,6 +134,8 @@ FEATURE_NEGATIVE_EVIDENCE: dict[str, tuple[str, ...]] = {
         "tests/test_miniswe_runtime.py::test_newfile_precedent_does_not_preempt_executed_syntax_failure",
     ),
     "persistent_plan": (
+        "tests/test_gt_audit.py::"
+        "test_native_plan_requires_exact_immediate_provider_bytes[persistent_plan-False]",
         "tests/test_persistent_plan_off.py::"
         "test_no_plan_journal_rows_without_a_plan",
         "tests/test_persistent_plan_integration.py::"
@@ -138,6 +144,8 @@ FEATURE_NEGATIVE_EVIDENCE: dict[str, tuple[str, ...]] = {
         "test_a_phantom_node_id_is_dropped_not_believed",
     ),
     "plan_gate": (
+        "tests/test_gt_audit.py::"
+        "test_native_plan_requires_exact_immediate_provider_bytes[plan_gate-False]",
         "tests/test_persistent_plan_gate.py::"
         "test_low_time_escapes_rather_than_forcing_a_timeout",
         "tests/test_persistent_plan_off.py::test_the_gate_is_inert_without_a_plan",

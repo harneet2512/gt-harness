@@ -421,8 +421,9 @@ Current plan audit: the rendering is stored by content hash and verified against
 the immediate provider request (including message-CAS storage) and matching
 response. `WITNESSED` means exact-byte exposure and response linkage, not
 semantic use or correctness. Missing/tampered bytes and unmatched boundaries
-stay `DELIVERED_UNEXPOSED`. `plan_gate` attribution remains open; its decision
-journal alone is not evidence that a directive reached the model.
+stay `DELIVERED_UNEXPOSED`. The same independent byte/response check now covers
+queued `plan_gate` directives. A gate decision alone still does not establish
+delivery, and neither feature's witnessed exposure establishes task correctness.
 
 Measured across six tasks on run 34374028796, 29,972 seconds total.
 
