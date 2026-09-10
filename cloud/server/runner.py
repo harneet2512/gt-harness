@@ -1083,6 +1083,7 @@ class SessionManager:
                     parent_id=parent_id,
                     role=WORKER_ROLE,
                     task=task,
+                    owner=parent.get("owner"),
                 )
                 self._state(worker_id).parent_id = parent_id
                 await self._bus.publish(parent_id, {
@@ -1280,6 +1281,7 @@ class SessionManager:
             parent_agent_id=nested,
             external_cwd=_clean_cwd(cwd),
             label=label,
+            owner=parent.get("owner"),
         )
         self._state(agent_id).parent_id = parent_id
         await self._bus.publish(parent_id, {

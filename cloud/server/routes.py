@@ -79,6 +79,7 @@ _SPAWN_LINE = re.compile(r"^\s*/spawn\s+(?P<task>\S.*?)\s*$")
 StoreDep = Annotated[SessionStore, Depends(get_store)]
 ManagerDep = Annotated[SessionManager, Depends(get_manager)]
 BusDep = Annotated[EventBus, Depends(get_event_bus)]
+UserDep = Annotated[dict[str, Any], Depends(require_user)]
 
 
 def _worker_report(row: dict) -> dict[str, Any] | None:
@@ -192,16 +193,23 @@ def _session_config(body: SessionCreate) -> dict[str, Any]:
     return config
 
 
-async def _require_session(store: SessionStore, session_id: str) -> dict:
+async def _require_session(
+    store: SessionStore, session_id: str, user: dict[str, Any]
+) -> dict:
     session = await store.get_session(session_id)
     if session is None:
+        raise HTTPException(404, "session not found")
+    owner = session.get("owner")
+    if owner is not None and owner != user.get("login"):
+        # 404, not 403: a session that is not yours does not exist, and the
+        # answer must not confirm that it does.
         raise HTTPException(404, "session not found")
     return session
 
 
 @router.post("/sessions", response_model=Session, status_code=201)
 async def create_session(
-    body: SessionCreate, store: StoreDep, manager: ManagerDep
+    body: SessionCreate, store: StoreDep, manager: ManagerDep, user: UserDep
 ) -> dict[str, Any]:
     if not _GITHUB_REPO_RE.match(body.repo):
         raise HTTPException(400, "repo must be a GitHub HTTPS URL")
@@ -218,6 +226,7 @@ async def create_session(
         model=body.model,
         gt_mode=body.gt_mode,
         config=_session_config(body),
+        owner=str(user.get("login") or "") or None,
     )
     try:
         await manager.create_workspace(
@@ -232,18 +241,25 @@ async def create_session(
 
 
 @router.get("/sessions", response_model=list[Session])
-async def list_sessions(store: StoreDep) -> list[dict[str, Any]]:
-    return [_session_view(s) for s in await store.list_sessions()]
+async def list_sessions(store: StoreDep, user: UserDep) -> list[dict[str, Any]]:
+    return [
+        _session_view(s)
+        for s in await store.list_sessions(owner=str(user.get("login") or ""))
+    ]
 
 
 @router.get("/sessions/{session_id}", response_model=Session)
-async def get_session(session_id: str, store: StoreDep) -> dict[str, Any]:
-    return _session_view(await _require_session(store, session_id))
+async def get_session(
+    session_id: str, store: StoreDep, user: UserDep
+) -> dict[str, Any]:
+    return _session_view(await _require_session(store, session_id, user))
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[Message])
-async def list_messages(session_id: str, store: StoreDep) -> list[dict[str, Any]]:
-    await _require_session(store, session_id)
+async def list_messages(
+    session_id: str, store: StoreDep, user: UserDep
+) -> list[dict[str, Any]]:
+    await _require_session(store, session_id, user)
     return await store.list_messages(session_id)
 
 
@@ -253,9 +269,13 @@ async def list_messages(session_id: str, store: StoreDep) -> list[dict[str, Any]
     status_code=202,
 )
 async def post_message(
-    session_id: str, body: MessageCreate, store: StoreDep, manager: ManagerDep
+    session_id: str,
+    body: MessageCreate,
+    store: StoreDep,
+    manager: ManagerDep,
+    user: UserDep,
 ) -> dict[str, Any]:
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     if session["status"] in _CLOSED_TO_MESSAGES:
         raise HTTPException(
             409, f"session is {session['status']} and cannot accept messages"
@@ -285,10 +305,14 @@ async def post_message(
     status_code=202,
 )
 async def spawn_agents(
-    session_id: str, body: AgentSpawn, store: StoreDep, manager: ManagerDep
+    session_id: str,
+    body: AgentSpawn,
+    store: StoreDep,
+    manager: ManagerDep,
+    user: UserDep,
 ) -> dict[str, Any]:
     """Spawn one worker agent per task. All of them, or none at all."""
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     _spawnable(session)
     try:
         workers = await manager.spawn_agents(
@@ -303,14 +327,14 @@ async def spawn_agents(
 
 @router.get("/sessions/{session_id}/agents", response_model=list[Session])
 async def list_agents(
-    session_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str, store: StoreDep, manager: ManagerDep, user: UserDep
 ) -> list[dict[str, Any]]:
     """Every agent of this session, oldest first.
 
     Workers *and* external agents: both are child rows of the same session and
     both render as a card, so one list answers "what is working on this?".
     """
-    await _require_session(store, session_id)
+    await _require_session(store, session_id, user)
     return [_session_view(w) for w in await manager.list_workers(session_id)]
 
 
@@ -319,10 +343,14 @@ async def list_agents(
     response_model=AgentApplied,
 )
 async def apply_agent(
-    session_id: str, worker_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str,
+    worker_id: str,
+    store: StoreDep,
+    manager: ManagerDep,
+    user: UserDep,
 ) -> Any:
     """Merge a worker's cumulative diff into this session's workspace."""
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     worker = await _require_worker(store, session_id, worker_id)
     if session["status"] != "idle":
         raise HTTPException(
@@ -347,10 +375,14 @@ async def apply_agent(
     "/sessions/{session_id}/agents/{worker_id}/close", response_model=Session
 )
 async def close_agent(
-    session_id: str, worker_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str,
+    worker_id: str,
+    store: StoreDep,
+    manager: ManagerDep,
+    user: UserDep,
 ) -> dict[str, Any]:
     """Close one worker. The same thing as `/sessions/{worker_id}/close`."""
-    await _require_session(store, session_id)
+    await _require_session(store, session_id, user)
     await _require_worker(store, session_id, worker_id)
     await manager.close(worker_id)
     return _session_view(await store.get_session(worker_id))  # type: ignore[arg-type]
@@ -369,6 +401,7 @@ async def register_external_agent(
     body: ExternalAgentCreate,
     request: Request,
     store: StoreDep,
+    user: UserDep,
 ) -> dict[str, Any]:
     """Register an agent we do not run, as a child of this session.
 
@@ -376,7 +409,7 @@ async def register_external_agent(
     sandbox, no model call, no concurrency slot. The answer is the row plus
     the only credential that can push events into it.
     """
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     if session["status"] in _CLOSED_TO_EXTERNAL:
         raise HTTPException(
             409,
@@ -524,7 +557,11 @@ async def register_external_child(
     children under itself, in its own session, or nowhere.
     """
     agent = await _require_external_agent(store, agent_id)
-    session = await _require_session(store, str(agent.get("parent_id") or ""))
+    # No user on this path: the ingest token already scopes the caller to
+    # its own agent, and the parent session is implied, not named.
+    session = await store.get_session(str(agent.get("parent_id") or ""))
+    if session is None:
+        raise HTTPException(404, "session not found")
     if session["status"] in _CLOSED_TO_EXTERNAL:
         raise HTTPException(
             409,
@@ -554,10 +591,11 @@ async def stream_events(
     session_id: str,
     store: StoreDep,
     event_bus: BusDep,
+    user: UserDep,
     after_id: int = 0,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> StreamingResponse:
-    await _require_session(store, session_id)
+    await _require_session(store, session_id, user)
     if not after_id and last_event_id:
         # A malformed resume token used to fall back to replaying the whole
         # history, silently — the client asked to continue and got the start
@@ -593,10 +631,11 @@ async def get_diff(
     session_id: str,
     store: StoreDep,
     manager: ManagerDep,
+    user: UserDep,
     through_event: Annotated[int | None, Query(ge=0)] = None,
 ) -> dict[str, Any]:
     """The workspace diff — live, or as of a ``tool_result`` event id."""
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     if through_event is None:
         return await manager.diff(session)
     return await manager.diff_at(session, through_event)
@@ -604,9 +643,9 @@ async def get_diff(
 
 @router.get("/sessions/{session_id}/tree", response_model=SessionTree)
 async def get_tree(
-    session_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str, store: StoreDep, manager: ManagerDep, user: UserDep
 ) -> dict[str, Any]:
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     return await manager.tree(session)
 
 
@@ -617,23 +656,25 @@ async def get_tree(
     response_model_exclude_none=True,
 )
 async def get_graph(
-    session_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str, store: StoreDep, manager: ManagerDep, user: UserDep
 ) -> dict[str, Any]:
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     return await manager.graph(session)
 
 
 @router.get("/sessions/{session_id}/receipts", response_model=list[TurnReceipt])
-async def get_receipts(session_id: str, store: StoreDep) -> list[dict[str, Any]]:
-    await _require_session(store, session_id)
+async def get_receipts(
+    session_id: str, store: StoreDep, user: UserDep
+) -> list[dict[str, Any]]:
+    await _require_session(store, session_id, user)
     return await store.list_turns(session_id)
 
 
 @router.post("/sessions/{session_id}/stop", status_code=202)
 async def stop_turn(
-    session_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str, store: StoreDep, manager: ManagerDep, user: UserDep
 ) -> dict[str, str]:
-    session = await _require_session(store, session_id)
+    session = await _require_session(store, session_id, user)
     if session["status"] != "running":
         raise HTTPException(409, "session has no running turn")
     await manager.stop(session_id)
@@ -642,9 +683,9 @@ async def stop_turn(
 
 @router.post("/sessions/{session_id}/close", response_model=Session, status_code=200)
 async def close_session(
-    session_id: str, store: StoreDep, manager: ManagerDep
+    session_id: str, store: StoreDep, manager: ManagerDep, user: UserDep
 ) -> dict[str, Any]:
-    await _require_session(store, session_id)
+    await _require_session(store, session_id, user)
     await manager.close(session_id)
     session = await store.get_session(session_id)
     return _session_view(session)  # type: ignore[arg-type]

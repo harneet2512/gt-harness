@@ -776,6 +776,47 @@ def test_api_requires_authentication(harness: Harness) -> None:
     assert set(body) == {"status", "commit"}
 
 
+def test_sessions_belong_to_their_owner(harness: Harness) -> None:
+    """One user cannot list, read, message or close another user's session.
+
+    404, not 403: a session that is not yours does not exist, and the answer
+    must not confirm that it does.
+    """
+    session_id = _create_idle(harness)
+    other = {
+        "Authorization": "Bearer "
+        + jwt.encode(
+            {"sub": "2", "login": "someone-else", "exp": int(time.time()) + 3600},
+            JWT_SECRET,
+            algorithm="HS256",
+        )
+    }
+
+    listed = harness.client.get("/api/sessions", headers=other)
+    assert listed.status_code == 200
+    assert session_id not in {s["id"] for s in listed.json()}
+
+    for method, path, kwargs in [
+        ("get", f"/api/sessions/{session_id}", {}),
+        ("get", f"/api/sessions/{session_id}/messages", {}),
+        ("get", f"/api/sessions/{session_id}/diff", {}),
+        ("get", f"/api/sessions/{session_id}/tree", {}),
+        ("get", f"/api/sessions/{session_id}/graph", {}),
+        ("get", f"/api/sessions/{session_id}/receipts", {}),
+        ("get", f"/api/sessions/{session_id}/agents", {}),
+        ("post", f"/api/sessions/{session_id}/messages", {"json": {"content": "hi"}}),
+        ("post", f"/api/sessions/{session_id}/stop", {}),
+        ("post", f"/api/sessions/{session_id}/close", {}),
+        ("post", f"/api/sessions/{session_id}/external-agents",
+         {"json": {"agent_kind": "other", "label": "spy"}}),
+    ]:
+        response = getattr(harness.client, method)(path, headers=other, **kwargs)
+        assert response.status_code == 404, f"{method} {path}: {response.status_code}"
+
+    # ...and the owner still sees it
+    assert _session(harness, session_id)["id"] == session_id
+
+
 def test_health_reports_the_stamped_build_commit(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

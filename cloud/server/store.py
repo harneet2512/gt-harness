@@ -13,7 +13,7 @@ import uuid
 
 import aiosqlite
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: How many events one session keeps. The stream is append-only and nothing
 #: ever deleted from it, so a long-lived session was an unbounded table — and
@@ -107,7 +107,10 @@ CREATE TABLE sessions (
     -- EXTERNAL agents: the one-line "doing right now" of the fleet list, and
     -- the cumulative token count the client reports (NULL when it never has)
     activity TEXT,
-    tokens INTEGER
+    tokens INTEGER,
+    -- the login that owns this session; workers and external agents inherit
+    -- their parent's owner. NULL only on rows from before ownership existed.
+    owner TEXT
 );
 
 CREATE TABLE messages (
@@ -243,6 +246,7 @@ class SessionStore:
         parent_agent_id: str | None = None,
         external_cwd: str | None = None,
         label: str | None = None,
+        owner: str | None = None,
     ) -> str:
         """Insert a session row.
 
@@ -258,8 +262,8 @@ class SessionStore:
             """INSERT INTO sessions
                (id, repo, ref, model, gt_mode, gt_status, status,
                 created_at, updated_at, config_json, parent_id, role, task,
-                agent_kind, parent_agent_id, external_cwd, label)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                agent_kind, parent_agent_id, external_cwd, label, owner)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 repo,
@@ -278,6 +282,7 @@ class SessionStore:
                 parent_agent_id,
                 external_cwd,
                 label,
+                owner,
             ),
         )
         await self._db.commit()
@@ -290,13 +295,23 @@ class SessionStore:
         row = await cursor.fetchone()
         return dict(row) if row is not None else None
 
-    async def list_sessions(self, limit: int = 100) -> list[dict]:
-        cursor = await self._db.execute(
-            # rowid breaks ties: two sessions created in the same clock tick
-            # would otherwise come back in arbitrary order.
-            "SELECT * FROM sessions ORDER BY created_at DESC, rowid DESC LIMIT ?",
-            (limit,),
-        )
+    async def list_sessions(
+        self, limit: int = 100, *, owner: str | None = None
+    ) -> list[dict]:
+        if owner is not None:
+            cursor = await self._db.execute(
+                "SELECT * FROM sessions WHERE owner = ?"
+                " ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (owner, limit),
+            )
+        else:
+            cursor = await self._db.execute(
+                # rowid breaks ties: two sessions created in the same clock
+                # tick would otherwise come back in arbitrary order.
+                "SELECT * FROM sessions ORDER BY created_at DESC, rowid DESC"
+                " LIMIT ?",
+                (limit,),
+            )
         return [dict(r) for r in await cursor.fetchall()]
 
     async def list_children(self, parent_id: str) -> list[dict]:
