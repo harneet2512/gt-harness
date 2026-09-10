@@ -354,9 +354,14 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
         from gt_harness.canonical_io import atomic_json, canonical_json_bytes
 
         command = action.get("command", "")
+        argv = action.get("argv")
+        if argv is not None and (not isinstance(argv, (list, tuple)) or not argv
+                or any(not isinstance(arg, str) or "\x00" in arg for arg in argv)):
+            raise ValueError("invalid execution argv")
         cwd = str(Path(cwd or self.config.cwd or os.getcwd()).resolve())
         child_env = self.execution_env()
         output = {"returncode": -1, "exception_info": "", "extra": {"timed_out": False}}
+        output["extra"]["cwd"] = cwd
         output["extra"]["environment_sha256"] = hashlib.sha256(
             canonical_json_bytes(child_env)
         ).hexdigest()
@@ -377,9 +382,10 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
             try:
                 child = subprocess.Popen(
                     ([sys.executable, "-I", "-m", "scripts.miniswe_supervisor", "--command-worker",
-                      str(worker_receipt), cwd, str(command_timeout), command]
-                     if contained else command),
-                    shell=not contained, cwd=cwd, env=child_env,
+                      str(worker_receipt), cwd, str(command_timeout), command,
+                      *([json.dumps(list(argv))] if argv is not None else [])]
+                     if contained else list(argv) if argv is not None else command),
+                    shell=not contained and argv is None, cwd=cwd, env=child_env,
                     stdout=spool, stderr=subprocess.STDOUT,
                     start_new_session=os.name == "posix",
                 )
@@ -424,6 +430,7 @@ class CredentialIsolatedLocalEnvironment(LocalEnvironment):
                         output["exception_info"] = terminal["reason"]
                     output["extra"]["descendant_scope"] = "linux_subreaper"
                     output["extra"]["capture_complete"] = terminal["capture_complete"]
+                    output["extra"]["surviving_descendants"] = terminal.get("surviving_descendants", [])
                 else:
                     output["extra"]["descendant_scope"] = "windows_best_effort"
                 spool.flush()

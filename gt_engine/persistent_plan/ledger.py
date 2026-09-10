@@ -93,6 +93,8 @@ class LedgerRow:
     subjects: tuple[str, ...] = ()
     tokens: tuple[str, ...] = ()
     obligation_ids: tuple[str, ...] = ()
+    source_text: str = ""
+    examples: tuple[str, ...] = ()
 
     @property
     def is_ledger_only(self) -> bool:
@@ -110,6 +112,8 @@ class LedgerRow:
             "context": self.context,
             "subjects": list(self.subjects),
             "obligation_ids": list(self.obligation_ids),
+            "source_text": self.source_text,
+            "examples": list(self.examples),
         }
 
 
@@ -118,6 +122,7 @@ class Ledger:
     rows: tuple[LedgerRow, ...] = ()
     skipped: tuple[tuple[int, str], ...] = ()
     fenced_lines: int = 0
+    unclassified_spans: tuple[tuple[int, str], ...] = ()
 
     def __iter__(self):
         return iter(self.rows)
@@ -278,13 +283,24 @@ def build_requirement_ledger(
     section = ""
     fenced = False
     fenced_lines = 0
+    example_lines: list[str] = []
+    unclassified: list[tuple[int, str]] = []
 
     for line_no, raw in enumerate((issue_text or "").splitlines(), start=1):
         if _FENCE_RE.match(raw):
+            example_lines.append(raw)
+            if fenced:
+                example = "\n".join(example_lines)
+                if rows:
+                    rows[-1] = replace(rows[-1], examples=rows[-1].examples + (example,))
+                else:
+                    unclassified.append((line_no - len(example_lines) + 1, example))
+                example_lines = []
             fenced = not fenced
             continue
         if fenced:
             fenced_lines += 1
+            example_lines.append(raw)
             continue
         if not raw.strip():
             continue
@@ -309,11 +325,6 @@ def build_requirement_ledger(
                 continue
             pieces.extend((item, label) for item in items)
         for sentence_index, (text, context) in enumerate(pieces):
-            if len(text) > MAX_ROW_CHARS:
-                # Truncating would make the row non-verbatim, which is the exact
-                # defect this ledger exists to remove. Record it instead.
-                skipped.append((line_no, "row_too_long"))
-                continue
             if not _carries_requirement(text):
                 skipped.append((line_no, "structural_only"))
                 continue
@@ -337,6 +348,7 @@ def build_requirement_ledger(
                     shape=shape,
                     sentence_index=sentence_index,
                     context=context,
+                    source_text=raw,
                     # The label is part of the requirement's identity: an item
                     # listed under "Monitor methods" is about Monitor even
                     # though the item text never repeats the word.
@@ -347,7 +359,16 @@ def build_requirement_ledger(
 
     if contract is not None:
         rows = _link_obligations(rows, contract)
-    return Ledger(rows=tuple(rows), skipped=tuple(skipped), fenced_lines=fenced_lines)
+    if example_lines:
+        if rows:
+            rows[-1] = replace(rows[-1], examples=rows[-1].examples + ("\n".join(example_lines),))
+        else:
+            unclassified.append((1, "\n".join(example_lines)))
+    raw_lines = (issue_text or "").splitlines()
+    unclassified.extend((line, raw_lines[line - 1]) for line, reason in skipped
+                        if reason not in {"leaks_test_identity", "workflow_noise", "duplicate"})
+    return Ledger(rows=tuple(rows), skipped=tuple(skipped), fenced_lines=fenced_lines,
+                  unclassified_spans=tuple(unclassified))
 
 
 def _link_obligations(

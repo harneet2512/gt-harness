@@ -419,7 +419,11 @@ def main() -> int:
 
 def command_worker(arguments: list[str]) -> int:
     """Stream native command output; contain the workload on timeout/shutdown."""
-    receipt_path, cwd, timeout, command = arguments
+    receipt_path, cwd, timeout, command = arguments[:4]
+    argv = json.loads(arguments[4]) if len(arguments) == 5 else None
+    if argv is not None and (not isinstance(argv, list) or not argv
+            or any(not isinstance(arg, str) or "\x00" in arg for arg in argv)):
+        raise ValueError("invalid worker argv")
     os.chdir(cwd)
     _enable_linux_subreaper()
     interrupted = False
@@ -431,7 +435,7 @@ def command_worker(arguments: list[str]) -> int:
     signal.signal(signal.SIGTERM, terminate)
     deadline = time.monotonic() + float(timeout)
     reason = "exited"
-    child = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,
+    child = subprocess.Popen(argv if argv is not None else command, shell=argv is None, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, start_new_session=True)
     eof = False
     with selectors.DefaultSelector() as selector:
@@ -464,6 +468,8 @@ def command_worker(arguments: list[str]) -> int:
         "schema": "gt.command_worker.v1", "reason": reason,
         "returncode": child.returncode, "capture_complete": reason == "exited",
         "descendants_reaped": reason != "exited",
+        "surviving_descendants": sorted(pid for pid, parent in _linux_children().items()
+                                         if parent == os.getpid()),
     })
     return 0
 

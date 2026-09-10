@@ -49,7 +49,7 @@ def repo(tmp_path):
 def _pytest_command() -> tuple[str, ...]:
     # Run the suite through this interpreter so the test never depends on a
     # `pytest` executable being on PATH.
-    return (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
+    return (sys.executable, "-m", "pytest", "-v", "-p", "no:cacheprovider")
 
 
 def test_budget_is_a_bounded_fraction_of_the_run():
@@ -105,8 +105,8 @@ def test_an_unfinishable_suite_times_out_without_raising(tmp_path):
     assert "exceeded" in result.detail
 
 
-def test_a_suite_that_dirties_the_worktree_is_restored(tmp_path):
-    """A test that rewrites a tracked file must not read as the agent's edit."""
+def test_a_suite_that_dirties_the_worktree_is_not_destructively_restored(tmp_path):
+    """Automatic checks may not discard source mutations."""
     root = tmp_path / "dirty"
     (root / "tests").mkdir(parents=True)
     (root / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
@@ -122,8 +122,8 @@ def test_a_suite_that_dirties_the_worktree_is_restored(tmp_path):
     _git_repo(root)
     result = run_baseline(str(root), budget_seconds=120, command=_pytest_command())
     assert result.captured
-    assert "data.txt" in result.restored_paths
-    assert (root / "data.txt").read_text(encoding="utf-8") == "original\n"
+    assert result.restored_paths == ()
+    assert (root / "data.txt").read_text(encoding="utf-8") == "mutated\n"
 
 
 def test_a_runner_with_no_parseable_result_is_not_a_baseline(tmp_path):

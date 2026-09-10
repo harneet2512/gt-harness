@@ -58,6 +58,7 @@ def render_cursor(
     unmet: tuple[str, ...],
     *,
     proven_delta: tuple[str, ...] = (),
+    states: dict[str, str] | None = None,
 ) -> str:
     """The tail block: what to build next. NEVER a claim about what is done.
 
@@ -97,18 +98,23 @@ def render_cursor(
         )
         return "\n".join(lines)
 
-    row_id = current_row(plan, outstanding)
+    states = states or {}
+    failed = tuple(r for r in outstanding if states.get(r) == "CHECK_FAILED")
+    pending = tuple(r for r in outstanding if states.get(r) != "DEFERRED")
+    row_id = current_row(plan, failed or pending or outstanding)
     row = plan.row(row_id)
     if row is None:
         return ""
     lines.append(f"  Requirement to work on now: {row_id}")
+    if states.get(row_id):
+        lines.append(f"    evidence state: {states[row_id]}")
     lines.append(f"    {_clip(row.text, MAX_TEXT_CHARS)}")
     if row.approach:
         lines.append(f"    design: {_clip(row.approach, MAX_TEXT_CHARS)}")
     if row.verification_command:
         lines.append(
             "    when you believe it is done, demonstrate it with: "
-            f"{_clip(row.verification_command, MAX_COMMAND_CHARS)}"
+            f"{row.verification_command}"
         )
     else:
         lines.append(

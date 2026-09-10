@@ -92,6 +92,7 @@ class PlanInputs:
             "graph_revision": self.graph_revision,
             "language": self.language,
             "rows": [row.as_dict() for row in self.ledger.rows],
+            "unclassified_spans": [list(span) for span in self.ledger.unclassified_spans],
             "anchors": {
                 row_id: [anchor.as_dict() for anchor in anchors]
                 for row_id, anchors in self.anchors.anchors.items()
@@ -206,9 +207,13 @@ class PersistentPlan:
                 "derived_rows": len(self.derived_rows),
                 "interaction_cells": len(self.interactions),
                 "applies_true": len(self.applicable_cells),
-                "verified_methods": sum(
+                "rows_with_check_commands": sum(
                     1 for row in self.rows if row.verification_command
                 ),
+                # Historical readers consume this name. It never counted
+                # executed checks; retain it as an explicitly versioned alias.
+                "verified_methods": sum(1 for row in self.rows if row.verification_command),
+                "counts_layout": "check_commands_not_verification.v2",
                 "plan_abstentions": len(self.abstentions),
                 "origin": self.origin,
                 "has_understanding": bool(self.understanding),

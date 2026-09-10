@@ -554,7 +554,7 @@ def test_unmapped_exit_zero_does_not_verify_contract(tmp_path, monkeypatch):
 
 
 @requires_gt
-def test_full_repository_test_run_verifies_complete_contract(tmp_path, monkeypatch):
+def test_unbound_full_repository_run_does_not_verify_complete_contract(tmp_path, monkeypatch):
     from gt_engine.bridge import GTBridge
 
     monkeypatch.setenv("GT_GATEWAY", "1")
@@ -587,8 +587,8 @@ def test_full_repository_test_run_verifies_complete_contract(tmp_path, monkeypat
         False,
     )
 
-    assert bridge.submit_probe() is None
-    assert bridge._obligation_coverage()["unmet"] == []
+    assert bridge.submit_probe() is not None
+    assert bridge._obligation_coverage()["unmet"]
 
 
 @requires_gt
@@ -645,7 +645,7 @@ def test_later_edit_invalidates_prior_predicate_receipts(tmp_path, monkeypatch):
     bridge = GTBridge(
         repo_root=str(tmp_path),
         graph_db=None,
-        issue_text="Implement helper and keep its callers compatible.",
+        issue_text="Implement helper: the value must start with `urn:gt:`.",
     )
     assert bridge.task_start()
     bridge.enrich(
@@ -659,7 +659,8 @@ def test_later_edit_invalidates_prior_predicate_receipts(tmp_path, monkeypatch):
     bridge.enrich(
         "bash",
         {"command": "python -m pytest -q"},
-        "3 passed in 0.08s",
+        "GT_SEMANTIC_ASSERT relation=starts_with literal_sha256="
+        + __import__("hashlib").sha256(b"urn:gt:").hexdigest() + " result=pass",
         False,
     )
     assert not bridge._obligation_coverage()["unmet"]

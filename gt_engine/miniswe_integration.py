@@ -593,115 +593,282 @@ class MiniSweAdapter(GroundtruthController):
     REVERIFY_COMMAND_TIMEOUT_SECONDS = 15.0
 
     def _reverify_after_edit(self, candidates: dict[str, str]) -> None:
-        """Re-establish proofs an edit invalidated, instead of making the model redo them.
+        """Invalidate now; coalesce registered checks at a verification boundary.
 
-        This is early cutoff, in the sense rust-analyzer's salsa uses the term:
-        recompute the cheap thing, and if the result is unchanged, do not
-        propagate the invalidation. GT was propagating unconditionally - run
-        34095557374 shows `unmet` falling to 3 of 18 at iteration 90 of 263 and
-        returning to 18 sixteen times, ending exactly where it started, with 15
-        of 18 obligations proven at some point and none surviving. That is the
-        58% step inflation against the GT-off run of the same task.
-
-        The invalidation itself is CORRECT and stays: after an edit, a proof is
-        no longer known to hold. What was wrong is who pays to re-establish it.
-        The model paid, at roughly ten steps per obligation. The harness can pay
-        by re-running the recorded command, which is the same mechanism
-        _live_renumber already uses at submit and is proven there.
-
-        Correct-or-quiet throughout: a command that cannot be re-run, times out,
-        produces no output, or no longer satisfies its predicate leaves the
-        predicate UNKNOWN, which is exactly today's behaviour. This can only
-        preserve a proof, never invent one.
+        Receipt commands are audit text, not executable check specifications.
+        In particular, a passing compound command may also contain an edit.
+        Never replay it, and never extract a guessed test suffix from it.
         """
-        skipped = ""
-        if not candidates:
-            skipped = "no_candidates"
-        elif os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1":
-            skipped = "verify_execute_off"
-        if skipped:
-            # Say so, rather than returning in silence. This pass produced zero
-            # rows in every run ever recorded, and a silent return is precisely
-            # why that read as "nothing needed re-proving" instead of as a check
-            # that had never once done its work. A skip that names itself is the
-            # difference between quiet and broken.
+        pending = getattr(self, "_pending_check_ids", set())
+        specs = getattr(self, "_check_specs", {})
+        # Dependencies are workspace-wide until a complete footprint is
+        # certified. A second edit supersedes, rather than duplicates, work.
+        pending.update(specs)
+        self._pending_check_ids = pending
+        self.store.append(
+            "obligation_reverified", candidates=sorted(candidates),
+            distinct_commands=len(set(candidates.values())), commands_run=0,
+            preserved=[], skipped="queued_registered_checks" if pending else "no_registered_check",
+            pending_check_ids=sorted(pending), epoch=self.workspace_epoch,
+            budget_seconds=self.REVERIFY_PASS_BUDGET_SECONDS,
+        )
+
+    def bind_plan_check(self, value: dict) -> str:
+        from .persistent_plan.checks import CheckSpec, validation_source_digest
+        from .runtime_observation import capture_workspace
+
+        spec = CheckSpec.from_dict(value, self.repo_root)
+        known = {row.row_id for row in getattr(self.persistent_plan, "rows", ())}
+        if not set(spec.requirement_ids).issubset(known):
+            raise ValueError("check references unknown plan row")
+        snapshot = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+        digest = validation_source_digest(spec, snapshot)
+        if spec.test_source_digest and spec.test_source_digest != digest:
+            raise ValueError("test source identity mismatch")
+        data = spec.as_dict()
+        data.pop("check_id")
+        spec = CheckSpec.from_dict({**data, "test_source_digest": digest}, self.repo_root)
+        specs = getattr(self, "_check_specs", {})
+        if spec.check_id in specs:
+            from dataclasses import replace
+
+            spec = replace(spec, requirement_ids=tuple(sorted(
+                set(spec.requirement_ids) | set(specs[spec.check_id].requirement_ids))))
+        specs[spec.check_id] = spec
+        self._check_specs = specs
+        pending = getattr(self, "_pending_check_ids", set())
+        pending.add(spec.check_id)
+        self._pending_check_ids = pending
+        self.store.append("plan_check_bound", **spec.as_dict())
+        return spec.check_id
+
+    def bind_initial_plan_checks(self) -> None:
+        """Bind admissible simple plan checks automatically, without a new tool loop."""
+        import shlex
+
+        grouped: dict[tuple[str, ...], list[str]] = {}
+        for row in getattr(self.persistent_plan, "rows", ()):
+            if not row.verification_command:
+                continue
             try:
-                self.store.append(
-                    "obligation_reverified",
-                    candidates=sorted(candidates),
-                    distinct_commands=0,
-                    commands_run=0,
-                    preserved=[],
-                    skipped=skipped,
-                    epoch=self.workspace_epoch,
-                    budget_seconds=self.REVERIFY_PASS_BUDGET_SECONDS,
-                )
-            except Exception:  # noqa: BLE001 - reporting never fails an edit
-                pass
+                lexer = shlex.shlex(row.verification_command, posix=True, punctuation_chars=True)
+                lexer.whitespace_split = True
+                argv = tuple(lexer)
+                if any(token and all(char in ";&|<>()" for char in token) for token in argv):
+                    raise ValueError("composite_shell_command")
+                if "$" in row.verification_command or "`" in row.verification_command:
+                    raise ValueError("shell_expansion")
+                grouped.setdefault(argv, []).append(row.row_id)
+            except ValueError as exc:
+                self.store.append("plan_check_binding_pending", row_id=row.row_id, reason=str(exc))
+        for argv, row_ids in grouped.items():
+            try:
+                self.bind_plan_check({"argv": list(argv), "requirement_ids": row_ids})
+            except ValueError as exc:
+                self.store.append("plan_check_binding_pending", row_ids=row_ids, reason=str(exc))
+
+    def publish_plan_state(self) -> None:
+        from gt_harness.canonical_io import atomic_json
+
+        plan = getattr(self, "persistent_plan", None)
+        if plan is None:
             return
-        import subprocess
-        # Distinct commands only. A command that proved seven predicates is run
-        # once, and evaluate_observation re-establishes every predicate its real
-        # output satisfies.
-        by_command: dict[str, list[str]] = {}
-        for predicate_id, command in candidates.items():
-            if command:
-                by_command.setdefault(command, []).append(predicate_id)
-        deadline = time.monotonic() + self.REVERIFY_PASS_BUDGET_SECONDS
-        preserved: list[str] = []
-        ran = 0
-        for command, predicate_ids in sorted(by_command.items(), key=lambda kv: -len(kv[1])):
+        ledger = getattr(plan.inputs, "ledger", None)
+        payload = {
+            "plan_digest": hashlib.sha256(plan.canonical_json().encode()).hexdigest(),
+            "source_revision": self.repository_revision,
+            "rows": [{**row.as_dict(), "state": self.plan_row_state(row.row_id),
+                      "source": (ledger.by_id(row.row_id).as_dict()
+                                 if ledger is not None and ledger.by_id(row.row_id) else {})}
+                     for row in plan.rows],
+        }
+        state_digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        if state_digest != getattr(self, "_last_plan_state_digest", None):
+            atomic_json(self.store.root / "plan" / "current.json", payload)
+            self._last_plan_state_digest = state_digest
+
+    def apply_plan_requests(self) -> None:
+        """Admit CLI proposals through the single journal/engine owner."""
+        from dataclasses import replace
+
+        plan = getattr(self, "persistent_plan", None)
+        if plan is None:
+            return
+        seen = getattr(self, "_plan_requests_seen", set())
+        root = self.store.root / "plan" / "requests"
+        for path in sorted(root.glob("*.json")):
+            if path.name in seen:
+                continue
+            seen.add(path.name)
+            try:
+                request = json.loads(path.read_text(encoding="utf-8"))
+                digest = hashlib.sha256(plan.canonical_json().encode()).hexdigest()
+                if request["plan_digest"] != digest:
+                    raise ValueError("stale plan revision")
+                row_id = request["row_id"]
+                row = plan.row(row_id)
+                if row is None:
+                    raise ValueError("unknown plan row")
+                operation, value = request["operation"], request.get("value", {})
+                if operation == "revise":
+                    allowed = {"approach", "verification_kind", "verification_command"}
+                    if set(value) - allowed or any(not isinstance(v, str) for v in value.values()):
+                        raise ValueError("invalid plan revision")
+                    plan.rows = tuple(replace(r, **value) if r.row_id == row_id else r for r in plan.rows)
+                    # A changed design/check invalidates its old check bindings.
+                    specs = getattr(self, "_check_specs", {})
+                    self._check_specs = {key: spec for key, spec in specs.items()
+                                         if row_id not in spec.requirement_ids}
+                    self._pending_check_ids = getattr(self, "_pending_check_ids", set()) & self._check_specs.keys()
+                elif operation == "defer":
+                    reason = request.get("reason")
+                    if not isinstance(reason, str) or not reason.strip():
+                        raise ValueError("deferral requires a reason")
+                    deferred = getattr(self, "_plan_deferred", {})
+                    deferred[row_id] = reason
+                    self._plan_deferred = deferred
+                elif operation == "bind-check":
+                    self.bind_plan_check({**value, "requirement_ids": [row_id]})
+                else:
+                    raise ValueError("unsupported plan operation")
+                self.store.append("plan_revision_applied", request_id=path.name, operation=operation,
+                                  row_id=row_id, previous_plan_digest=digest)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                self.store.append("plan_revision_rejected", request_id=path.name, detail=str(exc))
+        self._plan_requests_seen = seen
+        self.publish_plan_state()
+
+    def drain_plan_checks(self, environment: Any, *, budget_seconds: float = 30) -> None:
+        """Execute coalesced argv checks through the task's isolation boundary."""
+        if os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1":
+            return
+        from .persistent_plan.baseline import _parse
+        from .persistent_plan.checks import classify_bound_check, validation_source_digest
+        from .runtime_observation import (
+            capture_workspace,
+            compile_execution_evidence,
+            diff_workspace,
+        )
+
+        deadline = time.monotonic() + min(budget_seconds, self.REVERIFY_PASS_BUDGET_SECONDS)
+        pending = getattr(self, "_pending_check_ids", set())
+        for check_id in sorted(tuple(pending)):
             remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if remaining < 1:
                 break
+            spec = self._check_specs[check_id]
+            if not spec.test_source_digest:
+                pending.discard(check_id)
+                self.store.append("plan_check_binding_pending", check_id=check_id,
+                                  reason="test_source_not_bound")
+                continue
+            # A native environment lacking explicit isolation is not an
+            # authorized automatic executor. The normal agent remains usable.
+            if not callable(getattr(environment, "execution_env", None)):
+                break
+            before = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+            self.record_repository_snapshot(before, boundary="before_auto_check")
+            result = None
             try:
-                proc = subprocess.run(
-                    command, shell=True, cwd=self.repo_root,
-                    capture_output=True, text=True,
-                    timeout=min(self.REVERIFY_COMMAND_TIMEOUT_SECONDS, remaining),
+                result = environment.execute(
+                    {"command": spec.command, "argv": list(spec.argv)},
+                    cwd=str(Path(self.repo_root) / spec.cwd),
+                    timeout=max(1, int(min(remaining, self.REVERIFY_COMMAND_TIMEOUT_SECONDS))),
                 )
-            except Exception:  # noqa: BLE001 - correct-or-quiet
+            except Exception as exc:  # an automatic check cannot submit the task
+                self.store.append("plan_check_execution_failed", check_id=check_id,
+                                  error_type=type(exc).__name__)
+            finally:
+                after = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+                transaction = diff_workspace(before, after, action_id=self.global_action,
+                                             command=spec.command)
+                self.record_repository_snapshot(after, boundary="after_auto_check")
+                self.record_edit_transaction(transaction)
+                if transaction.changes:
+                    self.note_edit(transaction.changed_paths)
+                self._automatic_check_generation = getattr(self, "_automatic_check_generation", 0) + 1
+            if result is None:
+                pending.discard(check_id)
                 continue
-            ran += 1
-            output = (proc.stdout or "") + (proc.stderr or "")
-            if not output.strip():
-                continue
-            try:
-                satisfied = self.evaluate_observation(
-                    command, output, returncode=proc.returncode,
-                    action_index=self.global_action,
-                )
-            except Exception:  # noqa: BLE001 - correct-or-quiet
-                continue
-            # Re-record, do not merely count. The first draft of this computed
-            # the survivor list, journalled it, and never restored a single
-            # receipt - so every predicate stayed UNKNOWN and the pass did
-            # nothing but spend time. It read as working because the event row
-            # said commands_run=1.
-            for predicate_id in predicate_ids:
-                if predicate_id not in satisfied:
-                    continue
-                try:
-                    self.record_receipt(
-                        predicate_id, command, proc.returncode, output,
-                        epoch=self.workspace_epoch, status="GREEN", semantic=True,
-                    )
-                except Exception:  # noqa: BLE001 - correct-or-quiet
-                    continue
-                preserved.append(predicate_id)
-        try:
-            self.store.append(
-                "obligation_reverified",
-                candidates=sorted(candidates),
-                distinct_commands=len(by_command),
-                commands_run=ran,
-                preserved=sorted(set(preserved)),
-                skipped="",
-                epoch=self.workspace_epoch,
-                budget_seconds=self.REVERIFY_PASS_BUDGET_SECONDS,
+            extra = result.get("extra") or {}
+            self._current_check_environment_sha256 = str(extra.get("environment_sha256", ""))
+            if extra.get("surviving_descendants"):
+                self._background_writers_seen = True
+            reference = extra.get("output_artifact")
+            output = (environment.evidence_store.bytes(reference["sha256"]).decode("utf-8", "replace")
+                      if reference else str(result.get("output", "")))
+            execution = compile_execution_evidence(
+                command=spec.command, output=output, returncode=result.get("returncode"),
+                action_id=self.global_action, repository_revision=after.revision,
+                timed_out=bool(extra.get("timed_out")),
+                environment_sha256=str(extra.get("environment_sha256", "")),
             )
-        except Exception:  # noqa: BLE001 - reporting never fails an edit
-            pass
+            _, passing, _ = _parse(output, spec.argv)
+            observation = classify_bound_check(
+                spec, execution, before_revision=before.revision, after_revision=after.revision,
+                capture_complete=(extra.get("capture_complete") is True
+                                  and before.complete and after.complete),
+                test_ids=tuple(passing),
+                test_source_digest=validation_source_digest(spec, after),
+            )
+            observations = getattr(self, "_plan_check_observations", {})
+            observations[check_id] = observation
+            self._plan_check_observations = observations
+            pending.discard(check_id)
+            self.store.append("plan_check_observed", **asdict(observation))
+
+    def plan_row_state(self, row_id: str) -> str:
+        observations = getattr(self, "_plan_check_observations", {})
+        bound = [key for key, spec in getattr(self, "_check_specs", {}).items()
+                 if row_id in spec.requirement_ids]
+        states = [observations[key].state for key in bound if key in observations
+                  and observations[key].source_revision == self.repository_revision
+                  and observations[key].environment_sha256 == getattr(
+                      self, "_current_check_environment_sha256", "")]
+        if "CHECK_FAILED" in states:
+            return "CHECK_FAILED"
+        if states and len(states) == len(bound) and all(state == "CHECK_PASSED" for state in states):
+            return "CHECK_PASSED"
+        if row_id in getattr(self, "_plan_deferred", {}):
+            return "DEFERRED"
+        return "UNVERIFIED"
+
+    def observe_plan_checks(self, command: str, result: dict, before: Any, after: Any,
+                            environment: Any) -> None:
+        """An equivalent agent-run check discharges the pending automatic run."""
+        from .persistent_plan.baseline import _parse
+        from .persistent_plan.checks import classify_bound_check, validation_source_digest
+        from .runtime_observation import compile_execution_evidence
+
+        if before is None or after is None:
+            return
+        extra = result.get("extra") or {}
+        self._current_check_environment_sha256 = str(extra.get("environment_sha256", ""))
+        for check_id, spec in getattr(self, "_check_specs", {}).items():
+            if command != spec.command or extra.get("cwd") != str((Path(self.repo_root) / spec.cwd).resolve()):
+                continue
+            reference = extra.get("output_artifact")
+            output = (environment.evidence_store.bytes(reference["sha256"]).decode("utf-8", "replace")
+                      if reference else str(result.get("output", "")))
+            execution = compile_execution_evidence(
+                command=command, output=output, returncode=result.get("returncode"),
+                action_id=self.global_action, repository_revision=after.revision,
+                timed_out=bool(extra.get("timed_out")),
+                environment_sha256=str(extra.get("environment_sha256", "")),
+            )
+            _, passing, _ = _parse(output, spec.argv)
+            observation = classify_bound_check(
+                spec, execution, before_revision=before.revision, after_revision=after.revision,
+                capture_complete=(extra.get("capture_complete") is True and before.complete and after.complete),
+                test_ids=tuple(passing),
+                test_source_digest=validation_source_digest(spec, after),
+            )
+            observations = getattr(self, "_plan_check_observations", {})
+            observations[check_id] = observation
+            self._plan_check_observations = observations
+            if observation.state in {"CHECK_PASSED", "CHECK_FAILED"}:
+                getattr(self, "_pending_check_ids", set()).discard(check_id)
+            self.store.append("plan_check_observed", **asdict(observation))
 
     def note_edit(self, paths: Iterable[str]) -> None:
         normalized_paths = tuple(str(p) for p in paths)
@@ -1820,7 +1987,23 @@ class MiniSweAdapter(GroundtruthController):
         execution = compile_execution_evidence(command=command, output=output,
             returncode=returncode, action_id=action_index,
             repository_revision=self.repository_revision)
-        if execution is not None and execution.outcome != "pass":
+        if execution is None:
+            # A live filesystem assertion is a separate deterministic checker,
+            # not a test inferred from command wording or output.
+            green = []
+            if self.repo_root:
+                for predicate in self._compiled_predicates.values():
+                    if (predicate.kind == "artifact" and predicate.scope
+                            and self._live_artifact_exists(predicate.scope)):
+                        footprint = self._live_artifact_footprint(predicate.scope)
+                        if not footprint.complete:
+                            continue
+                        self.record_receipt(predicate.predicate_id, "gt_live_verify", 0,
+                                            "artifact exists", epoch=self.workspace_epoch,
+                                            status="GREEN", semantic=True, dependency_footprint=footprint)
+                        green.append(predicate.predicate_id)
+            return tuple(green)
+        if execution.outcome != "pass":
             return ()
         receipts = evaluate_passing_observation(
             self.contract,
@@ -2826,52 +3009,10 @@ class MiniSweAdapter(GroundtruthController):
         return certified_path_footprint(paths, basis="live_artifact_stat")
 
     def _live_renumber(
-        self,
-        predicate: Any,
-        obligation_id: str,
-        green: list[str],
+        self, predicate: Any, obligation_id: str, green: list[str],
     ) -> None:
-        """RE-EXECUTE the model's recorded proof for a numeric obligation.
-
-        The old implementation called ``evaluate_observation`` with empty output
-        and a forced returncode 0, so it could never legitimately certify a
-        bound - it was a false re-run. Here we actually execute the recorded
-        command in the live workspace (bounded timeout, cwd=repo_root) and feed
-        the REAL output back through the evaluator. If the command cannot be
-        re-run or the output does not satisfy the bound, the obligation stays
-        UNKNOWN (never silently GREEN).
-        """
-        receipt = self._receipts.get(predicate.predicate_id)
-        if receipt is None or not receipt.command:
-            return
-        if self.predicate_status(predicate.predicate_id) is not PredicateStatus.UNKNOWN:
-            return
-        command = receipt.command
-        import subprocess
-
-        try:
-            proc = subprocess.run(
-                command,
-                shell=True,
-                cwd=self.repo_root,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        except Exception:  # noqa: BLE001 - live re-number is correct-or-quiet
-            return
-        output = (proc.stdout or "") + (proc.stderr or "")
-        if not output.strip():
-            return
-        try:
-            result = self.evaluate_observation(
-                command, output, returncode=proc.returncode,
-                action_index=self.global_action,
-            )
-        except Exception:  # noqa: BLE001 - live re-number is correct-or-quiet
-            return
-        if predicate.predicate_id in result:
-            green.append(predicate.predicate_id)
+        """Schedule a registered check; never replay a historical shell receipt."""
+        self._reverify_after_edit({predicate.predicate_id: ""})
 
     def note_persistent_plan_bootstrap(self) -> None:
         """Record the one planning provider call, at the transport boundary.
@@ -2979,14 +3120,16 @@ class MiniSweAdapter(GroundtruthController):
         proven, so blocking on it would be blocking on our own gap.
         """
         mapping = getattr(self, "plan_row_predicates", {}) or {}
-        if not mapping:
-            return ()
+        plan = getattr(self, "persistent_plan", None)
+        row_ids = {row.row_id for row in getattr(plan, "rows", ())} | set(mapping)
         unmet = set(self.unmet_predicates)
         return tuple(
             sorted(
                 row_id
-                for row_id, predicate_ids in mapping.items()
-                if any(predicate_id in unmet for predicate_id in predicate_ids)
+                for row_id in row_ids
+                if self.plan_row_state(row_id) not in {"CHECK_PASSED", "PROVEN"}
+                and (not mapping.get(row_id)
+                     or any(predicate_id in unmet for predicate_id in mapping[row_id]))
             )
         )
 

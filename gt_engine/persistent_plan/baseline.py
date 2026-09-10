@@ -161,23 +161,8 @@ def _tracked_dirty(repo_root: str) -> tuple[str, ...]:
 
 
 def _restore(repo_root: str, paths: tuple[str, ...]) -> tuple[str, ...]:
-    """Undo whatever the suite wrote to tracked files.
-
-    A test run that leaves a snapshot, a cache or a fixture rewritten would
-    otherwise be attributed to the agent as its first edit, which bumps the
-    workspace epoch and invalidates every proof before any work has been done.
-    """
-    if not paths:
-        return ()
-    try:
-        subprocess.run(
-            ["git", "checkout", "--", *paths],
-            cwd=repo_root, capture_output=True, text=True, timeout=60,
-            encoding="utf-8", errors="replace",
-        )
-    except Exception:  # noqa: BLE001
-        return ()
-    return paths
+    """Compatibility shim: automatic checks never undo repository mutations."""
+    return ()
 
 
 def run_baseline(
@@ -187,9 +172,15 @@ def run_baseline(
     command: tuple[str, ...] | None = None,
     basis: str = "",
     confidence: str = "",
+    execution_env: dict[str, str] | None = None,
 ) -> BaselineResult:
     """Run the repository's suite once and record what was already green."""
     import hashlib
+
+    from scripts.miniswe_gt_run import _is_sensitive_env_name
+
+    child_env = {key: value for key, value in (execution_env if execution_env is not None else os.environ).items()
+                 if not _is_sensitive_env_name(key)}
 
     if not repo_root or not os.path.isdir(repo_root):
         return BaselineResult(status="no_repository")
@@ -212,6 +203,7 @@ def run_baseline(
             timeout=max(1.0, float(budget_seconds)),
             encoding="utf-8",
             errors="replace",
+            env=child_env,
         )
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - started
@@ -235,6 +227,7 @@ def run_baseline(
             return run_baseline(
                 repo_root, budget_seconds=budget_seconds, command=fallback,
                 basis="interpreter_fallback", confidence="low",
+                execution_env=child_env,
             )
         return BaselineResult(
             status="spawn_failed", command=tuple(command), basis=basis,
@@ -249,7 +242,8 @@ def run_baseline(
         )
 
     elapsed = time.monotonic() - started
-    output = ((proc.stdout or "") + "\n" + (proc.stderr or ""))[:MAX_OUTPUT_CHARS]
+    # Preview limits belong to rendering, never canonical semantic analysis.
+    output = (proc.stdout or "") + "\n" + (proc.stderr or "")
     counts, passing, failing = _parse(output, tuple(command))
     after = _tracked_dirty(repo_root)
     restored = _restore(repo_root, tuple(sorted(set(after) - set(before))))
@@ -280,7 +274,8 @@ def run_baseline(
 
 
 def compare_to_baseline(
-    baseline: BaselineResult, repo_root: str, *, budget_seconds: float
+    baseline: BaselineResult, repo_root: str, *, budget_seconds: float,
+    execution_env: dict[str, str] | None = None,
 ) -> RegressionReport:
     """Re-run the captured command and report what stopped passing.
 
@@ -297,6 +292,7 @@ def compare_to_baseline(
         command=baseline.command,
         basis=baseline.basis,
         confidence=baseline.confidence,
+        execution_env=execution_env,
     )
     if not after.captured:
         return RegressionReport(status="unknown", detail=after.status, after=after)
@@ -305,7 +301,7 @@ def compare_to_baseline(
     )
     passed_delta = after.passed - baseline.passed
     failed_delta = after.failed - baseline.failed
-    if newly_failing or failed_delta > 0 or passed_delta < 0:
+    if newly_failing or failed_delta > 0 or after.errored > baseline.errored:
         return RegressionReport(
             status="regressed",
             newly_failing=newly_failing,
@@ -315,6 +311,18 @@ def compare_to_baseline(
                 f"{after.passed} passing now against {baseline.passed} before"
             ),
             after=after,
+        )
+    missing = set(baseline.passing_names) - set(after.passing_names) - set(after.failing_names)
+    if missing or passed_delta < 0:
+        return RegressionReport(
+            status="incomplete", passed_delta=passed_delta, failed_delta=failed_delta,
+            detail="Previously passing tests not observed passing: " + ", ".join(sorted(missing)),
+            after=after,
+        )
+    if baseline.passed > len(set(baseline.passing_names)):
+        return RegressionReport(
+            status="unknown", passed_delta=passed_delta, failed_delta=failed_delta,
+            detail="Aggregate counts cannot establish conservation of test identities", after=after,
         )
     return RegressionReport(
         status="intact", passed_delta=passed_delta, failed_delta=failed_delta,

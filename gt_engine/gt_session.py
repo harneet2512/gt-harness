@@ -606,12 +606,18 @@ class GTSession:
             from .persistent_plan.cursor import render_cursor
 
             unmet = tuple(self._engine.unmet_plan_rows())
+            row_state = getattr(self._engine, "plan_row_state", None)
+            states = {r.row_id: row_state(r.row_id) for r in plan.rows} if callable(row_state) else {}
             previous = self._last_plan_unmet
-            if previous is not None and unmet == previous:
+            cursor_identity = (unmet, getattr(self._engine, "repository_revision", ""),
+                               tuple((r.row_id, r.text, r.approach, r.verification_command, states.get(r.row_id))
+                                     for r in plan.rows))
+            if getattr(self, "_last_plan_cursor_identity", None) == cursor_identity:
                 return None
             proven = tuple(sorted(set(previous or ()) - set(unmet)))
-            rendered = render_cursor(plan, unmet, proven_delta=proven)
+            rendered = render_cursor(plan, unmet, proven_delta=proven, states=states)
             self._last_plan_unmet = unmet
+            self._last_plan_cursor_identity = cursor_identity
             if not rendered:
                 return None
             payload_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
@@ -641,6 +647,15 @@ class GTSession:
         """Deliver context additions (contract/localization) before a model call."""
         if self._engine is None or self.disabled:
             return GTDecisionBatch()
+        apply_requests = getattr(self._engine, "apply_plan_requests", None)
+        if callable(apply_requests):
+            from gt_harness.canonical_io import canonical_json_bytes
+
+            environment = getattr(self._plan_agent, "env", None)
+            if callable(getattr(environment, "execution_env", None)):
+                self._engine._current_check_environment_sha256 = hashlib.sha256(
+                    canonical_json_bytes(environment.execution_env())).hexdigest()
+            apply_requests()
         candidates = list(self._queued_decision_candidates)
         contract_candidate: tuple[str, str] | None = None
         contract_unit_id = ""
@@ -1166,14 +1181,28 @@ class GTSession:
         plan = getattr(self._engine, "persistent_plan", None)
         if plan is None or not getattr(plan, "rows", ()):
             return True
-        from .persistent_plan.gate import decide
+        from .persistent_plan.gate import budget_allows_refusal, decide
 
         remaining_seconds, remaining_steps = self.plan_gate_budget()
         try:
             unmet = self._engine.unmet_plan_rows()
         except Exception:  # noqa: BLE001 - a gate fault must never block
             return True
-        regressions, baseline_status = self._plan_baseline_check()
+        # Do not spend the submission reserve on a check whose result cannot
+        # justify a refusal. Re-read the clock after any verification work.
+        if budget_allows_refusal(remaining_seconds, remaining_steps)[0]:
+            drain = getattr(self._engine, "drain_plan_checks", None)
+            environment = getattr(self._plan_agent, "env", None)
+            if callable(drain) and environment is not None:
+                drain(environment, budget_seconds=min(30, max(0, remaining_seconds - 600)))
+            regressions, baseline_status = self._plan_baseline_check()
+            remaining_seconds, remaining_steps = self.plan_gate_budget()
+            unmet = self._engine.unmet_plan_rows()
+        else:
+            regressions, baseline_status = (), "budget_not_checked"
+        previous = self._plan_gate_last_unmet
+        if previous is not None and set(previous) - set(unmet):
+            self._plan_gate_stalled_refusals = 0
         decision = decide(
             plan=plan,
             unmet_rows=unmet,
@@ -1193,11 +1222,7 @@ class GTSession:
         # and it earns another refusal. A refusal that changed nothing counts
         # toward the stall limit, so the gate concedes rather than run the task
         # into the deadline with no submission at all.
-        previous = self._plan_gate_last_unmet
-        if previous is not None and set(previous) - set(unmet):
-            self._plan_gate_stalled_refusals = 0
-        else:
-            self._plan_gate_stalled_refusals += 1
+        self._plan_gate_stalled_refusals += 1
         self._plan_gate_last_unmet = tuple(unmet)
         self._engine.pending_directives.append(decision.directive)
         return False
@@ -1207,7 +1232,15 @@ class GTSession:
         inputs = getattr(self._engine, "plan_inputs", None)
         if inputs is None or not inputs.baseline.captured:
             return (), getattr(getattr(inputs, "baseline", None), "status", "")
-        if self._plan_baseline_report is not None:
+        from .runtime_observation import capture_workspace, diff_workspace
+        environment = getattr(self._plan_agent, "env", None)
+        child_env = environment.execution_env() if callable(getattr(environment, "execution_env", None)) else None
+        before = capture_workspace(self.config.repo_root, excluded_roots=(self._engine.store.root,))
+        env_digest = hashlib.sha256(json.dumps(child_env, sort_keys=True).encode()).hexdigest() if child_env is not None else ""
+        cache_key = (before.revision, env_digest, inputs.baseline.command, inputs.baseline.output_sha256)
+        if (self._plan_baseline_report is not None
+                and before.complete and env_digest
+                and getattr(self, "_plan_baseline_key", None) == cache_key):
             report = self._plan_baseline_report
             return report.newly_failing, report.status
         from .persistent_plan.baseline import compare_to_baseline
@@ -1217,10 +1250,24 @@ class GTSession:
                 inputs.baseline,
                 self.config.repo_root,
                 budget_seconds=max(30.0, inputs.baseline.duration_seconds * 2),
+                execution_env=child_env,
             )
         except Exception:  # noqa: BLE001 - a probe fault is never a blocker
             return (), "probe_failed"
+        finally:
+            after = capture_workspace(self.config.repo_root, excluded_roots=(self._engine.store.root,))
+            transaction = diff_workspace(before, after, action_id=self._engine.global_action,
+                                         command="gt_baseline_recheck")
+            self._engine.record_repository_snapshot(after, boundary="after_baseline_recheck")
+            self._engine.record_edit_transaction(transaction)
+            if transaction.changes:
+                self._engine.note_edit(transaction.changed_paths)
+            self._engine._automatic_check_generation = getattr(self._engine, "_automatic_check_generation", 0) + 1
+        if before.revision != after.revision or not after.complete:
+            report.status = "unknown"
+            report.detail = "Baseline check changed source or snapshot capture was incomplete"
         self._plan_baseline_report = report
+        self._plan_baseline_key = cache_key
         self._engine.store.append("plan_baseline_recheck", **report.as_dict())
         return (report.newly_failing if report.regressed else ()), report.status
 

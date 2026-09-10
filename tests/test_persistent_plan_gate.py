@@ -171,9 +171,11 @@ def test_budget_predicate(seconds, steps, allowed):
     assert budget_allows_refusal(seconds, steps)[0] is allowed
 
 
-def test_the_directive_says_a_retry_will_be_accepted():
+def test_the_directive_describes_actual_bounded_retry_policy():
     text = render_directive(_plan(), ("req-a",), ())
-    assert "accepted" in text
+    assert "reassessed" in text
+    assert "accepted either way" not in text
+    assert "bounded stall limit" in text
     assert "disagree" in text
 
 

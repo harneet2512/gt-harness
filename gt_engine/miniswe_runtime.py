@@ -838,6 +838,8 @@ def install_runtime_hooks(
     # point where GT itself may run a subprocess against the worktree, and the
     # capture happens for real on the next action.
     carried_snapshot: Any = None
+    snapshot_carry_disabled = False
+    carried_check_generation = 0
 
     def prepare_messages(_model: Any, messages: list[dict]) -> list[dict]:
         if session.disabled:
@@ -1172,6 +1174,10 @@ def install_runtime_hooks(
             _print_plan_summary(plan, finish_reason)
             if plan.status != STATUS_ABSTAINED:
                 adapter.register_plan_predicates(plan)
+                adapter.bind_initial_plan_checks()
+                adapter.publish_plan_state()
+                if hasattr(environment, "config") and hasattr(environment.config, "env"):
+                    environment.config.env["GT_PLAN_ROOT"] = str(adapter.store.root / "plan")
                 block = render_plan_block(plan)
                 messages = getattr(agent, "messages", None)
                 if block and isinstance(messages, list) and len(messages) > 1:
@@ -1252,7 +1258,7 @@ def install_runtime_hooks(
         return message
 
     def execute_actions(_agent: Any, message: dict) -> list[dict]:
-        nonlocal carried_snapshot
+        nonlocal carried_snapshot, snapshot_carry_disabled, carried_check_generation
         from .miniswe_typed_actions import (
             execute_typed_action_fail_open,
             is_typed_action,
@@ -1469,7 +1475,10 @@ def install_runtime_hooks(
                         adapter.repo_root
                         and session.capability_active("snapshot_authority")
                     ):
-                        pre_snapshot = carried_snapshot
+                        pre_snapshot = (carried_snapshot
+                                        if carried_check_generation == getattr(adapter, "_automatic_check_generation", 0)
+                                        and not getattr(adapter, "_background_writers_seen", False)
+                                        else None)
                         if pre_snapshot is None:
                             pre_snapshot = capture_workspace(
                                 adapter.repo_root,
@@ -1507,6 +1516,10 @@ def install_runtime_hooks(
             returncode = _returncode(result)
             output_artifact = (result.get("extra") or {}).get("output_artifact")
             timed_out = bool((result.get("extra") or {}).get("timed_out"))
+            capture_meta = result.get("extra") or {}
+            if (capture_meta.get("surviving_descendants")
+                    or capture_meta.get("descendant_scope") != "linux_subreaper"):
+                snapshot_carry_disabled = True
             # A shell may exit zero before a child holding stdout times out.
             # Preserve its actual exit code in the artifact, never certify the
             # interrupted workload from that aggregate zero.
@@ -1525,7 +1538,12 @@ def install_runtime_hooks(
                     )
                     # This tree is the next action's starting tree, unless GT
                     # runs something against the worktree in between.
-                    carried_snapshot = post_snapshot
+                    carried_snapshot = (
+                        post_snapshot if not snapshot_carry_disabled
+                        and capture_meta.get("capture_complete") is True
+                        and post_snapshot.complete else None
+                    )
+                    carried_check_generation = getattr(adapter, "_automatic_check_generation", 0)
                     pre_graph_snapshot = adapter.graph_query_snapshot()
                     transaction = diff_workspace(
                         pre_snapshot,
@@ -1594,6 +1612,8 @@ def install_runtime_hooks(
                     action_index=action_index,
                 )
                 execution_candidates = []
+                if pre_snapshot is not None:
+                    adapter.observe_plan_checks(command, result, pre_snapshot, post_snapshot, environment)
                 execution = compile_execution_evidence(
                     command=command,
                     output=output,

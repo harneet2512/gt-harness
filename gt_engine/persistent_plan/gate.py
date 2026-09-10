@@ -148,8 +148,8 @@ def render_directive(
     lines = [
         "GT PLAN GATE: submission was not executed. The plan built before the "
         "first edit still has requirements with no evidence. You may run any "
-        "command, edit any file, or disagree; submitting again will be "
-        "accepted either way.",
+        "command, edit any file, or disagree. A later submission is reassessed "
+        "against current evidence, remaining budget, and the bounded stall limit.",
     ]
     if unmet_rows:
         lines.append("Requirements with no evidence yet:")

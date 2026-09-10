@@ -292,6 +292,7 @@ def test_adapter_rejects_provider_payload_without_messages(tmp_path):
 
 
 def test_adapter_evaluates_semantic_predicates_from_real_observation(tmp_path):
+    (tmp_path / "output.json").write_text("{}", encoding="utf-8")
     contract = TaskContract(
         "ARTIFACT",
         (Obligation("obl-1", "Create output.json artifact.", "test"),),
@@ -304,6 +305,7 @@ def test_adapter_evaluates_semantic_predicates_from_real_observation(tmp_path):
         state_dir=tmp_path,
         predicates=[Predicate(predicate_id, "output.json exists")],
         contract=contract,
+        repo_root=str(tmp_path),
     )
     a.start_task()
     a.begin_verify()

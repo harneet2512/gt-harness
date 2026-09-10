@@ -139,8 +139,8 @@ def test_plan_rows_map_to_predicates_and_start_unmet(tmp_path, graph):
     assert set(unmet) <= {row.row_id for row in plan.rows}
 
 
-def test_a_real_passing_observation_clears_a_plan_row(tmp_path, graph):
-    """The proof path, end to end: a full-suite run turns rows green."""
+def test_unbound_passing_suite_does_not_clear_plan_rows(tmp_path, graph):
+    """Passing a suite without requirement bindings is not behavioral proof."""
     adapter, inputs, _contract, _merged, _repo = _built(tmp_path, graph)
     _plan_for(inputs, adapter)
     before = adapter.unmet_plan_rows()
@@ -152,7 +152,7 @@ def test_a_real_passing_observation_clears_a_plan_row(tmp_path, graph):
         action_index=1,
     )
     after = adapter.unmet_plan_rows()
-    assert len(after) < len(before), (before, after)
+    assert after == before
 
 
 def test_registration_is_refused_after_the_first_edit(tmp_path, graph):
@@ -359,9 +359,10 @@ def test_the_carried_snapshot_is_dropped_before_a_submit():
 
     assert "carried_snapshot" in source
     # reused rather than recaptured
-    assert "pre_snapshot = carried_snapshot" in source
+    assert "pre_snapshot = (carried_snapshot" in source
+    assert "carried_check_generation ==" in source
     # refreshed from every post-image
-    assert "carried_snapshot = post_snapshot" in source
+    assert "post_snapshot if not snapshot_carry_disabled" in source
     # and dropped when GT itself may run the repository's suite
     assert "carried_snapshot = None" in source
 

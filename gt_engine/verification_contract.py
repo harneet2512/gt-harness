@@ -555,7 +555,6 @@ def evaluate_passing_observation(
     output = output or ""
     observed = f"{command}\n{output}"
     lexical = matching_obligation_ids(contract, command, output)
-    full_suite = is_full_repository_suite(command)
     executable = bool(_EXECUTABLE_RE.search(command))
     receipts: list[PredicateReceipt] = []
     for item in contract.obligations:
@@ -569,10 +568,9 @@ def evaluate_passing_observation(
         unit = ""
         coverage_basis = ""
         if predicate.kind == "behavior":
-            verified = full_suite or (
-                executable and item.obligation_id in lexical
-            )
-            if verified and predicate.expected_relation:
+            # A suite PASS says nothing about an arbitrary natural-language
+            # requirement. Lexical overlap is relevance, never a proof binding.
+            if executable and predicate.expected_relation:
                 expected_literal = hashlib.sha256(
                     predicate.literal.encode("utf-8", "surrogatepass")
                 ).hexdigest()
@@ -582,11 +580,7 @@ def evaluate_passing_observation(
                     for match in _SEMANTIC_ASSERTION_RE.finditer(output)
                 )
             if verified:
-                coverage_basis = (
-                    "exact_operator_literal_assertion"
-                    if predicate.expected_relation else
-                    "full_repository_suite" if full_suite else "targeted_executable_anchor_match"
-                )
+                coverage_basis = "exact_operator_literal_assertion"
         elif predicate.kind == "artifact":
             verified = bool(
                 executable
