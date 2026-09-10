@@ -363,6 +363,30 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Run the existing complete resolver/analysis exactly once per batch; republish
   derived layers without stale facts. Do not guess a narrowly complete resolver.
 - [ ] Reuse eligible history/cochange work; preserve embedding caches and LSP bindings.
+  EMBEDDING CACHES: the behaviour was already correct on the live path and had NO
+  test. It was held in place by three comments. The store's CONTENT key was always
+  revision-independent -- content sha plus recipe, model, tokenizer and dimension,
+  deliberately not node id and not graph revision -- but its LOCATION was not:
+  `default_store_path` derives the file from the graph path, and the graph lives at
+  `revisions/<key>/graph.db`, so every republication named a store that did not
+  exist yet. Run 34095557374 paid for it: sixteen refreshes each reporting
+  `planned=3809..3822`, the whole corpus, never a delta, and dense retrieval never
+  refreshed once in 78 minutes. The repair pinned the store to the TASK through
+  `RuntimeLayout.contract_store_path` and had to correct three call sites; two
+  matched and the third had simply omitted it.
+  `tests/test_contract_store_pinning.py` now guards it: 8 tests, passing installed.
+  They pin that the default store moves with every republication (the reason the
+  layout property exists), that the task-pinned store does not move with the
+  graph, that two tasks do not share one store, that the resolution order puts an
+  explicit argument first and the layout ahead of the environment override, and
+  that the live readers take the store from their caller rather than deriving one.
+  Two mutations each kill at least one: returning the store under the graph root,
+  and the indexer dropping the layout from the resolution order exactly as it did
+  before the repair. A cold cache raises nothing, so without these the regression
+  is silent and costs a whole run's dense retrieval.
+  STILL OPEN: history/cochange reuse is producer work -- the handoff records that
+  history, cochange, derived layers and FTS all still recompute on every build --
+  and LSP binding preservation is not yet witnessed.
 - [x] Wire a persistent external cache root and batch API through the harness's
   existing one-active/one-pending coordinator.
 - [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
