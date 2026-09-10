@@ -923,6 +923,7 @@ class MiniSweAdapter(GroundtruthController):
             return
         extra = result.get("extra") or {}
         self._current_check_environment_sha256 = str(extra.get("environment_sha256", ""))
+        observed = False
         for check_id, spec in getattr(self, "_check_specs", {}).items():
             if command != spec.command or extra.get("cwd") != str((Path(self.repo_root) / spec.cwd).resolve()):
                 continue
@@ -948,6 +949,9 @@ class MiniSweAdapter(GroundtruthController):
             if observation.state in {"CHECK_PASSED", "CHECK_FAILED"}:
                 getattr(self, "_pending_check_ids", set()).discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
+            observed = True
+        if observed:
+            self.publish_plan_state()
 
     def note_edit(self, paths: Iterable[str]) -> None:
         normalized_paths = tuple(str(p) for p in paths)

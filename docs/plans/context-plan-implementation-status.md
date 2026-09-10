@@ -52,9 +52,11 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Add exact equivalent agent-check observation to discharge queued work.
 - [x] Record automatic-check before/after source transactions and invalidate on edits.
 - [x] Catch automatic-check exceptions without letting a check submit the agent task.
-- [ ] Prove the complete queue lifecycle with real installed executions: repeated
+- [x] Prove the complete queue lifecycle with real installed executions: repeated
   edits, superseding revisions, multiple bindings, equivalent agent execution,
   mutation during checks, timeouts, and the bounded total verification allowance.
+  The allowance is shared across checks in a pass; the task reserve bounds later
+  passes. Controlled-clock tests prove deadline decisions, not measured speed.
 - [x] Drain coalesced checks before the next model decision in VERIFY, in addition
   to submission. Preserve the existing per-pass cap and submission reserve;
   do not run checks on every implementation turn or rerun discharged work.
@@ -173,6 +175,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Agent-run equivalent-check lifecycle: two real source edits coalesce; actual
+  isolated pytest execution discharges pending automatic work; an attempted
+  duplicate would fail the test. Two pending checks share one pass allowance;
+  advancing the controlled clock after the first real execution leaves the other
+  pending and the jointly bound row unverified. This complements installed
+  shared-binding/revision, mutation, exception, phase and timeout cases.
+  An added published-state assertion exposed stale current.json after agent-run
+  checks; the observer now publishes once only when a bound observation changes.
+  Candidate 25: 201 installed regressions passed, zero skips, 62.18 seconds
+  (`agent-check-publication-green.xml`); RED `agent-check-publication-red.xml`.
+  Full interrupted/native-agent restoration remains a separate open requirement.
 
 - Two installed RED cases exposed failure masking across evidence channels:
   mapped GREEN hid a failed bound check; a passed bound check hid mapped RED.
