@@ -1196,13 +1196,43 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   runs of both arms on every repository, including conan and matplotlib. So the
   defect is edge resolution, not the producer at large, and a parity suite over
   nodes/properties/assertions would be sound today while one over edges cannot be.
-  STILL OPEN, and the reason this box stays unticked: the item asks for graph
-  BLOCKED VERSUS BACKGROUND time, CHECKS and SNAPSHOTS as well. Those are
-  properties of the coordinator and the run loop, not of the producer, and this
-  instrument measures the producer. It is not a gap in the corpus -- all six
-  transitions are measured -- it is a second measurement against the live path
-  that has not been made. Ticking on the producer half alone would be claiming
-  a run-loop result from a producer benchmark.
+  THE RUN-LOOP HALF NOW HAS AN INSTRUMENT: `scripts/run_loop_graph_accounting.py`,
+  with `tests/test_run_loop_graph_accounting.py` (11 tests, passing installed on
+  wheels-89). It reads a run's own event journal and computes nothing the run did
+  not already record, so it applies to runs already on disk and cannot perturb the
+  timings it reports.
+  THE BLOCKED/BACKGROUND SPLIT HAS A DEGENERATE ANSWER, and that is itself the
+  finding. `GraphBuildCoordinator.wait_idle` exists and NOTHING on the live path
+  calls it -- checked in the source by a test, not asserted -- and
+  `close_graph_coordinator` closes with `wait=False` deliberately. So BLOCKED TIME
+  IS ZERO BY CONSTRUCTION, and the instrument reports the reason alongside the
+  zero, because a bare 0.0 invites the reading that graph builds are free.
+  WHAT THEY COST THE RUN IS GRAPH-DARK TIME: the interval between the edit that
+  invalidates the graph and the publication that adopts the rebuild, during which
+  every caller query, anchor and covering-test selection abstains. Measured across
+  four real repair rehearsals (`run-loop-accounting.json`):
+    run                  wall    dark   fraction  bg build  ended dark  pubs
+    CI rehearsal        14.7s    3.2s    22.1%      0.2s      False      2
+    rehearsal-repair-04 22.9s    6.2s    27.3%      1.6s      False      2
+    rehearsal-repair-06 38.9s    8.6s    22.2%      2.6s      TRUE       1
+    rehearsal-repair-07 41.4s    9.7s    23.4%      2.1s      TRUE       1
+  Two things fall straight out, and neither was visible from the producer study.
+  First, the runs that END graph-dark are exactly the ones with ONE publication --
+  the accounting reproduces mechanically the 06/07-versus-04 distinction this
+  tracker spent several entries establishing by hand, and it charges the unclosed
+  interval to the end of the journal rather than dropping it, which would have
+  reported the WORST runs as having the least staleness.
+  Second, and more useful: background build time is 0.2-2.6s while dark time is
+  3.2-9.7s. STALENESS IS NOT DOMINATED BY BUILDING. It is dominated by waiting for
+  a poll to adopt a build that has already finished, which is the same seam the
+  close-time drain addresses. On a two-file fixture roughly a quarter of every run
+  has a stale graph.
+  STILL OPEN, and the reason this box stays unticked: the item asks for these
+  metrics over the FIXED SIX REPOSITORY TRANSITIONS. What exists is the instrument
+  and four fixture-scale runs. Producing the six-repository run-loop rows needs the
+  harness driven over those repositories, which is a separate exercise from the
+  producer study that has already measured them. Ticking now would be presenting
+  fixture rehearsals as the six-repository result.
   FIRST BENCHMARK-SCALE ROW, and it does not look like the large-repository rows.
   `kedro-org__kedro-4580` (622 tracked, 328 parsed files) BUILDS in 6.3s, well
   inside the harness's 600s budget. Five alternating repetitions:

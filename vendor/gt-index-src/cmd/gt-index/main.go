@@ -235,6 +235,7 @@ func vtaCallsiteMechanism(vtaCandidates, publishedCandidates []int64) string {
 func main() {
 	root := flag.String("root", ".", "Project root directory")
 	output := flag.String("output", "graph.db", "Output SQLite database path")
+	amendParent := flag.String("amend-parent", "", "Build a batch amendment from a closed parent graph into a distinct output")
 	maxFiles := flag.Int("max-files", 10000, "Maximum files to index")
 	workers := flag.Int("workers", 0, "Parallel parse workers (0 = NumCPU)")
 	file := flag.String("file", "", "Incremental mode: re-index only this single file (relative to -root) into an existing -output graph.db")
@@ -244,6 +245,9 @@ func main() {
 	frameworkValidation := flag.Bool("framework-validation", false, "Print the HAR-70 framework overlay validation report and exit")
 	inspectJSONL := flag.Bool("inspect-jsonl", false, "Parse caller-supplied source bytes as pure JSONL without graph mutation")
 	flag.Parse()
+	if *amendParent != "" && (*file != "" || *rebuildClosure) {
+		log.Fatal("amend-parent cannot be combined with file or rebuild-closure")
+	}
 	if *inspectJSONL {
 		if err := runInspectionJSONL(os.Stdin, os.Stdout); err != nil {
 			log.Fatalf("inspect-jsonl: %v", err)
@@ -341,6 +345,11 @@ func main() {
 		}
 	}()
 	*output = stagedOutput
+	if *amendParent != "" {
+		if err := copyBatchParent(*amendParent, stagedOutput, requestedOutput); err != nil {
+			abortStagedBuild(nil, stagedOutput, "batch parent: %v", err)
+		}
+	}
 
 	// Open database
 	db, err := store.Open(stagedOutput)
@@ -380,6 +389,14 @@ func main() {
 	// Parse files in parallel
 	results := make([]*parser.ParseResult, len(files))
 	resultCh := make(chan fileParseResult, len(files))
+	cache := parser.ParseCache{Root: os.Getenv("GT_PARSE_CACHE_ROOT"), ProducerFingerprint: sourceFingerprint}
+	if cache.ProducerFingerprint == "" || cache.ProducerFingerprint == "unknown" {
+		if identity, err := currentBuildIdentity(); err == nil {
+			cache.ProducerFingerprint = identity.ExecutableSHA256
+		}
+	}
+	var cacheMu sync.Mutex
+	cacheHits := 0
 
 	var wg sync.WaitGroup
 	fileCh := make(chan int, len(files))
@@ -394,7 +411,12 @@ func main() {
 				// Mark test AND non-source (benchmark/example/fixture/docs/vendored)
 				// nodes is_test so their call edges stay OUT of the fact surface.
 				isTest := walker.IsTestFile(sf.Path) || walker.IsNonSourceFile(sf.Path)
-				result, err := parser.ParseFile(sf, isTest)
+				result, hit, err := cache.ParseFile(sf, isTest)
+				if hit {
+					cacheMu.Lock()
+					cacheHits++
+					cacheMu.Unlock()
+				}
 				resultCh <- fileParseResult{fileIdx: idx, result: result, err: err}
 			}
 		}()
@@ -414,6 +436,7 @@ func main() {
 
 	// Collect results and preserve parser failures in project_meta.
 	results, parseFailures, failSample := collectParseResults(files, resultCh)
+	fmt.Fprintf(os.Stderr, "  Parse cache: %d hits, %d misses\n", cacheHits, len(files)-cacheHits)
 
 	parseElapsed := time.Since(parseStart)
 	parsedOK := len(files) - parseFailures
@@ -505,9 +528,16 @@ func main() {
 
 	// Batch insert all nodes in one transaction
 	insertStart := time.Now()
-	nodeDBIDs, err := db.BatchInsertNodes(allNodePtrs)
+	batchIdentity, err := currentBuildIdentity()
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "batch producer identity: %v", err)
+	}
+	nodeDBIDs, retainedNodes, err := db.ReplaceParsedStructure(allNodePtrs, *amendParent != "", batchIdentity.ExecutableSHA256)
 	if err != nil {
 		abortStagedBuild(db, stagedOutput, "batch insert nodes: %v", err)
+	}
+	if *amendParent != "" {
+		fmt.Fprintf(os.Stderr, "  Batch structure: %d retained, %d inserted; one full resolver pass\n", retainedNodes, len(nodeDBIDs)-retainedNodes)
 	}
 
 	// Fix up parent IDs: map global index → DB ID
@@ -842,11 +872,6 @@ func main() {
 			}
 		}
 	}
-	if len(containsPtrs) > 0 {
-		if err := db.BatchInsertEdges(containsPtrs); err != nil {
-			log.Printf("WARNING: containment edges: %v", err)
-		}
-	}
 
 	// Symbol taxonomy edges (item 11, delta row 9): DECLARED_IMPLEMENTS,
 	// OVERRIDES, DECORATES, RETURNS_TYPE and PARAM_TYPE, derived in
@@ -858,11 +883,11 @@ func main() {
 	// the nodes, their assigned ids and the property rows, which is what keeps
 	// this call site short.
 	taxonomyPtrs := taxonomy.DeriveEdges(allNodePtrs, nodeDBIDs, allProps)
-	if len(taxonomyPtrs) > 0 {
-		if err := db.BatchInsertEdges(taxonomyPtrs); err != nil {
-			log.Printf("WARNING: taxonomy edges: %v", err)
-		}
+	retainedStructuralEdges, err := db.ReconcileParsedEdges(append(containsPtrs, taxonomyPtrs...))
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "reconcile parser edges: %v", err)
 	}
+	fmt.Fprintf(os.Stderr, "  Parser structural edges retained: %d\n", retainedStructuralEdges)
 
 	edgeElapsed := time.Since(edgeStart)
 	fmt.Fprintf(os.Stderr, "  Inserted %d CALLS + %d CONTAINS edges in %s\n", len(edgePtrs), len(containsPtrs), edgeElapsed.Round(time.Millisecond))
@@ -885,8 +910,9 @@ func main() {
 			})
 		}
 	}
-	if err := db.BatchInsertProperties(propPtrs); err != nil {
-		log.Printf("WARNING: batch insert properties: %v", err)
+	retainedProperties, err := db.ReconcileParsedProperties(propPtrs)
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "reconcile parser properties: %v", err)
 	}
 
 	// Convert AssertionRefs to store.Assertion with target resolution
@@ -960,12 +986,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  Assertion targets resolved: %d/%d (%.0f%%)\n",
 			resolvedCount, len(assertPtrs), 100.0*float64(resolvedCount)/float64(len(assertPtrs)))
 	}
-	if err := db.BatchInsertAssertions(assertPtrs); err != nil {
-		log.Printf("WARNING: batch insert assertions: %v", err)
+	retainedAssertions, err := db.ReconcileParsedAssertions(assertPtrs)
+	if err != nil {
+		abortStagedBuild(db, stagedOutput, "reconcile parser assertions: %v", err)
 	}
 
 	propElapsed := time.Since(propStart)
-	fmt.Fprintf(os.Stderr, "  Inserted %d properties, %d assertions in %s\n",
+	fmt.Fprintf(os.Stderr, "  Parser facts retained: %d properties, %d assertions\n", retainedProperties, retainedAssertions)
+	fmt.Fprintf(os.Stderr, "  Reconciled %d properties, %d assertions in %s\n",
 		len(propPtrs), len(assertPtrs), propElapsed.Round(time.Millisecond))
 
 	// ── Pass 4b: API EDGES — cross-service route matching ───────────────
@@ -1252,11 +1280,17 @@ func main() {
 	importResolved := methodCounts["import"]
 	sameFileResolved := methodCounts["same_file"]
 	nameMatchResolved := methodCounts["name_match"]
-	fmt.Printf(`{"files":%d,"nodes":%d,"edges":%d,"imports":%d,"properties":%d,"assertions":%d,"edges_import":%d,"edges_same_file":%d,"edges_name_match":%d,"time_ms":%d,"workers":%d}`,
+	buildMode := "full"
+	if *amendParent != "" {
+		buildMode = "batch"
+	}
+	fmt.Printf(`{"files":%d,"nodes":%d,"edges":%d,"imports":%d,"properties":%d,"assertions":%d,"edges_import":%d,"edges_same_file":%d,"edges_name_match":%d,"time_ms":%d,"workers":%d,"build_mode":%q,"parser_nodes_retained":%d,"parser_nodes_inserted":%d,"parse_cache_hits":%d,"parse_cache_misses":%d,"resolver_passes":1,"parser_properties_retained":%d,"parser_assertions_retained":%d,"parser_edges_retained":%d}`,
 		len(files), nodeCount, edgeCount, len(allImports),
 		propertyCount, assertionCount,
 		importResolved, sameFileResolved, nameMatchResolved,
-		elapsed.Milliseconds(), *workers)
+		elapsed.Milliseconds(), *workers, buildMode, retainedNodes,
+		len(nodeDBIDs)-retainedNodes, cacheHits, len(files)-cacheHits,
+		retainedProperties, retainedAssertions, retainedStructuralEdges)
 	fmt.Println()
 
 	// Fail-closed stays fail-closed: an operator who requires the analysis layer
