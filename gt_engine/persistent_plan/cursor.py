@@ -111,6 +111,11 @@ def render_cursor(
     lines.append(f"    {_clip(row.text, MAX_TEXT_CHARS)}")
     if row.approach:
         lines.append(f"    design: {_clip(row.approach, MAX_TEXT_CHARS)}")
+    else:
+        lines.append(
+            f"    design pending: record the intended change with `gt-plan revise {row_id} --file <json>`; "
+            "a proposed check alone is not an implementation design."
+        )
     if row.verification_command:
         lines.append(
             "    when you believe it is done, demonstrate it with: "

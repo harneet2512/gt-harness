@@ -70,6 +70,12 @@ def test_the_cursor_is_small():
     assert len(text) < 700, len(text)
 
 
+def test_missing_design_is_explicit_pending_work():
+    text = render_cursor(_plan(), ("req-1",))
+    assert "design pending" in text
+    assert "gt-plan revise req-1" in text
+
+
 def test_the_cursor_moves_on_without_announcing_the_row_it_left():
     plan = _plan()
     text = render_cursor(plan, ("req-1", "req-2"), proven_delta=("req-3",))

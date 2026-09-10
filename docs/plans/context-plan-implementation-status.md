@@ -133,11 +133,11 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Check reserve before expensive submission verification; reread budget afterward.
 - [x] Reset progress-related stall state before deciding whether to escape.
 - [x] Remove the false promise that the next submission is accepted unconditionally.
-- [ ] Close the workflow's 300-step cutoff end to end. Current uncommitted repair
+- [ ] Close the workflow's 300-step cutoff end to end. Pushed repair `42300c15`
   sets max_iterations=0 and represents unlimited remaining steps explicitly in
   the gate, preserving wall-time reserve. Two RED witnesses now pass; the related
-  integration/gate/adapter run passed 49 tests. Actual installed beyond-300-call
-  and deadline-stop proof, review, commit and successor CI remain required.
+  integration/gate/adapter run passed 49 tests. Installed 301-query/deadline-stop
+  proof passed in candidate 07. Successor canonical acceptance remains required.
 - [ ] Finish gate reasons separating verified completion, mapping gaps, check evidence,
   baseline uncertainty, and budget/stall acceptance. Acceptance is not correctness.
 - [ ] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
@@ -163,6 +163,12 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Missing-design cursor delivery now explicitly says `design pending` and names
+  the existing revision command, without another planner call or graph work.
+  The installed omission witness failed before the repair; rebuilt wheel 12
+  passed 72 cursor/prefix/check/gate tests, zero skips, in 8.28 seconds
+  (`D:/gt-context-proof/design-pending-green.xml`). Interaction omissions and
+  full automatic delivery coverage remain open; no broad item is closed here.
 - Malformed plan revision values could crash the engine request queue with an
   uncaught AttributeError. Installed RED reproduced two list-payload failures;
   object-shape validation now journals rejection and processes the next valid
