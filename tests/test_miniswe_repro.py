@@ -1122,3 +1122,108 @@ def test_response_digest_is_stable_for_one_response(tmp_path):
         for _ in range(20)
     }
     assert len(digests) == 1
+
+
+def _patch_matrix_repo(tmp_path):
+    """A repository with a base commit, ready to be put into any of four states."""
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    })
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True, env=env)
+    baseline = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, text=True,
+        capture_output=True,
+    ).stdout.strip()
+    return repo, env, baseline
+
+
+def _official_patch(repo, env, baseline):
+    """What the TASK collects and what is graded: committed work only.
+
+    This mirrors the collector the fixture installs, `git diff --binary
+    <baseline> HEAD`, rather than the supervisor's worktree export.
+    """
+    return subprocess.run(
+        ["git", "diff", "--binary", baseline, "HEAD"], cwd=repo, check=True,
+        text=True, capture_output=True, env=env,
+    ).stdout
+
+
+def _recovery_patch(repo, baseline, tmp_path, name):
+    """What the SUPERVISOR exports for diagnosis: the whole workspace."""
+    output = tmp_path / name
+    _write_model_patch(repo, baseline, output)
+    return output.read_text(encoding="utf-8")
+
+
+def test_official_and_recovery_patches_separate_across_every_commit_state(tmp_path):
+    """Only the task-collected patch is graded, and the two must never be swapped.
+
+    The supervisor's export conserves the workspace so an interrupted run can
+    still be diagnosed; the task's collector records what the agent actually
+    committed. Substituting the recovery artifact for the official one would
+    grade work the agent never committed, which is why eval/miniswe_agent.py
+    writes the supervisor artifact to agent/gt-worktree.patch and never to
+    artifacts/model.patch.
+    """
+    # 1. COMMITTED ONLY -- both see it, because HEAD moved.
+    repo, env, baseline = _patch_matrix_repo(tmp_path / "committed")
+    (repo / "tracked.txt").write_text("committed change\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-aqm", "work"], cwd=repo, check=True, env=env)
+    official = _official_patch(repo, env, baseline)
+    recovery = _recovery_patch(repo, baseline, tmp_path, "committed.patch")
+    assert "committed change" in official
+    assert "committed change" in recovery
+
+    # 2. UNCOMMITTED ONLY -- the graded patch is EMPTY and the recovery one is not.
+    # This is the whole reason they are separate artifacts.
+    repo, env, baseline = _patch_matrix_repo(tmp_path / "uncommitted")
+    (repo / "tracked.txt").write_text("uncommitted change\n", encoding="utf-8")
+    official = _official_patch(repo, env, baseline)
+    recovery = _recovery_patch(repo, baseline, tmp_path, "uncommitted.patch")
+    assert official.strip() == ""
+    assert "uncommitted change" in recovery
+
+    # 3. MIXED -- the graded patch carries the committed half only.
+    repo, env, baseline = _patch_matrix_repo(tmp_path / "mixed")
+    (repo / "tracked.txt").write_text("committed half\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-aqm", "half"], cwd=repo, check=True, env=env)
+    (repo / "later.txt").write_text("uncommitted half\n", encoding="utf-8")
+    official = _official_patch(repo, env, baseline)
+    recovery = _recovery_patch(repo, baseline, tmp_path, "mixed.patch")
+    assert "committed half" in official
+    assert "uncommitted half" not in official
+    assert "committed half" in recovery
+    assert "uncommitted half" in recovery
+
+    # 4. INTERRUPTED -- an untracked file and no commit at all. The supervisor
+    # still conserves it; grading still sees nothing, which is correct because
+    # nothing was committed.
+    repo, env, baseline = _patch_matrix_repo(tmp_path / "interrupted")
+    (repo / "scratch.txt").write_text("interrupted work\n", encoding="utf-8")
+    official = _official_patch(repo, env, baseline)
+    recovery = _recovery_patch(repo, baseline, tmp_path, "interrupted.patch")
+    assert official.strip() == ""
+    assert "interrupted work" in recovery
+
+
+def test_the_supervisor_artifact_is_never_written_to_the_graded_path():
+    """The path split is the enforcement; assert it at the source."""
+    from pathlib import Path as _Path
+
+    agent = (_Path(__file__).resolve().parents[1] / "eval" / "miniswe_agent.py").read_text(
+        encoding="utf-8"
+    )
+    assert "gt-worktree.patch" in agent
+    graded = [
+        line for line in agent.splitlines()
+        if "artifacts/model.patch" in line and not line.lstrip().startswith("#")
+    ]
+    assert graded == [], graded

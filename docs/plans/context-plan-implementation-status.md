@@ -322,7 +322,22 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   checks, and progress recovery before a previously reached stall limit.
 - [x] Add current committed-diff/uncommitted-state reporting and bounded finalization
   reminders. Do not automatically commit model changes.
-- [ ] Verify official submitted patch versus supervisor recovery artifact separately.
+- [x] Verify official submitted patch versus supervisor recovery artifact separately.
+  DONE. The four-state separation matrix is covered: committed-only, uncommitted-
+  only, mixed and interrupted. The graded artifact is the task-collected
+  `git diff --binary <baseline> HEAD`; the supervisor's export_patch conserves the
+  whole workspace so an interrupted run stays diagnosable. Uncommitted-only is the
+  case that proves they must stay separate: the graded patch is EMPTY while the
+  recovery patch carries the change, so substituting one for the other would grade
+  work the agent never committed. Mixed asserts the graded patch carries the
+  committed half and not the uncommitted one. A second test asserts the split at
+  the source: eval/miniswe_agent.py writes the supervisor artifact to
+  agent/gt-worktree.patch and never to artifacts/model.patch.
+  Verified installed on wheel 65 against a full checkout root: 77 passed, zero
+  failures and zero skips across the repro, supervisor and interruption suites
+  (D:/gt-context-proof/patch-surface-65b.xml). Scattered mounts are insufficient
+  for these suites -- they read pyproject.toml and scripts from the repository
+  root, so they need a real checkout rather than site-packages.
 
 ## 7. Installed release and performance — OPEN
 
