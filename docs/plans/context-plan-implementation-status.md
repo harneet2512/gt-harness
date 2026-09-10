@@ -151,7 +151,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   passed on `2ef314ad`; wall-time and submission reserve remain enforced.
 - [ ] Finish gate reasons separating verified completion, mapping gaps, check evidence,
   baseline uncertainty, and budget/stall acceptance. Acceptance is not correctness.
-- [ ] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
+- [x] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
   checks, and progress recovery before a previously reached stall limit.
 - [ ] Add current committed-diff/uncommitted-state reporting and bounded finalization
   reminders. Do not automatically commit model changes.
@@ -173,6 +173,14 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Gate boundary characterization passed against installed candidate 22: 41 tests,
+  zero skips, 7.72 seconds (`gate-boundaries.xml`). The exact 600-second/20-step
+  boundary remains refusal-eligible, lower values escape, three stalled refusals
+  concede, and progress resets a reached stall count before the decision. A
+  controlled verification clock proves 603 -> 599 seconds changes the final
+  decision to budget escape and never completion. Real execution/timeout tests
+  are separate queue evidence; the clock fixture is not a measured speed result.
 
 - Non-submission verification boundary: installed RED left a registered check
   pending in VERIFY despite ample budget. Candidate 22 now executes that real

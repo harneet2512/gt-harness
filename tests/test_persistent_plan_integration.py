@@ -270,6 +270,55 @@ def _journal(adapter) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+def test_gate_rereads_budget_consumed_by_queued_checks(tmp_path, graph, monkeypatch):
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    _plan_for(inputs, adapter)
+    session = GTSession(GTSessionConfig(task_id="reserve", repo_root=str(repo), mode="advisory"),
+                        engine=adapter)
+    session._plan_agent = SimpleNamespace(env=object())
+    remaining = [603.0]
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (remaining[0], 20))
+    allowances = []
+
+    def drain(environment, *, budget_seconds):
+        allowances.append(budget_seconds)
+        remaining[0] = 599.0
+
+    monkeypatch.setattr(adapter, "drain_plan_checks", drain)
+    monkeypatch.setattr(session, "_plan_baseline_check", lambda: ((), "unknown"))
+    assert session.plan_submit_gate() is True
+    assert allowances == [3.0]
+    event = next(row for row in reversed(_journal(adapter)) if row["event"] == "plan_gate_decision")
+    assert event["reason"] == "budget_escape"
+    assert event["remaining_seconds"] == 599.0
+    assert event["completion_proven"] is False
+
+
+def test_gate_progress_is_applied_before_reached_stall_limit(tmp_path, graph, monkeypatch):
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+    session = GTSession(GTSessionConfig(task_id="progress", repo_root=str(repo), mode="advisory"),
+                        engine=adapter)
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (600.0, 20))
+    monkeypatch.setattr(session, "_plan_baseline_check", lambda: ((), "unknown"))
+    row_ids = tuple(row.row_id for row in plan.rows)
+    assert len(row_ids) > 1
+    remaining = [row_ids]
+    monkeypatch.setattr(adapter, "unmet_plan_rows", lambda: remaining[0])
+    for _ in range(3):
+        assert session.plan_submit_gate() is False
+    assert session._plan_gate_stalled_refusals == 3
+    remaining[0] = row_ids[1:]
+    assert session.plan_submit_gate() is False
+    assert session._plan_gate_stalled_refusals == 1
+    assert session.plan_submit_gate() is False
+    assert session.plan_submit_gate() is False
+    assert session.plan_submit_gate() is True
+    event = next(row for row in reversed(_journal(adapter)) if row["event"] == "plan_gate_decision")
+    assert event["reason"] == "refusals_without_progress"
+    assert event["completion_proven"] is False
+
+
 def test_baseline_recheck_cannot_spend_the_submission_reserve(tmp_path, graph, monkeypatch):
     from dataclasses import replace
 
