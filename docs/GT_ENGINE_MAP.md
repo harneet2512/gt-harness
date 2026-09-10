@@ -4,6 +4,49 @@ The single reference for what GroundTruth stores, when it stores it, and what
 each capability does from task start to submission. Written against
 `codex/product-completion` at `2cbb9939`.
 
+## Current implementation overlay (2026-09-09)
+
+The run measurements and legacy-path findings below remain historical evidence.
+For the current candidate, follow `docs/plans/context-plan-implementation-status.md`.
+Harness `5c2e4965` pins producer `350cb156`; harness `ab71a0b6` additionally
+corrects baseline failure attribution. These are scoped candidate commits, not
+a benchmark-ready release.
+
+- The workflow now supplies `max_iterations=0` (Mini-SWE's unlimited-step mode).
+  GT represents unlimited remaining steps as null, not zero. Wall-clock limits
+  and the finalization reserve remain in force. Installed Mini-SWE executed 301
+  synthetic queries and rejected the next query at its wall deadline.
+- `CheckSpec` is explicit argv, not a shell receipt. Checks are coalesced after
+  edits and drained at submission. Passing a bound check is `CHECK_PASSED`, not
+  proof of arbitrary behavior; unbound full-suite/lexical matches no longer grant
+  GREEN. The supported exact-assertion and filesystem paths remain separate.
+- The legacy `-file` path in section 3.2 remains conservatively incomplete and
+  its in-place capability remains undeclared. The candidate uses a different,
+  staged `-amend-parent` batch API, declared as `batch_parser_node_reuse_v1`.
+  It copies the certified parent once, retains unchanged parser-owned node IDs,
+  loads complete content-keyed parser inputs, and executes the complete existing
+  resolver/analysis pipeline once. It does not narrowly guess affected callees.
+- A `parser_node_inventory` table binds retained nodes to parser inputs.
+  Properties, assertions, history/cochanges, and derived layers are currently
+  reconstructed. Therefore this is partial structural reuse, not a claim that
+  every graph layer is incrementally maintained. Parser cache storage survives
+  graph revisions outside the indexed input; the same coordinator still owns
+  one active and one coalesced pending build.
+- The real installed automatic refresh handled five changed paths, including
+  configuration, in one batch and preserved its parent bytes. Nine source
+  transition fixtures matched fresh normalized graph facts. All-consumer parity
+  and fixed-workload performance are still open; no measured end-to-end speedup
+  or no-regression benchmark claim follows from these checks.
+- Baseline commands use the existing isolated process-tree boundary and full
+  captured output. A new failing test is not labeled previously passing unless
+  its identity appears in the baseline passing set. Unknown or unattributed
+  failures are never reported as an intact baseline.
+
+Producer CI `34424185145` passed the complete configured matrix. Installed
+candidate 09 passed 126 checks with two explained skips; the subsequent baseline
+attribution increment passed 62 installed checks with zero skips. Canonical
+repinned harness CI and the remaining tracker requirements are separate gates.
+
 Every number in this document was measured, not estimated. Where a measurement
 comes from a specific run it is named, so a future reader can check it rather
 than trust it. Where something is a known defect it says so in the same
