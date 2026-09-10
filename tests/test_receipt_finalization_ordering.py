@@ -209,3 +209,65 @@ def test_a_refresh_that_completed_late_is_still_published_at_close(tmp_path, mon
     # coexist with.
     assert events.index("graph_publication") < events.index("session_closed")
     assert _conserved(_seal(adapter), rows)
+
+
+def test_a_build_that_finished_unpolled_is_adopted_and_published_at_close(tmp_path):
+    """The half of the late-refresh hole the first repair did not close.
+
+    `_record_graph_publication` reads `engine_state.graph_current`, and a
+    finished build does not make the graph current on its own: the coordinator
+    parks the artifact in `_completed` and only `poll()` -- reached from
+    `refresh_graph` -- calls `publish_graph`. So a build that completes after
+    the final action is not merely unobserved, it is UNADOPTED, and calling
+    `_record_graph_publication` at close returns at its first guard.
+
+    That is exactly rehearsal 06, measured: every refresh from row 148 to 179
+    reports `already_running` at revision 6c682809, the build finishes at rows
+    183/185 -- after the last snapshot (178) and after the submit deferral
+    (182) -- and nothing polls between it and `session_closed` at 187. One
+    publication, and `native_graph_refresh_verified` False for a rebuild that
+    completed for the current revision.
+
+    Close is the last chance to drain it. The coordinator is closed FIRST so
+    the poll cannot spawn enrichment work on the way out (`consider_enrichment`
+    returns "closed" once `_closed` is set), and the whole thing still runs
+    before the journal is sealed.
+
+    Contrast rehearsal 07, which this must NOT paper over: there the finished
+    build was for revision eae5f8bd while the tree had moved to 5e8ffa36, so
+    `publish_graph` refuses it as `source_revision_superseded` and there is
+    genuinely nothing to publish. Adoption stays the authority; close only
+    stops asking too early.
+    """
+    from gt_engine.graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MiniSweAdapter(task_id="late-adopt", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"graph")
+    graph.with_suffix(".manifest.json").write_text(
+        json.dumps({"graph_sha256": "c" * 64}), encoding="utf-8")
+
+    adapter.engine_state.bind_initial_source("rev-1")
+    artifact = GraphBuildArtifact(True, str(graph), "graph-rev-1")
+    coordinator = GraphBuildCoordinator(adapter.engine_state, lambda request: artifact)
+    adapter._graph_coordinator = coordinator
+    coordinator.schedule(FrozenBuildInput("rev-1", ("calculator.py",),
+                                          (("calculator.py", b"x = 1\n"),)))
+    assert coordinator.wait_idle(timeout=10), "the fixture build never finished"
+
+    # Nothing polls it -- the run's last action is already over.
+    assert not adapter.engine_state.graph_current, (
+        "precondition: a finished build must not be current before a poll")
+
+    adapter.close_graph_coordinator()
+
+    events = [row["event"] for row in _journal_rows(adapter)]
+    assert "graph_publication" in events, (
+        "a build that finished for the current revision was never adopted; "
+        f"journal tail is {events[-5:]}")
+    # And the seal still holds afterwards.
+    assert adapter._append_observation("graph_build_mode", mode="full") is False

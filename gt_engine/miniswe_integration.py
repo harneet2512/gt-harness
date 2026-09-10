@@ -1986,6 +1986,29 @@ class MiniSweAdapter(GroundtruthController):
         # is sealed, so recording here cannot disturb conservation. It is
         # correct-or-quiet: an unrecorded publication is the bug, and failing to
         # record one must not take the run down with it.
+        #
+        # Recording is not enough on its own. `_record_graph_publication` reads
+        # `engine_state.graph_current`, and a finished build does not make the
+        # graph current: the coordinator parks the artifact in `_completed` and
+        # only `poll()` calls `publish_graph`. A build that finishes after the
+        # last action is therefore unadopted, not merely unobserved. So close
+        # the coordinator FIRST -- which sets `_closed`, drops queued work and
+        # makes `consider_enrichment` return "closed" so the poll cannot spawn
+        # enrichment on the way out -- then drain it, then record. Every step
+        # is nonblocking: a RUNNING build is still not waited for.
+        #
+        # Adoption remains the authority, which is what keeps this honest.
+        # Rehearsal 07's finished build was for revision eae5f8bd while the
+        # tree had moved to 5e8ffa36; `publish_graph` refuses it as
+        # `source_revision_superseded` and no publication is recorded, because
+        # there is genuinely nothing to publish. Close only stops asking too
+        # early; it does not lower the bar.
+        if self._graph_coordinator is not None:
+            self._graph_coordinator.close(wait=False)
+            try:
+                self._graph_coordinator.poll()
+            except Exception:  # noqa: BLE001 - draining never fails a close
+                pass
         try:
             self._record_graph_publication()
         except Exception:  # noqa: BLE001 - observing a refresh never fails a close
@@ -1994,8 +2017,6 @@ class MiniSweAdapter(GroundtruthController):
         # write `session_closed` and then seal its manifest; a build still in
         # flight must not append past that point.
         self._journal_sealed = True
-        if self._graph_coordinator is not None:
-            self._graph_coordinator.close(wait=False)
         if self._lsp_scheduler is not None:
             self._lsp_scheduler.close(wait=False)
             self._drain_promotions()
