@@ -1001,8 +1001,57 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   happens to pick quiet repositories will report success while the defect is
   live, which is exactly how the fixture-scale parity claim was closed wrongly
   earlier in this tracker.
-  conan, haystack and matplotlib remain; matplotlib at 4,597 files is the one
-  that will say whether the budget holds at the top of the benchmark's range.
+  ALL SIX ROWS ARE NOW MEASURED, five alternating repetitions each, parse cache
+  enabled in both arms, budget 900s (`study-benchmark-scale.json`):
+    repository        parsed  parent   baseline  candidate   x    peak MB base->cand
+    kedro-4580          328     6.3s      5.35s     5.23s  1.02    186 -> 194
+    keras-20396         694   126.4s    118.42s   119.06s  0.99   1601 -> 1586
+    dynaconf-1238       609     4.2s      3.25s     3.30s  0.98    162 -> 165
+    conan-17132         997    87.3s     53.57s    54.96s  0.97    627 -> 648
+    haystack-8489       956    19.5s      8.74s     8.42s  1.04    208 -> 226
+    matplotlib-29431   1153   238.4s    314.79s   276.79s  1.14   1638 -> 1679
+  THE BUDGET QUESTION IS ANSWERED, and the answer is yes. matplotlib is the top
+  of the benchmark's range and its parent builds in 238s, inside the harness's
+  own 600s. So the graph-dark failure measured on terraform and cpython does not
+  reach the benchmark's workload; it is a fact about repositories the benchmark
+  does not contain. The earlier corpus choice was the error, and repointing was
+  what made this measurable.
+  THE SPEEDUP TREND IS REAL BUT SMALL. Five of six sit between 0.97 and 1.04 --
+  break-even within noise -- and matplotlib, the largest, is the only genuine
+  win at 1.14x. That is consistent with the mechanism already established: both
+  arms run `resolver_passes: 1`, so the amend saves structural rebuilding only,
+  and the structural share has to be large enough to cover copying and
+  reconciling the parent. It only is on the largest repository. Memory is
+  neutral everywhere (-1% to +9%), so click's +32% does not generalise.
+  THE IMPORTANT RESULT IS NOT THE SPEEDUP. `semantic_parity: False` was one bit
+  covering two findings that point opposite ways, and separating them changes
+  what this item reports. Now classified by `classify_parity`, run against the
+  stored results:
+    kedro, keras, dynaconf, haystack   identical
+    conan-17132       shared_nondeterminism   edges: base 3, cand 3, shared 3
+    matplotlib-29431  ARMS_DISJOINT           edges: base 4, cand 5, shared 0
+  conan's two arms wobble across the SAME three edge digests, which is the
+  producer's own nondeterminism passing through the amend and is evidence FOR
+  the amend's fidelity. matplotlib's arms share NOTHING: no amend in five ever
+  produced an edge set any rebuild produced, and the amend is 14-26 edges
+  heavier every single time. That is the amend and the rebuild DISAGREEING, not
+  inherited noise, and it appears on the largest repository in the corpus and
+  the only one where the amend is faster. Reading it as producer noise -- which
+  the old single boolean invited -- would have buried the more serious of the
+  two.
+  IT ALSO LOCALISES THE NONDETERMINISM, which the all-consumer parity item above
+  records generically. On all six repositories the ONLY surface that ever moved
+  is `edges`. Nodes, properties and assertions are byte-identical across all ten
+  runs of both arms on every repository, including conan and matplotlib. So the
+  defect is edge resolution, not the producer at large, and a parity suite over
+  nodes/properties/assertions would be sound today while one over edges cannot be.
+  STILL OPEN, and the reason this box stays unticked: the item asks for graph
+  BLOCKED VERSUS BACKGROUND time, CHECKS and SNAPSHOTS as well. Those are
+  properties of the coordinator and the run loop, not of the producer, and this
+  instrument measures the producer. It is not a gap in the corpus -- all six
+  transitions are measured -- it is a second measurement against the live path
+  that has not been made. Ticking on the producer half alone would be claiming
+  a run-loop result from a producer benchmark.
   FIRST BENCHMARK-SCALE ROW, and it does not look like the large-repository rows.
   `kedro-org__kedro-4580` (622 tracked, 328 parsed files) BUILDS in 6.3s, well
   inside the harness's 600s budget. Five alternating repetitions:
