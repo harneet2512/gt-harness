@@ -73,6 +73,24 @@ def test_budget_is_a_bounded_fraction_of_the_run():
     assert baseline_budget_seconds(10_000_000) <= BASELINE_MAX_SECONDS
 
 
+@pytest.mark.parametrize("complete", [False, None])
+def test_incomplete_baseline_capture_never_becomes_green(tmp_path, monkeypatch, complete):
+    from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+
+    (tmp_path / "test_ok.py").write_text("def test_ok(): assert True\n")
+    original = CredentialIsolatedLocalEnvironment.execute
+
+    def incomplete(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        result["extra"]["capture_complete"] = complete
+        return result
+
+    monkeypatch.setattr(CredentialIsolatedLocalEnvironment, "execute", incomplete)
+    result = run_baseline(str(tmp_path), budget_seconds=15, command=_pytest_command())
+    assert not result.captured
+    assert result.status == "spawn_failed"
+
+
 def test_a_repository_with_no_declared_command_abstains(tmp_path):
     root = tmp_path / "bare"
     root.mkdir()

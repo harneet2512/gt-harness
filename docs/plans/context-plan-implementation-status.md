@@ -4,6 +4,13 @@ Updated: 2026-09-10. Owner: current implementation session.
 
 ## Scope and release state
 
+Canonical provider-free CI `34442196007` PASSED at `f5b9c94f`.
+Baseline capture completeness is now mandatory: missing/false capture receipts
+cannot produce a captured passing baseline. Both RED cases reproduced the old
+false capture; installed wheel 58 passed all 36 baseline/preservation/original
+recovery tests (`baseline-capture-58.xml`). No new test execution or graph build
+is added by this admission check. Full baseline dependency identity remains open.
+
 Rehearsal 04 now earns verifier reward 1 with the exact official collected
 repair patch, stable pre-edit source, bound execution evidence and native graph
 refresh. Its original audit was RED because it compared agent turns against

@@ -199,6 +199,8 @@ def _execute_baseline(command: tuple[str, ...], repo_root: str,
             raise subprocess.TimeoutExpired(list(command), budget_seconds)
         if extra.get("surviving_descendants"):
             raise RuntimeError("baseline has surviving descendants")
+        if extra.get("capture_complete") is not True:
+            raise RuntimeError("baseline output capture is not complete")
         output = environment.evidence_store.bytes(extra["output_artifact"]["sha256"])
         return subprocess.CompletedProcess(list(command), result["returncode"],
                                            output.decode("utf-8", "replace"), "")
