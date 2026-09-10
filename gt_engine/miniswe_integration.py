@@ -24,7 +24,13 @@ from .delivery_budget import (
     delivery_byte_limit,
 )
 from .engine_state import EngineState, GraphQuerySnapshot, RuntimeLayout
-from .event_journal import GENESIS_HASH, JOURNAL_SCHEMA, event_hash, verify_event_journal
+from .event_journal import (
+    GENESIS_HASH,
+    JOURNAL_SCHEMA,
+    event_hash,
+    read_verified_events,
+    verify_event_journal,
+)
 from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
 from .request_history import store_provider_request
@@ -117,11 +123,12 @@ class ExternalStateStore:
         self._head = GENESIS_HASH
         self.startup_plan_events: list[dict] = []
         self.startup_journal_valid = True
+        self.anchor_path = self.root / "events.anchor.json"
         if self.path.exists():
             try:
                 verified = verify_event_journal(self.path)
-                self.startup_journal_valid = verified.valid
-                if verified.valid:
+                self.startup_journal_valid = verified.valid and self._anchor_holds(verified)
+                if self.startup_journal_valid:
                     self._sequence = verified.event_count
                     self._head = verified.event_head
                     with self.path.open(encoding="utf-8") as journal:
@@ -138,6 +145,67 @@ class ExternalStateStore:
                 # a fresh v1 chain; the verifier will correctly flag the mixed
                 # journal rather than silently bless it.
                 pass
+
+    def _anchor_holds(self, verified: Any) -> bool:
+        """Is this journal at least everything the anchor last saw?
+
+        The hash chain proves a journal is self-consistent, never that it is
+        COMPLETE. Cut the tail off and sequence numbers still run 1..N with
+        correct parent hashes, so an unanchored verify returns valid and startup
+        recovery rebuilds from a journal that has silently lost its most recent
+        events -- restoring a plan checkpoint and check definitions describing a
+        state the run already moved past.
+
+        The anchor is written after each row, so it may legitimately trail by one
+        when a run stops uncleanly. Trailing is therefore not corruption; the
+        rule is that the journal must still CONTAIN what the anchor witnessed:
+
+          journal shorter than the anchor   -> rows were removed
+          same length, different head       -> rows were rewritten
+          longer, wrong hash at that depth  -> history was replaced beneath us
+          longer, matching hash             -> a crash between row and anchor
+
+        A missing anchor beside a non-empty journal is not treated as a fault:
+        journals written before this file existed are legitimate, and refusing
+        them would strand real state. It simply provides no completeness proof.
+        """
+        try:
+            if not self.anchor_path.is_file():
+                return True
+            anchor = json.loads(self.anchor_path.read_text(encoding="utf-8"))
+            count = int(anchor["event_count"])
+            head = str(anchor["event_head"])
+        except (OSError, ValueError, TypeError, KeyError):
+            return False
+        if verified.event_count < count:
+            return False
+        if verified.event_count == count:
+            return verified.event_head == head
+        rows = read_verified_events(self.path)
+        if count <= 0:
+            return True
+        if count > len(rows):
+            return False
+        return str(rows[count - 1].get("event_hash") or "") == head
+
+    def _write_anchor(self) -> None:
+        """Record the head OUTSIDE the journal, atomically, after the row lands.
+
+        Row first, then anchor: the reverse order would claim an event that the
+        journal does not yet contain, which is the failure this exists to catch.
+        Correct-or-quiet -- an anchor that cannot be written must not fail the
+        append that already succeeded.
+        """
+        try:
+            payload = json.dumps(
+                {"event_count": self._sequence, "event_head": self._head},
+                sort_keys=True, separators=(",", ":"),
+            )
+            temporary = self.anchor_path.with_suffix(".json.tmp")
+            temporary.write_text(payload, encoding="utf-8")
+            temporary.replace(self.anchor_path)
+        except OSError:
+            pass
 
     def append(self, event: str, **payload: Any) -> None:
         with self._lock:
@@ -160,6 +228,7 @@ class ExternalStateStore:
                 os.fsync(handle.fileno())
             self._sequence = sequence
             self._head = row["event_hash"]
+            self._write_anchor()
 
     def receipt(self) -> dict[str, int | str]:
         with self._lock:

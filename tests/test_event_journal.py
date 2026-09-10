@@ -103,3 +103,67 @@ def test_reopened_store_continues_verified_typed_event_chain(tmp_path):
     reopened.append("checkpoint_recovered")
     result = verify_event_journal(reopened.path, **reopened.receipt())
     assert result.valid, result.issues
+
+
+def test_reopened_store_detects_a_truncated_tail(tmp_path):
+    """A truncated prefix is still a VALID chain, which is the whole problem.
+
+    Sequence numbers and parent hashes are internally consistent after the tail
+    is cut, so verify_event_journal(path) with no anchor returns valid. Startup
+    recovery then rebuilds from a journal that has silently lost its most recent
+    events, and the plan checkpoint and check definitions it restores describe a
+    state the run already moved past.
+    """
+    store = ExternalStateStore(tmp_path, "task")
+    store.append("first")
+    store.append("second")
+    store.append("third")
+
+    kept = store.path.read_text(encoding="utf-8").splitlines()[0]
+    store.path.write_text(kept + "\n", encoding="utf-8")
+
+    # The chain alone still looks perfect. That is why an anchor is required.
+    assert verify_event_journal(store.path).valid is True
+
+    reopened = ExternalStateStore(tmp_path, "task")
+    assert reopened.startup_journal_valid is False
+
+
+def test_reopened_store_survives_a_crash_between_row_and_anchor(tmp_path):
+    """An anchor one row behind is a crash, not tampering, and must not fail.
+
+    The row is written before the anchor, so an unclean stop leaves the anchor
+    trailing. Treating that as corruption would make every crash look like an
+    attack and would discard a journal that is entirely intact.
+    """
+    store = ExternalStateStore(tmp_path, "task")
+    store.append("first")
+    store.append("second")
+    anchor = store.root / "events.anchor.json"
+    assert anchor.is_file()
+    behind = json.loads(anchor.read_text(encoding="utf-8"))
+
+    store.append("third")
+    anchor.write_text(json.dumps(behind), encoding="utf-8")
+
+    reopened = ExternalStateStore(tmp_path, "task")
+    assert reopened.startup_journal_valid is True
+
+
+def test_reopened_store_rejects_a_rewritten_history_under_a_stale_anchor(tmp_path):
+    """Trailing by count must not become a licence to rewrite what came before."""
+    store = ExternalStateStore(tmp_path, "task")
+    store.append("first")
+    store.append("second")
+    anchor = store.root / "events.anchor.json"
+    behind = json.loads(anchor.read_text(encoding="utf-8"))
+
+    rebuilt = ExternalStateStore(tmp_path, "task2")
+    rebuilt.append("different")
+    rebuilt.append("history")
+    rebuilt.append("longer")
+    store.path.write_text(rebuilt.path.read_text(encoding="utf-8"), encoding="utf-8")
+    anchor.write_text(json.dumps(behind), encoding="utf-8")
+
+    reopened = ExternalStateStore(tmp_path, "task")
+    assert reopened.startup_journal_valid is False
