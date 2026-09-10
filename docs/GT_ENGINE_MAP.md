@@ -42,6 +42,10 @@ the updated lineage seal. Canonical provider-free CI `34438826174` passed at
   captured output. A new failing test is not labeled previously passing unless
   its identity appears in the baseline passing set. Unknown or unattributed
   failures are never reported as an intact baseline.
+- On fresh tasks, baseline capture precedes the single initial graph build:
+  suites can write source, so building first would give planning stale anchors.
+  The input builder reuses that capture; restart retains its original baseline
+  and does not run it again as a new pre-edit capture.
 
 Producer CI `34436549266` and static Linux build `34436550584` passed at
 `efa70e52`. Installed candidate 44 passed 200 checks with one explicit

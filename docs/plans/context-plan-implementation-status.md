@@ -47,6 +47,30 @@ The earlier installed issuer attempt failed two tests because installed
 site-packages has no checkout HEAD; that artifact is retained, not counted as
 passing evidence (`gate-feature-bindings-51.xml`).
 
+CI `34440017657` failed only the degradation-stage census: the new
+`plan_gate_delivery_receipt` stage was missing from the declared registry.
+It is now registered, with an installed fault-injection case proving that a
+receipt-write failure preserves the directive and records named degradation.
+Five complementary source/census checks passed (`baseline-gate-source-53.xml`).
+
+Initial ordering repair: a real runner RED observed index -> baseline, even
+when the suite wrote source. Capture/restoration now precedes the single
+initial index build; deterministic plan inputs reuse that capture rather than
+running the suite again. Restart never recaptures; a failed baseline probe
+still permits planning with an explicit gap. Installed wheel 53: 163 passed,
+one source-census deselection; wheel 54 final fault/restart subset: 12 passed,
+zero skips. This prevents initial anchors lagging baseline writes without an
+extra graph rebuild; full baseline identity/conservation remains open.
+
+Installed repair rehearsal 01 completed installation of all staged capabilities
+but failed before model calls: the outer Docker runner lacked host PID/cgroup
+visibility required by the resource evidence collector (`/proc/<pid>/cgroup`).
+No verification was bypassed. Rehearsal retry must use the appropriate Docker
+namespaces. The complete 10,762-file language-server tree was independently
+verified in a Linux volume against manifest SHA256
+`1245a4b6d36130483260e8cc3ceb7201af9034c047ab5ec87bee58f4bf4e08cf`;
+the redundant slow Windows-bind verification was stopped after this passed.
+
 Implement the approved targeted repairs to evidence, persistent planning,
 verification scheduling, incremental graph amendments, snapshots, submission,
 and installed product acceptance. Preserve the existing engine, graph consumers,

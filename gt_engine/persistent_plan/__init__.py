@@ -272,6 +272,7 @@ def build_plan_inputs(
     wall_time_limit_seconds: float | None = None,
     capture_baseline: bool = True,
     execution_env: dict[str, str] | None = None,
+    baseline_result: BaselineResult | None = None,
 ) -> PlanInputs:
     """Phase 0: everything derivable with no provider call.
 
@@ -292,8 +293,8 @@ def build_plan_inputs(
         anchors = AnchorResult(abstentions=(("*", f"anchors_failed:{type(exc).__name__}"),))
     abstentions.extend(anchors.abstentions)
 
-    baseline = BaselineResult(status="not_attempted")
-    if capture_baseline and repo_root:
+    baseline = baseline_result if baseline_result is not None else BaselineResult(status="not_attempted")
+    if baseline_result is None and capture_baseline and repo_root:
         try:
             baseline = run_baseline(
                 repo_root, budget_seconds=baseline_budget_seconds(wall_time_limit_seconds),

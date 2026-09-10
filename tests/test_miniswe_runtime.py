@@ -353,7 +353,8 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     assert _native_feature_projection(rows, plan_projection=projection)["persistent_plan"]["status"] == "WITNESSED"
 
 
-def test_plan_gate_directive_is_audited_through_native_provider_request(tmp_path, monkeypatch):
+@pytest.mark.parametrize("receipt_failure", [False, True])
+def test_plan_gate_directive_is_audited_through_native_provider_request(tmp_path, monkeypatch, receipt_failure):
     from gt_engine.persistent_plan import build_plan_inputs
     from scripts.gt_audit import _native_feature_projection, _native_plan_projection
 
@@ -369,9 +370,23 @@ def test_plan_gate_directive_is_audited_through_native_provider_request(tmp_path
     monkeypatch.setattr(session, "plan_gate_budget", lambda: (600.0, None))
     install_runtime_hooks(agent, session)
     agent.model.query(agent.messages)
+    if receipt_failure:
+        original_put = adapter.store.put_blob
+        def fail_gate_receipt(namespace, *args, **kwargs):
+            if namespace == "plan_gate_directives":
+                raise OSError("fixture receipt store failure")
+            return original_put(namespace, *args, **kwargs)
+        monkeypatch.setattr(adapter.store, "put_blob", fail_gate_receipt)
     agent.execute_actions({"extra": {"actions": [{"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"}]}})
     assert agent.env.executed == []
     assert any("GT PLAN GATE" in item.get("content", "") for item in agent.messages)
+    if receipt_failure:
+        assert session.disabled_stage == "plan_gate_delivery_receipt"
+        rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+        assert any(row.get("event") == "gt_degraded_fail_open"
+                   and row.get("stage") == "plan_gate_delivery_receipt" for row in rows)
+        assert not any(row.get("event") == "plan_gate_directive_prepared" for row in rows)
+        return
     agent.model.query(agent.messages)
     rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
     projection, issues = _native_plan_projection(rows, adapter.store.root)

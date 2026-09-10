@@ -69,6 +69,41 @@ def test_real_runner_restart_does_not_recapture_the_post_edit_baseline(tmp_path,
         assert resumed.plan_inputs.baseline.passing_names == ("original-test",)
 
 
+@pytest.mark.parametrize("probe_failure", [False, True])
+def test_initial_baseline_runs_before_the_single_initial_graph_build(tmp_path, monkeypatch, probe_failure):
+    from types import SimpleNamespace
+
+    from scripts.miniswe_gt_run import build_agent
+
+    monkeypatch.setenv("GT_PERSISTENT_PLAN", "1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "widget.py"
+    source.write_text("def widget(): return 1\n")
+    calls = []
+
+    def baseline(*args, **kwargs):
+        calls.append("baseline")
+        source.write_text("def widget(): return 2\n")
+        if probe_failure:
+            raise OSError("fixture baseline failure")
+        return BaselineResult(status="no_tests_observed")
+
+    def index(*args, **kwargs):
+        calls.append("index")
+        assert "return 2" in source.read_text(), "graph captured source before the suite wrote it"
+        return SimpleNamespace(success=False, graph_db=None, error_type="", error_diagnostic="")
+
+    monkeypatch.setattr("gt_engine.persistent_plan.run_baseline", baseline)
+    monkeypatch.setattr("gt_engine.indexer.ensure_index_with_receipt", index)
+    _, adapter, _ = build_agent(task="The widget must preserve compatibility.", model="deepseek-v4-flash",
+                cwd=str(repo), state_dir=str(tmp_path / "state"), output=None,
+                temperature=1.0, gt_off=False, wall_time_limit_seconds=1000)
+    assert calls == ["baseline", "index"]
+    assert adapter.plan_inputs is not None
+    assert adapter.plan_inputs.baseline.status == ("probe_failed" if probe_failure else "no_tests_observed")
+
+
 @pytest.mark.parametrize("damage", ["task", "missing", "content", "journal", "invalid_field"])
 def test_checkpoint_rejects_wrong_task_missing_corrupt_or_invalid_inputs(tmp_path, damage):
     store, _, task = saved_plan(tmp_path)

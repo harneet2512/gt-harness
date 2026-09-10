@@ -683,6 +683,35 @@ def build_agent(
         for contract_obligation in contract.obligations
         for item in (compiled[contract_obligation.obligation_id],)
     )
+    # Repository suites can write source. Capture once before indexing so the
+    # initial graph and anchors describe the workspace the model will receive.
+    plan_inputs = None
+    restored_initial_plan = None
+    initial_baseline = None
+    prior_run = True
+    _plan_setup_error = ""
+    if persistent_plan_enabled():
+        try:
+            env_obj.config.env["GT_PLAN_ROOT"] = str(layout.task_root / "plan")
+            from gt_engine import persistent_plan
+            from gt_engine.miniswe_integration import ExternalStateStore
+            from gt_engine.persistent_plan.recovery import restore_plan
+
+            startup_store = ExternalStateStore(layout.state_root, task_id)
+            prior_run = bool(startup_store.path.exists() and startup_store.path.stat().st_size)
+            restored_initial_plan = restore_plan(startup_store, task)
+            if restored_initial_plan is not None:
+                plan_inputs = restored_initial_plan.inputs
+            elif not prior_run:
+                try:
+                    initial_baseline = persistent_plan.run_baseline(
+                        str(cwd), budget_seconds=persistent_plan.baseline_budget_seconds(wall_time_limit_seconds),
+                        execution_env=env_obj.execution_env(),
+                    )
+                except Exception as exc:  # retain planning when its baseline probe fails
+                    initial_baseline = persistent_plan.BaselineResult(status="probe_failed", detail=type(exc).__name__)
+        except Exception as exc:  # optional planning must not prevent native execution
+            _plan_setup_error = f"{type(exc).__name__}: {str(exc)[:200]}"
     graph_db = None
     index_error: Exception | None = None
     try:
@@ -748,8 +777,8 @@ def build_agent(
         index_error = exc
     # PHASE 0 of the persistent plan: everything derivable with no provider
     # call, while the graph is at full strength. This is deliberately BEFORE
-    # the adapter and before the task_start snapshot below -- the baseline
-    # capture runs the repository's own suite, and a suite that writes a
+    # the adapter and before the task_start snapshot below. Baseline capture
+    # has already run before indexing above; a suite that writes a
     # tracked file would otherwise be snapshotted as the agent's first edit,
     # bumping the workspace epoch before any work exists to invalidate.
     #
@@ -757,18 +786,8 @@ def build_agent(
     # controller freezes its predicates at construction: a requirement written
     # verbatim in the prompt but merged away by the sentence-level extractor
     # otherwise reaches submission with nothing tracking it.
-    plan_inputs = None
-    restored_initial_plan = None
-    _plan_setup_error = ""
-    if persistent_plan_enabled():
+    if persistent_plan_enabled() and not _plan_setup_error:
         try:
-            env_obj.config.env["GT_PLAN_ROOT"] = str(layout.task_root / "plan")
-            from gt_engine.miniswe_integration import ExternalStateStore
-            from gt_engine.persistent_plan.recovery import restore_plan
-
-            startup_store = ExternalStateStore(layout.state_root, task_id)
-            prior_run = bool(startup_store.path.exists() and startup_store.path.stat().st_size)
-            restored_initial_plan = restore_plan(startup_store, task)
             if restored_initial_plan is not None:
                 plan_inputs = restored_initial_plan.inputs
             else:
@@ -781,7 +800,8 @@ def build_agent(
                     graph_revision=index_receipt.graph_revision if graph_db else "",
                     # A lost checkpoint cannot turn the post-edit workspace
                     # into a new pre-edit regression baseline.
-                    capture_baseline=not prior_run,
+                    capture_baseline=False,
+                    baseline_result=initial_baseline,
                     wall_time_limit_seconds=wall_time_limit_seconds,
                     execution_env=env_obj.execution_env(),
                 )
