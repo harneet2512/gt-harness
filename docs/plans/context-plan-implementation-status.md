@@ -633,6 +633,25 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
   hashes and update the candidate manifest only from real build evidence.
 - [x] Run required installed tests with zero unexplained skips and real journal audit.
+  THE SAME DEFECT WAS LIVE IN CANONICAL CI, and that is the worse half.
+  `.github/workflows/deepswe_gt_harness_product.yml` installs the vendored
+  producer at `/opt/groundtruth/gt-index/gt-index`, checks its sha256 against
+  the recorded pin, proves it is statically linked, and then hands it to the
+  suite ONLY through `GT_INDEX_BINARY`. That directory is not on PATH. With the
+  fixture stripping the variable, `find_binary` fell past PATH and a local
+  build to `ensure_binary()`, which on a networked runner DOWNLOADS gt-index
+  v1.1.0. So every graph test in that file ran against a downloaded producer
+  while the workflow certified one they never used. Offline the same path only
+  fails, which is how it was found at all.
+  `tests/test_producer_binding.py` now closes the other half of the pin. Its
+  existing tests all check that the VENDORED artifact is what it claims -- built
+  from the pinned commit, untampered, receipt-bound -- and none checked that the
+  producer a test RESOLVES is that artifact. The new test compares bytes, not
+  paths, and names a resolution that reached the download cache before it
+  compares. RED witness: with the override removed and a populated cache
+  standing in for the fetch, it fails with the resolved cache path; with the
+  pinned binary it passes, and the vendored artifact and
+  `producer-build-06` are byte-identical (sha256 `9e2973ea1060fc2c9236...`).
   MATERIALLY IMPROVED at `fc4b6319`+1. `tests/test_gt_engine.py` carried an autouse
   fixture stripping EVERY `GT_*` variable before each test, including
   `GT_INDEX_BINARY` -- which is not GT behaviour but the producer executable's
