@@ -56,6 +56,8 @@ class BaselineResult:
     restored_paths: tuple[str, ...] = ()
     detail: str = ""
     environment_sha256: str = ""
+    source_revision: str = ""
+    after_source_revision: str = ""
 
     @property
     def captured(self) -> bool:
@@ -78,6 +80,8 @@ class BaselineResult:
             "restored_paths": list(self.restored_paths),
             "detail": self.detail,
             "environment_sha256": self.environment_sha256,
+            "source_revision": self.source_revision,
+            "after_source_revision": self.after_source_revision,
         }
 
     def summary(self) -> str:
@@ -189,11 +193,21 @@ def _execute_baseline(command: tuple[str, ...], repo_root: str,
             # or host configuration. Only add the external capture destination.
             return child_env | {"GT_EVIDENCE_ROOT": str(self.evidence_store.root)}
 
+    # WHOLE SECONDS. minisweagent's environment config declares `timeout: int`,
+    # so Pydantic accepts an integral float such as 120.0 by coercion and REJECTS
+    # a fractional one. Subtracting the source-capture time from the allowance
+    # made this value fractional for the first time, and every affected baseline
+    # then failed validation before the command ran -- reported as spawn_failed
+    # with detail ValidationError, which reads like a missing runner rather than a
+    # rejected argument. Floor rather than round: the allowance is a ceiling the
+    # baseline may not exceed, and a floor of one second keeps a tiny remainder
+    # from becoming a zero-second timeout.
+    allowance = max(1, int(budget_seconds))
     with tempfile.TemporaryDirectory(prefix="gt-baseline-evidence-") as evidence_root:
-        environment = BaselineEnvironment(cwd=repo_root, timeout=max(1, budget_seconds),
+        environment = BaselineEnvironment(cwd=repo_root, timeout=allowance,
                                            evidence_root=evidence_root)
         result = environment.execute({"command": shlex.join(command), "argv": list(command)},
-                                     timeout=max(1, budget_seconds))
+                                     timeout=allowance)
         extra = result["extra"]
         if extra.get("timed_out"):
             raise subprocess.TimeoutExpired(list(command), budget_seconds)
@@ -237,7 +251,18 @@ def run_baseline(
 
     started = time.monotonic()
     try:
-        proc = _execute_baseline(tuple(command), repo_root, float(budget_seconds), child_env)
+        from gt_engine.runtime_observation import capture_workspace
+
+        before = capture_workspace(repo_root)
+        if not before.complete:
+            raise RuntimeError("baseline source capture incomplete")
+        remaining = float(budget_seconds) - (time.monotonic() - started)
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(list(command), budget_seconds)
+        proc = _execute_baseline(tuple(command), repo_root, remaining, child_env)
+        after = capture_workspace(repo_root)
+        if not after.complete:
+            raise RuntimeError("baseline final source capture incomplete")
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - started
         return BaselineResult(
@@ -285,7 +310,9 @@ def run_baseline(
             detail="runner produced no parseable result",
         )
     return BaselineResult(
-        status="captured",
+        status="captured" if before.revision == after.revision else "source_changed_during_baseline",
+        source_revision=before.revision,
+        after_source_revision=after.revision,
         environment_sha256=environment_sha256,
         command=tuple(command),
         basis=basis,

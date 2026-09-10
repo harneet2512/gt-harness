@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 import json
 from dataclasses import asdict
@@ -131,3 +132,26 @@ def test_checkpoint_rejects_wrong_task_missing_corrupt_or_invalid_inputs(tmp_pat
         assert restore_plan(ExternalStateStore(tmp_path, "malformed"), task) is None
         return
     assert restore_plan(ExternalStateStore(tmp_path, "checkpoint"), task) is None
+
+
+def test_a_previous_layout_checkpoint_is_rejected_by_version_not_by_shape(tmp_path):
+    """The serialized shape and LAYOUT are the same fact, so they move together.
+
+    BaselineResult gained source_revision and after_source_revision. The decoder
+    requires exact dataclass field-set equality, so a v1 checkpoint would have
+    failed on "checkpoint dataclass fields mismatch" -- which reads like
+    corruption rather than a format change. Rejection is the entire migration:
+    restoring nothing costs one planning call, while inventing the two missing
+    fields would mean asserting which source revision an older baseline observed,
+    and the only value to hand is the current workspace, which is exactly what
+    those fields exist to distinguish from.
+    """
+    from gt_engine.persistent_plan import recovery
+
+    assert recovery.LAYOUT == "gt.plan_checkpoint.v2"
+
+    from gt_engine.persistent_plan.baseline import BaselineResult
+
+    names = {f.name for f in dataclasses.fields(BaselineResult)}
+    assert "source_revision" in names
+    assert "after_source_revision" in names

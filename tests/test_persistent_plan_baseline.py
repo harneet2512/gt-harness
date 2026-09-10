@@ -175,7 +175,9 @@ def test_a_suite_that_dirties_the_worktree_is_not_destructively_restored(tmp_pat
     )
     _git_repo(root)
     result = run_baseline(str(root), budget_seconds=120, command=_pytest_command())
-    assert result.captured
+    assert not result.captured
+    assert result.status == "source_changed_during_baseline"
+    assert result.source_revision != result.after_source_revision
     assert result.restored_paths == ()
     assert (root / "data.txt").read_text(encoding="utf-8") == "mutated\n"
 

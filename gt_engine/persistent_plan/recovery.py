@@ -9,7 +9,21 @@ from typing import Any, get_args, get_origin, get_type_hints
 
 from . import PersistentPlan
 
-LAYOUT = "gt.plan_checkpoint.v1"
+# v2: BaselineResult gained source_revision and after_source_revision.
+#
+# The decoder below requires EXACT dataclass field-set equality, so the
+# serialized shape and this string are the same fact stated twice. A v1
+# checkpoint decoded by this build would fail on "checkpoint dataclass fields
+# mismatch", which reads like corruption; against a bumped layout it fails on
+# "checkpoint task/layout mismatch", which is the truth -- a different format.
+#
+# Rejection is the whole migration, deliberately. Restoring nothing costs one
+# planning call; inventing the two missing fields would mean asserting which
+# source revision an older baseline observed, and the only value available is
+# the CURRENT workspace, which is precisely the thing those fields exist to
+# distinguish from. A checkpoint that cannot say what it saw does not get to
+# borrow what we see now.
+LAYOUT = "gt.plan_checkpoint.v2"
 
 
 def _decode(value, annotation):
