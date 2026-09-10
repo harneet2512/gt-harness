@@ -22,13 +22,13 @@
  },
  "groundtruth": {
   "repository": "https://github.com/harneet2512/groundtruth.git",
-  "source_commit": "d6fdf93ddadc3326cb821740a15024f40cc15ab4",
-  "source_tree": "e883bc7e3c28b3d224313535ca45a2c5a1f29212",
+  "source_commit": "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
+  "source_tree": "7b311013c902eadd8b4119554c9a3d478be45ee2",
   "graph_schema_version": "v15.2-trust-tier",
   "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
   "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
   "producer_path": "vendor/gt-index-linux-amd64",
-  "producer_sha256": "de6b1f728bf7c69928f1cc7f89417dcfca4b357a7b8b9dea211e137d2f39c41f",
+  "producer_sha256": "f7d50356f810bd9de7d86ef2839908325d9b196a30f0819e9e2a0de040d1a541",
   "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
   "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
   "accepted_default_ref": "origin/gt-trial",
@@ -47,11 +47,11 @@
   "producer_build": {
    "schema": "gt.producer_build_binding.v1",
    "status": "VERIFIED",
-   "source_commit": "d6fdf93ddadc3326cb821740a15024f40cc15ab4",
-   "source_tree": "e883bc7e3c28b3d224313535ca45a2c5a1f29212",
-   "binary_sha256": "de6b1f728bf7c69928f1cc7f89417dcfca4b357a7b8b9dea211e137d2f39c41f",
+   "source_commit": "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
+   "source_tree": "7b311013c902eadd8b4119554c9a3d478be45ee2",
+   "binary_sha256": "f7d50356f810bd9de7d86ef2839908325d9b196a30f0819e9e2a0de040d1a541",
    "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-   "build_info_sha256": "67e2b393cdfd17f980041ac1cefb5f588cba224687fdb84b9b6a864323acd581",
+   "build_info_sha256": "26470424c47e515ba0e3475f519ac74b8d36aa1036eacb3c2f695ccd1b603ad3",
    "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
    "build_tags": "netgo,osusergo,sqlite_fts5",
    "static_linking": true
@@ -63,7 +63,7 @@
    "reason_code": "digest_recorded_source_descends_from_unadvanced_default",
    "accepted_default_ref": "origin/gt-trial",
    "accepted_default_commit": "ea79b92669cbfa549e43a0286fc92ae942348a76",
-   "source_commit": "d6fdf93ddadc3326cb821740a15024f40cc15ab4",
+   "source_commit": "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
    "certified_source_commit": "cffca1fd29001577bf35a3355b7238e6cedd1130",
    "ancestry_path": [
     "ea79b92669cbfa549e43a0286fc92ae942348a76",
@@ -181,7 +181,8 @@
     "350cb156b01bac708c4ca29674e95392efa9ac68",
     "ccf489baeac12acd3570c93af7a5ba3e8fd849c1",
     "efa70e52d4e85bff2364b0038ceca2306de218b0",
-    "d6fdf93ddadc3326cb821740a15024f40cc15ab4"
+    "d6fdf93ddadc3326cb821740a15024f40cc15ab4",
+    "87d2e89cc51b7e8529aa1d1ec28e76999beebd70"
    ],
    "post_certification_changed_paths": [
     ".gitattributes",
@@ -910,7 +911,7 @@
     "tests/wrapper/test_router_v2_telemetry.py",
     "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
    ],
-   "review_inbox_commit": "66dcb68cca2d59f5421ffc7a7e4ffec2f99efc7f",
+   "review_inbox_commit": "128b46ab1940a0351262add4f25e43741ba46f25",
    "review_packets": [
     {
      "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
@@ -999,13 +1000,13 @@
      "packet_digest_sha256": "34aaadc2c50ac34450e74d3cf11ea2a9187c640aeccc5bf3d3417f4d1aa16937"
     },
     {
-     "path": "inbox/HAR-83/har83-context-plan-producer-d6fdf93d.json",
-     "packet_id": "har83-context-plan-producer-d6fdf93d",
-     "head_sha": "d6fdf93ddadc3326cb821740a15024f40cc15ab4",
+     "path": "inbox/HAR-83/har83-context-plan-producer-87d2e89c.json",
+     "packet_id": "har83-context-plan-producer-87d2e89c",
+     "head_sha": "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
      "kind": "check_outcome",
      "status": "PASS",
-     "basis": "local_determinism_fix_verified_on_certified_static_build_and_source_correspondence",
-     "packet_digest_sha256": "16c5a2ff288d19b19b72afbe19140b14d3e168f626b75c8665aed77080bae324"
+     "basis": "local_determinism_fix_and_canonical_fingerprint_verified_on_certified_static_build",
+     "packet_digest_sha256": "26433140e4c6d59e19e0d912f5d195fd8e1182187ccfeee99a87b7058a4e9175"
     }
    ],
    "product_review_packets": [
@@ -1026,7 +1027,7 @@
      ]
     }
    ],
-   "attestation_digest_sha256": "4a981e799ab035b3b35fa01b710b699acb4d710602875862e1634a21e4f568fb"
+   "attestation_digest_sha256": "b8f64be13ea2e4161a460e5f51d818273f412c7fefbf84acdf2f751ec5a0ae47"
   }
  },
  "capabilities": [

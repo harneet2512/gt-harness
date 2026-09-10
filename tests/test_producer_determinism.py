@@ -170,14 +170,6 @@ def test_the_same_fixture_indexed_three_times_gives_the_same_graph(tmp_path):
     _assert_agreed(_build_thrice(root, tmp_path / "runs"))
 
 
-@pytest.mark.xfail(
-    reason="the certified producer is not deterministic at repository scale: "
-           "receiver selection for same-named methods varies between builds of "
-           "the identical tree. Measured on click (105 parsed files) at both "
-           "-workers 1 and -workers 4: three rebuilds, two distinct edge sets "
-           "of 50,954 and 50,957 edges.",
-    strict=False,
-)
 @pytest.mark.skipif(not sys.platform.startswith("linux"),
                     reason="installed Linux producer required")
 def test_the_same_real_repository_indexed_three_times_gives_the_same_graph(tmp_path):
