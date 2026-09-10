@@ -172,6 +172,27 @@
   border-left-color: var(--new, #4a9e6b);
 }
 .publish-done a { color: var(--accent, #3182f6); }
+/* Rows arrive — every list in the product gets the same 200ms entry so a
+   line appearing reads as an event, not a redraw. */
+@keyframes rowIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* A file that just changed warms for a breath, then cools — the same
+   signal the city paints on the building. */
+@keyframes fileChange {
+  from { background: var(--orange-soft); }
+  to { background: transparent; }
+}
+/* The first thing anyone ever sees: the card arrives, not pops. */
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.signin-card,
+.landing-mid {
+  animation: cardIn 420ms var(--ease-out) both;
+}
 .files {
   list-style: none;
 }
@@ -183,6 +204,8 @@
   text-align: left;
   padding: 4px 6px;
   border-radius: 4px;
+  animation: rowIn var(--dur-ui) var(--ease-out) both,
+    fileChange 900ms ease-out 150ms;
 }
 .file-row:hover {
   background: var(--paper);

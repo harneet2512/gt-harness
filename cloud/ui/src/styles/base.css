@@ -30,6 +30,16 @@
 
   --radius: 6px;
 
+  /* One motion grammar for the whole product: three curves, three durations.
+     Ease-out answers a press, the drawer curve carries panels, in-out moves
+     things that stay on screen. Nothing animates longer than 280ms. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press: 140ms;
+  --dur-ui: 200ms;
+  --dur-panel: 260ms;
+
   color-scheme: light;
 }
 
@@ -108,6 +118,13 @@ button {
   border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 6px 11px;
+  transition: transform var(--dur-press) var(--ease-out),
+    color var(--dur-ui) ease, background var(--dur-ui) ease,
+    border-color var(--dur-ui) ease, opacity var(--dur-ui) ease;
+}
+/* A button answers a press — scale, not a color swap, is the felt answer. */
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 button:disabled {
   opacity: 0.4;
@@ -302,10 +319,15 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .arrives,
   .caret,
-  .status-dot.is-live {
+  .status-dot.is-live,
+  .output-event,
+  .file-row,
+  .signin-card,
+  .landing-mid {
     animation: none !important;
   }
-  .ins {
+  .ins,
+  button {
     transition: none !important;
   }
 }

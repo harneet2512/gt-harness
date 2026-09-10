@@ -210,7 +210,7 @@ body,button,input,textarea,select,.cap {font-family:var(--font-ui)}
 .signin-button {display:flex;justify-content:center;align-items:center;gap:10px;width:100%;border:0;border-radius:7px;background:var(--ink);color:var(--paper);padding:12px;font-size:12px;cursor:pointer}
 .signin-card .build-stamp {margin-top:20px;color:var(--muted);font-size:10px}
 
-.output-event {display:grid;grid-template-columns:58px 105px minmax(0,1fr);gap:10px;align-items:baseline;padding:2px 0;font-size:10px}
+.output-event {display:grid;grid-template-columns:58px 105px minmax(0,1fr);gap:10px;align-items:baseline;padding:2px 0;font-size:10px;animation:rowIn var(--dur-ui) var(--ease-out) both}
 .output-event time {color:#8493a8;font-size:10px}
 .output-identity {font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .output-event pre {margin:0;font-size:10px;line-height:1.65;overflow-wrap:anywhere;white-space:pre-wrap}

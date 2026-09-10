@@ -154,6 +154,13 @@ export class Renderer3D {
   private input = false;
   private animationNow = 0;
   private labelLimit = 12;
+  /* The entrance: buildings rise from their plots when they are new. A first
+     city rises wholesale; a file the agent adds later rises alone. */
+  private riseAt = -1;
+  private riseDelays: number[][] = [];
+  private risePlots: CityPlot[][] = [];
+  private risenIds = new Set<string>();
+  private rising = false;
   constructor(private options: Renderer3DOptions) {
     this.gl = new WebGLRenderer({
       canvas: options.canvas,
@@ -277,6 +284,15 @@ export class Renderer3D {
     this.terraces = [];
     this.layout = layout;
     const districts=layout.districts;
+    // A city we have never framed is a new city: its whole skyline is new
+    // construction. A carried one keeps whatever already stands.
+    if (!this.framed) this.risenIds.clear();
+    const cx = districts.length
+      ? districts.reduce((s, d) => s + d.x + d.width / 2, 0) / districts.length
+      : 0;
+    const cz = districts.length
+      ? districts.reduce((s, d) => s + d.z + d.depth / 2, 0) / districts.length
+      : 0;
     if(districts.length) {
       const left=Math.min(...districts.map(d=>d.x))-100,right=Math.max(...districts.map(d=>d.x+d.width))+100;
       const back=Math.min(...districts.map(d=>d.z))-100,front=Math.max(...districts.map(d=>d.z+d.depth))+100;
@@ -314,9 +330,26 @@ export class Renderer3D {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.ids.push(plots.map((p) => p.id));
+      this.risePlots[kind] = plots;
+      this.riseDelays[kind] = plots.map((p) => {
+        if (this.risenIds.has(p.id) || this.options.getState().reduced) return -1;
+        this.risenIds.add(p.id);
+        // The wave travels out from the city's middle: nearer plots first.
+        const dx = p.x - cx,
+          dz = p.z - cz;
+        return 120 + Math.min(560, Math.hypot(dx, dz) * 1.1);
+      });
+      const fresh = this.riseDelays[kind].some((d) => d >= 0);
+      const startHidden = fresh && !this.options.getState().reduced;
       plots.forEach((p, i) => {
+        const delay = this.riseDelays[kind][i];
+        const hidden = startHidden && delay >= 0;
         this.matrix.position.set(p.x, p.y, p.z);
-        this.matrix.scale.set(p.width, p.height, p.depth);
+        this.matrix.scale.set(
+          p.width * (hidden ? 0.82 : 1),
+          hidden ? 0.001 : p.height,
+          p.depth * (hidden ? 0.82 : 1),
+        );
         this.matrix.updateMatrix();
         mesh.setMatrixAt(i, this.matrix.matrix);
         mesh.setColorAt(i, new Color(0xffffff));
@@ -325,6 +358,10 @@ export class Renderer3D {
       mesh.computeBoundingSphere();
       this.buildings.push(mesh);
       this.scene.add(mesh);
+    }
+    if (this.riseDelays.some((k) => k.some((d) => d >= 0))) {
+      this.riseAt = this.animationNow;
+      this.rising = true;
     }
     for (const d of layout.districts) {
       const geometry = terraceGeometry(pathHash(d.name) % 37);
@@ -563,6 +600,7 @@ export class Renderer3D {
     }
     const moved = this.controls.update();
     busy = busy || moved || this.cameraMotion.busy || this.targetMotion.busy;
+    busy = this.rise(this.animationNow) || busy;
     busy = this.paintBuildings(state) || busy;
     this.paintEdges(state);
     this.aoCamera.copy(this.camera);this.aoCamera.layers.set(0);
@@ -606,6 +644,45 @@ export class Renderer3D {
     this.floorMaterial.color.copy(this.scene.background as Color).multiplyScalar(2);
     this.factory.body.color.set(document.documentElement.dataset.theme === "dark" ? "#8795a6" : "#8093aa");
     return t < 1;
+  }
+  private rise(now: number) {
+    if (!this.rising || this.riseAt < 0) return false;
+    const elapsed = now - this.riseAt;
+    if (elapsed < 0) return true;
+    let pending = false;
+    for (let kind = 0; kind < this.buildings.length; kind++) {
+      const mesh = this.buildings[kind],
+        plots = this.risePlots[kind],
+        delays = this.riseDelays[kind];
+      if (!plots || !delays) continue;
+      let dirty = false;
+      for (let i = 0; i < plots.length; i++) {
+        const delay = delays[i];
+        if (delay < 0) continue;
+        const t = Math.min(1, Math.max(0, (elapsed - delay) / 640));
+        if (t < 1) pending = true;
+        else {
+          delays[i] = -1;
+        }
+        // easeOutCubic on height; a slight footprint swell keeps it a grow,
+        // not a stretch.
+        const s = 1 - Math.pow(1 - t, 3);
+        const w = 0.82 + 0.18 * s;
+        const p = plots[i];
+        this.matrix.position.set(p.x, p.y, p.z);
+        this.matrix.scale.set(
+          p.width * w,
+          Math.max(0.001, p.height * s),
+          p.depth * w,
+        );
+        this.matrix.updateMatrix();
+        mesh.setMatrixAt(i, this.matrix.matrix);
+        dirty = true;
+      }
+      if (dirty) mesh.instanceMatrix.needsUpdate = true;
+    }
+    if (!pending) this.rising = false;
+    return true;
   }
   private paintBuildings(state: Frame3DState) {
     const key = [
