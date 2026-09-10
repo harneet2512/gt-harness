@@ -16,6 +16,15 @@ def test_product_workflow_is_reachable_pinned_and_provider_free() -> None:
     assert validate_workflow(WORKFLOW, root=ROOT) == []
 
 
+def test_full_suite_receives_the_verified_producer_path() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["provider-free-product"]["steps"]
+    suite = next(step for step in steps if step.get("name") == "Run the full Python suite serially")
+    assert suite.get("env", {}).get("GT_INDEX_BINARY") == "/opt/groundtruth/gt-index/gt-index"
+
+
 def test_product_workflow_rejects_bypassing_manifest_pin_resolution(
     tmp_path: Path,
 ) -> None:

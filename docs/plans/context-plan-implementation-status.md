@@ -163,6 +163,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Canonical runs `34425339144` and `34425952156` failed because the full-suite
+  step could not resolve the verified producer: staging `/opt/groundtruth/gt-index/gt-index`
+  did not export a binary path. The workflow now supplies that exact verified
+  path as step-local GT_INDEX_BINARY. The missing-env static RED is retained;
+  six workflow checks passed in Linux and the tracked-workflow check passed on
+  the host. Expanded installed graph tests passed 43 with one explained
+  source-registry skip; seven source-history cases initially failed due to the
+  wheel-only layout, then all seven passed in a disposable Linux Git clone with
+  the pinned producer (`D:/gt-context-proof/producer-env-source-clone.xml`).
+  Earlier claims that the resolver fixture alone repaired CI were incomplete.
+  Successor full acceptance is required; no tests were disabled for this repair.
 - Queue timing RED showed automatic verification starting with a 15-second
   timeout after snapshot capture consumed its entire 30-second allowance.
   The queue now rereads its deadline after capture and retains unexecuted work

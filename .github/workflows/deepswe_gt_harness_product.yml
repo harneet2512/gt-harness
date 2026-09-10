@@ -299,6 +299,8 @@ jobs:
           python scripts/verify_feature_matrix.py
 
       - name: Run the full Python suite serially
+        env:
+          GT_INDEX_BINARY: /opt/groundtruth/gt-index/gt-index
         run: |
           set -euo pipefail
           python -m pytest -q -ra tests
