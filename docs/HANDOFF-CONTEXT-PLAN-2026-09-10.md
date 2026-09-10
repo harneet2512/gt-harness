@@ -100,16 +100,42 @@ certified binary on an unestablished cause is what that item exists to prevent.
 
 **Six-repository performance study: harness built, one repository measured.**
 `scripts/graph_transition_study.py` (tested by
-`tests/test_graph_transition_study.py`, 14 cases). On `click`, five alternating
-repetitions with the parse cache correctly enabled in both arms give baseline
-median 5.88s against candidate median 7.73s: the amend is about 24% SLOWER, a
-0.76x speedup, and about 32% heavier at peak (242.9 MB against 184.5 MB, no
-overlap across five runs each). The amend does what it claims structurally --
-947 of 1,087 parser nodes retained, parse cache fully hit -- and is still slower
-because BOTH arms run one full resolver pass. The amend saves structural
-rebuilding, not resolution, and pays copy-and-reconcile on top. An earlier run
-of this study left GT_PARSE_CACHE_ROOT unset in both arms; that was a real
-instrument defect, it was fixed, and it did not change the verdict. That is the smallest of the six and
+`tests/test_graph_transition_study.py`, 18 cases).
+
+READ THE CORPUS BEFORE THE NUMBERS. The first corpus used (`D:/test-repos`:
+click, terraform, cpython, sentry, grafana, kubernetes) is far larger than
+DeepSWE's actual task repositories, which are library-scale across five
+languages. Its rows measure the producer's SCALING, not the benchmark's
+workload, and are retained as `study-large-repos.json`: terraform (5,184 files),
+cpython (5,639) and sentry (20,094) all EXCEEDED a 900s build budget, peaking at
+1.6-2.1 GB when killed, while the harness's own budget is 600s.
+
+THE BENCHMARK-SCALE RESULT is different and is the one that answers the item.
+Over locally staged SWE-bench checkouts, five alternating repetitions each,
+parse cache enabled in both arms (`study-benchmark-scale.json`):
+
+    repository      parsed  parent   baseline  candidate   x     peak MB
+    kedro-4580        328    6.3s      5.35s     5.23s    1.02  188 -> 198
+    keras-20396       694  126.4s    118.42s   119.06s    0.99  1769 -> 1722
+    dynaconf-1238     609    4.2s      3.25s     3.30s    0.98  164 -> 166
+
+All build well inside 600s, the slowest at 126s, consistent with this
+codebase's own ~115s for arktype. The amend is BREAK-EVEN, 0.98x to 1.02x,
+three times over, with neutral memory. It is not failing structurally -- on
+keras it retains 10,055 of 10,698 parser nodes -- it is that both arms still run
+one full resolver pass and resolution is what costs.
+
+Semantic parity is TRUE on all three, one digest across every run of both arms,
+which is why the producer nondeterminism above is described as
+repository-dependent: click shows it, this corpus does not.
+
+An earlier version of this study left GT_PARSE_CACHE_ROOT unset in both arms, a
+real instrument defect that was found by reading the amend result line it was
+already recording, fixed, and did not change any verdict. On `click` alone the
+amend measured 0.76x and +32% memory; that figure does NOT generalise and
+should not be quoted for the benchmark.
+
+conan, haystack and matplotlib remain. That is the smallest of the six and
 the amend's advantage should grow with size, but "should" is what the study
 exists to replace. The remaining five are the point of the exercise. The
 harness does NOT measure the blocked-versus-background split, checks or
