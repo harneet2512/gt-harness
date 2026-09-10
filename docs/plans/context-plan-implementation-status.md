@@ -466,6 +466,34 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   CORRECTION: `internal/resolver/promote.go:567` is a real order-dependent site of
   the same class but is NOT this defect -- it emits CO_SERIALIZES, which the core
   layer does not produce at all.
+  ROOT CAUSE FOUND, and a fix VERIFIED in a local build. `resolver.go:1546`
+  builds the class-method index by ranging `nodeMeta[0]`, which is a Go map, and
+  writes `methodsByClass[m.ParentID][m.Name] = id` -- LAST WRITE WINS. A class can
+  hold two members under one name (`@overload`, a conditional redefinition, a
+  decorator pair), so which definition the index keeps is decided by randomized
+  map order. Every `impl_method` resolution reads that index, which is exactly why
+  the flips all carry `resolution_method=impl_method` at conf 0.6 and appear as the
+  same name in the same file at a different start_line.
+  It accounts for all three ruled-out hypotheses at once: map iteration is
+  randomized even at `-workers 1`, the ids never change but which one the index
+  keeps does, and the wrong entry is baked in BEFORE any tie-break picker runs.
+  THE FIX IS EIGHT LINES: keep the lowest (start_line, id) rather than the last
+  writer -- a content rule, independent of how the parse assigned ids. Applied as
+  the ONLY change against the vendored tree and rebuilt with the declared tags:
+    click   before  8 runs, 8 distinct digests, counts {3299, 3302}
+            after   8 runs, 1 distinct digest,  count  {3299}   DETERMINISTIC
+    kedro   identical before and after (5,982 edges) -- a repository with no
+            same-name collision is untouched, which is the property it should have.
+  Which of the two definitions is the RIGHT one is not decidable here and is not
+  the point: `impl_method` is the receiver-UNPROVEN path, capped at 0.6 because it
+  is a guess. The defect was that the guess was not repeatable.
+  Patch and evidence: `determinism-root-cause.md`, `resolver-rootfix.go`,
+  `determinism_ab.py`, `edge_diff.py`, `idcheck.py`, `method_diff.py`.
+  NOT SHIPPED, and the item stays open. This is producer source behind a certified
+  binary; landing it needs a producer rebuild and re-certification, which is the
+  same gate the release artifact binding item is blocked on. What changed is that
+  the blocker is no longer "producer work, cause unknown" -- it is a named site,
+  an eight-line diff, and a reproducer that runs without the certified binary.
   CONSEQUENCE: amend-versus-rebuild digest parity cannot be established at real
   scale while the producer's own repeatability is weaker than the comparison. No
   route comparison can be tighter than the producer's run-to-run agreement. Making
