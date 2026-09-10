@@ -250,6 +250,57 @@ def _apply_transition(path: Path) -> None:
         handle.write(addition)
 
 
+def classify_parity(parity: list[dict]) -> dict:
+    """Say WHICH surface moved and whether the two arms ever agreed.
+
+    `semantic_parity: False` is one bit covering two findings that point in
+    opposite directions. On conan both arms wobble across the same three edge
+    digests -- the producer's own nondeterminism passing through the amend,
+    which is evidence FOR the amend's fidelity. On matplotlib the arms are
+    disjoint: no amend ever produced an edge set any rebuild produced. That is
+    the amend and the rebuild disagreeing, and filing it as producer noise
+    would bury the more serious of the two results.
+
+    Reported per surface because the defect is localised. Across the six
+    benchmark-scale repositories only EDGES ever moved; nodes, properties and
+    assertions were byte-identical in every run of both arms everywhere.
+    """
+    if not parity:
+        return {"verdict": "unmeasured", "unstable_surfaces": [], "surfaces": {}}
+
+    surfaces: dict[str, dict] = {}
+    names = sorted({name for item in parity for name in item["digest"]})
+    for name in names:
+        baseline = {item["digest"][name] for item in parity if item["arm"] == "baseline"}
+        candidate = {item["digest"][name] for item in parity if item["arm"] == "candidate"}
+        if len(baseline | candidate) == 1:
+            continue  # stable, in both arms: not a finding
+        surfaces[name] = {
+            "baseline_distinct": len(baseline),
+            "candidate_distinct": len(candidate),
+            "shared": len(baseline & candidate),
+            "baseline": sorted(baseline),
+            "candidate": sorted(candidate),
+        }
+
+    if not surfaces:
+        return {"verdict": "identical", "unstable_surfaces": [], "surfaces": {}}
+
+    unstable = sorted(surfaces)
+    # Disjoint arms outrank every other reading: it is the only shape that
+    # accuses the amend rather than the producer, so it must not be masked by
+    # another surface that merely wobbles.
+    if any(entry["shared"] == 0 for entry in surfaces.values()):
+        verdict = "arms_disjoint"
+    elif all(entry["baseline_distinct"] == 1 for entry in surfaces.values()):
+        verdict = "candidate_only"
+    elif all(entry["candidate_distinct"] == 1 for entry in surfaces.values()):
+        verdict = "baseline_only"
+    else:
+        verdict = "shared_nondeterminism"
+    return {"verdict": verdict, "unstable_surfaces": unstable, "surfaces": surfaces}
+
+
 def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
                      repetitions: int, max_files: int, workers: int,
                      timeout: float | None = None) -> dict:
@@ -350,6 +401,10 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
         "budget_seconds": timeout,
         "semantic_parity": len(digests) == 1,
         "distinct_digests": len(digests),
+        # Which surface moved, and whether the arms ever agreed. `semantic_parity`
+        # alone cannot separate inherited producer noise from the amend and the
+        # rebuild disagreeing, and those need opposite responses.
+        "parity_classification": classify_parity(parity),
         "parity": parity if len(digests) != 1 else parity[:1],
     }
 
