@@ -1280,6 +1280,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   review `393b4c92`, lineage PASS. The "amend is faster" claim for matplotlib
   is retired: the 8% was partly divergent work; equal output now costs equal
   time (215.8s vs 218.0s) on this repository.
+  GITNEXUS HEAD-TO-HEAD (source-grounded, pinned D:/gitnexus-har81-pinned):
+  GitNexus is a retrieval/exploration system (16 MCP tools, agent decides);
+  GT is an evidence-delivery system (typed sealed envelopes, abstention,
+  revision-bound). GT's concrete gap: the producer computes `communities`,
+  `processes`, `process_steps`, `cochanges`, `closure` -- and the product
+  never reads `communities`/`processes`. Highest-leverage additions to
+  exceed it, all on edges/tables already produced: (1) consume
+  communities/processes in lookup/impact/orient/brief; (2) `detect_changes`
+  (diff->changed symbols->affected processes->risk); (3) `route_map`/
+  `api_impact` from HANDLES_ROUTE/API_CALL edges; (4) `trace` A->B; (5)
+  closure/community composite endpoints. Deliberately not copied: rename,
+  cypher, watch, wiki, semantic-as-primary (breaks certification).
   IT ALSO LOCALISES THE NONDETERMINISM, which the all-consumer parity item above
   records generically. On all six repositories the ONLY surface that ever moved
   is `edges`. Nodes, properties and assertions are byte-identical across all ten
