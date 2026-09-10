@@ -84,6 +84,17 @@ class CanonicalRedEvidenceTests(unittest.TestCase):
             )
 
     def test_prepared_replay_requires_the_seed_cache(self) -> None:
+        # cgo_enabled="1" below makes capture() resolve a C compiler, so this
+        # test depends on gcc even though its own command is sys.executable and
+        # it is about prepared-replay provenance rather than compilation. Without
+        # this guard the missing toolchain surfaced as
+        # CaptureError: executable_not_found -- a FAILURE, while the Go-dependent
+        # test a few lines below SKIPS for the same class of missing toolchain.
+        # One absent dependency should not produce two different verdicts, and a
+        # failure that is really an unavailable toolchain hides real regressions
+        # in a suite that is meant to run with zero unexplained failures.
+        if shutil.which("gcc") is None:
+            self.skipTest("gcc is unavailable; cgo_enabled capture cannot run")
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(Path(directory), "prepared")
             expected = "CHA/RTA implementation missing\n"

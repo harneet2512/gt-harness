@@ -387,9 +387,21 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   frozen receipt: the parked retries are real and the bootstraps were never
   reported. An interruption rehearsal is expected to audit RED; a completed run is
   the one that must be GREEN.
-  OPEN follow-up, not blocking this item: tests/test_red_evidence.py FAILS on a
-  missing Go executable at one test while SKIPPING for the same reason at line
-  147. One dependency should not produce two verdicts.
+  That follow-up is now CLOSED and the suite is clean. The failure was gcc, not
+  Go: the test passes cgo_enabled="1", which makes capture() resolve a C compiler
+  even though its own command is sys.executable and its subject is prepared-replay
+  provenance. It now guards on gcc exactly as the sibling guards on go, so one
+  absent toolchain gives one verdict. The two product-acceptance failures needed
+  the hatchling build backend, which they fetch to build a wheel in-test and which
+  --network none forbids; a wheelhouse is staged once at
+  D:/gt-context-proof/wheelhouse and supplied offline via PIP_NO_INDEX and
+  PIP_FIND_LINKS.
+  FINAL: 2,119 tests, 0 failures, 0 errors, 12 skips in 512s
+  (D:/gt-context-proof/full-suite-68.xml). Every skip states its reason: absent
+  arktype graph (3), GT_GITNEXUS_ROOT unset (3), sqlite_vec, Go, gcc,
+  GT_RETRIEVAL_TEST_GRAPH, and one deliberate complement covered by full-smoke.
+  The full recipe is: LF clone, wheelhouse for build backends, producer binary
+  COPIED and chmod 755, GT_INDEX_BINARY set, run from the checkout root.
 - [ ] Run canonical provider-free product acceptance and installed full-flow rehearsal.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
