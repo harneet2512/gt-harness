@@ -179,6 +179,22 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   plan/context/baseline checkpoints now recover through native bootstrap without
   another planning call or post-edit baseline capture. Terminal interruption and
   externally anchored journal-tail conservation remain open.
+  The forced-interruption rehearsal is now GREEN and no longer blocks this item:
+  rehearsal 09 on committed source eb9965ed with wheel 63 and static producer 06
+  reports VERIFIED_SYNTHETIC_INTERRUPTION, interruption_issues [], ten transport
+  requests, a gradable collected patch and paid_smoke_eligible false. Rehearsal
+  06's sole failure, unexpected_runtime_receipt_errors, was a stale expectation
+  rather than a fault: nine token/cost conservation errors had disappeared
+  because 7e9911ba repaired the counters, and the two that appeared are truthful
+  absence-of-claims findings on a receipt frozen at interruption -- it declares
+  provider_calls 6 while the journal holds 8 responses against 10 admissions, and
+  its effective_model was never written. Traced against the preserved journal
+  before the list was changed; committed at eb9965ed. The plan checkpoint layout
+  moved to v2 in the same increment because BaselineResult gained two fields and
+  the decoder requires exact field-set equality; older checkpoints reject by
+  version rather than being migrated, since the only value available to backfill
+  a missing source revision is the current workspace. Valid, truncated, tampered
+  and externally anchored journal tails are still open.
 - [x] Automatically bind admissible initial plan commands through CheckSpec and
   group identical executions across requirement bindings. The CLI is supplementary.
 
@@ -256,6 +272,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   comparison/reporting; changed or missing bindings remain unknown. The digest
   binds task variables before the private temporary capture-root override, not
   installed package versions or filesystem dependencies. Those remain open.
+  The source-revision half is now DONE and committed at c0455f36: BaselineResult
+  carries source_revision and after_source_revision, captured with the existing
+  workspace snapshotter before and after the command, incomplete snapshots are
+  rejected, and differing revisions are labelled source_changed_during_baseline
+  rather than captured. The candidate previously failed 14 of 36 installed tests
+  with spawn_failed/ValidationError: minisweagent's environment declares
+  timeout: int, so subtracting snapshot time made the allowance fractional and
+  Pydantic refused to construct the environment. Reproduced directly (120.0
+  accepted, 119.87 rejected, 1 accepted) and floored to whole seconds at that
+  boundary. Verified installed on wheel 62: 55 passed across the three baseline
+  and three recovery suites (baseline-source-62.xml). Config, test and dependency
+  identities remain open.
 - [x] Route baseline execution through the existing isolated process-tree boundary;
   real installed Linux timeout test confirms the sleeping grandchild is reaped.
 - [ ] Exercise background writers, typed mutations, automatic checks, incomplete
