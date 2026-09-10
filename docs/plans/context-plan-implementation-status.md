@@ -163,6 +163,15 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Independent evidence-guard witnesses passed 18 installed tests, zero skips,
+  in 6.74 seconds (`D:/gt-context-proof/check-guards.xml`). Stale source,
+  incomplete capture, missing IDs, and environment mismatch now each use an
+  otherwise valid test-source binding so one guard cannot mask another.
+  Protocol/command mismatch, timeout, contradictory exit status, and explicit
+  failure classifications also have isolated witnesses. Broader protocol
+  conservation remains open.
+- Fixture repairs are pushed as `1e1b45fff4f804f7ad3d11078b0aec9a76505e7b`;
+  successor provider-free acceptance is `34425339144` (pending at this checkpoint).
 - Current checkbox count: 41 completed bounded items, 27 open, 68 total. The
   step-limit release proof above was missing from the earlier 67-item census;
   it is now tracked explicitly. Counts are not an estimate of remaining effort.

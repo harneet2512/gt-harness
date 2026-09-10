@@ -29,14 +29,39 @@ def test_bound_pass_is_not_proof(tmp_path):
                                   test_source_digest="test-source")
     assert result.state == "CHECK_PASSED"
     assert classify_bound_check(check, execution, before_revision="old", after_revision="rev",
-                                capture_complete=True, test_ids=("test_widget",)).state == "UNVERIFIED"
+                                capture_complete=True, test_ids=("test_widget",),
+                                test_source_digest="test-source").state == "UNVERIFIED"
     assert classify_bound_check(check, execution, before_revision="rev", after_revision="rev",
-                                capture_complete=False, test_ids=("test_widget",)).state == "UNVERIFIED"
+                                capture_complete=False, test_ids=("test_widget",),
+                                test_source_digest="test-source").state == "UNVERIFIED"
     assert classify_bound_check(check, execution, before_revision="rev", after_revision="rev",
-                                capture_complete=True, test_ids=()).state == "UNVERIFIED"
+                                capture_complete=True, test_ids=(),
+                                test_source_digest="test-source").state == "UNVERIFIED"
     assert classify_bound_check(replace(check, environment_sha256="other"), execution,
                                 before_revision="rev", after_revision="rev", capture_complete=True,
-                                test_ids=("test_widget",)).state == "UNVERIFIED"
+                                test_ids=("test_widget",),
+                                test_source_digest="test-source").state == "UNVERIFIED"
+
+
+@pytest.mark.parametrize(("changes", "state"), [
+    ({"timed_out": True}, "UNVERIFIED"),
+    ({"returncode": 1}, "UNVERIFIED"),
+    ({"environment_sha256": ""}, "UNVERIFIED"),
+    ({"command_sha256": "other"}, "UNVERIFIED"),
+    ({"protocol": "unittest"}, "UNVERIFIED"),
+    ({"outcome": "fail", "returncode": 1}, "CHECK_FAILED"),
+    ({"outcome": "env_fail", "returncode": 1}, "CHECK_FAILED"),
+])
+def test_bound_check_guards_have_independent_witnesses(tmp_path, changes, state):
+    check = replace(spec(tmp_path), test_source_digest="test-source", protocol="pytest")
+    facts = dict(environment_sha256="env", repository_revision="rev",
+                 command_sha256=hashlib.sha256(check.command.encode()).hexdigest(),
+                 protocol="pytest", timed_out=False, outcome="pass", returncode=0)
+    facts.update(changes)
+    result = classify_bound_check(check, SimpleNamespace(**facts), before_revision="rev",
+                                  after_revision="rev", capture_complete=True,
+                                  test_ids=("test_widget",), test_source_digest="test-source")
+    assert result.state == state
 
 
 def test_changed_test_source_cannot_keep_bound_pass(tmp_path):
