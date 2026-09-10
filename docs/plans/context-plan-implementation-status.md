@@ -365,8 +365,31 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Reuse eligible history/cochange work; preserve embedding caches and LSP bindings.
 - [x] Wire a persistent external cache root and batch API through the harness's
   existing one-active/one-pending coordinator.
-- [x] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
+- [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
   immutable parent behavior, failure fallback, and every graph consumer's semantics.
+  REOPENED. This was ticked on fixture-scale evidence and the tick was wrong at
+  real-repository scale. The fixture evidence below stands and is worth keeping;
+  the CLAIM it was used to close does not.
+  Measured on `click` (105 parsed files, 43,679 nodes, 50,954 edges) with the
+  certified producer: THE PRODUCER IS NOT DETERMINISTIC. Three full rebuilds of a
+  byte-identical tree produced two different edge sets -- 50,954 edges and 50,957
+  edges, with different content -- and the amend wobbles between exactly the same
+  two. `-workers 1` is equally nondeterministic and lands on the identical pair of
+  digests, so this is NOT resolver concurrency; it is a nondeterministic tie-break
+  inside resolution, with Go's randomized map iteration the obvious candidate.
+  Evidence: `determinism-click.txt`, `study-click.json`.
+  What diverges is receiver selection for same-named methods. Between two arms:
+  `AliasedGroup.get_command` calls `Context.fail` in one graph and `ParamType.fail`
+  in the other; `_AtomicFile.close` calls `Context.close` or `LazyFile.close`;
+  `runner.invoke` binds to `Context.invoke` or `CliRunner.invoke` across five
+  assertions; and 359 of 43,680 `vta_flow_edge_fact` nodes carry different content
+  hashes at an identical row count (`arm-diff-click.txt`). A consumer asking who
+  calls `fail` gets a different answer depending on which build it reads.
+  CONSEQUENCE: amend-versus-rebuild digest parity cannot be established at real
+  scale while the producer's own repeatability is weaker than the comparison. No
+  route comparison can be tighter than the producer's run-to-run agreement. Making
+  the tie-break deterministic is producer work and needs re-certification.
+  The fixture-scale evidence is unaffected and remains recorded:
   Cases and immutable parent: `tests/test_batch_amend_parity.py` builds a parent,
   applies one mutation, then builds the graph BOTH ways and requires the amended
   graph to say exactly what a from-scratch rebuild says. Compared as content, not
@@ -609,6 +632,28 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
+  HARNESS BUILT, ONE OF SIX REPOSITORIES MEASURED. `scripts/graph_transition_study.py`
+  stages a real transition per repository (one new top-level definition appended to
+  the largest parseable file, so line numbers stay stable and the edit is a genuine
+  new resolution target), builds the parent once and reuses it in both arms, then
+  alternates baseline (full rebuild) and candidate (batch amend) so machine drift is
+  not charged to whichever arm ran second. Per run it records wall seconds, return
+  code, parsed files/nodes/edges, the amend result line, and peak memory as that
+  run's own VmHWM polled every 50ms -- getrusage(RUSAGE_CHILDREN) would have been
+  easier and wrong, since it is a high-water mark across every child ever reaped.
+  FIRST RESULT, `click`, 5 alternating repetitions (`study-click.json`): the amend is
+  SLOWER than the full rebuild. Baseline median 6.94s against candidate median 8.10s,
+  a 0.86x speedup -- the amend costs about 17% more on a 105-file repository. That is
+  one repository and the smallest of the six; the amend's advantage should grow with
+  repository size, and that is exactly what the remaining five must establish rather
+  than be assumed.
+  Semantic parity across arms could not be established, and the reason is the
+  producer nondeterminism recorded against the all-consumer parity item above, not
+  the amend.
+  NOT MEASURED by this harness, stated so its numbers are not read as more than they
+  are: the blocked-versus-background split, checks and snapshots are properties of
+  the coordinator and the run loop rather than of the producer, and need their own
+  measurement against the live path.
 - [ ] Review the final diff, rerun invalidated checks, then commit verified coherent
   changes on the exact branches/bases above. Scoped pushes and provider-free CI
   are authorized; paid dispatch is not.
