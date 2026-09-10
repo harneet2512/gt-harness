@@ -178,20 +178,20 @@ class InstalledRehearsalInterruptionTests(unittest.TestCase):
             },
             "teardown": {"checked": 2, "baseline_checked": 3,
                          "survivors": [], "new_processes": []},
+            # The shape rehearsal 06 actually produced, traced entry by entry
+            # against its preserved journal and receipt. The nine token/cost
+            # conservation failures this list used to carry are gone because
+            # 7e9911ba repaired the counters; the two new entries are the
+            # truthful consequence of a receipt frozen at interruption -- it
+            # declares provider_calls 6 while the journal holds 8 responses, and
+            # its effective_model was never written.
             "runtime_errors": [
                 "synthetic_transport_not_paid_evidence", "product_not_completed",
                 "product_provider_call_conservation_failed",
-                "product_input_token_conservation_failed",
-                "product_output_token_conservation_failed",
+                "product_effective_model_report_mismatch",
                 "product_event_journal_digest_mismatch",
                 "product_event_journal_conservation_failed",
-                "product_provider_completed_calls_conservation_failed",
-                "product_provider_failed_calls_conservation_failed",
-                "product_input_tokens_conservation_failed",
-                "product_output_tokens_conservation_failed",
-                "product_cached_tokens_conservation_failed",
-                "product_total_cost_conservation_failed",
-                "treatment_provider_admission_census_mismatch",
+                "provider_response_count_exceeds_attempts",
                 "treatment_receipt_missing",
             ],
             "request_count": 7,

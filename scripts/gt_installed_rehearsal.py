@@ -307,21 +307,42 @@ def _interruption_issues(
     # The outer supervisor deliberately overwrites the worker's completed-form
     # receipt with issue_runtime_receipt_failure. The verifier must report this
     # exact absence-of-claims shape; any missing or additional finding is drift.
+    # Rebuilt against rehearsal 06 after tracing every difference. NINE entries
+    # were removed and TWO added; neither change is a relaxation.
+    #
+    # The nine removed were token, cost and per-counter conservation failures.
+    # They no longer occur because 7e9911ba made ordinals count returned actions
+    # rather than HTTP requests, so the worker's counters now reconcile with its
+    # journal instead of disagreeing with it. An error that stops appearing
+    # because the accounting was repaired must stop being expected, or the
+    # expectation pins the bug.
+    #
+    # The two added are the truthful shape of a receipt frozen at interruption,
+    # verified against the preserved journal rather than assumed:
+    #
+    #   provider_response_count_exceeds_attempts
+    #       gt-run.json declares provider_calls 6; the journal holds 8
+    #       provider_response rows against 10 admissions. The supervisor
+    #       overwrote the worker's receipt while two parked retries were still
+    #       in flight, so the receipt under-reports by exactly those two. The
+    #       journal exceeding a failure receipt is the finding, not a race.
+    #
+    #   product_effective_model_report_mismatch
+    #       effective_model is null on that receipt while requested_model is
+    #       "synthetic-transport", because the worker died before reporting one.
+    #       The check compares the requested name against a field that was never
+    #       written, and says so.
+    #
+    # Both are absence-of-claims findings, which is what this receipt is FOR.
+    # The comparison below stays exact so any drift from this shape is caught.
     expected_errors = [
         "synthetic_transport_not_paid_evidence",
         "product_not_completed",
         "product_provider_call_conservation_failed",
-        "product_input_token_conservation_failed",
-        "product_output_token_conservation_failed",
+        "product_effective_model_report_mismatch",
         "product_event_journal_digest_mismatch",
         "product_event_journal_conservation_failed",
-        "product_provider_completed_calls_conservation_failed",
-        "product_provider_failed_calls_conservation_failed",
-        "product_input_tokens_conservation_failed",
-        "product_output_tokens_conservation_failed",
-        "product_cached_tokens_conservation_failed",
-        "product_total_cost_conservation_failed",
-        "treatment_provider_admission_census_mismatch",
+        "provider_response_count_exceeds_attempts",
         "treatment_receipt_missing",
     ]
     if runtime_errors != expected_errors:
