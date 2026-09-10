@@ -758,18 +758,33 @@ def build_agent(
     # verbatim in the prompt but merged away by the sentence-level extractor
     # otherwise reaches submission with nothing tracking it.
     plan_inputs = None
+    restored_initial_plan = None
     _plan_setup_error = ""
     if persistent_plan_enabled():
         try:
             env_obj.config.env["GT_PLAN_ROOT"] = str(layout.task_root / "plan")
-            plan_inputs = build_plan_inputs(
-                task,
-                contract=contract,
-                graph_db=graph_db,
-                repo_root=str(cwd),
-                wall_time_limit_seconds=wall_time_limit_seconds,
-                execution_env=env_obj.execution_env(),
-            )
+            from gt_engine.miniswe_integration import ExternalStateStore
+            from gt_engine.persistent_plan.recovery import restore_plan
+
+            startup_store = ExternalStateStore(layout.state_root, task_id)
+            prior_run = bool(startup_store.path.exists() and startup_store.path.stat().st_size)
+            restored_initial_plan = restore_plan(startup_store, task)
+            if restored_initial_plan is not None:
+                plan_inputs = restored_initial_plan.inputs
+            else:
+                plan_inputs = build_plan_inputs(
+                    task,
+                    contract=contract,
+                    graph_db=graph_db,
+                    repo_root=str(cwd),
+                    source_revision=index_receipt.source_revision if graph_db else "",
+                    graph_revision=index_receipt.graph_revision if graph_db else "",
+                    # A lost checkpoint cannot turn the post-edit workspace
+                    # into a new pre-edit regression baseline.
+                    capture_baseline=not prior_run,
+                    wall_time_limit_seconds=wall_time_limit_seconds,
+                    execution_env=env_obj.execution_env(),
+                )
             # The ledger-only rows are MERGED INTO the contract rather than
             # appended beside it. evaluate_passing_observation iterates
             # contract.obligations, so an obligation outside the contract can
@@ -807,6 +822,7 @@ def build_agent(
     # first provider call. The plan is journaled here, where the store exists,
     # rather than where it was computed.
     adapter.plan_inputs = plan_inputs
+    adapter._restored_initial_plan = restored_initial_plan
     adapter.persistent_plan = None
     if plan_inputs is not None:
         try:

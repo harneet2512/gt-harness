@@ -374,6 +374,42 @@ def test_native_action_batch_has_session_owned_execution_receipts(tmp_path, monk
     assert all(row["result_sha256"] for row in finishes)
 
 
+def test_native_restart_restores_original_plan_without_another_planning_call(tmp_path, monkeypatch):
+    from gt_engine.persistent_plan import build_plan_inputs
+
+    _configure_fixture_provider(monkeypatch)
+    task = "The widget must preserve compatibility."
+    plans = []
+    for attempt in range(2):
+        adapter = MiniSweAdapter(task_id="native-plan-restart", repo_root=str(tmp_path),
+                                 state_dir=tmp_path / "state", predicates=[], issue_text=task)
+        adapter.plan_inputs = build_plan_inputs(task, repo_root=str(tmp_path), capture_baseline=False,
+                                               source_revision=f"revision-{attempt}")
+        agent = FakeAgent()
+        agent.model = TransportFakeModel()
+        agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": task}]
+        install_runtime_hooks(agent, _session(adapter))
+        agent.model.query(agent.messages)
+        if not attempt:
+            import hashlib
+
+            request_dir = adapter.store.root / "plan" / "requests"
+            request_dir.mkdir(parents=True, exist_ok=True)
+            (request_dir / "01-revise.json").write_text(json.dumps({
+                "plan_digest": hashlib.sha256(adapter.persistent_plan.canonical_json().encode()).hexdigest(),
+                "row_id": adapter.persistent_plan.rows[0].row_id, "operation": "revise",
+                "value": {"approach": "Preserve the public widget signature during the change."},
+            }))
+            adapter.apply_plan_requests()
+        plans.append(adapter.persistent_plan.canonical_json())
+        if attempt:
+            assert len(agent.model.calls) == 1, "restart spent another planning provider call"
+            assert adapter.persistent_plan.inputs.source_revision == "revision-0"
+            assert adapter.unmet_plan_rows(), "historical plan restored passing authority"
+            assert "Preserve the public widget signature" in json.dumps(agent.model.calls[-1])
+    assert plans[0] == plans[1]
+
+
 def test_fast_paths_have_distinct_native_action_indices(tmp_path):
     agent = FakeAgent()
     adapter = MiniSweAdapter(task_id="fast-paths", state_dir=tmp_path, predicates=[])

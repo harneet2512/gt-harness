@@ -52,6 +52,9 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         "Design produced before implementation began, from the change request "
         "and a verified code graph. It is advisory: inspect anything, disagree "
         "with anything, and follow your own evidence. It is not a boundary.",
+        f"Context captured at source revision {plan.inputs.source_revision or 'unrecorded'}; "
+        f"graph revision {plan.inputs.graph_revision or 'unrecorded'}. "
+        "Anchors describe that capture, not proof of the current workspace after edits or restart.",
     ]
     if plan.understanding:
         head.extend(["", "DESIGN INTENT:", f"  {plan.understanding}"])

@@ -129,7 +129,7 @@ class ExternalStateStore:
                             if not line.strip():
                                 continue
                             row = json.loads(line)
-                            if row.get("event") in {"plan_check_bound", "plan_revision_applied", "plan_revision_rejected"}:
+                            if row.get("event") in {"plan_check_bound", "plan_revision_applied", "plan_revision_rejected", "persistent_plan_checkpoint"}:
                                 self.startup_plan_events.append(row)
             except Exception:
                 self.startup_journal_valid = False

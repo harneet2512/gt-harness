@@ -1090,51 +1090,52 @@ def install_runtime_hooks(
             response_finish_reason,
         )
         from .persistent_plan.render import render_plan_block
+        from .persistent_plan.recovery import checkpoint_plan, restore_plan
 
-        plan = None
+        plan = getattr(adapter, "_restored_initial_plan", None) or restore_plan(adapter.store, adapter.issue_text)
+        restored = plan is not None
+        finish_reason = "restored" if restored else ""
+        payload = None
         original_parser = getattr(model, "_parse_actions", None)
 
         def parse_nothing(_model: Any, _response: Any) -> list[dict]:
             return []
 
         try:
-            if callable(original_parser):
-                model._parse_actions = MethodType(parse_nothing, model)
-            plan_preparing = True
-            message = native_query(
-                list(build_planning_messages(inputs, adapter.issue_text)),
-                _gt_provider_tools=[plan_tool_schema(inputs)],
-                _gt_persistent_plan=True,
-                temperature=0.0,
-                # A FLOOR, not the run's reservation. The previous form took
-                # the reservation whenever one was set, which is how a run that
-                # reserved 16,384 gave the planning call exactly 16,384 and got
-                # nothing back on all twenty tasks. The reservation may raise
-                # this budget; it may not lower it.
-                max_tokens=max(
-                    PLAN_MAX_OUTPUT_TOKENS,
-                    int(os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS") or 0),
-                ),
-                num_retries=0,
-            )
-            adapter.note_persistent_plan_bootstrap()
-            extra = dict(message.get("extra") or {})
-            response = extra.get("response")
-            usage = response.get("usage") if isinstance(response, dict) else None
-            model_id = response.get("model", "") if isinstance(response, dict) else ""
-            adapter.bind_provider_response(
-                response, usage=usage, model=model_id, next_actions=()
-            )
-            finish_reason = response_finish_reason(response)
-            payload = parse_tool_arguments(response)
-            note = ""
-            if payload is None:
-                note = (
-                    "plan_call_truncated"
-                    if finish_reason == "length"
-                    else f"plan_call_returned_no_tool_call:{finish_reason or 'unknown'}"
+            if not restored:
+                if callable(original_parser):
+                    model._parse_actions = MethodType(parse_nothing, model)
+                plan_preparing = True
+                message = native_query(
+                    list(build_planning_messages(inputs, adapter.issue_text)),
+                    _gt_provider_tools=[plan_tool_schema(inputs)],
+                    _gt_persistent_plan=True,
+                    temperature=0.0,
+                    # The reservation may raise the planning floor, never lower it.
+                    max_tokens=max(
+                        PLAN_MAX_OUTPUT_TOKENS,
+                        int(os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS") or 0),
+                    ),
+                    num_retries=0,
                 )
-            plan = build_plan(payload, inputs, note=note)
+                adapter.note_persistent_plan_bootstrap()
+                extra = dict(message.get("extra") or {})
+                response = extra.get("response")
+                usage = response.get("usage") if isinstance(response, dict) else None
+                model_id = response.get("model", "") if isinstance(response, dict) else ""
+                adapter.bind_provider_response(
+                    response, usage=usage, model=model_id, next_actions=()
+                )
+                finish_reason = response_finish_reason(response)
+                payload = parse_tool_arguments(response)
+                note = ""
+                if payload is None:
+                    note = (
+                        "plan_call_truncated"
+                        if finish_reason == "length"
+                        else f"plan_call_returned_no_tool_call:{finish_reason or 'unknown'}"
+                    )
+                plan = build_plan(payload, inputs, note=note)
         except Exception as exc:  # noqa: BLE001 - planning is advisory
             try:
                 adapter.bind_provider_failure(exc)
@@ -1152,6 +1153,12 @@ def install_runtime_hooks(
 
         try:
             adapter.persistent_plan = plan
+            adapter.plan_inputs = plan.inputs
+            if not restored:
+                try:
+                    checkpoint_plan(adapter.store, plan, adapter.issue_text)
+                except Exception as exc:  # noqa: BLE001 - checkpointing is advisory
+                    adapter.store.append("persistent_plan_checkpoint_unavailable", error_type=type(exc).__name__)
             # Store the plan document itself, not only its counts. Diagnosing
             # the first production run meant downloading a gigabyte of artifacts
             # to answer "what plan was built"; the answer should be a small file
@@ -1165,7 +1172,7 @@ def install_runtime_hooks(
             except Exception:  # noqa: BLE001 - storing the plan is advisory
                 plan_blob = ""
             adapter.store.append(
-                "persistent_plan_built",
+                "persistent_plan_loaded" if restored else "persistent_plan_built",
                 finish_reason=finish_reason,
                 tool_call_returned=payload is not None,
                 plan_blob=plan_blob,
@@ -1179,7 +1186,7 @@ def install_runtime_hooks(
                 if hasattr(environment, "config") and hasattr(environment.config, "env"):
                     environment.config.env["GT_PLAN_ROOT"] = str(adapter.store.root / "plan")
                 rendering_receipt = {}
-                block = render_plan_block(plan, receipt=rendering_receipt)
+                block = render_plan_block(adapter.persistent_plan, receipt=rendering_receipt)
                 messages = getattr(agent, "messages", None)
                 if block and isinstance(messages, list) and len(messages) > 1:
                     task_message = messages[1]

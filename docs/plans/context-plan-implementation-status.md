@@ -64,9 +64,10 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   Check definitions now recover once from the chain-validated startup journal,
   preserve revised shared bindings, and revalidate current test source. Historical
   passing observations are not restored. Hash-linked design revisions and deferrals
-  now recover without replaying admitted requests or restoring proof. Full original
-  plan recovery, terminal interruption and externally anchored journal-tail
-  conservation remain open.
+  now recover without replaying admitted requests or restoring proof. Original
+  plan/context/baseline checkpoints now recover through native bootstrap without
+  another planning call or post-edit baseline capture. Terminal interruption and
+  externally anchored journal-tail conservation remain open.
 - [x] Automatically bind admissible initial plan commands through CheckSpec and
   group identical executions across requirement bindings. The CLI is supplementary.
 
@@ -108,10 +109,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   properties, assertions, resolution symbols/callsites/candidates, closure, and
   cochanges for this fixture.
 - [x] Implement a staged batch amendment API over one frozen revision, retaining
-  unchanged parser nodes and consuming cached complete parser inputs. Properties,
-  assertions, and derived layers are still reconstructed; this is not full structural reuse.
-- [ ] Copy the certified parent, retain unchanged structural rows, replace only
+  unchanged parser nodes and consuming cached complete parser inputs. Successor
+  producer `efa70e52` also retains exact parser properties, freshly target-bound
+  assertions, containment and taxonomy edges. Derived resolution still runs once.
+- [x] Copy the certified parent, retain unchanged parser structural rows, replace only
   changed/deleted structural rows, and remap cached parser-local references.
+  Nodes, parser properties, target-bound assertions, containment and taxonomy edges
+  are retained. Derived analysis and FTS publication remain with existing owners.
 - [x] Run the existing complete resolver/analysis exactly once per batch; republish
   derived layers without stale facts. Do not guess a narrowly complete resolver.
 - [ ] Reuse eligible history/cochange work; preserve embedding caches and LSP bindings.
@@ -181,6 +185,44 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Candidate 43 adds typed content-addressed checkpoints of the original plan,
+  complete inputs and initial baseline. Native restart restores later design
+  revisions into actual request bytes without another planning call, and never
+  restores passing authority. The real build_agent path no longer recaptures a
+  post-edit baseline; corrupt checkpoints leave baseline unknown. Original source/
+  graph revision IDs now flow from the index receipt into fresh plan inputs, and
+  rendering labels anchors as capture-time context, not current-workspace proof.
+  REDs: `original-plan-restart-red.xml`, `restart-baseline-red.xml`, and the corrupt
+  checkpoint case in `restart-baseline-42.xml`. Final installed run: 214 passed,
+  four explicit source-file checks deselected, zero skips, 102.88s
+  (`original-plan-restart-43-final.xml`). Those four plus flag-off source checks
+  passed separately: 16 passed, zero skips, 3.821s (`original-plan-source-43.xml`).
+  The initial broad run's four missing-source errors remain recorded in
+  `original-plan-restart-43.xml`. Wheel SHA256:
+  `28951b70ab92f5f63b7ea96f247fa04102b5bfdc465f7da8ff82ba20a8117c22`.
+
+- Exact producer `efa70e52` Linux build `34436550584` and full CI `34436549266`
+  passed. Actual downloaded static binary passed installed fixture proof
+  (`structural-binary-06.xml`, one test, zero skips, 10.66s): retained property,
+  assertion and structural-edge IDs; amended/fresh payload parity; immutable
+  parent; no foreign-key violations; 2 cache hits/1 miss/1 resolver pass.
+  All 317 Python wheel files match the exact archived commit, wheel SHA256
+  `cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9`.
+  Candidate manifest repinning remains outstanding. Canonical harness acceptance
+  `34436465709` passed at `81405e2c`, before these restart changes.
+
+- Producer `efa70e52` retains exact parser-owned properties/assertions and
+  containment/taxonomy edges using transactional inventories. Fresh assertion
+  target/score changes invalidate reuse; other edge owners are conserved.
+  Real CLI REDs showed unchanged property IDs 3 -> 25 and containment IDs
+  37 -> 76 before their respective fixes. The final command suite passed in
+  141.677s, including nine batch/fresh transition cases; store and parser suites
+  also passed. Additional insertion-failure rollback test passed with all focused
+  store cases (0.902s). Parent bytes remain immutable. Missing taxonomy kinds
+  caused one intermediate regression, fixed by using the canonical registry.
+  Exact installed Linux producer proof and build pins remain pending; no measured
+  end-to-end speedup or full-consumer equivalence is claimed.
 
 - Candidate 39 refuses contradictory exact semantic assertions for the same
   relation/literal identity, regardless of pass/fail order; unknown results also
