@@ -779,19 +779,31 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   and `product_effective_model_report_mismatch` is absent simply because
   `resolved_model` and `effective_model` agree. Nothing about tokens is wrong.
   THE DEFECT IS FINALIZATION ORDERING, exactly where the handoff said to look.
-  `runtime_receipts.py:806-816` compares a journal SUMMARY captured at one moment
-  against journal ROWS read at another, and requires equal counts, a matching head
-  and `valid is True`. Measured on disk:
-    rehearsal 04  reported 181, disk 183, valid=None, head match False
-                  tail after the summary: final_state, session_closed
-    rehearsal 05  reported 184, disk 188, valid=None, head match False
-                  tail: final_state, session_closed, graph_build_mode,
-                        graph_rebuild_embedding
-  So BOTH runs violate the rule on disk and it is not new. What differs is that 04
-  still issued a complete receipt while 05 did not, and the only difference in the
-  tail is two extra events from a background graph rebuild that finished after
-  `session_closed`. This is a race between receipt issuance and a background writer
-  appending to the journal, not a token-accounting bug.
+  CORRECTION to a first pass at this trace: the check reads the SEALED
+  `reproducibility_manifest.json`, not `gt.event_journal` from the report. The
+  manifest carries `valid: true` and `issues: []`, so validity was never the
+  problem; the counts are. Measured on disk:
+    rehearsal 04  manifest 183, journal 183   receipt issued in full
+    rehearsal 05  manifest 186, journal 188   issuance FAILED
+  The two extra rows in 05 are `graph_build_mode` and `graph_rebuild_embedding` --
+  a background graph build still running at the end, appending after the manifest
+  was sealed. 04 had nothing in flight and passed. So this is a RACE, not a
+  standing violation, which is why it appears intermittently.
+  The ordering that permits it is deliberate at every step. `GTSession.close`
+  calls `close_graph_coordinator`, which calls `close(wait=False)` ON PURPOSE:
+  an uncooperative in-flight pass otherwise holds the process open past its
+  deadline and the supervisor turns a scored submission into an infra timeout.
+  `close(wait=False)` cancels QUEUED work while a RUNNING build continues. The
+  manifest is sealed later still, in `miniswe_gt_run`, and that build's rows land
+  after it. The run therefore holds two correct-looking rules that contradict each
+  other: do not wait for a running graph build, and do not let anything append
+  after the seal.
+  `tests/test_receipt_finalization_ordering.py` states the second rule as an xfail
+  witness on the real `GTSession`/`MiniSweAdapter`, reproducing rehearsal 05's two
+  late rows and applying the same comparison the receipt makes. Its companion
+  passes, so the seal is sound when nothing is in flight. Resolving which rule
+  yields is a design decision and was NOT taken here: relaxing the conservation
+  check would be the same substitution as editing the expected-error list.
   ATTRIBUTION, stated carefully: the five `plan_accounting` rows added this session
   are NOT in the post-summary tail, so they are not the events breaking
   conservation. Whether this session changed the TIMING that lets the rebuild land
