@@ -744,6 +744,34 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   The full recipe is: LF clone, wheelhouse for build backends, producer binary
   COPIED and chmod 755, GT_INDEX_BINARY set, run from the checkout root.
 - [ ] Run canonical provider-free product acceptance and installed full-flow rehearsal.
+  CANONICAL CI: GREEN. Run **34473945205** passed at source `fd038e6c`, which is the
+  first run carrying the producer-identity guard, so it is also the proof that CI
+  now resolves the PINNED producer rather than a downloaded one.
+  INSTALLED FULL-FLOW REHEARSAL: RUN, AND **FAILED**. Repair scenario on the exact
+  committed artifact `cfa445ad` (source archived to `source-cfa445ad`, harness
+  wheel `wheels-78` built from that archive, producer wheel 06 and static binary
+  06), output `rehearsal-repair-05/`, `status: FAILED`.
+  What PASSED is most of the flow: `reproduction_verified`,
+  `pre_repair_source_stable`, `execution_evidence_verified`, `exact_repair_patch`,
+  `verifier_patch_matches`, `predicates_not_evaluated: []`, 10 transport requests.
+  Two issues remain, both real:
+    1. `unexpected_runtime_receipt_errors`. The observed list is nine entries; the
+       expected list in `scripts/gt_installed_rehearsal.py:338` is eight. Observed
+       carries `product_input_token_conservation_failed` and
+       `product_output_token_conservation_failed`; expected carries
+       `product_effective_model_report_mismatch`, which the run did not produce.
+    2. `native_graph_refresh_verified: false`.
+  THE EXPECTED LIST WAS NOT UPDATED TO MATCH. The handoff's own instruction for
+  this failure mode is explicit: "Do not merely replace the expected error list:
+  trace failure-receipt accounting and worker finalization ordering." Editing the
+  list would turn a red rehearsal green without changing anything the rehearsal
+  exists to check, which is the same substitution this tracker has caught several
+  times today.
+  NOT ESTABLISHED: whether this session's changes contributed. The rendered plan
+  block did change (stale-anchor line, acceptance annotations, unmapped-row notes)
+  and that moves prompt bytes, which is adjacent to token conservation -- adjacent
+  is not evidence, and the previous rehearsal that produced the eight-entry list
+  ran on an earlier artifact. Tracing this is the next action on this item.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
