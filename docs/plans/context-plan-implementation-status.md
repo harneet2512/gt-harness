@@ -743,7 +743,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   GT_RETRIEVAL_TEST_GRAPH, and one deliberate complement covered by full-smoke.
   The full recipe is: LF clone, wheelhouse for build backends, producer binary
   COPIED and chmod 755, GT_INDEX_BINARY set, run from the checkout root.
-- [ ] Run canonical provider-free product acceptance and installed full-flow rehearsal.
+- [x] Run canonical provider-free product acceptance and installed full-flow rehearsal.
   CANONICAL CI: GREEN. Run **34473945205** passed at source `fd038e6c`, which is the
   first run carrying the producer-identity guard, so it is also the proof that CI
   now resolves the PINNED producer rather than a downloaded one.
@@ -884,6 +884,57 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   artifact was UNADOPTED, not merely unobserved, `graph_current` stayed false,
   and the close-time recorder returned at its first guard -- which is exactly
   what it should do when the graph is not current.
+  BOTH HALVES ARE NOW GREEN, and the rehearsal half is reproducible by someone
+  who is not sitting at this workstation, which it never was before.
+    canonical CI      run 34494240109 at `5f4d69c6`, and again at every commit
+                      since; three consecutive greens carrying the
+                      producer-identity guard.
+    full-flow rehearsal  run **34503150207** at `1d75abeb`, GitHub-hosted
+                      ubuntu-24.04, `status: VERIFIED_SYNTHETIC_REPAIR`.
+      reproduction_verified        True     exact_repair_patch        True
+      pre_repair_source_stable     True     verifier_patch_matches    True
+      execution_evidence_verified  True     predicates_not_evaluated  []
+      native_graph_refresh_verified True    transport_requests        10
+      runtime_receipt_errors == ["synthetic_transport_not_paid_evidence"]
+    That last line is the repair scenario's exact required list
+    (`gt_installed_rehearsal.py:471`), and the expected-error list was never
+    edited to get there.
+  HONEST ATTRIBUTION, because the passing run does NOT prove the fix above. The
+  two publications land at journal rows 3 and 152, and 152 follows the snapshot
+  at row 150 -- the ordinary `record_repository_snapshot` path. Both builds (rows
+  145 and 147) finished before the last action, so the graph was adopted the
+  normal way and `close_graph_coordinator`'s drain never ran. This run took
+  rehearsal 04's shape. The drain remains a correct narrowing of a real window,
+  proved against rehearsal 06's shape by unit witness, and UNEXERCISED in any
+  live run so far. The box is ticked because the item asks for these two runs
+  and both are green, not because the race is proven closed.
+  GETTING IT ONTO A HOSTED RUNNER TOOK THREE FAILURES, each a real constraint
+  rather than a flake, and each is recorded because the next person will meet
+  them in the same order:
+    1. `inputs.scenario` is empty on a push trigger, not the choice default.
+    2. `_docker_compose_paths` is a PROPERTY on Pier's DockerEnvironment. The
+       host-gateway override shipped as a method, and every trial died in setup
+       with `TypeError: 'method' object is not iterable`. Its tests passed
+       against it because the stub defined its own method and never touched the
+       descriptor -- a green check over code that is not the code that runs.
+    3. Pier's generated squid config carries `acl Safe_ports port 80 443` with
+       `http_access deny !Safe_ports`. The workflow served the synthetic
+       transport on 8080, chosen because an unprivileged process cannot bind
+       below 1024, and every provider call returned a squid error page with
+       ZERO requests reaching the server. Both constraints are satisfied by
+       lowering `net.ipv4.ip_unprivileged_port_start` and serving on 80, which
+       also makes the CI run identical to the workstation's rather than a
+       variant. The workflow's DNS probe passed throughout run 34500788937
+       while every request was being refused on port policy, so the port is
+       pinned by a test that parses the ACL out of Pier's own
+       `squid_bootstrap_command()` rather than by another probe.
+  WHY IT MOVED OFF THE WORKSTATION AT ALL: Docker Desktop serves the Windows
+  drive over 9p and two consecutive local runs deadlocked in `p9_client_rpc`
+  (state D, uninterruptible) after `mkdir -p /installed-agent/bundle`, with
+  nothing about the rehearsal changed. Staging every input onto a VM-local
+  docker volume cleared that and then failed on a dense model directory Docker
+  had silently auto-created empty. One machine with unreconstructable state was
+  the whole evidence base for this item.
   FIXED at `5f4d69c6`: close now drains the coordinator before recording. The
   coordinator is closed FIRST so the drain cannot spawn work on the way out
   (`_closed` makes `consider_enrichment` return "closed", and queued work is
