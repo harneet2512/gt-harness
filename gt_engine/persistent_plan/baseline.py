@@ -353,6 +353,11 @@ def compare_to_baseline(
             status="unknown", passed_delta=passed_delta, failed_delta=failed_delta,
             detail="Aggregate counts cannot establish conservation of test identities", after=after,
         )
+    if after.exit_code not in (None, 0) and after.failed == 0 and after.errored == 0:
+        return RegressionReport(
+            status="unknown", passed_delta=passed_delta, failed_delta=failed_delta,
+            detail="Passing summary with nonzero exit cannot establish an intact baseline", after=after,
+        )
     return RegressionReport(
         status="intact", passed_delta=passed_delta, failed_delta=failed_delta,
         after=after,

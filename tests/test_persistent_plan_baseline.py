@@ -52,6 +52,19 @@ def _pytest_command() -> tuple[str, ...]:
     return (sys.executable, "-m", "pytest", "-v", "-p", "no:cacheprovider")
 
 
+def test_nonzero_exit_after_passing_summary_cannot_establish_intact_baseline(tmp_path):
+    (tmp_path / "test_ok.py").write_text("def test_ok(): assert True\n", encoding="utf-8")
+    before = run_baseline(str(tmp_path), budget_seconds=15, command=_pytest_command())
+    assert before.captured and before.passed == 1 and before.exit_code == 0
+    (tmp_path / "conftest.py").write_text(
+        "def pytest_sessionfinish(session, exitstatus):\n    session.exitstatus = 1\n", encoding="utf-8")
+    report = compare_to_baseline(before, str(tmp_path), budget_seconds=15)
+    assert report.after.passed == 1
+    assert report.after.exit_code == 1
+    assert report.status == "unknown"
+    assert "nonzero exit" in report.detail
+
+
 def test_budget_is_a_bounded_fraction_of_the_run():
     assert baseline_budget_seconds(5100) == pytest.approx(BASELINE_MAX_SECONDS)
     assert baseline_budget_seconds(1000) == pytest.approx(30.0)

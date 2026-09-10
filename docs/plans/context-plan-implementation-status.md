@@ -163,6 +163,12 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Real pytest shutdown-hook RED exposed `intact` despite a passing summary and
+  exit code 1. Final baseline comparison now reports `unknown` for a nonzero
+  exit without parsed failure/error attribution, preserving named regressions
+  and ordinary preexisting failures. Rebuilt wheel 13 passed 70 installed
+  baseline/integrity/gate/check tests, zero skips, in 18.84 seconds
+  (`D:/gt-context-proof/baseline-exit-green.xml`).
 - Missing-design cursor delivery now explicitly says `design pending` and names
   the existing revision command, without another planner call or graph work.
   The installed omission witness failed before the repair; rebuilt wheel 12
