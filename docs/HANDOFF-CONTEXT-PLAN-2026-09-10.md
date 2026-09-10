@@ -14,6 +14,68 @@ The authoritative checklist is `docs/plans/context-plan-implementation-status.md
 percentage. Its historical evidence paragraphs are cumulative; use exact commit
 and artifact identities, not the word “passed” from an older paragraph.
 
+### Update — 2026-09-10, later the same day, at `fad29bcf`
+
+62 checked and 6 open. The item count moved by eleven, and one of those moves
+was BACKWARDS: all-consumer graph parity was ticked on fixture-scale evidence
+and then reopened, because the first real repository it was tried on disproved
+the claim. Read the next paragraph before anything else in this document.
+
+**THE PRODUCER IS NOT DETERMINISTIC, AND THAT IS NOW THE DOMINANT BLOCKER.**
+Three full rebuilds of a byte-identical `click` checkout (105 parsed files)
+produce two different edge sets — 50,954 and 50,957 edges, different content —
+and the batch amend wobbles between exactly the same two. `-workers 1` is
+equally nondeterministic and lands on the identical pair of digests, so this is
+not resolver concurrency. What moves is receiver selection for same-named
+methods: `AliasedGroup.get_command` calls `Context.fail` in one build and
+`ParamType.fail` in another; `_AtomicFile.close` calls `Context.close` or
+`LazyFile.close`; `runner.invoke` binds to `Context.invoke` or
+`CliRunner.invoke` across five assertions; 359 of 43,680 `vta_flow_edge_fact`
+nodes differ at an identical row count.
+
+Three consequences, in order of how much they cost:
+
+1. It sets a CEILING on every parity claim in this project. No comparison
+   between two graphs can be tighter than the producer's agreement with itself,
+   so amend-versus-rebuild parity is not establishable at real scale by digest
+   equality until the tie-break is deterministic. This is producer work and
+   needs re-certification.
+2. A consumer asking who calls `fail` gets a different answer depending on
+   which build of the same code it reads. That is a correctness property of
+   every graph-backed answer, not only of the amend.
+3. It explains why the fixture-scale suites pass and why they were not
+   sufficient evidence. A six-file synthetic tree has no same-named methods for
+   the tie-break to act on. An eight-file fixture built specifically to have
+   that SHAPE is still deterministic — measured, not assumed. The defect needs
+   repository scale.
+
+Evidence and witnesses: `determinism-click.txt`, `arm-diff-click.txt`,
+`study-click.json` under `D:/gt-context-proof`, and
+`tests/test_producer_determinism.py`, which pairs a passing fixture guard with a
+real-repository test that XFAILs today and turns into an XPASS when the producer
+is repaired. A static scan of the vendored producer found 38 range-then-break
+sites, nearly all ranging over slices already sorted after map extraction; one
+is not (`internal/resolver/promote.go:567` over `map[fnlKey]int64`). That site
+is a confirmed member of the same class and is NOT attributed to the measured
+symptom, which lies in CALLS targets and VTA facts.
+
+**Six-repository performance study: harness built, one repository measured.**
+`scripts/graph_transition_study.py` (tested by
+`tests/test_graph_transition_study.py`, 13 cases). On `click`, five alternating
+repetitions give baseline median 6.94s against candidate median 8.10s: the
+amend is about 17% SLOWER, a 0.86x speedup. That is the smallest of the six and
+the amend's advantage should grow with size, but "should" is what the study
+exists to replace. The remaining five are the point of the exercise. The
+harness does NOT measure the blocked-versus-background split, checks or
+snapshots; those belong to the coordinator and the run loop and need their own
+measurement against the live path.
+
+**Persistent full-suite failures are environmental, verified at a clean HEAD**
+with no uncommitted work: two L6 wake tests resolve the producer by a route the
+`gt-linux-suite:3.12` image cannot reach, and two product-acceptance tests
+report `source_closure_differs_from_head`. Latest full installed run: 2,198
+tests, 4 failed, 89 skipped (`full-suite-76.xml`).
+
 ## Worktrees, branches, and authority
 
 | Purpose | Worktree | Branch | Implementation HEAD at handoff |
@@ -43,6 +105,32 @@ The harness pre-commit hook performs a read-only authority check, **not pytest**
 Its post-commit hook auto-pushes this branch. Do not assume committing ran tests.
 
 ## Immediate state: resume here
+
+### Superseded — the numbered list below is the state at handoff, not now
+
+Items 1–3 are CLOSED. CI has been green twice since, most recently
+**34465862429** at source `13c4e3b5`. Interruption rehearsal 06's expected-error
+accounting was fixed and committed at `eb9965ed`; the two uncommitted
+source-binding changes named in item 3 were committed at `c0455f36` and no
+longer exist as uncommitted work — do not go looking for them. Item 4 stands.
+
+Resume instead at, in this order:
+
+1. **The producer determinism defect described above.** It blocks all-consumer
+   parity and caps every graph comparison in the project. Everything else in
+   this list is smaller.
+2. **Finish the six-repository study.** One of six measured. Launch:
+   `scripts/graph_transition_study.py --repos-root <corpus> --workspace <tmp>
+   --binary <gt-index> --out <report.json> --repetitions 5 <repos...>` inside
+   `gt-linux-suite:3.12`. The corpus used is `D:/test-repos` (click, terraform,
+   cpython, sentry, grafana, kubernetes). It writes its report after EVERY
+   repository, so a slow one cannot lose the ones already done. Expect hours,
+   and do not run anything else CPU-heavy alongside it or the timings are junk.
+3. **The installed full-flow rehearsal** half of the canonical acceptance item.
+4. **Release artifact binding**, which needs the source to stop changing, and
+   the final review. Neither can start while 1 and 2 are moving.
+
+### Original handoff list, retained for its detail
 
 1. Check provider-free CI **34443015691**, source **7e9911ba**. It was in progress
    at handoff preparation. Prior CI **34442196007**, source **f5b9c94f**, PASSED.
