@@ -310,8 +310,25 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## 7. Installed release and performance — OPEN
 
-- [ ] Complete and audit the 21-capability inventory; retain historical 19-capability
+- [x] Complete and audit the 21-capability inventory; retain historical 19-capability
   records without rewriting their evidence.
+  DONE. Issued and independently verified at source revision 9affba20 in the
+  installed Linux environment with the pinned producer wheel 06 and its static
+  binary: all 21 identities WITNESSED, verify_feature_matrix reports 21/21 with
+  21 witnessed cells, matrix digest
+  112a46cbd219d74e9e5a159ffe0010dbd9b8178239dbfe08ba6f2b3c8b374b16.
+  Result: D:/gt-context-proof/feature-matrix-linux-67.json.
+  Structural audit first: all 21 features carry BOTH a positive and a negative
+  binding, no orphans in either direction, and all 51 bound witnesses resolve to
+  real tests. Three environment traps were the whole difficulty and none was a
+  code fault: the shared Windows venv is refused by the producer identity gate,
+  which is the gate working; an archived tree has no .git so the issuer's
+  git rev-parse HEAD fails and every identity reports missing; and a bind-mounted
+  producer binary arrives without its execute bit, so 13 graph-dependent
+  witnesses SKIP and the issuer correctly refuses to count a skip as proof.
+  Copy the binary and chmod 755 it, exactly as the rehearsal runner does.
+  A witnessed capability is exposure and binding evidence, NOT proof of causal
+  task benefit; that remains a separate question.
 - [ ] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
   hashes and update the candidate manifest only from real build evidence.
 - [ ] Run required installed tests with zero unexplained skips and real journal audit.
