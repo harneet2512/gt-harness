@@ -38,5 +38,6 @@
    "six-repository run-loop rows (driver built, sweep prepared not run)",
    "paid smoke approval gate"
   ]
- }
+ },
+ "packet_digest_sha256": "45dfeabbb78084c6fb8eef4da0d120daa25f8051b98792a03e28f7b13fcb7c2b"
 }
