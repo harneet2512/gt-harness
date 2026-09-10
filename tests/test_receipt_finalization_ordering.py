@@ -161,3 +161,51 @@ def test_the_run_can_tell_how_many_observations_the_seal_dropped(tmp_path):
     assert adapter._append_observation("graph_build_mode", mode="full") is False
     assert adapter._append_observation("graph_rebuild_embedding", state="skipped") is False
     assert adapter._dropped_observations == 2
+
+
+def test_a_refresh_that_completed_late_is_still_published_at_close(tmp_path, monkeypatch):
+    """A graph refresh nobody observed is a refresh the receipt cannot verify.
+
+    `_record_graph_publication` runs only from `record_repository_snapshot`, so
+    a rebuild is recorded only if some later action happens to take a snapshot.
+    Measured across two rehearsals of the same fixture:
+
+        rehearsal 04  second rebuild at row 155, snapshot at 171  ->  PUBLISHED
+        rehearsal 06  second rebuild at row 183, last snapshot 178 -> not published
+
+    Nothing was wrong with the rebuild in 06 -- `graph_build_mode` says
+    incremental with `analysis_state: complete`, and it finished before
+    `final_state`. It simply landed after the last action, so no snapshot
+    followed it and the fact went unrecorded. `native_graph_refresh_verified`
+    then reports False for a refresh that demonstrably happened.
+
+    Close is the last moment the run knows a rebuild will not be adopted later,
+    and it runs BEFORE `session_closed` and before the manifest is sealed, so
+    recording there cannot disturb journal conservation.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MiniSweAdapter(task_id="late-publish", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    session = GTSession(
+        GTSessionConfig(task_id=adapter.task_id, repo_root=str(repo),
+                        state_dir=str(adapter.store.root.parent), mode=GTMode.ADVISORY),
+        engine=adapter,
+    )
+    published: list[str] = []
+
+    def record() -> None:
+        published.append("recorded")
+        adapter.store.append("graph_publication", artifact_sha256="a" * 64,
+                             graph_sha256="b" * 64, repository_revision="rev2")
+
+    monkeypatch.setattr(adapter, "_record_graph_publication", record)
+    session.close("submitted")
+
+    assert published, "a completed refresh was never published at close"
+    rows = _journal_rows(adapter)
+    events = [row["event"] for row in rows]
+    # It must land BEFORE session_closed, or it breaks the seal it is meant to
+    # coexist with.
+    assert events.index("graph_publication") < events.index("session_closed")
+    assert _conserved(_seal(adapter), rows)

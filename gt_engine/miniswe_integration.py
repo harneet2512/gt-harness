@@ -1971,6 +1971,25 @@ class MiniSweAdapter(GroundtruthController):
         return True
 
     def close_graph_coordinator(self) -> None:
+        # A refresh that completed after the last action was never observed.
+        # `_record_graph_publication` runs only from `record_repository_snapshot`,
+        # so a rebuild finishing after the final action leaves no record even
+        # though it happened. Measured across two rehearsals of one fixture: the
+        # second rebuild landed at journal row 155 with a snapshot at 171 after
+        # it and WAS published; on the next run it landed at row 183 with the
+        # last snapshot at 178 and was not, and `native_graph_refresh_verified`
+        # then reported False for a refresh whose own row says
+        # `analysis_state: complete`.
+        #
+        # Close is the last moment the run knows no further rebuild will be
+        # adopted, and it runs before `session_closed` and before the manifest
+        # is sealed, so recording here cannot disturb conservation. It is
+        # correct-or-quiet: an unrecorded publication is the bug, and failing to
+        # record one must not take the run down with it.
+        try:
+            self._record_graph_publication()
+        except Exception:  # noqa: BLE001 - observing a refresh never fails a close
+            pass
         # From here the journal is sealed for observations. The run is about to
         # write `session_closed` and then seal its manifest; a build still in
         # flight must not append past that point.
