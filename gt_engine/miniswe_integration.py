@@ -661,6 +661,7 @@ class MiniSweAdapter(GroundtruthController):
         if getattr(self, "_initial_plan_checks_bound", False):
             return
         self._initial_plan_checks_bound = True
+        self._restore_plan_revisions()
         recovered_rows = self._restore_plan_check_definitions()
         if not self.store.startup_journal_valid:
             return
@@ -734,6 +735,68 @@ class MiniSweAdapter(GroundtruthController):
             self._pending_check_ids = pending
         return touched
 
+    @staticmethod
+    def _validated_design_revision(value: Any) -> dict:
+        allowed = {"approach", "verification_kind", "verification_command"}
+        if not isinstance(value, dict) or set(value) - allowed or any(not isinstance(v, str) for v in value.values()):
+            raise ValueError("invalid plan revision")
+        return value
+
+    def _restore_plan_revisions(self) -> None:
+        """Replay only hash-linked advisory edits; never restore evidence status."""
+        from dataclasses import replace
+
+        if getattr(self, "persistent_plan", None) is None:
+            return
+        if getattr(self, "_plan_revision_restore_attempted", False):
+            return
+        self._plan_revision_restore_attempted = True
+        if not self.store.startup_journal_valid:
+            return
+        seen = getattr(self, "_plan_requests_seen", set())
+        for event in self.store.startup_plan_events:
+            if event.get("event") != "plan_revision_applied":
+                continue
+            if event.get("revision_layout") != "gt.plan_revision.v1":
+                continue
+            plan = self.persistent_plan
+            try:
+                request_id = event["request_id"]
+                if not isinstance(request_id, str) or not request_id or Path(request_id).name != request_id:
+                    raise ValueError("invalid recovered request identity")
+                current = hashlib.sha256(plan.canonical_json().encode()).hexdigest()
+                if event["previous_plan_digest"] != current:
+                    raise ValueError("plan recovery base mismatch")
+                row_id = event["row_id"]
+                if plan.row(row_id) is None:
+                    raise ValueError("unknown recovered row")
+                operation = event["operation"]
+                candidate = plan
+                if operation == "revise":
+                    value = self._validated_design_revision(event["value"])
+                    candidate = replace(plan, rows=tuple(replace(row, **value) if row.row_id == row_id else row
+                                                         for row in plan.rows))
+                elif operation == "defer":
+                    reason = event.get("reason")
+                    if not isinstance(reason, str) or not reason.strip():
+                        raise ValueError("invalid recovered deferral")
+                elif operation != "bind-check":
+                    raise ValueError("unknown recovered operation")
+                if hashlib.sha256(candidate.canonical_json().encode()).hexdigest() != event["resulting_plan_digest"]:
+                    raise ValueError("plan recovery result mismatch")
+                self.persistent_plan = candidate
+                if operation == "defer":
+                    deferred = getattr(self, "_plan_deferred", {})
+                    deferred[row_id] = reason
+                    self._plan_deferred = deferred
+                seen.add(event["request_id"])
+                self.store.append("plan_revision_restored", request_id=event["request_id"],
+                                  row_id=row_id, operation=operation, evidence_restored=False)
+            except (KeyError, TypeError, ValueError) as exc:
+                self.store.append("plan_revision_restore_rejected", detail=str(exc))
+                break
+        self._plan_requests_seen = seen
+
     def publish_plan_state(self) -> None:
         from gt_harness.canonical_io import atomic_json
 
@@ -759,6 +822,7 @@ class MiniSweAdapter(GroundtruthController):
         """Admit CLI proposals through the single journal/engine owner."""
         from dataclasses import replace
 
+        self._restore_plan_revisions()
         plan = getattr(self, "persistent_plan", None)
         if plan is None:
             return
@@ -781,9 +845,7 @@ class MiniSweAdapter(GroundtruthController):
                 if not isinstance(value, dict):
                     raise ValueError("plan request value must be an object")
                 if operation == "revise":
-                    allowed = {"approach", "verification_kind", "verification_command"}
-                    if set(value) - allowed or any(not isinstance(v, str) for v in value.values()):
-                        raise ValueError("invalid plan revision")
+                    value = self._validated_design_revision(value)
                     plan.rows = tuple(replace(r, **value) if r.row_id == row_id else r for r in plan.rows)
                     # A changed design/check invalidates its old check bindings.
                     specs = getattr(self, "_check_specs", {})
@@ -806,7 +868,10 @@ class MiniSweAdapter(GroundtruthController):
                 else:
                     raise ValueError("unsupported plan operation")
                 self.store.append("plan_revision_applied", request_id=path.name, operation=operation,
-                                  row_id=row_id, previous_plan_digest=digest)
+                                  row_id=row_id, previous_plan_digest=digest,
+                                  revision_layout="gt.plan_revision.v1", value=value,
+                                  reason=request.get("reason", ""),
+                                  resulting_plan_digest=hashlib.sha256(plan.canonical_json().encode()).hexdigest())
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 self.store.append("plan_revision_rejected", request_id=path.name, detail=str(exc))
         self._plan_requests_seen = seen

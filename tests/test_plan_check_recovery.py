@@ -56,6 +56,60 @@ def test_corrupt_journal_cannot_restore_check_commands(tmp_path):
     assert not getattr(resumed, "_pending_check_ids", set())
 
 
+def test_restart_replays_design_and_deferral_without_replaying_requests(tmp_path):
+    import hashlib
+
+    first = adapter_at(tmp_path)
+    row_id = first.persistent_plan.rows[0].row_id
+    inbox = first.store.root / "plan" / "requests"
+    inbox.mkdir(parents=True)
+    for name, operation, value, reason in (
+        ("01.json", "revise", {"approach": "Preserve the existing public signature."}, ""),
+        ("02.json", "defer", {}, "Needs the caller migration."),
+    ):
+        (inbox / name).write_text(json.dumps({"plan_digest": hashlib.sha256(
+            first.persistent_plan.canonical_json().encode()).hexdigest(), "row_id": row_id,
+            "operation": operation, "value": value, "reason": reason}), encoding="utf-8")
+        first.apply_plan_requests()
+    resumed = adapter_at(tmp_path)
+    resumed.bind_initial_plan_checks()
+    assert resumed.persistent_plan.row(row_id).approach == "Preserve the existing public signature."
+    assert resumed.plan_row_state(row_id) == "DEFERRED"
+    assert resumed._plan_requests_seen == {"01.json", "02.json"}
+    resumed.apply_plan_requests()
+    events = [json.loads(line) for line in resumed.store.path.read_text(encoding="utf-8").splitlines()]
+    assert sum(row["event"] == "plan_revision_applied" for row in events) == 2
+
+
+@pytest.mark.parametrize("corruption", ["base", "result", "proof_grant", "request_identity"])
+def test_recovery_rejects_invalid_revision_without_partial_application(tmp_path, corruption):
+    import hashlib
+    from dataclasses import replace
+
+    first = adapter_at(tmp_path)
+    plan = first.persistent_plan
+    row = plan.rows[0]
+    candidate = replace(plan, rows=(replace(row, approach="Recovered design"),))
+    event = dict(request_id="revision.json", operation="revise", row_id=row.row_id,
+                 revision_layout="gt.plan_revision.v1", value={"approach": "Recovered design"},
+                 previous_plan_digest=hashlib.sha256(plan.canonical_json().encode()).hexdigest(),
+                 resulting_plan_digest=hashlib.sha256(candidate.canonical_json().encode()).hexdigest())
+    if corruption == "base":
+        event["previous_plan_digest"] = "0" * 64
+    elif corruption == "result":
+        event["resulting_plan_digest"] = "0" * 64
+    elif corruption == "proof_grant":
+        event["value"] = {"state": "PROVEN"}
+    else:
+        event["request_id"] = []
+    first.store.append("plan_revision_applied", **event)
+    resumed = adapter_at(tmp_path)
+    resumed.bind_initial_plan_checks()
+    assert resumed.persistent_plan.row(row.row_id).approach == row.approach
+    assert resumed.plan_row_state(row.row_id) == "UNVERIFIED"
+    assert "plan_revision_restore_rejected" in resumed.store.path.read_text(encoding="utf-8")
+
+
 def test_restart_preserves_shared_binding_revision(tmp_path):
     import hashlib
 

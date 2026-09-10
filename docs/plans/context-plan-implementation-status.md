@@ -63,8 +63,10 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Verify replay/restoration behavior across persisted state and interrupted runs.
   Check definitions now recover once from the chain-validated startup journal,
   preserve revised shared bindings, and revalidate current test source. Historical
-  passing observations are not restored. Full plan/deferral recovery, terminal
-  interruption and externally anchored journal-tail conservation remain open.
+  passing observations are not restored. Hash-linked design revisions and deferrals
+  now recover without replaying admitted requests or restoring proof. Full original
+  plan recovery, terminal interruption and externally anchored journal-tail
+  conservation remain open.
 - [x] Automatically bind admissible initial plan commands through CheckSpec and
   group identical executions across requirement bindings. The CLI is supplementary.
 
@@ -175,6 +177,15 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Candidate 33 restored validated design revisions and deferrals from the existing
+  chain-validated startup journal. Base/result digest mismatch, malformed request
+  identity and attempted proof grants are rejected before mutation. Installed
+  recovery/check/boundary/plan/native-runtime suites: 142 passed, zero skips,
+  65.59 seconds (`plan-revision-recovery-33.xml`); the missing-recovery RED is
+  retained in `plan-revision-recovery-red.xml`. This does not establish full native
+  interruption/resume. Canonical acceptance `34431080747` passed at `b954e63f`,
+  before these later changes; successor exact-commit acceptance remains required.
 
 - Omitted interaction assessments now remain explicit pending work in the
   immutable rendering, current cursor and published plan state, alongside the
