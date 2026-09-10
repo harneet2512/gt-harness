@@ -1672,6 +1672,20 @@ def install_runtime_hooks(
                             source_revision=execution.repository_revision,
                         ))
                 if session.capability_model_visible("evidence_delivery"):
+                    if session.allows_live_probes:
+                        # GT's own bounded probes run HERE, after the post-image
+                        # above was taken, and they write into the worktree:
+                        # `py_compile` drops bytecode beside every source it
+                        # checks, and the covering lane runs the repository's
+                        # own tests. Anything carried from before them describes
+                        # a tree GT has since moved itself, so the next action's
+                        # diff would charge GT's own bytecode to the agent --
+                        # a phantom edit, a spurious epoch bump, and evidence
+                        # invalidated for nothing. This is one of the points the
+                        # module comment above means by "GT itself may run a
+                        # subprocess against the worktree"; it was the one place
+                        # that did not honour it.
+                        carried_snapshot = None
                     rendered = _run_evidence(
                         adapter, command, output, semantic_returncode, adapter.global_action,
                         changed_files, edit_before_after, created_files,

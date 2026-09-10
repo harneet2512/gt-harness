@@ -433,8 +433,30 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   identities remain open.
 - [x] Route baseline execution through the existing isolated process-tree boundary;
   real installed Linux timeout test confirms the sleeping grandchild is reaped.
-- [ ] Exercise background writers, typed mutations, automatic checks, incomplete
+- [x] Exercise background writers, typed mutations, automatic checks, incomplete
   captures, and carried snapshots together in installed Linux tests.
+  `tests/test_snapshot_carry_interactions.py` drives the real `execute_actions`
+  with a shell that actually writes and counts real `capture_workspace` calls,
+  replacing a source-text assertion that only proved the code READ a certain
+  way. Eight cases, zero skips, installed Linux (`carry-72.xml`): a carried
+  post-image still charges the first action's write to the first action and the
+  second action captures once instead of twice; a surviving descendant, a
+  descendant scope the reaper does not own, and an incomplete capture each force
+  a real recapture; an automatic check generation bump and an observed background
+  writer each invalidate the carry; and a read-only typed query does NOT, because
+  dropping it there would charge every query the 1.08s this carry exists to avoid.
+  One real defect found and fixed. GT's own post-edit probes run AFTER the
+  post-image is taken and write into the worktree -- `py_compile` drops bytecode
+  beside every source it checks, and the covering lane runs the repository's own
+  tests. The carry survived them, so the next action's diff charged GT's own
+  bytecode to the agent: a phantom edit, a spurious epoch bump, and evidence
+  invalidated for nothing. The module comment already claimed the carry was
+  dropped wherever GT may run a subprocess against the worktree; this was the one
+  place that did not honour it. Reachable in ASSISTIVE with both live-probe
+  opt-ins, not on the advisory benchmark path. RED reproduced installed on Linux
+  before the fix. Three mutations each kill at least one test: removing the
+  live-probe drop, ignoring the check generation and background-writer flags, and
+  carrying an untrustworthy post-image.
 
 ## 6. Submission and official patch conservation — PARTIAL
 
