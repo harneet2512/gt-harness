@@ -13,6 +13,7 @@ import time
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 
 class RehearsalTransport(BaseHTTPRequestHandler):
@@ -33,6 +34,24 @@ class RehearsalTransport(BaseHTTPRequestHandler):
         if self._is_select_catalog_request(request):
             self.bootstrap_requests.append(request)
             self._respond_select_catalog(len(self.bootstrap_requests) - 1)
+            return
+        plan_tool = next((tool.get("function") for tool in request.get("tools") or ()
+                          if isinstance(tool, dict)
+                          and isinstance(tool.get("function"), dict)
+                          and tool["function"].get("name") == "write_persistent_plan"), None)
+        if plan_tool is not None:
+            self.bootstrap_requests.append(request)
+            row_ids = plan_tool["parameters"]["properties"]["rows"]["items"]["properties"]["row_id"]["enum"]
+            self._respond_bootstrap(len(self.bootstrap_requests) - 1, "write_persistent_plan", {
+                "understanding": "Synthetic calculator repair: addition currently subtracts; preserve the public function and verify the existing tests.",
+                "rows": [{
+                    "row_id": row_id,
+                    "approach": "Change calculator.py from left - right to left + right, preserving the signature and checking test_calculator.py.",
+                    "anchors": [],
+                    "verification_kind": "existing_test",
+                    "verification_command": "python3 -B -m unittest -v test_calculator",
+                } for row_id in row_ids],
+            })
             return
         ordinal = len(self.requests) - 1 - len(self.bootstrap_requests)
         if ordinal == 0:
@@ -107,16 +126,18 @@ class RehearsalTransport(BaseHTTPRequestHandler):
         """Answer the bootstrap with a real tool call over the offered catalog."""
         request = self.bootstrap_requests[ordinal]
         visible = re.findall(r"\"id\": *\"(focus-[0-9a-f]+)\"", json.dumps(request))
-        arguments = json.dumps({"ids": visible[:1]})
+        self._respond_bootstrap(ordinal, "select_catalog", {"ids": visible[:1]})
+
+    def _respond_bootstrap(self, ordinal: int, name: str, arguments: dict) -> None:
         payload = json.dumps({
             "id": f"synthetic-bootstrap-{ordinal}", "object": "chat.completion",
             "model": "synthetic-transport", "created": 0,
             "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
-                "role": "assistant", "content": "Synthetic transport catalog selection.",
+                "role": "assistant", "content": "Synthetic transport bootstrap response.",
                 "tool_calls": [{"id": f"synthetic-bootstrap-call-{ordinal}",
                                 "type": "function",
-                                "function": {"name": "select_catalog",
-                                             "arguments": arguments}}],
+                                "function": {"name": name,
+                                             "arguments": json.dumps(arguments)}}],
             }}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2,
                       "prompt_tokens_details": {"cached_tokens": 0}},

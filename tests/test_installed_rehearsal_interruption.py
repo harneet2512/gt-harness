@@ -22,6 +22,46 @@ from scripts.gt_installed_rehearsal import (
 
 
 class InstalledRehearsalInterruptionTests(unittest.TestCase):
+    def test_plan_bootstrap_does_not_consume_repair_action(self):
+        handler = type("PlanningTransport", (RehearsalTransport,), {
+            "requests": [], "commands": [], "bootstrap_requests": [],
+        })
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+        try:
+            tool = {"type": "function", "function": {
+                "name": "write_persistent_plan", "parameters": {"properties": {
+                    "rows": {"items": {"properties": {
+                        "row_id": {"enum": ["req-a", "req-b"]},
+                    }}},
+                }},
+            }}
+            for request in ({"messages": [], "tools": [tool]}, {"messages": []}):
+                body = json.dumps(request)
+                connection.request("POST", "/v1/chat/completions", body=body,
+                                   headers={"Content-Length": str(len(body))})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                payload = json.loads(response.read())
+                function = payload["choices"][0]["message"]["tool_calls"][0]["function"]
+                if request.get("tools"):
+                    self.assertEqual(function["name"], "write_persistent_plan")
+                    rows = json.loads(function["arguments"])["rows"]
+                    self.assertEqual([row["row_id"] for row in rows], ["req-a", "req-b"])
+                    self.assertTrue(all(row["verification_command"] for row in rows))
+                    self.assertEqual(handler.commands, [])
+                else:
+                    self.assertEqual(function["name"], "bash")
+                    self.assertEqual(handler.commands, ["python3 -m unittest -v"])
+            self.assertEqual(len(handler.bootstrap_requests), 1)
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_blocked_provider_request_releases_without_fabricating_response(self):
         handler = type("BlockedTransport", (RehearsalTransport,), {
             "requests": [{} for _ in range(6)],

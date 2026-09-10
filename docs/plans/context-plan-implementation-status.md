@@ -14,6 +14,15 @@ must pass again on the successor commit. Earlier local broad attempts are
 retained: Windows worktree Git pointers, uncommitted source closure, and
 offline build dependency availability prevented their release tests.
 
+Rehearsal transport repair: a real HTTP RED showed `write_persistent_plan`
+receiving a `bash` action and consuming repair ordinal zero. The synthetic
+transport now answers the offered requirement IDs with a fixture-specific
+plan/check and keeps both planning and catalog bootstraps outside action
+ordinals. Installed Linux wheel 46 passed 30 tests plus four subtests, zero
+skips (`rehearsal-lineage-installed-46.xml`); the combined source check passed
+41 tests with three explicitly excluded release/Git-environment tests.
+This proves transport behavior, not completion of the installed Harbor trial.
+
 Implement the approved targeted repairs to evidence, persistent planning,
 verification scheduling, incremental graph amendments, snapshots, submission,
 and installed product acceptance. Preserve the existing engine, graph consumers,
