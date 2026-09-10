@@ -125,9 +125,14 @@ three times over, with neutral memory. It is not failing structurally -- on
 keras it retains 10,055 of 10,698 parser nodes -- it is that both arms still run
 one full resolver pass and resolution is what costs.
 
-Semantic parity is TRUE on all three, one digest across every run of both arms,
-which is why the producer nondeterminism above is described as
-repository-dependent: click shows it, this corpus does not.
+Semantic parity is TRUE on kedro, keras, dynaconf and haystack -- one digest
+across every run of both arms -- and FALSE on conan-io__conan-17132, which gives
+three distinct edge digests across five builds of a byte-identical tree (34,457,
+34,459 and 34,460 edges). So the producer nondeterminism is repository-dependent
+but NOT confined to oversized repositories: it reaches the benchmark's own size
+and style class, roughly one repository in five here. The candidate arm wobbles
+across the same three states rather than a different set, so the amend inherits
+the defect rather than adding to it.
 
 An earlier version of this study left GT_PARSE_CACHE_ROOT unset in both arms, a
 real instrument defect that was found by reading the amend result line it was

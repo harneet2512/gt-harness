@@ -915,9 +915,20 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   and resolution is what costs. keras makes the point on its own: 694 parsed
   files take 126s where kedro's 328 take 6.3s, twice the files for twenty
   times the time.
-  SEMANTIC PARITY IS TRUE ON ALL THREE, one distinct digest across every run of
-  both arms. Combined with click's four digests, the producer nondeterminism is
-  confirmed repository-dependent and absent from this corpus.
+  SEMANTIC PARITY, and a CORRECTION to what those first three rows suggested.
+  kedro, keras, dynaconf and haystack each give ONE digest across every run of
+  both arms, and on that basis I wrote that the producer nondeterminism was
+  "absent from this corpus". It is not. `conan-io__conan-17132` (1,046 files)
+  gives THREE distinct edge digests across five baseline builds of a
+  byte-identical tree -- 34,457, 34,459 and 34,460 edges -- so the defect reaches
+  repositories in the benchmark's own size and style class, not only click.
+  Two details matter. The candidate arm wobbles across the SAME three states, not
+  a different set, so the amend is inheriting the producer's nondeterminism rather
+  than adding any of its own -- which is evidence FOR the amend's semantic
+  fidelity. And one repository in five showing it means a parity suite that
+  happens to pick quiet repositories will report success while the defect is
+  live, which is exactly how the fixture-scale parity claim was closed wrongly
+  earlier in this tracker.
   conan, haystack and matplotlib remain; matplotlib at 4,597 files is the one
   that will say whether the budget holds at the top of the benchmark's range.
   FIRST BENCHMARK-SCALE ROW, and it does not look like the large-repository rows.
