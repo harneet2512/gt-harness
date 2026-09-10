@@ -115,13 +115,25 @@ class ExternalStateStore:
         self._lock = threading.Lock()
         self._sequence = 0
         self._head = GENESIS_HASH
+        self.startup_plan_events: list[dict] = []
+        self.startup_journal_valid = True
         if self.path.exists():
             try:
                 verified = verify_event_journal(self.path)
+                self.startup_journal_valid = verified.valid
                 if verified.valid:
                     self._sequence = verified.event_count
                     self._head = verified.event_head
+                    with self.path.open(encoding="utf-8") as journal:
+                        for line in journal:
+                            if not line.strip():
+                                continue
+                            row = json.loads(line)
+                            if row.get("event") in {"plan_check_bound", "plan_revision_applied", "plan_revision_rejected"}:
+                                self.startup_plan_events.append(row)
             except Exception:
+                self.startup_journal_valid = False
+                self.startup_plan_events.clear()
                 # Legacy/partial state remains untouched. The next write starts
                 # a fresh v1 chain; the verifier will correctly flag the mixed
                 # journal rather than silently bless it.
@@ -646,9 +658,15 @@ class MiniSweAdapter(GroundtruthController):
         """Bind admissible simple plan checks automatically, without a new tool loop."""
         import shlex
 
+        if getattr(self, "_initial_plan_checks_bound", False):
+            return
+        self._initial_plan_checks_bound = True
+        recovered_rows = self._restore_plan_check_definitions()
+        if not self.store.startup_journal_valid:
+            return
         grouped: dict[tuple[str, ...], list[str]] = {}
         for row in getattr(self.persistent_plan, "rows", ()):
-            if not row.verification_command:
+            if not row.verification_command or row.row_id in recovered_rows:
                 continue
             try:
                 lexer = shlex.shlex(row.verification_command, posix=True, punctuation_chars=True)
@@ -666,6 +684,55 @@ class MiniSweAdapter(GroundtruthController):
                 self.bind_plan_check({"argv": list(argv), "requirement_ids": row_ids})
             except ValueError as exc:
                 self.store.append("plan_check_binding_pending", row_ids=row_ids, reason=str(exc))
+
+    def _restore_plan_check_definitions(self) -> set[str]:
+        """Recover validated definitions once; historical results confer no proof."""
+        from dataclasses import replace
+
+        from .persistent_plan.checks import CheckSpec, validation_source_digest
+        from .runtime_observation import capture_workspace
+
+        if not self.store.startup_journal_valid:
+            self.store.append("plan_check_restore_rejected", reason="invalid_startup_journal")
+            return set()
+        known = {row.row_id for row in getattr(self.persistent_plan, "rows", ())}
+        specs = {}
+        touched = set()
+        for event in self.store.startup_plan_events:
+            if event["event"] == "plan_check_bound":
+                try:
+                    spec = CheckSpec.from_dict(event, self.repo_root)
+                    if not set(spec.requirement_ids).issubset(known):
+                        raise ValueError("unknown_plan_row")
+                    specs[spec.check_id] = spec
+                    touched.update(spec.requirement_ids)
+                except (ValueError, TypeError) as exc:
+                    self.store.append("plan_check_restore_rejected", reason=str(exc))
+            else:
+                if event["event"] == "plan_revision_applied" and event.get("operation") == "revise":
+                    row_id = event.get("row_id")
+                    if not isinstance(row_id, str) or row_id not in known:
+                        self.store.append("plan_check_restore_rejected", reason="invalid_revised_row")
+                        continue
+                    touched.add(row_id)
+                    specs = {key: replace(spec, requirement_ids=tuple(
+                        identity for identity in spec.requirement_ids if identity != row_id
+                    )) for key, spec in specs.items()
+                        if any(identity != row_id for identity in spec.requirement_ids)}
+        if specs:
+            snapshot = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+            restored = getattr(self, "_check_specs", {})
+            pending = getattr(self, "_pending_check_ids", set())
+            for key, spec in specs.items():
+                if not spec.test_source_digest or validation_source_digest(spec, snapshot) != spec.test_source_digest:
+                    self.store.append("plan_check_restore_rejected", check_id=key, reason="test_source_identity_changed_or_missing")
+                    continue
+                restored[key] = spec
+                pending.add(key)
+                self.store.append("plan_check_restored", check_id=key, evidence_state="UNVERIFIED")
+            self._check_specs = restored
+            self._pending_check_ids = pending
+        return touched
 
     def publish_plan_state(self) -> None:
         from gt_harness.canonical_io import atomic_json
