@@ -551,15 +551,16 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   `collision_shape.py`.
   Patch and evidence: `determinism-root-cause.md`, `resolver-rootfix.go`,
   `determinism_ab.py`, `edge_diff.py`, `idcheck.py`, `method_diff.py`.
-  NOT SHIPPED, and the item stays open. This is producer source behind a certified
-  binary; landing it needs a producer rebuild and re-certification, which is the
-  same gate the release artifact binding item is blocked on. What changed is that
-  the blocker is no longer "producer work, cause unknown" -- it is a named site,
-  an eight-line diff, and a reproducer that runs without the certified binary.
-  CONSEQUENCE: amend-versus-rebuild digest parity cannot be established at real
-  scale while the producer's own repeatability is weaker than the comparison. No
-  route comparison can be tighter than the producer's run-to-run agreement. Making
-  the tie-break deterministic is producer work and needs re-certification.
+  SHIPPED at producer `87d2e89c` (determinism fix `d6fdf93d` + canonical
+  fingerprint recipe `87d2e89c`), certified binary `f7d50356...`. Verified on
+  the certified artifact: click 8 runs -> 1 digest (was 8 distinct), conan 5
+  runs -> 1 digest (was 3/5). The regression witness is now a real guard:
+  `TestSameNamedClassMembersResolveDeterministically` in the producer suite
+  (RED pre-fix at run 9/128, GREEN post-fix) and the repository-scale
+  `test_producer_determinism.py` XPASSed on the pinned binary.
+  Semantic note: the fix keeps the lowest (start_line, id) -- first definition
+  wins. Python runtime dispatch is last-definition-wins; the shipped choice is
+  the verified one and the alternative needs its own verification cycle.
   The fixture-scale evidence is unaffected and remains recorded:
   Cases and immutable parent: `tests/test_batch_amend_parity.py` builds a parent,
   applies one mutation, then builds the graph BOTH ways and requires the amended
@@ -757,36 +758,29 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   Copy the binary and chmod 755 it, exactly as the rehearsal runner does.
   A witnessed capability is exposure and binding evidence, NOT proof of causal
   task benefit; that remains a separate question.
-- [ ] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
+- [x] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
   hashes and update the candidate manifest only from real build evidence.
-  BLOCKED, AND NOW MEASURED RATHER THAN ASSUMED. The certified binary's declared
-  source is not reproducible from the vendored tree or from the commit it names.
-  `vendor/gt-index-linux-amd64.build-info.json` declares `git_commit=efa70e52...`
-  and `source_fingerprint=f7fca174...`, built 2026-09-10T04:16:51Z. Against that:
-    `vendor/gt-index-src/SOURCE-COMMIT`        193b9d93...  (a DIFFERENT commit)
-    vendored tree, producer's own recipe       4f612d4c...  (not f7fca174)
-    `git archive efa70e52 gt-index`, on Linux  367a641a...  (not f7fca174)
-  The recipe is the producer's own, `scripts/swebench/build_gt_index_linux.sh:73`,
-  run from `$REPO_DIR/gt-index` exactly as the build does.
-  WHY they diverge is NOT established and is deliberately not guessed at. A build
-  from a dirty working tree would explain it and so would several other things.
-  What is established is that the artifact binding this item asks for cannot be
-  written from real build evidence today, because no available tree reproduces the
-  certified binary's declared fingerprint.
-  CONSEQUENCE FOR THE PAID DISPATCH: both comparisons above are exactly what
-  `deepswe_gt_harness_product_p0731.yaml` ("GT Harness: DeepSWE paid smoke20")
-  performs, and they live ONLY there -- the free canonical workflow does not check
-  the binding at all. So a paid dispatch would fail its producer-source gate before
-  doing any work. `tests/test_vendored_producer_binding.py` moves both halves onto
-  the free suite as xfail witnesses carrying the measured digests, so the failure
-  is visible without spending anything and turns into XPASS when the artifacts are
-  repinned. A third test verifies the pure-Python fingerprint against the real
-  shell pipeline, so the witness cannot silently redefine what binding means.
-  The candidate manifest itself is INTERNALLY consistent: its `producer_sha256`
-  equals the vendored binary's bytes (`9e2973ea1060fc2c9236...`). The gap is
-  between the binary and its SOURCE, not between the manifest and the binary.
-  No artifact was repinned here. Repinning a certified binary on an unestablished
-  cause is exactly the move this item exists to prevent.
+  RESOLVED at producer `87d2e89c`, harness `5356c0b2`. The original divergence
+  had TWO stacked causes, now both closed:
+    (a) the 04:16 binary was stamped with a Windows-format fingerprint --
+        `sha256sum` emits `hash *path` on MSYS but `hash  path` on Linux, so
+        the outer digest differed by build host for identical content. The
+        recipe now normalizes the mode marker
+        (`build_gt_index_linux.sh`, producer `87d2e89c`), making the stamped
+        fingerprint platform-canonical.
+    (b) the vendored tree was a stale LF-bytes snapshot of a different commit.
+        It now carries the exact worktree bytes the recipe hashed, preserved
+        by `* -text` in `vendor/gt-index-src/.gitattributes`.
+  All identities agree: build-info `git_commit` == SOURCE-COMMIT == `87d2e89c`;
+  `source_fingerprint` `72fea328...` reproduces over both the vendored tree and
+  the producer worktree, on Windows and Linux; bundle `producer_sha256` ==
+  `f7d50356...` == vendored binary bytes; `verify_groundtruth_lineage` returns
+  PASS with zero failures against review inbox `128b46ab` (packet
+  `har83-context-plan-producer-87d2e89c`, basis: local determinism fix +
+  canonical fingerprint verification; producer CI run still pending upstream
+  push). The two xfail witnesses in `tests/test_vendored_producer_binding.py`
+  now pass and are permanent guards; the third test continues to pin the
+  pure-Python fingerprint to the real shell pipeline.
 - [x] Run required installed tests with zero unexplained skips and real journal audit.
   THE SAME DEFECT WAS LIVE IN CANONICAL CI, and that is the worse half.
   `.github/workflows/deepswe_gt_harness_product.yml` installs the vendored
