@@ -49,10 +49,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
-      # Port 80 is what the workstation used, but an unprivileged runner
-      # process cannot bind below 1024. The allowlist cares about the hostname,
-      # not the number.
-      GT_REHEARSAL_PORT: "8080"
+      # 80, and it has to be. Pier generates the proxy's squid config itself
+      # and it carries `acl Safe_ports port 80 443` with `http_access deny
+      # !Safe_ports`, so the agent can reach the synthetic transport on 80 or
+      # 443 and nowhere else. Run 34500788937 used 8080 -- picked because an
+      # unprivileged process cannot bind below 1024 -- and every provider call
+      # came back a squid error page with zero requests reaching the server.
+      # The two constraints pull opposite ways; the sysctl step below is how
+      # both are satisfied, and it keeps this identical to what the
+      # workstation ran rather than a variant of it.
+      GT_REHEARSAL_PORT: "80"
       TASK_IMAGE: public.ecr.aws/d3j8x8q7/swe-bench-202605:kh75679ajj3b8dtd7se3h7z0a1833y6r-v1.1
     steps:
       - uses: actions/checkout@v4
@@ -236,12 +242,27 @@ jobs:
           docker pull "$TASK_IMAGE"
           docker image inspect "$TASK_IMAGE" >/dev/null
 
+      - name: Let an unprivileged process bind the only port the proxy will carry
+        run: |
+          set -euo pipefail
+          # Squid allows 80 and 443; Linux reserves everything under 1024 for
+          # root. Lowering the boundary satisfies both without running the
+          # rehearsal itself as root, which would change the file ownership of
+          # every artifact it writes.
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
+          test "$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start)" -le "$GT_REHEARSAL_PORT"
+
       - name: Prove the proxy can reach the host before spending a rehearsal on it
         run: |
           set -euo pipefail
           # A rehearsal that dies on DNS looks exactly like a rehearsal that
           # failed on its subject, and it costs 20 minutes to find out. This
           # costs two seconds and names the failure precisely.
+          #
+          # It checks resolution only. It passed in run 34500788937 while every
+          # request was being refused by squid's port policy, which is why the
+          # port itself is pinned by tests/test_rehearsal_transport_port.py
+          # rather than by another probe here.
           python - <<'PY' &
           import http.server, os
           port = int(os.environ["GT_REHEARSAL_PORT"])
