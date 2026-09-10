@@ -174,6 +174,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- A follow-on installed RED found the CLI plan snapshot remained UNVERIFIED
+  after a boundary check changed the in-memory row to CHECK_PASSED. The existing
+  queue now publishes its final state once after draining, using the existing
+  content-deduplicated atomic writer. Candidate 23: 87 installed tests passed,
+  zero skips, 20.42 seconds (`check-publication-green.xml`); stale-state RED
+  retained in `check-publication-red.xml`. No extra check or graph rebuild.
+
 - Gate boundary characterization passed against installed candidate 22: 41 tests,
   zero skips, 7.72 seconds (`gate-boundaries.xml`). The exact 600-second/20-step
   boundary remains refusal-eligible, lower values escape, three stalled refusals

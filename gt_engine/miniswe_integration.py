@@ -894,6 +894,7 @@ class MiniSweAdapter(GroundtruthController):
             self._plan_check_observations = observations
             pending.discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
+        self.publish_plan_state()
 
     def plan_row_state(self, row_id: str) -> str:
         observations = getattr(self, "_plan_check_observations", {})

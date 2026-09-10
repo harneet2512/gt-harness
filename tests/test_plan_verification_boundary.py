@@ -45,6 +45,8 @@ def test_pending_check_at_native_decision_boundary(tmp_path, monkeypatch, phase,
     session.before_model([], 1)
     assert (check_id not in adapter._pending_check_ids) is executes
     assert adapter.plan_row_state(row_id) == ("CHECK_PASSED" if executes else "UNVERIFIED")
+    published = json.loads((adapter.store.root / "plan" / "current.json").read_text(encoding="utf-8"))
+    assert published["rows"][0]["state"] == adapter.plan_row_state(row_id)
     session.before_model([], 2)
     events = [json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()]
     assert sum(row["event"] == "plan_check_observed" for row in events) == int(executes)
