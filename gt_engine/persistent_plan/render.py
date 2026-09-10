@@ -14,6 +14,8 @@ paths more than once.
 """
 from __future__ import annotations
 
+import hashlib
+
 from . import PersistentPlan
 
 PLAN_TAG = "GT_PERSISTENT_PLAN"
@@ -33,9 +35,12 @@ def _truncate(lines: list[str], limit: int) -> tuple[list[str], int]:
     return kept, 0
 
 
-def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS) -> str:
+def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
+                      receipt: dict | None = None) -> str:
     """The immutable artifact the model reads for the rest of the task."""
     if plan.status == "ABSTAINED" or not plan.rows:
+        if receipt is not None:
+            receipt.clear()
         return ""
     head = [
         f"[{PLAN_TAG}]",
@@ -53,6 +58,7 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS) -> 
         ["", "REQUIREMENTS - each needs acceptance evidence before this is done:"]
     )
     body: list[str] = []
+    row_ranges: dict[str, tuple[int, int]] = {}
     ordered = list(plan.edit_order) or [row.row_id for row in plan.rows]
     rendered: set[str] = set()
     for row_id in ordered:
@@ -60,6 +66,7 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS) -> 
         if row is None or row_id in rendered:
             continue
         rendered.add(row_id)
+        start = len(body)
         body.append(f"  {row.row_id}: {row.text}")
         if row.approach:
             body.append(f"      design: {row.approach}")
@@ -71,16 +78,19 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS) -> 
             body.append(f"      acceptance: {row.verification_command}")
         elif row.verification_kind:
             body.append(f"      acceptance: {row.verification_kind} (no command given)")
+        row_ranges[row_id] = (start, len(body))
     for row in plan.rows:
         if row.row_id in rendered:
             continue
         rendered.add(row.row_id)
+        start = len(body)
         origin = f" [from {row.derived_from} under {row.mode_symbol}.{row.mode_member}]" if row.is_derived else ""
         body.append(f"  {row.row_id}: {row.text}{origin}")
         if row.approach:
             body.append(f"      design: {row.approach}")
         if row.verification_command:
             body.append(f"      acceptance: {row.verification_command}")
+        row_ranges[row.row_id] = (start, len(body))
 
     applying = plan.applicable_cells
     if applying:
@@ -133,9 +143,22 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS) -> 
     )
 
     kept, dropped = _truncate(body, max(0, limit - sum(len(x) + 1 for x in head)))
+    kept_count = len(kept)
     if dropped:
         kept.append(f"  ... {dropped} more plan lines omitted for length")
-    return "\n".join([*head, *kept])
+    block = "\n".join([*head, *kept])
+    if receipt is not None:
+        receipt.clear()
+        receipt.update({
+            "plan_rendering_layout": "gt.plan_rendering.v1",
+            "indexed_row_ids": [row.row_id for row in plan.rows],
+            "rendered_requirement_row_ids": [key for key, (start, _) in row_ranges.items() if start < kept_count],
+            "complete_row_block_ids": [key for key, (_, end) in row_ranges.items() if end <= kept_count],
+            "omitted_requirement_row_ids": [key for key, (start, _) in row_ranges.items() if start >= kept_count],
+            "rendered_sha256": hashlib.sha256(block.encode("utf-8")).hexdigest(),
+            "plan_rows_basis": "indexed_not_fully_delivered",
+        })
+    return block
 
 
 def _anchor_labels(plan: PersistentPlan, node_ids: tuple[int, ...]) -> str:

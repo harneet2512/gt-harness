@@ -1178,7 +1178,8 @@ def install_runtime_hooks(
                 adapter.publish_plan_state()
                 if hasattr(environment, "config") and hasattr(environment.config, "env"):
                     environment.config.env["GT_PLAN_ROOT"] = str(adapter.store.root / "plan")
-                block = render_plan_block(plan)
+                rendering_receipt = {}
+                block = render_plan_block(plan, receipt=rendering_receipt)
                 messages = getattr(agent, "messages", None)
                 if block and isinstance(messages, list) and len(messages) > 1:
                     task_message = messages[1]
@@ -1190,6 +1191,7 @@ def install_runtime_hooks(
                             rendered_bytes=len(block.encode("utf-8")),
                             plan_rows=len(plan.rows),
                             process_id=plan.process_id,
+                            **rendering_receipt,
                         )
         except Exception as exc:  # noqa: BLE001 - delivery is advisory
             session.degrade("persistent_plan_delivery", exc)

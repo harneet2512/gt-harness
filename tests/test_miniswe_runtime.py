@@ -310,6 +310,35 @@ class FakeAgent:
         return {}
 
 
+def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch):
+    import hashlib
+
+    from gt_engine.event_journal import verify_event_journal
+    from gt_engine.persistent_plan import build_plan_inputs
+
+    _configure_fixture_provider(monkeypatch)
+    task = "\n".join(f"The widget must preserve behavior {index}: " + "detail " * 60 for index in range(30))
+    adapter = MiniSweAdapter(task_id="plan-render", repo_root=str(tmp_path),
+                             state_dir=tmp_path / "state", predicates=[], issue_text=task)
+    adapter.plan_inputs = build_plan_inputs(task, repo_root=str(tmp_path), capture_baseline=False)
+    agent = FakeAgent()
+    agent.model = TransportFakeModel()
+    agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": task}]
+    install_runtime_hooks(agent, _session(adapter))
+    agent.model.query(agent.messages)
+    rows = [json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    delivered = next(row for row in rows if row["event"] == "persistent_plan_delivered")
+    request_text = agent.model.calls[-1][1]["content"]
+    # Runtime steering can follow the immutable plan in the same message.
+    suffix = request_text[request_text.index("[GT_PERSISTENT_PLAN]"):].encode()
+    block = suffix[:delivered["rendered_bytes"]]
+    assert delivered["rendered_sha256"] == hashlib.sha256(block).hexdigest()
+    assert delivered["omitted_requirement_row_ids"]
+    assert len(delivered["indexed_row_ids"]) > len(delivered["rendered_requirement_row_ids"])
+    assert delivered["plan_rows_basis"] == "indexed_not_fully_delivered"
+    assert verify_event_journal(adapter.store.path).valid
+
+
 def test_native_action_batch_has_session_owned_execution_receipts(tmp_path, monkeypatch):
     import subprocess
     import sys

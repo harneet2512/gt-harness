@@ -28,6 +28,44 @@ PROMPT = (
 )
 
 
+def test_render_receipt_distinguishes_index_from_delivered_row_content():
+    import hashlib
+
+    plan = _plan()
+    receipt = {}
+    block = render_plan_block(plan, limit=1, receipt=receipt)
+    assert receipt["indexed_row_ids"] == [row.row_id for row in plan.rows]
+    assert receipt["rendered_requirement_row_ids"] == []
+    assert receipt["complete_row_block_ids"] == []
+    assert receipt["omitted_requirement_row_ids"] == receipt["indexed_row_ids"]
+    assert receipt["rendered_sha256"] == hashlib.sha256(block.encode()).hexdigest()
+    full_receipt = {}
+    render_plan_block(plan, receipt=full_receipt)
+    assert full_receipt["complete_row_block_ids"] == receipt["indexed_row_ids"]
+    assert full_receipt["omitted_requirement_row_ids"] == []
+
+
+def test_render_receipt_does_not_call_partial_row_complete():
+    plan = _plan()
+    full = render_plan_block(plan)
+    first = plan.rows[0]
+    row_end = full.index(f"  {first.row_id}: {first.text}") + len(f"  {first.row_id}: {first.text}") + 1
+    receipt = {}
+    render_plan_block(plan, limit=row_end, receipt=receipt)
+    assert receipt["rendered_requirement_row_ids"] == [first.row_id]
+    assert receipt["complete_row_block_ids"] == []
+    assert receipt["omitted_requirement_row_ids"] == [plan.rows[1].row_id]
+
+
+def test_render_receipt_clears_previous_delivery_on_abstention():
+    plan = _plan()
+    receipt = {}
+    render_plan_block(plan, receipt=receipt)
+    plan.status = "ABSTAINED"
+    assert render_plan_block(plan, receipt=receipt) == ""
+    assert receipt == {}
+
+
 def _anchor(node_id: int = 1, name: str = "load") -> Anchor:
     return Anchor(
         node_id=node_id, name=name, qualified_name=name, label="Function",

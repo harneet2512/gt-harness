@@ -172,6 +172,20 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Plan rendering now journals exact indexed/rendered/complete/omitted row IDs
+  and the immutable block digest without increasing prompt bytes. Installed
+  native request interception verifies the exact rendered byte range, separately
+  from later steering text. Partial rows do not count as complete; abstention
+  clears stale receipts. Candidate 21: 157 passed, zero skips, 56.15 seconds,
+  `D:/gt-context-proof/plan-render-final.xml`. Native test initially hashed the
+  following steering text too; corrected the test boundary, not runtime bytes.
+  The missing receipt API RED is retained in `plan-render-red.xml`. This does not
+  establish model consumption or close the broader exposure/count inventory.
+- Canonical provider-free acceptance `34428047710` passed at `31cf1205`.
+  Check-definition recovery is pushed as `52e5a4cb`; its installed suite passed
+  80 tests without skips in 21.05 seconds (`check-recovery-20.xml`). It restores
+  validated definitions as pending, never historical proof. Full restart remains open.
+
 - Canonical acceptance `34428047710` PASSED on `31cf1205`.
 - Check recovery RED reproduced loss of pending definitions after constructing
   a new adapter over the existing journal. Rebuilt wheel 20 passed 80 installed
