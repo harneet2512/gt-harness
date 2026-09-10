@@ -1,0 +1,276 @@
+name: "GT Harness: installed full-flow rehearsal"
+
+# The installed full-flow rehearsal is half of the release gate, and until now
+# it ran only on one Windows workstation through Docker Desktop. That is a
+# problem twice over. Evidence nobody else can reproduce is weak evidence, and
+# Docker Desktop serves the Windows drive over 9p: two consecutive runs
+# deadlocked in `p9_client_rpc` (state D, uninterruptible) right after
+# `mkdir -p /installed-agent/bundle`, with nothing about the rehearsal changed.
+#
+# Every input is already reproducible in CI with a pinned digest -- the staging
+# steps below are lifted verbatim from the PAID workflow, which has been
+# provisioning exactly these assets for months. What this workflow removes is
+# the only expensive part: there is no provider. The rehearsal serves its own
+# synthetic transport in-process, so this runs for free and can run on every
+# push if it earns that.
+#
+# THE ONE THING THAT IS NOT A COPY is host.docker.internal. Pier puts the task
+# container on an `internal` network and routes its egress through a squid
+# proxy, and the transport allowlist in eval/pier_gt_harness_adapter.py accepts
+# only `host.docker.internal` or `127.0.0.1` as the synthetic endpoint. Docker
+# Desktop resolves that name for free; Linux does not. So the name has to
+# resolve inside the PROXY container -- not the task container, which never
+# talks to the host directly -- and that is what the `extra_hosts` override in
+# eval/pier_filtered_docker.py adds. It grants no domain: squid still refuses
+# anything the allowlist does not name.
+
+on:
+  # Not dispatch-only: GitHub will not offer workflow_dispatch for a workflow
+  # that is not yet on the default branch, and this one has to be runnable from
+  # the branch that is developing it. The rehearsal costs no provider call, so
+  # running it on every push to the integrity branch is affordable and is the
+  # point -- the failure it exists to catch is a finalization race that appears
+  # intermittently and cannot be reasoned about from one run.
+  push:
+    branches: [codex/context-plan-integrity]
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Rehearsal scenario"
+        type: choice
+        default: repair
+        options: [repair, forced-interruption]
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      # Port 80 is what the workstation used, but an unprivileged runner
+      # process cannot bind below 1024. The allowlist cares about the hostname,
+      # not the number.
+      GT_REHEARSAL_PORT: "8080"
+      TASK_IMAGE: public.ecr.aws/d3j8x8q7/swe-bench-202605:kh75679ajj3b8dtd7se3h7z0a1833y6r-v1.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and stage the exact treatment bundle
+        env:
+          BUNDLE_DIR: ${{ runner.temp }}/gt-treatment-bundle
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from gt_harness.product import build_product_bundle
+
+          root = Path.cwd()
+          output = Path(os.environ["BUNDLE_DIR"])
+          bundle = build_product_bundle(
+              root / "config/deepswe_product_bundle_v1.json", output_dir=output
+          )
+          wheel = output / "dist" / bundle["python_wheel"]["filename"]
+          records = {
+              "GT_GROUNDTRUTH_WHEEL_HOST": root / bundle["groundtruth"]["wheel_path"],
+              "GT_INDEX_BINARY_HOST": root / bundle["groundtruth"]["producer_path"],
+              "GT_HARNESS_WHEEL_HOST": wheel,
+              "GT_HARNESS_WHEEL_SHA256": bundle["python_wheel"]["sha256"],
+          }
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as handle:
+              for name, value in records.items():
+                  handle.write(f"{name}={value}\n")
+          PY
+          test -s "$BUNDLE_DIR/product-bundle.json"
+
+      - name: Install Pier and the canonical product source
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            --require-hashes -r config/product-requirements.lock
+          python -m pip install --disable-pip-version-check --no-deps "$GT_HARNESS_WHEEL_HOST"
+          test "$(python -c 'import importlib.metadata as m; print(m.version("mini-swe-agent"))')" = "2.4.6"
+          test "$(python -c 'import importlib.metadata as m; print(m.version("datacurve-pier"))')" = "0.3.1"
+
+      - name: Provision the pinned local retrieval model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          model_dir="$RUNNER_TEMP/snowflake-arctic-embed-m"
+          mkdir -p "$model_dir"
+          gh release download gt-retrieval-runtime-v1 \
+            --repo harneet2512/gt-harness \
+            --pattern model.onnx --pattern tokenizer.json --pattern manifest.json \
+            --dir "$model_dir"
+          echo "564e6c65ee0c739a486702e9e3e9b33c3f697c19c34dbe886bce9eec497ce971  $model_dir/model.onnx" | sha256sum -c -
+          echo "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854  $model_dir/tokenizer.json" | sha256sum -c -
+          echo "GT_DENSE_MODEL_DIR=$model_dir" >> "$GITHUB_ENV"
+
+      - name: Provision the pinned language servers
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Stage the pinned language servers for LSP promotion
+        run: |
+          set -euo pipefail
+          lsp_bin="$RUNNER_TEMP/lsp-bin"
+          mkdir -p "$lsp_bin"
+
+          # gopls: module-only, so version-pinned and checksum-verified by the
+          # Go module proxy against sum.golang.org.
+          GOBIN="$lsp_bin" go install golang.org/x/tools/gopls@v0.23.0
+
+          # rust-analyzer: released as a binary, pinned by tag and digest.
+          ra_gz="$RUNNER_TEMP/rust-analyzer.gz"
+          curl -fsSL -o "$ra_gz" \
+            https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-31/rust-analyzer-x86_64-unknown-linux-gnu.gz
+          echo "a775f9edb543bb0c077da339b783e89446092986cde921c9d8e1733b091080c6  $ra_gz" | sha256sum -c -
+          gunzip -c "$ra_gz" > "$lsp_bin/rust-analyzer"
+          chmod 755 "$lsp_bin"/*
+
+          # Fail loudly rather than staging an empty directory: a silently
+          # skipped provisioning step is how LSP stayed nominally on while
+          # contributing nothing.
+          test -x "$lsp_bin/gopls"
+          test -x "$lsp_bin/rust-analyzer"
+
+          # python, typescript and javascript are 12 of the 20 cohort tasks and
+          # their servers are npm packages. The task container has no network and
+          # no guaranteed Node, so the runtime is staged alongside them, exactly
+          # as the Python runtime already is.
+          node_tar="$RUNNER_TEMP/node.tar.xz"
+          curl -fsSL -o "$node_tar" \
+            https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz
+          echo "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2  $node_tar" | sha256sum -c -
+          node_root="$lsp_bin/node-runtime"
+          mkdir -p "$node_root"
+          tar -xJf "$node_tar" -C "$node_root" --strip-components=1
+
+          # Versions pinned; npm verifies package integrity against the
+          # registry-provided hashes it records while installing.
+          "$node_root/bin/npm" install --prefix "$node_root/servers" --no-fund --no-audit \
+            pyright@1.1.413 \
+            typescript-language-server@6.0.0 \
+            typescript@7.0.2
+
+          # Explicit shims rather than npm bin symlinks: symlinks do not survive
+          # the upload into the task environment, and a broken shim would look
+          # exactly like an absent server. Written with printf so the shebang
+          # stays on column zero inside this YAML block.
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "pyright/langserver.index.js" > "$lsp_bin/pyright-langserver"
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" > "$lsp_bin/typescript-language-server"
+          chmod 755 "$lsp_bin/pyright-langserver" "$lsp_bin/typescript-language-server"
+
+          # npm writes node_modules/.bin symlinks regardless of the shims
+          # above. They are unreachable in the task environment - symlinks do
+          # not survive the upload, which is why the shims exist - and
+          # write_lsp_manifest refuses to record a tree containing any symlink,
+          # so they killed the staging step itself. Removed at the source, so
+          # the manifest stays strict rather than learning to tolerate them.
+          find "$node_root" -type l -delete
+          test -z "$(find "$lsp_bin" -type l -print -quit)"
+
+          test -x "$node_root/bin/node"
+          test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
+          test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
+
+          # Record the staged tree. verify_lsp_assets opens
+          # $lsp_bin/manifest.json unconditionally, so without this the agent
+          # install raises FileNotFoundError and the task errors in setup
+          # before any model call - which is exactly what run 34046802932 did.
+          python -m gt_harness.lsp_assets --root "$lsp_bin" --write
+
+          echo "GT_LSP_BIN_HOST=$lsp_bin" >> "$GITHUB_ENV"
+
+      - name: Stage the verified uv installer for the task container
+        run: |
+          set -euo pipefail
+          installer="$RUNNER_TEMP/uv-install-0.11.32.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$installer" \
+            https://releases.astral.sh/github/uv/releases/download/0.11.32/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967  $installer" \
+            | sha256sum -c -
+          echo "GT_UV_INSTALLER_HOST=$installer" >> "$GITHUB_ENV"
+
+      - name: Stage the verified Python runtime for the task container
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cpython-3.12.13-20260718.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            'https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.12.13%2B20260718-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz'
+          echo "5854aa6ec71cad00334d5065633c210b2e7feb40956767a59a91791cadcf0b79  $archive" \
+            | sha256sum -c -
+          echo "GT_PYTHON_ARCHIVE_HOST=$archive" >> "$GITHUB_ENV"
+
+      - name: Stage the pinned Python dependency wheelhouse
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/gt-wheelhouse"
+          mkdir -p "$wheelhouse"
+          python -m pip download --only-binary=:all: --dest "$wheelhouse" \
+            "mini-swe-agent==2.4.6" "numpy==2.5.1" \
+            "onnxruntime==1.20.1" "tokenizers==0.23.1" \
+            "anthropic==0.120.2" "openai==2.50.0" \
+            "pydantic==2.13.4" "rich==15.0.0" \
+            "mcp==1.27.1" "structlog==25.5.0"
+          test -n "$(find "$wheelhouse" -type f -print -quit)"
+          echo "GT_WHEELHOUSE_HOST=$wheelhouse" >> "$GITHUB_ENV"
+
+      - name: Pull the fixture task image
+        run: |
+          set -euo pipefail
+          docker pull "$TASK_IMAGE"
+          docker image inspect "$TASK_IMAGE" >/dev/null
+
+      - name: Prove the proxy can reach the host before spending a rehearsal on it
+        run: |
+          set -euo pipefail
+          # A rehearsal that dies on DNS looks exactly like a rehearsal that
+          # failed on its subject, and it costs 20 minutes to find out. This
+          # costs two seconds and names the failure precisely.
+          python - <<'PY' &
+          import http.server, os
+          port = int(os.environ["GT_REHEARSAL_PORT"])
+          http.server.HTTPServer(("0.0.0.0", port), http.server.BaseHTTPRequestHandler).serve_forever()
+          PY
+          sleep 2
+          docker run --rm --add-host host.docker.internal:host-gateway ubuntu:24.04 \
+            bash -c "getent hosts host.docker.internal"
+          kill %1 || true
+
+      - name: Run the installed full-flow rehearsal
+        run: |
+          set -euo pipefail
+          python -m scripts.gt_installed_rehearsal \
+            --output "$RUNNER_TEMP/rehearsal" \
+            --source-sha "$(git rev-parse HEAD)" \
+            --image "$TASK_IMAGE" \
+            --port "$GT_REHEARSAL_PORT" \
+            --transport-url "http://host.docker.internal:${GT_REHEARSAL_PORT}/v1" \
+            --scenario "${{ inputs.scenario }}"
+
+      - name: Publish the rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rehearsal-${{ inputs.scenario }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/rehearsal/rehearsal.json
+            ${{ runner.temp }}/rehearsal/trials/**/agent/events.jsonl
+            ${{ runner.temp }}/rehearsal/trials/**/agent/gt-run.json
+            ${{ runner.temp }}/rehearsal/trials/**/trial.log
+          if-no-files-found: warn

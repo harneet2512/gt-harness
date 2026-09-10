@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -28,6 +29,44 @@ class PierFilteredDockerEnvironment(DockerEnvironment):
         if task_env_config.allow_internet:
             task_env_config = task_env_config.model_copy(update={"allow_internet": False})
         super().__init__(task_env_config=task_env_config, **kwargs)
+
+    # Pier puts `main` on an `internal` network and routes every byte of its
+    # egress through the squid proxy, so the synthetic transport endpoint has to
+    # resolve in the PROXY container, not the task container. Docker Desktop
+    # publishes `host.docker.internal` to every container for free; Linux does
+    # not, and `eval.pier_gt_harness_adapter` will only accept
+    # `host.docker.internal` or `127.0.0.1` as that endpoint -- and 127.0.0.1
+    # inside the proxy is the proxy. Without this the rehearsal cannot run
+    # anywhere but a Docker Desktop workstation, which is how it came to have
+    # exactly one reproducer.
+    #
+    # This grants no reachability of its own: squid still refuses every domain
+    # the agent's `network_allowlist` does not name, so on the paid path -- whose
+    # allowlist is openrouter.ai -- the alias is present and unusable.
+    HOST_GATEWAY_ALIAS = "host.docker.internal:host-gateway"
+
+    def _docker_compose_paths(self) -> list[Path]:
+        paths = super()._docker_compose_paths()
+        proxy_compose = getattr(self, "_egress_proxy_compose_path", None)
+        if proxy_compose is None:
+            # No proxy means no filtered egress to reach the host through, and
+            # writing an override for a service that will not exist would fail
+            # the compose merge rather than do nothing.
+            return paths
+        from pier.environments.agent_setup import EGRESS_PROXY_SERVICE
+
+        override = Path(proxy_compose).with_name("docker-compose-egress-host-gateway.json")
+        override.write_text(
+            json.dumps(
+                {"services": {EGRESS_PROXY_SERVICE: {
+                    "extra_hosts": [self.HOST_GATEWAY_ALIAS]}}},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        # Last, so it merges onto the proxy service pier just defined.
+        paths.append(override)
+        return paths
 
     @staticmethod
     def _read_cgroup_integer(path: Path) -> int | None:
