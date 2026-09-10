@@ -55,7 +55,8 @@ class RehearsalTransport(BaseHTTPRequestHandler):
                 } for row_id in row_ids],
             })
             return
-        ordinal = len(self.requests) - 1 - len(self.bootstrap_requests)
+        # A retry is another request for the same action, not a completed turn.
+        ordinal = len(self.commands)
         if ordinal == 0:
             command = "python3 -m unittest -v"
         elif ordinal == 1:
@@ -297,7 +298,9 @@ def _interruption_issues(
     if (teardown.get("baseline_checked") != len(baseline or [])
             or teardown.get("new_processes") != []):
         issues.append("late_descendants_survived")
-    if request_count != 7:
+    # Six completed actions, then at least one unanswered request. Transport
+    # retries remain parked at that same action and may increase this count.
+    if request_count < 7:
         issues.append("interruption_request_count")
     if (trajectory.get("info") or {}).get("exit_status") == "Submitted":
         issues.append("interruption_reported_submitted")
@@ -706,7 +709,7 @@ async def run(args) -> dict:
                 trigger=interruption.get("trigger") or {},
                 teardown=interruption.get("teardown") or {},
                 runtime_errors=receipt["runtime_receipt_errors"],
-                request_count=len(handler.requests),
+                request_count=len(handler.requests) - len(handler.bootstrap_requests),
             )
             if not receipt.get("verifier_patch_matches"):
                 issues.append("verifier_patch_identity_mismatch")

@@ -23,6 +23,29 @@ from scripts.gt_installed_rehearsal import (
 
 
 class InstalledRehearsalInterruptionTests(unittest.TestCase):
+    def test_interrupted_transport_retries_never_advance_to_submit(self):
+        import io
+
+        release = threading.Event()
+        release.set()
+        handler = type("RetryTransport", (RehearsalTransport,), {
+            "requests": [{}] * 6, "commands": ["prior"] * 6,
+            "bootstrap_requests": [], "interrupt_at_ordinal": 6,
+            "provider_wait_started": threading.Event(), "release_provider_wait": release,
+        })
+        payload = json.dumps({"messages": [], "tools": []}).encode()
+        for _ in range(2):
+            request = object.__new__(handler)
+            request.headers = {"content-length": str(len(payload))}
+            request.rfile = io.BytesIO(payload)
+            request.wfile = io.BytesIO()
+            request.send_response = lambda *args: None
+            request.send_header = lambda *args: None
+            request.end_headers = lambda: None
+            request.do_POST()
+            self.assertEqual(request.wfile.getvalue(), b"")
+        self.assertEqual(len(handler.commands), 6)
+
     def test_rehearsal_uses_the_task_owned_committed_patch_collector(self):
         import tomllib
 
@@ -95,7 +118,7 @@ class InstalledRehearsalInterruptionTests(unittest.TestCase):
     def test_blocked_provider_request_releases_without_fabricating_response(self):
         handler = type("BlockedTransport", (RehearsalTransport,), {
             "requests": [{} for _ in range(6)],
-            "commands": [],
+            "commands": ["prior"] * 6,
             "interrupt_at_ordinal": 6,
             "provider_wait_started": threading.Event(),
             "release_provider_wait": threading.Event(),
@@ -122,11 +145,11 @@ class InstalledRehearsalInterruptionTests(unittest.TestCase):
         try:
             self.assertTrue(handler.provider_wait_started.wait(timeout=2))
             self.assertTrue(client.is_alive())
-            self.assertEqual(handler.commands, [])
+            self.assertEqual(handler.commands, ["prior"] * 6)
             handler.release_provider_wait.set()
             client.join(timeout=2)
             self.assertFalse(client.is_alive())
-            self.assertEqual(handler.commands, [])
+            self.assertEqual(handler.commands, ["prior"] * 6)
             self.assertNotEqual(outcome, [200])
         finally:
             handler.release_provider_wait.set()

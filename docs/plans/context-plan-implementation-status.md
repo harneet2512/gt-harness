@@ -4,6 +4,15 @@ Updated: 2026-09-10. Owner: current implementation session.
 
 ## Scope and release state
 
+Forced-interruption rehearsal 05 collected a gradable exact repair and reaped
+the observed process tree, but FAILED: a retried HTTP request advanced the
+canned action ordinal and fabricated a later submit response. Rehearsal action
+ordinals now count returned commands, so retries remain blocked at the same
+action. The interruption census excludes bootstrap requests and permits
+unanswered retries; the six-command/no-submit/receipt/teardown checks remain.
+RED: `rehearsal-retry-red.xml`; installed wheel 59: 98 tests plus four subtests
+passed (`rehearsal-retry-59.xml`). Successor actual interruption remains required.
+
 Canonical provider-free CI `34442196007` PASSED at `f5b9c94f`.
 Baseline capture completeness is now mandatory: missing/false capture receipts
 cannot produce a captured passing baseline. Both RED cases reproduced the old
