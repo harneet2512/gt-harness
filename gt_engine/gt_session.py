@@ -656,6 +656,8 @@ class GTSession:
                 self._engine._current_check_environment_sha256 = hashlib.sha256(
                     canonical_json_bytes(environment.execution_env())).hexdigest()
             apply_requests()
+        if getattr(self._engine, "phase", "") == "VERIFY":
+            self._drain_verification_boundary()
         candidates = list(self._queued_decision_candidates)
         contract_candidate: tuple[str, str] | None = None
         contract_unit_id = ""
@@ -1166,6 +1168,25 @@ class GTSession:
             else max(0, step_limit - int(getattr(agent, "n_calls", 0) or 0))
         )
         return remaining_seconds, remaining_steps
+
+    def _drain_verification_boundary(self) -> None:
+        """Coalesce pending checks before a verification decision, preserving reserve."""
+        if not getattr(self._engine, "_pending_check_ids", None):
+            return
+        from .persistent_plan.gate import MIN_REMAINING_SECONDS, budget_allows_refusal
+
+        remaining_seconds, remaining_steps = self.plan_gate_budget()
+        if not budget_allows_refusal(remaining_seconds, remaining_steps)[0]:
+            return
+        allowance = min(30, max(0, remaining_seconds - MIN_REMAINING_SECONDS))
+        environment = getattr(self._plan_agent, "env", None)
+        drain = getattr(self._engine, "drain_plan_checks", None)
+        if allowance < 1 or environment is None or not callable(drain):
+            return
+        try:
+            drain(environment, budget_seconds=allowance)
+        except Exception as exc:  # verification plumbing must not prevent the native decision
+            self.degrade("plan_check_boundary", exc)
 
     def plan_submit_gate(self) -> bool:
         """Decide, BEFORE the submit command runs, whether to let it through.

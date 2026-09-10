@@ -55,7 +55,9 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Prove the complete queue lifecycle with real installed executions: repeated
   edits, superseding revisions, multiple bindings, equivalent agent execution,
   mutation during checks, timeouts, and the bounded total verification allowance.
-- [ ] Finish verification-boundary draining beyond explicit submission.
+- [x] Drain coalesced checks before the next model decision in VERIFY, in addition
+  to submission. Preserve the existing per-pass cap and submission reserve;
+  do not run checks on every implementation turn or rerun discharged work.
 - [ ] Verify replay/restoration behavior across persisted state and interrupted runs.
   Check definitions now recover once from the chain-validated startup journal,
   preserve revised shared bindings, and revalidate current test source. Historical
@@ -171,6 +173,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Non-submission verification boundary: installed RED left a registered check
+  pending in VERIFY despite ample budget. Candidate 22 now executes that real
+  isolated pytest check before context selection. Implementation turns, exhausted
+  reserve and fewer than 20 remaining steps do not execute it; a second decision
+  does not duplicate it. Executor exceptions retain pending work and do not block
+  the model. 146 installed regressions passed without skips in 55.33 seconds
+  (`check-boundary-green.xml`); final five boundary cases passed in 5.40 seconds
+  (`check-boundary-final.xml`). The initial fixture called start_task with an
+  unsupported argument; corrected before the valid RED. This closes boundary
+  scheduling, not the separate total-allowance/restart lifecycle requirements.
 
 - Plan rendering now journals exact indexed/rendered/complete/omitted row IDs
   and the immutable block digest without increasing prompt bytes. Installed
