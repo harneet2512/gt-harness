@@ -610,7 +610,8 @@ class GTSession:
             states = {r.row_id: row_state(r.row_id) for r in plan.rows} if callable(row_state) else {}
             previous = self._last_plan_unmet
             cursor_identity = (unmet, getattr(self._engine, "repository_revision", ""),
-                               tuple((r.row_id, r.text, r.approach, r.verification_command, states.get(r.row_id))
+                               tuple((r.row_id, r.text, r.approach, r.verification_command, states.get(r.row_id),
+                                      plan.pending_interactions(r.row_id))
                                      for r in plan.rows))
             if getattr(self, "_last_plan_cursor_identity", None) == cursor_identity:
                 return None

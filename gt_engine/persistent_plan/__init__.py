@@ -198,6 +198,18 @@ class PersistentPlan:
                 return item
         return None
 
+    def pending_interactions(self, row_id: str) -> tuple[tuple[str, str], ...]:
+        """Unassessed source-row/mode cells; omitted is not an assessment of False."""
+        ledger = getattr(self.inputs, "ledger", None)
+        if ledger is None or ledger.by_id(row_id) is None:
+            return ()
+        from .bootstrap import mode_pairs
+
+        assessed = {(cell.mode_symbol, cell.member) for cell in self.interactions
+                    if cell.row_id == row_id and type(cell.applies) is bool and cell.reason.strip()}
+        return tuple(sorted({(mode.symbol, member) for key, mode in mode_pairs(self.inputs) if key == row_id
+                             for member in mode.members} - assessed))
+
     def counts(self) -> dict[str, Any]:
         counts = dict(self.inputs.counts())
         counts.update(
@@ -206,6 +218,8 @@ class PersistentPlan:
                 "plan_rows": len(self.rows),
                 "derived_rows": len(self.derived_rows),
                 "interaction_cells": len(self.interactions),
+                "pending_interaction_cells": sum(len(self.pending_interactions(row.row_id)) for row in self.rows),
+                "rows_with_pending_design": sum(not row.approach.strip() for row in self.rows),
                 "applies_true": len(self.applicable_cells),
                 "rows_with_check_commands": sum(
                     1 for row in self.rows if row.verification_command

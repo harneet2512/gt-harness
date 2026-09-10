@@ -66,6 +66,20 @@ def test_render_receipt_clears_previous_delivery_on_abstention():
     assert receipt == {}
 
 
+def test_omitted_interactions_are_pending_not_implicitly_false():
+    from gt_engine.persistent_plan.anchors import ModeCandidate
+    from gt_engine.persistent_plan.cursor import render_cursor
+
+    plan = _plan()
+    first = plan.rows[0].row_id
+    plan.inputs.anchors.modes = (ModeCandidate("Mode", 3, "mode.py", "enum", ("A", "B"), (1,)),)
+    plan.interactions = (InteractionCell(first, "Mode", "A", False, "independent"),)
+    assert plan.pending_interactions(first) == (("Mode", "B"),)
+    assert plan.counts()["pending_interaction_cells"] == 1
+    assert "interaction assessment pending: Mode.B" in render_plan_block(plan)
+    assert "interaction assessment pending: Mode.B" in render_cursor(plan, (first,))
+
+
 def _anchor(node_id: int = 1, name: str = "load") -> Anchor:
     return Anchor(
         node_id=node_id, name=name, qualified_name=name, label="Function",

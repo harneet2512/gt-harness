@@ -79,6 +79,10 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         elif row.verification_kind:
             body.append(f"      acceptance: {row.verification_kind} (no command given)")
         row_ranges[row_id] = (start, len(body))
+        pending = plan.pending_interactions(row_id)
+        if pending:
+            body.append("      interaction assessment pending: " + ", ".join(f"{symbol}.{member}" for symbol, member in pending))
+            row_ranges[row_id] = (start, len(body))
     for row in plan.rows:
         if row.row_id in rendered:
             continue
@@ -91,6 +95,10 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         if row.verification_command:
             body.append(f"      acceptance: {row.verification_command}")
         row_ranges[row.row_id] = (start, len(body))
+        pending = plan.pending_interactions(row.row_id)
+        if pending:
+            body.append("      interaction assessment pending: " + ", ".join(f"{symbol}.{member}" for symbol, member in pending))
+            row_ranges[row.row_id] = (start, len(body))
 
     applying = plan.applicable_cells
     if applying:

@@ -34,6 +34,18 @@ PROMPT = (
 )
 
 
+@pytest.mark.parametrize("applies", ["false", "true", 0, 1, None])
+def test_interaction_assessment_requires_an_actual_boolean(tmp_path, graph, applies):
+    inputs = build_plan_inputs(PROMPT, graph_db=str(graph), repo_root=str(tmp_path), capture_baseline=False)
+    row_id = inputs.ledger.rows[0].row_id
+    _rows, cells, _order, gaps = validate_plan({"interactions": [{
+        "row_id": row_id, "mode_symbol": "DebugMode", "member": "ALL",
+        "applies": applies, "reason": "assessment",
+    }]}, inputs)
+    assert not cells
+    assert (row_id, "interaction_assessment_not_boolean") in gaps
+
+
 @pytest.fixture
 def graph(tmp_path):
     path = tmp_path / "graph.db"

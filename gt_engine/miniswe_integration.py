@@ -745,6 +745,7 @@ class MiniSweAdapter(GroundtruthController):
             "plan_digest": hashlib.sha256(plan.canonical_json().encode()).hexdigest(),
             "source_revision": self.repository_revision,
             "rows": [{**row.as_dict(), "state": self.plan_row_state(row.row_id),
+                      "pending_interactions": [list(cell) for cell in plan.pending_interactions(row.row_id)],
                       "source": (ledger.by_id(row.row_id).as_dict()
                                  if ledger is not None and ledger.by_id(row.row_id) else {})}
                      for row in plan.rows],

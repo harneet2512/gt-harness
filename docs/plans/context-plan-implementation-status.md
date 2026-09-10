@@ -82,7 +82,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   and journal owner. A real CLI-to-engine test rejects direct proof grants.
 - [x] Add an all-row ID index and retrieval instructions to the plan rendering.
 - [ ] Finish full source-span/example delivery and long/unfenced code-block cases.
-- [ ] Make omitted designs and interaction cells explicit pending work under the
+- [x] Make omitted designs and interaction cells explicit pending work under the
   existing planner limits; preserve stable requirement identities.
 - [ ] Finish anchor/source-revision validation and distinguish existing versus
   proposed symbols/tests in plan data and rendering.
@@ -175,6 +175,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Omitted interaction assessments now remain explicit pending work in the
+  immutable rendering, current cursor and published plan state, alongside the
+  existing missing-design warning. Only the canonical graph-connected mode pairs
+  are considered; planner limits and its single call are unchanged. Invalid
+  string/numeric/null boolean values are rejected instead of silently coerced.
+  Candidate 31: 177 installed tests passed in 54.10 seconds; four source-reading
+  fixtures were explicitly run in the separate 50-test source suite (3.511s).
+  Native transport verifies pending assessment text in the exact plan bytes.
+  Evidence: `interaction-31.xml`, `interaction-bootstrap-source-final.xml`.
+  Earlier missing-input compatibility and wrongly addressed source deselections
+  failed and are retained; five coercion REDs are in `interaction-type-red.xml`.
 
 - Gate evidence now records separate predicate mapping, unmapped rows, bound
   check passes/failures, deferred/unverified rows and baseline assessment. Every

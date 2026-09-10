@@ -109,6 +109,10 @@ def render_cursor(
     if states.get(row_id):
         lines.append(f"    evidence state: {states[row_id]}")
     lines.append(f"    {_clip(row.text, MAX_TEXT_CHARS)}")
+    pending_cells = plan.pending_interactions(row_id)
+    if pending_cells:
+        lines.append("    interaction assessment pending: " + ", ".join(
+            f"{symbol}.{member}" for symbol, member in pending_cells))
     if row.approach:
         lines.append(f"    design: {_clip(row.approach, MAX_TEXT_CHARS)}")
     else:

@@ -321,6 +321,13 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     adapter = MiniSweAdapter(task_id="plan-render", repo_root=str(tmp_path),
                              state_dir=tmp_path / "state", predicates=[], issue_text=task)
     adapter.plan_inputs = build_plan_inputs(task, repo_root=str(tmp_path), capture_baseline=False)
+    from gt_engine.persistent_plan.anchors import Anchor, ModeCandidate
+
+    first_id = adapter.plan_inputs.ledger.rows[0].row_id
+    adapter.plan_inputs.anchors.anchors[first_id] = (Anchor(
+        node_id=1, name="widget", qualified_name="widget", label="Function", file_path="widget.py",
+        start_line=1, signature="def widget():", language="python", basis="exact_name"),)
+    adapter.plan_inputs.anchors.modes = (ModeCandidate("Mode", 2, "mode.py", "enum", ("A", "B"), (1,)),)
     agent = FakeAgent()
     agent.model = TransportFakeModel()
     agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": task}]
@@ -333,6 +340,7 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     suffix = request_text[request_text.index("[GT_PERSISTENT_PLAN]"):].encode()
     block = suffix[:delivered["rendered_bytes"]]
     assert delivered["rendered_sha256"] == hashlib.sha256(block).hexdigest()
+    assert b"interaction assessment pending: Mode.A, Mode.B" in block
     assert delivered["omitted_requirement_row_ids"]
     assert len(delivered["indexed_row_ids"]) > len(delivered["rendered_requirement_row_ids"])
     assert delivered["plan_rows_basis"] == "indexed_not_fully_delivered"

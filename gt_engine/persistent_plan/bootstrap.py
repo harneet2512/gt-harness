@@ -555,12 +555,15 @@ def validate_plan(
         if member not in mode.members:
             abstentions.append((row_id, "phantom_mode_member"))
             continue
+        if type(item.get("applies")) is not bool:
+            abstentions.append((row_id, "interaction_assessment_not_boolean"))
+            continue
         interactions.append(
             InteractionCell(
                 row_id=row_id,
                 mode_symbol=symbol,
                 member=member,
-                applies=bool(item.get("applies")),
+                applies=item["applies"],
                 reason=str(item.get("reason") or "")[:200],
             )
         )
