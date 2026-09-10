@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+common_git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+common_root=$(dirname "$common_git_dir")
+hooks_path="$common_root/.githooks"
+
+git config --local core.hooksPath "$hooks_path"
+configured=$(git config --path --get core.hooksPath)
+if [ "$configured" != "$hooks_path" ]; then
+  printf '%s\n' 'hook installation refused: core.hooksPath did not persist' >&2
+  exit 1
+fi
+
+for hook in pre-commit post-commit; do
+  if [ ! -x "$hooks_path/$hook" ]; then
+    printf 'hook installation refused: %s is not executable\n' "$hooks_path/$hook" >&2
+    exit 1
+  fi
+done
+
+printf 'installed common hooksPath=%s\n' "$hooks_path"

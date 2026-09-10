@@ -1,0 +1,16 @@
+{
+  "name": "gt-cloud-agent",
+  // A slim, reliably-starting base. The universal image was failing to start
+  // on the Codespaces host (error 1302, recovery container), which silently
+  // cost us docker-in-docker and every forwarded port with it.
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [80, 8000],
+  "portsAttributes": {
+    "80": { "label": "GT Cloud Agent (UI + API)", "onAutoForward": "silent" },
+    "8000": { "label": "API (direct)", "onAutoForward": "silent" }
+  },
+  "hostRequirements": { "cpus": 4, "memory": "16gb" }
+}

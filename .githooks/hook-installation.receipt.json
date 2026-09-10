@@ -1,0 +1,35 @@
+{
+  "schema": "gt.hook_installation_receipt.v1",
+  "status": "PASS",
+  "common_hooks_path": ".githooks",
+  "inheritance": "resolved from git-common-dir for main and linked worktrees",
+  "hooks": [
+    {
+      "path": ".githooks/install",
+      "mode": "100755",
+      "sha256": "9978fd8a56149e8047050819ffb66fe00716ecf0b418397a72f50a427623c079"
+    },
+    {
+      "path": ".githooks/pre-commit",
+      "mode": "100755",
+      "sha256": "d5cbba3bf75260062a1757b2bd1966e960d0f9190544dd57aa66eda510721ab6"
+    },
+    {
+      "path": ".githooks/post-commit",
+      "mode": "100755",
+      "sha256": "2d4c3c4e22564420c90b7bf15fde6c9ddcb3ab63e756271e8874fc415ad30c58"
+    }
+  ],
+  "post_commit": {
+    "behavior": "preserved-auto-push",
+    "remote_environment": "GNX_PUSH_REMOTE",
+    "failure_log": "gnx-autopush.failures.log"
+  },
+  "evidence": {
+    "command": "python -m pytest -q tests/test_failure_ids.py",
+    "exit_code": 0,
+    "passed": 6,
+    "ruff_exit_code": 0,
+    "diff_check_exit_code": 0
+  }
+}

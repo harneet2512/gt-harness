@@ -1,0 +1,107 @@
+{
+  "_comment": [
+    "Paste into ~/.codex/hooks.json (CODEX_HOME/hooks.json). Codex reads hooks",
+    "from their own file, not from config.toml.",
+    "",
+    "This runs the SAME script as the Claude Code adapter. Codex 0.153.3 embeds",
+    "JSON Schemas for its hook payloads - pre-tool-use.command.input,",
+    "post-tool-use.command.input, subagent-start/stop, session-start/end, stop,",
+    "user-prompt-submit - and their fields are the ones Claude Code sends, plus",
+    "`turn_id` and a required `model`. Verified by extracting the schemas from",
+    "the shipped binary; see docs/cloud/external-agents.md.",
+    "",
+    "Set GT_CLOUD_AGENT_KIND=codex in the environment so the card is labelled",
+    "as Codex rather than Claude Code, alongside GT_CLOUD_ORIGIN,",
+    "GT_CLOUD_SESSION and GT_CLOUD_TOKEN.",
+    "",
+    "Codex names its tools differently from Claude Code (`exec`, `apply_patch`,",
+    "`shell_command`), which is why every matcher here is \"*\": the adapter reads",
+    "the payload's fields, not the tool's name. If you would rather not rely on",
+    "hooks at all, run cloud/adapters/codex/gt_cloud_codex.py instead - it reads",
+    "the session rollout file and needs no configuration in Codex."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/path/to/gt-cloud/cloud/adapters/claude_code/gt_cloud_hook.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
