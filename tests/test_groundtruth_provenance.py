@@ -192,11 +192,25 @@ def test_lineage_binds_clean_review_head_index_and_live_supersession(tmp_path: P
             },
         }
     }
+    lineage = payload["groundtruth"]["lineage_exception"]
+    lineage["attestation_digest_sha256"] = hashlib.sha256(
+        canonical_json_bytes(lineage)
+    ).hexdigest()
     _write_json(manifest, payload)
     clean = verify_groundtruth_lineage(
         manifest, groundtruth_checkout=source, review_checkout=review
     )
     assert clean["status"] == "PASS", clean
+    for corrupt_digest in (None, "0" * 64):
+        damaged = copy.deepcopy(payload)
+        damaged["groundtruth"]["lineage_exception"]["attestation_digest_sha256"] = corrupt_digest
+        _write_json(manifest, damaged)
+        rejected = verify_groundtruth_lineage(
+            manifest, groundtruth_checkout=source, review_checkout=review
+        )
+        assert rejected["status"] == "FAIL"
+        assert "lineage_attestation_digest_mismatch" in rejected["failures"]
+    _write_json(manifest, payload)
     original_wheel = wheel.read_bytes()
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("groundtruth/__init__.py", b"VALUE = 2\n")

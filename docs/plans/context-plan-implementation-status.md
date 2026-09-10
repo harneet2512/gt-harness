@@ -4,6 +4,16 @@ Updated: 2026-09-10. Owner: current implementation session.
 
 ## Scope and release state
 
+Latest continuation: canonical run `34438068308` rejected the `b68de522`
+producer repin because its lineage block retained the previous self-seal.
+The source/review verifier had not checked that seal. Both failures were
+reproduced (`lineage-seal-red.xml`); the seal is recomputed from the actual
+filed block and the provenance verifier now rejects missing or mismatched
+seals. The focused Linux source checks passed; whole release acceptance
+must pass again on the successor commit. Earlier local broad attempts are
+retained: Windows worktree Git pointers, uncommitted source closure, and
+offline build dependency availability prevented their release tests.
+
 Implement the approved targeted repairs to evidence, persistent planning,
 verification scheduling, incremental graph amendments, snapshots, submission,
 and installed product acceptance. Preserve the existing engine, graph consumers,

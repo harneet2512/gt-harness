@@ -1015,7 +1015,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "d03b30f5f7c0eda8a844a2163757a27908695cefba83ca6d5eb6bd9eb833a411"
+      "attestation_digest_sha256": "5ef8859b0df4577f76fbd246cb3f7ffe1af8d4433e5d1627562accb0ca6fe7e7"
     }
   },
   "capabilities": [

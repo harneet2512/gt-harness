@@ -202,6 +202,10 @@ def verify_groundtruth_lineage(
     )
     expected_changes = sorted(lineage["post_certification_changed_paths"])
     failures: list[str] = []
+    unsigned_lineage = dict(lineage)
+    supplied_digest = unsigned_lineage.pop("attestation_digest_sha256", None)
+    if supplied_digest != hashlib.sha256(canonical_json_bytes(unsigned_lineage)).hexdigest():
+        failures.append("lineage_attestation_digest_mismatch")
     from scripts.verify_wheel_source import verify_wheel_source
 
     correspondence: dict[str, Any] = {"status": "FAIL"}
