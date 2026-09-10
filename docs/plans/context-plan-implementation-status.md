@@ -875,6 +875,28 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   that share does not cover the copy.
   It is also HEAVIER: candidate peak memory median 242.9 MB against baseline
   184.5 MB, about 32% more, with no overlap between the two sets of five.
+  FIRST BENCHMARK-SCALE ROW, and it does not look like the large-repository rows.
+  `kedro-org__kedro-4580` (622 tracked, 328 parsed files) BUILDS in 6.3s, well
+  inside the harness's 600s budget. Five alternating repetitions:
+    baseline median 5.354s   candidate median 5.232s   speedup 1.02
+    peak memory      185.9-188.2 MB   against   189.9-198.1 MB  (+5%)
+    parse cache 328 hits / 0 misses; 2,384 of 2,529 parser nodes retained,
+    145 inserted, one resolver pass
+  So at benchmark scale the amend is BREAK-EVEN rather than the 24% regression
+  and 32% memory cost measured on click. Neither number is the whole story yet;
+  five repositories remain, matplotlib at 4,597 files being the one that
+  matters most because it sits in the size class that did not build.
+  IT ALSO REFINES THE DETERMINISM FINDING. `semantic_parity: True` with ONE
+  distinct digest across all ten runs of both arms -- the producer was
+  deterministic here, and the amend agreed with the rebuild exactly. On click
+  the same measurement gave four distinct digests. So the nondeterminism
+  recorded against the all-consumer parity item is REPOSITORY-DEPENDENT, not
+  universal: click carries several classes each defining `fail`, `close` and
+  `invoke`, which is what drives the ambiguous-receiver tie-break, and kedro
+  evidently does not. That does not make the defect smaller -- a graph whose
+  content depends on which build you read is still unusable for parity -- but
+  it does mean it cannot be reproduced on an arbitrary repository, which is
+  why the xfail witness needs GT_DETERMINISM_REPO pointed at one that shows it.
   CORPUS CAVEAT, recorded before the numbers below are read as more than they are.
   The tracker names "six repository transitions" without naming WHICH six, and the
   first corpus chosen (`D:/test-repos`: click, terraform, cpython, sentry, grafana,
