@@ -850,6 +850,10 @@ def test_a_full_rebuild_names_the_reason_the_amend_was_refused(monkeypatch, tmp_
     than as an ordinary rebuild.
     """
     adapter, _repo, _graph = _edited_adapter(tmp_path)
+    # Exercise the capability refusal specifically; missing parent artifacts
+    # now short-circuit before any producer discovery. Certification is not
+    # reached because the producer declares no amend capability in this fixture.
+    _graph.with_suffix(".manifest.json").write_text("{}", encoding="utf-8")
     rebuilt = tmp_path / "rebuilt.db"
     rebuilt.write_bytes(b"new")
     monkeypatch.setattr(

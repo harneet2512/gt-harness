@@ -30,6 +30,22 @@ from gt_engine import indexer
 from gt_engine.miniswe_integration import MiniSweAdapter
 
 
+@pytest.mark.parametrize("parent_exists", [False, True])
+def test_missing_parent_artifacts_refuse_before_producer_capability_probe(tmp_path, monkeypatch, parent_exists):
+    adapter = _adapter(tmp_path)
+    parent = tmp_path / "absent-parent.db"
+    if parent_exists:
+        parent.write_bytes(b"not a certified graph")
+    def forbidden(*args):
+        pytest.fail("An ineligible parent must not pay for producer capability discovery")
+    monkeypatch.setattr(indexer, "_producer_supports_amend_capability", forbidden)
+    result, reason, rows = indexer._ensure_index_incremental_unlocked(
+        adapter.repo_root, layout=adapter.engine_state.layout, parent_graph=parent, changed_paths=("a.py",))
+    assert result is None
+    assert reason == ("parent_manifest_missing" if parent_exists else "parent_graph_missing")
+    assert rows == ()
+
+
 @pytest.fixture(autouse=True)
 def _enable_guarded_test_process_on_windows(monkeypatch):
     """The producer refuses to launch on Windows until a Job Object exists.

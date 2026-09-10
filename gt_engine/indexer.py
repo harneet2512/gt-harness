@@ -1673,14 +1673,14 @@ def _ensure_index_incremental_unlocked(
     """
 
     results: tuple[dict[str, object], ...] = ()
-    batch = _producer_supports_amend_capability(BATCH_AMEND_CAPABILITY)
-    if not batch and not _producer_supports_incremental_amend():
-        return None, "producer_lacks_amend_capability", results
     if not parent_graph.is_file():
         return None, "parent_graph_missing", results
     parent_manifest = parent_graph.with_suffix(".manifest.json")
     if not parent_manifest.is_file():
         return None, "parent_manifest_missing", results
+    batch = _producer_supports_amend_capability(BATCH_AMEND_CAPABILITY)
+    if not batch and not _producer_supports_incremental_amend():
+        return None, "producer_lacks_amend_capability", results
     certification = _binary_certification()
     valid, certification_reason = _certify_published_graph(
         parent_graph, parent_manifest, expected_root=Path(layout.workspace),

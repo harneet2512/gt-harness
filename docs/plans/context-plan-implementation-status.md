@@ -182,6 +182,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Candidate 38 now rejects a missing parent graph/manifest before producer
+  capability discovery. Two RED witnesses prove the unnecessary probe occurred.
+  Capability checks and parent certification are unchanged for eligible parents.
+  A capability-refusal fixture now supplies a manifest so it still exercises its
+  intended branch. Final expanded installed run: 206 passed, one explicitly
+  deselected source-registry check, 171.96s (`evidence-graph-38-final.xml`). The
+  real registry mirror passed separately against source (one test, zero skips,
+  3.699s, `evidence-graph-registry-38.xml`). The preceding run's changed-refusal
+  fixture failure remains recorded in `evidence-graph-38.xml`. Canonical acceptance
+  `34433223742` passed at `6d05713a`; later changes still need exact-commit CI.
+
 - Candidate 37 carries predicate evidence kind, coverage basis, originating
   source revision, action and protocol through controller receipts, journal and
   final summaries; raw commands/output are not copied into summaries. Legacy
