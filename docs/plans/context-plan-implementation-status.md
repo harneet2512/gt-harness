@@ -164,6 +164,12 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Final baseline rechecks had the same phase-transition defect as queued checks.
+  Real pytest mutations reproduced crashes in VERIFY and SUBMIT. The baseline
+  owner now transitions through the existing IMPLEMENT path before invalidating
+  mutated evidence; source changes survive and the result remains unknown.
+  Rebuilt wheel 16 passed 101 installed check/gate/integration/integrity/baseline
+  tests, zero skips, in 29.85 seconds (`D:/gt-context-proof/baseline-phase-green.xml`).
 - Canonical provider-free acceptance `34426564301` PASSED at `2ef314ad`.
   The full suite now executes the installed producer witnesses; remaining seven
   skips concern absent historical graph fixtures, unavailable sqlite_vec, and

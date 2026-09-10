@@ -1274,6 +1274,8 @@ class GTSession:
             self._engine.record_repository_snapshot(after, boundary="after_baseline_recheck")
             self._engine.record_edit_transaction(transaction)
             if transaction.changes:
+                if self._engine.phase != "IMPLEMENT":
+                    self._engine.begin_implement()
                 self._engine.note_edit(transaction.changed_paths)
             self._engine._automatic_check_generation = getattr(self._engine, "_automatic_check_generation", 0) + 1
         if before.revision != after.revision or not after.complete:

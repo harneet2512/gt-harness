@@ -292,6 +292,41 @@ def test_baseline_recheck_cannot_spend_the_submission_reserve(tmp_path, graph, m
     assert budgets == [2.0]
 
 
+@pytest.mark.parametrize("phase", ["VERIFY", "SUBMIT"])
+def test_baseline_mutation_at_terminal_boundary_returns_to_implementation(tmp_path, graph, monkeypatch, phase):
+    import sys
+    from dataclasses import replace
+
+    from gt_engine.event_journal import verify_event_journal
+    from gt_engine.persistent_plan.baseline import run_baseline
+
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Linux process-tree and capture boundary required")
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    source = repo / "widget.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    test = repo / "test_widget.py"
+    test.write_text("def test_widget(): assert True\n", encoding="utf-8")
+    baseline = run_baseline(str(repo), budget_seconds=15,
+                            command=(sys.executable, "-m", "pytest", "-v", "test_widget.py"))
+    assert baseline.captured and baseline.passed == 1
+    adapter.plan_inputs = replace(inputs, baseline=baseline)
+    test.write_text("def test_widget():\n    from pathlib import Path\n"
+                    "    Path('widget.py').write_text('value = 2\\n')\n", encoding="utf-8")
+    session = GTSession(GTSessionConfig(task_id="mutation", repo_root=str(repo), mode="advisory"),
+                        engine=adapter)
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (1000.0, None))
+    adapter.start_task()
+    adapter.begin_verify()
+    if phase == "SUBMIT":
+        adapter.begin_submit()
+    regressions, status = session._plan_baseline_check()
+    assert regressions == () and status == "unknown"
+    assert source.read_text(encoding="utf-8") == "value = 2\n"
+    assert adapter.phase == "IMPLEMENT"
+    assert verify_event_journal(adapter.store.path).valid
+
+
 def test_the_journal_records_the_plan_without_a_new_schema(tmp_path, graph):
     """New event names are free; a new schema string is rejected upstream."""
     adapter, inputs, _contract, _merged, _repo = _built(tmp_path, graph)
