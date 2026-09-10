@@ -129,4 +129,5 @@ def test_the_fingerprint_recipe_matches_the_producers_own():
                                capture_output=True, text=True)
     if completed.returncode != 0:
         pytest.skip(f"git ls-tree unavailable: {completed.stderr.strip()[:80]}")
-    assert completed.stdout.strip() == _source_fingerprint(SOURCE)
+    # sha256sum prints "<hash>  -" for stdin; compare the hash field only.
+    assert completed.stdout.split()[0] == _source_fingerprint(SOURCE)
