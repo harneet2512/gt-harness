@@ -719,7 +719,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
-  The instrument is now tested: `tests/test_graph_transition_study.py`, 13 cases
+  A PER-BUILD BUDGET was added after terraform ran 38 minutes at 100% CPU without
+  once touching its output file, on a full build of 5,184 files, where a
+  105-file repository takes 7 seconds. Resolution is superlinear and the four
+  largest repositories in the corpus are up to six times larger again, so an
+  instrument without a budget cannot produce a report at all. A repository that
+  exceeds it is now recorded as `parent_build_exceeded_budget` and the study
+  moves on: "the producer did not finish this repository in N seconds" is a
+  fact about whether the graph is viable at that size, and it is the fact a
+  reader most needs. A timed-out arm never enters a median, because its
+  duration is the budget rather than the work.
+  The instrument is now tested: `tests/test_graph_transition_study.py`, 18 cases
   against a stub producer, because a performance claim is exactly the kind
   nobody re-derives by hand and an untested instrument produces confident
   wrong numbers. It pins the two properties the comparison rests on -- the

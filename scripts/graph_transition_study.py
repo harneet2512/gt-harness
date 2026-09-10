@@ -119,8 +119,19 @@ def _peak_kb(pid: int) -> int:
     return 0
 
 
-def _run(command: list[str], environment: dict[str, str] | None = None) -> dict:
+def _run(command: list[str], environment: dict[str, str] | None = None,
+         timeout: float | None = None) -> dict:
     """Run one producer invocation and record what it cost.
+
+    A BUDGET, because an instrument that can block forever cannot produce a
+    report. Measured: the full build of a 5,184-file repository ran 38 minutes
+    at 100% CPU without touching its output file, while a 105-file repository
+    took 7 seconds. Resolution is superlinear and the largest repositories in
+    the corpus are five times larger again. A repository that exceeds the
+    budget is recorded as having exceeded it and the study moves on, which is
+    a result -- "the producer did not finish this repository in N seconds" is a
+    fact about whether the graph is viable at that size, and it is the fact a
+    reader most needs.
 
     The sampling happens on a THREAD and the pipes are drained on this one.
     Polling ``poll()`` in a loop and only calling ``communicate()`` afterwards
@@ -142,8 +153,17 @@ def _run(command: list[str], environment: dict[str, str] | None = None) -> dict:
 
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
+    timed_out = False
     try:
-        stdout, stderr = process.communicate()
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            process.kill()
+            # Drain after the kill: the pipes still hold whatever the producer
+            # wrote before it was stopped, and that output names the pass it
+            # was in when the budget ran out.
+            stdout, stderr = process.communicate()
     finally:
         finished.set()
         sampler.join(timeout=1.0)
@@ -172,6 +192,7 @@ def _run(command: list[str], environment: dict[str, str] | None = None) -> dict:
     return {
         "seconds": round(elapsed, 3),
         "returncode": completed.returncode,
+        "timed_out": timed_out,
         "peak_mb": round(peak_kb / 1024, 1),
         "peak_basis": "VmHWM sampled every 50ms while the process was alive",
         "counts": counts,
@@ -230,7 +251,8 @@ def _apply_transition(path: Path) -> None:
 
 
 def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
-                     repetitions: int, max_files: int, workers: int) -> dict:
+                     repetitions: int, max_files: int, workers: int,
+                     timeout: float | None = None) -> dict:
     work = workspace / name
     if work.exists():
         shutil.rmtree(work)
@@ -263,8 +285,18 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
     environment["GT_PARSE_CACHE_ROOT"] = str(cache_root)
 
     parent_run = _run(_index_command(binary, str(work), str(parent),
-                                     max_files=max_files, workers=workers), environment)
+                                     max_files=max_files, workers=workers),
+                      environment, timeout)
+    if parent_run.get("timed_out"):
+        # Not a failure of the study and not a failure of the amend: the
+        # producer could not build this repository at all inside the budget, so
+        # there is no parent for either arm to start from. Recorded as the
+        # finding it is.
+        shutil.rmtree(work, ignore_errors=True)
+        return {"repo": name, "status": "parent_build_exceeded_budget",
+                "budget_seconds": timeout, "parent": parent_run}
     if parent_run["returncode"] != 0:
+        shutil.rmtree(work, ignore_errors=True)
         return {"repo": name, "status": "parent_build_failed", "parent": parent_run}
 
     _apply_transition(target)
@@ -281,7 +313,7 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
                                  max_files=max_files, workers=workers)
         if arm == "candidate":
             command = command + ["-amend-parent", str(parent)]
-        measured = _run(command, environment)
+        measured = _run(command, environment, timeout)
         measured.update({"arm": arm, "repetition": index // 2, "ordinal": index})
         runs.append(measured)
         if measured["returncode"] == 0:
@@ -289,8 +321,12 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
                            "digest": _parity_digest(output)})
         output.unlink(missing_ok=True)
 
-    baseline = [r["seconds"] for r in runs if r["arm"] == "baseline" and not r["returncode"]]
-    candidate = [r["seconds"] for r in runs if r["arm"] == "candidate" and not r["returncode"]]
+    # A timed-out run is neither a fast run nor a slow one: it is a run whose
+    # duration is the budget rather than the work, so it must not enter a median.
+    baseline = [r["seconds"] for r in runs
+                if r["arm"] == "baseline" and not r["returncode"] and not r.get("timed_out")]
+    candidate = [r["seconds"] for r in runs
+                 if r["arm"] == "candidate" and not r["returncode"] and not r.get("timed_out")]
     digests = {json.dumps(item["digest"], sort_keys=True) for item in parity}
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(graphs, ignore_errors=True)
@@ -310,6 +346,8 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
         "speedup": (round(_median(baseline) / _median(candidate), 2)
                     if baseline and candidate and _median(candidate) else None),
         # One distinct digest across every run of both arms is the parity claim.
+        "runs_exceeding_budget": sum(1 for r in runs if r.get("timed_out")),
+        "budget_seconds": timeout,
         "semantic_parity": len(digests) == 1,
         "distinct_digests": len(digests),
         "parity": parity if len(digests) != 1 else parity[:1],
@@ -335,6 +373,8 @@ def main(argv=None) -> int:
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--max-files", type=int, default=60000)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--timeout", type=float, default=1200.0,
+                        help="per-producer-invocation budget in seconds")
     parser.add_argument("repos", nargs="+")
     args = parser.parse_args(argv)
 
@@ -346,6 +386,7 @@ def main(argv=None) -> int:
         "repetitions": args.repetitions,
         "workers": args.workers,
         "max_files": args.max_files,
+        "timeout_seconds": args.timeout,
         "repositories": [],
     }
     for name in args.repos:
@@ -353,7 +394,8 @@ def main(argv=None) -> int:
         started = time.monotonic()
         row = study_repository(name, source, workspace, args.binary,
                                repetitions=args.repetitions,
-                               max_files=args.max_files, workers=args.workers)
+                               max_files=args.max_files, workers=args.workers,
+                               timeout=args.timeout)
         row["wall_seconds"] = round(time.monotonic() - started, 1)
         report["repositories"].append(row)
         # Written after every repository: a study that only lands at the end
