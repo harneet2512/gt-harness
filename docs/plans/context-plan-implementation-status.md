@@ -101,12 +101,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Run the existing complete resolver/analysis exactly once per batch; republish
   derived layers without stale facts. Do not guess a narrowly complete resolver.
 - [ ] Reuse eligible history/cochange work; preserve embedding caches and LSP bindings.
-- [ ] Wire a persistent external cache root and batch API through the harness's
+- [x] Wire a persistent external cache root and batch API through the harness's
   existing one-active/one-pending coordinator.
 - [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
   immutable parent behavior, failure fallback, and every graph consumer's semantics.
-- [ ] Build/certify the actual producer before declaring or enabling its amendment
-  capability. No amendment capability has been declared or enabled by this work.
+- [x] Build/certify the actual producer before declaring or enabling its amendment
+  capability. The bounded batch capability is now declared and installed automatic
+  selection passes. This does not close all-consumer equivalence or release acceptance.
 
 ## 5. Snapshots and regression baseline — PARTIAL
 
@@ -162,9 +163,25 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
-- Current checkbox count: 39 completed bounded items, 29 open, 68 total. The
+- Current checkbox count: 41 completed bounded items, 27 open, 68 total. The
   step-limit release proof above was missing from the earlier 67-item census;
   it is now tracked explicitly. Counts are not an estimate of remaining effort.
+- Current candidate pins bind producer `350cb156b01bac708c4ca29674e95392efa9ac68`,
+  tree `03afbb192e64c8ed4bd0d39df31530237de9420f`, wheel
+  `62e1dca7046fd3df39e8b63749d10dcb8c645a48c4800898eae37125cb555718`, binary
+  `2f283b819928be5e3ea38df0eefee11cb9fc55a23006976a9f0f6d9458875e52`.
+  Exact build `34424183550` passed. The actual lineage verifier passed with 317
+  matching wheel files and ten review packets, including bounded installed proof
+  on review branch commit `fb1705edf488de25cdfafb7853dcf5e91e896879`.
+- Installed candidate 09: 126 passed, two explained skips, 54.66 seconds,
+  network-disabled with current producer wheel/binary and installed harness.
+  `D:/gt-context-proof/installed-09.xml`. Repin lineage/adapter regressions also
+  passed 17 tests in a separate container with the exact installed producer.
+  Shared Windows venv correctly refused the new pin; it remains unchanged.
+- CI `34423608011` FAILED eight old fixture expectations already corrected in
+  harness `f226dcee`; it predates the producer repin. Final producer CI
+  `34424185145` is still pending at this checkpoint. Successor repinned harness
+  CI is required; no whole-product acceptance or paid reward is claimed.
 - New uncommitted producer summary exposes retained/inserted parser nodes, cache
   hits/misses and resolver passes; the harness now parses its batch result. Both
   missing-summary RED witnesses reproduced before repair. Producer batch tests
