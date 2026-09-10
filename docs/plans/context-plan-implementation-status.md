@@ -875,7 +875,27 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   that share does not cover the copy.
   It is also HEAVIER: candidate peak memory median 242.9 MB against baseline
   184.5 MB, about 32% more, with no overlap between the two sets of five.
-  THE PATTERN ACROSS THE CORPUS: every real repository except the smallest fails to
+  CORPUS CAVEAT, recorded before the numbers below are read as more than they are.
+  The tracker names "six repository transitions" without naming WHICH six, and the
+  first corpus chosen (`D:/test-repos`: click, terraform, cpython, sentry, grafana,
+  kubernetes) is far larger than DeepSWE's actual task repositories. The benchmark
+  selection is 20 library-scale tasks across go/javascript/python/rust/typescript
+  (`eval/deepswe_smoke20_v1.json`), and this codebase's own measurements record
+  arktype -- a real task repository -- building in ~115s, comfortably inside the
+  600s budget. So the rows below measure the producer's SCALING on large
+  repositories. They are a real result about scaling and they are NOT a
+  measurement of the benchmark's workload; treating them as one would be the same
+  over-reach this tracker has already corrected twice today.
+  A second run is therefore under way over a benchmark-representative corpus, the
+  locally staged SWE-bench-scale checkouts at
+  `D:/gt_runs/loc_mixture30_local_20260727/repos` -- kedro (622 files), keras
+  (852), dynaconf (959), conan (1,046), haystack (1,070) and matplotlib (4,597),
+  chosen to bracket the real workload. Output `study-benchmark-scale.json`; the
+  large-repository rows are retained as `study-large-repos.json`.
+  Note that matplotlib at 4,597 files and cfn-lint at 6,977 sit in terraform's size
+  class, which did NOT build. Whether benchmark-scale repositories clear the budget
+  is therefore an open measurement, not a safe assumption in either direction.
+  THE PATTERN ON THE LARGE CORPUS: every repository except the smallest fails to
   build at all inside a 900s budget, and the harness's own budget is 600s.
     click        105 parsed files   builds in ~6s      amend 0.76x, +32% memory
     terraform  5,184 tracked files  EXCEEDED 900s      peak 1,600 MB when killed
