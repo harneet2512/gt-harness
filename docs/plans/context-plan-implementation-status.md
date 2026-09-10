@@ -519,9 +519,36 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   conan is the one that matters: 997 files, benchmark-scale, and the repository
   whose three distinct digests were this tracker's evidence that the defect reaches
   the benchmark's own size class rather than only click. It is now single-valued.
-  Which of the two definitions is the RIGHT one is not decidable here and is not
-  the point: `impl_method` is the receiver-UNPROVEN path, capped at 0.6 because it
-  is a guess. The defect was that the guess was not repeatable.
+  CORRECTION, and it matters because this fix has since been VENDORED AND
+  CERTIFIED. I wrote above that which of the two definitions is right "is not
+  decidable here and is not the point". That was wrong, and checking took one
+  query. Every same-name collision in click is a Python `@t.overload` group --
+  stubs first, the implementation LAST:
+    Command.main 1319/1329/1338, Context.invoke 761/766/768,
+    Context.lookup_default 689/694/698, Editor.edit 621/626/628,
+    Group.command 1633/1636/1640, Group.group 1682/1685/1689,
+    Parameter.get_default 2249/2254/2258
+  Python binds a name to the LAST definition, so keeping the LOWEST line names a
+  type stub with an empty body. Measured on the newly vendored binary against
+  click: `impl_method` into overload groups gives implementation=0, STUB=277. All
+  of them. Deterministically wrong is worse than randomly wrong here, because it
+  is stable and therefore looks correct.
+  THE VENDORED PRODUCER IS NOW DETERMINISTIC -- 5 runs, 1 digest, 50,954 edges, a
+  full build with the analysis layer -- so the blocker that capped every parity
+  claim IS closed in the shipped artifact. It is the target choice that is wrong.
+  THE CORRECTION IS ONE COMPARISON, verified: invert the guard IN PLACE so the
+  HIGHEST (start_line, id) wins. Built from the current vendored tree with the
+  declared tags, only that change: 6 runs, 1 distinct digest, DETERMINISTIC, and
+  implementation=277 / STUB=0. Both properties hold together. The edge count moves
+  3299 -> 3302, the other state the unfixed producer wobbled between, which is the
+  expected direction since an implementation has a body and outgoing calls and a
+  stub does not.
+  A TRAP RECORDED BECAUSE I FELL INTO IT: do not ADD a guard to a tree that
+  already carries the shipped one. Two opposing guards mean the FIRST writer wins,
+  and that is decided by the randomized map order -- nondeterministic again, and
+  still stub-picking. Replace the comparison; do not stack it.
+  Evidence: `overload-target-correction.md`, `overload_target.py`,
+  `collision_shape.py`.
   Patch and evidence: `determinism-root-cause.md`, `resolver-rootfix.go`,
   `determinism_ab.py`, `edge_diff.py`, `idcheck.py`, `method_diff.py`.
   NOT SHIPPED, and the item stays open. This is producer source behind a certified
