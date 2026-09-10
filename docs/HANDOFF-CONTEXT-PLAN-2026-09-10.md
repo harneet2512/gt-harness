@@ -183,6 +183,146 @@ Its post-commit hook auto-pushes this branch. Do not assume committing ran tests
 
 ## Immediate state: resume here
 
+### Update — 2026-09-10, evening, at `3ec3981b`. READ THIS FIRST.
+
+Tracker: **63 checked, 5 open**. NOT benchmark ready, and do not claim it: parity,
+the study's run-loop half, and the release artifact binding are all open.
+
+**Closed since the last update:** the canonical acceptance + installed full-flow
+rehearsal item. Both halves are green at the SAME commit `48ca7ee2` — canonical CI
+run **34505286172**, rehearsal run **34505263336**, `VERIFIED_SYNTHETIC_REPAIR`,
+`runtime_receipt_errors == ["synthetic_transport_not_paid_evidence"]` exactly, and
+the expected-error list was never edited. Three consecutive rehearsal passes.
+
+#### THE BIG ONE: the producer determinism defect has a root cause and a verified fix
+
+This blocked all-consumer parity and capped every graph comparison in the project.
+It is a single site.
+
+`vendor/gt-index-src/internal/resolver/resolver.go:1546`:
+
+    for id, m := range nodeMeta[0] {                  // map[int64]NodeMeta
+        if m.ParentID != 0 && (m.Label == "Method" || m.Label == "Function") {
+            ...
+            methodsByClass[m.ParentID][m.Name] = id   // LAST WRITE WINS
+        }
+    }
+
+`nodeMeta[0]` is a Go map, so the loop order is randomized. A class can hold TWO
+members under one name (`@overload`, a conditional redefinition, a decorator
+pair), and last-write-wins makes WHICH definition the index keeps run-dependent.
+Every `impl_method` resolution reads that index.
+
+**Fix (eight lines):** keep the lowest `(start_line, id)` instead of the last
+writer. Patched source: `D:/gt-context-proof/gt-index-src-rootfix/`, single file
+also at `D:/gt-context-proof/resolver-rootfix.go`. Applied as the ONLY change
+against the vendored tree, built with the declared tags
+(`netgo,osusergo,sqlite_fts5`, go1.24):
+
+    click   105 files    8 runs, 8 distinct digests  ->  1 digest   DETERMINISTIC
+    conan   997 files    5 runs, 5 distinct digests  ->  1 digest   DETERMINISTIC
+    kedro   328 files    unchanged at 5,982 edges (no same-name collision)
+
+conan is the one that matters: benchmark-scale, and its wobble was the evidence
+that the defect reaches the benchmark's own size class.
+
+**NOT SHIPPED.** This is producer source behind a certified binary. Landing it
+needs a producer rebuild and re-certification — the same gate the release artifact
+binding item is blocked on, so those two items are now ONE action.
+
+**How to reproduce and re-verify without the certified binary** (this is the part
+that took longest to find, so do not rediscover it). Build the producer from the
+vendored source in `golang:1.24` with `PATH=/usr/local/go/bin:$PATH` (the image
+does not put `go` on PATH for `bash -lc`), copying `/src` to a writable dir first,
+then:
+
+    python /proof/determinism_ab.py <repo> <runs> <binary>...   # digests per binary
+    python /proof/edge_diff.py      <repo> <binary> <runs>      # which edges move
+    python /proof/idcheck.py        <repo> <binary> <runs>      # are node ids stable
+    python /proof/method_diff.py    <repo> <binary> 2           # flips by resolution_method
+
+Full write-up with the ruled-out hypotheses:
+`D:/gt-context-proof/determinism-root-cause.md`.
+
+**Three hypotheses that are DEAD — do not spend time on them again:**
+
+* NOT concurrency. `-workers 1` still differs run to run.
+* NOT node-id assignment. At `-workers 1` all 1,086 click definitions keep
+  byte-identical ids across runs (0 of 1,086 differ).
+* NOT the id tie-breaks. `pickBestNameMatchTarget` (~954), `pickBestLocalTarget`
+  (~902) and `pickBestImportCandidate` (~866) all end in a node-id comparison and
+  all three were rewritten to `(file, start_line, id)` and rebuilt — still
+  nondeterministic, because the wrong entry is in the index before any picker runs.
+
+Also corrected: `promote.go:567` is a real order-dependent site of the same class
+but is NOT this defect — it emits CO_SERIALIZES, which the core layer never
+produces.
+
+The local build reports `analysis_state=failed` and is core-only (3,302 edges
+against the certified binary's 50,954). That gap is the missing resolution-evidence
+layer, NOT source divergence: the 13 core edge types match count for count.
+
+#### The rehearsal now runs on a hosted runner. Stop using Docker Desktop for it.
+
+`.github/workflows/installed_rehearsal.yml`, free (synthetic transport, no
+provider), triggered on push to this branch and by dispatch. Docker Desktop serves
+the Windows drive over 9p and TWO consecutive local runs deadlocked in
+`p9_client_rpc` (state D, uninterruptible) right after
+`mkdir -p /installed-agent/bundle`. Staging onto a VM-local docker volume cleared
+that and then failed on a dense-model directory Docker had auto-created empty.
+
+Three constraints it took three failed runs to find, in the order you will meet
+them:
+
+1. `inputs.scenario` is the empty string on a push trigger, not the choice default.
+2. `_docker_compose_paths` is a **property** on Pier's DockerEnvironment. Overriding
+   it as a method kills every trial in setup with
+   `TypeError: 'method' object is not iterable`.
+3. Pier generates the squid config itself with `acl Safe_ports port 80 443` and
+   `http_access deny !Safe_ports`. The transport is reachable on 80 or 443 and
+   NOWHERE else, whatever the allowlist says about the hostname. Port 8080 returns
+   a squid error page with zero requests reaching the server. The workflow lowers
+   `net.ipv4.ip_unprivileged_port_start` and serves on 80. Pinned by
+   `tests/test_rehearsal_transport_port.py`, which parses the ACL out of Pier's own
+   `squid_bootstrap_command()`.
+
+`eval/pier_filtered_docker.py` adds one compose override giving the PROXY container
+`host.docker.internal:host-gateway` — the agent is on an `internal` network and
+never reaches the host directly, so the name must resolve in the proxy.
+
+#### Open threads, mid-flight
+
+* **`study-matplotlib-x10.json`** was running at handoff (10+10 repetitions,
+  ~1.8h). It decides whether the "matplotlib's amend and rebuild produce DISJOINT
+  edge sets" finding survives. That finding rests on 5+5 samples; if the baseline's
+  true range is wider than five draws showed, it is sampling and must be RETRACTED
+  from the tracker, not softened. Note the determinism fix above may make the whole
+  question moot — re-run the study with a fixed producer before trusting either way.
+* **LSP binding preservation** (the open half of the history/cochange item) is
+  part-traced. Established: `certify_lsp_candidate` refuses a base whose manifest
+  carries `derivation`, so enrichment is strictly ONE level; the amend accepts a
+  derived parent as certifiable; and the child manifest built at `indexer.py:1347`
+  is assembled fresh and carries NO `derivation` key. The unfinished question is
+  whether a promoted graph actually becomes the parent of the next amend — if it
+  does, the one-level invariant is silently defeated, because the child no longer
+  declares the derivation and a second promotion would not trip
+  `lsp_nested_derivation_forbidden`. Finish that before writing anything down.
+* **The close-time coordinator drain** (`5f4d69c6`) is correct against rehearsal
+  06's shape by unit witness and has NOT fired in any live run. The passing
+  rehearsal took rehearsal 04's shape — publications at journal rows 3 and 152, the
+  ordinary snapshot path — so it is unexercised, not validated.
+
+#### What is left, split by whether it is building or verifying
+
+| Item | Build or verify |
+|---|---|
+| All-consumer parity at real scale | VERIFY. The harness is built (8 mutations x 8 consumers, zero skips). Blocked only by the producer defect above. |
+| Release artifact binding | BUILD, in the producer. Same re-certification gate as the determinism fix. |
+| Six-repository study, run-loop half | BUILD. Blocked-vs-background time, checks and snapshots are coordinator/run-loop properties; `graph_transition_study.py` measures the PRODUCER and says so. That instrument does not exist. This is the largest genuine build item left. |
+| History/cochange reuse | BUILD, in the producer. History, cochange, derived layers and FTS all recompute every build. |
+| LSP binding preservation | UNKNOWN until the trace above finishes. |
+| Final review | VERIFY. Last by construction; needs the source to freeze. |
+
 ### Superseded — the numbered list below is the state at handoff, not now
 
 Items 1–3 are CLOSED. CI has been green twice since, most recently
