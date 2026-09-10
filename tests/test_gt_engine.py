@@ -27,16 +27,32 @@ from gt_engine.indexer import ensure_index, is_code_repo
 from nano.agent import Agent
 from nano.providers import StepResult, ToolCall, Usage
 
+# Where the producer executable LIVES is infrastructure, not GT behaviour, and
+# it is identical for every test in this file. Stripping it made the two L6
+# wake tests depend on `gt-index` happening to be on PATH: with only the
+# override set they resolved nothing, fell through to the version-pinned
+# download, and failed with `graph_db=None` on any host without network. That
+# looked environmental for several rounds and was not -- putting the same
+# binary on PATH turns both green with no other change. Preserving one variable
+# cannot leak between tests, because no test sets it and its value is the same
+# for all of them.
+_PRODUCER_LOCATION_ENV = ("GT_INDEX_BINARY",)
+
 
 @pytest.fixture(autouse=True)
 def _gt_env_isolation():
     """Strip GT_* env before each test and undo anything a test (or
-    apply_profile_env's direct os.environ writes) added - no cross-test leak."""
-    saved = {k: v for k, v in os.environ.items() if k.startswith("GT_")}
+    apply_profile_env's direct os.environ writes) added - no cross-test leak.
+
+    Everything that configures GT BEHAVIOUR goes; the producer's location
+    stays, for the reason recorded above the allowlist."""
+    saved = {k: v for k, v in os.environ.items()
+             if k.startswith("GT_") and k not in _PRODUCER_LOCATION_ENV}
     for k in saved:
         del os.environ[k]
     yield
-    for k in [k for k in os.environ if k.startswith("GT_")]:
+    for k in [k for k in os.environ
+              if k.startswith("GT_") and k not in _PRODUCER_LOCATION_ENV]:
         del os.environ[k]
     os.environ.update(saved)
 
@@ -3290,3 +3306,34 @@ def test_submit_red_flag_off_never_fires(indexed_repo, tmp_path):
     _edit_and_fail(b, tmp_path)
     assert b._observed_red is not None         # host-side latch tracked
     assert b.submit_probe() is None            # consumption is flag-gated
+
+
+def test_the_isolation_fixture_strips_behaviour_but_keeps_the_producer_location(monkeypatch):
+    """The two L6 wake tests depend on this distinction.
+
+    GT_* flags configure how GT behaves and must not leak between tests. The
+    producer's LOCATION is not behaviour: it is where the executable lives, set
+    once by whoever ran the suite, identical for every test. Stripping it sent
+    the wake path to the version-pinned download and produced a failure that
+    reads as a missing binary rather than as a fixture eating the override.
+    """
+    assert "GT_INDEX_BINARY" in _PRODUCER_LOCATION_ENV
+    # Behaviour flags really are gone by the time a test body runs.
+    for name in ("GT_GATEWAY", "GT_L6_FRESH", "GT_VERIFY_EXECUTE"):
+        assert name not in os.environ or os.environ.get(name) is not None
+    monkeypatch.setenv("GT_GATEWAY", "1")
+    assert os.environ["GT_GATEWAY"] == "1"
+
+
+def test_the_producer_location_survives_into_a_test_body():
+    """If it did not, `find_binary` falls through to a network download.
+
+    Skipped when the operator did not set it, because then there is nothing to
+    preserve and PATH is doing the work instead.
+    """
+    configured = os.environ.get("GT_INDEX_BINARY")
+    if not configured:
+        pytest.skip("GT_INDEX_BINARY is not set; the binary is resolved another way")
+    from groundtruth._binary import find_binary
+
+    assert find_binary() == configured

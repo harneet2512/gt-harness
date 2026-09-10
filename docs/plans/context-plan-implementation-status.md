@@ -633,6 +633,30 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
   hashes and update the candidate manifest only from real build evidence.
 - [x] Run required installed tests with zero unexplained skips and real journal audit.
+  MATERIALLY IMPROVED at `fc4b6319`+1. `tests/test_gt_engine.py` carried an autouse
+  fixture stripping EVERY `GT_*` variable before each test, including
+  `GT_INDEX_BINARY` -- which is not GT behaviour but the producer executable's
+  LOCATION. With it stripped, `find_binary` fell past its override to the
+  version-pinned download, so on any host without network the graph never built.
+  Two L6 wake tests FAILED with `graph_db=None` and the rest of that file's graph
+  tests SKIPPED themselves with 'gt-index binary unavailable'.
+  Those two failures were called environmental for several rounds. They were not.
+  Proof by substitution: putting the identical binary on PATH as `gt-index`, which
+  the fixture cannot strip, turns both green with no other change. The fixture now
+  preserves the producer location and strips everything that configures behaviour.
+  The effect is far larger than the two failures. Installed Linux full suite went
+  from 2,198 tests / 4 failed / 89 skipped (`full-suite-76.xml`) to 2,224 tests /
+  2 failed / 15 skipped (`full-suite-77.xml`): about 74 tests had been silently
+  skipping because the fixture ate the binary path, and they now run and pass.
+  The 2 remaining failures are both `harness_wheel_build_failed: No matching
+  distribution found for hatchling` -- the offline build backend, fixed by
+  mounting the wheelhouse, and now named exactly rather than assumed. The earlier
+  `source_closure_differs_from_head` pair is gone: it came from building the wheel
+  from an uncommitted tree, and the verification clone now commits first.
+  All 15 skips carry a stated reason: GT_GITNEXUS_ROOT (3), gt-index unavailable
+  in two deliberate absence tests (2), real arktype graph absent (2), a real graph
+  path from another machine (2), GT_RETRIEVAL_TEST_GRAPH, a full-smoke complement,
+  GT_DETERMINISM_REPO, gcc, Go and sqlite_vec (1 each).
   DONE at 18a794b5 on wheel 66 against a full checkout with the static producer
   made executable: 2,119 tests, 0 errors, 3 failures and 11 skips in 504s
   (D:/gt-context-proof/full-suite-66.xml). Every skip carries a stated reason and
