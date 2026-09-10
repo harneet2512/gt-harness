@@ -1260,6 +1260,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   Determinism on the shipped binary: click 4 runs 1 digest (50957 edges),
   conan 5 runs 1 digest (34460 edges, same Go code as the 8/5-run-verified
   d6811825 build).
+  THE DIVERGENCE IS CLOSED. `c4d4a54f` orders every cross-file pick by
+  (file_path, start_line, id) -- renumbering-invariant by construction; 13 RED
+  layout witnesses failed on the pre-fix code and all pass after. Verified on
+  the certified binary (`02962926`, fingerprint `c4a9488c`): matplotlib parity
+  study v3 reports `semantic_parity: true`, `distinct_digests: 1`, verdict
+  `identical` -- both arms produce the same 49,054-edge multiset (was
+  arms_disjoint +13). Conan identical again (82.7s / 80.0s); click and conan
+  determinism each 1 digest. Producer CI green on c4d4a54f (matrix
+  34536273690); review packet `har83-context-plan-producer-c4d4a54f-ci`,
+  review `393b4c92`, lineage PASS. The "amend is faster" claim for matplotlib
+  is retired: the 8% was partly divergent work; equal output now costs equal
+  time (215.8s vs 218.0s) on this repository.
   IT ALSO LOCALISES THE NONDETERMINISM, which the all-consumer parity item above
   records generically. On all six repositories the ONLY surface that ever moved
   is `edges`. Nodes, properties and assertions are byte-identical across all ten
