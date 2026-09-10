@@ -954,14 +954,24 @@ class MiniSweAdapter(GroundtruthController):
             return
         seen = getattr(self, "_plan_requests_seen", set())
         root = self.store.root / "plan" / "requests"
+        # The base every request in this batch could have read. `plan/current.json`
+        # is rewritten once, after the whole queue drains, so two `gt-plan revise`
+        # calls in one turn necessarily carry the SAME digest. Comparing each
+        # against a digest that moves as the batch applies rejected everything
+        # after the first -- and silently, from the agent's side, because the CLI
+        # had already answered "requested". Staleness is unchanged for a request
+        # authored against an earlier turn: that digest is not this one.
+        published = hashlib.sha256(plan.canonical_json().encode()).hexdigest()
         for path in sorted(root.glob("*.json")):
             if path.name in seen:
                 continue
             seen.add(path.name)
             try:
                 request = json.loads(path.read_text(encoding="utf-8"))
+                # The journal still chains on the TRUE pre-application digest,
+                # so a batch replays through its own intermediate states.
                 digest = hashlib.sha256(plan.canonical_json().encode()).hexdigest()
-                if request["plan_digest"] != digest:
+                if request["plan_digest"] != published:
                     raise ValueError("stale plan revision")
                 row_id = request["row_id"]
                 row = plan.row(row_id)

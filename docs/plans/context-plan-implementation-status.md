@@ -310,8 +310,37 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   each kill at least one: counting retrievable IDs as exposed, dropping the
   plan-membership filter on proven/executed, inverting failure precedence, and
   letting a count drift from its own list.
-- [ ] Test CLI stale requests, multiple requests, restart handling, invalid check
+- [x] Test CLI stale requests, multiple requests, restart handling, invalid check
   specs, deferral, and complete installed automatic cursor delivery.
+  `tests/test_plan_cli_requests.py` covers the queue between `gt-plan` and the
+  engine: a request carrying an earlier turn's digest is rejected as stale and the
+  queue keeps draining; an unusable check spec (a shell string the engine cannot
+  bind to a test identity) is refused without stopping the requests behind it; a
+  deferral is refused twice, by the CLI and again by the engine, when it carries no
+  reason, and when accepted it is a state and not a proof (the row stays in
+  `unmet_plan_rows`); an unsupported operation and an unknown row change nothing;
+  each request file is read at most once.
+  Multiple requests in one turn revealed a real defect and it is fixed here.
+  `plan/current.json` is rewritten once, after the whole queue drains, so two
+  `gt-plan revise` calls in the same turn necessarily read the SAME digest.
+  `apply_plan_requests` compared each request against a digest that moved as the
+  batch applied, so everything after the first was rejected -- silently from the
+  agent's side, because the CLI had already answered "requested". Requests are now
+  admitted against the base the CLI could actually have read, while the journal
+  still chains on the true pre-application digest, so a batch replays through its
+  own intermediate states.
+  Restart handling remains covered by `tests/test_plan_check_recovery.py`:
+  design and deferral replay without reapplying requests, a corrupted base,
+  result, proof grant or request identity is rejected without partial
+  application, and only current check definitions are restored.
+  Installed automatic cursor delivery is proven end to end on the real
+  `GTSession` in `tests/test_persistent_plan_integration.py`: the cursor arrives
+  as a context addition from a real `before_model`, naming a row and its command;
+  an unchanged world does not repeat it; a moved row state re-emits it under the
+  same `plan_cursor:task` supersession key as a distinct unit, so the tail carries
+  one cursor rather than a growing pile; an abstained plan delivers none.
+  Two mutations kill these: dropping the candidate from `before_model`, and
+  firing on a clock rather than on change.
 
 ## 4. Graph reuse and batch amendment — MOSTLY OPEN
 

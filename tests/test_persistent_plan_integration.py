@@ -533,3 +533,77 @@ def test_the_carried_snapshot_is_dropped_before_a_submit():
         if isinstance(node, ast.Nonlocal) and "carried_snapshot" in node.names
     ]
     assert nonlocals, "the carry must be shared across actions, not per call"
+
+
+def _cursor_session(tmp_path, graph, repo, adapter):
+    session = GTSession(
+        GTSessionConfig(task_id="cursor", repo_root=str(repo), mode="advisory"),
+        engine=adapter,
+    )
+    # Advisory mode is already model-visible; assert it rather than assume it,
+    # because a cursor that never reaches the model is the failure under test.
+    assert session.model_visible
+    return session
+
+
+def test_the_cursor_is_delivered_to_the_tail_by_the_real_session(tmp_path, graph):
+    """The steering line has to arrive, not merely render.
+
+    Everything else about the cursor is tested on the renderer in isolation. The
+    thing that decides whether an agent ever sees it is this path: the session
+    building a candidate, admitting it through the delivery lane, and returning
+    it as a context addition on a real ``before_model``.
+    """
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+    session = _cursor_session(tmp_path, graph, repo, adapter)
+
+    batch = session.before_model([{"role": "user", "content": "task"}], 1)
+    cursor = [text for text in batch.context_additions if "[GT_PLAN_CURSOR]" in text]
+    assert len(cursor) == 1
+    assert any(row.row_id in cursor[0] for row in plan.rows)
+    assert "pytest -q" in cursor[0]
+
+
+def test_an_unchanged_world_does_not_repeat_the_cursor(tmp_path, graph):
+    """Fired on change, not on a clock: a second identical turn adds nothing."""
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    _plan_for(inputs, adapter)
+    session = _cursor_session(tmp_path, graph, repo, adapter)
+
+    assert any("[GT_PLAN_CURSOR]" in text
+               for text in session.before_model([{"role": "user", "content": "t"}], 1).context_additions)
+    again = session.before_model([{"role": "user", "content": "t"}], 2)
+    assert not any("[GT_PLAN_CURSOR]" in text for text in again.context_additions)
+
+
+def test_a_moved_row_state_re_emits_the_cursor_superseding_the_last(tmp_path, graph):
+    """One cursor at the tail, replaced -- never a growing pile of them."""
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+    session = _cursor_session(tmp_path, graph, repo, adapter)
+    session.before_model([{"role": "user", "content": "t"}], 1)
+
+    remaining = [row.row_id for row in plan.rows][1:]
+    assert remaining
+    adapter.unmet_plan_rows = lambda: tuple(remaining)
+    moved = session.before_model([{"role": "user", "content": "t"}], 2)
+    cursor = [text for text in moved.context_additions if "[GT_PLAN_CURSOR]" in text]
+    assert len(cursor) == 1
+    assert remaining[0] in cursor[0]
+
+    rows = _journal(adapter)
+    prepared = [row for row in rows
+                if row["event"] == "decision_context_unit_prepared"
+                and row.get("supersession_key") == "plan_cursor:task"]
+    assert len(prepared) == 2
+    assert prepared[0]["unit_id"] != prepared[1]["unit_id"]
+
+
+def test_an_abstained_plan_delivers_no_cursor(tmp_path, graph):
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    adapter.persistent_plan = build_plan(None, inputs)
+    adapter.persistent_plan.rows = ()
+    session = _cursor_session(tmp_path, graph, repo, adapter)
+    batch = session.before_model([{"role": "user", "content": "t"}], 1)
+    assert not any("[GT_PLAN_CURSOR]" in text for text in batch.context_additions)
