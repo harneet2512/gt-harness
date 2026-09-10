@@ -859,6 +859,52 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   record would therefore never be published -- the same shape as the finalization
   race fixed above, one stage earlier. That is a hypothesis with a mechanism, not
   a measurement, and it has not been confirmed.
+  THE LEAD IS NOW MEASURED, AND IT WAS WRONG IN ONE LOAD-BEARING WAY. A first
+  repair (`d48fbea8`) called `_record_graph_publication()` at close on the
+  strength of that lead. Its unit witness passed, but it monkeypatched the
+  recorder, so it never exercised the recorder's own guards -- and REHEARSAL 07
+  DISPROVED IT IN THE LIVE PATH: still one publication, still
+  `native_graph_refresh_verified: False`, and no `graph_publication` anywhere
+  near close. A committed fix that demonstrably did not do its job.
+  Reading both journals rather than reasoning about them:
+    07  build finishes at row 157 for revision `eae5f8bd` while the tree has
+        already moved to `5e8ffa36`. `publish_graph` REFUSES it -- the request's
+        revision is superseded -- and the follow-up build for the newer revision
+        is still RUNNING at close (`already_running` at rows 175 and 179). There
+        was genuinely nothing to publish. Correct behaviour, and a fix that
+        changed it would be a fix that lies.
+    06  every refresh from row 148 to 179 reports `already_running` at revision
+        `6c682809`; that build finishes at rows 183/185 -- after the last
+        snapshot (178) and after the submit deferral (182) -- and nothing polls
+        between it and `session_closed` at 187.
+  06 is the defect, and it sits one step earlier than the lead said. A finished
+  build does not "become current" by itself. The coordinator parks the artifact
+  in `_completed`, and only `poll()` calls `publish_graph`; `poll()` is reached
+  from `refresh_graph`, which nothing calls after the last action. So the
+  artifact was UNADOPTED, not merely unobserved, `graph_current` stayed false,
+  and the close-time recorder returned at its first guard -- which is exactly
+  what it should do when the graph is not current.
+  FIXED at `5f4d69c6`: close now drains the coordinator before recording. The
+  coordinator is closed FIRST so the drain cannot spawn work on the way out
+  (`_closed` makes `consider_enrichment` return "closed", and queued work is
+  already dropped), every step is nonblocking so the rule that a RUNNING build is
+  never waited for is untouched, and all of it still runs before the journal is
+  sealed. Adoption stays the authority: `publish_graph` still refuses a
+  superseded revision, so 07's shape still records nothing. Close only stops
+  asking too early.
+  RED first, against the installed `d48fbea8` wheel (`wheels-81`): the new
+  witness builds a real `GraphBuildCoordinator`, lets a build finish,
+  deliberately does not poll, and asserts a publication after close. It failed
+  with `journal tail is ['runtime_layout']`, and its precondition assertion
+  confirmed the finished build really was not current. GREEN on `wheels-83`.
+  Installed verification, `gt-linux-suite:3.12`, `--network none`, pinned
+  producer: 61 pass across the finalization, coordinator, LSP-publication and
+  miniswe-integration suites; full suite 2,119 passed / 87 failed / 20 skipped
+  (`suite-82.xml`). Those 87 are MOUNT ARTIFACTS, proved rather than asserted --
+  the same 24 files run against `wheels-81` under identical mounts give a
+  byte-identical failure set of 87 with an empty symmetric difference
+  (`failedfiles-81.xml`). They read `gt_finalstand/`, `gt_engine/`, `.github/`
+  and `.githooks/` as DATA, and none of those is in the tests+scripts mount.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
