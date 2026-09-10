@@ -100,7 +100,7 @@ _STARTS_WITH_RE = re.compile(r"(?i)\b(?:starts?\s+with|begins?\s+with|prefix(?:e
 _CONTAINS_RE = re.compile(r"(?i)\bcontains?\b")
 _SEMANTIC_ASSERTION_RE = re.compile(
     r"(?m)^GT_SEMANTIC_ASSERT\s+relation=(?P<relation>[a-z_]+)\s+"
-    r"literal_sha256=(?P<literal>[0-9a-f]{64})\s+result=pass$"
+    r"literal_sha256=(?P<literal>[0-9a-f]{64})\s+result=(?P<result>[^\r\n]*)$"
 )
 
 
@@ -574,11 +574,13 @@ def evaluate_passing_observation(
                 expected_literal = hashlib.sha256(
                     predicate.literal.encode("utf-8", "surrogatepass")
                 ).hexdigest()
-                verified = any(
-                    match.group("relation") == predicate.expected_relation
-                    and match.group("literal") == expected_literal
+                outcomes = {
+                    match.group("result")
                     for match in _SEMANTIC_ASSERTION_RE.finditer(output)
-                )
+                    if match.group("relation") == predicate.expected_relation
+                    and match.group("literal") == expected_literal
+                }
+                verified = outcomes == {"pass"}
             if verified:
                 coverage_basis = "exact_operator_literal_assertion"
         elif predicate.kind == "artifact":

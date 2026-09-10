@@ -1,5 +1,6 @@
 import hashlib
 import json
+import pytest
 
 from gt_engine.event_journal import verify_event_journal
 from gt_engine.miniswe_controller import Predicate
@@ -8,6 +9,23 @@ from gt_engine.persistent_plan import build_plan_inputs
 from gt_engine.persistent_plan.bootstrap import build_plan
 from gt_engine.task_contract import extract_task_contract
 from gt_engine.verification_contract import compile_obligation_predicates
+
+
+@pytest.mark.parametrize("outcomes", [("pass", "fail"), ("fail", "pass"), ("pass", "unknown")])
+def test_contradictory_exact_assertions_cannot_advance_predicates(tmp_path, outcomes):
+    contract = extract_task_contract('The identifier must start with "urn:gt:".')
+    compiled = compile_obligation_predicates(contract)
+    adapter = MiniSweAdapter(task_id="contradiction", state_dir=tmp_path / "state", repo_root=tmp_path,
+                             predicates=[Predicate(row.predicate_id, row.kind) for row in compiled.values()],
+                             contract=contract)
+    adapter.start_task()
+    literal = hashlib.sha256(b"urn:gt:").hexdigest()
+    output = "test_id.py::test_prefix PASSED\n1 passed\n" + "\n".join(
+        f"GT_SEMANTIC_ASSERT relation=starts_with literal_sha256={literal} result={result}"
+        for result in outcomes)
+    assert adapter.evaluate_observation("pytest -v test_id.py", output, returncode=0, action_index=1) == ()
+    assert adapter.unmet_predicates
+    assert adapter.final_state()["predicate_evidence"] == {}
 
 
 def test_exact_assertion_metadata_survives_controller_journal_and_summary(tmp_path):

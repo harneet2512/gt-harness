@@ -1,6 +1,6 @@
 # Context + plan implementation tracker
 
-Updated: 2026-09-09. Owner: current implementation session.
+Updated: 2026-09-10. Owner: current implementation session.
 
 ## Scope and release state
 
@@ -181,6 +181,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Candidate 39 refuses contradictory exact semantic assertions for the same
+  relation/literal identity, regardless of pass/fail order; unknown results also
+  prevent promotion. Three installed RED witnesses advanced a predicate before
+  repair (`assertion-contradiction-red.xml`). Final installed evidence/check/gate
+  regressions passed 86 tests, zero skips, 16.47s
+  (`assertion-contradiction-39-final.xml`); the preceding green attempt exposed a
+  test reading a submission-only field before submission, corrected to inspect
+  actual predicate receipts without changing the primary rejection assertion.
+  Wheel SHA256: `cb2af2f0eb940788b29f53c7b6ca56c6185a14f6341dcbb593d5fbdaded72ff4`.
+  Canonical acceptance `34434458732` passed at harness `1f4fba35`; producer CI
+  `34434408677` passed at `ccf489ba`. These precede current structural-row work.
 
 - Candidate 38 now rejects a missing parent graph/manifest before producer
   capability discovery. Two RED witnesses prove the unnecessary probe occurred.
