@@ -93,6 +93,7 @@ class PlanInputs:
             "language": self.language,
             "rows": [row.as_dict() for row in self.ledger.rows],
             "unclassified_spans": [list(span) for span in self.ledger.unclassified_spans],
+            "source_spans": [list(span) for span in self.ledger.source_spans],
             "anchors": {
                 row_id: [anchor.as_dict() for anchor in anchors]
                 for row_id, anchors in self.anchors.anchors.items()

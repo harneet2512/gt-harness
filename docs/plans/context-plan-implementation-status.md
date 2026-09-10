@@ -83,7 +83,11 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Add gt-plan show/revise/defer/bind-check requests through the existing engine
   and journal owner. A real CLI-to-engine test rejects direct proof grants.
 - [x] Add an all-row ID index and retrieval instructions to the plan rendering.
-- [ ] Finish full source-span/example delivery and long/unfenced code-block cases.
+- [x] Finish full source-span/example delivery and long/unfenced code-block cases.
+  The planner already receives the original task; retained line-numbered source
+  is now explicitly retrievable with `gt-plan show --source`, including indentation,
+  blank lines and examples. Existing workflow/test-identity filters remain active.
+  Retrieval availability is not counted as actual model exposure.
 - [x] Make omitted designs and interaction cells explicit pending work under the
   existing planner limits; preserve stable requirement identities.
 - [ ] Finish anchor/source-revision validation and distinguish existing versus
@@ -177,6 +181,16 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Candidate 36 fixes nested/tilde fence parsing and adds full source-span
+  retrieval to the existing CLI/state owner. Long unfenced examples, structural
+  lines and blank-line positions survive; unterminated leading examples keep
+  their true starting line. No added provider call or repeated prompt payload.
+  Six installed source/ledger/prefix/check/recovery/integration suites: 106 passed,
+  zero skips, 28.09s (`plan-source-36.xml`); expanded source edge cases: five
+  passed, zero skips, 7.60s (`plan-source-edge-36.xml`). Three pre-fix REDs:
+  `plan-source-red.xml`. Canonical acceptance `34432337182` passed at `9b23e66a`,
+  before finalization/source changes; successor acceptance remains required.
 
 - Candidate 35 observes actual BASE-to-HEAD binary diff bytes, separately from
   tracked/untracked working changes and the supervisor's recovery export. An

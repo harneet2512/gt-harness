@@ -807,6 +807,8 @@ class MiniSweAdapter(GroundtruthController):
         payload = {
             "plan_digest": hashlib.sha256(plan.canonical_json().encode()).hexdigest(),
             "source_revision": self.repository_revision,
+            "source_spans": [list(span) for span in ledger.source_spans] if ledger is not None else [],
+            "unclassified_spans": [list(span) for span in ledger.unclassified_spans] if ledger is not None else [],
             "rows": [{**row.as_dict(), "state": self.plan_row_state(row.row_id),
                       "pending_interactions": [list(cell) for cell in plan.pending_interactions(row.row_id)],
                       "source": (ledger.by_id(row.row_id).as_dict()

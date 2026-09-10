@@ -14,7 +14,8 @@ from gt_harness.canonical_io import atomic_json
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="gt-plan")
     parser.add_argument("operation", choices=("show", "revise", "defer", "bind-check"))
-    parser.add_argument("row_id")
+    parser.add_argument("row_id", nargs="?")
+    parser.add_argument("--source", action="store_true", help="show retained source lines, without normalizing examples")
     parser.add_argument("--file")
     parser.add_argument("--reason")
     args = parser.parse_args(argv)
@@ -24,6 +25,13 @@ def main(argv=None) -> int:
             raise ValueError("GT_PLAN_ROOT is not configured")
         root = Path(root)
         state = json.loads((root / "current.json").read_text(encoding="utf-8"))
+        if args.source:
+            if args.operation != "show" or args.row_id is not None:
+                raise ValueError("--source is only valid with show and no row id")
+            print(json.dumps({"source_spans": state.get("source_spans", []),
+                              "unclassified_spans": state.get("unclassified_spans", []),
+                              "source_available": "source_spans" in state}, ensure_ascii=False, sort_keys=True))
+            return 0
         row = next((r for r in state["rows"] if r["row_id"] == args.row_id), None)
         if row is None:
             raise ValueError("unknown plan row")

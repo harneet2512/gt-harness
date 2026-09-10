@@ -32,7 +32,7 @@ from ..task_contract import (
     significant_tokens,
 )
 
-_FENCE_RE = re.compile(r"^\s*```")
+_FENCE_RE = re.compile(r"^\s*(?P<marker>`{3,}|~{3,})(?P<tail>.*)$")
 _BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+(?P<text>.+?)\s*$")
 _HEADING_RE = re.compile(
     r"^\s*(?:#{1,6}\s*(?P<hash>.+?)|\*\*(?P<bold>[^*]+)\*\*)\s*:?\s*$"
@@ -123,6 +123,7 @@ class Ledger:
     skipped: tuple[tuple[int, str], ...] = ()
     fenced_lines: int = 0
     unclassified_spans: tuple[tuple[int, str], ...] = ()
+    source_spans: tuple[tuple[int, str], ...] = ()
 
     def __iter__(self):
         return iter(self.rows)
@@ -281,24 +282,31 @@ def build_requirement_ledger(
     skipped: list[tuple[int, str]] = []
     seen: set[str] = set()
     section = ""
-    fenced = False
+    fence_marker = ""
+    example_start = 0
     fenced_lines = 0
     example_lines: list[str] = []
     unclassified: list[tuple[int, str]] = []
 
     for line_no, raw in enumerate((issue_text or "").splitlines(), start=1):
-        if _FENCE_RE.match(raw):
+        fence = _FENCE_RE.match(raw)
+        closes = bool(fence and fence_marker and fence.group("marker")[0] == fence_marker[0]
+                      and len(fence.group("marker")) >= len(fence_marker) and not fence.group("tail").strip())
+        if fence and (not fence_marker or closes):
             example_lines.append(raw)
-            if fenced:
+            if closes:
                 example = "\n".join(example_lines)
                 if rows:
                     rows[-1] = replace(rows[-1], examples=rows[-1].examples + (example,))
                 else:
-                    unclassified.append((line_no - len(example_lines) + 1, example))
+                    unclassified.append((example_start, example))
                 example_lines = []
-            fenced = not fenced
+                fence_marker = ""
+            else:
+                fence_marker = fence.group("marker")
+                example_start = line_no
             continue
-        if fenced:
+        if fence_marker:
             fenced_lines += 1
             example_lines.append(raw)
             continue
@@ -363,12 +371,14 @@ def build_requirement_ledger(
         if rows:
             rows[-1] = replace(rows[-1], examples=rows[-1].examples + ("\n".join(example_lines),))
         else:
-            unclassified.append((1, "\n".join(example_lines)))
+            unclassified.append((example_start, "\n".join(example_lines)))
     raw_lines = (issue_text or "").splitlines()
     unclassified.extend((line, raw_lines[line - 1]) for line, reason in skipped
                         if reason not in {"leaks_test_identity", "workflow_noise", "duplicate"})
     return Ledger(rows=tuple(rows), skipped=tuple(skipped), fenced_lines=fenced_lines,
-                  unclassified_spans=tuple(unclassified))
+                  unclassified_spans=tuple(unclassified),
+                  source_spans=tuple((number, raw) for number, raw in enumerate(raw_lines, 1)
+                                     if not _is_workflow_noise(raw) and not _leaks_test_identity(raw)))
 
 
 def _link_obligations(

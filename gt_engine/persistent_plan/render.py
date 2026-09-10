@@ -45,7 +45,8 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
     head = [
         f"[{PLAN_TAG}]",
         "Requirement index: " + ", ".join(row.row_id for row in plan.rows),
-        "Inspect full rows with `gt-plan show <row-id>`. Revise a design with "
+        "Inspect full rows with `gt-plan show <row-id>` and retained source/examples "
+        "with `gt-plan show --source`. Revise a design with "
         "`gt-plan revise <row-id> --file <json>`; bind an argv check with "
         "`gt-plan bind-check <row-id> --file <json>`. These requests cannot grant evidence.",
         "Design produced before implementation began, from the change request "
