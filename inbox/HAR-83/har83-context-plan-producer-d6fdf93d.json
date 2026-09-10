@@ -1,0 +1,38 @@
+{
+  "schema": "gt.review_packet.v1",
+  "packet_id": "har83-context-plan-producer-d6fdf93d",
+  "ticket": "HAR-83",
+  "head_sha": "d6fdf93ddadc3326cb821740a15024f40cc15ab4",
+  "kind": "check_outcome",
+  "status": "PASS",
+  "basis": "local_determinism_fix_verified_on_certified_static_build_and_source_correspondence",
+  "detail": {
+    "scope": "Producer determinism root-cause fix (resolver.go same-named member index), certified static Linux build, vendored source/fingerprint correspondence, installed determinism witness. Not full consumer equivalence, product readiness, or benchmark reward.",
+    "repository": "harneet2512/groundtruth",
+    "source_tree": "e883bc7e3c28b3d224313535ca45a2c5a1f29212",
+    "producer_sha256": "de6b1f728bf7c69928f1cc7f89417dcfca4b357a7b8b9dea211e137d2f39c41f",
+    "build_info_sha256": "67e2b393cdfd17f980041ac1cefb5f588cba224687fdb84b9b6a864323acd581",
+    "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
+    "receipt_digest_sha256": "ea135139c1a7591980b6a111a5914650a31c8e88e5f907c85d3cd5b9a5faec00",
+    "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "build_tags": "netgo,osusergo,sqlite_fts5",
+    "go_toolchain": "go1.22.5",
+    "fix": "resolver.go class-method index: lowest (start_line, id) wins same-name collision instead of map-order last-write-wins",
+    "measured": {
+      "unit_witness": "TestSameNamedClassMembersResolveDeterministically: RED on pre-fix (flip at run 9/128), PASS post-fix; resolver+store suites green with sqlite_fts5",
+      "click": "8 runs, 1 digest, 50954 edges (was 8 distinct digests)",
+      "conan": "5 runs, 1 digest, 34457 edges (was 3 distinct digests/5 builds)",
+      "binding": "build-info git_commit=d6fdf93d == SOURCE-COMMIT; source_fingerprint=77d8bf97 == recipe hash over vendored tree == build worktree hash",
+      "installed_witness": "test_producer_determinism.py: 1 passed + 1 XPASS on new binary (wheels-89, producer-wheels-06, 88.47s)"
+    },
+    "remaining": [
+      "producer CI run for pushed d6fdf93d (branch not yet pushed upstream)",
+      "all-consumer graph parity at real scale",
+      "six-repository study run-loop instrument",
+      "paid smoke approval gate"
+    ],
+    "paid_dispatch": false,
+    "confidence": "high"
+  },
+  "packet_digest_sha256": "16c5a2ff288d19b19b72afbe19140b14d3e168f626b75c8665aed77080bae324"
+}

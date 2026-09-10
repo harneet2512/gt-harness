@@ -1,7 +1,5 @@
 {
   "live_packets": [
-    "har83-context-plan-producer-efa70e52",
-    "har83-context-plan-producer-350cb156",
     "bugbot-pr24-20260901",
     "bugbot-pr25-20260901",
     "bugbot-pr26-20260901",
@@ -136,6 +134,9 @@
     "har81-groundtruth-owner-acceptance-cffca1fd2",
     "har81-smoke20-run-33646776586-outcome",
     "har83-benchmark-producer-84e19be70",
+    "har83-context-plan-producer-350cb156",
+    "har83-context-plan-producer-d6fdf93d",
+    "har83-context-plan-producer-efa70e52",
     "har83-final-hardening-exact-build-08fe997d0",
     "har83-final-hardening-producer-9d0d8079f",
     "har83-unified-source-1ecd03674",
@@ -393,9 +394,10 @@
       "merge-har81-resource-c6e5a47d"
     ],
     "HAR-83": [
-      "har83-context-plan-producer-efa70e52",
-      "har83-context-plan-producer-350cb156",
       "har83-benchmark-producer-84e19be70",
+      "har83-context-plan-producer-350cb156",
+      "har83-context-plan-producer-d6fdf93d",
+      "har83-context-plan-producer-efa70e52",
       "har83-final-hardening-exact-build-08fe997d0",
       "har83-final-hardening-producer-9d0d8079f",
       "har83-unified-source-1ecd03674"
