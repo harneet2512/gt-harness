@@ -774,6 +774,9 @@ class MiniSweAdapter(GroundtruthController):
                 break
             before = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
             self.record_repository_snapshot(before, boundary="before_auto_check")
+            remaining = deadline - time.monotonic()
+            if remaining < 1:
+                break
             result = None
             try:
                 result = environment.execute(

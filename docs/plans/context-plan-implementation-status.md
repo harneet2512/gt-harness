@@ -163,6 +163,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Queue timing RED showed automatic verification starting with a 15-second
+  timeout after snapshot capture consumed its entire 30-second allowance.
+  The queue now rereads its deadline after capture and retains unexecuted work
+  as pending. Rebuilt wheel 14 passed 99 installed baseline/integrity/gate/check/
+  cursor/prefix tests, zero skips, in 19.27 seconds
+  (`D:/gt-context-proof/queue-budget-green.xml`). The deadline witness uses a
+  controlled clock and real snapshot capture; ordinary isolated checks also ran.
 - Real pytest shutdown-hook RED exposed `intact` despite a passing summary and
   exit code 1. Final baseline comparison now reports `unknown` for a nonzero
   exit without parsed failure/error attribution, preserving named regressions

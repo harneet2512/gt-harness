@@ -246,3 +246,33 @@ def test_real_queue_coalesces_edits_and_checks_current_source(tmp_path, monkeypa
     assert adapter.plan_row_state(row_id) == expected
     assert adapter._pending_check_ids == set()
     assert verify_event_journal(adapter.store.path).valid
+
+
+def test_queue_does_not_spend_expired_allowance_after_snapshot(tmp_path, monkeypatch):
+    from gt_engine import runtime_observation
+    from gt_engine.miniswe_integration import MiniSweAdapter
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.bootstrap import build_plan
+
+    (tmp_path / "test_widget.py").write_text("def test_widget(): assert True\n", encoding="utf-8")
+    adapter = MiniSweAdapter(task_id="snapshot-budget", state_dir=tmp_path / "state",
+                             repo_root=str(tmp_path), predicates=())
+    adapter.persistent_plan = build_plan(None, build_plan_inputs(
+        "The widget must preserve compatibility.", repo_root=str(tmp_path), capture_baseline=False))
+    check_id = adapter.bind_plan_check({"argv": ["pytest", "-v", "test_widget.py"],
+                                       "requirement_ids": [adapter.persistent_plan.rows[0].row_id]})
+    elapsed = [0.0]
+    capture = runtime_observation.capture_workspace
+    def slow_capture(*args, **kwargs):
+        snapshot = capture(*args, **kwargs)
+        elapsed[0] = 31.0
+        return snapshot
+    calls = []
+    environment = SimpleNamespace(execution_env=lambda: {},
+                                  execute=lambda *a, **kw: calls.append(kw))
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    monkeypatch.setattr("gt_engine.miniswe_integration.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(runtime_observation, "capture_workspace", slow_capture)
+    adapter.drain_plan_checks(environment, budget_seconds=30)
+    assert calls == []
+    assert check_id in adapter._pending_check_ids
