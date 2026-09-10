@@ -913,14 +913,76 @@ def _verify_native_blob(
     return []
 
 
-def _native_feature_projection(rows: list[dict]) -> dict[str, dict]:
-    """Project native events conservatively into the canonical 19 identities.
+def _native_plan_projection(rows: list[dict], state_dir: Path) -> tuple[list[dict], list[str]]:
+    """Verify task-message plan bytes independently of evidence-dose admission.
+
+    This is audit-only: it neither adds prompt bytes nor changes the delivery
+    budget. A matching response proves linkage, not semantic use of the plan.
+    """
+    synthetic: list[dict] = []
+    issues: list[str] = []
+    for index, row in enumerate(rows):
+        if row.get("event") != "persistent_plan_delivered":
+            continue
+        identity = str(row.get("rendered_sha256") or "")
+        synthetic.append({"event_type": "decision.committed", "payload": {
+            "decision": "delivered", "feature_id": "persistent_plan",
+            "delivery_id": identity, "reason": "plan_rendered_without_verified_provider_join",
+        }})
+        failures = _verify_native_blob(state_dir, row, path_key="rendered_blob",
+                                       digest_key="rendered_sha256", label="persistent plan")
+        if failures:
+            issues.extend(failures)
+            continue
+        boundaries = [other for other in rows[index + 1:]
+                      if other.get("event") in {"provider_delivery", "provider_response"}][:2]
+        if (len(boundaries) != 2 or boundaries[0].get("event") != "provider_delivery"
+                or boundaries[1].get("event") != "provider_response"
+                or not boundaries[0].get("request_id")
+                or boundaries[0].get("request_id") != boundaries[1].get("request_id")
+                or boundaries[0].get("iteration") != boundaries[1].get("iteration")):
+            issues.append("persistent plan: immediate provider request/response pair missing")
+            continue
+        request_row, response_row = boundaries
+        failures = _verify_native_blob(state_dir, response_row, path_key="response_blob",
+                                        digest_key="response_sha256", label="plan provider response")
+        if failures:
+            issues.extend(failures)
+            continue
+        try:
+            rendered = (state_dir / row["rendered_blob"]).read_bytes()
+            if not rendered or len(rendered) != row.get("rendered_bytes"):
+                raise ValueError("plan rendering size mismatch")
+            text = rendered.decode("utf-8")
+            if not request_row.get("payload_sha256"):
+                raise ValueError("plan provider request digest missing")
+            request = load_provider_request(state_dir, request_row)
+            response = json.loads((state_dir / response_row["response_blob"]).read_text(encoding="utf-8"))
+            if not isinstance(response, dict):
+                raise ValueError("plan provider response object required")
+            messages = request.get("messages", [])
+            if not any(isinstance(message, dict) and message.get("role") == "user"
+                       and isinstance(message.get("content"), str)
+                       and text in message["content"] for message in messages):
+                raise ValueError("plan bytes absent from immediate task message")
+        except (OSError, KeyError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+            issues.append(f"persistent plan: {exc}")
+            continue
+        synthetic.extend([
+            {"event_type": "provider.request", "payload": {"delivery_ids": [identity]}},
+            {"event_type": "model.response", "payload": {"delivery_ids": [identity]}},
+        ])
+    return synthetic, issues
+
+
+def _native_feature_projection(rows: list[dict], *, plan_projection: list[dict] | None = None) -> dict[str, dict]:
+    """Project native events conservatively into the canonical feature identities.
 
     Audit-owned delivery IDs are populated only after locating the sealed exact
     bytes in the immediate provider request and joining its response. Direct
     callers may pass raw event rows for projection-only unit tests.
     """
-    synthetic: list[dict] = []
+    synthetic: list[dict] = list(plan_projection or ())
     for row in rows:
         event = str(row.get("event") or "")
         if event == "provider_delivery":
@@ -1416,7 +1478,9 @@ def _audit_native_miniswe_task(
         )
         provider_requests[request_id]["_audited_delivery_ids"] = sorted(verified)
         provider_responses[request_id]["_audited_delivery_ids"] = sorted(verified)
-    a.feature_attribution = _native_feature_projection(rows)
+    plan_projection, plan_issues = _native_plan_projection(rows, state_dir)
+    a.attribution_issues.extend(plan_issues)
+    a.feature_attribution = _native_feature_projection(rows, plan_projection=plan_projection)
     if a.iterations != len(provider_requests):
         a.attribution_issues.append(
             f"trajectory api_calls {a.iterations} != provider requests "

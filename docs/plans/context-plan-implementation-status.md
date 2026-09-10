@@ -23,6 +23,15 @@ skips (`rehearsal-lineage-installed-46.xml`); the combined source check passed
 41 tests with three explicitly excluded release/Git-environment tests.
 This proves transport behavior, not completion of the installed Harbor trial.
 
+Canonical successor `34438826174` PASSED at `440c337b`. Persistent-plan
+exposure now has independent exact-byte audit through both monolithic and
+message-CAS provider requests, with the immediate response identity checked.
+The installed native hook -> saved rendering -> provider request -> audit
+test passed alongside the full focused matrix: 153 passed, zero skips,
+`plan-exposure-installed-49.xml`. Missing/tampered renderings, wrong sizes,
+late delivery and mismatched responses cannot promote exposure. This fixes
+the plan portion of the census, not plan-gate attribution or semantic use.
+
 Implement the approved targeted repairs to evidence, persistent planning,
 verification scheduling, incremental graph amendments, snapshots, submission,
 and installed product acceptance. Preserve the existing engine, graph consumers,

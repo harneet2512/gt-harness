@@ -4,13 +4,13 @@ The single reference for what GroundTruth stores, when it stores it, and what
 each capability does from task start to submission. Written against
 `codex/product-completion` at `2cbb9939`.
 
-## Current implementation overlay (2026-09-09)
+## Current implementation overlay (2026-09-10)
 
 The run measurements and legacy-path findings below remain historical evidence.
 For the current candidate, follow `docs/plans/context-plan-implementation-status.md`.
-Harness `5c2e4965` pins producer `350cb156`; harness `ab71a0b6` additionally
-corrects baseline failure attribution. These are scoped candidate commits, not
-a benchmark-ready release.
+Harness `b68de522` pins producer `efa70e52`; `ab58d4af` corrects and verifies
+the updated lineage seal. Canonical provider-free CI `34438826174` passed at
+`440c337b`. These are scoped candidate commits, not a benchmark-ready release.
 
 - The workflow now supplies `max_iterations=0` (Mini-SWE's unlimited-step mode).
   GT represents unlimited remaining steps as null, not zero. Wall-clock limits
@@ -26,9 +26,10 @@ a benchmark-ready release.
   It copies the certified parent once, retains unchanged parser-owned node IDs,
   loads complete content-keyed parser inputs, and executes the complete existing
   resolver/analysis pipeline once. It does not narrowly guess affected callees.
-- A `parser_node_inventory` table binds retained nodes to parser inputs.
-  Properties, assertions, history/cochanges, and derived layers are currently
-  reconstructed. Therefore this is partial structural reuse, not a claim that
+- Parser inventories bind retained nodes, properties, assertions and structural
+  edges to exact parser facts. Unchanged fact rows retain physical identities;
+  assertions are freshly resolved before comparison. History/cochanges and
+  derived analyses still run. This is structural reuse, not a claim that
   every graph layer is incrementally maintained. Parser cache storage survives
   graph revisions outside the indexed input; the same coordinator still owns
   one active and one coalesced pending build.
@@ -42,10 +43,10 @@ a benchmark-ready release.
   its identity appears in the baseline passing set. Unknown or unattributed
   failures are never reported as an intact baseline.
 
-Producer CI `34424185145` passed the complete configured matrix. Installed
-candidate 09 passed 126 checks with two explained skips; the subsequent baseline
-attribution increment passed 62 installed checks with zero skips. Canonical
-repinned harness CI and the remaining tracker requirements are separate gates.
+Producer CI `34436549266` and static Linux build `34436550584` passed at
+`efa70e52`. Installed candidate 44 passed 200 checks with one explicit
+source-registry deselection; 14 complementary source checks passed. The
+remaining tracker requirements are separate gates.
 
 Every number in this document was measured, not estimated. Where a measurement
 comes from a specific run it is named, so a future reader can check it rather
@@ -407,7 +408,7 @@ name in `gt_engine/feature_matrix.py`. Renaming a test without repointing its
 pin leaves the feature with no proof, and readiness refuses the commit. That is
 not a nuisance; it caught exactly that mistake on run 34402254504.
 
-Note that `persistent_plan` and `plan_gate` currently audit as `INELIGIBLE` with
+Historical note: `persistent_plan` and `plan_gate` audited as `INELIGIBLE` with
 `no_trigger_observed`, because the plan block is appended directly to the task
 message rather than admitted through `admit_decision_packet`. The feature works
 — the journal proves it — but the attribution census cannot see it. Known gap.
@@ -415,6 +416,13 @@ message rather than admitted through `admit_decision_packet`. The feature works
 ---
 
 ## 8. Where the time goes
+
+Current plan audit: the rendering is stored by content hash and verified against
+the immediate provider request (including message-CAS storage) and matching
+response. `WITNESSED` means exact-byte exposure and response linkage, not
+semantic use or correctness. Missing/tampered bytes and unmatched boundaries
+stay `DELIVERED_UNEXPOSED`. `plan_gate` attribution remains open; its decision
+journal alone is not evidence that a directive reached the model.
 
 Measured across six tasks on run 34374028796, 29,972 seconds total.
 

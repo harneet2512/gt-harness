@@ -340,11 +340,17 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     suffix = request_text[request_text.index("[GT_PERSISTENT_PLAN]"):].encode()
     block = suffix[:delivered["rendered_bytes"]]
     assert delivered["rendered_sha256"] == hashlib.sha256(block).hexdigest()
+    assert (adapter.store.root / delivered["rendered_blob"]).read_bytes() == block
     assert b"interaction assessment pending: Mode.A, Mode.B" in block
     assert delivered["omitted_requirement_row_ids"]
     assert len(delivered["indexed_row_ids"]) > len(delivered["rendered_requirement_row_ids"])
     assert delivered["plan_rows_basis"] == "indexed_not_fully_delivered"
     assert verify_event_journal(adapter.store.path).valid
+    from scripts.gt_audit import _native_feature_projection, _native_plan_projection
+
+    projection, issues = _native_plan_projection(rows, adapter.store.root)
+    assert issues == []
+    assert _native_feature_projection(rows, plan_projection=projection)["persistent_plan"]["status"] == "WITNESSED"
 
 
 def test_native_action_batch_has_session_owned_execution_receipts(tmp_path, monkeypatch):

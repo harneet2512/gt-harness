@@ -286,6 +286,63 @@ def test_native_delivery_exact_bytes_are_independently_witnessed(tmp_path):
     assert audit.feature_attribution["cochange_prior"]["status"] == "WITNESSED"
 
 
+@pytest.mark.parametrize("expose", [True, False])
+def test_native_plan_requires_exact_immediate_provider_bytes(tmp_path, expose):
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="[GT_PERSISTENT_PLAN] fixture design", expose_delivery=expose
+    )
+
+    def convert(rows):
+        plan = rows[0]
+        plan["event"] = "persistent_plan_delivered"
+        plan["rendered_sha256"] = plan["delivery_identity"]
+        plan["rendered_blob"] = plan["delivery_blob"]
+        for row in rows[1:]:
+            row["delivery_ids"] = []
+            if row["event"] == "provider_delivery":
+                row["matches"] = []
+    rewrite_native_events(task, convert)
+    audit = gt_audit.audit_task(task)
+    plan = audit.feature_attribution["persistent_plan"]
+    assert plan["status"] == ("WITNESSED" if expose else "DELIVERED_UNEXPOSED")
+    assert plan["exposed"] is expose
+    if not expose:
+        assert any("plan bytes absent" in issue for issue in audit.attribution_issues)
+
+
+@pytest.mark.parametrize("damage", ["missing_blob", "tampered_blob", "wrong_response", "late_plan", "wrong_size"])
+def test_native_plan_never_promotes_broken_delivery_chain(tmp_path, damage):
+    task = make_native_miniswe_task(tmp_path, delivery_text="[GT_PERSISTENT_PLAN] fixture design")
+
+    def convert(rows):
+        plan = rows[0]
+        plan["event"] = "persistent_plan_delivered"
+        plan["rendered_sha256"] = plan["delivery_identity"]
+        plan["rendered_blob"] = plan["delivery_blob"]
+        for row in rows[1:]:
+            row["delivery_ids"] = []
+            if row["event"] == "provider_delivery":
+                row["matches"] = []
+        if damage == "missing_blob":
+            plan.pop("rendered_blob")
+        elif damage == "wrong_size":
+            plan["rendered_bytes"] += 1
+        elif damage == "wrong_response":
+            rows[2]["request_id"] = "another-request"
+        elif damage == "late_plan":
+            rows.append(rows.pop(0))
+            for sequence, row in enumerate(rows, 1):
+                row["sequence"] = sequence
+        elif damage == "tampered_blob":
+            state = task / "agent" / "gt-state" / "native-task"
+            (state / plan["rendered_blob"]).write_bytes(b"another plan")
+    rewrite_native_events(task, convert)
+    audit = gt_audit.audit_task(task)
+    assert audit.feature_attribution["persistent_plan"]["status"] == "DELIVERED_UNEXPOSED"
+    assert audit.feature_attribution["persistent_plan"]["exposed"] is False
+    assert audit.attribution_issues
+
+
 def test_native_delivery_must_be_on_the_immediate_provider_boundary(tmp_path):
     task = make_native_miniswe_task(tmp_path, delivery_text="inspect sibling.py")
     rewrite_native_events(

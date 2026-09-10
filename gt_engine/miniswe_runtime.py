@@ -1089,8 +1089,8 @@ def install_runtime_hooks(
             plan_tool_schema,
             response_finish_reason,
         )
-        from .persistent_plan.render import render_plan_block
         from .persistent_plan.recovery import checkpoint_plan, restore_plan
+        from .persistent_plan.render import render_plan_block
 
         plan = getattr(adapter, "_restored_initial_plan", None) or restore_plan(adapter.store, adapter.issue_text)
         restored = plan is not None
@@ -1192,9 +1192,12 @@ def install_runtime_hooks(
                     task_message = messages[1]
                     content = task_message.get("content")
                     if isinstance(content, str) and PLAN_BLOCK_TAG not in content:
+                        rendered_sha = rendering_receipt["rendered_sha256"]
+                        adapter.store.put_blob("plan_renderings", rendered_sha, block.encode("utf-8"))
                         task_message["content"] = f"{content}\n\n{block}"
                         adapter.store.append(
                             "persistent_plan_delivered",
+                            rendered_blob=f"plan_renderings/{rendered_sha}.json",
                             rendered_bytes=len(block.encode("utf-8")),
                             plan_rows=len(plan.rows),
                             process_id=plan.process_id,
