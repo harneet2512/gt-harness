@@ -253,6 +253,11 @@ jobs:
           kill %1 || true
 
       - name: Run the installed full-flow rehearsal
+        env:
+          # A push carries no dispatch inputs, so `inputs.scenario` is the empty
+          # string there, not the choice default. argparse rejected it after
+          # eight minutes of staging had already been paid for.
+          SCENARIO: ${{ inputs.scenario || 'repair' }}
         run: |
           set -euo pipefail
           python -m scripts.gt_installed_rehearsal \
@@ -261,13 +266,13 @@ jobs:
             --image "$TASK_IMAGE" \
             --port "$GT_REHEARSAL_PORT" \
             --transport-url "http://host.docker.internal:${GT_REHEARSAL_PORT}/v1" \
-            --scenario "${{ inputs.scenario }}"
+            --scenario "$SCENARIO"
 
       - name: Publish the rehearsal evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rehearsal-${{ inputs.scenario }}-${{ github.run_id }}
+          name: rehearsal-${{ inputs.scenario || 'repair' }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/rehearsal/rehearsal.json
             ${{ runner.temp }}/rehearsal/trials/**/agent/events.jsonl
