@@ -853,7 +853,7 @@ def test_a_full_rebuild_names_the_reason_the_amend_was_refused(monkeypatch, tmp_
     rebuilt = tmp_path / "rebuilt.db"
     rebuilt.write_bytes(b"new")
     monkeypatch.setattr(
-        "gt_engine.indexer._producer_supports_incremental_amend", lambda: False)
+        "gt_engine.indexer._producer_supports_amend_capability", lambda capability: False)
     monkeypatch.setattr(
         "gt_engine.indexer.ensure_index_with_receipt",
         lambda root, **_kwargs: IndexBuildReceipt(

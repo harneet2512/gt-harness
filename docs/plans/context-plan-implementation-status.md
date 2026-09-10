@@ -192,6 +192,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   other new failures remain explicitly `new_failures_unattributed`, never intact.
   Installed regression set passed 62 tests in 16.70 seconds, zero skips:
   `D:/gt-context-proof/baseline-attribution-green.xml`; RED retained beside it.
+- Repinned harness CI `34424824590` FAILED two fixture setup assumptions:
+  direct GT_INDEX_BINARY lookup instead of the normal resolver, and a fallback
+  mock disabling only legacy capability while the real batch capability remained
+  available. Both assertions are preserved; fixtures now use actual binary
+  resolution and explicitly model no amendment capability. Installed tests with
+  GT_INDEX_BINARY unset and the verified binary on PATH passed 45 checks, zero
+  skips, 15.85 seconds (`D:/gt-context-proof/ci-fixture-green.xml`).
 - New uncommitted producer summary exposes retained/inserted parser nodes, cache
   hits/misses and resolver passes; the harness now parses its batch result. Both
   missing-summary RED witnesses reproduced before repair. Producer batch tests

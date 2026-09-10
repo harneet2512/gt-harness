@@ -1,7 +1,6 @@
 """Execute the actual batch producer through the harness resource guard."""
 import hashlib
 import json
-import os
 import sqlite3
 import sys
 from contextlib import closing
@@ -15,7 +14,7 @@ from gt_engine.engine_state import RuntimeLayout
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="installed Linux producer required")
 def test_installed_batch_preserves_parent_and_reuses_parser_inputs(tmp_path):
-    binary = os.environ.get("GT_INDEX_BINARY", "")
+    binary = indexer._resolved_binary_path()
     assert binary and Path(binary).is_file(), "provide the exact candidate Linux binary"
     root = tmp_path / "repo"
     root.mkdir()
