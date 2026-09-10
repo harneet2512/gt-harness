@@ -179,6 +179,7 @@ export default function GraphPanel({
             matches={matches}
             labels={labels}
             trailIds={view.trailIds}
+            showAllRelations={workspaceView === "Flow"}
             workerTrails={view.workerTrails}
             presence={view.agentPresence}
             focusAgent={focused}

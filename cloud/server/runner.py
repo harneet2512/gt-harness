@@ -2364,7 +2364,12 @@ def _short_error(exc: BaseException) -> str:
 
 
 def _preflight_blocking(model: str) -> None:
-    """One 1-token completion over the session's own LiteLLM route."""
+    """One minimal completion over the session's own LiteLLM route.
+
+    16 tokens, not 1: providers exist (e.g. OpenRouter's muse-spark route)
+    that reject ``max_output_tokens < 16`` outright, and a preflight that
+    cannot pass a served model is a preflight that lies.
+    """
     model_name, model_kwargs = resolve_model(model)
     model_kwargs.pop("temperature", None)
     # A preflight the user is waiting on gets its own, much shorter, budget.
@@ -2375,7 +2380,7 @@ def _preflight_blocking(model: str) -> None:
         litellm.completion(
             model=model_name,
             messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
+            max_tokens=16,
             **model_kwargs,
         )
     except Exception as exc:  # noqa: BLE001 - any refusal is "not available"

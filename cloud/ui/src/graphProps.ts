@@ -35,6 +35,11 @@ export interface GraphViewProps {
   labels: boolean;
   /** Particle ids the agent walked, in order, up to the scrub cutoff. */
   trailIds: readonly string[];
+  /**
+   * Draw every relation in the field, not only the selection's. The
+   * "Flow" presentation; renderers that always draw edges ignore it.
+   */
+  showAllRelations?: boolean;
   /** Identity of that walk: a change means replay, which never animates. */
   trailToken: string;
   animate: boolean;

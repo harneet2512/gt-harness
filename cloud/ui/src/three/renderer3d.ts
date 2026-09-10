@@ -209,10 +209,10 @@ export class Renderer3D {
     this.edges = new LineSegments(
       new BufferGeometry(),
       new LineBasicMaterial({
-        color: 0x718896,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.9,
         depthTest: true,
+        vertexColors: true,
       }),
     );
     this.scene.add(this.edges);
@@ -638,6 +638,15 @@ export class Renderer3D {
           if(id === state.selectedId) c.lerp(new Color("#8db6e6"),.45);
           else if(id === state.hoverId) c.multiplyScalar(1.13);
           else if(state.hoverId || (state.matches && !state.matches.has(id))) c.multiplyScalar(.76);
+          /* A building the agent has changed keeps its mark under any
+             hover — activity is the thing this view exists to show. */
+          const edit = state.edited.get(id);
+          if (edit) {
+            const worked = edit.status === "added" ? "#79b38a"
+              : edit.status === "deleted" ? "#c47f7f"
+              : "#d99a5b";
+            c.lerp(new Color(worked), id === state.selectedId ? 0.3 : 0.55);
+          }
         }),
       );
     }
@@ -659,31 +668,46 @@ export class Renderer3D {
   }
   private paintEdges(state: Frame3DState) {
     const id = state.hoverId ?? state.selectedId;
-    const key = `${this.layout?.signature}|${id}`;
+    const all = state.showAllRelations === true;
+    const key = `${this.layout?.signature}|${id}|${all}`;
     if (key === this.edgeKey) return;
     this.edgeKey = key;
     const vertices: number[] = [];
-    if (id && this.layout)
+    const colors: number[] = [];
+    const dark = document.documentElement.dataset.theme === "dark";
+    const faint = new Color(dark ? "#39434f" : "#c3ccd6");
+    const lit = new Color(dark ? "#7fb1f2" : "#287df0");
+    // A link is sixteen segments; the budget is segments, not links.
+    const budget = all ? 16 * 400 : 16 * 80;
+    if (this.layout && (all || id))
       for (const l of this.layout.links) {
         const a = this.layout.byId.get(String(l.source)) as
             | CityPlot
             | undefined,
           b = this.layout.byId.get(String(l.target)) as CityPlot | undefined;
-        if (!a || !b || (a.id !== id && b.id !== id)) continue;
+        if (!a || !b) continue;
+        const hot = id !== null && (a.id === id || b.id === id);
+        if (!all && !hot) continue;
+        const tone = all && !hot ? faint : lit;
         const from=new Vector3(a.x,a.y+a.height+1,a.z), to=new Vector3(b.x,b.y+b.height+1,b.z);
         for(let j=0;j<16;j++) {
           for(const t of [j/16,(j+1)/16]) {
             const q=from.clone().lerp(to,t);q.y+=Math.sin(Math.PI*t)*Math.min(16,from.distanceTo(to)*.12);
             vertices.push(q.x,q.y,q.z);
+            colors.push(tone.r,tone.g,tone.b);
           }
         }
-        if (vertices.length >= 6 * 16 * 80) break;
+        if (vertices.length >= 6 * budget) break;
       }
     this.edges.geometry.dispose();
     this.edges.geometry = new BufferGeometry();
     this.edges.geometry.setAttribute(
       "position",
       new Float32BufferAttribute(vertices, 3),
+    );
+    this.edges.geometry.setAttribute(
+      "color",
+      new Float32BufferAttribute(colors, 3),
     );
   }
   private paintAgents(
