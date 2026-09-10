@@ -183,8 +183,8 @@ def test_a_previous_layout_checkpoint_is_rejected_by_version_not_by_shape(tmp_pa
     """
     from gt_engine.persistent_plan import recovery
 
-    assert recovery.LAYOUT == "gt.plan_checkpoint.v3"
-    assert _checkpoint_shape_fingerprint() == "e024cd7fadfe2046"
+    assert recovery.LAYOUT == "gt.plan_checkpoint.v4"
+    assert _checkpoint_shape_fingerprint() == "70abda976bc1db42"
 
     from gt_engine.persistent_plan import PlanRow
     from gt_engine.persistent_plan.baseline import BaselineResult
@@ -193,3 +193,4 @@ def test_a_previous_layout_checkpoint_is_rejected_by_version_not_by_shape(tmp_pa
     assert {"source_revision", "after_source_revision"} <= baseline_names
     row_names = {f.name for f in dataclasses.fields(PlanRow)}
     assert {"check_basis", "check_missing_paths", "symbol_basis"} <= row_names
+    assert {"test_file_digests", "config_sha256", "dependency_sha256"} <= baseline_names

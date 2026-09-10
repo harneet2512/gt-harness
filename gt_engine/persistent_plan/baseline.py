@@ -13,6 +13,7 @@ never reads the benchmark's tests, its fail-to-pass list, or its verifier.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
 import shutil
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -58,6 +60,14 @@ class BaselineResult:
     environment_sha256: str = ""
     source_revision: str = ""
     after_source_revision: str = ""
+    # The three things "the same command still passes the same tests" depends on
+    # and the agent can change. Test sources are kept per file, because the
+    # question is per test: only the files the observed tests live in are
+    # recorded, so the map stays a handful of rows rather than the whole tree.
+    # An empty digest means the file was not present at capture time.
+    test_file_digests: tuple[tuple[str, str], ...] = ()
+    config_sha256: str = ""
+    dependency_sha256: str = ""
 
     @property
     def captured(self) -> bool:
@@ -82,6 +92,9 @@ class BaselineResult:
             "environment_sha256": self.environment_sha256,
             "source_revision": self.source_revision,
             "after_source_revision": self.after_source_revision,
+            "test_file_digests": [list(item) for item in self.test_file_digests],
+            "config_sha256": self.config_sha256,
+            "dependency_sha256": self.dependency_sha256,
         }
 
     def summary(self) -> str:
@@ -101,6 +114,14 @@ class RegressionReport:
     failed_delta: int = 0
     detail: str = ""
     after: BaselineResult | None = field(default=None, repr=False)
+    # Files a previously passing test lived in whose content moved. The name
+    # survived; the test did not, so its pass is not carried.
+    changed_test_files: tuple[str, ...] = ()
+    # Identities that moved without invalidating the name comparison --
+    # "config", "dependency". Reported rather than blocking: adding a fixture
+    # or a package is ordinary work, and a report that silently did not check
+    # is worse than one that says what it saw.
+    changed_identities: tuple[str, ...] = ()
 
     @property
     def regressed(self) -> bool:
@@ -114,6 +135,8 @@ class RegressionReport:
             "failed_delta": self.failed_delta,
             "detail": self.detail,
             "after_environment_sha256": self.after.environment_sha256 if self.after else "",
+            "changed_test_files": list(self.changed_test_files),
+            "changed_identities": list(self.changed_identities),
         }
 
 
@@ -150,6 +173,79 @@ def _parse(output: str, command: tuple[str, ...]) -> tuple[dict[str, int], list[
         return counts, passing, failing
     except Exception:  # noqa: BLE001 - parsing is correct-or-quiet
         return {"passed": 0, "failed": 0, "errored": 0}, [], []
+
+
+# What the discovered command reads to decide which tests exist and how they
+# run. Matched by basename anywhere in the tree, because conftest.py is
+# per-directory by design and a repository may carry several.
+_CONFIG_BASENAMES = frozenset({
+    "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "conftest.py",
+    ".pytest.ini", "jest.config.js", "jest.config.ts", "vitest.config.ts",
+    "vitest.config.js", "karma.conf.js", "phpunit.xml", "phpunit.xml.dist",
+})
+# What the repository DECLARES it depends on. Installed packages live outside
+# the tree and are deliberately not covered here; this is the half that is a
+# fact about the repository rather than about the container.
+_DEPENDENCY_BASENAMES = frozenset({
+    "requirements.txt", "requirements-dev.txt", "constraints.txt", "pyproject.toml",
+    "poetry.lock", "Pipfile", "Pipfile.lock", "setup.py", "package.json",
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "go.mod", "go.sum",
+    "Cargo.toml", "Cargo.lock", "Gemfile", "Gemfile.lock", "pom.xml",
+    "build.gradle", "build.gradle.kts", "composer.json", "composer.lock",
+})
+
+
+def identity_paths_for(names: Iterable[str], known_paths: Iterable[str] = ()) -> tuple[str, ...]:
+    """The repository files the observed test names live in.
+
+    A runner that prints `tests/test_widget.py::test_a` is telling us which
+    file holds that test. unittest prints a dotted identity instead
+    (`tests.test_widget.TestCase.test_a`), which names a module rather than a
+    path; that is resolved against ``known_paths`` by trying successively
+    shorter prefixes, and a prefix that resolves to nothing is discarded rather
+    than guessed at.
+
+    A name that yields no file leaves no entry, and the absence has to stay
+    visible downstream: an empty result means no identity was established, not
+    that nothing changed.
+    """
+    known = {str(path).replace("\\", "/") for path in known_paths}
+    found: set[str] = set()
+    for name in names:
+        candidate = str(name or "").split("::", 1)[0].replace("\\", "/").strip()
+        while candidate.startswith("./"):
+            candidate = candidate[2:]
+        if not candidate:
+            continue
+        if "/" in candidate or candidate.endswith((".py", ".js", ".ts", ".go", ".rb", ".php")):
+            found.add(candidate)
+            continue
+        parts = candidate.split(".")
+        for stop in range(len(parts), 0, -1):
+            module = "/".join(parts[:stop]) + ".py"
+            if module in known:
+                found.add(module)
+                break
+    return tuple(sorted(found))
+
+
+def _snapshot_digests(snapshot, paths: Iterable[str]) -> tuple[tuple[str, str], ...]:
+    """Digest each named path from a snapshot; absent files digest to ''."""
+    known = {item.path.replace("\\", "/"): item.sha256 for item in getattr(snapshot, "files", ())}
+    return tuple(sorted((path, known.get(path, "")) for path in dict.fromkeys(paths)))
+
+
+def _grouped_digest(snapshot, basenames: frozenset[str]) -> str:
+    """One digest over every file in the tree whose basename is of interest."""
+    rows = sorted(
+        (item.path.replace("\\", "/"), item.sha256)
+        for item in getattr(snapshot, "files", ())
+        if item.path.replace("\\", "/").rsplit("/", 1)[-1] in basenames
+    )
+    if not rows:
+        return ""
+    payload = "\n".join(f"{path}:{digest}" for path, digest in rows)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _tracked_dirty(repo_root: str) -> tuple[str, ...]:
@@ -228,8 +324,14 @@ def run_baseline(
     basis: str = "",
     confidence: str = "",
     execution_env: dict[str, str] | None = None,
+    identity_paths: tuple[str, ...] = (),
 ) -> BaselineResult:
-    """Run the repository's suite once and record what was already green."""
+    """Run the repository's suite once and record what was already green.
+
+    ``identity_paths`` are files an EARLIER capture recorded and this run must
+    digest whether or not its own names mention them. Without it a comparison
+    could not tell a test file that vanished from one this run never observed.
+    """
     import hashlib
 
     from gt_harness.canonical_io import canonical_json_bytes
@@ -325,6 +427,17 @@ def run_baseline(
         duration_seconds=elapsed,
         exit_code=proc.returncode,
         output_sha256=hashlib.sha256(output.encode("utf-8", "replace")).hexdigest(),
+        # Digested from the snapshot taken AFTER the command, so a suite that
+        # rewrites its own fixtures is recorded as it ended, not as it began.
+        test_file_digests=_snapshot_digests(
+            after,
+            (*identity_paths, *identity_paths_for(
+                (*passing, *failing),
+                (item.path for item in getattr(after, "files", ())),
+            )),
+        ),
+        config_sha256=_grouped_digest(after, _CONFIG_BASENAMES),
+        dependency_sha256=_grouped_digest(after, _DEPENDENCY_BASENAMES),
     )
 
 
@@ -348,7 +461,20 @@ def compare_to_baseline(
         basis=baseline.basis,
         confidence=baseline.confidence,
         execution_env=execution_env,
+        identity_paths=tuple(path for path, _digest in baseline.test_file_digests),
     )
+    return compare_results(baseline, after)
+
+
+def compare_results(baseline: BaselineResult, after: BaselineResult) -> RegressionReport:
+    """Decide what the two observations do and do not establish.
+
+    Split from the run so the decision is testable without spawning a suite,
+    and so every rule below is a statement about two recorded observations
+    rather than about a subprocess.
+    """
+    if not baseline.captured:
+        return RegressionReport(status="no_baseline", detail=baseline.status)
     if not after.captured:
         return RegressionReport(status="unknown", detail=after.status, after=after)
     if not baseline.environment_sha256 or not after.environment_sha256:
@@ -378,6 +504,47 @@ def compare_to_baseline(
             detail="Previously passing tests not observed passing: " + ", ".join(sorted(missing)),
             after=after,
         )
+    # A NAME is not an identity. `test_widget.py::test_rejects_bad_input`
+    # passing before and passing after is conservation only if it is the same
+    # test, and the file holding it is a file the agent can edit. Rewriting an
+    # assertion into `assert True` conserves the name perfectly, which is
+    # exactly the substitution the bound-check path already refuses via
+    # test_source_digest. The baseline has to refuse it too.
+    #
+    # Only the baseline's OWN files are compared, so adding new test files --
+    # the work itself, on most tasks -- is never a conservation failure.
+    changed_identities = tuple(
+        name for name, before_value, after_value in (
+            ("config", baseline.config_sha256, after.config_sha256),
+            ("dependency", baseline.dependency_sha256, after.dependency_sha256),
+        )
+        if before_value != after_value
+    )
+    if not baseline.test_file_digests:
+        return RegressionReport(
+            status="unknown", passed_delta=passed_delta, failed_delta=failed_delta,
+            detail="No per-test source identity was recorded, so test identity "
+                   "conservation was never established",
+            after=after, changed_identities=changed_identities,
+        )
+    observed = dict(after.test_file_digests)
+    changed_test_files = tuple(
+        path for path, digest in baseline.test_file_digests
+        if observed.get(path, "") != digest
+    )
+    if changed_test_files:
+        affected = sorted(
+            name for name in baseline.passing_names
+            if str(name).split("::", 1)[0].replace("\\", "/").lstrip("./") in set(changed_test_files)
+        )
+        return RegressionReport(
+            status="incomplete", passed_delta=passed_delta, failed_delta=failed_delta,
+            changed_test_files=changed_test_files,
+            changed_identities=changed_identities,
+            detail="Previously passing tests whose own source changed, so their "
+                   "pass is not carried: " + ", ".join(affected),
+            after=after,
+        )
     unattributed = set(after.failing_names) - set(baseline.failing_names)
     if unattributed or failed_delta > 0 or after.errored > baseline.errored:
         return RegressionReport(
@@ -391,13 +558,25 @@ def compare_to_baseline(
         return RegressionReport(
             status="unknown", passed_delta=passed_delta, failed_delta=failed_delta,
             detail="Aggregate counts cannot establish conservation of test identities", after=after,
+            changed_identities=changed_identities,
         )
     if after.exit_code not in (None, 0) and after.failed == 0 and after.errored == 0:
         return RegressionReport(
             status="unknown", passed_delta=passed_delta, failed_delta=failed_delta,
             detail="Passing summary with nonzero exit cannot establish an intact baseline", after=after,
+            changed_identities=changed_identities,
         )
+    # Intact, and honest about what that did and did not cover. A changed
+    # configuration or dependency set does not falsify the name-and-source
+    # comparison above, but the same command may now select a different suite,
+    # and a report that quietly did not look is worse than one that says so.
+    detail = ""
+    if changed_identities:
+        labels = {"config": "test configuration", "dependency": "declared dependencies"}
+        detail = ("Baseline conserved, but the following changed since capture "
+                  "and were not accounted for: "
+                  + ", ".join(labels[name] for name in changed_identities))
     return RegressionReport(
         status="intact", passed_delta=passed_delta, failed_delta=failed_delta,
-        after=after,
+        after=after, changed_identities=changed_identities, detail=detail,
     )

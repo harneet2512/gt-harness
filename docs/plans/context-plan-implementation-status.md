@@ -383,12 +383,42 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Add source/environment/command/output-keyed baseline recheck reuse.
 - [x] Record final baseline source mutations and invalidate affected evidence.
 - [x] Filter sensitive environment names from baseline child execution.
-- [ ] Finish baseline source/config/test/environment identities at initial capture
+- [x] Finish baseline source/config/test/environment identities at initial capture
   and final comparison, including skipped/missing test conservation.
-  Filtered task-environment hashes are now propagated from initial capture to
+  Filtered task-environment hashes are propagated from initial capture to
   comparison/reporting; changed or missing bindings remain unknown. The digest
-  binds task variables before the private temporary capture-root override, not
-  installed package versions or filesystem dependencies. Those remain open.
+  binds task variables before the private temporary capture-root override.
+  The TEST identity half is now done. A name is not an identity: a test that
+  passed before and passes now is conservation only if it is the same test, and
+  rewriting an assertion into `assert True` conserves the name perfectly -- the
+  exact substitution the bound-check path already refuses through
+  `test_source_digest`. `BaselineResult.test_file_digests` records, per file,
+  the digest of every file the observed test names live in, taken from the
+  snapshot after the command so a suite that rewrites its own fixtures is
+  recorded as it ended. `compare_results` refuses to carry a pass whose file
+  moved or vanished, naming the affected tests, and returns `unknown` when no
+  per-test identity was recorded at all rather than reading silence as
+  conservation. Only the baseline's own files are compared, so adding test
+  files -- the work itself on most tasks -- is never a conservation failure.
+  Test CONFIGURATION and DECLARED dependency identities are recorded as grouped
+  digests over the tree (`config_sha256`, `dependency_sha256`) and reported in
+  `RegressionReport.changed_identities` with the intact verdict, not as
+  blockers: adding a fixture to conftest.py or a package to requirements is
+  ordinary work, and a report that quietly did not check is worse than one that
+  says what it saw. Skipped/missing conservation was already covered -- a
+  previously passing test observed as neither passing nor failing is
+  `incomplete` -- and remains so.
+  The comparison is split into a pure `compare_results(baseline, after)` so
+  every rule is a statement about two recorded observations rather than about a
+  subprocess. Witnesses: `tests/test_baseline_identities.py` (10 tests); four
+  mutations each kill at least one -- never noticing a changed test source,
+  treating an absent identity record as conserved, counting a newly added test
+  file as a conservation failure, and dropping the config/dependency report.
+  Checkpoint layout moved to `gt.plan_checkpoint.v4`; the shape fingerprint in
+  `tests/test_original_plan_recovery.py` caught the field addition unprompted.
+  INSTALLED PACKAGE versions and filesystem dependencies outside the repository
+  remain out of scope: they are a fact about the container, not the repository,
+  and probing them costs a subprocess per capture and per comparison.
   The source-revision half is now DONE and committed at c0455f36: BaselineResult
   carries source_revision and after_source_revision, captured with the existing
   workspace snapshotter before and after the command, incomplete snapshots are
