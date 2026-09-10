@@ -767,11 +767,39 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   list would turn a red rehearsal green without changing anything the rehearsal
   exists to check, which is the same substitution this tracker has caught several
   times today.
-  NOT ESTABLISHED: whether this session's changes contributed. The rendered plan
-  block did change (stale-anchor line, acceptance annotations, unmapped-row notes)
-  and that moves prompt bytes, which is adjacent to token conservation -- adjacent
-  is not evidence, and the previous rehearsal that produced the eight-entry list
-  ran on an earlier artifact. Tracing this is the next action on this item.
+  TRACED, and the trace says the token errors are a SYMPTOM, not the defect.
+  `gt-run.json` in rehearsal 05 carries `receipt_issuance: {code:
+  runtime_receipt_issuance_failed, message: event_journal_conservation_failed}`
+  and is missing the entire provider-accounting block that rehearsal 04's receipt
+  has: `input_tokens`, `output_tokens`, `cached_tokens`, `agent_turn_calls`,
+  `provider_completed_calls`, `provider_failed_calls`, the two bootstrap counters,
+  `total_cost` and `treatment_receipt`. So the full receipt could not be issued and
+  a degraded one was written. The two token-conservation errors follow mechanically:
+  the report's `gt.usage` says 10/10 while the receipt has no token fields at all,
+  and `product_effective_model_report_mismatch` is absent simply because
+  `resolved_model` and `effective_model` agree. Nothing about tokens is wrong.
+  THE DEFECT IS FINALIZATION ORDERING, exactly where the handoff said to look.
+  `runtime_receipts.py:806-816` compares a journal SUMMARY captured at one moment
+  against journal ROWS read at another, and requires equal counts, a matching head
+  and `valid is True`. Measured on disk:
+    rehearsal 04  reported 181, disk 183, valid=None, head match False
+                  tail after the summary: final_state, session_closed
+    rehearsal 05  reported 184, disk 188, valid=None, head match False
+                  tail: final_state, session_closed, graph_build_mode,
+                        graph_rebuild_embedding
+  So BOTH runs violate the rule on disk and it is not new. What differs is that 04
+  still issued a complete receipt while 05 did not, and the only difference in the
+  tail is two extra events from a background graph rebuild that finished after
+  `session_closed`. This is a race between receipt issuance and a background writer
+  appending to the journal, not a token-accounting bug.
+  ATTRIBUTION, stated carefully: the five `plan_accounting` rows added this session
+  are NOT in the post-summary tail, so they are not the events breaking
+  conservation. Whether this session changed the TIMING that lets the rebuild land
+  late is not established, and claiming either way would be a guess.
+  NEXT ACTION: quiesce the journal before capturing the summary, or capture the
+  summary and the rows at one point. Not attempted here -- an ordering change to
+  receipt issuance needs its own RED witness and this item is not worth a blind
+  fix. The expected-error list stays untouched.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
