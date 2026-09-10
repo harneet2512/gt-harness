@@ -362,7 +362,34 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   task benefit; that remains a separate question.
 - [ ] Rebuild current harness and producer artifacts; bind actual source/wheel/binary
   hashes and update the candidate manifest only from real build evidence.
-- [ ] Run required installed tests with zero unexplained skips and real journal audit.
+- [x] Run required installed tests with zero unexplained skips and real journal audit.
+  DONE at 18a794b5 on wheel 66 against a full checkout with the static producer
+  made executable: 2,119 tests, 0 errors, 3 failures and 11 skips in 504s
+  (D:/gt-context-proof/full-suite-66.xml). Every skip carries a stated reason and
+  every failure is environmental, each traced rather than assumed:
+    sqlite_vec absent (1), real arktype graph absent (4), Go toolchain absent (1),
+    GT_RETRIEVAL_TEST_GRAPH absent (1), GT_GITNEXUS_ROOT unset (3), and one
+    deliberate complement -- 'graph available; covered by the full-smoke test'.
+  The two test_product_acceptance failures were source_closure_differs_from_head,
+  which is a WINDOWS CLONE artifact, not a defect: git clone applies autocrlf so
+  the working tree is byte-different from HEAD's LF blobs while git status still
+  reads clean, and the closure digest is computed over working bytes. Proven by
+  re-cloning with core.autocrlf=false core.eol=lf, which moves the error on to
+  harness_wheel_build_failed: those two build a harness wheel in-test and need
+  hatchling, unavailable under --network none. Clone with LF for any closure or
+  release test. The third failure needs the Go toolchain, the same dependency a
+  sibling test SKIPS for; that inconsistency is noted below.
+  Real journal audit run both ways to show the auditor discriminates:
+  completed repair rehearsal 04 audits GREEN-delivered
+  (D:/gt-context-proof/rehearsal04-audit66.json); interrupted rehearsal 09 audits
+  RED (rehearsal09-audit66.json) for two unanswered provider requests and
+  'api_calls 6 + bootstrap 0 != 10 requests'. Both are the truthful signature of a
+  frozen receipt: the parked retries are real and the bootstraps were never
+  reported. An interruption rehearsal is expected to audit RED; a completed run is
+  the one that must be GREEN.
+  OPEN follow-up, not blocking this item: tests/test_red_evidence.py FAILS on a
+  missing Go executable at one test while SKIPPING for the same reason at line
+  147. One dependency should not produce two verdicts.
 - [ ] Run canonical provider-free product acceptance and installed full-flow rehearsal.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
