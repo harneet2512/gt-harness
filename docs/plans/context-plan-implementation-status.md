@@ -384,9 +384,39 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   and the indexer dropping the layout from the resolution order exactly as it did
   before the repair. A cold cache raises nothing, so without these the regression
   is silent and costs a whole run's dense retrieval.
+  LSP BINDINGS ARE NOT PRESERVED, and that is now MEASURED rather than open.
+  A promotion publishes an enriched graph and `GraphBuildCoordinator` makes it
+  `engine_state.graph_path`, so it is the PARENT the next edit amends from. That
+  puts two wanted properties in direct conflict and only one can hold:
+    * RETAIN the promoted edges -> bindings survive an edit, and amend-versus-
+      rebuild parity is broken BY CONSTRUCTION, since no rebuild can produce them.
+      `test_batch_amend_parity.py` compares the two for EQUALITY across eight
+      mutations and would fail on every one.
+    * DROP them -> parity holds and every promotion is lost on the first edit.
+  The certified producer DROPS them. Two edges no re-derivation can produce were
+  injected into a parent -- one between definitions in the file the edit changes,
+  one between definitions in a file it does not touch -- and BOTH are gone from
+  the amended graph. Retention is not path-scoped: the amend retains parser NODES
+  (the study measures `parser_nodes_retained` in the thousands) but re-resolves
+  every EDGE, both arms running `resolver_passes: 1`, so a fact resolution cannot
+  reproduce cannot survive wherever it lives.
+  `tests/test_amend_derived_fact_retention.py`, 3 tests, passing installed on
+  Linux with the certified producer alongside the 9 parity cases, zero skips
+  (`lsp-retention-87.xml`, 12 passed). It pins the drop, that the amend does NOT
+  reach back and mutate its own parent (which is what makes the drop a
+  re-derivation result rather than a mutation), and -- as a premise guard -- that
+  a rebuild does not emit the injected edge either, without which the first two
+  assertions would pass for the wrong reason.
+  So the honest statement is that the system RE-PROMOTES rather than preserves:
+  after an amend the new revision is unenriched and `consider_enrichment` may fire
+  again for it. Whether that is acceptable is a design question this does not
+  answer. What it removes is the assumption, in either direction.
+  This also explains why the parity suite can demand equality at all: the amend
+  carries forward nothing a rebuild would not derive. If the producer ever starts
+  retaining derived facts, the new file fails FIRST and names the parity suite,
+  which would otherwise start failing on all eight mutations with no explanation.
   STILL OPEN: history/cochange reuse is producer work -- the handoff records that
-  history, cochange, derived layers and FTS all still recompute on every build --
-  and LSP binding preservation is not yet witnessed.
+  history, cochange, derived layers and FTS all still recompute on every build.
 - [x] Wire a persistent external cache root and batch API through the harness's
   existing one-active/one-pending coordinator.
 - [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
