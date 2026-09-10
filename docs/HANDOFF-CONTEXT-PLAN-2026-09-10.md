@@ -59,6 +59,45 @@ is not (`internal/resolver/promote.go:567` over `map[fnlKey]int64`). That site
 is a confirmed member of the same class and is NOT attributed to the measured
 symptom, which lies in CALLS targets and VTA facts.
 
+**TWO PRODUCER-PINNING FINDINGS, one closed and one blocking.**
+
+CLOSED. `tests/test_gt_engine.py` stripped every `GT_*` variable before each
+test, including `GT_INDEX_BINARY` -- which is the producer executable's
+LOCATION, not GT behaviour. The canonical workflow installs the vendored
+producer at `/opt/groundtruth/gt-index/gt-index`, checks its sha256 against the
+pin, and passes it to the suite ONLY through that variable; that directory is
+not on PATH. So `find_binary` fell past the override to `ensure_binary()`, which
+on a networked runner DOWNLOADS gt-index v1.1.0. That file's graph tests ran
+against a downloaded producer while the workflow certified one they never used.
+Offline the same path merely fails, which is the only reason it surfaced.
+Fixed at `54d9ea5a`, guarded at `fd038e6c` by a test that compares the resolved
+producer's BYTES against the vendored artifact and names a resolution that
+reached the download cache. Canonical CI **34473945205** passed at `fd038e6c`
+with that guard active, which is the proof it now resolves the pinned binary.
+Side effect worth knowing: the installed suite went from 89 skips to 15. About
+seventy-four graph tests had been skipping themselves because the fixture ate
+the binary path, and a skip is not a failure, which is why it survived every
+verification run.
+
+BLOCKING. The certified binary's declared source cannot be reproduced:
+
+    build-info git_commit          efa70e52...   built 2026-09-10T04:16:51Z
+    vendor/.../SOURCE-COMMIT       193b9d93...   a different commit
+    build-info source_fingerprint  f7fca174...
+    vendored tree, producer recipe 4f612d4c...
+    git archive efa70e52 gt-index  367a641a...
+
+Measured with the producer's own recipe
+(`scripts/swebench/build_gt_index_linux.sh:73`) run from `$REPO_DIR/gt-index`.
+The producer worktree sits clean at `efa70e52` and neither its working copy nor
+a `git archive` of that commit reproduces `f7fca174`. WHY is not established and
+is not guessed at. Both comparisons are exactly what the PAID smoke20 workflow
+performs, and they live only there -- the free canonical workflow does not check
+the binding at all -- so a paid dispatch would fail its producer-source gate
+before doing any work. `tests/test_vendored_producer_binding.py` carries both as
+xfail witnesses with the measured digests. Nothing was repinned: repinning a
+certified binary on an unestablished cause is what that item exists to prevent.
+
 **Six-repository performance study: harness built, one repository measured.**
 `scripts/graph_transition_study.py` (tested by
 `tests/test_graph_transition_study.py`, 14 cases). On `click`, five alternating
