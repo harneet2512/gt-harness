@@ -184,7 +184,21 @@ def test_the_same_real_repository_indexed_three_times_gives_the_same_graph(tmp_p
     """Where the defect actually lives.
 
     Needs a real checkout, because the ambiguity that drives the tie-break does
-    not exist at fixture scale. Point GT_DETERMINISM_REPO at one.
+    not exist at fixture scale. It also needs the RIGHT one: the defect is
+    repository-dependent, measured. `click` gives four distinct digests across
+    ten builds; `kedro-org__kedro-4580` gives ONE and is perfectly
+    deterministic. What separates them is several classes each defining the
+    same method name -- click has `fail`, `close`, `invoke` and `to_info_dict`
+    on four different classes, reached through receivers whose type is not
+    locally obvious, and kedro does not.
+
+    So an XPASS here is NOT evidence the producer was repaired. It is equally
+    the shape of a repository that never exercised the tie-break. I tried to
+    detect that from source and could not: a heuristic looking for one method
+    name defined on several classes accepts kedro too, and kedro is
+    deterministic. Whatever distinguishes them is finer than "same-named
+    methods exist", so the caller has to choose a repository known to exhibit
+    it -- click does -- and read an XPASS with that in mind.
     """
     import os
     import shutil
