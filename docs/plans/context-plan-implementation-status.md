@@ -264,10 +264,52 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   Retrieval availability is not counted as actual model exposure.
 - [x] Make omitted designs and interaction cells explicit pending work under the
   existing planner limits; preserve stable requirement identities.
-- [ ] Finish anchor/source-revision validation and distinguish existing versus
+- [x] Finish anchor/source-revision validation and distinguish existing versus
   proposed symbols/tests in plan data and rendering.
-- [ ] Complete counts and exposure evidence: existing/proposed/executed/passed/proven/
+  `gt_engine/persistent_plan/provenance.py` classifies each row once, against the
+  repository as it stood before the first edit: `symbol_basis` is `existing` only
+  for an exact-name graph anchor, `name_guess` for a lexical one and `unmapped`
+  for none; `check_basis` is `existing` only when every path the acceptance
+  command names is present, `proposed` when one is absent, `unnamed` when the
+  command names no file. A `verification_kind` of `existing_test` over an absent
+  file is corrected to `new_test` (one-directional: a new case in an existing file
+  stays a new test). Rendering names the missing file instead of printing an
+  acceptance check that cannot collect. A revision that rewrites the command
+  clears the classification rather than re-deriving it against the edited
+  workspace, so a recovered revision replays to the same digest.
+  `PlanInputs.observed_source_revision` records the revision this run actually
+  indexed; when a restart moves the workspace off the captured revision the block
+  leads with `STALE ANCHORS` naming both, and `anchors_are_current` is False.
+  Witnesses: `tests/test_persistent_plan_provenance.py` (14 tests). Four mutations
+  each kill at least one: dropping the one-directional correction, never seeing a
+  missing path, treating an unanchored row as existing, and keeping the capture-
+  time classification across a rewritten command. `tests/test_original_plan_recovery.py`
+  now derives the checkpoint shape fingerprint from the dataclass graph the decoder
+  walks, so any future field change fails until `recovery.LAYOUT` moves with it
+  (now `gt.plan_checkpoint.v3`).
+- [x] Complete counts and exposure evidence: existing/proposed/executed/passed/proven/
   unmapped/model-exposed, plus exact row IDs and rendered digests.
+  `gt_engine/persistent_plan/accounting.py` places every row in exactly one bucket
+  of four partitions and reports each bucket as a list of row IDs first, with the
+  scalar derived from that list rather than counted separately: symbols
+  (existing/name_guess/unmapped), checks (existing/proposed/unnamed/none/
+  unclassified), evidence (proven/passed/failed/deferred/unverified) and exposure.
+  `executed` is reported alongside evidence because a check that ran and failed is
+  a different fact from one that never ran. Precedence is stated and tested: a
+  current failure outranks a pass, a proof outranks a pass. Exposure counts a row
+  as model-exposed ONLY when its whole block survived the rendering cap --
+  `retrievable_row_ids` (the index, always complete) is reported separately and is
+  strictly larger, so retrieval availability can never be read as delivery -- and
+  it carries `rendered_sha256`, which pins the accounting to the exact text stored
+  at `plan_renderings/<sha>.json`. `MiniSweAdapter.plan_accounting()` assembles it
+  from the four sources only that object holds, `publish_plan_state` writes the
+  full lists to `plan/current.json`, and a `plan_accounting` journal row carries
+  the scalars plus the plan and rendering digests that tie back to them.
+  Witnesses: `tests/test_persistent_plan_accounting.py` (8 tests), including the
+  end-to-end file-and-journal publication with a valid hash chain. Four mutations
+  each kill at least one: counting retrievable IDs as exposed, dropping the
+  plan-membership filter on proven/executed, inverting failure precedence, and
+  letting a count drift from its own list.
 - [ ] Test CLI stale requests, multiple requests, restart handling, invalid check
   specs, deferral, and complete installed automatic cursor delivery.
 

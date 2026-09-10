@@ -33,6 +33,7 @@ from .event_journal import (
 )
 from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
+from .persistent_plan.provenance import cleared_check_provenance
 from .request_history import store_provider_request
 from .run_diagnostics import DiagnosticCode, DiagnosticEvent, DiagnosticJournal
 from .task_contract import (
@@ -843,7 +844,8 @@ class MiniSweAdapter(GroundtruthController):
                 candidate = plan
                 if operation == "revise":
                     value = self._validated_design_revision(event["value"])
-                    candidate = replace(plan, rows=tuple(replace(row, **value) if row.row_id == row_id else row
+                    applied = {**value, **cleared_check_provenance(value)}
+                    candidate = replace(plan, rows=tuple(replace(row, **applied) if row.row_id == row_id else row
                                                          for row in plan.rows))
                 elif operation == "defer":
                     reason = event.get("reason")
@@ -866,6 +868,44 @@ class MiniSweAdapter(GroundtruthController):
                 break
         self._plan_requests_seen = seen
 
+    def plan_accounting(self) -> dict:
+        """Every plan row named in every dimension, for the journal and the file.
+
+        Assembled here because this is the only object that holds all four
+        pieces: the plan, the bound checks' observed states, the predicate
+        channel's proofs, and the receipt for the text actually delivered.
+        """
+        from .persistent_plan.accounting import plan_accounting
+
+        plan = getattr(self, "persistent_plan", None)
+        if plan is None:
+            return {}
+        mapping = getattr(self, "plan_row_predicates", {}) or {}
+        unmet = set(self.unmet_predicates)
+        proven = [
+            row.row_id
+            for row in plan.rows
+            if mapping.get(row.row_id)
+            and all(key in self.predicates and key not in unmet
+                    and self.predicate_status(key) == PredicateStatus.GREEN
+                    for key in mapping[row.row_id])
+        ]
+        observations = getattr(self, "_plan_check_observations", {})
+        executed = [
+            row.row_id
+            for row in plan.rows
+            if any(key in observations
+                   for key, spec in getattr(self, "_check_specs", {}).items()
+                   if row.row_id in spec.requirement_ids)
+        ]
+        return plan_accounting(
+            plan,
+            states={row.row_id: self.plan_row_state(row.row_id) for row in plan.rows},
+            proven=proven,
+            executed=executed,
+            rendering=getattr(self, "plan_rendering_receipt", {}) or {},
+        )
+
     def publish_plan_state(self) -> None:
         from gt_harness.canonical_io import atomic_json
 
@@ -884,10 +924,25 @@ class MiniSweAdapter(GroundtruthController):
                                  if ledger is not None and ledger.by_id(row.row_id) else {})}
                      for row in plan.rows],
         }
+        payload["accounting"] = self.plan_accounting()
         state_digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         if state_digest != getattr(self, "_last_plan_state_digest", None):
             atomic_json(self.store.root / "plan" / "current.json", payload)
             self._last_plan_state_digest = state_digest
+            # The file is the readable copy; the journal is the auditable one.
+            # Only the scalars go in a row, with the digest that ties them back
+            # to the full lists in the file and to the delivered rendering.
+            accounting = payload["accounting"]
+            if accounting:
+                self.store.append(
+                    "plan_accounting",
+                    accounting_layout=accounting["schema"],
+                    plan_digest=accounting["plan_digest"],
+                    process_id=accounting["process_id"],
+                    rendered_sha256=accounting["exposure"]["rendered_sha256"],
+                    state_digest=state_digest,
+                    **accounting["counts"],
+                )
 
     def apply_plan_requests(self) -> None:
         """Admit CLI proposals through the single journal/engine owner."""
@@ -917,7 +972,8 @@ class MiniSweAdapter(GroundtruthController):
                     raise ValueError("plan request value must be an object")
                 if operation == "revise":
                     value = self._validated_design_revision(value)
-                    plan.rows = tuple(replace(r, **value) if r.row_id == row_id else r for r in plan.rows)
+                    applied = {**value, **cleared_check_provenance(value)}
+                    plan.rows = tuple(replace(r, **applied) if r.row_id == row_id else r for r in plan.rows)
                     # A changed design/check invalidates its old check bindings.
                     specs = getattr(self, "_check_specs", {})
                     self._check_specs = {

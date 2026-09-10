@@ -56,6 +56,17 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         f"graph revision {plan.inputs.graph_revision or 'unrecorded'}. "
         "Anchors describe that capture, not proof of the current workspace after edits or restart.",
     ]
+    if not plan.inputs.anchors_are_current:
+        # A restart re-indexes the workspace, and the revision it finds is the
+        # one the agent is editing. When it differs from the captured one, every
+        # file path, line number and signature below describes a tree that is
+        # no longer there. Saying so is the difference between a stale map and
+        # a map presented as current.
+        head.append(
+            f"STALE ANCHORS: the workspace is now at {plan.inputs.observed_source_revision}, "
+            f"not the {plan.inputs.source_revision} this design was built from. Line numbers, "
+            "file paths and signatures below were not re-validated; confirm each before relying on it."
+        )
     if plan.understanding:
         head.extend(["", "DESIGN INTENT:", f"  {plan.understanding}"])
     head.extend(
@@ -74,14 +85,17 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         body.append(f"  {row.row_id}: {row.text}")
         if row.approach:
             body.append(f"      design: {row.approach}")
-        if row.anchors:
-            anchors = _anchor_labels(plan, row.anchors)
-            if anchors:
-                body.append(f"      touches: {anchors}")
-        if row.verification_command:
-            body.append(f"      acceptance: {row.verification_command}")
-        elif row.verification_kind:
-            body.append(f"      acceptance: {row.verification_kind} (no command given)")
+        anchors = _anchor_labels(plan, row.anchors) if row.anchors else ""
+        if anchors:
+            body.append(f"      touches: {anchors}")
+        elif row.symbol_basis == "unmapped":
+            body.append(
+                "      touches: no existing symbol resolved for this "
+                "requirement; treat it as new code"
+            )
+        acceptance = _acceptance_line(row)
+        if acceptance:
+            body.append(acceptance)
         row_ranges[row_id] = (start, len(body))
         pending = plan.pending_interactions(row_id)
         if pending:
@@ -96,8 +110,9 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         body.append(f"  {row.row_id}: {row.text}{origin}")
         if row.approach:
             body.append(f"      design: {row.approach}")
-        if row.verification_command:
-            body.append(f"      acceptance: {row.verification_command}")
+        acceptance = _acceptance_line(row)
+        if acceptance:
+            body.append(acceptance)
         row_ranges[row.row_id] = (start, len(body))
         pending = plan.pending_interactions(row.row_id)
         if pending:
@@ -171,6 +186,30 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
             "plan_rows_basis": "indexed_not_fully_delivered",
         })
     return block
+
+
+def _acceptance_line(row) -> str:
+    """The check, and whether the repository already contains it.
+
+    A command over a file the repository does not have is a test still to be
+    written. Printing it the same way as a check that can be run right now
+    tells the agent something false in the one place it cannot verify cheaply:
+    running it yields a collection error, which looks like neither a red test
+    nor a missing file.
+    """
+    if not row.verification_command:
+        return (
+            f"      acceptance: {row.verification_kind} (no command given)"
+            if row.verification_kind
+            else ""
+        )
+    line = f"      acceptance: {row.verification_command}"
+    if row.check_basis == "proposed":
+        named = ", ".join(row.check_missing_paths[:3]) or "the file it names"
+        return f"{line} - {named} does not exist yet; write it first"
+    if row.check_basis == "existing":
+        return f"{line} - runs against files already in the repository"
+    return line
 
 
 def _anchor_labels(plan: PersistentPlan, node_ids: tuple[int, ...]) -> str:

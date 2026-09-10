@@ -790,6 +790,16 @@ def build_agent(
         try:
             if restored_initial_plan is not None:
                 plan_inputs = restored_initial_plan.inputs
+                # The restored inputs describe the tree the plan was built
+                # from. This run has just indexed the tree it will actually
+                # edit. Recording the second one is what lets the rendering
+                # say the anchors are stale rather than present them as
+                # current: after a restart the agent's own earlier edits are
+                # already in the workspace, so every line number below may
+                # have moved.
+                plan_inputs.observed_source_revision = (
+                    index_receipt.source_revision if graph_db else ""
+                )
             else:
                 plan_inputs = build_plan_inputs(
                     task,

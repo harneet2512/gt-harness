@@ -1135,7 +1135,8 @@ def install_runtime_hooks(
                         if finish_reason == "length"
                         else f"plan_call_returned_no_tool_call:{finish_reason or 'unknown'}"
                     )
-                plan = build_plan(payload, inputs, note=note)
+                plan = build_plan(payload, inputs, note=note,
+                                  repo_root=getattr(adapter, "repo_root", ""))
         except Exception as exc:  # noqa: BLE001 - planning is advisory
             try:
                 adapter.bind_provider_failure(exc)
@@ -1187,6 +1188,9 @@ def install_runtime_hooks(
                     environment.config.env["GT_PLAN_ROOT"] = str(adapter.store.root / "plan")
                 rendering_receipt = {}
                 block = render_plan_block(adapter.persistent_plan, receipt=rendering_receipt)
+                # Held so the accounting can say which rows were actually
+                # delivered rather than merely listed as retrievable.
+                adapter.plan_rendering_receipt = dict(rendering_receipt)
                 messages = getattr(agent, "messages", None)
                 if block and isinstance(messages, list) and len(messages) > 1:
                     task_message = messages[1]

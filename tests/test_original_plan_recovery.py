@@ -134,24 +134,62 @@ def test_checkpoint_rejects_wrong_task_missing_corrupt_or_invalid_inputs(tmp_pat
     assert restore_plan(ExternalStateStore(tmp_path, "checkpoint"), task) is None
 
 
+def _checkpoint_shape_fingerprint() -> str:
+    """Every dataclass field name the checkpoint decoder must match exactly.
+
+    This walks the same graph ``recovery._decode`` walks, so it is not a
+    restatement of the serialization -- it is the serialization's own contract,
+    read from the types.
+    """
+    from typing import get_args, get_type_hints
+
+    from gt_engine.persistent_plan import PersistentPlan
+
+    seen: dict[str, tuple[str, ...]] = {}
+
+    def visit(annotation) -> None:
+        if dataclasses.is_dataclass(annotation):
+            key = f"{annotation.__module__}.{annotation.__qualname__}"
+            if key in seen:
+                return
+            hints = get_type_hints(annotation)
+            seen[key] = tuple(sorted(hints))
+            for value in hints.values():
+                visit(value)
+            return
+        for argument in get_args(annotation):
+            visit(argument)
+
+    visit(PersistentPlan)
+    payload = "\n".join(f"{key}({','.join(fields)})" for key, fields in sorted(seen.items()))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def test_a_previous_layout_checkpoint_is_rejected_by_version_not_by_shape(tmp_path):
     """The serialized shape and LAYOUT are the same fact, so they move together.
 
-    BaselineResult gained source_revision and after_source_revision. The decoder
-    requires exact dataclass field-set equality, so a v1 checkpoint would have
-    failed on "checkpoint dataclass fields mismatch" -- which reads like
-    corruption rather than a format change. Rejection is the entire migration:
-    restoring nothing costs one planning call, while inventing the two missing
-    fields would mean asserting which source revision an older baseline observed,
-    and the only value to hand is the current workspace, which is exactly what
-    those fields exist to distinguish from.
+    The decoder requires exact dataclass field-set equality, so a checkpoint
+    written by an older build fails on "checkpoint dataclass fields mismatch"
+    -- which reads like corruption rather than a format change. Rejection is
+    the entire migration: restoring nothing costs one planning call, while
+    filling in missing fields would mean asserting facts the older checkpoint
+    never observed.
+
+    The fingerprint below is what makes that automatic rather than remembered.
+    Adding, removing or renaming a field on anything the plan serializes
+    changes it, and this test then fails until BOTH the recorded fingerprint
+    and ``recovery.LAYOUT`` are moved together. If you are reading this because
+    the assertion failed: bump the layout, then record the new fingerprint.
     """
     from gt_engine.persistent_plan import recovery
 
-    assert recovery.LAYOUT == "gt.plan_checkpoint.v2"
+    assert recovery.LAYOUT == "gt.plan_checkpoint.v3"
+    assert _checkpoint_shape_fingerprint() == "e024cd7fadfe2046"
 
+    from gt_engine.persistent_plan import PlanRow
     from gt_engine.persistent_plan.baseline import BaselineResult
 
-    names = {f.name for f in dataclasses.fields(BaselineResult)}
-    assert "source_revision" in names
-    assert "after_source_revision" in names
+    baseline_names = {f.name for f in dataclasses.fields(BaselineResult)}
+    assert {"source_revision", "after_source_revision"} <= baseline_names
+    row_names = {f.name for f in dataclasses.fields(PlanRow)}
+    assert {"check_basis", "check_missing_paths", "symbol_basis"} <= row_names

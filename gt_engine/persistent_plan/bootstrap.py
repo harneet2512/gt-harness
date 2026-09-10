@@ -624,13 +624,20 @@ def validate_plan(
     return tuple(rows), tuple(interactions), order, tuple(abstentions)
 
 
-def build_plan(payload: Any, inputs: PlanInputs, note: str = "") -> PersistentPlan:
+def build_plan(payload: Any, inputs: PlanInputs, note: str = "",
+               *, repo_root: str = "") -> PersistentPlan:
     """Turn a validated tool payload into the immutable plan artifact.
 
     ``note`` records why the payload was unusable when it is, so the journal
     alone distinguishes "the model refused" from "the model never finished".
+
+    ``repo_root`` is the repository as it stands before the first edit. It is
+    read only to separate what that repository already has from what the plan
+    proposes to add; without it every row is left explicitly unclassified
+    rather than optimistically called existing.
     """
     from .deterministic import build_deterministic_plan
+    from .provenance import annotate_plan
 
     base = build_deterministic_plan(inputs)
     rows, interactions, order, abstentions = validate_plan(payload, inputs)
@@ -645,6 +652,7 @@ def build_plan(payload: Any, inputs: PlanInputs, note: str = "") -> PersistentPl
         base.abstentions = combined or base.abstentions
         if base.abstentions:
             base.status = STATUS_PARTIAL
+        annotate_plan(base, repo_root)
         base.process_id = _process_id(base)
         base.planning_receipt = _planning_receipt(base)
         return base
@@ -671,6 +679,7 @@ def build_plan(payload: Any, inputs: PlanInputs, note: str = "") -> PersistentPl
             else ""
         ),
     )
+    annotate_plan(plan, repo_root)
     plan.process_id = hashlib.sha256(
         plan.canonical_json().encode("utf-8", "surrogatepass")
     ).hexdigest()

@@ -9,6 +9,7 @@ from typing import Any, get_args, get_origin, get_type_hints
 
 from . import PersistentPlan
 
+# v3: PlanRow gained check_basis, check_missing_paths and symbol_basis.
 # v2: BaselineResult gained source_revision and after_source_revision.
 #
 # The decoder below requires EXACT dataclass field-set equality, so the
@@ -23,7 +24,7 @@ from . import PersistentPlan
 # the CURRENT workspace, which is precisely the thing those fields exist to
 # distinguish from. A checkpoint that cannot say what it saw does not get to
 # borrow what we see now.
-LAYOUT = "gt.plan_checkpoint.v2"
+LAYOUT = "gt.plan_checkpoint.v3"
 
 
 def _decode(value, annotation):

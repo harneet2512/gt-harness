@@ -57,11 +57,28 @@ class PlanInputs:
     baseline: BaselineResult
     source_revision: str = ""
     graph_revision: str = ""
+    # The workspace revision observed the last time this plan was delivered.
+    # At capture it equals ``source_revision``; after a restart it is whatever
+    # the runner indexed then, which is how a plan learns that the tree its
+    # anchors describe is no longer the tree the agent is editing.
+    observed_source_revision: str = ""
     language: str = ""
     # Test files the graph ties to each row's own definitions. This is the
     # check that comes from context rather than from a model's suggestion.
     covering: dict[str, tuple[str, ...]] = field(default_factory=dict)
     abstentions: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def anchors_are_current(self) -> bool:
+        """Whether the anchors still describe the tree being edited.
+
+        Unknown counts as current: with no observation to compare against there
+        is nothing to warn about, and a warning that fires on every run is a
+        warning nobody reads.
+        """
+        if not self.observed_source_revision or not self.source_revision:
+            return True
+        return self.observed_source_revision == self.source_revision
 
     def counts(self) -> dict[str, Any]:
         ledger_counts = self.ledger.counts()
@@ -78,6 +95,8 @@ class PlanInputs:
             "rows_with_covering_tests": sum(
                 1 for value in self.covering.values() if value
             ),
+            "anchors_are_current": self.anchors_are_current,
+            "observed_source_revision": self.observed_source_revision,
             "baseline_status": self.baseline.status,
             "baseline_seconds": round(self.baseline.duration_seconds, 3),
             "baseline_passing": self.baseline.passed,
@@ -90,6 +109,7 @@ class PlanInputs:
             "schema": "gt.persistent_plan_inputs.v1",
             "source_revision": self.source_revision,
             "graph_revision": self.graph_revision,
+            "observed_source_revision": self.observed_source_revision,
             "language": self.language,
             "rows": [row.as_dict() for row in self.ledger.rows],
             "unclassified_spans": [list(span) for span in self.ledger.unclassified_spans],
@@ -127,6 +147,14 @@ class PlanRow:
     derived_from: str = ""
     mode_symbol: str = ""
     mode_member: str = ""
+    # What the repository already had, at capture, of what this row names.
+    # ``check_basis`` answers it for the acceptance command and
+    # ``symbol_basis`` for the code the row is anchored to. Both are decided
+    # once by ``provenance.annotate_plan``; see that module for why they are
+    # never re-decided later.
+    check_basis: str = ""
+    check_missing_paths: tuple[str, ...] = ()
+    symbol_basis: str = ""
 
     @property
     def is_derived(self) -> bool:
@@ -143,6 +171,9 @@ class PlanRow:
             "derived_from": self.derived_from,
             "mode_symbol": self.mode_symbol,
             "mode_member": self.mode_member,
+            "check_basis": self.check_basis,
+            "check_missing_paths": list(self.check_missing_paths),
+            "symbol_basis": self.symbol_basis,
         }
 
 
@@ -229,6 +260,34 @@ class PersistentPlan:
                 # executed checks; retain it as an explicitly versioned alias.
                 "verified_methods": sum(1 for row in self.rows if row.verification_command),
                 "counts_layout": "check_commands_not_verification.v2",
+                # Existing versus proposed, kept apart. A row anchored to a
+                # symbol the graph resolved and a row anchored to a word that
+                # merely appeared in prose are not the same claim, and a check
+                # over a file the repository has is not the same promise as a
+                # check over a file somebody still has to write.
+                "rows_naming_existing_symbols": sum(
+                    1 for row in self.rows if row.symbol_basis == "existing"
+                ),
+                "rows_naming_only_guessed_symbols": sum(
+                    1 for row in self.rows if row.symbol_basis == "name_guess"
+                ),
+                "rows_unmapped_to_any_symbol": sum(
+                    1 for row in self.rows if row.symbol_basis == "unmapped"
+                ),
+                "rows_with_existing_test_checks": sum(
+                    1 for row in self.rows if row.check_basis == "existing"
+                ),
+                "rows_with_proposed_test_checks": sum(
+                    1 for row in self.rows if row.check_basis == "proposed"
+                ),
+                "rows_with_unnamed_checks": sum(
+                    1 for row in self.rows if row.check_basis == "unnamed"
+                ),
+                "rows_with_unclassified_checks": sum(
+                    1 for row in self.rows
+                    if row.verification_command and row.check_basis in {"", "unknown"}
+                ),
+                "provenance_layout": "gt.plan_provenance.v1",
                 "plan_abstentions": len(self.abstentions),
                 "origin": self.origin,
                 "has_understanding": bool(self.understanding),
@@ -338,6 +397,7 @@ def build_plan_inputs(
         baseline=baseline,
         source_revision=source_revision,
         graph_revision=graph_revision,
+        observed_source_revision=source_revision,
         language=sorted(languages)[0] if len(languages) == 1 else "",
         covering=covering,
         abstentions=tuple(abstentions),
