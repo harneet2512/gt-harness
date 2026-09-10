@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import shlex
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 
 from .verification_contract import (
@@ -54,6 +54,18 @@ class Receipt:
     status: PredicateStatus
     semantic: bool = False
     dependency_footprint: DependencyFootprint | None = None
+    evidence_kind: str = "legacy_unspecified"
+    coverage_basis: str = "legacy_unspecified"
+    source_revision_at_observation: str = ""
+    action_index: int | None = None
+    execution_protocol: str = ""
+
+    def evidence_summary(self) -> dict:
+        """Conserve asserted scope without publishing raw command/output text."""
+        value = asdict(self)
+        value["command_sha256"] = hashlib.sha256(value.pop("command").encode()).hexdigest()
+        value["evidence_layout"] = "gt.predicate_evidence.v1"
+        return value
 
 
 @dataclass(frozen=True)
@@ -201,7 +213,12 @@ class GroundtruthController:
                        output: str, *, epoch: int,
                        status: str | PredicateStatus | None = None,
                        semantic: bool = False,
-                       dependency_footprint: DependencyFootprint | None = None) -> Receipt:
+                       dependency_footprint: DependencyFootprint | None = None,
+                       evidence_kind: str = "legacy_unspecified",
+                       coverage_basis: str = "legacy_unspecified",
+                       source_revision_at_observation: str = "",
+                       action_index: int | None = None,
+                       execution_protocol: str = "") -> Receipt:
         if predicate_id not in self.predicates:
             raise LifecycleError(f"unknown predicate {predicate_id}")
         if epoch != self.workspace_epoch:
@@ -217,7 +234,8 @@ class GroundtruthController:
         receipt = Receipt(
             predicate_id, command, exit_code,
             hashlib.sha256(output.encode("utf-8")).hexdigest(), epoch, parsed,
-            semantic, dependency_footprint,
+            semantic, dependency_footprint, evidence_kind, coverage_basis,
+            source_revision_at_observation, action_index, execution_protocol,
         )
         self._receipts[predicate_id] = receipt
         self._status[predicate_id] = parsed

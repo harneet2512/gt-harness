@@ -35,7 +35,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Add explicit CheckSpec and distinguish CHECK_PASSED from PROVEN.
 - [x] Reject stale source, incomplete capture, missing test identities, environment
   mismatch, and nonpassing execution in the bound-check classifier tests.
-- [ ] Finish evidence metadata propagation through controller receipts, persistence,
+- [x] Finish evidence metadata propagation through controller receipts, persistence,
   summaries, and consumers; historical receipts must not gain stronger authority.
 - [x] Enforce captured test-source/configuration digest matching for bound checks.
   Missing identifiable source remains unverified; implementation edits do not
@@ -181,6 +181,20 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Candidate 37 carries predicate evidence kind, coverage basis, originating
+  source revision, action and protocol through controller receipts, journal and
+  final summaries; raw commands/output are not copied into summaries. Legacy
+  unspecified metadata stays unspecified and startup does not restore historical
+  passing authority. Empty predicate sets and unmapped plan rows cannot claim
+  verified completion. Three corrected REDs retained in
+  `predicate-metadata-red-corrected.xml` (the first fixture originally omitted
+  predicate registration). Broad installed suites: 178 passed and one graph
+  coordinator 3-second timeout (`predicate-metadata-37.xml`). That graph check
+  failed once independently, then passed unchanged on old and current wheels
+  (`graph-timeout-old-36.xml`, `graph-timeout-current-37.xml`). Investigation found
+  capability probing occurs before checking a missing parent manifest; the
+  bounded fast-refusal repair and full successor run remain next work, not waived.
 
 - Candidate 36 fixes nested/tilde fence parsing and adds full source-span
   retrieval to the existing CLI/state owner. Long unfenced examples, structural

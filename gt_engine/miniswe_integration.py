@@ -2115,6 +2115,11 @@ class MiniSweAdapter(GroundtruthController):
         self._last_control_state = state
         return self.provider_suffix()
 
+    def record_receipt(self, *args, **kwargs):
+        receipt = super().record_receipt(*args, **kwargs)
+        self.store.append("predicate_receipt_recorded", **receipt.evidence_summary())
+        return receipt
+
     def evaluate_observation(
         self,
         command: str,
@@ -2151,7 +2156,10 @@ class MiniSweAdapter(GroundtruthController):
                             continue
                         self.record_receipt(predicate.predicate_id, "gt_live_verify", 0,
                                             "artifact exists", epoch=self.workspace_epoch,
-                                            status="GREEN", semantic=True, dependency_footprint=footprint)
+                                            status="GREEN", semantic=True, dependency_footprint=footprint,
+                                            evidence_kind="artifact", coverage_basis="live_filesystem_assertion",
+                                            source_revision_at_observation=self.repository_revision,
+                                            action_index=action_index)
                         green.append(predicate.predicate_id)
             return tuple(green)
         if execution.outcome != "pass":
@@ -2182,6 +2190,9 @@ class MiniSweAdapter(GroundtruthController):
                 status="GREEN",
                 semantic=True,
                 dependency_footprint=footprint,
+                evidence_kind=receipt.kind, coverage_basis=receipt.coverage_basis,
+                source_revision_at_observation=self.repository_revision,
+                action_index=action_index, execution_protocol=execution.protocol,
             )
             dependencies[receipt.predicate_id] = asdict(footprint)
             green.append(receipt.predicate_id)
@@ -2941,6 +2952,8 @@ class MiniSweAdapter(GroundtruthController):
             self.record_receipt(
                 predicate_id, command, returncode, output,
                 epoch=self.workspace_epoch, status="RED", semantic=True,
+                evidence_kind="failing_execution", coverage_basis="lexically_associated_failure",
+                source_revision_at_observation=self.repository_revision, action_index=action_index,
             )
             red.append(predicate_id)
         if red:
@@ -3123,6 +3136,8 @@ class MiniSweAdapter(GroundtruthController):
                         "artifact exists", epoch=self.workspace_epoch,
                         status="GREEN", semantic=True,
                         dependency_footprint=self._live_artifact_footprint(predicate.scope),
+                        evidence_kind="artifact", coverage_basis="live_filesystem_assertion",
+                        source_revision_at_observation=self.repository_revision, action_index=self.global_action,
                     )
                     green.append(predicate.predicate_id)
                     continue
@@ -3132,6 +3147,8 @@ class MiniSweAdapter(GroundtruthController):
                     predicate.predicate_id, "gt_live_verify", 1,
                     "artifact missing", epoch=self.workspace_epoch,
                     status="RED", semantic=True,
+                    evidence_kind="artifact", coverage_basis="live_filesystem_assertion",
+                    source_revision_at_observation=self.repository_revision, action_index=self.global_action,
                 )
                 continue
             if predicate.kind == "numeric_threshold":
@@ -3310,6 +3327,8 @@ class MiniSweAdapter(GroundtruthController):
 
     def final_state(self) -> dict[str, Any]:
         state = {"phase": self.phase, "epoch": self.workspace_epoch,
+                 "predicate_evidence": {key: receipt.evidence_summary() for key, receipt in self._receipts.items()},
+                 "verification_scope": "current_registered_predicates_and_plan_rows_not_official_reward",
                  "unmet_predicates": list(self.unmet_predicates),
                  "iterations": self.iteration,
                  "delivered_evidence": self._accepted_sealed_delivery_count,
@@ -3331,7 +3350,7 @@ class MiniSweAdapter(GroundtruthController):
             # T2.2: an accepted submission with UNKNOWN obligations is NOT
             # verified. Only report verified when every obligation has positive
             # evidence (GREEN). UNKNOWN -> unverified (never silently success).
-            state["verified"] = not self.unmet_predicates
+            state["verified"] = bool(self.predicates) and not self.unmet_predicates and not self.unmet_plan_rows()
             state["unverified_predicates"] = [
                 pid for pid, st in self._status.items()
                 if st is PredicateStatus.UNKNOWN
