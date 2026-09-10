@@ -53,6 +53,14 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
 
 _TABLES = ("diff_snapshots", "events", "turns", "messages", "sessions")
 
+#: One entry per version step: the SQL that takes a live database from that
+#: version to the next. Additive schema changes migrate in place — dropping
+#: the DB on every bump was never a migration, just an acceptable shortcut.
+#: A version with no entry still falls back to rebuild.
+_MIGRATIONS: dict[int, str] = {
+    8: "ALTER TABLE sessions ADD COLUMN owner TEXT",
+}
+
 _SCHEMA = """
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
@@ -217,7 +225,14 @@ class SessionStore:
         cursor = await self._db.execute("PRAGMA user_version")
         row = await cursor.fetchone()
         version = int(row[0]) if row else 0
-        if version != SCHEMA_VERSION:
+        if version != SCHEMA_VERSION and 0 < version < SCHEMA_VERSION and all(
+            step in _MIGRATIONS for step in range(version, SCHEMA_VERSION)
+        ):
+            # Every step on the path exists: the data survives the upgrade.
+            for step in range(version, SCHEMA_VERSION):
+                await self._db.executescript(_MIGRATIONS[step])
+            await self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        elif version != SCHEMA_VERSION:
             for table in _TABLES:
                 await self._db.execute(f"DROP TABLE IF EXISTS {table}")
             await self._db.executescript(_SCHEMA)

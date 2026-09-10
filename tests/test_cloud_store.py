@@ -60,6 +60,49 @@ async def test_init_drops_and_recreates_a_stale_schema(tmp_path) -> None:
         await store.close()
 
 
+@pytest.mark.asyncio
+async def test_a_known_version_step_migrates_instead_of_dropping(tmp_path) -> None:
+    """A v8 database keeps its rows through init(): the owner column is added,
+    not rebuilt around. Dropping the DB was never a migration."""
+    db_path = str(tmp_path / "v8.db")
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, repo TEXT NOT NULL, ref TEXT NOT NULL,
+                model TEXT NOT NULL, gt_mode TEXT NOT NULL DEFAULT 'off',
+                gt_status TEXT NOT NULL DEFAULT 'off', gt_error TEXT,
+                status TEXT NOT NULL DEFAULT 'creating', closed_reason TEXT,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                last_message TEXT, turns INTEGER NOT NULL DEFAULT 0,
+                steps INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0,
+                total_wall_seconds REAL NOT NULL DEFAULT 0,
+                gt_actions INTEGER NOT NULL DEFAULT 0, current_turn_id TEXT,
+                workspace_path TEXT, base_sha TEXT, graph_db TEXT,
+                config_json TEXT NOT NULL DEFAULT '{}', parent_id TEXT,
+                role TEXT NOT NULL DEFAULT 'primary', task TEXT,
+                report_json TEXT, applied_at REAL, applied_sha256 TEXT,
+                agent_kind TEXT, parent_agent_id TEXT, external_cwd TEXT,
+                label TEXT, activity TEXT, tokens INTEGER)"""
+        )
+        await db.execute(
+            "INSERT INTO sessions (id, repo, ref, model, status, created_at,"
+            " updated_at) VALUES ('kept', 'r', 'main', 'm', 'idle', 1.0, 1.0)"
+        )
+        await db.execute("PRAGMA user_version = 8")
+        await db.commit()
+
+    store = SessionStore(db_path)
+    await store.init()
+    try:
+        row = await store.get_session("kept")
+        assert row is not None, "the v8 row was dropped instead of migrated"
+        assert row["owner"] is None
+        cursor = await store._db.execute("PRAGMA user_version")
+        assert (await cursor.fetchone())[0] == SCHEMA_VERSION
+    finally:
+        await store.close()
+
+
 # --------------------------------------------------------------------------
 # sessions
 # --------------------------------------------------------------------------
