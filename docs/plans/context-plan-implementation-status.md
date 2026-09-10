@@ -182,6 +182,16 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   harness `f226dcee`; it predates the producer repin. Final producer CI
   `34424185145` is still pending at this checkpoint. Successor repinned harness
   CI is required; no whole-product acceptance or paid reward is claimed.
+- Producer full CI `34424185145` subsequently PASSED all jobs on exact source
+  `350cb156`: six Python/OS matrix jobs, lint, Go suite/build, offline fixture
+  benchmark. Repinned harness `5c2e4965b49fed28976b438045f46e620f6cd243` is pushed;
+  canonical provider-free run `34424824590` is in progress.
+- Additional baseline attribution defect reproduced in the installed runtime:
+  a newly created failing test was labeled as previously passing. Only the
+  intersection with baseline passing identities now receives regression status;
+  other new failures remain explicitly `new_failures_unattributed`, never intact.
+  Installed regression set passed 62 tests in 16.70 seconds, zero skips:
+  `D:/gt-context-proof/baseline-attribution-green.xml`; RED retained beside it.
 - New uncommitted producer summary exposes retained/inserted parser nodes, cache
   hits/misses and resolver passes; the harness now parses its batch result. Both
   missing-summary RED witnesses reproduced before repair. Producer batch tests

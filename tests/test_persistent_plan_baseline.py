@@ -189,6 +189,17 @@ def test_an_already_failing_test_is_not_charged_to_the_agent(repo):
     assert report.status == "intact"
 
 
+def test_a_new_failing_test_is_not_reported_as_previously_passing(repo):
+    baseline = run_baseline(str(repo), budget_seconds=120, command=_pytest_command())
+    (repo / "tests" / "test_new.py").write_text(
+        "def test_new_behavior():\n    assert False\n", encoding="utf-8")
+    report = compare_to_baseline(baseline, str(repo), budget_seconds=120)
+    assert report.newly_failing == ()
+    assert report.status == "new_failures_unattributed"
+    assert not report.regressed
+    assert report.after.failed > baseline.failed
+
+
 def test_comparison_without_a_baseline_never_blocks(tmp_path):
     from gt_engine.persistent_plan.baseline import BaselineResult
 

@@ -317,11 +317,11 @@ def compare_to_baseline(
     if not after.captured:
         return RegressionReport(status="unknown", detail=after.status, after=after)
     newly_failing = tuple(
-        name for name in after.failing_names if name not in baseline.failing_names
+        name for name in after.failing_names if name in baseline.passing_names
     )
     passed_delta = after.passed - baseline.passed
     failed_delta = after.failed - baseline.failed
-    if newly_failing or failed_delta > 0 or after.errored > baseline.errored:
+    if newly_failing:
         return RegressionReport(
             status="regressed",
             newly_failing=newly_failing,
@@ -337,6 +337,15 @@ def compare_to_baseline(
         return RegressionReport(
             status="incomplete", passed_delta=passed_delta, failed_delta=failed_delta,
             detail="Previously passing tests not observed passing: " + ", ".join(sorted(missing)),
+            after=after,
+        )
+    unattributed = set(after.failing_names) - set(baseline.failing_names)
+    if unattributed or failed_delta > 0 or after.errored > baseline.errored:
+        return RegressionReport(
+            status="new_failures_unattributed", passed_delta=passed_delta,
+            failed_delta=failed_delta,
+            detail="New failures were observed, but were not identified as passing in the baseline: "
+                   + ", ".join(sorted(unattributed)),
             after=after,
         )
     if baseline.passed > len(set(baseline.passing_names)):
