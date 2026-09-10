@@ -45,6 +45,7 @@ import json
 import shutil
 import sqlite3
 import subprocess
+import threading
 import time
 from contextlib import closing
 from pathlib import Path
@@ -118,16 +119,34 @@ def _peak_kb(pid: int) -> int:
 
 
 def _run(command: list[str]) -> dict:
-    """Run one producer invocation and record what it cost."""
+    """Run one producer invocation and record what it cost.
+
+    The sampling happens on a THREAD and the pipes are drained on this one.
+    Polling ``poll()`` in a loop and only calling ``communicate()`` afterwards
+    deadlocks the moment the producer writes more than a pipe buffer: the child
+    blocks on a full stderr, so it never exits, so ``poll()`` never returns, so
+    nothing ever reads the pipe. The producer prints a line per pass per file
+    class, and the repositories this study is for are the large ones.
+    """
     started = time.monotonic()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True)
-    peak_kb = 0
-    while process.poll() is None:
-        peak_kb = max(peak_kb, _peak_kb(process.pid))
-        time.sleep(0.05)
-    peak_kb = max(peak_kb, _peak_kb(process.pid))
-    stdout, stderr = process.communicate()
+    peak = {"kb": 0}
+    finished = threading.Event()
+
+    def sample() -> None:
+        while not finished.is_set():
+            peak["kb"] = max(peak["kb"], _peak_kb(process.pid))
+            finished.wait(0.05)
+
+    sampler = threading.Thread(target=sample, daemon=True)
+    sampler.start()
+    try:
+        stdout, stderr = process.communicate()
+    finally:
+        finished.set()
+        sampler.join(timeout=1.0)
+    peak_kb = peak["kb"]
     completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     elapsed = time.monotonic() - started
     stderr = completed.stderr or ""

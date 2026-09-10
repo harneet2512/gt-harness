@@ -652,6 +652,22 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
+  The instrument is now tested: `tests/test_graph_transition_study.py`, 13 cases
+  against a stub producer, because a performance claim is exactly the kind
+  nobody re-derives by hand and an untested instrument produces confident
+  wrong numbers. It pins the two properties the comparison rests on -- the
+  arms alternate, and only the candidate carries `-amend-parent`, without
+  which the study would compare a rebuild against a rebuild and report a
+  speedup of one -- plus target selection, append-only transitions, the
+  median, parity disagreement, and the exclusion of failed runs from the
+  medians. Three mutations each kill at least one.
+  It also fixed a latent hang I shipped in the first version. `_run` polled
+  `poll()` and only called `communicate()` after exit, which deadlocks the
+  moment a child writes more than a pipe buffer: the child blocks on a full
+  stderr, so it never exits, so `poll()` never returns, so nothing drains the
+  pipe. Reproduced directly -- the old shape hangs on 400KB of stderr, the new
+  one returns all 400KB -- and it survived `click` only because click's output
+  is small. The repositories this study exists for are the large ones.
   HARNESS BUILT, ONE OF SIX REPOSITORIES MEASURED. `scripts/graph_transition_study.py`
   stages a real transition per repository (one new top-level definition appended to
   the largest parseable file, so line numbers stay stable and the edit is a genuine
