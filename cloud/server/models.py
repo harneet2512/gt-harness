@@ -160,7 +160,7 @@ class Session(BaseModel):
     #: when this worker's patch was applied to the parent workspace
     applied_at: float | None = None
     #: EXTERNAL agents only — what kind of agent is reporting in
-    #: (``claude-code`` | ``codex`` | ``other``; a free lowercase slug)
+    #: (``claude-code`` | ``codex`` | ``devin`` | ``other``; a free lowercase slug)
     agent_kind: str | None = None
     #: EXTERNAL agents only — set when this agent is a **subagent of another
     #: external agent**. ``parent_id`` still points at the owning *session*,

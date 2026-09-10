@@ -97,7 +97,7 @@ BREAKER_FATAL_MULTIPLIER = 4
 # Statuses that no amount of retrying can fix: a revoked token, a deleted agent.
 FATAL_STATUSES = (401, 403, 404, 410)
 
-VALID_KINDS = ("claude-code", "codex", "other")
+VALID_KINDS = ("claude-code", "codex", "devin", "other")
 VALID_STATES = ("working", "idle", "done", "error")
 VALID_FINISH = ("done", "error")
 
@@ -599,6 +599,27 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeo
         return _Response(0, b"")
 
 
+def _get_json(url: str, headers: dict[str, str], timeout: float) -> _Response:
+    """GET JSON — the Devin adapter's read path. Same contract as _post_json."""
+    request = urllib.request.Request(url, method="GET")
+    request.add_header("User-Agent", _USER_AGENT)
+    for key, value in headers.items():
+        if value:
+            request.add_header(key, value)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            return _Response(int(getattr(response, "status", 200) or 200), response.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            payload_bytes = exc.read()
+        except Exception:
+            payload_bytes = b""
+        return _Response(int(exc.code), payload_bytes)
+    except Exception as exc:
+        debug(f"GET {url} failed", exc)
+        return _Response(0, b"")
+
+
 # --- the bridge -------------------------------------------------------------
 
 
@@ -889,8 +910,23 @@ class Bridge:
                 "cwd": self.cwd,
                 "parent_agent_id": self.parent_agent_id,
             }
-            url = f"{self.config.origin}/api/sessions/{self.config.session_id}/external-agents"
-            response = _post_json(url, payload, self._user_headers(), self.config.timeout)
+            if self.parent_agent_id and self.config.preauthorised:
+                # We hold a parent's ingest token, not a user JWT: children of
+                # that parent register on the token-scoped route. This is the
+                # path a poller (the Devin adapter) takes when it was itself
+                # spawned under a card rather than signed in as a person.
+                url = (
+                    f"{self.config.origin}/api/external-agents/"
+                    f"{self.parent_agent_id}/children"
+                )
+                headers = {"Authorization": f"Bearer {self.config.agent_token}"}
+            else:
+                url = (
+                    f"{self.config.origin}/api/sessions/"
+                    f"{self.config.session_id}/external-agents"
+                )
+                headers = self._user_headers()
+            response = _post_json(url, payload, headers, self.config.timeout)
             self._note_outcome(response)
             if not response.ok:
                 debug(f"registration returned {response.status}")

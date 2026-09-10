@@ -12,9 +12,10 @@ off the documentation either, because the documentation was wrong or silent.
 
 - [What you get](#what-you-get)
 - [The event contract](#the-event-contract)
-- [The three adapters](#the-three-adapters)
+- [The adapters](#the-adapters)
 - [Setting it up: Claude Code](#setting-it-up-claude-code)
 - [Setting it up: Codex](#setting-it-up-codex)
+- [Setting it up: Devin](#setting-it-up-devin)
 - [Configuration](#configuration)
 - [What each adapter can and cannot see](#what-each-adapter-can-and-cannot-see)
 - [How the host contracts were verified](#how-the-host-contracts-were-verified)
@@ -97,16 +98,17 @@ a symlink is not silently followed out of the repository.
 
 ---
 
-## The three adapters
+## The adapters
 
 Everything is standard library only, Python ≥ 3.10, so a single file can be
 copied onto a machine that has no virtualenv.
 
 | File | What it is |
 |---|---|
-| [`cloud/adapters/gt_cloud_bridge.py`](../../cloud/adapters/gt_cloud_bridge.py) | The transport all three share. Registration (with reuse), a bounded queue, batching and coalescing on a background thread, retry with backoff, the path conversion, `finish()`. |
+| [`cloud/adapters/gt_cloud_bridge.py`](../../cloud/adapters/gt_cloud_bridge.py) | The transport all four share. Registration (with reuse), a bounded queue, batching and coalescing on a background thread, retry with backoff, the path conversion, `finish()`. |
 | [`cloud/adapters/claude_code/gt_cloud_hook.py`](../../cloud/adapters/claude_code/gt_cloud_hook.py) | The hook. Reads one hook payload on stdin, posts the matching events. **Serves both Claude Code and Codex** — their hook payloads are the same shape. |
 | [`cloud/adapters/codex/gt_cloud_codex.py`](../../cloud/adapters/codex/gt_cloud_codex.py) | The Codex rollout tailer. Follows the session transcript on disk and the subagent rollout files spawned under it. Needs no configuration inside Codex. |
+| [`cloud/adapters/devin/gt_cloud_devin.py`](../../cloud/adapters/devin/gt_cloud_devin.py) | The Devin poller. Devin is hosted — no hook, no transcript — so it polls the v3 sessions API and maps status, spend, PRs and child sessions onto the contract. |
 | [`cloud/adapters/gt_cloud_tail.py`](../../cloud/adapters/gt_cloud_tail.py) | The generic JSONL tailer, for a tool with neither hooks nor a transcript we parse. The honest fallback. |
 | [`cloud/adapters/payloads.py`](../../cloud/adapters/payloads.py) | Pulling a command and a set of paths out of a tool payload, by reading fields *if present* rather than asserting a schema. |
 | [`cloud/adapters/claude_code/transcript.py`](../../cloud/adapters/claude_code/transcript.py) | Reading a token count out of a Claude Code transcript, since its hooks carry none. |
@@ -240,6 +242,27 @@ names, e.g. `notify = ["/path/to/program", "turn-ended"]` — also exists and is
 real, but it fires **once per turn** with no tool detail. It is not used here
 and is not a substitute for either mechanism above.
 
+## Setting it up: Devin
+
+Devin is different in kind: the agent is hosted, so there is nothing local to
+hook or tail. The adapter polls the v3 sessions API from wherever you run it.
+
+```bash
+export GT_CLOUD_ORIGIN=https://your-server
+export GT_CLOUD_SESSION=<session-id> GT_CLOUD_TOKEN=<user-jwt>
+export DEVIN_API_KEY=... DEVIN_ORG_ID=org-...
+
+python cloud/adapters/devin/gt_cloud_devin.py devin-abc123   # one session
+python cloud/adapters/devin/gt_cloud_devin.py --all         # the whole org
+```
+
+`--all` discovers every live session in the org each poll cycle — point it at
+the org and the fleet populates itself. `--poll` (default 4 s) sets the API
+cadence; `--no-children` turns off child-session discovery. Nothing here needs
+the user's JWT beyond the first registration: a child session's card registers
+under its parent's ingest token via
+`POST /api/external-agents/{parent}/children`.
+
 ---
 
 ## Configuration
@@ -332,6 +355,23 @@ config file, and the failure mode of a wrong expression is a card full of
 plausible nonsense. If a rename is not enough, write four lines of Python that
 print the contract shape and pipe them in. Malformed, empty and unrecognised
 lines are counted and skipped; the finish summary reports the three counts.
+
+### The Devin poller
+
+**Sees:** `status` and `status_detail` (working / waiting for you / waiting for
+approval / suspended-with-reason), `pull_requests` announced when they appear,
+`structured_output` once, `child_session_ids` as real nested cards, and ACU
+spend on the card's note line.
+
+**Does not see, by construction:**
+
+| Gap | Detail |
+|---|---|
+| **No tool calls and no file paths.** | The v3 API is session-level; it never says which file Devin is touching. The card works from its dock and its activity line does the talking — it cannot land on a building. |
+| **ACUs are not tokens.** | `acus_consumed` is compute units. It is surfaced as a `note` ("ACU 4.20") and never written into the `tokens` field, which is reserved for real token counts. |
+| **Everything is poll-latent.** | The card lags Devin by up to `--poll` seconds plus API latency. |
+| **`--all` sees one page.** | `sessions?first=50` — the most recent fifty sessions, filtered to live ones. An org running more than that needs `--poll` discipline, not pagination heroics. |
+| **Nesting is clamped at depth 4**, same as Codex. | |
 
 ---
 
