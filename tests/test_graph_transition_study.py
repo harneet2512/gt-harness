@@ -115,7 +115,7 @@ def test_the_arms_alternate_and_only_the_candidate_names_a_parent(tmp_path, monk
 
     seen: list[list[str]] = []
 
-    def fake_run(command):
+    def fake_run(command, environment=None):
         seen.append(list(command))
         return {"seconds": 1.0, "returncode": 0, "peak_mb": 1.0, "counts": {},
                 "amend_result": {}, "stderr_tail": ""}
@@ -145,8 +145,9 @@ def test_a_disagreeing_run_is_reported_as_a_parity_failure(tmp_path, monkeypatch
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
 
     monkeypatch.setattr("scripts.graph_transition_study._run",
-                        lambda command: {"seconds": 1.0, "returncode": 0, "peak_mb": 1.0,
-                                         "counts": {}, "amend_result": {}, "stderr_tail": ""})
+                        lambda command, environment=None: {
+                            "seconds": 1.0, "returncode": 0, "peak_mb": 1.0,
+                            "counts": {}, "amend_result": {}, "stderr_tail": ""})
     answers = iter([{"nodes": "1:aaaa"}, {"nodes": "1:bbbb"}])
     monkeypatch.setattr("scripts.graph_transition_study._parity_digest",
                         lambda _database: next(answers))
@@ -169,7 +170,7 @@ def test_a_failed_arm_does_not_enter_the_medians(tmp_path, monkeypatch):
 
     calls = {"n": 0}
 
-    def fake_run(command):
+    def fake_run(command, environment=None):
         calls["n"] += 1
         failed = "-amend-parent" in command and calls["n"] == 3
         return {"seconds": 0.0 if failed else 2.0, "returncode": 1 if failed else 0,
@@ -183,3 +184,44 @@ def test_a_failed_arm_does_not_enter_the_medians(tmp_path, monkeypatch):
                               repetitions=2, max_files=10, workers=1)
     assert 0.0 not in report["candidate_seconds"]
     assert report["candidate_median"] == 2.0
+
+
+def test_both_arms_get_the_parse_cache_the_harness_would_give_them(tmp_path, monkeypatch):
+    """The first version of this study left the cache off, and measured nothing.
+
+    `indexer._index_launch_environment` sets GT_PARSE_CACHE_ROOT for every
+    producer launch the harness makes. The study called the binary directly and
+    set nothing, so the amend re-parsed the whole repository before doing its
+    extra reconciliation work and came out slower -- a configuration production
+    never runs.
+
+    Both arms get the SAME root, because production gives both the same one: a
+    full rebuild after a one-file edit re-parses one file too. What remains to
+    compare is then the real question, whether retaining the parent's structural
+    rows beats rebuilding them.
+    """
+    root = tmp_path / "repo"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "mod.py").write_text("a = 1\n" * 50, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+
+    seen: list[dict] = []
+
+    def fake_run(command, environment=None):
+        seen.append(dict(environment or {}))
+        return {"seconds": 1.0, "returncode": 0, "peak_mb": 1.0, "counts": {},
+                "amend_result": {}, "stderr_tail": ""}
+
+    monkeypatch.setattr("scripts.graph_transition_study._run", fake_run)
+    monkeypatch.setattr("scripts.graph_transition_study._parity_digest",
+                        lambda _database: {"nodes": "1:aaaa"})
+
+    report = study_repository("repo", root, tmp_path / "work", "/bin/true",
+                              repetitions=2, max_files=10, workers=1)
+    roots = {item.get("GT_PARSE_CACHE_ROOT") for item in seen}
+    assert len(seen) == 5
+    assert len(roots) == 1, f"the arms disagreed about the cache root: {roots}"
+    assert roots != {None}, "no parse cache root was configured"
+    assert report["parse_cache_root"] == next(iter(roots))
+    assert Path(report["parse_cache_root"]).is_dir()

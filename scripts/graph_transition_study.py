@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -118,7 +119,7 @@ def _peak_kb(pid: int) -> int:
     return 0
 
 
-def _run(command: list[str]) -> dict:
+def _run(command: list[str], environment: dict[str, str] | None = None) -> dict:
     """Run one producer invocation and record what it cost.
 
     The sampling happens on a THREAD and the pipes are drained on this one.
@@ -130,7 +131,7 @@ def _run(command: list[str]) -> dict:
     """
     started = time.monotonic()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True)
+                               text=True, env=environment)
     peak = {"kb": 0}
     finished = threading.Event()
 
@@ -244,8 +245,25 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
     graphs = workspace / f"{name}-graphs"
     graphs.mkdir(parents=True, exist_ok=True)
     parent = graphs / "parent.db"
+    # THE PARSE CACHE IS THE POINT, AND THE FIRST VERSION OF THIS STUDY LEFT IT
+    # OFF. `indexer._index_launch_environment` sets GT_PARSE_CACHE_ROOT for every
+    # producer launch the harness makes; this study called the binary directly and
+    # set nothing, so `parse_cache_hits: 0, parse_cache_misses: 105` on BOTH arms
+    # and the amend re-parsed the whole repository before doing its extra work.
+    # It measured a configuration production never runs.
+    #
+    # BOTH arms get the same cache root, because production gives both the same
+    # one: a full rebuild after a one-file edit re-parses one file too. What is
+    # left to compare is then the real question -- whether retaining the parent's
+    # structural rows beats rebuilding them -- rather than whether parsing twice
+    # is slower than parsing once.
+    cache_root = workspace / f"{name}-parse-cache"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    environment = dict(os.environ)
+    environment["GT_PARSE_CACHE_ROOT"] = str(cache_root)
+
     parent_run = _run(_index_command(binary, str(work), str(parent),
-                                     max_files=max_files, workers=workers))
+                                     max_files=max_files, workers=workers), environment)
     if parent_run["returncode"] != 0:
         return {"repo": name, "status": "parent_build_failed", "parent": parent_run}
 
@@ -263,7 +281,7 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
                                  max_files=max_files, workers=workers)
         if arm == "candidate":
             command = command + ["-amend-parent", str(parent)]
-        measured = _run(command)
+        measured = _run(command, environment)
         measured.update({"arm": arm, "repetition": index // 2, "ordinal": index})
         runs.append(measured)
         if measured["returncode"] == 0:
@@ -282,6 +300,7 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
         "edited_file": relative,
         "copy_seconds": copy_seconds,
         "parent_seconds": parent_run["seconds"],
+        "parse_cache_root": str(cache_root),
         "parent_counts": parent_run["counts"],
         "runs": runs,
         "baseline_seconds": baseline,

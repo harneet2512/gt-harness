@@ -61,9 +61,16 @@ symptom, which lies in CALLS targets and VTA facts.
 
 **Six-repository performance study: harness built, one repository measured.**
 `scripts/graph_transition_study.py` (tested by
-`tests/test_graph_transition_study.py`, 13 cases). On `click`, five alternating
-repetitions give baseline median 6.94s against candidate median 8.10s: the
-amend is about 17% SLOWER, a 0.86x speedup. That is the smallest of the six and
+`tests/test_graph_transition_study.py`, 14 cases). On `click`, five alternating
+repetitions with the parse cache correctly enabled in both arms give baseline
+median 5.88s against candidate median 7.73s: the amend is about 24% SLOWER, a
+0.76x speedup, and about 32% heavier at peak (242.9 MB against 184.5 MB, no
+overlap across five runs each). The amend does what it claims structurally --
+947 of 1,087 parser nodes retained, parse cache fully hit -- and is still slower
+because BOTH arms run one full resolver pass. The amend saves structural
+rebuilding, not resolution, and pays copy-and-reconcile on top. An earlier run
+of this study left GT_PARSE_CACHE_ROOT unset in both arms; that was a real
+instrument defect, it was fixed, and it did not change the verdict. That is the smallest of the six and
 the amend's advantage should grow with size, but "should" is what the study
 exists to replace. The remaining five are the point of the exercise. The
 harness does NOT measure the blocked-versus-background split, checks or

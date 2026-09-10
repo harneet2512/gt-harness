@@ -677,12 +677,34 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   code, parsed files/nodes/edges, the amend result line, and peak memory as that
   run's own VmHWM polled every 50ms -- getrusage(RUSAGE_CHILDREN) would have been
   easier and wrong, since it is a high-water mark across every child ever reaped.
-  FIRST RESULT, `click`, 5 alternating repetitions (`study-click.json`): the amend is
-  SLOWER than the full rebuild. Baseline median 6.94s against candidate median 8.10s,
-  a 0.86x speedup -- the amend costs about 17% more on a 105-file repository. That is
-  one repository and the smallest of the six; the amend's advantage should grow with
-  repository size, and that is exactly what the remaining five must establish rather
-  than be assumed.
+  A HARNESS MISCONFIGURATION WAS FOUND AND FIXED IN THIS INSTRUMENT, and it did not
+  change the verdict. The first version called the producer directly and set no
+  `GT_PARSE_CACHE_ROOT`, which `indexer._index_launch_environment` sets for every
+  producer launch the harness makes. Both arms therefore reported
+  `parse_cache_hits: 0, parse_cache_misses: 105` and the amend re-parsed the whole
+  repository before doing its extra reconciliation -- a configuration production
+  never runs. Both arms now get the same cache root, because production gives both
+  the same one: a full rebuild after a one-file edit re-parses one file too.
+  FIRST RESULT, `click`, 5 alternating repetitions with the cache correctly enabled
+  (`study-click-cached.json`; the uncached run is retained as `study-click.json`):
+  baseline 104 cache hits and 1 miss, candidate 105 hits and 0 misses, so the cache
+  is demonstrably working in both arms. The amend is still SLOWER: baseline median
+  5.88s against candidate median 7.73s, a 0.76x speedup, about 24% more expensive.
+  Enabling the cache sped BOTH arms up (baseline 6.94s to 5.88s, candidate 8.10s to
+  7.73s) and moved the ratio hardly at all, so the earlier 0.86x was not an artifact
+  of the missing cache.
+  What the amend actually does on click is not in doubt and is not the problem: it
+  retains 947 of 1,087 parser nodes, inserts 140, and hits the parse cache
+  completely. It is slower because BOTH arms run `resolver_passes: 1` -- the amend
+  saves structural rebuilding, not resolution -- and it pays for copying and
+  reconciling the parent on top of a resolution pass it did not avoid. So the saving
+  is bounded by the structural share of build time, and on a 105-file repository
+  that share does not cover the copy.
+  It is also HEAVIER: candidate peak memory median 242.9 MB against baseline
+  184.5 MB, about 32% more, with no overlap between the two sets of five.
+  That is one repository and the smallest of the six. The amend's advantage should
+  grow with repository size, and that is exactly what the remaining five must
+  establish rather than be assumed.
   Semantic parity across arms could not be established, and the reason is the
   producer nondeterminism recorded against the all-consumer parity item above, not
   the amend.
