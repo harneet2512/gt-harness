@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.graph_transition_study import classify_parity
+from scripts.graph_transition_study import classify_parity, retained_parity_rows
 
 
 def _rows(baseline: list[dict], candidate: list[dict]) -> list[dict]:
@@ -128,3 +128,34 @@ def test_agreement_still_needs_both_arms_to_have_run():
     result = classify_parity(_rows([_digest("e1")] * 3, [_digest("e1")] * 3))
     assert result["verdict"] == "identical"
     assert result["arms_present"] == ["baseline", "candidate"]
+
+
+def test_agreement_keeps_one_row_from_each_arm_not_one_row_total():
+    """A PASSING result has to stay verifiable after the fact.
+
+    Storing `parity[:1]` kept the baseline row alone, because baseline runs
+    first. Re-reading such a report cannot distinguish "the candidate agreed"
+    from "the candidate never ran" -- the two cases this study exists to
+    separate. Measured on a real report: kedro agreed, the file stored one
+    baseline row, and re-classifying it returned `one_arm_missing` for a
+    repository whose amend had run for 9.2 seconds.
+    """
+    rows = _rows([_digest("e1")] * 5, [_digest("e1")] * 5)
+    kept = retained_parity_rows(rows, 1)
+    assert [item["arm"] for item in kept] == ["baseline", "candidate"]
+    # And the kept rows must still classify as agreement.
+    assert classify_parity(kept)["verdict"] == "identical"
+
+
+def test_disagreement_keeps_every_row():
+    """When the arms differ, the rows ARE the finding."""
+    rows = _rows([_digest("e1"), _digest("e2")], [_digest("e8"), _digest("e9")])
+    assert retained_parity_rows(rows, 4) == rows
+
+
+def test_a_one_armed_run_is_not_rescued_by_the_retention_rule():
+    """Retention must not invent a row for an arm that produced none."""
+    rows = _rows([_digest("e1")] * 3, [])
+    kept = retained_parity_rows(rows, 1)
+    assert [item["arm"] for item in kept] == ["baseline"]
+    assert classify_parity(kept)["verdict"] == "one_arm_missing"

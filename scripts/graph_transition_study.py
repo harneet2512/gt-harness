@@ -250,6 +250,32 @@ def _apply_transition(path: Path) -> None:
         handle.write(addition)
 
 
+def retained_parity_rows(parity: list[dict], distinct: int) -> list[dict]:
+    """Which parity rows to keep in the report when the arms agreed.
+
+    Keeping every identical digest is noise, so agreement used to store
+    `parity[:1]` -- ONE row, and since baseline runs first, always the baseline.
+    That makes a PASSING result unverifiable after the fact: re-reading the
+    report cannot tell whether the candidate arm agreed or never ran, which are
+    the two cases this study exists to separate. Measured on a real report --
+    kedro agreed, the file stored one baseline row, and re-classifying it gave
+    `one_arm_missing` for a repository whose amend had demonstrably run for 9.2
+    seconds.
+
+    Keep the first row of EACH arm instead. Same order of magnitude in size,
+    and the stored evidence still answers the question it was collected for.
+    """
+    if distinct != 1:
+        return parity
+    kept: list[dict] = []
+    for arm in ("baseline", "candidate"):
+        for item in parity:
+            if item.get("arm") == arm:
+                kept.append(item)
+                break
+    return kept
+
+
 def classify_parity(parity: list[dict]) -> dict:
     """Say WHICH surface moved and whether the two arms ever agreed.
 
@@ -423,7 +449,7 @@ def study_repository(name: str, source: Path, workspace: Path, binary: str, *,
         # alone cannot separate inherited producer noise from the amend and the
         # rebuild disagreeing, and those need opposite responses.
         "parity_classification": classify_parity(parity),
-        "parity": parity if len(digests) != 1 else parity[:1],
+        "parity": retained_parity_rows(parity, len(digests)),
     }
 
 
