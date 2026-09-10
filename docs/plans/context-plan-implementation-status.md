@@ -807,6 +807,20 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   that share does not cover the copy.
   It is also HEAVIER: candidate peak memory median 242.9 MB against baseline
   184.5 MB, about 32% more, with no overlap between the two sets of five.
+  SECOND RESULT, `terraform` (5,184 tracked files, Go): THE PRODUCER CANNOT BUILD
+  THIS REPOSITORY AT ALL inside the budget. The full build was killed at 900s with
+  peak memory 1.6 GB, in `Pass 3: resolving 157492 call references`, having already
+  inserted 27,305 nodes and extracted 27,305 definitions and 12,396 imports. There
+  is therefore no parent graph for either arm to start from and no ratio to report.
+  This UNDERSTATES the production problem, and that is the important part.
+  `indexer._INDEX_TIMEOUT_SECONDS` is 600, so the harness gives a build two thirds
+  of what this study gave it before killing it. On a repository of terraform's size
+  the initial graph never completes, and the run proceeds graph-dark: every caller
+  query, anchor and covering-test selection abstains for the whole task. That is a
+  benchmark-readiness fact, not merely a performance one, and it was invisible for
+  as long as the study only had `click`.
+  Recorded rather than worked around. The amend cannot help here either: it needs a
+  certified parent, and there is none.
   That is one repository and the smallest of the six. The amend's advantage should
   grow with repository size, and that is exactly what the remaining five must
   establish rather than be assumed.
