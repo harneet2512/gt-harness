@@ -1,0 +1,43 @@
+{
+  "schema": "gt.review_packet.v1",
+  "packet_id": "har83-context-plan-producer-87d2e89c",
+  "ticket": "HAR-83",
+  "head_sha": "87d2e89cc51b7e8529aa1d1ec28e76999beebd70",
+  "kind": "check_outcome",
+  "status": "PASS",
+  "basis": "local_determinism_fix_and_canonical_fingerprint_verified_on_certified_static_build",
+  "detail": {
+    "scope": "Producer determinism root-cause fix plus platform-canonical fingerprint recipe; certified static Linux build; vendored source/fingerprint correspondence; installed determinism witness. Not full consumer equivalence, product readiness, or benchmark reward.",
+    "repository": "harneet2512/groundtruth",
+    "source_tree": "7b311013c902eadd8b4119554c9a3d478be45ee2",
+    "producer_sha256": "f7d50356f810bd9de7d86ef2839908325d9b196a30f0819e9e2a0de040d1a541",
+    "build_info_sha256": "26470424c47e515ba0e3475f519ac74b8d36aa1036eacb3c2f695ccd1b603ad3",
+    "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
+    "receipt_digest_sha256": "fc024b057cffb95839c7c2aa35d3dd66386dccd111eca96a1adf5cf655ac5bc4",
+    "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "build_tags": "netgo,osusergo,sqlite_fts5",
+    "go_toolchain": "go1.22.5",
+    "changes": [
+      "d6fdf93d resolver.go: class-method index keeps lowest (start_line,id) instead of map-order last-write-wins",
+      "87d2e89c build recipe: sha256sum mode marker normalized so source_fingerprint is platform-canonical"
+    ],
+    "measured": {
+      "unit_witness": "TestSameNamedClassMembersResolveDeterministically: RED pre-fix (flip run 9/128), PASS post-fix; resolver+store suites green with sqlite_fts5",
+      "click": "8 runs, 1 digest, 50954 edges (was 8 distinct digests)",
+      "conan": "5 runs, 1 digest, 34457 edges (was 3 distinct digests/5 builds)",
+      "binding": "build-info git_commit=87d2e89c == SOURCE-COMMIT; source_fingerprint=72fea328 is canonical two-space format, identical on Windows and Linux recipe runs over vendored tree and build worktree",
+      "installed_witness": "test_producer_determinism.py 1 passed + 1 XPASS on new binary (wheels-89, producer-wheels-06)",
+      "root_cause_of_prior_binding_failure": "original binary stamped a Windows-format (asterisk-marker) fingerprint; Linux-side recipe over any tree cannot reproduce that format"
+    },
+    "remaining": [
+      "producer CI run for pushed 87d2e89c (branch not yet pushed upstream)",
+      "all-consumer graph parity at real scale",
+      "six-repository study run-loop instrument",
+      "paid smoke approval gate"
+    ],
+    "paid_dispatch": false,
+    "confidence": "high"
+  },
+  "supersedes": "har83-context-plan-producer-d6fdf93d",
+  "packet_digest_sha256": "26433140e4c6d59e19e0d912f5d195fd8e1182187ccfeee99a87b7058a4e9175"
+}
