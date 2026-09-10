@@ -36,6 +36,25 @@ def test_an_explicit_zero_survives_the_runner_default():
     assert 'os.environ["GT_PERSISTENT_PLAN"] = "1"' not in source
 
 
+def _requires_plan_enabled(node: ast.expr) -> bool:
+    if isinstance(node, ast.Call):
+        return isinstance(node.func, ast.Name) and node.func.id == "persistent_plan_enabled"
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+        return any(_requires_plan_enabled(value) for value in node.values)
+    return False
+
+
+@pytest.mark.parametrize("expression,expected", [
+    ("persistent_plan_enabled()", True),
+    ("persistent_plan_enabled() and not setup_error", True),
+    ("persistent_plan_enabled() or not setup_error", False),
+    ("not persistent_plan_enabled()", False),
+    ("other_flag()", False),
+])
+def test_plan_guard_requires_an_unconditional_positive_flag(expression, expected):
+    assert _requires_plan_enabled(ast.parse(expression, mode="eval").body) is expected
+
+
 def test_phase_zero_is_guarded_by_the_flag():
     """build_plan_inputs must sit inside a persistent_plan_enabled() branch."""
     tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
@@ -51,15 +70,14 @@ def test_phase_zero_is_guarded_by_the_flag():
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Call)
-        and isinstance(node.test.func, ast.Name)
-        and node.test.func.id == "persistent_plan_enabled"
+        and _requires_plan_enabled(node.test)
     ]
     assert guards, "no persistent_plan_enabled() guard found"
     guarded = {
         id(node)
         for guard in guards
-        for node in ast.walk(guard)
+        for statement in guard.body
+        for node in ast.walk(statement)
         if isinstance(node, ast.Call)
     }
     assert all(id(call) in guarded for call in calls)

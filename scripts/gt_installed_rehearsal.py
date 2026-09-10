@@ -15,6 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+REHEARSAL_CHECK = "python3 -B -m unittest -v test_calculator.py"
+
 
 class RehearsalTransport(BaseHTTPRequestHandler):
     requests: list[dict] = []
@@ -49,7 +51,7 @@ class RehearsalTransport(BaseHTTPRequestHandler):
                     "approach": "Change calculator.py from left - right to left + right, preserving the signature and checking test_calculator.py.",
                     "anchors": [],
                     "verification_kind": "existing_test",
-                    "verification_command": "python3 -B -m unittest -v test_calculator",
+                    "verification_command": REHEARSAL_CHECK,
                 } for row_id in row_ids],
             })
             return
@@ -74,7 +76,9 @@ class RehearsalTransport(BaseHTTPRequestHandler):
                 return
             command = "python3 -c \"from pathlib import Path; p=Path('calculator.py'); p.write_text(p.read_text().replace('left - right', 'left + right'))\""
         elif ordinal == 5:
-            command = "cat calculator.py"
+            command = ("git add -- calculator.py && git -c user.name=Fixture "
+                       "-c user.email=fixture@example.invalid -c core.hooksPath= "
+                       "commit -m repair && cat calculator.py")
         elif ordinal == 6:
             # Provider wait is part of the synthetic transport. Real background
             # graph work continues while the agent awaits this response.
@@ -87,7 +91,7 @@ class RehearsalTransport(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return
             time.sleep(3)
-            command = "python3 -B -m unittest -v"
+            command = REHEARSAL_CHECK
         elif ordinal == 7:
             command = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
         else:
@@ -454,7 +458,11 @@ def write_fixture(root: Path, image: str) -> None:
     )
     (root / "task.toml").write_text(
         'version = "1.0"\n[agent]\ntimeout_sec = 600\n'
-        '[verifier]\ntimeout_sec = 120\n[environment]\nbuild_timeout_sec = 300\n'
+        '[verifier]\ntimeout_sec = 120\n'
+        '[[verifier.collect]]\n'
+        'command = "mkdir -p /logs/artifacts && git -C /rehearsal diff --binary gt-rehearsal-base HEAD > /logs/artifacts/model.patch"\n'
+        'timeout_sec = 30\n'
+        '[environment]\nbuild_timeout_sec = 300\n'
     )
     (root / "environment" / "calculator.py").write_text(
         "def add(left, right):\n    return left - right\n"
@@ -468,7 +476,8 @@ def write_fixture(root: Path, image: str) -> None:
         f"FROM {image}\nUSER root\nWORKDIR /rehearsal\n"
         "COPY calculator.py test_calculator.py ./\n"
         "RUN git init -q && git add . && git -c user.name=Fixture "
-        "-c user.email=fixture@example.invalid -c core.hooksPath= commit -qm initial\n"
+        "-c user.email=fixture@example.invalid -c core.hooksPath= commit -qm initial "
+        "&& git tag gt-rehearsal-base\n"
     )
     (root / "tests" / "test.sh").write_text(
         "#!/bin/bash\nset -eu\nmkdir -p /logs/verifier\n"

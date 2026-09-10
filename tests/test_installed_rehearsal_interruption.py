@@ -18,10 +18,26 @@ from scripts.gt_installed_rehearsal import (
     _is_exact_repair_patch,
     _pre_repair_source_stable,
     _process_tree_script,
+    write_fixture,
 )
 
 
 class InstalledRehearsalInterruptionTests(unittest.TestCase):
+    def test_rehearsal_uses_the_task_owned_committed_patch_collector(self):
+        import tomllib
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "fixture"
+            write_fixture(root, "fixture-image:fixed")
+            config = tomllib.loads((root / "task.toml").read_text())
+            collect = config["verifier"].get("collect", [])
+            self.assertEqual(len(collect), 1)
+            command = collect[0]["command"]
+            self.assertIn("diff --binary gt-rehearsal-base HEAD", command)
+            self.assertIn("/logs/artifacts/model.patch", command)
+            self.assertNotIn("gt-worktree.patch", command)
+            self.assertIn("git tag gt-rehearsal-base", (root / "environment/Dockerfile").read_text())
+
     def test_plan_bootstrap_does_not_consume_repair_action(self):
         handler = type("PlanningTransport", (RehearsalTransport,), {
             "requests": [], "commands": [], "bootstrap_requests": [],
@@ -51,6 +67,20 @@ class InstalledRehearsalInterruptionTests(unittest.TestCase):
                     rows = json.loads(function["arguments"])["rows"]
                     self.assertEqual([row["row_id"] for row in rows], ["req-a", "req-b"])
                     self.assertTrue(all(row["verification_command"] for row in rows))
+                    import shlex
+
+                    from gt_engine.persistent_plan.checks import CheckSpec, validation_source_digest
+                    from gt_engine.runtime_observation import capture_workspace
+
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        (root / "test_calculator.py").write_text("def test_sum(): assert True\n")
+                        spec = CheckSpec.from_dict({
+                            "argv": shlex.split(rows[0]["verification_command"]),
+                            "requirement_ids": [rows[0]["row_id"]],
+                        }, str(root))
+                        self.assertTrue(validation_source_digest(spec, capture_workspace(root)),
+                                        "synthetic plan check has no existing test-source binding")
                     self.assertEqual(handler.commands, [])
                 else:
                     self.assertEqual(function["name"], "bash")

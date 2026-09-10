@@ -4,6 +4,23 @@ Updated: 2026-09-10. Owner: current implementation session.
 
 ## Scope and release state
 
+Continuation: canonical run `34441061328` failed the static planning-off guard
+test because it did not recognize the mandatory flag in an AND expression.
+The checker now recognizes mandatory positive conjunctions, excludes ELSE
+bodies, and rejects OR/negated guards. All 17 planning-off checks passed in
+Linux (`plan-off-guard-56.xml`). Production flag behavior is unchanged.
+
+Actual installed rehearsal 03 reached all eight synthetic actions at zero
+provider cost, but failed verification: its task omitted the benchmark's
+`verifier.collect` hook and the canned agent never committed its repair.
+The fixture now tags its base, commits the repair, and uses the normal
+`git diff --binary BASE HEAD` collector for `artifacts/model.patch`; the
+supervisor recovery patch is not substituted. Planning and execution also
+share an explicit existing test-file command so its source digest binds.
+RED witnesses: `rehearsal-check-binding-red.xml`, `rehearsal-collector-red.xml`.
+Installed wheel 56: 63 passed plus four subtests, zero skips
+(`rehearsal-collector-56.xml`). Actual successor rehearsal remains required.
+
 Latest continuation: canonical run `34438068308` rejected the `b68de522`
 producer repin because its lineage block retained the previous self-seal.
 The source/review verifier had not checked that seal. Both failures were
