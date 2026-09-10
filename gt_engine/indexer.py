@@ -324,10 +324,15 @@ AMEND_CAPABILITY = "incremental_amend_in_place"
 
 # Keyed on (path, content digest): a rebuilt binary at the same path is a
 # different producer and must be re-probed.
-_AMEND_CAPABILITY_CACHE: dict[tuple[str, str], bool] = {}
+_AMEND_CAPABILITY_CACHE: dict[tuple[str, str, str], bool] = {}
+BATCH_AMEND_CAPABILITY = "batch_parser_node_reuse_v1"
 
 
 def _producer_supports_incremental_amend() -> bool:
+    return _producer_supports_amend_capability(AMEND_CAPABILITY)
+
+
+def _producer_supports_amend_capability(capability: str) -> bool:
     """Whether the resolved producer declares in-place amend.
 
     Fails closed. Any probe that cannot be read -- missing binary, non-zero
@@ -339,7 +344,7 @@ def _producer_supports_incremental_amend() -> bool:
     if not binary:
         return False
     certification = _binary_certification()
-    key = (binary, certification.get("binary_sha256", ""))
+    key = (binary, certification.get("binary_sha256", ""), capability)
     cached = _AMEND_CAPABILITY_CACHE.get(key)
     if cached is not None:
         return cached
@@ -359,7 +364,7 @@ def _producer_supports_incremental_amend() -> bool:
             supported = (
                 isinstance(identity, dict)
                 and isinstance(capabilities, list)
-                and AMEND_CAPABILITY in capabilities
+                and capability in capabilities
             )
     except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
         supported = False
@@ -540,6 +545,16 @@ def _index_child_environment(memory_limit_bytes: int) -> dict[str, str]:
     child["GOMAXPROCS"] = str(_INDEX_MAX_PROCS)
     go_limit = min(_INDEX_GOMEMLIMIT_BYTES, memory_limit_bytes * 3 // 4)
     child["GOMEMLIMIT"] = f"{max(48 * 1024 * 1024, go_limit)}B"
+    return child
+
+
+def _index_launch_environment(memory_limit_bytes: int, root: str, log_dir: Path) -> dict[str, str]:
+    child = _index_child_environment(memory_limit_bytes)
+    state = log_dir.parent.parent if log_dir.parent.name == "revisions" else log_dir
+    cache = (state / "parse-cache").resolve()
+    workspace = Path(root).resolve()
+    if cache != workspace and workspace not in cache.parents:
+        child["GT_PARSE_CACHE_ROOT"] = str(cache)
     return child
 
 
@@ -736,7 +751,7 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path, *,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=_index_child_environment(memory_limit),
+            env=_index_launch_environment(memory_limit, root, log_dir),
             start_new_session=os.name != "nt",
             creationflags=(
                 subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
@@ -1564,7 +1579,9 @@ def _parse_incremental_result(stdout_tail: str) -> dict[str, object]:
             parsed = json.loads(candidate)
         except ValueError:
             continue
-        if isinstance(parsed, dict) and "file" in parsed:
+        if isinstance(parsed, dict) and (
+            "file" in parsed or (parsed.get("build_mode") == "batch" and "files" in parsed)
+        ):
             return parsed
     return {"result_line": "unparsed"}
 
@@ -1656,7 +1673,8 @@ def _ensure_index_incremental_unlocked(
     """
 
     results: tuple[dict[str, object], ...] = ()
-    if not _producer_supports_incremental_amend():
+    batch = _producer_supports_amend_capability(BATCH_AMEND_CAPABILITY)
+    if not batch and not _producer_supports_incremental_amend():
         return None, "producer_lacks_amend_capability", results
     if not parent_graph.is_file():
         return None, "parent_graph_missing", results
@@ -1675,7 +1693,15 @@ def _ensure_index_incremental_unlocked(
         return None, f"incremental_parent_uncertifiable:{certification_reason}", results
 
     root_path = Path(root)
-    amendable, refusal = _amendable_paths(root_path, changed_paths)
+    if batch:
+        amendable = tuple(sorted(set(changed_paths)))
+        refusal = "" if amendable else "no_amendable_paths"
+        for relative in amendable:
+            path = (root_path / relative).resolve()
+            if path == root_path.resolve() or root_path.resolve() not in path.parents:
+                refusal = "changed_path_outside_repository"
+    else:
+        amendable, refusal = _amendable_paths(root_path, changed_paths)
     if refusal:
         return None, refusal, results
 
@@ -1717,10 +1743,13 @@ def _ensure_index_incremental_unlocked(
     process_result: IndexProcessResult | None = None
     total_elapsed_ms = 0
     try:
-        _copy_graph_for_amend(parent_graph, candidate)
-        for ordinal, relative in enumerate(amendable, start=1):
+        if not batch:
+            _copy_graph_for_amend(parent_graph, candidate)
+        for ordinal, relative in enumerate(("batch",) if batch else amendable, start=1):
             def build_argv(binary: str, argv_root: str, output: str,
                            _relative: str = relative) -> list[str]:
+                if batch:
+                    return _index_command(binary, argv_root, output) + ["-amend-parent", str(parent_graph)]
                 return _incremental_index_command(binary, argv_root, output, _relative)
 
             # No retry. A failed amend leaves the copy in an unknown state, and
@@ -1732,6 +1761,9 @@ def _ensure_index_incremental_unlocked(
             total_elapsed_ms += process_result.elapsed_ms
             row = _parse_incremental_result(process_result.stdout_tail)
             row["path"] = relative
+            if batch:
+                row["paths"] = list(amendable)
+                row["mode"] = "batch"
             row["status"] = process_result.status
             collected.append(row)
             attempts.append(

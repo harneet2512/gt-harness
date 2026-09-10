@@ -177,6 +177,26 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   resolution sidecar. Keep this compatibility gap open; batch tests passed.
   The installed 301-query/deadline regression passed with synthetic model output
   and zero provider calls. Evidence: `D:/gt-context-proof/installed-07.xml`.
+- Harness `42300c15c943a0ea69ae3430d7a94ee18a54cb61` is pushed. Its provider-free
+  CI `34423608011` passed the feature matrix and entered the full Python suite.
+- Producer `99a5a55620be01531c8e83b9e29bca4a46a9ac8d` declares the bounded
+  `batch_parser_node_reuse_v1` capability after nine batch/fresh transition tests
+  and the store/parser/command suites passed (command package 143.314 seconds).
+  Exact static Linux build `34423978913` passed. Installed automatic selection
+  then passed: five changed paths including config, one batch/result/resolver pass,
+  parser cache reuse, unchanged nodes retained, immutable parent. Combined graph
+  checks: 27 passed, one source-registry-only skip (no producer source mount),
+  17.75 seconds; `D:/gt-context-proof/batch-selection-04.xml`.
+- The inherited symbol-conservation test now exercises the producer's declared
+  batch API when available, preserving the same changed/unchanged symbol checks.
+  Legacy single-file behavior remains conservatively incomplete, not falsely
+  certified as complete and not an enabled fallback for this producer.
+- Exact archive wheel for 99a5a556 matched all 317 package files, SHA256
+  `37a526b951e78a4fe7e01bfb1cfa0be038e5d565923e0bbb92f49fa85bce0eb5`.
+  Producer CI `34423980548` exposed a Ruff quote-format failure; repaired in
+  pushed `350cb156`, 19 protocol tests passed. New exact build and CI dispatched;
+  that source formatting change invalidates final artifact pins, not the observed
+  earlier runtime results. Release manifest is still on the historical producer.
 
 - Harness checkpoint `8f955cd63e222ac22569b582ebb8deab6aeb7631` is pushed on
   `codex/context-plan-integrity`, with direct parent `ce309e90`.

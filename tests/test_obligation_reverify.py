@@ -54,7 +54,11 @@ def _proven_adapter(tmp_path: Path) -> tuple[MiniSweAdapter, str, str, Path]:
         "class ConsumerAnswerTest(unittest.TestCase):\n"
         "    def test_consumer_answer(self):\n"
         "        print('Consumer answer check')\n"
-        "        self.assertEqual(value(), 1)\n",
+        "        self.assertEqual(value(), 1)\n"
+        "        self.assertIn('1', str(value()))\n"
+        "        import hashlib\n"
+        "        print('GT_SEMANTIC_ASSERT relation=contains literal_sha256=' +\n"
+        "              hashlib.sha256(b'1').hexdigest() + ' result=pass')\n",
         encoding="utf-8",
     )
     (repo / "src" / "consumer.py").write_text(
@@ -64,7 +68,7 @@ def _proven_adapter(tmp_path: Path) -> tuple[MiniSweAdapter, str, str, Path]:
 
     contract = TaskContract(
         "code_behavior",
-        (Obligation("consumer", "Consumer answer must remain one.", "task"),),
+        (Obligation("consumer", "Consumer answer must contain '1'.", "task"),),
     )
     compiled = compile_obligation_predicates(contract)["consumer"]
     adapter = MiniSweAdapter(
@@ -94,14 +98,8 @@ def _edit(adapter: MiniSweAdapter, repo: Path, relative: str, text: str) -> tupl
     return transaction.changed_paths
 
 
-def test_an_unrelated_edit_no_longer_costs_the_run_its_proof(tmp_path, monkeypatch):
-    """The whole point: re-run the recorded command instead of billing the model.
-
-    A documentation edit cannot break a unit test, but the conservative
-    footprint invalidates the proof anyway -- correctly, since after an edit a
-    proof is no longer KNOWN to hold. What was wrong is who pays to
-    re-establish it.
-    """
+def test_an_unrelated_edit_invalidates_without_replaying_shell(tmp_path, monkeypatch):
+    """Unknown dependencies invalidate; only registered argv checks may rerun."""
     monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
     adapter, predicate_id, _command, repo = _proven_adapter(tmp_path)
 
@@ -110,12 +108,12 @@ def test_an_unrelated_edit_no_longer_costs_the_run_its_proof(tmp_path, monkeypat
     reverified = _rows(adapter, "obligation_reverified")
     assert reverified, "the reverification pass produced no row at all"
     row = reverified[-1]
-    assert row["skipped"] == ""
+    assert row["skipped"] == "no_registered_check"
     assert row["candidates"] == [predicate_id]
-    assert row["commands_run"] == 1
-    assert row["preserved"] == [predicate_id]
-    assert adapter.predicate_status(predicate_id) is PredicateStatus.GREEN
-    assert predicate_id not in adapter.unmet_predicates
+    assert row["commands_run"] == 0
+    assert row["preserved"] == []
+    assert adapter.predicate_status(predicate_id) is PredicateStatus.UNKNOWN
+    assert predicate_id in adapter.unmet_predicates
 
 
 def test_a_breaking_edit_leaves_the_proof_discarded(tmp_path, monkeypatch):
@@ -126,7 +124,7 @@ def test_a_breaking_edit_leaves_the_proof_discarded(tmp_path, monkeypatch):
     _edit(adapter, repo, "src/helper.py", "answer = 2\n")
 
     row = _rows(adapter, "obligation_reverified")[-1]
-    assert row["commands_run"] == 1
+    assert row["commands_run"] == 0
     assert row["preserved"] == []
     assert adapter.predicate_status(predicate_id) is PredicateStatus.UNKNOWN
 
@@ -143,7 +141,7 @@ def test_a_pass_that_does_nothing_says_so(tmp_path, monkeypatch):
     _edit(adapter, repo, "docs/readme.md", "notes, revised\n")
 
     row = _rows(adapter, "obligation_reverified")[-1]
-    assert row["skipped"] == "verify_execute_off"
+    assert row["skipped"] == "no_registered_check"
     assert row["commands_run"] == 0
     assert row["candidates"] == [predicate_id]
 
@@ -201,5 +199,5 @@ def test_no_proofs_means_a_named_skip_not_silence(tmp_path, monkeypatch):
     adapter.note_edit(("app.py",))
 
     row = _rows(adapter, "obligation_reverified")[-1]
-    assert row["skipped"] == "no_candidates"
+    assert row["skipped"] == "no_registered_check"
     assert row["preserved"] == []

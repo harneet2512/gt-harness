@@ -47,7 +47,11 @@ def test_imported_dependency_edit_invalidates_actual_green_before_rerun(tmp_path
         "class ConsumerAnswerTest(unittest.TestCase):\n"
         "    def test_consumer_answer(self):\n"
         "        print('Consumer answer check')\n"
-        "        self.assertEqual(value(), 1)\n",
+        "        self.assertEqual(value(), 1)\n"
+        "        self.assertIn('1', str(value()))\n"
+        "        import hashlib\n"
+        "        print('GT_SEMANTIC_ASSERT relation=contains literal_sha256=' +\n"
+        "              hashlib.sha256(b'1').hexdigest() + ' result=pass')\n",
         encoding="utf-8",
     )
     (repo / "src" / "consumer.py").write_text(
@@ -57,7 +61,7 @@ def test_imported_dependency_edit_invalidates_actual_green_before_rerun(tmp_path
     helper.write_text("answer = 1\n", encoding="utf-8")
     contract = TaskContract(
         "code_behavior",
-        (Obligation("consumer", "Consumer answer must remain one.", "task"),),
+        (Obligation("consumer", "Consumer answer must contain '1'.", "task"),),
     )
     compiled = compile_obligation_predicates(contract)["consumer"]
     adapter = MiniSweAdapter(

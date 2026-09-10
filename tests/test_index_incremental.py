@@ -307,6 +307,45 @@ def _publish_parent(root: Path, layout, monkeypatch) -> Path:
     return Path(graph)
 
 
+def test_batch_amend_uses_one_process_for_multiple_paths_and_config(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    before = parent.read_bytes()
+    changed = ("app.py", "two.py", "three.py", "four.py", "pyproject.toml")
+    for name in changed:
+        (root / name).write_text("# edited\n", encoding="utf-8")
+    calls = []
+    script = tmp_path / "batch.py"
+    script.write_text("import shutil,sys\nshutil.copyfile(sys.argv[-1],sys.argv[1])\n", encoding="utf-8")
+
+    def command(binary, source, output):
+        calls.append((source, output))
+        return [binary, str(script), output]
+
+    monkeypatch.setattr(indexer, "_producer_supports_amend_capability",
+                        lambda capability: capability == indexer.BATCH_AMEND_CAPABILITY)
+    monkeypatch.setattr(indexer, "_index_command", command)
+    receipt = indexer.refresh_index_files(root, parent, changed, layout=layout, source_revision="batch-2")
+    assert receipt.success, receipt.error_type
+    assert receipt.build_mode == "incremental"
+    assert len(calls) == 1
+    assert receipt.incremental_results[0]["mode"] == "batch"
+    assert receipt.incremental_results[0]["paths"] == sorted(changed)
+    assert parent.read_bytes() == before
+
+
+def test_parser_cache_location_survives_graph_revision_changes(tmp_path):
+    root = tmp_path / "repo"
+    state = tmp_path / "state"
+    first = indexer._index_launch_environment(1024**3, str(root), state / "revisions" / "one")
+    second = indexer._index_launch_environment(1024**3, str(root), state / "revisions" / "two")
+    assert first["GT_PARSE_CACHE_ROOT"] == second["GT_PARSE_CACHE_ROOT"] == str((state / "parse-cache").resolve())
+    assert "GT_PARSE_CACHE_ROOT" not in indexer._index_launch_environment(1024**3, str(root), root / "state")
+
+
 def test_amend_publishes_a_new_revision_and_leaves_the_parent_certifiable(
     tmp_path, monkeypatch
 ):
@@ -564,6 +603,13 @@ def test_an_empty_log_is_not_copied(tmp_path):
 # ------------------------------------------------------------- real producer
 
 
+def test_batch_summary_preserves_work_counters():
+    summary = {"build_mode": "batch", "files": 5, "parser_nodes_retained": 7,
+               "parser_nodes_inserted": 3, "parse_cache_hits": 4,
+               "parse_cache_misses": 1, "resolver_passes": 1}
+    assert indexer._parse_incremental_result(json.dumps(summary)) == summary
+
+
 @pytest.mark.skipif(
     os.name != "posix" or not os.environ.get("GT_INDEX_BINARY"),
     reason="installed Linux producer required",
@@ -598,18 +644,33 @@ def test_real_producer_amend_reminds_the_edited_files_symbols(tmp_path):
         "from pkg.base import Base\n\n\nclass Child(Base):\n"
         "    def run(self):\n        return self.save()\n\n"
         "    def extra(self):\n        return 0\n", encoding="utf-8")
+    build_info = json.loads(indexer.subprocess.run(
+        [binary, "-build-info"], check=True, capture_output=True, text=True,
+    ).stdout)
+    batch = indexer.BATCH_AMEND_CAPABILITY in build_info["capabilities"]
+    candidate = tmp_path / "candidate.db" if batch else graph
+    command = (
+        indexer._index_command(binary, str(root), str(candidate)) + ["-amend-parent", str(graph)]
+        if batch else indexer._incremental_index_command(
+            binary, str(root), str(graph), "pkg/child.py")
+    )
     amend = indexer.subprocess.run(
-        indexer._incremental_index_command(
-            binary, str(root), str(graph), "pkg/child.py"),
+        command,
         check=False, capture_output=True,
     )
     assert amend.returncode == 0, amend.stderr
 
     result = indexer._parse_incremental_result(amend.stdout.decode("utf-8", "replace"))
-    assert result["short_circuited"] is False
-    assert int(result["symbols_reminted"]) > 0
+    if batch:
+        assert result["build_mode"] == "batch"
+        assert result["parser_nodes_retained"] > 0
+        assert result["parser_nodes_inserted"] > 0
+        assert result["resolver_passes"] == 1
+    else:
+        assert result["short_circuited"] is False
+        assert int(result["symbols_reminted"]) > 0
 
-    with sqlite3.connect(f"file:{graph.as_posix()}?mode=ro", uri=True) as connection:
+    with sqlite3.connect(f"file:{candidate.as_posix()}?mode=ro", uri=True) as connection:
         after = connection.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
         reminted = connection.execute(
             "SELECT COUNT(*) FROM resolution_symbols WHERE path = 'pkg/child.py'"

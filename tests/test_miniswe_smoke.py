@@ -4,7 +4,8 @@ Deterministic and provider-free (scripted model + scripted env). Validates the
 full seam end-to-end:
   contract in iteration-1 payload, localization evidence at search_result,
   RED receipt on a failing test, receipt invalidation on edit (epoch bump),
-  GREEN on a passing test, submit gate accept, provider-response binding, exit.
+  passing execution without unbound behavioral proof, advisory submission,
+  provider-response binding, and exit.
 """
 from __future__ import annotations
 
@@ -221,7 +222,8 @@ def test_miniswe_gt_smoke_runs_to_submitted(tmp_path, monkeypatch):
 
     assert result.get("exit_status") == "Submitted"
     assert adapter.phase == "FINISHED"
-    assert adapter.unmet_predicates == ()
+    assert adapter.unmet_predicates, "an unbound suite must not certify the task"
+    assert adapter.final_state()["verified"] is False
     assert adapter.contract_shipped is True
     assert adapter.iteration == 6
     assert len(adapter.deliveries) == 6
@@ -245,6 +247,7 @@ def test_miniswe_gt_smoke_delivers_evidence_and_receipts(tmp_path, monkeypatch):
     assert execution, "no structured action-bound evidence was delivered"
     assert execution[0]["action_id"] == 3
     assert execution[0]["outcome"] == "fail"
+    assert any(row["outcome"] == "pass" for row in execution)
     assert any(row["event"] == "semantic_red" for row in rows)
     assert any(row["event"] == "submit_decision" and row["accepted"] for row in rows)
 
