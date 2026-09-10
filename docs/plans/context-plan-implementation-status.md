@@ -1233,6 +1233,33 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   benchmark-scale rows. matplotlib re-measurement is in flight on the same
   binary; its old ARMS_DISJOINT reading stays unadopted until the fixed-producer
   run says whether the 14-26 extra edges were the defect or a real divergence.
+  MATPLOTLIB FIXED-PRODUCER READING IS IN (`study-fixed-matplotlib-v2.json`,
+  producer 87d2e89c, first-wins binary): three alternating repetitions, both arms
+  internally deterministic -- baseline 1 digest (49040 edges), candidate 1 digest
+  (49053 edges), shared 0 -- verdict `arms_disjoint` again. The +13 surplus is a
+  REAL amend-vs-rebuild divergence, not producer noise. REPRODUCED AND
+  DECOMPOSED (`mpl_divergence_repro.py`, DBs preserved at mpl-rebuilt.db /
+  mpl-amended.db): gross churn is +726/-713 edge tuples; by resolution method the
+  relabels are `impl_method`/`inheritance` at net ZERO (endpoint flips only),
+  and the entire net +13 is `promote_dataflow_callee` DATA_FLOW edges minted
+  where the flipped CALLS pairs left hops uncovered. Mechanism: the amend keeps
+  parent node ids and inserts the edited file's nodes at the TOP of the
+  AUTOINCREMENT space, so every pick site that compares raw node ids ACROSS
+  FILES flips -- `impl_method`'s smallest-class-id fallback (resolver.go ~2336),
+  `classByName` first-writer (promote.go ~387), `entries[0]` fallbacks
+  (relationships.go ~940/976). These are the same bug class whose comments say
+  it was already fixed at four sibling sites. FIX IN FLIGHT: order those picks
+  by (file_path, start_line, id) so they are renumbering-invariant; then the
+  amend and rebuild agree by construction.
+  PRODUCER CHAIN SUPERCEDED: `9e42ff28` (last-definition-wins overload binding
+  `d6811825` -- first-wins resolved all 277 measured overload calls to stubs;
+  object-hash fingerprint `8685e473`; MSYS scoping `9e42ff28`). Binary
+  `47e7eecd`, source fingerprint `fb3af740` (git-object canonical), CI green
+  (build 34531382214, matrix 34531379405), receipt VERIFIED, review packet
+  `har83-context-plan-producer-9e42ff28-ci` in review `b2e29b2c`, lineage PASS.
+  Determinism on the shipped binary: click 4 runs 1 digest (50957 edges),
+  conan 5 runs 1 digest (34460 edges, same Go code as the 8/5-run-verified
+  d6811825 build).
   IT ALSO LOCALISES THE NONDETERMINISM, which the all-consumer parity item above
   records generically. On all six repositories the ONLY surface that ever moved
   is `edges`. Nodes, properties and assertions are byte-identical across all ten
