@@ -367,6 +367,34 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   existing one-active/one-pending coordinator.
 - [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
   immutable parent behavior, failure fallback, and every graph consumer's semantics.
+  THREE OF FOUR PARTS DONE; consumer semantics remain open, so the box stays open.
+  Cases and immutable parent: `tests/test_batch_amend_parity.py` builds a parent,
+  applies one mutation, then builds the graph BOTH ways and requires the amended
+  graph to say exactly what a from-scratch rebuild says. Compared as content, not
+  as row ids -- the amend retains parent ids on purpose and a rebuild has no reason
+  to pick the same numbers -- across nodes, edges, properties, assertions,
+  resolution symbols/callsites/candidates, closure, cochanges and file hashes.
+  Equality rather than containment: a fact the amend keeps that the rebuild would
+  not produce is a stale fact outliving its code, and one the rebuild produces that
+  the amend drops is a fact no consumer will find.
+  Eight cases pass installed on Linux with the certified producer, zero skips
+  (`amend-parity-72.xml`): add a definition, delete one, rename one across two
+  files, change an import, move inheritance up a new class, introduce an ambiguous
+  same-named method, add a new resolution target, and delete a whole file. The
+  parent's bytes are unchanged after every one, and each amended graph reports
+  `analysis_state=complete` with a clean `PRAGMA foreign_key_check`.
+  Two guards keep the parity honest. A matrix test rebuilds each mutation on its
+  own and fails if any case left the graph unchanged -- it caught one inert case
+  the first time it ran, which is the failure mode a parity suite dies of. And
+  comparing the stale PARENT against the rebuild instead of the amend fails all
+  eight cases, so the comparison demonstrably discriminates.
+  Failure fallback was already covered: `tests/test_index_incremental.py` proves a
+  failed amend falls back to a full rebuild and names why, that an undeclared
+  capability and an uncertifiable parent both refuse, and that a delete and a
+  rename are amendable rather than refused.
+  STILL OPEN: every graph consumer's semantics across the eight consumers. Table
+  equality is necessary and not sufficient -- it does not prove each consumer
+  answers the same question of both graphs.
 - [x] Build/certify the actual producer before declaring or enabling its amendment
   capability. The bounded batch capability is now declared and installed automatic
   selection passes. This does not close all-consumer equivalence or release acceptance.
