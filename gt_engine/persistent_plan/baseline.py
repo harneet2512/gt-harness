@@ -14,10 +14,14 @@ never reads the benchmark's tests, its fail-to-pass list, or its verifier.
 from __future__ import annotations
 
 import os
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # The capture is a fraction of the run, never a phase of it. Measured runtimes
 # were 16-72 minutes against an 85-minute budget, so a few minutes buys the
@@ -165,6 +169,38 @@ def _restore(repo_root: str, paths: tuple[str, ...]) -> tuple[str, ...]:
     return ()
 
 
+def _execute_baseline(command: tuple[str, ...], repo_root: str,
+                      budget_seconds: float, child_env: dict[str, str]):
+    """Use the same descendant containment and complete capture as task actions."""
+    from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+
+    executable = command[0]
+    if not shutil.which(executable, path=child_env.get("PATH")):
+        candidate = Path(repo_root) / executable
+        if not candidate.is_file():
+            raise FileNotFoundError(executable)
+
+    class BaselineEnvironment(CredentialIsolatedLocalEnvironment):
+        def execution_env(self):
+            # Do not merge a caller's isolated environment back with host secrets
+            # or host configuration. Only add the external capture destination.
+            return child_env | {"GT_EVIDENCE_ROOT": str(self.evidence_store.root)}
+
+    with tempfile.TemporaryDirectory(prefix="gt-baseline-evidence-") as evidence_root:
+        environment = BaselineEnvironment(cwd=repo_root, timeout=max(1, budget_seconds),
+                                           evidence_root=evidence_root)
+        result = environment.execute({"command": shlex.join(command), "argv": list(command)},
+                                     timeout=max(1, budget_seconds))
+        extra = result["extra"]
+        if extra.get("timed_out"):
+            raise subprocess.TimeoutExpired(list(command), budget_seconds)
+        if extra.get("surviving_descendants"):
+            raise RuntimeError("baseline has surviving descendants")
+        output = environment.evidence_store.bytes(extra["output_artifact"]["sha256"])
+        return subprocess.CompletedProcess(list(command), result["returncode"],
+                                           output.decode("utf-8", "replace"), "")
+
+
 def run_baseline(
     repo_root: str,
     *,
@@ -192,27 +228,14 @@ def run_baseline(
             confidence=confidence or "unknown",
         )
 
-    before = _tracked_dirty(repo_root)
     started = time.monotonic()
     try:
-        proc = subprocess.run(
-            list(command),
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=max(1.0, float(budget_seconds)),
-            encoding="utf-8",
-            errors="replace",
-            env=child_env,
-        )
+        proc = _execute_baseline(tuple(command), repo_root, float(budget_seconds), child_env)
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - started
-        after = _tracked_dirty(repo_root)
-        restored = _restore(repo_root, tuple(sorted(set(after) - set(before))))
         return BaselineResult(
             status="timeout", command=tuple(command), basis=basis,
             confidence=confidence, duration_seconds=elapsed,
-            restored_paths=restored,
             detail=f"suite exceeded {budget_seconds:.0f}s",
         )
     except FileNotFoundError:
@@ -245,14 +268,12 @@ def run_baseline(
     # Preview limits belong to rendering, never canonical semantic analysis.
     output = (proc.stdout or "") + "\n" + (proc.stderr or "")
     counts, passing, failing = _parse(output, tuple(command))
-    after = _tracked_dirty(repo_root)
-    restored = _restore(repo_root, tuple(sorted(set(after) - set(before))))
     total = counts["passed"] + counts["failed"] + counts["errored"]
     if total == 0:
         return BaselineResult(
             status="no_tests_observed", command=tuple(command), basis=basis,
             confidence=confidence, duration_seconds=elapsed,
-            exit_code=proc.returncode, restored_paths=restored,
+            exit_code=proc.returncode,
             output_sha256=hashlib.sha256(output.encode("utf-8", "replace")).hexdigest(),
             detail="runner produced no parseable result",
         )
@@ -269,7 +290,6 @@ def run_baseline(
         duration_seconds=elapsed,
         exit_code=proc.returncode,
         output_sha256=hashlib.sha256(output.encode("utf-8", "replace")).hexdigest(),
-        restored_paths=restored,
     )
 
 

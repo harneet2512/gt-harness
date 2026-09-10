@@ -105,6 +105,29 @@ def test_an_unfinishable_suite_times_out_without_raising(tmp_path):
     assert "exceeded" in result.detail
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux descendant containment")
+def test_baseline_timeout_reaps_grandchildren(tmp_path):
+    import os
+    import signal
+
+    script = tmp_path / "slow.py"
+    script.write_text(
+        "import subprocess,sys,time\nfrom pathlib import Path\n"
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+        "Path('child.pid').write_text(str(p.pid))\ntime.sleep(60)\n", encoding="utf-8")
+    result = run_baseline(str(tmp_path), budget_seconds=1,
+                          command=(sys.executable, str(script)))
+    pid = int((tmp_path / "child.pid").read_text())
+    try:
+        assert result.status == "timeout"
+        assert not Path(f"/proc/{pid}").exists(), "baseline left a running descendant"
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def test_a_suite_that_dirties_the_worktree_is_not_destructively_restored(tmp_path):
     """Automatic checks may not discard source mutations."""
     root = tmp_path / "dirty"
@@ -182,7 +205,7 @@ def test_an_unparseable_recheck_is_unknown_not_a_block(repo, monkeypatch):
     def broken(*_args, **_kwargs):
         raise OSError("boom")
 
-    monkeypatch.setattr(subprocess, "run", broken)
+    monkeypatch.setattr("gt_engine.persistent_plan.baseline._execute_baseline", broken)
     report = compare_to_baseline(baseline, str(repo), budget_seconds=10)
     assert report.status == "unknown"
     assert not report.regressed

@@ -717,8 +717,12 @@ class MiniSweAdapter(GroundtruthController):
                     plan.rows = tuple(replace(r, **value) if r.row_id == row_id else r for r in plan.rows)
                     # A changed design/check invalidates its old check bindings.
                     specs = getattr(self, "_check_specs", {})
-                    self._check_specs = {key: spec for key, spec in specs.items()
-                                         if row_id not in spec.requirement_ids}
+                    self._check_specs = {
+                        key: replace(spec, requirement_ids=tuple(
+                            identity for identity in spec.requirement_ids if identity != row_id
+                        )) for key, spec in specs.items()
+                        if any(identity != row_id for identity in spec.requirement_ids)
+                    }
                     self._pending_check_ids = getattr(self, "_pending_check_ids", set()) & self._check_specs.keys()
                 elif operation == "defer":
                     reason = request.get("reason")

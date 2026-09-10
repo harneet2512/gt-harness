@@ -763,7 +763,7 @@ jobs:
             --ak task_id="$TASK" \
             --ak product_source_sha="${{ needs.plan.outputs.source_sha }}" \
             --ak temperature=1.0 \
-            --ak max_iterations=300 \
+            --ak max_iterations=0 \
             --ak time_budget_seconds="${{ matrix.time_budget_seconds }}"
 
       - name: Bind the Pier reward to the canonical product receipt

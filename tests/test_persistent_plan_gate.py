@@ -18,6 +18,15 @@ from gt_engine.persistent_plan.ledger import build_requirement_ledger
 AMPLE = {"remaining_seconds": 3000.0, "remaining_steps": 200}
 
 
+def test_unlimited_steps_leave_wall_time_reserve_in_force():
+    assert budget_allows_refusal(3000.0, None) == (True, "")
+    assert budget_allows_refusal(599.0, None) == (False, "time")
+    decision = decide(plan=_plan(), unmet_rows=("req-a",), regressions=(),
+                      refusals=0, remaining_seconds=3000.0, remaining_steps=None)
+    assert not decision.accepted
+    assert decision.as_row()["remaining_steps"] is None
+
+
 def _plan(rows=("req-a", "req-b")) -> PersistentPlan:
     inputs = PlanInputs(
         ledger=build_requirement_ledger(""),
@@ -43,7 +52,16 @@ def test_a_complete_plan_is_accepted():
         plan=_plan(), unmet_rows=(), regressions=(), refusals=0, **AMPLE
     )
     assert decision.accepted
-    assert decision.reason == "complete"
+    assert decision.reason == "no_blocking_evidence"
+    assert decision.as_row()["completion_proven"] is False
+
+
+def test_no_blocking_evidence_does_not_claim_unknown_baseline_is_intact():
+    decision = decide(plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+                      baseline_status="unknown", **AMPLE)
+    assert decision.accepted
+    assert decision.reason != "complete"
+    assert decision.as_row()["completion_proven"] is False
 
 
 def test_unmet_rows_refuse_once_when_there_is_room():

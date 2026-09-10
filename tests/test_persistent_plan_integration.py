@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,39 @@ PROMPT = (
     " build_container must accept a registry argument\n"
     " Scoped loaders run independently; the parent loader is not rebuilt\n"
 )
+
+
+def test_zero_step_limit_is_unlimited_not_exhausted(monkeypatch):
+    session = GTSession.__new__(GTSession)
+    session._plan_agent = SimpleNamespace(
+        config=SimpleNamespace(wall_time_limit_seconds=6600, step_limit=0),
+        _start_time=1000, n_calls=301,
+    )
+    monkeypatch.setattr("time.time", lambda: 6000)
+    assert session.plan_gate_budget() == (1600.0, None)
+    session._plan_agent.config.step_limit = 300
+    assert session.plan_gate_budget() == (1600.0, 0)
+
+
+def test_installed_miniswe_unlimited_queries_preserve_deadline(monkeypatch):
+    from minisweagent.agents.default import DefaultAgent
+    from minisweagent.exceptions import TimeExceeded
+
+    # No provider calls: exercise the installed agent's actual query/limit logic.
+    model = SimpleNamespace(query=lambda messages: {"role": "assistant", "content": "continue"})
+    agent = DefaultAgent(model, SimpleNamespace(), system_template="", instance_template="",
+                         step_limit=0, wall_time_limit_seconds=6600)
+    monkeypatch.setattr("time.time", lambda: agent._start_time + 5000)
+    for _ in range(301):
+        agent.query()
+    assert agent.n_calls == 301
+    session = GTSession.__new__(GTSession)
+    session._plan_agent = agent
+    assert session.plan_gate_budget() == (1600.0, None)
+    monkeypatch.setattr("time.time", lambda: agent._start_time + 6600)
+    with pytest.raises(TimeExceeded):
+        agent.query()
+    assert agent.n_calls == 301
 
 
 @pytest.fixture
@@ -236,6 +270,28 @@ def _journal(adapter) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+def test_baseline_recheck_cannot_spend_the_submission_reserve(tmp_path, graph, monkeypatch):
+    from dataclasses import replace
+
+    from gt_engine.persistent_plan.baseline import BaselineResult, RegressionReport
+
+    adapter, inputs, _contract, _merged, repo = _built(tmp_path, graph)
+    adapter.plan_inputs = replace(inputs, baseline=BaselineResult(
+        status="captured", command=("pytest",), duration_seconds=60))
+    session = GTSession(GTSessionConfig(task_id="reserve", repo_root=str(repo), mode="advisory"),
+                        engine=adapter)
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (602.0, 200))
+    budgets = []
+
+    def compare(*args, **kwargs):
+        budgets.append(kwargs["budget_seconds"])
+        return RegressionReport(status="unknown")
+
+    monkeypatch.setattr("gt_engine.persistent_plan.baseline.compare_to_baseline", compare)
+    session._plan_baseline_check()
+    assert budgets == [2.0]
+
+
 def test_the_journal_records_the_plan_without_a_new_schema(tmp_path, graph):
     """New event names are free; a new schema string is rejected upstream."""
     adapter, inputs, _contract, _merged, _repo = _built(tmp_path, graph)
@@ -280,10 +336,11 @@ def test_the_gate_is_consulted_before_the_command_runs(tmp_path, graph):
     pre-execution branch of ``_run_submit_gate``; this pins that it does.
     """
     import ast
+    import inspect
 
-    source = (
-        Path(__file__).resolve().parents[1] / "gt_engine" / "miniswe_runtime.py"
-    ).read_text(encoding="utf-8")
+    from gt_engine import miniswe_runtime
+
+    source = inspect.getsource(miniswe_runtime)
     tree = ast.parse(source)
     gate = next(
         node
@@ -351,11 +408,11 @@ def test_the_carried_snapshot_is_dropped_before_a_submit():
     edit to the next, or lose it, and a lost edit means a missed epoch bump.
     """
     import ast
-    from pathlib import Path
+    import inspect
 
-    source = (
-        Path(__file__).resolve().parents[1] / "gt_engine" / "miniswe_runtime.py"
-    ).read_text(encoding="utf-8")
+    from gt_engine import miniswe_runtime
+
+    source = inspect.getsource(miniswe_runtime)
 
     assert "carried_snapshot" in source
     # reused rather than recaptured

@@ -70,7 +70,7 @@ def test_baseline_analyzes_summary_after_preview(monkeypatch, tmp_path):
 
     output = "x" * 25000 + "\n1 passed\n"
     monkeypatch.setattr(baseline, "_tracked_dirty", lambda root: ())
-    monkeypatch.setattr(baseline.subprocess, "run", lambda *a, **kw:
+    monkeypatch.setattr(baseline, "_execute_baseline", lambda *a, **kw:
                         SimpleNamespace(stdout=output, stderr="", returncode=0))
     seen = []
     def parse(text, command):

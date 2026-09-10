@@ -93,11 +93,12 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   one-file edit 2 hits/1 miss. Cached versus fresh output matched nodes, edges,
   properties, assertions, resolution symbols/callsites/candidates, closure, and
   cochanges for this fixture.
-- [ ] Implement the approved batch amendment API over all changed paths in one
-  frozen revision. **The current cache-backed path still rebuilds the graph.**
+- [x] Implement a staged batch amendment API over one frozen revision, retaining
+  unchanged parser nodes and consuming cached complete parser inputs. Properties,
+  assertions, and derived layers are still reconstructed; this is not full structural reuse.
 - [ ] Copy the certified parent, retain unchanged structural rows, replace only
   changed/deleted structural rows, and remap cached parser-local references.
-- [ ] Run the existing complete resolver/analysis exactly once per batch; republish
+- [x] Run the existing complete resolver/analysis exactly once per batch; republish
   derived layers without stale facts. Do not guess a narrowly complete resolver.
 - [ ] Reuse eligible history/cochange work; preserve embedding caches and LSP bindings.
 - [ ] Wire a persistent external cache root and batch API through the harness's
@@ -121,8 +122,8 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Filter sensitive environment names from baseline child execution.
 - [ ] Finish baseline source/config/test/environment identities at initial capture
   and final comparison, including skipped/missing test conservation.
-- [ ] Finish baseline process-tree/timeout isolation using the existing execution
-  boundary; filtering environment variables alone does not close this item.
+- [x] Route baseline execution through the existing isolated process-tree boundary;
+  real installed Linux timeout test confirms the sleeping grandchild is reaped.
 - [ ] Exercise background writers, typed mutations, automatic checks, incomplete
   captures, and carried snapshots together in installed Linux tests.
 
@@ -131,6 +132,11 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Check reserve before expensive submission verification; reread budget afterward.
 - [x] Reset progress-related stall state before deciding whether to escape.
 - [x] Remove the false promise that the next submission is accepted unconditionally.
+- [ ] Close the workflow's 300-step cutoff end to end. Current uncommitted repair
+  sets max_iterations=0 and represents unlimited remaining steps explicitly in
+  the gate, preserving wall-time reserve. Two RED witnesses now pass; the related
+  integration/gate/adapter run passed 49 tests. Actual installed beyond-300-call
+  and deadline-stop proof, review, commit and successor CI remain required.
 - [ ] Finish gate reasons separating verified completion, mapping gaps, check evidence,
   baseline uncertainty, and budget/stall acceptance. Acceptance is not correctness.
 - [ ] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
@@ -151,9 +157,26 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
 - [ ] Review the final diff, rerun invalidated checks, then commit verified coherent
-  changes on the exact branches/bases above. No push or paid dispatch is implied.
+  changes on the exact branches/bases above. Scoped pushes and provider-free CI
+  are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Current checkbox count: 39 completed bounded items, 29 open, 68 total. The
+  step-limit release proof above was missing from the earlier 67-item census;
+  it is now tracked explicitly. Counts are not an estimate of remaining effort.
+- New uncommitted producer summary exposes retained/inserted parser nodes, cache
+  hits/misses and resolver passes; the harness now parses its batch result. Both
+  missing-summary RED witnesses reproduced before repair. Producer batch tests
+  passed in 34.059 seconds; harness index tests passed 25 with one explicit
+  installed-Linux-only skip. Rebuilt installed summary proof remains required.
+- Producer work-counter implementation is now pushed as `8583930b`; its exact
+  Linux build is running. Installed harness candidate 07 finished 124 passed,
+  1 failed, 2 explained skips in 46.97 seconds. Failure: the preexisting legacy
+  `-file` producer path has no `symbols_reminted` field and invalidates the
+  resolution sidecar. Keep this compatibility gap open; batch tests passed.
+  The installed 301-query/deadline regression passed with synthetic model output
+  and zero provider calls. Evidence: `D:/gt-context-proof/installed-07.xml`.
 
 - Harness checkpoint `8f955cd63e222ac22569b582ebb8deab6aeb7631` is pushed on
   `codex/context-plan-integrity`, with direct parent `ce309e90`.
@@ -168,8 +191,29 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   a removed test. Rebound it to real isolated queued-check execution and added
   unbound-suite rejection as a negative witness. Both witnesses passed against
   installed candidate 02 on Linux (2 passed, 7.05 seconds). Successor CI required.
-- Batch-amendment RED test currently fails because `-amend-parent` is absent.
-  The test is uncommitted; batch amendment is not implemented or release-ready.
+- Harness checkpoint `5eaaef8b6f42e7ee2bcbd4a582701950591d616b` repairs the
+  feature matrix bindings. Successor CI `34421020506` passed that matrix but
+  failed nine Python tests retaining old lexical-GREEN/shell-replay expectations.
+  The current working tree updates those fixtures to explicit supported assertions
+  and conservatively rejects unbound full-suite observations; successor CI remains required.
+- Producer `9df478286816976a71ca227a418bd9b80327e332` implements staged batch
+  amendments and recognizes quoted/absolute Python test runner paths. Its Go
+  store/parser/command suites passed with `sqlite_fts5`; 105 Python protocol tests passed.
+- Producer `3f5e965385a140ebfe18462982df9f5fd6976989` permits empty SQLite WAL
+  sidecars while retaining rejection of uncheckpointed data. The actual installed
+  Linux batch test exposed the original over-strict guard before this repair.
+  Provider-free binary build `34422715093` passed for this exact SHA.
+- Installed batch candidate 02: 1 passed, 3.16 seconds, network disabled, real
+  compiled Linux producer and installed harness. Verified immutable parent bytes,
+  unchanged parser node identity, 1 cache hit/1 miss, complete analysis, committed
+  core receipt and no foreign-key violations. Evidence:
+  `D:/gt-context-proof/batch-installed-02.xml`. Automatic capability selection and
+  full graph-consumer equivalence remain unproven; capability is still undeclared.
+- Installed candidate 05: 96 passed, one explained complementary graph-unavailable
+  skip, 34.45 seconds. Covers baseline process-tree cleanup, shared check bindings,
+  submission reserve and conservative evidence fixtures. Evidence:
+  `D:/gt-context-proof/installed-05/results.xml`. This used the previous Go binary,
+  not the batch producer, and does not establish whole-product acceptance.
 - RED witnesses reproduced lexical/full-suite false GREEN, original-shell replay,
   dropped long requirements, clipped commands, truncated baseline analysis,
   disappearing test identities, and destructive baseline cleanup.

@@ -1147,8 +1147,8 @@ class GTSession:
             )
         return batch
 
-    def plan_gate_budget(self) -> tuple[float, int]:
-        """Seconds and steps the agent has left, from the agent itself."""
+    def plan_gate_budget(self) -> tuple[float, int | None]:
+        """Remaining budget; None steps means Mini-SWE's explicit unlimited mode."""
         agent = self._plan_agent
         if agent is None:
             return 0.0, 0
@@ -1159,8 +1159,12 @@ class GTSession:
         remaining_seconds = (
             max(0.0, limit - (time.time() - started)) if limit and started else 0.0
         )
-        step_limit = int(getattr(agent.config, "step_limit", 0) or 0)
-        remaining_steps = max(0, step_limit - int(getattr(agent, "n_calls", 0) or 0))
+        configured_steps = getattr(agent.config, "step_limit", None)
+        step_limit = int(configured_steps or 0)
+        remaining_steps = (
+            None if configured_steps is not None and step_limit == 0
+            else max(0, step_limit - int(getattr(agent, "n_calls", 0) or 0))
+        )
         return remaining_seconds, remaining_steps
 
     def plan_submit_gate(self) -> bool:
@@ -1172,9 +1176,8 @@ class GTSession:
         consulted after the fact would journal a refusal and change nothing,
         which is worse than no gate because it would read as working.
 
-        Deliberately weaker than enforcement: one refusal, a budget escape ahead
-        of it, and the directive tells the agent plainly that submitting again
-        will be accepted. Returns True whenever it has nothing to say.
+        Refusals are bounded by remaining budget and consecutive lack of progress.
+        Acceptance is permission to submit, not a correctness certificate.
         """
         if self._engine is None or self.disabled:
             return True
@@ -1245,11 +1248,21 @@ class GTSession:
             return report.newly_failing, report.status
         from .persistent_plan.baseline import compare_to_baseline
 
+        # Automatic checks and snapshot capture may already have consumed most
+        # of the available allowance. The protected finalization reserve is not
+        # a baseline budget, even when the initial suite was slow.
+        remaining_seconds, _ = self.plan_gate_budget()
+        from .persistent_plan.gate import MIN_REMAINING_SECONDS
+        allowance = min(max(30.0, inputs.baseline.duration_seconds * 2),
+                        max(0.0, remaining_seconds - MIN_REMAINING_SECONDS))
+        if allowance < 1:
+            return (), "budget_not_checked"
+
         try:
             report = compare_to_baseline(
                 inputs.baseline,
                 self.config.repo_root,
-                budget_seconds=max(30.0, inputs.baseline.duration_seconds * 2),
+                budget_seconds=allowance,
                 execution_env=child_env,
             )
         except Exception:  # noqa: BLE001 - a probe fault is never a blocker

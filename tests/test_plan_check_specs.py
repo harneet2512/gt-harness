@@ -101,6 +101,36 @@ def test_plan_cli_requests_are_applied_by_engine_and_cannot_grant_proof(tmp_path
     assert verify_event_journal(adapter.store.path).valid
 
 
+def test_revising_one_row_preserves_other_shared_check_bindings(tmp_path):
+    import json
+
+    from gt_engine.miniswe_integration import MiniSweAdapter
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.bootstrap import build_plan
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_widget.py").write_text("def test_widget(): assert True\n", encoding="utf-8")
+    inputs = build_plan_inputs("The widget must preserve compatibility.\nThe widget must reject invalid input.",
+                               repo_root=str(repo), capture_baseline=False)
+    adapter = MiniSweAdapter(task_id="shared", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    adapter.persistent_plan = build_plan(None, inputs)
+    first, second = [row.row_id for row in adapter.persistent_plan.rows[:2]]
+    check_id = adapter.bind_plan_check({"argv": ["pytest", "-v", "test_widget.py"],
+                                       "requirement_ids": [first, second]})
+    inbox = adapter.store.root / "plan" / "requests"
+    inbox.mkdir(parents=True)
+    (inbox / "revision.json").write_text(json.dumps({
+        "plan_digest": hashlib.sha256(adapter.persistent_plan.canonical_json().encode()).hexdigest(),
+        "row_id": first, "operation": "revise", "value": {"approach": "new design"},
+    }), encoding="utf-8")
+    adapter.apply_plan_requests()
+    assert adapter._check_specs[check_id].requirement_ids == (second,)
+    assert adapter._pending_check_ids == {check_id}
+    assert adapter.plan_row_state(first) == "UNVERIFIED"
+
+
 def test_validation_digest_tracks_tests_and_configuration_not_implementation(tmp_path):
     from gt_engine.persistent_plan.checks import validation_source_digest
     from gt_engine.runtime_observation import capture_workspace

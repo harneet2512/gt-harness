@@ -9,8 +9,7 @@ existing enforcing gate is simply unreachable.
 This module supplies the decision for a plan-scoped gate that works in advisory
 mode, with three properties that keep it honest:
 
-* It refuses ONCE. The controller's own submit path already yields on the second
-  attempt, and this matches it. The gate is a reminder, never a cage.
+* It bounds consecutive refusals without progress and escapes on budget.
 * It escapes on budget. A gate that turns a near-miss into a timeout converts a
   partial score into a zero, and four of the measured losses were one or two
   tests short. Time and steps are checked BEFORE any refusal.
@@ -55,7 +54,7 @@ class GateDecision:
     unmet_rows: tuple[str, ...] = ()
     regressions: tuple[str, ...] = ()
     remaining_seconds: float = 0.0
-    remaining_steps: int = 0
+    remaining_steps: int | None = 0
     refusals: int = 0
     directive: str = ""
     escaped: str = ""
@@ -73,14 +72,15 @@ class GateDecision:
             "refusals": self.refusals,
             "escaped": self.escaped,
             "baseline_status": self.baseline_status,
+            "completion_proven": False,
         }
 
 
-def budget_allows_refusal(remaining_seconds: float, remaining_steps: int) -> tuple[bool, str]:
+def budget_allows_refusal(remaining_seconds: float, remaining_steps: int | None) -> tuple[bool, str]:
     """Is there room for the agent to act on a refusal and submit again?"""
     if remaining_seconds < MIN_REMAINING_SECONDS:
         return False, "time"
-    if remaining_steps < MIN_REMAINING_STEPS:
+    if remaining_steps is not None and remaining_steps < MIN_REMAINING_STEPS:
         return False, "steps"
     return True, ""
 
@@ -91,7 +91,7 @@ def decide(
     unmet_rows: tuple[str, ...],
     regressions: tuple[str, ...],
     remaining_seconds: float,
-    remaining_steps: int,
+    remaining_steps: int | None,
     refusals: int,
     baseline_status: str = "",
     refusals_without_progress: int | None = None,
@@ -119,7 +119,7 @@ def decide(
         )
     blocking = tuple(unmet_rows) + tuple(regressions)
     if not blocking:
-        return GateDecision(accepted=True, reason="complete", **common)
+        return GateDecision(accepted=True, reason="no_blocking_evidence", **common)
     allowed, escape = budget_allows_refusal(remaining_seconds, remaining_steps)
     if not allowed:
         return GateDecision(
@@ -141,9 +141,8 @@ def render_directive(
 ) -> str:
     """What the agent is told when the gate refuses.
 
-    Names the rows and the command that would prove each, because a refusal
-    that says only "obligations unmet" is not actionable. Says plainly that a
-    second submit is accepted, so the gate can never be mistaken for a trap.
+    Names outstanding rows and proposed checks without asserting that executing
+    a check proves its requirement. Retries follow the bounded stall policy.
     """
     lines = [
         "GT PLAN GATE: submission was not executed. The plan built before the "
@@ -158,7 +157,7 @@ def render_directive(
             text = row.text if row is not None else row_id
             lines.append(f"- {row_id}: {text}")
             if row is not None and row.verification_command:
-                lines.append(f"    prove with: {row.verification_command}")
+                lines.append(f"    proposed check (not proof): {row.verification_command}")
         extra = len(unmet_rows) - MAX_LISTED_ROWS
         if extra > 0:
             lines.append(f"- ... and {extra} more")
