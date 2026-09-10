@@ -157,7 +157,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   baseline uncertainty, and budget/stall acceptance. Acceptance is not correctness.
 - [x] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
   checks, and progress recovery before a previously reached stall limit.
-- [ ] Add current committed-diff/uncommitted-state reporting and bounded finalization
+- [x] Add current committed-diff/uncommitted-state reporting and bounded finalization
   reminders. Do not automatically commit model changes.
 - [ ] Verify official submitted patch versus supervisor recovery artifact separately.
 
@@ -177,6 +177,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are authorized; paid dispatch is not.
 
 ## Evidence retained so far
+
+- Candidate 35 observes actual BASE-to-HEAD binary diff bytes, separately from
+  tracked/untracked working changes and the supervisor's recovery export. An
+  empty commit no longer implies a nonempty collectible patch. The bounded
+  two-second read-only observer reports unavailable state as unknown. At most
+  two finalization reminders use the existing context admission path (VERIFY
+  entry and reserve), never committing or rebuilding a graph. Installed suites:
+  86 passed, one source-only entrypoint check explicitly deselected, 54.52s
+  (`submission-state-35.xml`). That entrypoint and all session source tests:
+  65 passed, zero skips, 9.361s (`submission-source-35.xml`). Two REDs retained
+  in `submission-state-red.xml`. Actual external collector/rehearsal remains open;
+  the new observation explicitly sets `official_collection_observed=false`.
 
 - Candidate 33 restored validated design revisions and deferrals from the existing
   chain-validated startup journal. Base/result digest mismatch, malformed request

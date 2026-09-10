@@ -13,6 +13,42 @@ from gt_engine.persistent_plan.bootstrap import build_plan
 from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
 
 
+def test_finalization_reminders_are_bounded_and_do_not_commit(tmp_path, monkeypatch):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True).stdout
+    git("init")
+    (repo / "a.py").write_text("x = 1\n")
+    git("add", ".")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "core.hooksPath=", "commit", "-m", "fixture")
+    head = git("rev-parse", "HEAD").decode().strip()
+    (repo / "a.py").write_text("x = 2\n")
+    index_before = git("diff", "--cached")
+    adapter = MiniSweAdapter(task_id="finalize", repo_root=str(repo), state_dir=tmp_path / "state", predicates=())
+    adapter.start_task()
+    adapter.begin_implement()
+    session = GTSession(GTSessionConfig(task_id="finalize", repo_root=str(repo), mode="advisory"), engine=adapter)
+    session._patch_baseline = head
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (1000, None))
+    assert session._finalization_candidate() is None
+    adapter.begin_verify()
+    first = session.before_model([], 1)
+    assert any("[GT_FINALIZATION]" in part for part in first.context_additions)
+    assert session._finalization_candidate() is None
+    monkeypatch.setattr(session, "plan_gate_budget", lambda: (599, None))
+    assert session._finalization_candidate() is not None
+    assert session._finalization_candidate() is None
+    assert git("rev-parse", "HEAD").decode().strip() == head
+    assert git("diff", "--cached") == index_before
+    events = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    assert sum(row["event"] == "submission_patch_observed" for row in events) == 2
+    assert verify_event_journal(adapter.store.path).valid
+
+
 @pytest.mark.parametrize(("phase", "seconds", "steps", "executes"), [
     ("VERIFY", 1000, None, True),
     ("IMPLEMENT", 1000, None, False),

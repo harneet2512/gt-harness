@@ -1135,6 +1135,8 @@ def main() -> int:
         return TERMINAL_EXIT_CODES[terminal]
     report: dict = {"model": args.model, "terminal": "internal_error",
                     "synthetic_transport": args.synthetic_transport}
+    if session is not None:
+        session._patch_baseline = patch_baseline
     result: dict = {}
     exception: BaseException | None = None
     gt_state: dict | None = None
@@ -1168,9 +1170,13 @@ def main() -> int:
     # measures the thing worth knowing - how often the step count costs the
     # commit.
     if patch_baseline:
-        head = _repository_head(Path(args.cwd))
-        report["collected_patch_will_be_empty"] = bool(head) and head == patch_baseline
-        report["repository_head_moved"] = bool(head) and head != patch_baseline
+        from scripts.miniswe_supervisor import submission_patch_state
+
+        patch_state = submission_patch_state(Path(args.cwd), patch_baseline)
+        report["submission_patch_state"] = patch_state
+        report["collected_patch_will_be_empty"] = patch_state.get("committed_patch_empty")
+        report["repository_head_moved"] = (
+            patch_state["head"] != patch_baseline if patch_state["status"] == "observed" else None)
     # Treatment identity is the requested mode, not effective engine health.
     # A kill switch may preserve native execution but cannot relabel ON as OFF.
     gt_active = not args.gt_off and args.gt_mode != "off"

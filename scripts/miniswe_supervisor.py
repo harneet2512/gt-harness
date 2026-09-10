@@ -214,6 +214,38 @@ def _git(repo: Path, arguments: list[str], *, env: dict | None = None,
                           capture_output=True, input=input_bytes, timeout=10).stdout
 
 
+def submission_patch_state(repo: Path, baseline: str) -> dict:
+    """Read collector-shaped commit bytes separately from recoverable work.
+
+    This is an advisory observation, not an atomic workspace snapshot or proof
+    that the external collector ran. Never stage or commit on the agent's behalf.
+    """
+    state = {"layout": "gt.submission_patch_state.v1", "baseline": baseline,
+             "official_collection_observed": False, "status": "unavailable"}
+    deadline = time.monotonic() + 2.0
+    def read(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
+                              timeout=max(0.001, deadline - time.monotonic())).stdout
+    try:
+        if not baseline:
+            return state
+        head = read("rev-parse", "HEAD").decode().strip()
+        committed = read("diff", "--binary", baseline, head)
+        tracked = read("diff", "--name-only", "-z", head, "--")
+        untracked = read("ls-files", "-z", "--others", "--exclude-standard")
+        if read("rev-parse", "HEAD").decode().strip() != head:
+            return {**state, "reason": "head_changed_during_observation"}
+        return {**state, "status": "observed", "head": head,
+                "committed_patch_empty": not committed,
+                "committed_patch_sha256": hashlib.sha256(committed).hexdigest(),
+                "committed_patch_bytes": len(committed),
+                "uncommitted_tracked": bool(tracked),
+                "untracked_paths": [part.decode("utf-8", "replace")
+                                    for part in untracked.split(b"\0") if part]}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {**state, "reason": type(exc).__name__}
+
+
 def export_patch(
     repo: Path, baseline: str, output: Path, *, excluded_roots: tuple[Path, ...] = ()
 ) -> None:
@@ -280,6 +312,7 @@ def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baselin
                               "checkpoint_status": result.checkpoint_status,
                               "checkpoint_returncode": result.checkpoint_returncode,
                               "checkpoint_error_type": result.checkpoint_error_type})
+    report["submission_patch_state"] = submission_patch_state(Path(args.cwd), baseline)
     if args.patch_output:
         try:
             from gt_engine.engine_state import RuntimeLayout

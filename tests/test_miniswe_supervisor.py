@@ -133,3 +133,49 @@ def test_export_omits_generated_cache_and_preserves_source_paths(tmp_path):
     paths = {row.path for row in capture_workspace(repo).files}
     assert "vendor/new.py" in paths
     assert "__pycache__/tracked.py" in paths
+
+
+def test_submission_state_distinguishes_commits_from_recovery_bytes(tmp_path):
+    import hashlib
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True, check=True).stdout
+    def commit():
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "-c", "core.hooksPath=", "commit", "--allow-empty", "-m", "fixture")
+    git("init")
+    (repo / "a.py").write_text("x = 1\n")
+    git("add", ".")
+    commit()
+    baseline = git("rev-parse", "HEAD").decode().strip()
+    commit()  # A moved HEAD does not establish a nonempty collectible patch.
+    (repo / "a.py").write_text("x = 2\n")
+    (repo / "new.py").write_text("y = 3\n")
+    index_before = git("diff", "--cached")
+    state = supervisor.submission_patch_state(repo, baseline)
+    assert state["status"] == "observed"
+    assert state["committed_patch_empty"] is True
+    assert state["uncommitted_tracked"] is True
+    assert state["untracked_paths"] == ["new.py"]
+    assert state["official_collection_observed"] is False
+    recovery = tmp_path / "worktree.patch"
+    supervisor.export_patch(repo, baseline, recovery)
+    assert recovery.stat().st_size > 0
+    assert git("diff", "--cached") == index_before
+    git("add", ".")
+    assert supervisor.submission_patch_state(repo, baseline)["committed_patch_empty"] is True
+    commit()
+    state = supervisor.submission_patch_state(repo, baseline)
+    official = git("diff", "--binary", baseline, "HEAD")
+    assert state["committed_patch_sha256"] == hashlib.sha256(official).hexdigest()
+    assert state["committed_patch_empty"] is False
+    assert state["uncommitted_tracked"] is False
+    assert state["untracked_paths"] == []
+
+
+def test_submission_state_unavailable_is_not_empty_patch(tmp_path):
+    state = supervisor.submission_patch_state(tmp_path, "missing")
+    assert state["status"] == "unavailable"
+    assert "committed_patch_empty" not in state

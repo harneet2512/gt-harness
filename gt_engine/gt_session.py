@@ -644,6 +644,39 @@ class GTSession:
             self.degrade("plan_cursor", exc)
             return None
 
+    def _finalization_candidate(self) -> GTDecisionCandidate | None:
+        """At most two advisory observations, through the existing delivery owner."""
+        baseline = getattr(self, "_patch_baseline", "")
+        if not baseline or not self.model_visible or self._engine is None:
+            return None
+        seconds, _ = self.plan_gate_budget()
+        stage = ("reserve" if seconds <= 600 else
+                 "verification" if getattr(self._engine, "phase", "") == "VERIFY" else "")
+        seen = getattr(self, "_finalization_stages", set())
+        if not stage or stage in seen:
+            return None
+        from pathlib import Path
+
+        from scripts.miniswe_supervisor import submission_patch_state
+
+        state = submission_patch_state(Path(self.config.repo_root), baseline)
+        seen.add(stage)
+        self._finalization_stages = seen
+        self._engine.store.append("submission_patch_observed", stage=stage, **state)
+        rendered = ("[GT_FINALIZATION]\nThe benchmark collects committed changes (BASE to HEAD); "
+                    "the supervisor worktree recovery patch is a separate artifact. "
+                    "Review and finalize the intended changes yourself before submission. "
+                    "GT will not commit them for you. This is not a correctness assessment.\n")
+        if state["status"] == "observed":
+            rendered += (f"Current committed diff empty: {state['committed_patch_empty']}; "
+                         f"uncommitted tracked changes: {state['uncommitted_tracked']}; "
+                         f"untracked paths: {len(state['untracked_paths'])}.")
+        else:
+            rendered += "Current Git state unavailable; inspect it directly."
+        digest = hashlib.sha256(rendered.encode()).hexdigest()
+        return GTDecisionCandidate(rendered=rendered, kind="context_delta", lane="prompt",
+                                   target="provider_prompt", dedup_key=f"finalization:{stage}:{digest}")
+
     def before_model(self, messages: list[dict], iteration: int) -> GTDecisionBatch:
         """Deliver context additions (contract/localization) before a model call."""
         if self._engine is None or self.disabled:
@@ -660,6 +693,9 @@ class GTSession:
         if getattr(self._engine, "phase", "") == "VERIFY":
             self._drain_verification_boundary()
         candidates = list(self._queued_decision_candidates)
+        finalization = self._finalization_candidate()
+        if finalization is not None:
+            candidates.append(finalization)
         contract_candidate: tuple[str, str] | None = None
         contract_unit_id = ""
         localization_candidate = ""
