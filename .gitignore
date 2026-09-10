@@ -22,3 +22,8 @@ textstats.py
 test_textstats.py
 .agent-handoff/
 skills.md
+
+# cloud agent runtime artifacts (server DB + per-session workspace clones)
+cloud_harness.db
+workspaces/
+cloud/.env
