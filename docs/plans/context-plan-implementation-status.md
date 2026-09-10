@@ -429,6 +429,43 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   assertions; and 359 of 43,680 `vta_flow_edge_fact` nodes carry different content
   hashes at an identical row count (`arm-diff-click.txt`). A consumer asking who
   calls `fail` gets a different answer depending on which build it reads.
+  ROOT-CAUSE WORK, and it CORRECTS two things written above. The defect now has a
+  reproducer that does not need the certified binary at all
+  (`determinism-root-cause.md`, with `determinism_ab.py`, `edge_diff.py`,
+  `idcheck.py`). Built from `vendor/gt-index-src` with the declared tags, the core
+  layer emits the same 13 core edge types with IDENTICAL counts as the certified
+  binary -- CALLS 2119, CONTAINS 377, ACCESSES 266, READS 216, WRITES 84, and so on
+  -- and it is nondeterministic in the same way. The certified binary additionally
+  emits the resolution-evidence layer (HAS_COMPLETENESS_FACT 33,414 of its 50,954
+  edges); the local build reports `analysis_state=failed` and is core-only, which
+  is what the 3,302-versus-50,954 edge gap between them is. Not source divergence:
+  the core layer matches exactly.
+  THREE HYPOTHESES RULED OUT BY MEASUREMENT:
+    * NOT concurrency. `-workers 1` still differs run to run.
+    * NOT node-id assignment. At `-workers 1` all 1,086 definitions keep
+      byte-identical ids across three runs (0 of 1,086 differ). Node rows are
+      stable; only edges move.
+    * NOT the id tie-breaks. `resolver.go` picks among candidates in three places
+      that each end in a node-id comparison -- `pickBestNameMatchTarget` (~954,
+      already content-SORTED by the authors, with a comment describing this exact
+      defect, but still comparing `tid < best` when two candidates share a file),
+      `pickBestLocalTarget` (~902, "deterministic min-ID tie-break" over SAME-FILE
+      candidates), and `pickBestImportCandidate` (~866, "(file, id)", which is
+      content-ordered across files and degenerate within one). All three were
+      rewritten to compare (file, start_line, id) and rebuilt: STILL
+      nondeterministic. In hindsight that follows from the ids being stable, and it
+      is the useful negative -- the order dependence is UPSTREAM, in how the
+      candidate set reaching these pickers is built or iterated.
+  THE SIGNATURE IS NARROWER THAN RECORDED ABOVE. Only CALLS edges move, and only
+  where the caller and the callee NAME and FILE are identical and the callee's
+  START_LINE differs -- selection among same-named definitions in the SAME FILE,
+  not receiver selection across different classes in different files:
+    `invoke` core.py 761/766/768, `main` 1319/1329/1338, `group` 1682/1685/1689,
+    `get_default` 2249/2254, `lookup_default` 689/694/698.
+  Between two runs 228-281 of click's 2,119 CALLS edges flip this way.
+  CORRECTION: `internal/resolver/promote.go:567` is a real order-dependent site of
+  the same class but is NOT this defect -- it emits CO_SERIALIZES, which the core
+  layer does not produce at all.
   CONSEQUENCE: amend-versus-rebuild digest parity cannot be established at real
   scale while the producer's own repeatability is weaker than the comparison. No
   route comparison can be tighter than the producer's run-to-run agreement. Making
