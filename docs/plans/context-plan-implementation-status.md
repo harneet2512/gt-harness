@@ -875,6 +875,30 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   that share does not cover the copy.
   It is also HEAVIER: candidate peak memory median 242.9 MB against baseline
   184.5 MB, about 32% more, with no overlap between the two sets of five.
+  THREE BENCHMARK-SCALE ROWS, and the answer they give is a NEGATIVE RESULT:
+  at this scale the batch amendment is not a speedup. Five alternating
+  repetitions each, parse cache enabled in both arms:
+    repository        parsed  parent   baseline  candidate  x     peak MB
+    kedro-4580          328    6.3s      5.35s     5.23s   1.02  188 -> 198
+    keras-20396         694  126.4s    118.42s   119.06s   0.99  1769 -> 1722
+    dynaconf-1238       609    4.2s      3.25s     3.30s   0.98  164 -> 166
+  Every one of them BUILDS well inside the harness's 600s budget, the slowest
+  at 126s -- which matches this codebase's own recorded ~115s for arktype, a
+  real task repository. So the large-repository corpus said nothing about the
+  benchmark, and repointing was necessary to learn anything.
+  The amend lands between 0.98x and 1.02x: break-even within noise, three times
+  over. Memory is neutral too (+5%, -3%, +1%), so click's +32% does not
+  generalise either. It is not failing to do its job -- on keras it retains
+  10,055 of 10,698 parser nodes, 94% -- it is that retaining parser structure
+  does not move the total, because BOTH arms still run one full resolver pass
+  and resolution is what costs. keras makes the point on its own: 694 parsed
+  files take 126s where kedro's 328 take 6.3s, twice the files for twenty
+  times the time.
+  SEMANTIC PARITY IS TRUE ON ALL THREE, one distinct digest across every run of
+  both arms. Combined with click's four digests, the producer nondeterminism is
+  confirmed repository-dependent and absent from this corpus.
+  conan, haystack and matplotlib remain; matplotlib at 4,597 files is the one
+  that will say whether the budget holds at the top of the benchmark's range.
   FIRST BENCHMARK-SCALE ROW, and it does not look like the large-repository rows.
   `kedro-org__kedro-4580` (622 tracked, 328 parsed files) BUILDS in 6.3s, well
   inside the harness's 600s budget. Five alternating repetitions:
