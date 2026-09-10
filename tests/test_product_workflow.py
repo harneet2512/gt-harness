@@ -60,10 +60,18 @@ def test_only_closed_supported_workflow_set_is_active() -> None:
     # is a supply-chain event, not a detail. The two image mirrors are
     # workflow_dispatch-only, touch no paid path, and exist to cut task-image
     # pull latency; they are admitted by name rather than by loosening the rule.
+    # `installed_rehearsal.yml` is admitted the same way: it runs the installed
+    # full-flow rehearsal, which serves its own synthetic transport in-process
+    # and makes no provider call, so it touches no paid path. It exists because
+    # that rehearsal previously had exactly ONE reproducer -- a single
+    # workstation whose Docker Desktop 9p mount deadlocked two runs in
+    # `p9_client_rpc` -- and evidence nobody else can reproduce is weak
+    # evidence for a release gate.
     assert active == [
         "deepswe_cache_images.yml",
         "deepswe_gt_harness_product.yml",
         "deepswe_gt_harness_product_p0731.yaml",
+        "installed_rehearsal.yml",
         "tb2_cache_images.yml",
     ]
 
