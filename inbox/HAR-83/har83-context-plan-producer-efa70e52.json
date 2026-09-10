@@ -1,0 +1,33 @@
+{
+  "schema": "gt.review_packet.v1",
+  "packet_id": "har83-context-plan-producer-efa70e52",
+  "ticket": "HAR-83",
+  "head_sha": "efa70e52d4e85bff2364b0038ceca2306de218b0",
+  "kind": "check_outcome",
+  "status": "PASS",
+  "basis": "exact_static_build_installed_structural_reuse_and_source_correspondence",
+  "detail": {
+    "scope": "Producer build, complete producer CI, exact installed structural retention fixture and Python wheel/source correspondence. Not full consumer equivalence, product readiness, speedup or benchmark reward.",
+    "repository": "harneet2512/groundtruth",
+    "source_tree": "65964ea2b5c6490ec8e119327e47ca44cb7a43ca",
+    "build_workflow_run_id": 34436550584,
+    "build_conclusion": "success",
+    "full_producer_ci_run_id": 34436549266,
+    "full_producer_ci_conclusion": "success",
+    "producer_sha256": "9e2973ea1060fc2c9236b0e81ea39ebb957a0013903d45517e01d4b0b25ef91c",
+    "build_info_sha256": "39d00944df6a6ad7213140d9494d606a5f082d15989f3a85d9ce57e25faa44cd",
+    "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
+    "package_files_matching_source": 317,
+    "installed_evidence": "inbox/HAR-83/evidence/structural-binary-06.xml",
+    "installed_passed": 1,
+    "installed_skipped": 0,
+    "installed_seconds": 10.66,
+    "installed_runtime": "Downloaded exact static Linux binary, Python 3.12 fixture consumer, network disabled, no producer source-package mount",
+    "installed_checks": ["unchanged property/assertion/structural-edge row IDs", "fresh versus amended fact payloads", "immutable parent bytes", "foreign key integrity", "two parse-cache hits and one miss", "one resolver pass"],
+    "source_regressions": ["nine batch/fresh transitions", "store/parser/command packages", "duplicate fact multiplicity", "fresh assertion target and score", "tampered fact rejection", "insertion failure rollback", "non-parser edge owner conservation"],
+    "remaining": ["full repinned harness acceptance", "all-consumer workload equivalence and performance", "remaining context-plan tracker requirements"],
+    "paid_dispatch": false,
+    "confidence": "high"
+  },
+  "packet_digest_sha256": "13a9333a50e57ceff136107a37d84ef5a067feb9be2d853b6d16c5e90c81bba4"
+}
