@@ -171,7 +171,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Drain coalesced checks before the next model decision in VERIFY, in addition
   to submission. Preserve the existing per-pass cap and submission reserve;
   do not run checks on every implementation turn or rerun discharged work.
-- [ ] Verify replay/restoration behavior across persisted state and interrupted runs.
+- [x] Verify replay/restoration behavior across persisted state and interrupted runs.
   Check definitions now recover once from the chain-validated startup journal,
   preserve revised shared bindings, and revalidate current test source. Historical
   passing observations are not restored. Hash-linked design revisions and deferrals
@@ -195,6 +195,22 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   version rather than being migrated, since the only value available to backfill
   a missing source revision is the current workspace. Valid, truncated, tampered
   and externally anchored journal tails are still open.
+  Both named gaps are now closed. Externally anchored journal-tail conservation
+  landed in 9affba20: events.anchor.json records event_count and event_head
+  beside the journal, written atomically AFTER each row, and startup requires
+  the journal to still contain what the anchor witnessed. A hash chain proves
+  self-consistency, never completeness -- cut the tail and sequence numbers
+  still run 1..N with correct parent hashes, so an unanchored verify returns
+  valid and recovery rebuilds from a journal that lost its most recent events.
+  Containment rather than equality, because the anchor legitimately trails by
+  one after an unclean stop; a shorter journal, a different head at equal
+  length, or a wrong hash at the anchored depth all fail. Three tests carry
+  truncated, crash-behind and rewritten-under-a-stale-anchor, and the first
+  asserts the unanchored chain still looks perfect so the test states WHY the
+  anchor is needed. Terminal interruption is covered by rehearsal 09 above.
+  Verified installed on wheel 64: 81 passed and 4 subtests across the journal,
+  all recovery, receipt, baseline and interruption suites
+  (D:/gt-context-proof/anchor-surface-64.xml).
 - [x] Automatically bind admissible initial plan commands through CheckSpec and
   group identical executions across requirement bindings. The CLI is supplementary.
 
