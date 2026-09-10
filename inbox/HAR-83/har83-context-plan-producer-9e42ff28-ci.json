@@ -1,0 +1,42 @@
+{
+ "schema": "gt.review_packet.v1",
+ "packet_id": "har83-context-plan-producer-9e42ff28-ci",
+ "ticket": "HAR-83",
+ "head_sha": "9e42ff282c0ccf5e7c517a9bc569b143cf589c8c",
+ "kind": "check_outcome",
+ "status": "PASS",
+ "basis": "exact_ci_static_build_last_wins_overload_fix_and_object_fingerprint",
+ "detail": {
+  "scope": "Producer last-definition-wins same-name tie-break (overload impl binding), git-object source fingerprint (platform-canonical), dirty-worktree build refusal; full producer CI green; certified static Linux build; vendored source/fingerprint correspondence. Not full consumer equivalence, product readiness, or benchmark reward.",
+  "repository": "harneet2512/groundtruth",
+  "source_tree": "e1ab20e89410aa6f1eae994a59937b81bbac07e7",
+  "build_workflow_run_id": 34531382214,
+  "build_conclusion": "success",
+  "full_producer_ci_run_id": 34531379405,
+  "full_producer_ci_conclusion": "success",
+  "producer_sha256": "47e7eecd26ddb23da8b7f9910ebd79c105f146daaaa53a02eaba7d3ea32bc2bd",
+  "build_info_sha256": "4c0d27ab07ce9786faa88c9a6353c7bbddfb8954033dca9099b111f3e5c59b5e",
+  "wheel_sha256": "cb73ff2ed55c11d7babbdc32ef55c72268e8617913cadfa94b323ea852ca0ce9",
+  "receipt_digest_sha256": "743dc236a7a9b1b490662aa41ab23a844abf73742721968f673b3d9b694530a2",
+  "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+  "build_tags": "netgo,osusergo,sqlite_fts5",
+  "go_toolchain": "go1.22.5",
+  "changes": [
+   "d6811825 resolver.go: same-name tie-break binds LAST definition (impl) not first (overload stub) - 277/277 overload calls resolved to stubs under first-wins",
+   "8685e473 build recipe: fingerprint git tree objects (ls-tree blob shas), not worktree bytes; refuse dirty gt-index builds",
+   "9e42ff28 build recipe: scope MSYS path-conversion exclusion to the docker call so git -C resolves"
+  ],
+  "measured": {
+   "unit_witness": "TestSameNamedClassMembersResolveDeterministically: RED on first-wins (resolved to stub node 10, want impl 11), PASS; resolver+store 299 tests green with sqlite_fts5",
+   "click": "4 runs, 1 digest, 50957 edges (was 50954 under first-wins; +3 edges = impl-vs-stub targets)",
+   "conan": "5 runs, 1 digest, 34460 edges on identical code (was 34457 under first-wins)",
+   "fingerprint": "fb3af740 object-based; identical on Windows host and reproducible from git objects on any platform; vendored tree carries producer blob bytes exactly",
+   "binding": "build-info git_commit=9e42ff28 == SOURCE-COMMIT; source_fingerprint=fb3af740 object-canonical"
+  },
+  "remaining": [
+   "matplotlib amend-vs-rebuild +13 edges (arms_disjoint under first-wins binary; rerun pending on this artifact)",
+   "six-repository run-loop rows (driver built, sweep prepared not run)",
+   "paid smoke approval gate"
+  ]
+ }
+}
