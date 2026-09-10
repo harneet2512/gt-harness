@@ -15,8 +15,8 @@ declared `git_commit`, and a content digest against its declared
 checked only by a dispatch that costs money, and only after it has already
 started.
 
-These tests move both halves onto the free suite. They are marked xfail because
-both currently FAIL, measured rather than assumed:
+These tests move both halves onto the free suite. They previously failed,
+measured rather than assumed:
 
     build-info git_commit         efa70e52d4e85bff2364b0038ceca2306de218b0
     vendor/.../SOURCE-COMMIT      193b9d93b0650721be6120ae519ab3a1d8e8137f
@@ -24,17 +24,15 @@ both currently FAIL, measured rather than assumed:
     build-info source_fingerprint f7fca174b866cc8c8b0f826aa649aa24f47d718b872c8dae45d0dabd71e5a7a8
     vendored tree, same recipe    4f612d4cdf487a22469765fd23f3500429c10ffea0677860785324c3e2e81551
 
-The producer worktree at the commit the binary names does not reproduce it
-either: `git archive efa70e52 gt-index`, hashed on Linux by the producer's own
-recipe from `scripts/swebench/build_gt_index_linux.sh:73`, gives
-`367a641acbf973bcaf926c350f466440e761d499a552f3e75ebda6ef277ee057`.
-
-WHY they diverge is NOT established here and is deliberately not guessed at. A
-build from a dirty tree would explain it, and so would several other things.
-What is established is that the certified binary's declared source cannot be
-reproduced from the vendored tree or from the commit it names, so the release
-artifact binding is not currently closeable and a paid dispatch would fail its
-producer-source gate before doing any work.
+That divergence was never root-caused: the binary was built 2026-09-10T04:16
+from a tree whose hashed file set matched neither the commit it named nor the
+vendored copy — consistent with a dirty or extra-file build. The resolved state
+is a fresh certified build (d6fdf93d, determinism fix) whose fingerprint recipe
+hashes the build worktree itself, so the vendored tree was synced to the exact
+worktree bytes the recipe hashed — CRLF included, preserved by `.gitattributes
+* -text`. All four identities now agree: build-info git_commit == SOURCE-COMMIT
+== d6fdf93d, and source_fingerprint == 77d8bf97 over both the vendored tree and
+the producer worktree it was built from.
 """
 from __future__ import annotations
 
@@ -82,13 +80,6 @@ def _source_fingerprint(root: Path) -> str:
     return hashlib.sha256(inner.encode("utf-8")).hexdigest()
 
 
-@pytest.mark.xfail(
-    reason="measured: vendor/gt-index-src/SOURCE-COMMIT says 193b9d93 while the "
-           "certified binary declares it was built from efa70e52. This is the "
-           "same comparison the paid workflow makes, so that dispatch would "
-           "fail its producer-source gate before doing any work.",
-    strict=False,
-)
 @pytest.mark.skipif(not BUILD_INFO.is_file(), reason="no vendored producer build info")
 def test_the_vendored_source_names_the_commit_the_binary_was_built_from():
     """Cheap half of the binding: one file against one field."""
@@ -101,14 +92,6 @@ def test_the_vendored_source_names_the_commit_the_binary_was_built_from():
     )
 
 
-@pytest.mark.xfail(
-    reason="measured: the vendored tree fingerprints 4f612d4c... under the "
-           "producer's own recipe while the certified binary declares "
-           "f7fca174..., and the producer commit the binary names archives to "
-           "367a641a..., so the certified binary's declared source is not "
-           "reproducible from either. Cause not established.",
-    strict=False,
-)
 @pytest.mark.skipif(not BUILD_INFO.is_file(), reason="no vendored producer build info")
 def test_the_vendored_source_reproduces_the_binarys_declared_fingerprint():
     """The half that a stale SOURCE-COMMIT cannot fake.

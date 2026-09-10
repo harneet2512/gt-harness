@@ -290,6 +290,45 @@ them:
 `host.docker.internal:host-gateway` — the agent is on an `internal` network and
 never reaches the host directly, so the name must resolve in the proxy.
 
+#### Closing state at `b57e1f24`
+
+Both workflows green at the SAME commit, and the rehearsal has now passed FIVE
+consecutive times on hosted runners:
+
+    canonical CI                34514569315   success   b57e1f24
+    installed full-flow rehearsal 34514545699 success   b57e1f24
+
+Full suite installed on `wheels-89` in `gt-linux-suite:3.12` with `--network none`
+and the certified producer: **2,161 passed, 72 failed, 20 skipped**. The 72 are the
+mount artifacts proved equal earlier in this branch -- tests that read
+`gt_finalstand/`, `gt_engine/`, `.github/` and `.githooks/` as DATA under a
+tests-only mount. Compared test-by-test against the pre-tick baseline: **zero new
+failures, zero recovered**. The +14 passes are the tests added since.
+
+The run-loop half of the transition study now has an instrument:
+`scripts/run_loop_graph_accounting.py` (11 tests). Applied to four real repair
+rehearsals it gives the run-loop numbers the study could not:
+
+    run                  wall    dark   fraction  bg build  ended dark  pubs
+    CI rehearsal        14.7s    3.2s    22.1%      0.2s      False      2
+    rehearsal-repair-04 22.9s    6.2s    27.3%      1.6s      False      2
+    rehearsal-repair-06 38.9s    8.6s    22.2%      2.6s      TRUE       1
+    rehearsal-repair-07 41.4s    9.7s    23.4%      2.1s      TRUE       1
+
+Two results worth carrying forward. Blocked time is ZERO BY CONSTRUCTION --
+`wait_idle` has no caller on the live path, checked in source by a test -- so the
+split the item asks for has a degenerate answer, and the instrument reports the
+reason with the zero. And background build is 0.2-2.6s against 3.2-9.7s dark:
+**staleness is dominated by waiting for a poll to adopt a build that already
+finished**, not by building. That is the same seam the close-time drain addresses,
+and it is the most actionable run-loop finding on this branch.
+
+`tests/test_amend_derived_fact_retention.py` settles the LSP question: bindings
+are NOT preserved across an amend. Two edges no re-derivation can produce were
+injected into a parent, one in the changed file and one in a file the edit never
+touched, and BOTH are gone from the amended graph. The system re-promotes rather
+than preserves, and that is also why the parity suite can demand equality at all.
+
 #### Open threads, mid-flight
 
 * **`study-matplotlib-x10.json`** was running at handoff (10+10 repetitions,
