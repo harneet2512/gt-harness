@@ -405,6 +405,10 @@ class MiniSweAdapter(GroundtruthController):
         self._closed_blockers: Any | None = None
         self._submit_invalidation_keys: dict[str, str] = {}
         self._latest_workspace_snapshot: Any | None = None
+        # Set at close_graph_coordinator. A build still in flight may not
+        # append past the point the run seals its manifest.
+        self._journal_sealed = False
+        self._dropped_observations = 0
         self._graph_coordinator: GraphBuildCoordinator | None = None
         self._lsp_scheduler: Any | None = None
         self._lsp_requests: dict[str, Any] = {}
@@ -1753,8 +1757,7 @@ class MiniSweAdapter(GroundtruthController):
         # a caller_coverage improvement was credited to producer code that had
         # never executed. build_mode_reason is what turns a permanent silent
         # fallback into something the first edit reports.
-        try:
-            self.store.append(
+        self._append_observation(
                 "graph_build_mode",
                 mode=receipt.build_mode,
                 reason=receipt.build_mode_reason,
@@ -1769,19 +1772,14 @@ class MiniSweAdapter(GroundtruthController):
                 amended=[dict(row) for row in receipt.incremental_results],
                 analysis_state=receipt.analysis_state,
                 elapsed_ms=elapsed_ms,
-            )
-        except Exception:  # noqa: BLE001 - reporting never fails a rebuild
-            pass
-        try:
-            self.store.append(
+        )
+        self._append_observation(
                 "graph_rebuild_embedding",
                 state=receipt.embedding_state,
                 measurement=receipt.embedding_measurement,
                 reason=receipt.embedding_failure_reason,
                 budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
-            )
-        except Exception:  # noqa: BLE001 - reporting never fails a rebuild
-            pass
+        )
         return GraphBuildArtifact(
             bool(receipt.success and receipt.graph_db), str(receipt.graph_db or ""),
             str(receipt.graph_revision or ""), receipt.error_type or "",
@@ -1937,7 +1935,46 @@ class MiniSweAdapter(GroundtruthController):
     # promotion stopped" and "we stopped waiting for it" never read alike.
     PROMOTION_DRAIN_SECONDS = 20.0
 
+    def _append_observation(self, event: str, **fields: Any) -> bool:
+        """Journal a best-effort diagnostic, unless the journal is sealed.
+
+        `graph_build_mode` and `graph_rebuild_embedding` are written by the
+        build worker, on a background thread, after the build finishes. Both
+        are diagnostics: their call sites already sit inside
+        `except Exception: pass` under "reporting never fails a rebuild".
+
+        A build that outlives `session.close` writes them AFTER the run has
+        sealed its reproducibility manifest, and receipt issuance then refuses
+        the whole receipt -- `event_journal_conservation_failed` -- because the
+        sealed count no longer matches the journal. Measured on
+        rehearsal-repair-05: manifest 186 against 188 rows, and the receipt
+        went out missing input and output tokens, every call counter, both
+        bootstrap counters, total_cost and the treatment receipt. Rehearsal 04,
+        with nothing in flight, issued a complete one.
+
+        So the trade is a diagnostic against a receipt, and the diagnostic
+        loses. This does NOT make the coordinator wait: `close(wait=False)` is
+        deliberate, because an uncooperative in-flight pass otherwise holds the
+        process open past its deadline and the supervisor turns a scored
+        submission into an infra timeout. The build still runs and still
+        publishes its graph; only its post-seal commentary is dropped, and the
+        count of what was dropped is kept so the loss is visible rather than
+        silent.
+        """
+        if self._journal_sealed:
+            self._dropped_observations = getattr(self, "_dropped_observations", 0) + 1
+            return False
+        try:
+            self.store.append(event, **fields)
+        except Exception:  # noqa: BLE001 - reporting never fails a rebuild
+            return False
+        return True
+
     def close_graph_coordinator(self) -> None:
+        # From here the journal is sealed for observations. The run is about to
+        # write `session_closed` and then seal its manifest; a build still in
+        # flight must not append past that point.
+        self._journal_sealed = True
         if self._graph_coordinator is not None:
             self._graph_coordinator.close(wait=False)
         if self._lsp_scheduler is not None:

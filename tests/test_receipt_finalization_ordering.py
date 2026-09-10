@@ -24,18 +24,23 @@ scored submission into an infra timeout. `close(wait=False)` cancels QUEUED work
 but a RUNNING build keeps going. The manifest is then sealed later still, in
 `miniswe_gt_run`, and that build's rows land after it.
 
-So the run has two correct-looking rules that contradict each other: do not wait
-for a running graph build, and do not let anything append after the seal. This
-test states the second one. It is xfail because the contradiction is real and
-resolving it is a design decision about which rule yields -- not something to
-paper over by relaxing the conservation check, which would be the same
-substitution as editing a rehearsal's expected-error list.
+So the run had two correct-looking rules that contradict each other: do not wait
+for a running graph build, and do not let anything append after the seal.
+
+RESOLVED, and neither rule was relaxed. The coordinator still does not wait, and
+the conservation check is untouched -- relaxing it would have been the same
+substitution as editing a rehearsal's expected-error list. What yields is the
+one thing that is neither: the two rows are DIAGNOSTICS, written by the build
+worker inside `except Exception: pass` under "reporting never fails a rebuild".
+They now go through `MiniSweAdapter._append_observation`, which drops them once
+`close_graph_coordinator` has sealed the journal and counts what it dropped, so
+the loss is a number the run can report rather than a silent hole. A diagnostic
+is a cheaper thing to lose than every token, call counter and treatment receipt
+on the run's receipt.
 """
 from __future__ import annotations
 
 import json
-
-import pytest
 
 from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
 from gt_engine.miniswe_integration import MiniSweAdapter
@@ -77,24 +82,17 @@ def test_a_sealed_manifest_describes_the_journal_it_was_sealed_from(tmp_path):
     assert _conserved(_seal(adapter), _journal_rows(adapter))
 
 
-@pytest.mark.xfail(
-    reason="measured on rehearsal-repair-05: a background graph build still "
-           "running at close appends graph_build_mode and "
-           "graph_rebuild_embedding after the manifest is sealed, giving "
-           "manifest 186 against journal 188, so runtime receipt issuance "
-           "fails with event_journal_conservation_failed and the receipt loses "
-           "its whole provider-accounting block. close_graph_coordinator uses "
-           "close(wait=False) deliberately, so the two rules genuinely "
-           "conflict and the resolution is a design decision.",
-    strict=False,
-)
-def test_nothing_appends_to_the_journal_after_the_session_closes(tmp_path):
+def test_a_late_build_observation_is_dropped_rather_than_breaking_the_receipt(tmp_path):
     """The invariant receipt issuance actually depends on.
 
-    A graph build that outlives `session.close` is reproduced here by appending
-    exactly the two rows rehearsal 05 recorded, after the close and after the
-    seal. Nothing is faked about the consequence: the same comparison the
-    receipt makes is applied to the same sealed shape the manifest carries.
+    A graph build that outlives `session.close` is reproduced here through the
+    same seam the build worker uses, `_append_observation`, which is how
+    `graph_build_mode` and `graph_rebuild_embedding` reach the journal. Both
+    are diagnostics the worker already treats as best-effort -- their appends
+    sit inside `except Exception: pass` under the comment "reporting never
+    fails a rebuild" -- so dropping one that arrives after the journal is
+    sealed costs a diagnostic, while keeping it costs the entire
+    provider-accounting block of the receipt.
     """
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -109,9 +107,10 @@ def test_nothing_appends_to_the_journal_after_the_session_closes(tmp_path):
     session.close("submitted")
     sealed = _seal(adapter)
 
-    # The in-flight build finishes here, exactly as it did in rehearsal 05.
-    adapter.store.append("graph_build_mode", build_mode="full")
-    adapter.store.append("graph_rebuild_embedding", refreshed=0)
+    # The in-flight build finishes here, exactly as it did in rehearsal 05,
+    # and reports through the seam the real worker uses.
+    adapter._append_observation("graph_build_mode", mode="full", reason="")
+    adapter._append_observation("graph_rebuild_embedding", state="skipped")
 
     rows = _journal_rows(adapter)
     assert _conserved(sealed, rows), (
@@ -119,3 +118,46 @@ def test_nothing_appends_to_the_journal_after_the_session_closes(tmp_path):
         f"{len(rows)} rows; the tail is "
         f"{[row.get('event') for row in rows[sealed['event_count']:]]}"
     )
+
+
+def test_a_build_observation_before_the_close_is_journalled_normally(tmp_path):
+    """The half that stops the seal from eating every diagnostic.
+
+    `graph_build_mode` is what distinguishes an amend from a full rebuild in
+    the journal, and the last time that distinction was missing a
+    caller_coverage improvement was credited to producer code that had never
+    executed. Sealing at construction rather than at close would drop every one
+    of these silently and no other test would notice -- a mutation that set the
+    flag early survived the post-close test on its own.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MiniSweAdapter(task_id="seal-open", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    before = len(_journal_rows(adapter))
+
+    assert adapter._append_observation("graph_build_mode", mode="batch", reason="") is True
+    assert adapter._append_observation("graph_rebuild_embedding", state="refreshed") is True
+
+    rows = _journal_rows(adapter)
+    assert len(rows) == before + 2
+    assert [row["event"] for row in rows[-2:]] == [
+        "graph_build_mode", "graph_rebuild_embedding"]
+    assert adapter._dropped_observations == 0
+
+
+def test_the_run_can_tell_how_many_observations_the_seal_dropped(tmp_path):
+    """A silent drop is the failure mode this whole file is about."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MiniSweAdapter(task_id="seal-count", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    session = GTSession(
+        GTSessionConfig(task_id=adapter.task_id, repo_root=str(repo),
+                        state_dir=str(adapter.store.root.parent), mode=GTMode.ADVISORY),
+        engine=adapter,
+    )
+    session.close("submitted")
+    assert adapter._append_observation("graph_build_mode", mode="full") is False
+    assert adapter._append_observation("graph_rebuild_embedding", state="skipped") is False
+    assert adapter._dropped_observations == 2

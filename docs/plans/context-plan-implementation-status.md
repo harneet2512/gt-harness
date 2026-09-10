@@ -808,10 +808,31 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   are NOT in the post-summary tail, so they are not the events breaking
   conservation. Whether this session changed the TIMING that lets the rebuild land
   late is not established, and claiming either way would be a guess.
-  NEXT ACTION: quiesce the journal before capturing the summary, or capture the
-  summary and the rows at one point. Not attempted here -- an ordering change to
-  receipt issuance needs its own RED witness and this item is not worth a blind
-  fix. The expected-error list stays untouched.
+  FIXED, and neither of the two conflicting rules was relaxed. The coordinator
+  still does not wait -- `close(wait=False)` stays, because an uncooperative
+  in-flight pass otherwise holds the process open past its deadline and the
+  supervisor turns a scored submission into an infra timeout -- and the
+  conservation check in `runtime_receipts.py` is untouched, because relaxing it
+  would be the same substitution as editing the expected-error list.
+  What yields is the thing that is neither: `graph_build_mode` and
+  `graph_rebuild_embedding` are DIAGNOSTICS. Their call sites already sat inside
+  `except Exception: pass` under the comment "reporting never fails a rebuild".
+  They now route through `MiniSweAdapter._append_observation`, which drops them
+  once `close_graph_coordinator` seals the journal and COUNTS what it dropped, so
+  the loss is a number the run can report rather than a silent hole. Losing a
+  diagnostic is cheaper than losing every token, call counter and treatment
+  receipt on the run's receipt, which is what the race cost on rehearsal 05.
+  Four tests in `tests/test_receipt_finalization_ordering.py`, all passing, no
+  xfail: a quiet seal still conserves; a late observation is dropped instead of
+  breaking the receipt; an observation BEFORE the close is journalled normally;
+  and the drop count is readable. That third test exists because a mutation that
+  sealed at construction rather than at close survived the other three -- it would
+  have silently deleted every build diagnostic for the whole run.
+  Installed Linux full suite on the fix: 2,236 tests, 2 failed, 17 skipped
+  (`full-suite-80.xml`). Both failures are the offline `hatchling` build backend,
+  unchanged and unrelated. A successor rehearsal is still required to show the
+  receipt now issues in full; the fix removes the cause, it does not by itself
+  prove the rehearsal passes.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
