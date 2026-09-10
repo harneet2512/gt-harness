@@ -11,6 +11,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -514,3 +515,67 @@ def _git_input(
 def _git_output(workspace: str, args: list[str]) -> str:
     result = _git(workspace, args)
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def publish_branch(
+    workspace: str,
+    repo_url: str,
+    *,
+    branch: str,
+    message: str,
+    author_name: str,
+    author_email: str,
+    token: str,
+    push_timeout: int = 120,
+) -> str:
+    """Commit everything the workspace holds and push it on a new branch.
+
+    The token rides in a throwaway credential-store file, not the push URL:
+    a token on the command line is readable by every process on the box for
+    as long as the push runs, and one accidental ``set -x`` or verbose flag
+    away from a log. The file is deleted in ``finally`` either way.
+
+    Returns the pushed commit's SHA. Raises ``RuntimeError`` with sanitised
+    git output on any failure — the token must never reach an error string.
+    """
+    if not token:
+        raise RuntimeError("publish needs a GitHub token")
+    credentials = tempfile.NamedTemporaryFile(
+        mode="w", prefix="gt-cred-", suffix=".store", delete=False
+    )
+    try:
+        credentials.write(f"https://x-access-token:{token}@github.com\n")
+        credentials.close()
+        cred_args = [
+            "-c", "credential.helper=",
+            "-c", f"credential.helper=store --file {credentials.name}",
+        ]
+
+        def git(*args: str, timeout: int = GIT_TIMEOUT) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["git", *cred_args, *args],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+        checks = [
+            git("checkout", "-B", branch),
+            git("add", "-A"),
+            git("-c", f"user.name={author_name}",
+                "-c", f"user.email={author_email}",
+                "commit", "-q", "-m", message, "--allow-empty"),
+            git("push", "-u", repo_url, branch, timeout=push_timeout),
+        ]
+        for step in checks:
+            if step.returncode != 0:
+                raise RuntimeError(
+                    _strip_paths(step.stderr or step.stdout or "git failed")
+                )
+        return _git_output(workspace, ["rev-parse", "HEAD"])
+    finally:
+        try:
+            os.unlink(credentials.name)
+        except OSError:
+            pass

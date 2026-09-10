@@ -860,6 +860,23 @@ export function closeSession(id: string): Promise<unknown> {
   return request(`${path(id)}/close`, { method: "POST" });
 }
 
+export interface PublishResult {
+  branch: string;
+  commit_sha: string;
+  pr_url: string;
+  pr_number: number;
+}
+
+export function publishSession(
+  id: string,
+  body: { github_token: string; title?: string; body?: string; branch?: string },
+): Promise<PublishResult> {
+  return request(`${path(id)}/publish`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 /* ------------------------------------------------------------------ *
  * Worker agents
  * ------------------------------------------------------------------ */

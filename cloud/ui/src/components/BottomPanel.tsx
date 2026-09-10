@@ -14,6 +14,8 @@ interface Props {
   outputRows?: readonly OutputRow[];
   requestedTab?: {tab: "changes" | "receipts" | "trail"; nonce:number} | null;
   agents?: readonly AgentVisualState[];
+  /** The session shown; the changes tab's publish button hides without it. */
+  sessionId?: string | null;
   steps: readonly TrailStep[];
   cutoff: number;
   hereStep: number | null;
@@ -45,6 +47,7 @@ export default function BottomPanel({
   requestedTab,
   outputRows = [],
   agents = [],
+  sessionId = null,
   steps,
   cutoff,
   hereStep,
@@ -156,6 +159,7 @@ export default function BottomPanel({
               note={diffNote}
               error={diffError}
               loading={diffLoading}
+              sessionId={sessionId}
               onRefresh={onRefreshDiff}
               onPickFile={onPickFile}
             />

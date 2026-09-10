@@ -148,6 +148,30 @@
   gap: 8px;
   padding-bottom: 7px;
 }
+.publish-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0 8px;
+}
+.publish-token {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.publish-token:focus {
+  outline: 1px solid var(--accent, #3182f6);
+  outline-offset: 0;
+}
+.publish-done {
+  border-left-color: var(--new, #4a9e6b);
+}
+.publish-done a { color: var(--accent, #3182f6); }
 .files {
   list-style: none;
 }

@@ -307,3 +307,74 @@ def test_a_failed_clone_leaves_nothing_on_disk(tmp_path: Path) -> None:
         with pytest.raises(RuntimeError):
             clone_repo(str(repo), ref, str(workspace))
         assert not workspace.exists(), f"{ref} left {workspace} behind"
+
+
+def test_publish_branch_commits_and_pushes(tmp_path: Path) -> None:
+    """A local bare remote stands in for github.com: the credential file is
+    configured but a path remote ignores it — what is proven here is the git
+    dance (branch, commit-all, push), not auth."""
+    from cloud.server.workspace import publish_branch
+
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(remote)],
+        check=True, capture_output=True, text=True,
+    )
+    workspace = tmp_path / "ws"
+    clone_repo(str(_seed_repo(tmp_path)), "master", str(workspace))
+    (workspace / "new_file.py").write_text("print('shipped')\n")
+
+    sha = publish_branch(
+        str(workspace),
+        str(remote),
+        branch="gt-cloud/test",
+        message="a change",
+        author_name="tester",
+        author_email="tester@users.noreply.github.com",
+        token="unused-on-a-path-remote",
+    )
+
+    shown = subprocess.run(
+        ["git", "ls-remote", str(remote), "gt-cloud/test"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert shown.startswith(sha)
+    # the pushed tree carries the file the agent wrote
+    files = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "gt-cloud/test"],
+        cwd=remote, check=True, capture_output=True, text=True,
+    ).stdout
+    assert "new_file.py" in files
+
+
+def test_publish_branch_needs_a_token(tmp_path: Path) -> None:
+    from cloud.server.workspace import publish_branch
+
+    workspace = tmp_path / "ws"
+    clone_repo(str(_seed_repo(tmp_path)), "master", str(workspace))
+    with pytest.raises(RuntimeError, match="token"):
+        publish_branch(
+            str(workspace), str(tmp_path / "nowhere.git"),
+            branch="x", message="m", author_name="t",
+            author_email="t@t", token="",
+        )
+
+
+def test_a_failed_push_does_not_leak_the_token(tmp_path: Path) -> None:
+    from cloud.server.workspace import publish_branch
+
+    workspace = tmp_path / "ws"
+    clone_repo(str(_seed_repo(tmp_path)), "master", str(workspace))
+    (workspace / "x.txt").write_text("x\n")
+    with pytest.raises(RuntimeError) as exc:
+        publish_branch(
+            str(workspace),
+            "https://github.com/definitely/not-a-repo.git",
+            branch="gt-cloud/x",
+            message="m",
+            author_name="t",
+            author_email="t@t",
+            token="ghp_SECRET_SENTINEL_000",
+            push_timeout=30,
+        )
+    assert "ghp_SECRET_SENTINEL_000" not in str(exc.value)

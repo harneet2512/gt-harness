@@ -251,6 +251,7 @@ export default function GraphPanel({
           />
           <BottomPanel
             outputRows={outputRows}
+            sessionId={sessionId}
             steps={view.steps}
             cutoff={view.cutoff}
             hereStep={view.hereStep}

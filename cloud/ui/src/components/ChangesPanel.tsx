@@ -1,4 +1,8 @@
+import { useState } from "react";
+
 import type { DiffFile, SessionDiff } from "../api";
+import { publishSession } from "../api";
+import type { PublishResult } from "../api";
 import { shortSha } from "../format";
 
 interface Props {
@@ -7,6 +11,8 @@ interface Props {
   note: string | null;
   error: string | null;
   loading: boolean;
+  /** The session this diff belongs to; publish hides without it. */
+  sessionId: string | null;
   onRefresh: () => void;
   onPickFile: (path: string) => void;
 }
@@ -17,10 +23,34 @@ export default function ChangesPanel({
   note,
   error,
   loading,
+  sessionId,
   onRefresh,
   onPickFile,
 }: Props) {
   const files = diff?.files ?? [];
+  const [publishing, setPublishing] = useState(false);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pr, setPr] = useState<PublishResult | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  const publish = async () => {
+    if (!sessionId || !token.trim()) return;
+    setBusy(true);
+    setPublishError(null);
+    try {
+      const result = await publishSession(sessionId, {
+        github_token: token.trim(),
+      });
+      setPr(result);
+      setToken("");
+      setPublishing(false);
+    } catch (exc) {
+      setPublishError(exc instanceof Error ? exc.message : "publish failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <>
@@ -30,6 +60,16 @@ export default function ChangesPanel({
           {diff?.base_sha ? ` · base ${shortSha(diff.base_sha)}` : ""}
         </span>
         <span className="spacer" />
+        {files.length > 0 && sessionId && (
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => setPublishing((v) => !v)}
+            disabled={busy}
+          >
+            open PR
+          </button>
+        )}
         <button
           type="button"
           className="btn-text"
@@ -39,6 +79,39 @@ export default function ChangesPanel({
           {loading ? "…" : "refresh"}
         </button>
       </div>
+
+      {publishing && !pr && (
+        <div className="publish-row">
+          <input
+            type="password"
+            className="publish-token"
+            placeholder="GitHub token — used once, never stored"
+            value={token}
+            autoComplete="off"
+            onChange={(e) => setToken(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void publish();
+            }}
+          />
+          <button
+            type="button"
+            className="btn-text"
+            disabled={busy || !token.trim()}
+            onClick={() => void publish()}
+          >
+            {busy ? "pushing…" : "push & open"}
+          </button>
+        </div>
+      )}
+      {publishError && <div className="notice">{publishError}</div>}
+      {pr && (
+        <div className="notice publish-done">
+          Opened PR #{pr.pr_number} on <code>{pr.branch}</code> —{" "}
+          <a href={pr.pr_url} target="_blank" rel="noreferrer">
+            {pr.pr_url}
+          </a>
+        </div>
+      )}
 
       {error && <div className="notice">{error}</div>}
 

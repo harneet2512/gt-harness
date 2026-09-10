@@ -5,11 +5,13 @@ which is attached once at the router so no endpoint can forget it.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -33,6 +35,8 @@ from .models import (
     Message,
     MessageAccepted,
     MessageCreate,
+    PublishRequest,
+    PublishResult,
     Session,
     SessionCreate,
     SessionDiff,
@@ -53,6 +57,7 @@ from .runner import (
     SessionManager,
 )
 from .store import SessionStore
+from .workspace import publish_branch
 
 router = APIRouter(dependencies=[Depends(require_user)])
 #: The external agents' own routes. A SEPARATE router because ``router``
@@ -689,3 +694,128 @@ async def close_session(
     await manager.close(session_id)
     session = await store.get_session(session_id)
     return _session_view(session)  # type: ignore[arg-type]
+
+
+_GITHUB_API = "https://api.github.com"
+_REPO_PARTS = re.compile(
+    r"^https://github\.com/(?P<owner>[\w\-\.]+)/(?P<repo>[\w\-\.]+?)(?:\.git)?$"
+)
+
+
+@router.post(
+    "/sessions/{session_id}/publish",
+    response_model=PublishResult,
+    status_code=201,
+)
+async def publish_session(
+    session_id: str,
+    body: PublishRequest,
+    store: StoreDep,
+    manager: ManagerDep,
+    user: UserDep,
+    event_bus: BusDep,
+) -> dict[str, Any]:
+    """Push the session's diff on a branch and open a pull request.
+
+    A diff nobody can land is a screenshot of work. This is the seam that
+    turns a session into a contribution. The token travels once — into the
+    push's credential file and the pulls API call — and is never stored,
+    logged, or returned. If GitHub says the PR already exists, the answer
+    is the existing PR, not an error that hides it.
+    """
+    session = await _require_session(store, session_id, user)
+    if session["status"] not in {"idle", "closed"}:
+        raise HTTPException(
+            409,
+            f"session is {session['status']}; publish when the turn is done",
+        )
+    workspace = str(session.get("workspace_path") or "")
+    if not workspace or not os.path.isdir(workspace):
+        raise HTTPException(409, "session has no workspace to publish")
+
+    match = _REPO_PARTS.match(str(session["repo"]))
+    if match is None:
+        raise HTTPException(400, "session repo is not a GitHub HTTPS URL")
+    owner, repo = match.group("owner"), match.group("repo")
+
+    diff = await manager.diff(session)
+    files = diff.get("files") or []
+    if not files:
+        raise HTTPException(409, "the session produced no changes to publish")
+
+    token = body.github_token.get_secret_value()
+    branch = body.branch or f"gt-cloud/{session_id}"
+    login = str(user.get("login") or "gt-cloud")
+    title = body.title or str(session.get("last_message") or "gt-cloud change")
+    message = (
+        f"{title[:72]}\n\n"
+        f"Produced by a GT Cloud Agent session ({session_id}).\n"
+        f"{len(files)} file(s) changed."
+    )
+    try:
+        commit_sha = await asyncio.to_thread(
+            publish_branch,
+            workspace,
+            str(session["repo"]),
+            branch=branch,
+            message=message,
+            author_name=login,
+            author_email=f"{login}@users.noreply.github.com",
+            token=token,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(502, f"push failed: {exc}") from exc
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            f"{_GITHUB_API}/repos/{owner}/{repo}/pulls",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={
+                "title": title[:200],
+                "head": branch,
+                "base": str(session.get("ref") or "main"),
+                "body": body.body or message,
+            },
+        )
+    if response.status_code == 422:
+        # A PR for this head already exists — find it rather than fail.
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            existing = await client.get(
+                f"{_GITHUB_API}/repos/{owner}/{repo}/pulls",
+                params={"head": f"{owner}:{branch}", "state": "open"},
+                headers={"Authorization": f"Bearer {token}",
+                         "Accept": "application/vnd.github+json"},
+            )
+        prs = existing.json() if existing.status_code == 200 else []
+        if isinstance(prs, list) and prs:
+            pr = prs[0]
+            await event_bus.publish(session_id, {
+                "type": "assistant",
+                "data": {"text": f"Updated {branch}; PR already open: {pr.get('html_url')}"},
+            })
+            return {
+                "branch": branch,
+                "commit_sha": commit_sha,
+                "pr_url": str(pr.get("html_url") or ""),
+                "pr_number": int(pr.get("number") or 0),
+            }
+        raise HTTPException(502, "push landed but the PR could not be opened")
+    if response.status_code not in (200, 201):
+        raise HTTPException(
+            502, f"push landed; GitHub answered {response.status_code} on PR"
+        )
+    pr = response.json()
+    await event_bus.publish(session_id, {
+        "type": "assistant",
+        "data": {"text": f"Published {branch}; opened PR #{pr.get('number')}: {pr.get('html_url')}"},
+    })
+    return {
+        "branch": branch,
+        "commit_sha": commit_sha,
+        "pr_url": str(pr.get("html_url") or ""),
+        "pr_number": int(pr.get("number") or 0),
+    }

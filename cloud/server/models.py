@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 SessionStatusName = Literal["creating", "idle", "running", "failed", "closed"]
 GtStatusName = Literal["off", "ready", "unavailable", "pending"]
@@ -252,6 +252,40 @@ class AgentApplied(BaseModel):
     worker_id: str
     files: list[str] = Field(default_factory=list)
     patch_sha256: str | None = None
+
+
+class PublishRequest(BaseModel):
+    """``POST /api/sessions/{id}/publish`` — turn the diff into a PR.
+
+    The token is a request-scoped credential: it pushes one branch and opens
+    one pull request, and is never stored, never logged, and never echoed.
+    ``SecretStr`` keeps it out of reprs and error dumps.
+    """
+
+    github_token: SecretStr
+    title: str | None = Field(None, max_length=200)
+    body: str | None = Field(None, max_length=40_000)
+    #: defaults to ``gt-cloud/<session-id>``; overridable for a rerun
+    branch: str | None = Field(None, max_length=200)
+
+    @field_validator("branch")
+    @classmethod
+    def _branch_is_boring(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", cleaned) or ".." in cleaned:
+            raise ValueError("branch must be a plain git ref name")
+        return cleaned
+
+
+class PublishResult(BaseModel):
+    """What a publish produced: the pushed commit and the opened PR."""
+
+    branch: str
+    commit_sha: str
+    pr_url: str
+    pr_number: int
 
 
 # --------------------------------------------------------------------------
