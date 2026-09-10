@@ -1211,6 +1211,14 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   the only one where the amend is faster. Reading it as producer noise -- which
   the old single boolean invited -- would have buried the more serious of the
   two.
+  CONAN RE-MEASURED ON THE FIXED PRODUCER (87d2e89c, `study-fixed-conan.json`):
+  five alternating repetitions, `semantic_parity: true`, `distinct_digests: 1`,
+  verdict `identical` -- the shared wobble is gone, which confirms the
+  classification: it was producer noise, not an amend defect. Baseline median
+  56.9s, candidate 56.6s, speedup 1.0 -- break-even like the other
+  benchmark-scale rows. matplotlib re-measurement is in flight on the same
+  binary; its old ARMS_DISJOINT reading stays unadopted until the fixed-producer
+  run says whether the 14-26 extra edges were the defect or a real divergence.
   IT ALSO LOCALISES THE NONDETERMINISM, which the all-consumer parity item above
   records generically. On all six repositories the ONLY surface that ever moved
   is `edges`. Nodes, properties and assertions are byte-identical across all ten
