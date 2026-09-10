@@ -482,8 +482,13 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   the ONLY change against the vendored tree and rebuilt with the declared tags:
     click   before  8 runs, 8 distinct digests, counts {3299, 3302}
             after   8 runs, 1 distinct digest,  count  {3299}   DETERMINISTIC
+    conan   before  5 runs, 5 distinct digests, counts {34457,34458,34459,34460}
+            after   5 runs, 1 distinct digest,  count  {34457}  DETERMINISTIC
     kedro   identical before and after (5,982 edges) -- a repository with no
             same-name collision is untouched, which is the property it should have.
+  conan is the one that matters: 997 files, benchmark-scale, and the repository
+  whose three distinct digests were this tracker's evidence that the defect reaches
+  the benchmark's own size class rather than only click. It is now single-valued.
   Which of the two definitions is the RIGHT one is not decidable here and is not
   the point: `impl_method` is the receiver-UNPROVEN path, capped at 0.6 because it
   is a guess. The defect was that the guess was not repeatable.
