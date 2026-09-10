@@ -365,9 +365,8 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [ ] Reuse eligible history/cochange work; preserve embedding caches and LSP bindings.
 - [x] Wire a persistent external cache root and batch API through the harness's
   existing one-active/one-pending coordinator.
-- [ ] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
+- [x] Prove add/delete/rename/import/inheritance/ambiguity/new-resolution-target cases,
   immutable parent behavior, failure fallback, and every graph consumer's semantics.
-  THREE OF FOUR PARTS DONE; consumer semantics remain open, so the box stays open.
   Cases and immutable parent: `tests/test_batch_amend_parity.py` builds a parent,
   applies one mutation, then builds the graph BOTH ways and requires the amended
   graph to say exactly what a from-scratch rebuild says. Compared as content, not
@@ -392,9 +391,32 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   failed amend falls back to a full rebuild and names why, that an undeclared
   capability and an uncertifiable parent both refuse, and that a delete and a
   rename are amendable rather than refused.
-  STILL OPEN: every graph consumer's semantics across the eight consumers. Table
-  equality is necessary and not sufficient -- it does not prove each consumer
-  answers the same question of both graphs.
+  Consumer semantics: `tests/test_batch_amend_consumer_parity.py` asks the
+  question each consumer actually asks, of the amended graph and of the rebuild,
+  and requires the same answer. Table equality is necessary and not sufficient --
+  two databases can agree row for row while a consumer answers differently
+  through an FTS index that was not republished, a closure whose depths were
+  retained, or a symbol id form that changed under a caller, which is the class
+  of failure that made the amend worth distrusting when caller coverage was
+  answered on only 18 of 33 post-edit rebuilds.
+  Eight consumers, eight mutations, all passing installed on Linux with zero
+  skips: the task-start graph projection, the surface receipt census, the plan's
+  anchors (with modes and abstentions), the plan's caller closure, the producer's
+  ego graph and change impact, targeted covering-test selection, symbol contracts
+  for every function/method/class, and the cochange row count.
+  Answers are compared by NAME and PATH, and row-id-shaped keys are dropped at
+  every depth. That is not a loosening, it is the point: the amend retains parent
+  ids deliberately and a rebuild renumbers, so comparing addresses would fail on
+  the amend's whole reason for existing. Two consumers appeared to disagree on
+  every case until this was fixed -- `ego_and_impact` was comparing raw node ids
+  and `symbol_contracts` was comparing `property_id` storage addresses inside
+  `provenance` and `returns.shapes`, while every value was identical. The graphs
+  agreed; the harness was reading addresses.
+  A panel guard keeps that honest: the same consumers are asked of the
+  pre-mutation parent and of the rebuild, at least one must disagree for every
+  case, and at least four distinct consumers must move across the matrix.
+  Otherwise the equality above would be satisfied by questions none of these
+  consumers can answer.
 - [x] Build/certify the actual producer before declaring or enabling its amendment
   capability. The bounded batch capability is now declared and installed automatic
   selection passes. This does not close all-consumer equivalence or release acceptance.
