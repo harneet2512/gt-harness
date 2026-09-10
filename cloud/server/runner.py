@@ -27,6 +27,7 @@ from .conversational_agent import (
     ConversationalAgent,
     Steering,
     TurnResult,
+    install_abortable_query,
     turn_wall_seconds,
 )
 from .events import EventBus
@@ -2036,6 +2037,10 @@ class SessionManager:
             cost_limit=0.0,
             output_path=scratch / TRAJECTORY_NAME,
         )
+        # Stop must reach a model call in flight, not only a command in
+        # flight: litellm.completion is synchronous, so without the shim a
+        # /stop waits out the provider (46.8 s measured).
+        install_abortable_query(model_obj, agent)
         agent.extra_template_vars |= {"repo": repo, "ref": ref, "cwd": env_cwd}
 
         if not gt_off:

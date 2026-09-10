@@ -29,6 +29,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,6 +104,63 @@ def format_minutes(seconds: float) -> str:
     """``seconds`` as the minute figure quoted back to the user."""
     minutes = seconds / 60.0
     return f"{minutes:.0f}" if minutes >= 1 else f"{minutes:.2f}"
+
+
+class TurnAborted(Exception):
+    """The model call in flight was abandoned: the turn's ending is decided.
+
+    Raised inside ``model.query`` by the abortable-query shim installed at
+    agent build. The run loop catches it and lets its ordinary boundary
+    checks name the reason — stop request, deadline, or a harness-detected
+    error — so the finish reason stays a boundary decision, not a guess
+    made inside the model wrapper.
+    """
+
+
+#: Pool the abandoned model calls complete on. ``litellm.completion`` is a
+#: synchronous call with no cancel verb; the only way to honour a stop during
+#: it is to stop waiting for it. Bounded by ``MODEL_REQUEST_TIMEOUT``.
+_QUERY_POOL = ThreadPoolExecutor(
+    max_workers=8, thread_name_prefix="gt-cloud-query"
+)
+#: How often the turn thread re-checks the stop/deadline flags while a model
+#: call is in flight. 50 ms: human-instant, cheap enough to poll.
+_ABORT_POLL_SECONDS = 0.05
+
+
+def install_abortable_query(model: Any, agent: "ConversationalAgent") -> None:
+    """Let a stop request, the deadline watchdog, or a harness error reach a
+    model call while it is still running.
+
+    Without this a ``/stop`` during ``litellm.completion`` waited for the
+    provider to answer — 46.8 s measured against a merely-slow model. The
+    call moves to a pool thread; the turn thread polls it and, once any
+    ending is already decided, raises :class:`TurnAborted` so the loop's
+    boundary checks run at once. The provider call completes orphaned and
+    its result is discarded; the SDK offers no cancel.
+
+    Patched on the instance, so it wraps whichever ``_query`` the model
+    actually runs — plain ``LitellmModel`` or the GroundTruth variant —
+    and registered as an abort exception so ``query()``'s retry loop does
+    not mistake an intentional abandonment for a transient failure.
+    """
+    original = model._query
+
+    def _query(messages: list[dict[str, str]], **kwargs: Any) -> Any:
+        future = _QUERY_POOL.submit(original, messages, **kwargs)
+        while True:
+            try:
+                return future.result(timeout=_ABORT_POLL_SECONDS)
+            except _FutureTimeout:
+                if (
+                    agent._stop_event.is_set()
+                    or agent._deadline_event.is_set()
+                    or agent._turn_error is not None
+                ):
+                    raise TurnAborted()
+
+    model._query = _query
+    model.abort_exceptions = [*model.abort_exceptions, TurnAborted]
 
 
 @dataclass(frozen=True)
@@ -587,6 +645,10 @@ class ConversationalAgent(DefaultAgent):
                 break
             except InterruptAgentFlow as exc:
                 self.add_messages(*exc.messages)
+            except TurnAborted:
+                # The stop/deadline/error flag is already set; the boundary
+                # checks at the top of the loop name the finish reason.
+                pass
             except Exception as exc:
                 self.last_error_turn_id = turn_id
                 self._emit(

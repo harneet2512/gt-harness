@@ -25,6 +25,7 @@ from cloud.server.conversational_agent import (
     ConversationalAgent,
     assistant_message_from_format_error,
     format_minutes,
+    install_abortable_query,
     is_question,
     turn_wall_seconds,
 )
@@ -633,6 +634,64 @@ def test_request_stop_without_an_interruptible_env_still_stops() -> None:
     agent = _agent([_action("echo one"), _text_reply("done")], env=FakeEnv())
     agent.request_stop()
     assert agent.run_turn("go", turn_id="t1").finish_reason == "stopped"
+
+
+class BlockingModel(FakeModel):
+    """FAKE BOUNDARY: a provider call that never returns on its own.
+
+    ``_query`` blocks the way ``litellm.completion`` does — no cancel verb,
+    no callback, just a wait. Without the abortable-query shim a ``/stop``
+    sits behind it until the provider answers.
+    """
+
+    abort_exceptions: list[type[Exception]] = []
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def _query(self, messages: list[dict], **_: Any) -> dict:
+        self.entered.set()
+        # Long enough to stand in for a wedged provider; the test releases it
+        # once the turn is over so the orphaned pool thread can die.
+        self.release.wait(30)
+        raise AssertionError("the abandoned call should never return")
+
+    def query(self, messages: list[dict], **kwargs: Any) -> dict:
+        return self._query(messages, **kwargs)
+
+
+def test_request_stop_reaches_a_model_call_in_flight() -> None:
+    """G-14: a synchronous model call must not hold the stop hostage."""
+    model = BlockingModel()
+    agent = ConversationalAgent(
+        model,
+        FakeEnv(),
+        system_template="SYSTEM",
+        instance_template="BRIEF",
+        step_limit=10,
+    )
+    agent.begin_session()
+    install_abortable_query(model, agent)
+
+    result: dict[str, Any] = {}
+
+    def run() -> None:
+        result["turn"] = agent.run_turn("go", turn_id="t1")
+
+    worker = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    assert model.entered.wait(10.0), "the model call never started"
+    agent.request_stop()
+    worker.join(10.0)
+    elapsed = time.monotonic() - started
+    model.release.set()  # let the abandoned pool thread die with the test
+
+    assert not worker.is_alive()
+    assert result["turn"].finish_reason == "stopped"
+    assert elapsed < 5.0, f"the stop took {elapsed:.1f}s behind a model call"
 
 
 # --------------------------------------------------------------------------
