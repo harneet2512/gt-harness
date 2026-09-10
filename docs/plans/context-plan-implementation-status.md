@@ -830,9 +830,35 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   have silently deleted every build diagnostic for the whole run.
   Installed Linux full suite on the fix: 2,236 tests, 2 failed, 17 skipped
   (`full-suite-80.xml`). Both failures are the offline `hatchling` build backend,
-  unchanged and unrelated. A successor rehearsal is still required to show the
-  receipt now issues in full; the fix removes the cause, it does not by itself
-  prove the rehearsal passes.
+  unchanged and unrelated.
+  SUCCESSOR REHEARSAL 06 CONFIRMS THE FIX, on artifact `019ce423`:
+    receipt status        ERROR  ->  COMPLETED
+    receipt_issuance      failed ->  absent
+    runtime_receipt_errors   9   ->  1   (only `synthetic_transport_not_paid_evidence`)
+    input/output tokens  MISSING ->  10 / 10
+    agent_turn_calls     MISSING ->  8
+    provider completed/failed MISSING -> 10 / 0
+    total_cost           MISSING ->  0.0
+    treatment_receipt    MISSING ->  present
+  The repair scenario requires `runtime_receipt_errors ==
+  ["synthetic_transport_not_paid_evidence"]` and rehearsal 06 now matches it
+  exactly. CORRECTION to the earlier trace: I named the failing mechanism
+  `unexpected_runtime_receipt_errors`, which belongs to the FORCED-INTERRUPTION
+  scenario's expected-error list. The repair scenario compares inline at
+  `gt_installed_rehearsal.py:471`. Same underlying cause, wrong mechanism named.
+  The expected-error list was never edited, and did not need to be.
+  ONE BLOCKER REMAINS for the repair rehearsal: `native_graph_refresh_verified`
+  is False. It requires at least two `graph_publication` rows with differing
+  graph digests. Rehearsal 04 has two; 05 and 06 have ONE. Both rebuilds still
+  RUN in 06 -- two `graph_build_mode` rows, both incremental, both
+  `analysis_state: complete` -- so the post-edit rebuild completes and simply
+  never publishes.
+  LEAD, NOT A CONCLUSION: `_record_graph_publication` only runs from
+  `record_repository_snapshot`, and only when `engine_state.graph_current` is
+  already true. A background rebuild that becomes current AFTER the last snapshot
+  record would therefore never be published -- the same shape as the finalization
+  race fixed above, one stage earlier. That is a hypothesis with a mechanism, not
+  a measurement, and it has not been confirmed.
 - [ ] Run five alternating offline baseline/candidate repetitions over the fixed six
   repository transitions with equal budgets. Report graph blocked versus background
   time, parsed files, resolver passes, checks, snapshots, memory, and semantic parity.
