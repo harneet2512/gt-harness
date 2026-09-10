@@ -57,7 +57,7 @@ class StubClient:
 class FakeBridge:
     """FAKE BOUNDARY: the GT server. Records every contract call."""
 
-    instances: list["FakeBridge"] = []
+    instances: list[FakeBridge] = []
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs

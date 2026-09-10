@@ -10,8 +10,8 @@ from harbor.agents.installed.base import NonZeroAgentExitCodeError
 
 from eval.miniswe_agent import (
     _DEFAULT_MINISWE_AGENT_VERSION,
-    _REMOTE_LSP_BIN,
     _PYTHON_VERSION,
+    _REMOTE_LSP_BIN,
     _UV_INSTALL,
     _UV_VERSION,
     MiniSweAgent,

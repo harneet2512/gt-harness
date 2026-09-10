@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import io
 from pathlib import Path
 
 import pytest
@@ -71,7 +70,7 @@ def test_the_benchmark_runner_lets_the_refusal_through():
     is handled before the broad `Exception` that records and continues.
     """
 
-    source = io.open(REPO / "scripts" / "miniswe_gt_run.py", encoding="utf-8").read()
+    source = open(REPO / "scripts" / "miniswe_gt_run.py", encoding="utf-8").read()
     handlers = _handlers_guarding("ensure_index(cwd", source)
 
     assert "BenchmarkGraphRequired" in handlers
@@ -79,7 +78,7 @@ def test_the_benchmark_runner_lets_the_refusal_through():
 
 
 def test_the_bridge_path_lets_the_refusal_through():
-    source = io.open(REPO / "gt_engine" / "__init__.py", encoding="utf-8").read()
+    source = open(REPO / "gt_engine" / "__init__.py", encoding="utf-8").read()
     handlers = _handlers_guarding("ensure_index(gt_root)", source)
 
     assert "_must_propagate" in handlers

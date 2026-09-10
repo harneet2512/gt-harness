@@ -29,7 +29,8 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FutureTimeout
 from dataclasses import dataclass
 from typing import Any
 
@@ -128,7 +129,7 @@ _QUERY_POOL = ThreadPoolExecutor(
 _ABORT_POLL_SECONDS = 0.05
 
 
-def install_abortable_query(model: Any, agent: "ConversationalAgent") -> None:
+def install_abortable_query(model: Any, agent: ConversationalAgent) -> None:
     """Let a stop request, the deadline watchdog, or a harness error reach a
     model call while it is still running.
 
@@ -157,7 +158,7 @@ def install_abortable_query(model: Any, agent: "ConversationalAgent") -> None:
                     or agent._deadline_event.is_set()
                     or agent._turn_error is not None
                 ):
-                    raise TurnAborted()
+                    raise TurnAborted() from None
 
     model._query = _query
     model.abort_exceptions = [*model.abort_exceptions, TurnAborted]
