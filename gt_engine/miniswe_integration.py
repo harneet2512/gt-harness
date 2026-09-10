@@ -794,6 +794,8 @@ class MiniSweAdapter(GroundtruthController):
                 self.record_repository_snapshot(after, boundary="after_auto_check")
                 self.record_edit_transaction(transaction)
                 if transaction.changes:
+                    if self.phase != "IMPLEMENT":
+                        self.begin_implement()
                     self.note_edit(transaction.changed_paths)
                 self._automatic_check_generation = getattr(self, "_automatic_check_generation", 0) + 1
             if result is None:

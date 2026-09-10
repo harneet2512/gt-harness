@@ -276,3 +276,56 @@ def test_queue_does_not_spend_expired_allowance_after_snapshot(tmp_path, monkeyp
     adapter.drain_plan_checks(environment, budget_seconds=30)
     assert calls == []
     assert check_id in adapter._pending_check_ids
+
+
+@pytest.mark.parametrize("phase", ["IMPLEMENT", "VERIFY", "SUBMIT"])
+@pytest.mark.parametrize(("body", "expected"), [
+    ("assert True", "CHECK_PASSED"),
+    ("assert False", "CHECK_FAILED"),
+    ("from pathlib import Path; Path('widget.py').write_text('value = 2\\n')", "UNVERIFIED"),
+    ("import time; time.sleep(5)", "UNVERIFIED"),
+])
+def test_installed_queue_execution_outcomes_and_shared_binding(tmp_path, monkeypatch, body, expected, phase):
+    import os
+    import sys
+    from pathlib import Path
+
+    from gt_engine.event_journal import verify_event_journal
+    from gt_engine.miniswe_integration import MiniSweAdapter
+    from gt_engine.persistent_plan import build_plan_inputs
+    from gt_engine.persistent_plan.bootstrap import build_plan
+    from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
+
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Linux process-tree and capture boundary required")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "widget.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "test_widget.py").write_text(f"def test_widget():\n    {body}\n", encoding="utf-8")
+    adapter = MiniSweAdapter(task_id="outcomes", state_dir=tmp_path / "state",
+                             repo_root=str(repo), predicates=())
+    adapter.persistent_plan = build_plan(None, build_plan_inputs(
+        "The widget must preserve compatibility.\nThe widget must reject invalid input.",
+        repo_root=str(repo), capture_baseline=False))
+    row_ids = [row.row_id for row in adapter.persistent_plan.rows]
+    assert len(row_ids) == 2
+    adapter.start_task()
+    if phase != "IMPLEMENT":
+        adapter.begin_verify()
+    if phase == "SUBMIT":
+        adapter.begin_submit()
+    command = {"argv": [sys.executable, "-m", "pytest", "-v", "test_widget.py"]}
+    first = adapter.bind_plan_check({**command, "requirement_ids": row_ids[:1]})
+    second = adapter.bind_plan_check({**command, "requirement_ids": row_ids[1:]})
+    assert first == second
+    assert adapter._pending_check_ids == {first}
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    adapter.REVERIFY_COMMAND_TIMEOUT_SECONDS = 1 if "sleep" in body else 10
+    environment = CredentialIsolatedLocalEnvironment(cwd=str(repo), timeout=10,
+        evidence_root=tmp_path / "evidence", env={"PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]})
+    adapter.drain_plan_checks(environment)
+    assert [adapter.plan_row_state(row_id) for row_id in row_ids] == [expected, expected]
+    assert adapter.phase == ("IMPLEMENT" if "write_text" in body else phase)
+    assert adapter._automatic_check_generation == 1
+    assert adapter._pending_check_ids == set()
+    assert verify_event_journal(adapter.store.path).valid

@@ -133,11 +133,12 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 - [x] Check reserve before expensive submission verification; reread budget afterward.
 - [x] Reset progress-related stall state before deciding whether to escape.
 - [x] Remove the false promise that the next submission is accepted unconditionally.
-- [ ] Close the workflow's 300-step cutoff end to end. Pushed repair `42300c15`
+- [x] Close the workflow's 300-step cutoff end to end. Pushed repair `42300c15`
   sets max_iterations=0 and represents unlimited remaining steps explicitly in
   the gate, preserving wall-time reserve. Two RED witnesses now pass; the related
   integration/gate/adapter run passed 49 tests. Installed 301-query/deadline-stop
-  proof passed in candidate 07. Successor canonical acceptance remains required.
+  proof passed in candidate 07. Successor canonical acceptance `34426564301`
+  passed on `2ef314ad`; wall-time and submission reserve remain enforced.
 - [ ] Finish gate reasons separating verified completion, mapping gaps, check evidence,
   baseline uncertainty, and budget/stall acceptance. Acceptance is not correctness.
 - [ ] Prove exact 600-second/20-step/three-stall boundaries, budget consumption during
@@ -163,6 +164,18 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
 
 ## Evidence retained so far
 
+- Canonical provider-free acceptance `34426564301` PASSED at `2ef314ad`.
+  The full suite now executes the installed producer witnesses; remaining seven
+  skips concern absent historical graph fixtures, unavailable sqlite_vec, and
+  the complementary graph-unavailable case, not missing binary wiring.
+- Real queued pytest checks now cover shared bindings and pass/fail/mutation/
+  timeout outcomes in IMPLEMENT, VERIFY, and SUBMIT. Two installed RED cases
+  exposed a lifecycle crash when a check changed source during VERIFY/SUBMIT.
+  Automatic mutations now use the existing transition back to IMPLEMENT before
+  invalidation, matching ordinary agent edits. Rebuilt wheel 15 passed 82
+  installed check/gate/plan-integration/integrity tests, zero skips, 16.35 seconds
+  (`D:/gt-context-proof/queue-phases-green.xml`). Restart restoration is still
+  open; these execution witnesses do not establish persisted queue recovery.
 - Canonical runs `34425339144` and `34425952156` failed because the full-suite
   step could not resolve the verified producer: staging `/opt/groundtruth/gt-index/gt-index`
   did not export a binary path. The workflow now supplies that exact verified
@@ -208,7 +221,7 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   conservation remains open.
 - Fixture repairs are pushed as `1e1b45fff4f804f7ad3d11078b0aec9a76505e7b`;
   successor provider-free acceptance is `34425339144` (pending at this checkpoint).
-- Current checkbox count: 41 completed bounded items, 27 open, 68 total. The
+- Current checkbox count: 42 completed bounded items, 26 open, 68 total. The
   step-limit release proof above was missing from the earlier 67-item census;
   it is now tracked explicitly. Counts are not an estimate of remaining effort.
 - Current candidate pins bind producer `350cb156b01bac708c4ca29674e95392efa9ac68`,
