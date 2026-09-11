@@ -1,15 +1,21 @@
 import { idOf, type ParticleField } from "./graph";
 import type { Node3D, Scene3D } from "./graph3d";
 
-export const CITY_VERSION = 4;
+export const CITY_VERSION = 5;
 export const ARCHETYPES = ["slab", "monolith", "stepped tower", "twin block", "central spine", "podium tower"] as const;
 export interface CityPlot extends Node3D {
   archetype: number; width: number; height: number; depth: number; terrace: number; slot: number;
   site: string;
+  /** Weighted dependency degree, 0..1 within this city — feeds height. */
+  centrality: number;
+  /** A file the whole repo leans on — it gets the lit roof. */
+  landmark: boolean;
 }
 export interface District {
   id: string; name: string; x: number; z: number; width: number; depth: number; terrace: number;
   capacity: number; slots: {x: number; z: number}[];
+  /** Total dependency strength to other districts — drives its route and gravity. */
+  weight: number;
 }
 export interface CityLayout extends Scene3D {
   nodes: CityPlot[]; byId: Map<string, CityPlot>; districts: District[]; assignments: Map<string, CityPlot>;
@@ -60,7 +66,7 @@ function newSite(name: string, count: number, districts: District[]): District {
     if (districts.every(d => Math.hypot(x-d.x-d.width/2,z-d.z-d.depth/2) > radius*1.16+d.width*.58+12)) break;
   }
   return {id: `${name}::${districts.filter(d => d.name === name).length}`, name,
-    x:x-radius, z:z-radius, width:radius*2, depth:radius*2, terrace:5, capacity, slots};
+    x:x-radius, z:z-radius, width:radius*2, depth:radius*2, terrace:5, capacity, slots, weight: 0};
 }
 export function buildCity(field: ParticleField, previous?: CityLayout | null): CityLayout {
   const prior = previous?.version === CITY_VERSION && previous.districts.length ? previous : null;
@@ -68,17 +74,62 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
   const districtSlots = new Map(prior?.districtSlots);
   const districts = (prior?.districts ?? []).map(d => ({...d}));
   const nodes: CityPlot[] = [];
-  const groups = [...new Set(field.particles.map(p => p.cluster))].sort((a,b)=>field.particles.filter(p=>p.cluster===b).length-field.particles.filter(p=>p.cluster===a).length||a.localeCompare(b));
+
+  /* --- architecture before geometry ------------------------------------
+     The field is repository truth: real files, real imports. Districts are
+     discovered, not assumed — and a dominant top-level dir in a big repo
+     splits into its second level so the skyline reflects real structure. */
+  const dirCounts = new Map<string, number>();
+  for (const p of field.particles) dirCounts.set(p.cluster, (dirCounts.get(p.cluster) ?? 0) + 1);
+  const splitAt = field.particles.length > 500 ? 80 : 140;
+  const clusterOf = (p: (typeof field.particles)[number]) => {
+    if ((dirCounts.get(p.cluster) ?? 0) <= splitAt) return p.cluster;
+    const seg = p.path.replace(/\/$/, "").split("/");
+    return seg.length > 2 ? `${p.cluster}/${seg[1]}` : p.cluster;
+  };
+
+  /* Dependency truth: per-file centrality and district-to-district weight. */
+  const centrality = new Map<string, number>();
+  const pairWeight = new Map<string, number>();
+  const idCluster = new Map<string, string>();
+  for (const p of field.particles) idCluster.set(p.id, clusterOf(p));
+  for (const l of field.filaments) {
+    const s = idOf(l.source), t = idOf(l.target);
+    const w = (l as { weight?: number }).weight ?? 1;
+    centrality.set(s, (centrality.get(s) ?? 0) + w);
+    centrality.set(t, (centrality.get(t) ?? 0) + w);
+    const ca = idCluster.get(s), cb = idCluster.get(t);
+    if (ca && cb && ca !== cb) {
+      const key = ca < cb ? `${ca}${cb}` : `${cb}${ca}`;
+      pairWeight.set(key, (pairWeight.get(key) ?? 0) + w);
+    }
+  }
+  const maxCent = Math.max(1, ...centrality.values());
+
+  const groups = [...new Set(field.particles.map(clusterOf))].sort((a,b)=>field.particles.filter(p=>clusterOf(p)===b).length-field.particles.filter(p=>clusterOf(p)===a).length||a.localeCompare(b));
   if (!prior) {
-    // Compose initial districts in camera-aligned shelves. Choose the aspect
-    // closest to the desktop viewport; later edits never repack these sites.
-    for (const name of groups) districts.push(newSite(name,field.particles.filter(p=>p.cluster===name).length,districts));
-    const reference=[[-.55,0],[.08,-.72],[.68,0],[-.42,.74],[.58,.84],[1.02,-.68]];
-    const span=Math.max(...districts.map(d=>d.width))*.68;
+    /* Placement is affinity-ordered: walk the dependency matrix like a
+       chain — each district goes next to its strongest related neighbor —
+       then lay the chain on a ring around the hub and resolve collisions. */
+    const affinity = (a: string, b: string) => pairWeight.get(a < b ? `${a}${b}` : `${b}${a}`) ?? 0;
+    const order: string[] = groups.length ? [groups[0]] : [];
+    const rest = new Set(groups.slice(1));
+    while (rest.size) {
+      let best = "", bw = -1;
+      for (const g of rest) {
+        const w = order.reduce((s, o) => s + affinity(o, g), 0);
+        if (w > bw || (w === bw && g < best)) { bw = w; best = g; }
+      }
+      order.push(best); rest.delete(best);
+    }
+    for (const name of order) districts.push(newSite(name,field.particles.filter(p=>clusterOf(p)===name).length,districts));
+    const span=Math.max(...districts.map(d=>d.width))*.72;
     const centers: {u:number;v:number;r:number}[]=[];
-    districts.forEach((d,i)=>{
-      const anchor=reference[i]??[Math.cos(i*2.4)*1.05,Math.sin(i*2.4)*1.05];
-      const c={u:anchor[0]*span,v:anchor[1]*span,r:d.width*.62};
+    const byName = new Map(districts.map(d=>[d.name,d]));
+    order.forEach((name,i)=>{
+      const d=byName.get(name)!;
+      const a=(i/Math.max(1,order.length))*Math.PI*2-Math.PI/2;
+      const c={u:Math.cos(a)*span,v:Math.sin(a)*span*.82,r:d.width*.62};
       for(let pass=0;pass<32;pass++) for(const other of centers) {
         const dx=c.u-other.u,dz=c.v-other.v,distance=Math.hypot(dx,dz),needed=c.r+other.r+4;
         if(distance<needed){c.u+=dx/Math.max(1,distance)*(needed-distance);c.v+=dz/Math.max(1,distance)*(needed-distance);}
@@ -88,7 +139,7 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
   }
   for (const name of groups) {
     if (!districtSlots.has(name)) districtSlots.set(name,districtSlots.size);
-    const files = field.particles.filter(p => p.cluster === name).sort((a,b) => b.size-a.size || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const files = field.particles.filter(p => clusterOf(p) === name).sort((a,b) => b.size-a.size || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     for (const p of files) {
       const old = assignments.get(p.id);
       let site = old ? districts.find(d => d.id === old.site) : undefined;
@@ -101,17 +152,30 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
       const at = site.slots[slot];
       const dim = dimensions(p.size);
       const archetype = pathHash(p.path) % 6;
-      const centrality = 1 - Math.min(1,Math.hypot(at.x,at.z)/(site.width/2));
+      /* Geometry is metric truth: footprint from bytes, height from bytes
+         and dependency centrality — a file the whole repo leans on towers
+         without a skyscraper outlier breaking the skyline. */
+      const cent = Math.min(1, (centrality.get(p.id) ?? 0) / maxCent);
+      const positional = 1 - Math.min(1,Math.hypot(at.x,at.z)/(site.width/2));
       const plot: CityPlot = {id:p.id, cluster:name, hue:p.hue, r:6, index:nodes.length,
         x:site.x+site.width/2+at.x, z:site.z+site.depth/2+at.z, y:plotElevation(at.x,at.z,site.width,site.depth),
         terrace:5, site:site.id, slot, archetype, ...dim,
-        height: Math.min(78,Math.max(5, dim.height * (0.55+centrality*.65) * [0.6,1,1,.95,1,1.15][archetype]))};
+        centrality: cent, landmark: cent > 0.62 && dim.height > 24,
+        height: Math.min(78,Math.max(5, dim.height * (0.45+positional*.35+cent*.55) * [0.6,1,1,.95,1,1.15][archetype]))};
       assignments.set(p.id,plot); nodes.push(plot);
     }
   }
+  /* District weight = its share of inter-district dependency — it drives
+     how strongly the hub pulls a route to it. */
+  for (const d of districts) d.weight = 0;
+  for (const [key, w] of pairWeight) {
+    const sep = key.indexOf("");
+    const a = key.slice(0, sep), b = key.slice(sep + 1);
+    for (const d of districts) if (d.name === a || d.name === b) d.weight += w;
+  }
   const byId = new Map(nodes.map(n => [n.id,n]));
   const links = field.filaments.filter(l => byId.has(idOf(l.source)) && byId.has(idOf(l.target))).map(l => ({...l,source:idOf(l.source),target:idOf(l.target),across:false,samples:2,dashed:l.kind === "cotouch"}));
-  return {version:CITY_VERSION,nodes,byId,links,districts,assignments,districtSlots,anchors:new Map(),waists:new Map(),edgeVertices:links.length*2,signature:`city-v3:${field.signature}`};
+  return {version:CITY_VERSION,nodes,byId,links,districts,assignments,districtSlots,anchors:new Map(),waists:new Map(),edgeVertices:links.length*2,signature:`city-v5:${field.signature}`};
 }
 
 // Separate, bounded cache: never reads or writes particle coordinates.

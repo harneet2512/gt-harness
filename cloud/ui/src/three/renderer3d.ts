@@ -27,6 +27,8 @@
   Fog,
   TorusGeometry,
   CylinderGeometry,
+  TubeGeometry,
+  QuadraticBezierCurve3,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -138,22 +140,14 @@ export class Renderer3D {
     roughness: 1,
     metalness: 0,
   });
-  /* A district is a neighborhood: it needs its own color. The slab takes
-     the hue at full softness, the rock takes it darkened. */
+  /* A district is a neighborhood: it needs its own color. The hue is a
+     stable function of the district's identity — never its name — so the
+     same repo colors itself identically every time and no repository
+     concept is hardcoded. */
   private districtTint(name: string): Color {
-    const lower = name.toLowerCase();
-    const named: [RegExp, string][] = [
-      [/core|engine|server|src/, "#7ba7d9"],
-      [/ui|frontend|web|visual|docs/, "#b394dd"],
-      [/service|auth|api/, "#dd92a6"],
-      [/infra|deploy|ops|tool|devcontainer/, "#85c4a2"],
-      [/test|eval|spec/, "#ddb36b"],
-      [/example|sample|demo|tutorial/, "#6fbccb"],
-      [/agent|worker|producer/, "#9e93d8"],
-    ];
-    const fallback = ["#8fb4d9", "#ab9ade", "#8ac2ab", "#d9a488", "#c3a3cf"];
-    const hit = named.find(([p]) => p.test(lower));
-    return new Color(hit?.[1] ?? fallback[pathHash(name) % fallback.length]);
+    const palette = ["#7ba7d9", "#b394dd", "#85c4a2", "#dd92a6", "#6fbccb",
+      "#ddb36b", "#9e93d8", "#8fb4d9", "#c9a88a", "#7fc8b4"];
+    return new Color(palette[pathHash(name) % palette.length]);
   }
   private contact = new MeshBasicMaterial({
     color: 0x171b20,
@@ -506,6 +500,24 @@ export class Renderer3D {
       base.position.set(cx,6,cz);
       base.scale.set(5,12,5);
       this.terrain.add(base);
+      /* Routes are dependency truth: a ground path from the hub to each
+         district, its girth proportional to real inter-district weight.
+         Weak districts get a thread; load-bearing ones get a boulevard. */
+      const maxW = Math.max(1, ...districts.map((d) => d.weight));
+      for (const d of districts) {
+        const dx = d.x + d.width / 2, dz = d.z + d.depth / 2;
+        const w = d.weight / maxW;
+        const r = 0.25 + w * 1.1;
+        const mid = new Vector3((cx + dx) / 2, 0.3, (cz + dz) / 2);
+        const curve = new QuadraticBezierCurve3(
+          new Vector3(cx, 0.3, cz), mid, new Vector3(dx, 0.3, dz));
+        const tube = new Mesh(
+          new TubeGeometry(curve, 20, r, 5, false),
+          this.walkwayMaterial,
+        );
+        tube.receiveShadow = true;
+        this.terrain.add(tube);
+      }
     }
     const contacts = new InstancedMesh(
       this.box,
@@ -520,6 +532,27 @@ export class Renderer3D {
       contacts.setMatrixAt(i, this.matrix.matrix);
     });
     this.terrain.add(contacts);
+    /* Landmarks: the files the whole repository leans on get a lit roof —
+       cheap geometry, real hierarchy. */
+    const landmarks = layout.nodes.filter((p) => p.landmark);
+    if (landmarks.length) {
+      const caps = new InstancedMesh(
+        this.box,
+        new MeshStandardMaterial({
+          color: 0xf5e8c8, roughness: 0.4, metalness: 0.1,
+          emissive: new Color(0xffb45e), emissiveIntensity: 1.4,
+        }),
+        landmarks.length,
+      );
+      landmarks.forEach((p, i) => {
+        this.matrix.position.set(p.x, p.y + p.height + 0.4, p.z);
+        this.matrix.scale.set(p.width * 0.6, 0.5, p.depth * 0.6);
+        this.matrix.rotation.set(0, 0, 0);
+        this.matrix.updateMatrix();
+        caps.setMatrixAt(i, this.matrix.matrix);
+      });
+      this.terrain.add(caps);
+    }
     this.edgeKey = "";
     this.colorsKey = "";
     this.colorFrom = this.ids.map((ids) => ids.map(() => new Color()));
@@ -833,19 +866,10 @@ export class Renderer3D {
         this.ids[k].forEach((id, i) => {
           mesh.getColorAt(i, this.colorFrom[k][i]);
           const p=this.layout?.byId.get(id);
-          const cluster = (p?.cluster ?? "").toLowerCase();
-          // Module identity is stable and legible across sessions; unknown
-          // directories still receive a deterministic neutral pastel.
-          const named: [RegExp, string][] = [
-            [/core|engine|server/, "#b8d2ee"],
-            [/ui|frontend|web|visual/, "#d7c9ee"],
-            [/service|auth|api/, "#e8c5c8"],
-            [/infra|deploy|ops|tool/, "#c8dfd1"],
-            [/test|eval|spec/, "#ead8b6"],
-            [/agent|worker|producer/, "#d1c9e8"],
-          ];
-          const tint = new Color(named.find(([pattern]) => pattern.test(cluster))?.[1] ??
-            ["#c7d8e8", "#d4d5e6", "#d1dfd6"][pathHash(cluster) % 3]);
+          const cluster = p?.cluster ?? "";
+          // District identity is a stable hash of the district itself —
+          // never a hardcoded repository concept.
+          const tint = this.districtTint(cluster);
           /* Facades stay near-neutral with a per-building warmth wobble;
              the district's hue lives on the platform, not on every wall. */
           const wobble=(pathHash(id)%100)/100;
