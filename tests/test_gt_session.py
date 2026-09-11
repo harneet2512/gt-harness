@@ -599,6 +599,27 @@ def test_admitted_unit_retains_its_retrieval_reference(tmp_path):
     assert admitted["artifact_reference"] == reference
 
 
+def test_stale_unit_reference_marker_teaches_retrieval(tmp_path):
+    a = _adapter(tmp_path)
+    a.repository_revision = "r2"
+    s = GTSession(GTSessionConfig(task_id="t"), engine=a)
+    stale = GTDecisionCandidate(
+        "stale fact bytes from r1", "localization", "stale", unit_id="stale-r1",
+        supersession_key="check:test_a", source_revision="r1",
+    )
+
+    batch = s.admit_decision_packet([stale], iteration=0, action_index=1)
+
+    marker = batch.context_additions[0]
+    assert "[GT_CONTEXT_UNIT_REFERENCE]" in marker
+    reference = json.loads(marker.split("[GT_CONTEXT_UNIT_REFERENCE] ", 1)[1])
+    assert reference["retrieval_command"].startswith("gt-evidence read ")
+    # The pointer alone is undocumented plumbing; the marker itself must tell
+    # the model the unit is retrievable via `gt-evidence read`.
+    hint = str(reference.get("retrieval_hint") or "")
+    assert "gt-evidence read" in hint
+
+
 def test_nonexistent_or_wrong_root_reference_is_refused(tmp_path):
     a = _adapter(tmp_path)
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)

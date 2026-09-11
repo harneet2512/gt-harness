@@ -1049,6 +1049,15 @@ class GTSession:
                     )
                     if key in artifact_reference
                 }
+                if visible_reference:
+                    # A bare pointer is undocumented plumbing to the model: the
+                    # marker itself must name the retrieval affordance or the
+                    # degraded unit is unrecoverable in-context.
+                    visible_reference["retrieval_hint"] = (
+                        "unit elided to a reference; run the retrieval_command "
+                        "(gt-evidence read <sha256> 0 8192) in the task shell "
+                        "to load the complete unit bytes"
+                    )
                 metadata = {
                     "unit_id": unit_id,
                     "supersession_key": candidate.supersession_key,
