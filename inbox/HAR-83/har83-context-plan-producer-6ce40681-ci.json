@@ -1,0 +1,37 @@
+{
+  "basis": "exact_ci_static_build_data_access_edges_and_binding",
+  "detail": {
+    "build_conclusion": "success",
+    "build_info_sha256": "ab3f997245214a298d2f71bf4433afbbe1f94f427cc3142f46ae30c8aa102551",
+    "build_tags": "netgo,osusergo,sqlite_fts5",
+    "build_workflow_run_id": 34620727667,
+    "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "changes": [
+      "f2db691c resolver/relationships: emit QUERIES (orm_data_access) + INJECTS (depends_injection/annotation_injection/ctor_injection), source=enclosing function via funcRangeIndex, target=class-index node",
+      "6ce40681 cmd/build_info: declare data_access_edges_v1 capability so the manifest producer_capabilities subset binds"
+    ],
+    "full_producer_ci_conclusion": "success",
+    "full_producer_ci_run_id": 34620727657,
+    "go_toolchain": "go1.22.5",
+    "measured": {
+      "binding": "producer_build VERIFIED: producer_sha256==f32802d0, source_commit==6ce40681, source_tree==49a6f06c (root tree), capabilities declare data_access_edges_v1",
+      "edges": "orm/di repo -> INJECTS x1 (get_users->UserService depends_injection), QUERIES x3 (Django objects.filter/create + db.query -> User); graph_context surfaces them as data_access/injection semantic facts",
+      "go_tests": "CI go-build green: Full Go test suite + resolver unit tests + data-flow base + indexing + closure preflight on 6ce40681"
+    },
+    "producer_sha256": "f32802d0e0fc4af95a93328dd29c97ed8a2aca7d8602899823723d1a15e798dd",
+    "remaining": [
+      "canonical provider-free acceptance on final bundle SHA",
+      "paid smoke approval gate"
+    ],
+    "repository": "harneet2512/groundtruth",
+    "scope": "Producer data-access edges + capability declaration: resolver emits QUERIES (function -> ORM model via Django objects.*/SQLAlchemy query()/ActiveRecord find) and INJECTS (function/ctor -> injected service type via FastAPI Depends/@Inject/@Autowired/TS ctor injection), sourced from the enclosing function via funcRangeIndex, resolved through the class index, carrying resolution_method + confidence; build_info declares data_access_edges_v1. Closes the GitNexus QUERIES/INJECTS gap with provenance.",
+    "source_tree": "49a6f06c2177c86d220018037f61fc96fca6a5d5"
+  },
+  "head_sha": "6ce4068193e3fc2e7e0cfdd495f3ff616078644b",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "65183d19c1f2c0c392b37adc7bba4748855c89f93d40cf628fd5ed76c2eb829a",
+  "packet_id": "har83-context-plan-producer-6ce40681-ci",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-83"
+}
