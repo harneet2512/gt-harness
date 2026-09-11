@@ -1280,6 +1280,16 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   review `393b4c92`, lineage PASS. The "amend is faster" claim for matplotlib
   is retired: the 8% was partly divergent work; equal output now costs equal
   time (215.8s vs 218.0s) on this repository.
+  PHASE D MCP SURFACES LANDED (`fceae84c` + format `df9b983b`): six new
+  composite endpoints expose already-computed tables -- `gt_trace` (bounded
+  BFS path A->B over CALLS/HAS_METHOD), `gt_detect_changes` (diff->changed
+  symbols->affected processes->risk, partial/unknown/truncated flags),
+  `gt_route_map` + `gt_api_impact` (HANDLES_ROUTE/API_CALL service boundary),
+  `gt_closure` (transitive reach) + `gt_community` (module membership). 28
+  RED->GREEN tests + 207 affected-suite passes; abstention typed throughout.
+  This closes the tool-breadth gap GitNexus had while keeping certification.
+  TRANSPORT DEFECTS: F1 (`7901de98`, typed tools on the wire) + F2
+  (`0251bd43`, commit-after-transport) landed; F3/F5/F6/F12 in flight.
   PHASE D ITEM 1 LANDED (`f28108c9`): the producer's `communities`/`processes`
   tables are now consumed -- `gt_engine/derived_context.py` reads
   `community_members`(file-kind)+`communities` and `process_steps`+`processes`
