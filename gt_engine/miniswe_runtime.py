@@ -954,6 +954,27 @@ def install_runtime_hooks(
             reason="within_provider_window",
             **admission.to_dict(),
         )
+        # The request is fully validated before the wire, but the delivery
+        # ledger and the session's shipped latches commit only after the
+        # transport returns. A raised attempt therefore leaves every pending
+        # delivery, exposure and queued candidate intact for the tenacity
+        # retry instead of claiming a delivery that was never sent.
+        try:
+            adapter.bind_provider_payload(payload, commit=False)
+        except Exception:
+            adapter.discard_pending_provider_deliveries(reason="request_receipt_error")
+            raise
+        response = transport(
+            messages,
+            **kwargs,
+            # The wire must carry the exact tool set the admitted envelope
+            # recorded. Forwarding only a caller-supplied override left
+            # ordinary turns shipping [BASH_TOOL] while the request manifest
+            # claimed the model's whole advertised set.
+            _gt_provider_tools=list(tools) if tools is not None else None,
+            **({"_gt_select_catalog": True} if bootstrap_request else {}),
+            **({"_gt_persistent_plan": True} if plan_request else {}),
+        )
         try:
             delivery = adapter.bind_provider_payload(payload)
         except Exception:
@@ -974,17 +995,7 @@ def install_runtime_hooks(
             )
         else:
             session.provider_request_admitted(delivery.delivery_ids)
-        return transport(
-            messages,
-            **kwargs,
-            # The wire must carry the exact tool set the admitted envelope
-            # recorded. Forwarding only a caller-supplied override left
-            # ordinary turns shipping [BASH_TOOL] while the request manifest
-            # claimed the model's whole advertised set.
-            _gt_provider_tools=list(tools) if tools is not None else None,
-            **({"_gt_select_catalog": True} if bootstrap_request else {}),
-            **({"_gt_persistent_plan": True} if plan_request else {}),
-        )
+        return response
 
     def bootstrap_select_catalog() -> None:
         """Run one explicit catalog request without creating Mini-SWE actions."""

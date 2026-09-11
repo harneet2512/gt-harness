@@ -2094,7 +2094,17 @@ class MiniSweAdapter(GroundtruthController):
                     affected.append(predicate_id)
         return tuple(sorted(set(affected)))
 
-    def bind_provider_payload(self, payload: Mapping[str, Any]) -> ProviderDelivery:
+    def bind_provider_payload(
+        self, payload: Mapping[str, Any], *, commit: bool = True
+    ) -> ProviderDelivery | None:
+        """Validate the exact provider-bound payload; commit it when asked.
+
+        ``commit=False`` runs the request/delivery consistency checks (digest,
+        membership, exposure chain) without touching ledger or pending state:
+        the caller runs it before the wire so a conflicted request never
+        spends provider budget, then commits after the transport returns so a
+        failed attempt cannot claim a delivery it never carried.
+        """
         messages = payload.get("messages")
         if not isinstance(messages, list):
             raise ValueError("provider payload requires messages")
@@ -2150,6 +2160,8 @@ class MiniSweAdapter(GroundtruthController):
                     )
                     raise ExposureChainConflict("provider request exposure chain conflict")
                 proposed_head = exposure.next_chain_head
+        if not commit:
+            return None
         request_sha256, request_manifest, request_manifest_sha256, storage = (
             store_provider_request(self.store, payload)
         )

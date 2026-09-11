@@ -5,7 +5,12 @@ import json
 import pytest
 
 import gt_engine.miniswe_runtime as rt
-from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
+from gt_engine.gt_session import (
+    GTDecisionCandidate,
+    GTMode,
+    GTSession,
+    GTSessionConfig,
+)
 from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_evidence import EvidenceResult
 from gt_engine.miniswe_integration import MiniSweAdapter
@@ -2296,3 +2301,67 @@ def test_wire_tool_set_matches_the_recorded_request_envelope(tmp_path, monkeypat
     recorded = [tool["function"]["name"] for tool in request["tools"]]
     assert "groundtruth" in recorded
     assert wire_tools and wire_tools[-1] == recorded
+
+
+def test_transport_failure_preserves_pending_deliveries_for_retry(
+    tmp_path, monkeypatch
+):
+    """F2: a raised transport must not consume GT context it never carried.
+
+    Binding and admission used to commit before the wire call, so a failed
+    attempt was journaled as delivered and the retry went out empty.
+    """
+    _configure_fixture_provider(monkeypatch)
+    agent = FakeAgent()
+
+    class FlakyTransportModel(TransportFakeModel):
+        def __init__(self):
+            super().__init__()
+            self.failures = 1
+
+        def _query(self, messages, **kwargs):
+            self.calls.append(messages)
+            if self.failures:
+                self.failures -= 1
+                raise TimeoutError("provider timeout")
+            return {"id": "response", "model": self.model_name, "usage": {}}
+
+    agent.model = FlakyTransportModel()
+    adapter = MiniSweAdapter(
+        task_id="t", state_dir=tmp_path, predicates=[],
+        contract=extract_task_contract("Fix compute()."),
+    )
+    session = _session(adapter)
+    install_runtime_hooks(agent, session)
+    session.queue_decision_candidates((
+        GTDecisionCandidate(
+            rendered="[GT_EVIDENCE:queued]\nqueued fact", kind="context_delta",
+            lane="prompt", target="provider_prompt", dedup_key="queued-fact",
+            verification_candidate="verify-me",
+        ),
+    ))
+    prepared = agent.model._prepare_messages_for_api(
+        [{"role": "user", "content": "task"}]
+    )
+    assert "GT_TASK_CONTRACT" in prepared[-1]["content"]
+    assert adapter._pending_provider_deliveries
+
+    with pytest.raises(TimeoutError):
+        agent.model._query(prepared)
+
+    # The request never left: nothing may be claimed delivered, and every
+    # pending structure must remain for the retry.
+    assert not adapter.deliveries
+    assert adapter._pending_provider_deliveries
+    assert adapter._pending_exposures
+    assert session._queued_decision_candidates
+    assert not adapter.contract_shipped
+
+    prepared = agent.model._prepare_messages_for_api(
+        [{"role": "user", "content": "task"}]
+    )
+    agent.model._query(prepared)
+    assert adapter.deliveries
+    assert adapter.contract_shipped
+    wire = json.dumps(agent.model.calls[-1])
+    assert "queued fact" in wire
