@@ -23,6 +23,7 @@ from .delivery_budget import (
     compact_localization,
     delivery_byte_limit,
 )
+from .attribution import feature_for_evidence
 from .engine_state import EngineState, GraphQuerySnapshot, RuntimeLayout
 from .event_journal import (
     GENESIS_HASH,
@@ -2193,6 +2194,7 @@ class MiniSweAdapter(GroundtruthController):
                 event, lane=item.lane, kind=item.kind,
                 action_index=item.action_index, iteration=item.iteration,
                 evidence_type=item.kind, dedup_key=item.dedup_key,
+                feature_id=feature_for_evidence(item.kind),
                 target=item.target, rendered_bytes=len(item.rendered.encode("utf-8")),
                 payload_sha256=item.identity, delivery_identity=item.identity,
                 delivery_blob=f"deliveries/{item.identity}.json",
