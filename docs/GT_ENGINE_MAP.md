@@ -52,6 +52,70 @@ Producer CI `34436549266` and static Linux build `34436550584` passed at
 source-registry deselection; 14 complementary source checks passed. The
 remaining tracker requirements are separate gates.
 
+### 2026-09-10 — producer parity, derived surfaces, transport fixes
+
+The bundle pin above is superseded the same day: `4fc6d384` rebinds the
+bundle to producer `df9b983b` — vendored wheel, `gt-index` Linux binary and
+`SOURCE-COMMIT` updated, CI-backed packet, lineage PASS.
+
+- **Producer determinism — amend ≡ rebuild** (producer repo):
+  `c4d4a54f` makes every cross-file target pick renumbering-invariant —
+  name-index candidates sort by `(file_path, start_line, id)` before each
+  first-found selection instead of raw AUTOINCREMENT id order, so a batch
+  amend (the edited file's nodes re-inserted at the top of the id space)
+  resolves the same logical targets as a full rebuild. Measured on
+  matplotlib: the ±726/713 gross CALLS relabels between layouts are gone.
+  `87d755a6` carries the parent's `cochanges`/`communities` tables through a
+  batch amend when the recorded coupling receipt's reuse key (repository
+  revision, shallow flag, window boundary commits) matches; the community
+  layer additionally requires its recorded window bounds plus the certified
+  call-pair digest (`derived_community_call_pairs_sha256`) to still answer
+  the amended graph. `derived_coupling_reused` records which layers were
+  carried.
+- **Derived tables consumed** (`f28108c9`): `gt_engine/derived_context.py`
+  reads `community_members` (file-kind) + `communities` and
+  `process_steps` + `processes` through the producer's effective stable id
+  (`COALESCE(nodes.stable_id, resolution_symbols.stable_id)` on
+  `native_id = nodes.id`), gated on `derived_*_state == 'ok'` plus
+  recorded-vs-live count markers — the same admission contract
+  `_closure_is_fresh` applies to `closure_count`. Surfaced additively
+  through `HybridRanking.attribution_record` (the
+  `gt.semantic_localization.v1` artifact) and `build_graph_projection`
+  facts. `not_run`, `disabled_by_operator`, `unrecorded`, `table_absent`
+  and `count_mismatch` all serve typed-empty fields with the state named
+  verbatim — never a stale or fabricated partition.
+- **Transport fixes**: F1 `7901de98` — the wire now carries the exact tool
+  set the admitted request envelope recorded; ordinary turns had shipped
+  only `[BASH_TOOL]` while the manifest claimed the model's whole
+  advertised set. F2 `0251bd43` — the delivery ledger and shipped latches
+  commit only after transport returns (`bind_provider_payload(...,
+  commit=False)`), so a raised attempt leaves pending deliveries, exposures
+  and queued candidates intact for the retry instead of claiming a delivery
+  never sent. F4 `fb79ab91` — sealed `<gt-facts>` envelopes are extracted
+  verbatim before an oversized observation is elided (original bytes
+  CAS-archived), so evidence journaled delivered at turn N no longer
+  disappears at N+1 with no revocation record. F9 `55f5b774` — elided
+  context-unit markers carry `retrieval_hint` naming the
+  `gt-evidence read <sha> 0 8192` affordance; the field is additive and the
+  six canonical reference keys are unchanged. F10 `daded316` — the
+  post-edit syntax probe runs each checkable file's on-disk bytes through
+  the certified `gt-index -inspect-jsonl` parser boundary
+  (.py/.pyi/.go/.ts/.tsx/.js/.jsx/.rs) instead of py_compile-only; a row is
+  positive evidence only when the producer reports
+  `syntax_tree_incomplete`, request/transport fault rows stay abstentions,
+  and extensions outside the certified set are never probed.
+- **Six derived MCP endpoints** (producer `fceae84c`, formatted `df9b983b`;
+  bundle rebind `4fc6d384`): `gt_trace` (bounded BFS path A→B over
+  CALLS + `nodes.parent_id` containment, depth ≤ 6 / expansions ≤ 500),
+  `gt_detect_changes` (diff → changed symbols → test-witnessed
+  `process_steps`/`processes`, `risk_level` unknown on failure never
+  guessed), `gt_route_map` + `gt_api_impact` (`HANDLES_ROUTE`/`API_CALL`
+  service boundary, consumer-key attribution), `gt_closure` (precomputed
+  transitive reach, producer bounds stated, staleness flagged),
+  `gt_community` (`communities`/`community_members` verbatim, NULL cohesion
+  stays null). Typed-abstention throughout; the endpoint contract is
+  documented in the producer repo's `docs/kernel/DERIVED_ENDPOINTS.md`.
+
 Every number in this document was measured, not estimated. Where a measurement
 comes from a specific run it is named, so a future reader can check it rather
 than trust it. Where something is a known defect it says so in the same

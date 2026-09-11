@@ -348,3 +348,81 @@ Recorded here rather than half-applied. The measurement is the durable part.
 - **Confirm the mass before blaming the mechanism.** The overlay was 97.9% of
   nodes and the survivors were 3,810 — matching the reproduction to the row,
   which is what turned a hypothesis into a cause.
+
+---
+
+## 2026-09-10 — derived surfaces, transport fixes, producer parity
+
+Shipped on `codex/context-plan-integrity` through `4fc6d384`, with the
+producer side on `codex/context-plan-producer` through `df9b983b`. The
+gate-by-gate record lives in
+`docs/plans/context-plan-implementation-status.md`; this is the architectural
+summary.
+
+**Producer determinism — amend ≡ rebuild** (producer repo). `c4d4a54f`:
+node ids are AUTOINCREMENT artifacts and a batch amend re-inserts the edited
+file's nodes at the top of the id space, so every cross-file pick that rode
+raw id order named a different logical declaration under an amend than under
+a rebuild (measured on matplotlib: 49,053 vs 49,040 edges, ±726/713 gross
+CALLS relabels). Every first-found pick now sorts name-index candidates by
+`(file_path, start_line, id)` before choosing — resolver fallbacks (1.94,
+1.94a, 1.95, 1.96, 1.97), `classByName`/serde promotion, relationship
+resolution, MRO ties, taxonomy truncation and assertion/inheritance
+tie-breaks. `87d755a6`: a batch amend over a pinned-identical history window
+no longer re-walks `git log` and delete-rewrites identical `cochanges`/
+`communities` rows — the parent's recorded coupling receipt is read from the
+staged copy, and when the reuse key (repository revision, shallow flag,
+window boundary commits) matches, the tables are preserved through the
+structural rebuild. The community partition additionally requires its
+recorded window bounds plus the certified call-pair digest
+(`derived_community_call_pairs_sha256`) to still answer the amended graph;
+`derived_coupling_reused` records which layers were carried.
+
+**Derived tables consumed** (`f28108c9`). `gt_engine/derived_context.py` is
+the gated read side for what the producer already published: community
+membership joined through `community_members.member == nodes.file_path`,
+process participation through the producer's effective stable id
+(`COALESCE(nodes.stable_id, resolution_symbols.stable_id)` on
+`native_id = nodes.id`). Each layer gates on `derived_*_state == 'ok'` plus
+recorded-vs-live count markers — the admission contract
+`_closure_is_fresh` applies to `closure_count` — and surfaces additively
+through `HybridRanking.attribution_record` (the
+`gt.semantic_localization.v1` artifact) and `build_graph_projection` facts.
+Degraded states serve typed-empty output with the state named verbatim,
+never a fabricated partition.
+
+**Transport fixes.** F1 `7901de98` — the wire carries the exact admitted
+tool set the request envelope recorded; ordinary turns had shipped only
+`[BASH_TOOL]` while the manifest claimed the model's whole advertised set,
+so the typed-action surface was dead code and receipts over-claimed it.
+F2 `0251bd43` — delivery ledger and shipped latches commit only after
+transport returns (`bind_provider_payload(..., commit=False)`); a raised
+attempt leaves pending deliveries, exposures and queued candidates intact
+for the retry. F4 `fb79ab91` — sealed `<gt-facts>` envelopes are extracted
+verbatim before an oversized observation is bounded (original bytes
+CAS-archived); evidence journaled delivered at turn N no longer vanishes at
+N+1 with no revocation record. F9 `55f5b774` — elided context-unit markers
+carry `retrieval_hint` naming `gt-evidence read <sha> 0 8192`, so recovery
+no longer depends on the model spontaneously invoking undocumented
+plumbing. F10 `daded316` — the post-edit syntax probe sends each checkable
+file's on-disk bytes through the certified `gt-index -inspect-jsonl` parser
+boundary (.py/.pyi/.go/.ts/.tsx/.js/.jsx/.rs) instead of py_compile on
+Python only; positive evidence requires the producer's
+`syntax_tree_incomplete`, fault rows stay abstentions, extensions outside
+the certified set are never probed.
+
+**Six derived MCP endpoints** (producer `fceae84c` + format `df9b983b`;
+bundle rebind `4fc6d384` — vendored wheel, `gt-index` binary and
+`SOURCE-COMMIT`, CI-backed packet, lineage PASS): `gt_trace` (bounded BFS
+path A→B over CALLS + `nodes.parent_id` containment, depth ≤ 6, expansions
+≤ 500), `gt_detect_changes` (diff → changed symbols → test-witnessed
+`process_steps`/`processes`; `risk_level` is `unknown` on failure, never
+guessed), `gt_route_map` + `gt_api_impact` (`HANDLES_ROUTE`/`API_CALL`
+service boundary; multi-fetch consumers carry `attributionNote`),
+`gt_closure` (precomputed transitive reach, producer bounds stated,
+staleness flagged via the `_closure_is_fresh` probe), `gt_community`
+(`communities`/`community_members` verbatim; NULL cohesion stays null —
+unmeasurable is not zero). Typed abstention throughout: absent tables,
+unreadable decorator lines and ambiguous names return typed results, never
+fabricated rows. The endpoint contract is documented in the producer
+repo's `docs/kernel/DERIVED_ENDPOINTS.md`.
