@@ -41,7 +41,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import type { GraphViewProps } from "../graphProps";
-import { pathHash, TERRACE_LEVELS, type CityLayout, type CityPlot, type District } from "../city";
+import { pathHash, type CityLayout, type CityPlot, type District } from "../city";
 import type { Node3D } from "../graph3d";
 import { palette } from "../palette";
 import { CameraMotion, TIMING, travel } from "../cityMotion";
@@ -443,44 +443,46 @@ export class Renderer3D {
       this.riseAt = this.animationNow;
       this.rising = true;
     }
+    /* The island: one shared landmass under every district. Neighborhoods
+       stop being separate platforms — the city is contiguous, avenues are
+       the gaps between building clusters, and the shore is a single edge
+       around the whole repository. */
+    {
+      const minX = Math.min(...districts.map(d=>d.x)), minZ = Math.min(...districts.map(d=>d.z));
+      const maxX = Math.max(...districts.map(d=>d.x+d.width)), maxZ = Math.max(...districts.map(d=>d.z+d.depth));
+      const islandPad = 11;
+      const islandW = maxX-minX+islandPad*2, islandD = maxZ-minZ+islandPad*2;
+      const islandX = (minX+maxX)/2, islandZ = (minZ+maxZ)/2;
+      const islandGeometry = terraceGeometry(11);
+      this.terraces.push(islandGeometry);
+      const shore = new Mesh(islandGeometry, this.rock);
+      shore.position.set(islandX, -0.2, islandZ);
+      shore.scale.set(islandW*1.06, 3.4, islandD*1.06);
+      shore.castShadow = true;
+      this.terrain.add(shore);
+      const deck = new Mesh(islandGeometry, new MeshStandardMaterial({color:0xe9ebee,roughness:.95,metalness:0}));
+      deck.position.set(islandX, 0, islandZ);
+      deck.scale.set(islandW, 2.4, islandD);
+      deck.receiveShadow = true; deck.castShadow = true;
+      this.terrain.add(deck);
+    }
     for (const d of layout.districts) {
-      const geometry = terraceGeometry(pathHash(d.name) % 37);
-      this.terraces.push(geometry);
       const tint = this.districtTint(d.name);
-      const slab = this.ground.clone();
-      slab.color.copy(tint).lerp(new Color(0xffffff), 0.55);
-      const rock = this.rock.clone();
-      rock.color.copy(tint).multiplyScalar(0.75);
-      const footing=new Mesh(geometry,this.contact);
-      footing.layers.set(1);
-      footing.position.set(d.x+d.width/2,-.15,d.z+d.depth/2);
-      footing.scale.set(d.width*1.18,.02,d.depth*1.18);
-      this.terrain.add(footing);
-      for (let layer = 0; layer < TERRACE_LEVELS.length; layer++) {
-        const m = new Mesh(geometry, slab);
-        m.receiveShadow = true; m.castShadow = true;
-        m.position.set(d.x + d.width / 2, TERRACE_LEVELS[layer].y, d.z + d.depth / 2);
-        const expansion = TERRACE_LEVELS[layer].scale;
-        /* The extrusion is 1.4 deep; squeezing it to a plate is what makes
-           the district a platform instead of a cuboid. */
-        m.scale.set(d.width * expansion, 0.32, d.depth * expansion);
-        this.terrain.add(m);
-      }
-      /* A thin shadowed skirt, not a landmass: just enough to give the
-         platform an edge and a shadow side. The district's mass belongs
-         to the buildings on it, not the ground under it. */
-      const cliff=new Mesh(geometry,rock);
-      cliff.position.set(d.x+d.width/2,0,d.z+d.depth/2);
-      cliff.scale.set(d.width*1.14,3.2,d.depth*1.14);
-      cliff.castShadow=true;
-      this.terrain.add(cliff);
-      // Planting: a loose ring of trees around the district's mid-terrace.
+      /* Neighborhood ground tone: a flush, near-invisible wash on the
+         island deck — identity lives on the buildings, the ground just
+         hints at the border. */
+      const pad = new Mesh(
+        this.box,
+        new MeshBasicMaterial({color:tint,transparent:true,opacity:.16,depthWrite:false}),
+      );
+      pad.position.set(d.x+d.width/2, 2.46, d.z+d.depth/2);
+      pad.scale.set(d.width*1.02, .05, d.depth*1.02);
+      pad.renderOrder = 1;
+      this.terrain.add(pad);
+      // Planting: street rows down the open axes + a rim promenade.
       const seed=pathHash(d.id);
       const trees=new InstancedMesh(this.tree,this.leaf,26);
       for(let i=0;i<26;i++) {
-        /* Two plantings: a promenade at the platform rim, and a street
-           row down the pedestrian axis the plots deliberately leave
-           open — green where the buildings aren't. */
         const street = i >= 16;
         const a=(i/(street?10:16))*Math.PI*2+((seed%97)/97)*Math.PI*2;
         const wobble=((seed+i*31)%100)/100;
@@ -491,7 +493,7 @@ export class Renderer3D {
           ? d.z+d.depth*.15+wobble*d.depth*.7
           : d.z+d.depth/2+Math.sin(a)*d.depth*(.44+.05*wobble);
         const s=(street?3.4:4.5)+((seed+i*13)%100)/100*3;
-        this.matrix.position.set(tx, street ? 1.2 : .5, tz);
+        this.matrix.position.set(tx, 2.4, tz);
         this.matrix.scale.set(s,s,s);
         this.matrix.rotation.set(0,a,0);
         this.matrix.updateMatrix();
@@ -515,24 +517,39 @@ export class Renderer3D {
       stage.scale.set(stageR * 2.6, stageR * 2.6, 1);
       stage.renderOrder = -1;
       this.terrain.add(stage);
-      /* The center is the repository's root — ontologically it's where
-         every district's route terminates, not a monument. A flat forum:
-         nothing stands here, everything passes through. */
+      /* The center is the repository's commons — ontologically it's the
+         root every district's route converges on. In city terms it's the
+         park: a green field with trees, not a monument. */
       const forum=new Mesh(
         new CylinderGeometry(16,16.8,0.5,48),
-        new MeshStandardMaterial({color:0xeef0f3,roughness:.9,metalness:0}),
+        new MeshStandardMaterial({color:0xa9c6a2,roughness:1,metalness:0}),
       );
-      forum.position.set(cx,0.25,cz);
+      forum.position.set(cx,2.65,cz);
       forum.receiveShadow=true;
       this.terrain.add(forum);
-      this.hub.set(cx, 6, cz);
-      /* A flush inlay ring — pavement detail, not a tower. */
+      this.hub.set(cx, 8, cz);
+      /* Park planting — a loose grove, the one green mass the city shares. */
+      const grove=new InstancedMesh(this.tree,this.leaf,14);
+      const gseed=pathHash("commons");
+      for(let i=0;i<14;i++) {
+        const a=(i/14)*Math.PI*2+((gseed%97)/97)*Math.PI*2;
+        const r=i<4?3+i*1.8:7+((gseed+i*17)%40)/40*7;
+        this.matrix.position.set(cx+Math.cos(a)*r, 2.9, cz+Math.sin(a)*r*.8);
+        const s=2.6+((gseed+i*23)%100)/100*2.4;
+        this.matrix.scale.set(s,s,s);
+        this.matrix.rotation.set(0,a,0);
+        this.matrix.updateMatrix();
+        grove.setMatrixAt(i,this.matrix.matrix);
+      }
+      grove.castShadow=true;
+      this.terrain.add(grove);
+      /* A flush path ring around the lawn — pavement, not a tower. */
       const inlay=new Mesh(
-        new TorusGeometry(10,0.35,8,64),
-        new MeshStandardMaterial({color:0xd6dbe2,roughness:.8,metalness:0}),
+        new TorusGeometry(11,0.5,8,64),
+        new MeshStandardMaterial({color:0xd0d6de,roughness:.8,metalness:0}),
       );
       inlay.rotation.x=Math.PI/2;
-      inlay.position.set(cx,0.52,cz);
+      inlay.position.set(cx,2.92,cz);
       this.terrain.add(inlay);
       /* Routes are dependency truth: a ground path from the hub to each
          district, its girth proportional to real inter-district weight.
@@ -542,9 +559,9 @@ export class Renderer3D {
         const dx = d.x + d.width / 2, dz = d.z + d.depth / 2;
         const w = d.weight / maxW;
         const r = 0.6 + w * 2.2;
-        const mid = new Vector3((cx + dx) / 2, 0.3, (cz + dz) / 2);
+        const mid = new Vector3((cx + dx) / 2, 2.5, (cz + dz) / 2);
         const curve = new QuadraticBezierCurve3(
-          new Vector3(cx, 0.3, cz), mid, new Vector3(dx, 0.3, dz));
+          new Vector3(cx, 2.5, cz), mid, new Vector3(dx, 2.5, dz));
         const tube = new Mesh(
           new TubeGeometry(curve, 20, r, 5, false),
           this.walkwayMaterial,

@@ -123,7 +123,9 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
       order.push(best); rest.delete(best);
     }
     for (const name of order) districts.push(newSite(name,field.particles.filter(p=>clusterOf(p)===name).length,districts));
-    const span=Math.max(...districts.map(d=>d.width))*.72;
+    /* The island, not the archipelago: districts pull close enough that
+       the gaps between them read as avenues, not straits. */
+    const span=Math.max(...districts.map(d=>d.width))*.44;
     const centers: {u:number;v:number;r:number}[]=[];
     const byName = new Map(districts.map(d=>[d.name,d]));
     order.forEach((name,i)=>{
@@ -131,7 +133,7 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
       const a=(i/Math.max(1,order.length))*Math.PI*2-Math.PI/2;
       const c={u:Math.cos(a)*span,v:Math.sin(a)*span*.82,r:d.width*.62};
       for(let pass=0;pass<32;pass++) for(const other of centers) {
-        const dx=c.u-other.u,dz=c.v-other.v,distance=Math.hypot(dx,dz),needed=c.r+other.r+4;
+        const dx=c.u-other.u,dz=c.v-other.v,distance=Math.hypot(dx,dz),needed=c.r+other.r+9;
         if(distance<needed){c.u+=dx/Math.max(1,distance)*(needed-distance);c.v+=dz/Math.max(1,distance)*(needed-distance);}
       }
       centers.push(c);d.x=(c.u*1.22+c.v)*Math.SQRT1_2-d.width/2;d.z=(c.v-c.u*1.22)*Math.SQRT1_2-d.depth/2;
@@ -158,7 +160,7 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
       const cent = Math.min(1, (centrality.get(p.id) ?? 0) / maxCent);
       const positional = 1 - Math.min(1,Math.hypot(at.x,at.z)/(site.width/2));
       const plot: CityPlot = {id:p.id, cluster:name, hue:p.hue, r:6, index:nodes.length,
-        x:site.x+site.width/2+at.x, z:site.z+site.depth/2+at.z, y:plotElevation(at.x,at.z,site.width,site.depth),
+        x:site.x+site.width/2+at.x, z:site.z+site.depth/2+at.z, y:2.4,
         terrace:5, site:site.id, slot, archetype, ...dim,
         centrality: cent, landmark: cent > 0.62 && dim.height > 24,
         height: Math.min(78,Math.max(5, dim.height * (0.4+positional*.3+cent*.55) * [0.38,1.4,1,0.8,1,1.28][archetype]))};
