@@ -786,10 +786,10 @@ jobs:
                 --run-id "$GITHUB_RUN_ID" \
                 --output run-status.md \
                 --budget-seconds "${{ matrix.time_budget_seconds }}" \
-                --stdout-log pier-stdout.log || true
+                --stdout-log pier-stdout.log || echo "::warning::run-status emit failed (non-fatal)"
               python scripts/upload_transient_artifact.py \
                 --file run-status.md \
-                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" || true
+                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" || echo "::warning::transient artifact upload failed (non-fatal)"
             done
           ) &
           MONITOR_PID=$!
@@ -813,8 +813,8 @@ jobs:
             2>&1 | tee pier-stdout.log
           pier_status=${PIPESTATUS[0]}
           set -e
-          kill "$MONITOR_PID" 2>/dev/null || true
-          wait "$MONITOR_PID" 2>/dev/null || true
+          kill "$MONITOR_PID" 2>/dev/null || :
+          wait "$MONITOR_PID" 2>/dev/null || :
           exit "$pier_status"
 
       - name: Bind the Pier reward to the canonical product receipt
