@@ -450,7 +450,8 @@ def test_deepswe_workflow_uses_deepseek_v4_and_pins_v11_catalog_snapshot():
         / "deepswe_miniswe_central.yml"
     ).read_text(encoding="utf-8")
 
-    assert 'default: "deepseek-v4-flash"' in workflow
+    assert "OpenRouter model id passed to litellm" in workflow
+    assert 'default: "deepseek-v4-flash"' not in workflow
     assert workflow.count("ref: 435ee89ec2f2e2289f33b0da4f992f0b7b7266b9") == 2
     assert "v1.0.0" not in workflow
     assert "v1.1 catalog-compatible" in workflow
@@ -483,12 +484,18 @@ def test_deepswe_workflow_provider_preflight_matches_gateway_model_routing():
         / "deepswe_miniswe_central.yml"
     ).read_text(encoding="utf-8")
 
-    assert "OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}" in workflow
+    assert "OPENAI_BASE_URL: ${{ inputs.provider_base_url }}" in workflow
+    assert "OPENAI_API_KEY: ${{ secrets.OPENROUTER_NEW || secrets.OPENROUTER_API_KEY }}" in workflow
     assert 'base = (os.environ.get("OPENAI_BASE_URL") or "").strip()' in workflow
     assert 'model = f"openai/{model}"' in workflow
-    assert "options: [deepseek, openrouter, tokenrouter]" in workflow
-    assert "TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}" in workflow
-    assert "DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" in workflow
+    assert "options: [openrouter]" in workflow
+    assert "GT_OPENROUTER_PROVIDER_ONLY: deepseek" in workflow
+    assert "openrouter:deepseek:only:no-fallback" in workflow
+    # Secret-mapped legacy provider credentials are gone; the names survive
+    # only inside the generic "any credential configured" probe and the
+    # retained (dispatch-unreachable) provider branches.
+    assert "TOKENROUTER_API_KEY: ${{ secrets.TOKENROUTER_API_KEY }}" not in workflow
+    assert "DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}" not in workflow
     assert 'tokenrouter_base = os.environ["PROVIDER_BASE_URL"].strip()' in workflow
     assert "PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}" in workflow
     assert 'echo "GT_LITELLM_MODEL=${executor_model}"' in workflow

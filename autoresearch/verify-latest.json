@@ -1,0 +1,38 @@
+{
+  "census": {
+    "bad_verdicts": [],
+    "ok": true,
+    "rc": 0
+  },
+  "efficiency_replay": {
+    "chars_avoided": 927805450,
+    "compaction_deferrals": 410,
+    "projected_epochs": 9,
+    "rc": 0,
+    "receipt_complete": true,
+    "reduction_ratio": 0.379055,
+    "task_count": 20
+  },
+  "elapsed_sec": 849.2,
+  "guards_ok": false,
+  "integrity": {
+    "ok": true,
+    "rc": 0
+  },
+  "pytest": {
+    "failed": -1,
+    "ok": false,
+    "passed": -1,
+    "tail": [
+      "FAILED tests/test_gt_repository_intelligence.py::test_incremental_refresh_holds_publication_lock_across_build",
+      "FAILED tests/test_gt_repository_intelligence.py::test_repository_session_reindexes_reverse_dependents_in_same_generation",
+      "FAILED tests/test_gt_repository_intelligence.py::test_repository_session_incrementally_indexes_content_signature_source",
+      "FAILED tests/test_gt_repository_intelligence.py::test_repository_session_rebuilds_resolution_after_metadata_change",
+      "FAILED tests/test_miniswe_runtime.py::test_runtime_captures_one_multifile_transaction_and_refreshes_graph_once"
+    ]
+  },
+  "readiness": {
+    "ok": true,
+    "rc": 0
+  }
+}
