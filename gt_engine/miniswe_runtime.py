@@ -43,6 +43,7 @@ from .miniswe_integration import MiniSweAdapter, ProviderModelMismatch
 from .provider_limits import (
     ProviderContextWindowUnavailable,
     ProviderRequestTooLarge,
+    build_provider_request_envelope,
     provider_request_tokens,
     render_and_admit_provider_request,
 )
@@ -67,6 +68,12 @@ PLAN_BLOCK_TAG = "[GT_PERSISTENT_PLAN]"
 # exactly AT the ceiling, which is what a binding limit looks like. The ask is
 # smaller now; this is the headroom that lets a converging chain finish.
 PLAN_MAX_OUTPUT_TOKENS = 32768
+# Bound on how many complete trailing turn-groups the provider view keeps
+# inline when compacting; older complete turns are archived with a
+# retrievable reference. The caller used to pass ``len(messages)``, which
+# made the bound unreachable and collapsed the structural turn selection in
+# ``compact_provider_view`` to a byte-budget-only fill.
+PROVIDER_VIEW_MAX_TAIL_TURNS = 8
 
 _SUBMIT_REFUSED_OUTPUT = "submission withheld by the Groundtruth contract gate"
 
@@ -910,15 +917,37 @@ def install_runtime_hooks(
             except ImportError:
                 tools = None
         try:
-            from .context import compact_provider_view
+            from .context import compact_provider_view, message_chars
             from .output_evidence import EvidenceStore
 
+            input_budget_tokens = max(1, context_window - reserved_output)
+            # The char pass below only elides; the token-accurate admission
+            # pass still enforces the real window afterward. Derive the
+            # elision budget from THIS request's measured chars-per-token
+            # density: the flat 2-chars-per-token proxy elided history
+            # roughly twice as early as the provider window required (code
+            # text runs ~3.5-4 chars/token).
+            probe_tokens = provider_request_tokens(
+                build_provider_request_envelope(
+                    messages=messages,
+                    model=model_name,
+                    model_kwargs=model_kwargs,
+                    tools=tools,
+                    call_kwargs=kwargs,
+                )
+            )
+            char_budget = max(
+                1,
+                message_chars(messages)
+                * input_budget_tokens
+                // max(1, probe_tokens),
+            )
             # This seam receives Mini-SWE's provider-rendered messages. Keep its
             # complete current action batch and archive older complete turns.
             messages, history_receipt = compact_provider_view(
                 messages, checkpoint="",
-                char_budget=max(1, context_window - reserved_output) * 2,
-                max_tail_turns=max(2, len(messages)),
+                char_budget=char_budget,
+                max_tail_turns=PROVIDER_VIEW_MAX_TAIL_TURNS,
                 artifact_store=EvidenceStore(adapter.engine_state.layout.evidence_root),
             )
             adapter.store.append("context_assembly", **history_receipt)
@@ -1787,6 +1816,19 @@ def install_runtime_hooks(
     model.query = MethodType(query, model)
     if callable(transport):
         model._query = MethodType(query_transport, model)
+        # The admission refusals raised inside query_transport are
+        # deterministic (``retryable = False``): a replayed request can only
+        # refuse again. Register them on the model's own abort list so the
+        # tenacity loop in ``LitellmModel.query`` stops after one attempt
+        # instead of spending up to ten billed retries on the same refusal.
+        # Instance-scoped: the shared class list is left untouched.
+        abort_exceptions = getattr(model, "abort_exceptions", None)
+        if isinstance(abort_exceptions, list):
+            model.abort_exceptions = [
+                *abort_exceptions,
+                ProviderContextWindowUnavailable,
+                ProviderRequestTooLarge,
+            ]
     agent._gt_original_execute_actions = execute
     agent.execute_actions = MethodType(execute_actions, agent)
     handle = RuntimeHookHandle(

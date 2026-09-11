@@ -2365,3 +2365,127 @@ def test_transport_failure_preserves_pending_deliveries_for_retry(
     assert adapter.contract_shipped
     wire = json.dumps(agent.model.calls[-1])
     assert "queued fact" in wire
+
+
+def test_provider_admission_refusal_is_not_retried(tmp_path, monkeypatch):
+    """F3: a deterministic local refusal must abort, not retry.
+
+    ``provider_limits`` marks ``ProviderRequestTooLarge`` and
+    ``ProviderContextWindowUnavailable`` ``retryable = False``, but the model's
+    ``abort_exceptions`` never listed them, so the tenacity loop replayed a
+    request that can only refuse again -- up to 10 billed attempts.
+    """
+    import tenacity
+    from minisweagent.models import litellm_model as litellm_model_module
+
+    from gt_engine.miniswe_typed_actions import GroundTruthLitellmModel
+    from gt_engine.provider_limits import ProviderContextWindowUnavailable
+
+    _configure_fixture_provider(monkeypatch)
+    # A request measured at 500 tokens against a 90-token input budget is a
+    # deterministic local refusal, not a transient transport failure.
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "100")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "10")
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _payload: 500)
+
+    def fast_retry(*, logger, abort_exceptions):
+        # The production predicate, without the exponential backoff: the test
+        # must observe the retry DECISION, not spend real seconds sleeping.
+        return tenacity.Retrying(
+            reraise=True,
+            stop=tenacity.stop_after_attempt(4),
+            retry=tenacity.retry_if_not_exception_type(tuple(abort_exceptions)),
+        )
+
+    monkeypatch.setattr(litellm_model_module, "retry", fast_retry)
+    agent = FakeAgent()
+    agent.model = GroundTruthLitellmModel(
+        model_name="fixture/model", model_kwargs={}, cost_tracking="ignore_errors"
+    )
+    adapter = MiniSweAdapter(
+        task_id="no-retry", state_dir=tmp_path / "state", predicates=[],
+        issue_text="Fix it.",
+    )
+    install_runtime_hooks(agent, _session(adapter))
+    attempts = []
+    wrapped = agent.model._query
+
+    def counting_transport(messages, **kwargs):
+        attempts.append(messages)
+        return wrapped(messages, **kwargs)
+
+    agent.model._query = counting_transport
+    with pytest.raises(ProviderRequestTooLarge):
+        agent.model.query([{"role": "user", "content": "task"}])
+    assert len(attempts) == 1
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    refused = [
+        row for row in rows
+        if row["event"] == "provider_admission" and row.get("status") == "refused"
+    ]
+    assert len(refused) == 1
+    assert refused[0]["reason"] == "GT_PROVIDER_REQUEST_TOO_LARGE"
+
+    # The unavailable-window refusal is the same deterministic class.
+    monkeypatch.delenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE")
+    attempts.clear()
+    with pytest.raises(ProviderContextWindowUnavailable):
+        agent.model.query([{"role": "user", "content": "task"}])
+    assert len(attempts) == 1
+
+
+def test_provider_view_budget_tracks_tokens_and_tail_is_bounded(
+    tmp_path, monkeypatch
+):
+    """F5: elision must follow the token window, not a 2x char proxy.
+
+    ``char_budget = window * 2`` asked for ~2 chars/token while code runs
+    ~3.5-4, so history was elided roughly twice as early as the real window
+    required -- even though a token-accurate admission pass already exists.
+    And ``max_tail_turns = len(messages)`` disabled the tail bound, so the
+    structural turn selection in ``compact_provider_view`` could never fire.
+    """
+    from gt_engine import context as context_module
+    from gt_engine.context import message_chars
+
+    _configure_fixture_provider(monkeypatch)
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "2000")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "200")
+    # The measured request is 1200 tokens against an 1800-token input
+    # budget: it fits the provider window as rendered.
+    monkeypatch.setattr(rt, "provider_request_tokens", lambda _payload: 1200)
+    agent = FakeAgent()
+    agent.model = TransportFakeModel()
+    adapter = MiniSweAdapter(
+        task_id="budget", state_dir=tmp_path / "state", predicates=[]
+    )
+    install_runtime_hooks(agent, _session(adapter))
+    captured: dict = {}
+    real_compact = context_module.compact_provider_view
+
+    def spy(view_messages, **kwargs):
+        captured.update(kwargs)
+        return real_compact(view_messages, **kwargs)
+
+    monkeypatch.setattr(context_module, "compact_provider_view", spy)
+    messages = [{"role": "user", "content": "task"}]
+    for index in range(10):
+        messages.append({"role": "assistant", "content": f"reasoning {index}"})
+        messages.append({"role": "user", "content": "x" * 400})
+    agent.model._query(messages)
+
+    probe_chars = message_chars(messages)
+    # The elision budget must be the token budget expressed in this
+    # request's own measured char density. The old proxy would have passed
+    # max(1, 2000 - 200) * 2 = 3600 chars and elided a request the token
+    # window can hold whole.
+    assert captured["char_budget"] == probe_chars * 1800 // 1200
+    assert captured["char_budget"] >= probe_chars
+    assert captured["char_budget"] != 1800 * 2
+    # A real bound, not len(messages): structural tail selection must be
+    # able to fire when the history runs long.
+    assert captured["max_tail_turns"] == rt.PROVIDER_VIEW_MAX_TAIL_TURNS
+    assert 2 <= captured["max_tail_turns"] < len(messages)
