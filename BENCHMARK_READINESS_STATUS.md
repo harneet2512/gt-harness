@@ -4,6 +4,33 @@ Recorded on 2026-09-05. This reference supersedes older status claims in
 `GT_HARNESS_SESSION_HANDOFF.md`. The dispatch procedure remains
 `BENCHMARK_DISPATCH_CHECKLIST.md`.
 
+## Current verified release — 2026-09-11 (supersedes 4df7ab9c below)
+
+The latest verified functional release is harness
+`aa7cf40c486447678665282bba66fff28b55dc83` on
+`codex/context-plan-integrity`.
+
+| Artifact | Exact identity |
+|---|---|
+| Canonical provider-free run | [34568047031, SUCCESS](https://github.com/harneet2512/gt-harness/actions/runs/34568047031) |
+| Groundtruth source | `f1e0a7f3659648d43fae70910bf69b6fa8b300b2` |
+| Groundtruth source tree | `295d64c48160a59795456b796d5531a8f74a506a` |
+| Groundtruth wheel SHA-256 | `97af90f5480def3f9370cbbfef5f4dc6257b80ba015a584ccbf169c2be0fbe6c` |
+| Linux producer SHA-256 | `f132885c4686ae214721dfd2163665f2ec7954c321eadb442214ff08c26e1069` |
+| Build-info SHA-256 | `85575e5ae6ae5d8ecc780ad43c302556059515ba325386b307bdb56288c0b7b4` |
+| Review-inbox commit | `911a003c5cecc959768a98c6e6a16a1b9823c7f9` |
+| Exact-source review packets | `har83-context-plan-producer-f1e0a7f3-ci` + 13 prior |
+| Lineage | PASS, 14 packets, wheel correspondence 323 files, provider_calls=0 |
+| Feature matrix | 21/21 WITNESSED at 6479fb00 (superset covering aa7cf40c state) |
+
+This release carries the analysis-phase fix (resolution tables now populate:
+0->71544 callsites, 0->14526 symbols, 0->1835 processes on matplotlib), the six
+derived MCP endpoints, communities/processes consumption, and transport fixes
+F1/F2/F3/F5/F10. Amend-vs-rebuild parity re-proven +0/-0 identical on the
+populated shape (739527 nodes / 1085943 edges).
+
+## Prior verified release (superseded)
+
 ## Current verified release
 
 The latest verified functional release is harness
