@@ -22,13 +22,13 @@
  },
  "groundtruth": {
   "repository": "https://github.com/harneet2512/groundtruth.git",
-  "source_commit": "6ce4068193e3fc2e7e0cfdd495f3ff616078644b",
-  "source_tree": "49a6f06c2177c86d220018037f61fc96fca6a5d5",
+  "source_commit": "4525ef38f33465b143a5773920d5809d97fc7a92",
+  "source_tree": "fb1ac16f4a980a3612bf43233058b6b1f615b6fc",
   "graph_schema_version": "v15.2-trust-tier",
   "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-  "wheel_sha256": "97af90f5480def3f31f0ca9595b4c0fcca828182637b119c1e38ab34b251af3d",
+  "wheel_sha256": "5957162323f495a302e3f457a02045af56030cba848603533a2b82dc33d5a80d",
   "producer_path": "vendor/gt-index-linux-amd64",
-  "producer_sha256": "f32802d0e0fc4af95a93328dd29c97ed8a2aca7d8602899823723d1a15e798dd",
+  "producer_sha256": "1acf7c5fa5ee2533fd9c3a34f58fee950b8255e5f464e311a574a53fb90b46c1",
   "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
   "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
   "accepted_default_ref": "origin/gt-trial",
@@ -48,14 +48,15 @@
   "producer_build": {
    "schema": "gt.producer_build_binding.v1",
    "status": "VERIFIED",
-   "source_commit": "6ce4068193e3fc2e7e0cfdd495f3ff616078644b",
-   "source_tree": "49a6f06c2177c86d220018037f61fc96fca6a5d5",
-   "binary_sha256": "f32802d0e0fc4af95a93328dd29c97ed8a2aca7d8602899823723d1a15e798dd",
+   "source_commit": "4525ef38f33465b143a5773920d5809d97fc7a92",
+   "source_tree": "fb1ac16f4a980a3612bf43233058b6b1f615b6fc",
+   "binary_sha256": "1acf7c5fa5ee2533fd9c3a34f58fee950b8255e5f464e311a574a53fb90b46c1",
    "build_info_path": "vendor/gt-index-linux-amd64.build-info.json",
-   "build_info_sha256": "ab3f997245214a298d2f71bf4433afbbe1f94f427cc3142f46ae30c8aa102551",
+   "build_info_sha256": "51136ba7f1e8fcf96fd31acb24a7d992f760b831320fff35e2de487f4860ce10",
    "builder_image_digest": "af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
    "build_tags": "netgo,osusergo,sqlite_fts5",
-   "static_linking": true
+   "static_linking": true,
+   "source_fingerprint": "3053606059aea28f725af15a50ef036f99a9fe59d55148a1a668636cb11286bf"
   },
   "lineage_exception": {
    "schema": "gt.groundtruth_lineage_exception.v1",
