@@ -49,6 +49,8 @@ FEATURE_EVIDENCE: dict[str, tuple[str, ...]] = {
     ),
     "syntax_result": (
         "tests/test_gt_engine.py::test_post_edit_syntax_failure_delivers_immediately",
+        "tests/test_miniswe_covering_syntax.py::"
+        "test_syntax_probe_reports_broken_edit_on_certified_nonpython_surface",
     ),
     "persistent_plan": (
         "tests/test_miniswe_runtime.py::"

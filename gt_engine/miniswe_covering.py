@@ -24,6 +24,17 @@ _SOURCE_EXTS = frozenset({
     ".cc", ".h", ".cpp", ".rb", ".php", ".swift", ".cs",
 })
 
+# Extensions the certified producer parser checks (parser_inspection._LANGUAGE,
+# mirrored from compile_transaction_artifacts). Edits outside this set have no
+# harness-certified syntax check and the probe abstains.
+_SYNTAX_PROBE_EXTS = frozenset({
+    ".py", ".pyi", ".go", ".ts", ".tsx", ".js", ".jsx", ".rs",
+})
+
+# gt-index -inspect-jsonl rejects request payloads above this bound
+# (cmd/gt-index/inspection.go maxInspectionBytes).
+_MAX_INSPECTION_BYTES = 2 * 1024 * 1024
+
 
 def _repo_relative(path: str, repo_root: str) -> str | None:
     try:
@@ -108,22 +119,94 @@ def attribute_test_failure(adapter, command: str, output: str, *, returncode):
     )
 
 
+def _syntax_probe_rows(adapter, files: list[str]) -> dict[str, dict] | None:
+    """Producer-certified syntax rows for each file's on-disk post-edit bytes.
+
+    Reuses the same ``gt-index -inspect-jsonl`` boundary as
+    ``compile_transaction_artifacts``: the pinned producer parses the
+    caller-supplied bytes with tree-sitter and returns one typed row per
+    request. Returns ``None`` when that boundary is unavailable so the caller
+    can degrade to the Python compile probe; a file that cannot be resolved
+    under the repo root, read, or fit the producer byte bound simply has no
+    row - an abstention, never a finding.
+    """
+    from .parser_inspection import ParserInspectionRequest, inspect_sources
+
+    root = adapter.repo_root or os.getcwd()
+    requests: list[ParserInspectionRequest] = []
+    names: list[str] = []
+    for rel in files:
+        path = rel if os.path.isabs(rel) else os.path.join(root, rel)
+        repo_rel = _repo_relative(path, root)
+        if repo_rel is None:
+            continue
+        try:
+            content = Path(path).read_bytes()
+        except OSError:
+            continue
+        if len(content) > _MAX_INSPECTION_BYTES:
+            continue
+        requests.append(ParserInspectionRequest(
+            f"syntax_probe:{repo_rel}", repo_rel, content,
+        ))
+        names.append(rel)
+    if not requests:
+        return {}
+    try:
+        rows = inspect_sources(requests)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    return dict(zip(names, rows, strict=True))
+
+
 def run_syntax_probe(adapter, changed_files: tuple[str, ...]) -> str:
     """Proactive post-edit syntax check (syntax_result / GT_EDIT_CHECK).
 
     Reframed trigger: GT runs a bounded syntax probe on every edit of a
-    checkable file, instead of waiting for the model to run a check. A broken
-    edit is delivered as syntax evidence immediately. Correct-or-quiet: no
-    edited .py files or a clean compile.
+    producer-checkable file, instead of waiting for the model to run a check.
+    A broken edit is delivered as syntax evidence immediately. The certified
+    producer parser owns the check for every extension it parses
+    (.py/.pyi/.go/.ts/.tsx/.js/.jsx/.rs); where that boundary is unavailable,
+    the probe degrades to ``py_compile`` for Python files and stays quiet for
+    the rest. Correct-or-quiet: no edited checkable file or a clean parse.
     """
     if os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1":
         return ""
-    py_files = [f for f in changed_files if f.endswith(".py")]
-    if not py_files:
+    checkable = [
+        rel for rel in dict.fromkeys(changed_files)
+        if os.path.splitext(rel)[1].lower() in _SYNTAX_PROBE_EXTS
+    ][:3]
+    if not checkable:
         return ""
+    rows = _syntax_probe_rows(adapter, checkable)
     lines: list[str] = []
-    for rel in py_files[:3]:
+    for rel in checkable:
+        row = rows.get(rel) if rows is not None else None
+        if row is not None:
+            if row.get("complete"):
+                continue
+            diagnostics = [
+                str(item).strip()
+                for item in (row.get("diagnostics") or ())
+                if str(item).strip()
+            ]
+            # "syntax_tree_incomplete" is the producer's only parse-failure
+            # diagnostic - positive syntax evidence. Any other incomplete row
+            # is a request/transport fault (path_invalid, content_too_large,
+            # parser_error:...), an abstention rather than a finding, and the
+            # file falls through to the degraded per-language check.
+            if "syntax_tree_incomplete" in diagnostics:
+                tail = diagnostics[:8]
+                producer = str(row.get("parser_identity") or "")
+                if producer:
+                    tail = [*tail, f"producer={producer}"]
+                lines.append(f"{rel}: syntax error\n" + "\n".join(tail))
+                continue
+        if not rel.endswith((".py", ".pyi")):
+            continue
         path = rel if os.path.isabs(rel) else os.path.join(adapter.repo_root or "", rel)
+        if not os.path.isfile(path):
+            continue
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "py_compile", path],
