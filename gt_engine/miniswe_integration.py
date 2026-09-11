@@ -2449,6 +2449,7 @@ class MiniSweAdapter(GroundtruthController):
                 repo_root=self.repo_root,
                 issue_text=self.issue_text,
                 episode=episode,
+                producer_recorder=self._producer_invocation_record,
                 producer_audit_context={
                     "observation_id": f"{self.task_id}:{self.iteration}",
                     "decision_id": f"miniswe:{self.iteration}",
@@ -2457,6 +2458,55 @@ class MiniSweAdapter(GroundtruthController):
                 },
             )
         return self._gateway_state
+
+    def _producer_invocation_record(self, row: dict[str, Any]) -> None:
+        """Journal GT core's ``gt.producer_invocation.v1`` rows.
+
+        Without this recorder every producer evaluation — entered / delivered /
+        abstained / suppressed with its reason — is built then dropped, which is
+        why a conditional family looks identical whether it abstained correctly
+        or never ran. Wiring it closes the eligibility-vs-delivery audit gap.
+        """
+        if self._journal_sealed or self.store is None:
+            return
+        safe = dict(row)
+        evidence_types = [
+            str(t) for t in safe.get("evidence_types") or () if str(t)
+        ]
+        feature_id = next(
+            (
+                feature_for_evidence(t)
+                for t in evidence_types
+                if feature_for_evidence(t)
+            ),
+            None,
+        )
+        self.store.append(
+            "producer_invocation",
+            invocation_schema=str(safe.get("schema") or "gt.producer_invocation.v1"),
+            invocation_id=str(safe.get("invocation_id") or ""),
+            producer=str(safe.get("producer") or ""),
+            evidence_types=tuple(evidence_types),
+            feature_id=feature_id,
+            invocation_site=str(safe.get("invocation_site") or ""),
+            event_type=str(safe.get("event_type") or ""),
+            subject=str(safe.get("subject") or ""),
+            outcome=str(safe.get("outcome") or ""),
+            action_index=int(safe.get("action_index") or 0),
+            observation_id=str(safe.get("observation_id") or ""),
+            decision_id=str(safe.get("decision_id") or ""),
+            returned_fact=bool(safe.get("returned_fact")),
+            returned_nothing=bool(safe.get("returned_nothing")),
+            registry_allowed=bool(safe.get("registry_allowed")),
+            authority_result=str(safe.get("authority_result") or ""),
+            dedup_result=str(safe.get("dedup_result") or ""),
+            abstention_reasons=tuple(
+                str(r) for r in safe.get("abstention_reasons") or () if str(r)
+            ),
+            suppression_reasons=tuple(
+                str(r) for r in safe.get("suppression_reason") or () if str(r)
+            ),
+        )
 
     def bind_provider_response(
         self,

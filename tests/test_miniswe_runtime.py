@@ -2238,6 +2238,66 @@ def test_no_pre_edit_graph_leaves_the_producers_as_they_were(monkeypatch, tmp_pa
     assert seen["graph_db"] is None
 
 
+def test_miniswe_journals_producer_invocations_with_feature_identity(tmp_path):
+    """The eligibility-vs-delivery audit: every producer evaluation must land in
+    the run journal, tagged with its canonical capability identity.
+
+    Without a ``producer_recorder`` the gateway builds each ``entered`` /
+    ``delivered`` / ``abstained`` audit row then drops it, so a conditional
+    family is indistinguishable between "correctly abstained" and "never ran".
+    """
+    import json
+
+    adapter = MiniSweAdapter(
+        task_id="invocation-audit", state_dir=tmp_path, predicates=[],
+        contract=extract_task_contract("Fix a caller."))
+    adapter.start_task()
+
+    recorder = adapter.gateway_state().producer_recorder
+    assert callable(recorder), (
+        "miniswe GatewayState must wire producer_recorder so the eligibility "
+        "audit reaches the journal"
+    )
+
+    recorder({
+        "schema": "gt.producer_invocation.v1",
+        "layer": "producer.invocation",
+        "outcome": "abstained",
+        "invocation_id": "a" * 64,
+        "producer": "caller_contract",
+        "evidence_types": ["caller_contract_view", "caller_break"],
+        "invocation_site": "gateway.edit.caller_contract",
+        "event_type": "edit_result",
+        "subject": "mod.py",
+        "action_index": 1,
+        "observation_id": "invocation-audit:0",
+        "decision_id": "miniswe:0",
+        "returned_fact": False,
+        "returned_nothing": True,
+        "registry_allowed": True,
+        "abstention_reasons": ["no_caller_in_scope"],
+        "suppression_reason": [],
+    })
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    invocation = [r for r in rows if r.get("event") == "producer_invocation"]
+    assert invocation, "producer_invocation rows must land in the run journal"
+    row = invocation[-1]
+    assert row["feature_id"] == "caller_contract"
+    assert row["outcome"] == "abstained"
+    assert row["producer"] == "caller_contract"
+    assert row["registry_allowed"] is True
+    assert row["returned_nothing"] is True
+    assert "no_caller_in_scope" in row["abstention_reasons"]
+
+    from gt_engine.event_journal import verify_event_journal
+
+    assert verify_event_journal(adapter.store.path).valid
+
+
 def test_wire_tool_set_matches_the_recorded_request_envelope(tmp_path, monkeypatch):
     """F1: the admitted tool set must reach the wire, not only the envelope.
 
