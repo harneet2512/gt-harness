@@ -1,0 +1,40 @@
+{
+ "basis": "exact_ci_static_build_resolver_reexport_caller_fallback_localizer_seam_and_dispatch_audit",
+ "detail": {
+  "build_conclusion": "success",
+  "build_info_sha256": "178d75d6bdeb29d50349e611617a8071a3fffa17420a86a462a5456a90e0d37d",
+  "build_tags": "netgo,osusergo,sqlite_fts5",
+  "build_workflow_run_id": 34650899610,
+  "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+  "changes": [
+   "4525ef38 resolver: Python __init__.py re-export/relative-import chase to defining file (import edges 4->39, name_match 71->65 on aiomonitor); runtime: WARNING-tier caller-contract fallback for candidate edges, normalize_event no-operand fix, _localize seam wired to graph_localizer.localize, producer.dispatch not_entered skip rows",
+   "b4d33a0c tests: drop unused pytest imports (ruff F401)",
+   "7db2f460 style: ruff-format runtime/gateway.py and new test files"
+  ],
+  "full_producer_ci_conclusion": "success",
+  "full_producer_ci_run_id": 34650897819,
+  "go_toolchain": "go1.22.5",
+  "measured": {
+   "binding": "producer_build VERIFIED: producer_sha256==545bb28c, source_commit==7db2f460, source_tree==e38deadf (root tree), build_info_sha256==178d75d6, source_fingerprint==30536060",
+   "edges": "re-export chase: from aiomonitor import Monitor resolves import/1.0 to monitor.py defining file; candidate caller fallback emits WARNING-tier envelope when FACT-tier absent; dispatch audit rows distinguish entered vs not_entered",
+   "go_tests": "CI go-build green on 7db2f460: Full Go test suite + resolver unit tests + data-flow base + indexing + closure preflight (sqlite_fts5)",
+   "python_tests": "CI test matrix green on ubuntu/windows/macos 3.11+3.12; local: 1706 passed, 24 skipped",
+   "wheel": "groundtruth_mcp-1.0.0-py3-none-any.whl sha256=79cb3547 built from git archive; verify_wheel_source correspondence PASS vs 7db2f460 src/"
+  },
+  "producer_sha256": "545bb28c9fa008d6f517575c07a6c798c26182e74ac2be93eae729c3c175801c",
+  "remaining": [
+   "canonical provider-free acceptance on final bundle SHA",
+   "paid smoke approval gate"
+  ],
+  "repository": "harneet2512/groundtruth",
+  "scope": "Context-compiler fixes: Go resolver chases Python package re-export chains (relative .mod/..pkg paths, transitive, cycle-safe, deterministic); runtime caller-contract view falls back to WARNING-tier candidate callers; normalize_event stops synthesizing file_view with no operand; _localize seam wired to graph_localizer.localize (FTS5+anchors); producer.dispatch skip rows record not_entered+skip_reason for gated producers (patch_delta, change_surface, ranked_localization).",
+  "source_tree": "e38deadf9c97096b5f551f50cdcaef6531a9a243"
+ },
+ "head_sha": "7db2f460810c43059cf1c3797eac99e2ae412ed8",
+ "kind": "check_outcome",
+ "packet_digest_sha256": "999f7e880f681ac4ba238cf5c44e83a8b639e632a6711fc467da82414b3124c4",
+ "packet_id": "har83-context-plan-producer-7db2f460-ci",
+ "schema": "gt.review_packet.v1",
+ "status": "PASS",
+ "ticket": "HAR-83"
+}
