@@ -26,6 +26,7 @@
   Scene,
   Fog,
   TorusGeometry,
+  CylinderGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -120,6 +121,23 @@ export class Renderer3D {
     roughness: 1,
     metalness: 0,
   });
+  /* A district is a neighborhood: it needs its own color. The slab takes
+     the hue at full softness, the rock takes it darkened. */
+  private districtTint(name: string): Color {
+    const lower = name.toLowerCase();
+    const named: [RegExp, string][] = [
+      [/core|engine|server|src/, "#7ba7d9"],
+      [/ui|frontend|web|visual|docs/, "#b394dd"],
+      [/service|auth|api/, "#dd92a6"],
+      [/infra|deploy|ops|tool|devcontainer/, "#85c4a2"],
+      [/test|eval|spec/, "#ddb36b"],
+      [/example|sample|demo|tutorial/, "#6fbccb"],
+      [/agent|worker|producer/, "#9e93d8"],
+    ];
+    const fallback = ["#8fb4d9", "#ab9ade", "#8ac2ab", "#d9a488", "#c3a3cf"];
+    const hit = named.find(([p]) => p.test(lower));
+    return new Color(hit?.[1] ?? fallback[pathHash(name) % fallback.length]);
+  }
   private contact = new MeshBasicMaterial({
     color: 0x171b20,
     transparent: true,
@@ -386,41 +404,45 @@ export class Renderer3D {
     for (const d of layout.districts) {
       const geometry = terraceGeometry(pathHash(d.name) % 37);
       this.terraces.push(geometry);
+      const tint = this.districtTint(d.name);
+      const slab = this.ground.clone();
+      slab.color.copy(tint).lerp(new Color(0xffffff), 0.55);
+      const rock = this.rock.clone();
+      rock.color.copy(tint).multiplyScalar(0.75);
       const footing=new Mesh(geometry,this.contact);
       footing.layers.set(1);
       footing.position.set(d.x+d.width/2,-.15,d.z+d.depth/2);
       footing.scale.set(d.width*1.18,.02,d.depth*1.18);
       this.terrain.add(footing);
       for (let layer = 0; layer < TERRACE_LEVELS.length; layer++) {
-        const m = new Mesh(geometry, this.ground);
+        const m = new Mesh(geometry, slab);
         m.receiveShadow = true; m.castShadow = true;
         m.position.set(d.x + d.width / 2, TERRACE_LEVELS[layer].y, d.z + d.depth / 2);
         const expansion = TERRACE_LEVELS[layer].scale;
-        m.scale.set(d.width * expansion, 1, d.depth * expansion);
+        /* The extrusion is 1.4 deep; squeezing it to a plate is what makes
+           the district a platform instead of a cuboid. */
+        m.scale.set(d.width * expansion, 0.32, d.depth * expansion);
         this.terrain.add(m);
       }
-      // The landmass under the terraces: two tapering rock layers so a
-      // district reads as a floating island, not a slab on a table.
-      const cliff=new Mesh(geometry,this.rock);
+      /* A thin shadowed skirt, not a landmass: just enough to give the
+         platform an edge and a shadow side. The district's mass belongs
+         to the buildings on it, not the ground under it. */
+      const cliff=new Mesh(geometry,rock);
       cliff.position.set(d.x+d.width/2,0,d.z+d.depth/2);
-      cliff.scale.set(d.width*1.1,26,d.depth*1.1);
+      cliff.scale.set(d.width*1.14,6,d.depth*1.14);
       cliff.castShadow=true;
       this.terrain.add(cliff);
-      const cliff2=new Mesh(geometry,this.rock);
-      cliff2.position.set(d.x+d.width/2,-26,d.z+d.depth/2);
-      cliff2.scale.set(d.width*.72,10,d.depth*.72);
-      this.terrain.add(cliff2);
       // Planting: a loose ring of trees around the district's mid-terrace.
       const seed=pathHash(d.id);
       const trees=new InstancedMesh(this.tree,this.leaf,18);
       for(let i=0;i<18;i++) {
         const a=(i/18)*Math.PI*2+((seed%97)/97)*Math.PI*2;
         const wobble=((seed+i*31)%100)/100;
-        const r=.5+.14*wobble;
+        const r=.45+.05*wobble;
         const tx=d.x+d.width/2+Math.cos(a)*d.width*r;
         const tz=d.z+d.depth/2+Math.sin(a)*d.depth*r;
-        const s=.8+((seed+i*13)%100)/100*.9;
-        this.matrix.position.set(tx,4.6,tz);
+        const s=2.6+((seed+i*13)%100)/100*2.2;
+        this.matrix.position.set(tx,.5,tz);
         this.matrix.scale.set(s,s,s);
         this.matrix.rotation.set(0,a,0);
         this.matrix.updateMatrix();
@@ -430,18 +452,26 @@ export class Renderer3D {
       this.terrain.add(trees);
     }
     if(districts.length>1){
-      // The monument at the city's middle — the mark the site stamp
-      // carries, raised so it can be seen from anywhere.
+      /* The GT hub: a thin circular forum at the city's middle, carrying the
+         raised ring. Every district orients around it; the idle drone docks
+         here. */
+      const forum=new Mesh(
+        new CylinderGeometry(20,22,0.5,48),
+        new MeshStandardMaterial({color:0xf2f4f7,roughness:.85,metalness:0}),
+      );
+      forum.position.set(cx,0.25,cz);
+      forum.receiveShadow=true;
+      this.terrain.add(forum);
       const ring=new Mesh(
         new TorusGeometry(9,1.1,14,48),
         new MeshStandardMaterial({color:0xdfe5ec,roughness:.5,metalness:.25,emissive:new Color(0x7fb0d8),emissiveIntensity:.5}),
       );
-      ring.position.set(cx,20,cz);
+      ring.position.set(cx,14,cz);
       ring.rotation.x=Math.PI/2;
       this.terrain.add(ring);
       const base=new Mesh(this.box,this.ground);
-      base.position.set(cx,7.2,cz);
-      base.scale.set(4,14,4);
+      base.position.set(cx,4.5,cz);
+      base.scale.set(4,9,4);
       this.terrain.add(base);
     }
     const contacts = new InstancedMesh(
@@ -505,11 +535,26 @@ export class Renderer3D {
   fit() {
     this.userOwned = false;
     if (!this.layout?.nodes.length || this.width < 2 || this.height < 2) return;
-    const ds = this.layout.districts;
+    /* Fit to the mass, not the outliers: the districts holding 90% of the
+       files frame the shot; a stray one-file site lives at the edge of the
+       frame instead of shrinking the whole city to accommodate it. */
+    const counts = new Map<string, number>();
+    for (const n of this.layout.nodes) counts.set(n.site, (counts.get(n.site) ?? 0) + 1);
+    const total = this.layout.nodes.length;
+    const byMass = [...this.layout.districts].sort(
+      (a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0),
+    );
+    const ds: District[] = [];
+    let mass = 0;
+    for (const d of byMass) {
+      ds.push(d);
+      mass += counts.get(d.id) ?? 0;
+      if (mass >= total * 0.9) break;
+    }
     const minX=Math.min(...ds.map(d=>d.x-d.width*.1)), maxX=Math.max(...ds.map(d=>d.x+d.width*1.1));
     const minZ=Math.min(...ds.map(d=>d.z-d.depth*.1)), maxZ=Math.max(...ds.map(d=>d.z+d.depth*1.1));
     const target=new Vector3((minX+maxX)/2,8,(minZ+maxZ)/2);
-    const direction=new Vector3(.50,.7071,.50).normalize();
+    const direction=new Vector3(.55,.62,.55).normalize();
     const corners: Vector3[]=[];
     for(const d of ds) {
       const geometry=terraceGeometry(pathHash(d.name)%37);
@@ -534,7 +579,7 @@ export class Renderer3D {
       const distance=(lo+hi)/2;
       this.camera.position.copy(target).addScaledVector(direction,distance);
       this.camera.lookAt(target); this.camera.updateMatrixWorld();
-      const fits=corners.every(p=>{const q=p.clone().project(this.camera);return Math.abs(q.x)<=.88 && Math.abs(q.y)<=.88 && q.z<1;});
+      const fits=corners.every(p=>{const q=p.clone().project(this.camera);return Math.abs(q.x)<=.95 && Math.abs(q.y)<=.92 && q.z<1;});
       if(fits) hi=distance; else lo=distance;
     }
     const distance=hi;
@@ -781,7 +826,9 @@ export class Renderer3D {
           ];
           const tint = new Color(named.find(([pattern]) => pattern.test(cluster))?.[1] ??
             ["#c7d8e8", "#d4d5e6", "#d1dfd6"][pathHash(cluster) % 3]);
-          const c=this.colorTo[k][i].set("#ffffff").lerp(tint,.82);
+          /* Facades stay near-neutral; the district's hue lives on the
+             platform and its labels, not on every wall. */
+          const c=this.colorTo[k][i].set("#f0f2f5").lerp(tint,.22);
           if(id === state.selectedId) c.lerp(new Color("#8db6e6"),.45);
           else if(id === state.hoverId) c.multiplyScalar(1.13);
           else if(state.hoverId || (state.matches && !state.matches.has(id))) c.multiplyScalar(.76);
@@ -1067,7 +1114,7 @@ export class Renderer3D {
       if(named.has(d.name))continue;named.add(d.name);
       const count=this.layout.nodes.filter(p=>p.cluster===d.name).length;
       if(!count)continue;
-      label(d.name||"Repository",`${count.toLocaleString()} files`,d.x+d.width*.2,9,d.z+d.depth*.15);
+      label(d.name||"Repository",`${count.toLocaleString()} files`,d.x+d.width*.2,3.5,d.z+d.depth*.15);
     }
   }
   dispose() {

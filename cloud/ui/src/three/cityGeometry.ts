@@ -133,7 +133,7 @@ export function facadeTexture(): CanvasTexture {
   for (let r = 0; r < rows; r++) {
     for (let col = 0; col < cols; col++) {
       // A hairline window reveal — present, not loud.
-      g.fillStyle = "rgba(96,112,140,0.16)";
+      g.fillStyle = "rgba(96,112,140,0.24)";
       g.fillRect(col * cw + cw * 0.28, r * rh + rh * 0.30, cw * 0.44, rh * 0.42);
     }
   }
