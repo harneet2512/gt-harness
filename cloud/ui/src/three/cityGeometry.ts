@@ -47,9 +47,11 @@ export function buildingGeometry(kind: number): BufferGeometry {
   switch (kind) {
     case 0:
       box(0, 0, 0, 1, 0.48, 1);
+      box(-0.2, 0.48, -0.15, 0.4, 0.1, 0.4);   // rooftop plant
       break;
     case 1:
       box(0, 0, 0, 0.55, 1, 0.65);
+      box(0, 1, 0, 0.09, 0.22, 0.09);          // antenna spire
       break;
     case 2:
       box(0, 0, 0, 1, 0.38, 1);
@@ -59,6 +61,7 @@ export function buildingGeometry(kind: number): BufferGeometry {
     case 3:
       box(-0.27, 0, 0, 0.44, 0.85, 0.85);
       box(0.27, 0, 0.1, 0.44, 0.6, 0.85);
+      box(0, 0.58, 0.05, 0.5, 0.05, 0.5);      // the skybridge
       break;
     case 4:
       box(0, 0, 0, 0.28, 1, 0.95);
@@ -68,6 +71,7 @@ export function buildingGeometry(kind: number): BufferGeometry {
     case 5:
       box(0, 0, 0, 1, 0.2, 1);
       box(-0.14, 0.2, -0.1, 0.55, 0.8, 0.62);
+      box(0.24, 0.2, 0.18, 0.3, 0.45, 0.4);    // podium annex
       break;
     default:
       box(0, 0, 0, 0.84, 0.24, 0.84);
@@ -89,13 +93,14 @@ export function buildingGeometry(kind: number): BufferGeometry {
   return geometry;
 }
 
-/** Smooth architectural contour, with a stable, distinct silhouette per directory. */
+/** Crisp architectural platform: a softened rectangle with the barest
+ *  per-district wobble — a plinth, not an amoeba. */
 export function terraceGeometry(seed: number): BufferGeometry {
   const shape = new Shape();
   for (let i=0; i<96; i++) {
     const a=i/96*Math.PI*2;
-    const radius=0.5*(1+0.035*Math.sin(3*a+seed)+0.02*Math.cos(5*a+seed*.7));
-    const power=.30+(seed%5)*.04;
+    const radius=0.5*(1+0.006*Math.sin(3*a+seed)+0.004*Math.cos(5*a+seed*.7));
+    const power=.72+(seed%3)*.08;
     const x=Math.sign(Math.cos(a))*Math.pow(Math.abs(Math.cos(a)),power)*radius;
     const y=Math.sign(Math.sin(a))*Math.pow(Math.abs(Math.sin(a)),power)*radius;
     if(i===0) shape.moveTo(x,y); else shape.lineTo(x,y);
@@ -119,7 +124,7 @@ export function terraceGeometry(seed: number): BufferGeometry {
  * so six archetypes share two draws' worth of texture memory. `facade`
  * keeps the face near-white so the pastel module tints still read;
  * `lit` is the sparse warm emissive layer on top. */
-export function facadeTexture(): CanvasTexture {
+export function facadeTexture(variant = 0): CanvasTexture {
   const c = document.createElement("canvas");
   c.width = 64; c.height = 96;
   const t = new CanvasTexture(c);
@@ -128,19 +133,35 @@ export function facadeTexture(): CanvasTexture {
   if (!g) return t;
   g.fillStyle = "#ffffff";
   g.fillRect(0, 0, 64, 96);
-  const cols = 4, rows = 8;
-  const cw = 64 / cols, rh = 96 / rows;
-  for (let r = 0; r < rows; r++) {
-    for (let col = 0; col < cols; col++) {
-      // A window reveal that reads from the overview camera.
-      g.fillStyle = "rgba(84,100,128,0.42)";
-      g.fillRect(col * cw + cw * 0.22, r * rh + rh * 0.24, cw * 0.56, rh * 0.5);
+  if (variant === 1) {
+    // Horizontal banding — slab blocks read as long courses of windows.
+    for (let r = 0; r < 10; r++) {
+      g.fillStyle = "rgba(84,100,128,0.38)";
+      g.fillRect(4, r * 9.6 + 3, 56, 3.4);
+    }
+  } else if (variant === 2) {
+    // Sparse large panes — the civic read for podium archetypes.
+    for (let r = 0; r < 5; r++) {
+      for (let col = 0; col < 3; col++) {
+        g.fillStyle = "rgba(84,100,128,0.40)";
+        g.fillRect(6 + col * 19, 6 + r * 18, 13, 12);
+      }
+    }
+  } else {
+    const cols = 4, rows = 8;
+    const cw = 64 / cols, rh = 96 / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let col = 0; col < cols; col++) {
+        // A window reveal that reads from the overview camera.
+        g.fillStyle = "rgba(84,100,128,0.42)";
+        g.fillRect(col * cw + cw * 0.22, r * rh + rh * 0.24, cw * 0.56, rh * 0.5);
+      }
     }
   }
   // The ground floor reads as entrances, slightly deeper.
   g.fillStyle = "rgba(80,95,120,0.22)";
-  for (let col = 0; col < cols; col++) {
-    g.fillRect(col * cw + cw * 0.30, 96 - rh * 0.62, cw * 0.4, rh * 0.52);
+  for (let col = 0; col < 4; col++) {
+    g.fillRect(col * 16 + 4.5, 96 - 6, 10, 5);
   }
   t.needsUpdate = true;
   return t;

@@ -88,7 +88,7 @@ export class Renderer3D {
   private floorMaterial=new MeshStandardMaterial({color:0xf7f8fa,roughness:1,metalness:0});
   private floorGeometry=new PlaneGeometry(8000,8000);
   private siteLinesMaterial=new LineBasicMaterial({color:0x8995a4,transparent:true,opacity:.055,depthWrite:false});
-  private walkwayMaterial=new MeshStandardMaterial({color:0xe5e8eb,roughness:.9,metalness:0,emissive:new Color(0x9db8cc),emissiveIntensity:.28});
+  private walkwayMaterial=new MeshStandardMaterial({color:0xdfe4ea,roughness:.75,metalness:.05,emissive:new Color(0x8fb8d8),emissiveIntensity:.55});
   private siteMarkTexture:CanvasTexture;
   private siteMarkMaterial:MeshBasicMaterial;
   private siteMarkGeometry=new PlaneGeometry(30,15);
@@ -373,9 +373,15 @@ export class Renderer3D {
     }
     for (let kind = 0; kind < 6; kind++) {
       const plots = layout.nodes.filter((p) => p.archetype === kind);
+      /* Each archetype gets its own facade variant — same shader, same
+         state, a different window rhythm — so the city reads as six
+         neighborhoods of architecture, not one stamp repeated. */
+      const mat = this.solids.clone();
+      mat.map = facadeTexture(kind % 3);
+      mat.emissiveMap = litFacadeTexture(kind * 31 + 7);
       const mesh = new InstancedMesh(
         this.geometry[kind],
-        this.solids,
+        mat,
         plots.length,
       );
       mesh.castShadow = true;
@@ -396,6 +402,9 @@ export class Renderer3D {
         const delay = this.riseDelays[kind][i];
         const hidden = startHidden && delay >= 0;
         this.matrix.position.set(p.x, p.y, p.z);
+        /* A quarter-turn by identity: the same archetype reads differently
+           on different plots, doubling the skyline's variety for free. */
+        this.matrix.rotation.set(0, ((pathHash(p.id) >> 4) % 4) * Math.PI / 2, 0);
         this.matrix.scale.set(
           p.width * (hidden ? 0.82 : 1),
           hidden ? 0.001 : p.height,
@@ -442,7 +451,7 @@ export class Renderer3D {
          to the buildings on it, not the ground under it. */
       const cliff=new Mesh(geometry,rock);
       cliff.position.set(d.x+d.width/2,0,d.z+d.depth/2);
-      cliff.scale.set(d.width*1.14,6,d.depth*1.14);
+      cliff.scale.set(d.width*1.14,3.2,d.depth*1.14);
       cliff.castShadow=true;
       this.terrain.add(cliff);
       // Planting: a loose ring of trees around the district's mid-terrace.
@@ -479,27 +488,24 @@ export class Renderer3D {
       stage.scale.set(stageR * 2.6, stageR * 2.6, 1);
       stage.renderOrder = -1;
       this.terrain.add(stage);
-      /* The GT hub: a thin circular forum at the city's middle, carrying the
-         raised ring. Every district orients around it; the idle drone docks
-         here. */
+      /* The center is the repository's root — ontologically it's where
+         every district's route terminates, not a monument. A flat forum:
+         nothing stands here, everything passes through. */
       const forum=new Mesh(
-        new CylinderGeometry(20,22,0.5,48),
-        new MeshStandardMaterial({color:0xf2f4f7,roughness:.85,metalness:0}),
+        new CylinderGeometry(16,16.8,0.5,48),
+        new MeshStandardMaterial({color:0xeef0f3,roughness:.9,metalness:0}),
       );
       forum.position.set(cx,0.25,cz);
       forum.receiveShadow=true;
       this.terrain.add(forum);
-      const ring=new Mesh(
-        new TorusGeometry(12,1.4,14,48),
-        new MeshStandardMaterial({color:0xdfe5ec,roughness:.5,metalness:.25,emissive:new Color(0x7fb0d8),emissiveIntensity:.6}),
+      /* A flush inlay ring — pavement detail, not a tower. */
+      const inlay=new Mesh(
+        new TorusGeometry(10,0.35,8,64),
+        new MeshStandardMaterial({color:0xd6dbe2,roughness:.8,metalness:0}),
       );
-      ring.position.set(cx,19,cz);
-      ring.rotation.x=Math.PI/2;
-      this.terrain.add(ring);
-      const base=new Mesh(this.box,this.ground);
-      base.position.set(cx,6,cz);
-      base.scale.set(5,12,5);
-      this.terrain.add(base);
+      inlay.rotation.x=Math.PI/2;
+      inlay.position.set(cx,0.52,cz);
+      this.terrain.add(inlay);
       /* Routes are dependency truth: a ground path from the hub to each
          district, its girth proportional to real inter-district weight.
          Weak districts get a thread; load-bearing ones get a boulevard. */
@@ -507,7 +513,7 @@ export class Renderer3D {
       for (const d of districts) {
         const dx = d.x + d.width / 2, dz = d.z + d.depth / 2;
         const w = d.weight / maxW;
-        const r = 0.25 + w * 1.1;
+        const r = 0.6 + w * 2.2;
         const mid = new Vector3((cx + dx) / 2, 0.3, (cz + dz) / 2);
         const curve = new QuadraticBezierCurve3(
           new Vector3(cx, 0.3, cz), mid, new Vector3(dx, 0.3, dz));
@@ -870,13 +876,15 @@ export class Renderer3D {
           // District identity is a stable hash of the district itself —
           // never a hardcoded repository concept.
           const tint = this.districtTint(cluster);
-          /* Facades stay near-neutral with a per-building warmth wobble;
-             the district's hue lives on the platform, not on every wall. */
+          /* Facades range across a real city's palette — cool concrete,
+             warm stone, pale glass — each taking a modest lean from its
+             district so neighborhoods read without saturation slop. */
           const wobble=(pathHash(id)%100)/100;
+          const base = wobble < .33 ? "#e8e9eb" : wobble < .66 ? "#efe9dd" : "#e2e6ea";
+          const lean = (pathHash(id) >> 6) % 3 === 0 ? .85 : .5;
           const c=this.colorTo[k][i]
-            .set("#eef0f3")
-            .lerp(new Color(wobble>.5?"#f3ece2":"#e9edf2"),wobble*.5)
-            .lerp(tint,.42);
+            .set(base)
+            .lerp(tint,lean);
           if(id === state.selectedId) c.lerp(new Color("#8db6e6"),.45);
           else if(id === state.hoverId) c.multiplyScalar(1.13);
           else if(state.hoverId || (state.matches && !state.matches.has(id))) c.multiplyScalar(.76);

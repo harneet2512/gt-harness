@@ -161,7 +161,7 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
         x:site.x+site.width/2+at.x, z:site.z+site.depth/2+at.z, y:plotElevation(at.x,at.z,site.width,site.depth),
         terrace:5, site:site.id, slot, archetype, ...dim,
         centrality: cent, landmark: cent > 0.62 && dim.height > 24,
-        height: Math.min(78,Math.max(5, dim.height * (0.45+positional*.35+cent*.55) * [0.6,1,1,.95,1,1.15][archetype]))};
+        height: Math.min(78,Math.max(5, dim.height * (0.4+positional*.3+cent*.55) * [0.38,1.4,1,0.8,1,1.28][archetype]))};
       assignments.set(p.id,plot); nodes.push(plot);
     }
   }
