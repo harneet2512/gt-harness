@@ -1280,6 +1280,17 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   review `393b4c92`, lineage PASS. The "amend is faster" claim for matplotlib
   is retired: the 8% was partly divergent work; equal output now costs equal
   time (215.8s vs 218.0s) on this repository.
+  SYSTEMIC PRODUCER DEFECT FOUND+FIXED (`f1e0a7f3`): every real-repo graph
+  shipped analysis_state=failed since before 87d2e89c -- the hierarchy pass's
+  CHA-substituted candidates kept publishedMechanism='import' but carry no
+  import chain -> store.validateCandidateDerivation aborts -> atomic rollback
+  -> resolution_callsites/candidates/symbols ALL EMPTY on every graph ->
+  derived processes could never populate (witnessed_paths_have_no_resolvable
+  _stable_id). Deterministic (same callsite sha on rebuild AND amend -- parity
+  was proving amend==rebuild OF THE BROKEN STATE). Post-fix on matplotlib:
+  analysis complete, resolution_callsites 0->71544, symbols 0->14526,
+  processes 0->1835 (5529 steps). The whole typed-resolution surface and the
+  process layer were dark on every shipped graph until this commit.
   PHASE D MCP SURFACES LANDED (`fceae84c` + format `df9b983b`): six new
   composite endpoints expose already-computed tables -- `gt_trace` (bounded
   BFS path A->B over CALLS/HAS_METHOD), `gt_detect_changes` (diff->changed
