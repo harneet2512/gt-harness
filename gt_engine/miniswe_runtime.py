@@ -977,7 +977,11 @@ def install_runtime_hooks(
         return transport(
             messages,
             **kwargs,
-            **({"_gt_provider_tools": tools} if provider_tools is not None else {}),
+            # The wire must carry the exact tool set the admitted envelope
+            # recorded. Forwarding only a caller-supplied override left
+            # ordinary turns shipping [BASH_TOOL] while the request manifest
+            # claimed the model's whole advertised set.
+            _gt_provider_tools=list(tools) if tools is not None else None,
             **({"_gt_select_catalog": True} if bootstrap_request else {}),
             **({"_gt_persistent_plan": True} if plan_request else {}),
         )

@@ -2231,3 +2231,68 @@ def test_no_pre_edit_graph_leaves_the_producers_as_they_were(monkeypatch, tmp_pa
     rt._run_evidence(adapter, "edit", "", 0, 1, ("mod.py",), {})
 
     assert seen["graph_db"] is None
+
+
+def test_wire_tool_set_matches_the_recorded_request_envelope(tmp_path, monkeypatch):
+    """F1: the admitted tool set must reach the wire, not only the envelope.
+
+    The recorded provider request claims every tool ``_model.tools`` exposes,
+    but the transport used to ship only ``BASH_TOOL`` on ordinary turns: the
+    whole typed-action surface was dead code while receipts over-claimed it.
+    """
+    from types import SimpleNamespace
+
+    from gt_engine.miniswe_typed_actions import GroundTruthLitellmModel
+    from gt_engine.request_history import load_provider_request
+
+    _configure_fixture_provider(monkeypatch)
+    agent = FakeAgent()
+    agent.model = GroundTruthLitellmModel(
+        model_name="fixture/model", model_kwargs={}, cost_tracking="ignore_errors"
+    )
+    wire_tools = []
+
+    class Message:
+        def __init__(self, tool_calls):
+            self.content, self.tool_calls = "", tool_calls
+
+        def model_dump(self):
+            return {"role": "assistant", "content": "", "tool_calls": self.tool_calls}
+
+    class Response:
+        def __init__(self, message):
+            self.id, self.model = "resp", "fixture/model"
+            self.usage = {"prompt_tokens": 3, "completion_tokens": 1}
+            self.choices = [
+                SimpleNamespace(message=message, finish_reason="tool_calls")
+            ]
+
+        def model_dump(self, mode=None):
+            return {"id": self.id, "model": self.model, "usage": self.usage,
+                    "choices": [{"message": self.choices[0].message.model_dump()}]}
+
+    def completion(*, model, messages, tools, **kwargs):
+        wire_tools.append([tool["function"]["name"] for tool in tools])
+        function = SimpleNamespace(name="bash", arguments='{"command":"ls"}')
+        return Response(
+            Message([SimpleNamespace(id="call-1", function=function)])
+        )
+
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr(agent.model, "_calculate_cost", lambda _: {"cost": 0.0})
+    adapter = MiniSweAdapter(
+        task_id="tools-wire", state_dir=tmp_path / "state", predicates=[],
+        issue_text="Fix it.",
+    )
+    install_runtime_hooks(agent, _session(adapter))
+    agent.model.query([{"role": "user", "content": "task"}])
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    delivery = next(row for row in rows if row["event"] == "provider_delivery")
+    request = load_provider_request(adapter.store.root, delivery)
+    recorded = [tool["function"]["name"] for tool in request["tools"]]
+    assert "groundtruth" in recorded
+    assert wire_tools and wire_tools[-1] == recorded
