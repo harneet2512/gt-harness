@@ -10,6 +10,7 @@ build/
 results/**/raw/
 
 # local-only artifacts (benchmark runs, editor config, scratch notes)
+out/
 results/
 .vscode/
 nul

@@ -1048,6 +1048,54 @@ def _native_feature_projection(rows: list[dict], *, plan_projection: list[dict] 
     return summarize_features(synthetic)
 
 
+# --------------------------------------------------------------------------- #
+# delivery-content token matching (module level so scripts/gt_trajectory_eval
+# reuses the identical word-boundary policy; the per-task join below keeps
+# thin closures that delegate here)
+# --------------------------------------------------------------------------- #
+GENERIC_DELIVERY_TOKENS = frozenset({
+    "python", "return", "import", "class", "function", "assert",
+    "pytest", "unittest", "self", "none", "true", "false", "result",
+})
+
+
+def delivery_content_tokens(identity: str, target: str,
+                            rendered: str | None = None) -> set[str]:
+    """Word-boundary match tokens identifying a delivery's content.
+
+    ``target`` plus its basename are always candidates; when the sealed
+    rendered text is available, path-shaped and long identifier tokens are
+    drawn from it.  Tokens shorter than 4 chars are dropped so a bare
+    ``monitor`` can never credit ``aiomonitor``.
+    """
+    tokens: set[str] = set()
+    if target:
+        tokens.add(target)
+        base = target.rsplit("/", 1)[-1]
+        if len(base) >= 4:
+            tokens.add(base)
+    if rendered:
+        for tok in re.findall(r"[\w./-]+\.[A-Za-z]{1,4}\b", rendered):
+            if "/" in tok or tok.startswith("."):
+                tokens.add(tok.strip())
+            else:
+                base = tok.rsplit("/", 1)[-1]
+                if len(base) >= 5:
+                    tokens.add(base)
+        for tok in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]{6,}\b", rendered):
+            if tok.lower() not in GENERIC_DELIVERY_TOKENS:
+                tokens.add(tok)
+    return {t for t in tokens if len(t) >= 4}
+
+
+def token_word_hit(command: str, tokens) -> str:
+    """First token found inside ``command`` on word boundaries, else ""."""
+    for tok in tokens:
+        if re.search(r"(?<![\w])" + re.escape(tok) + r"(?![\w])", command):
+            return tok
+    return ""
+
+
 def _audit_native_miniswe_task(
     task_dir: Path,
     rj: dict,
@@ -1531,39 +1579,14 @@ def _audit_native_miniswe_task(
             out.append(content)
         return out
 
-    _GENERIC_TOKENS = frozenset({
-        "python", "return", "import", "class", "function", "assert",
-        "pytest", "unittest", "self", "none", "true", "false", "result",
-    })
-
     def _delivery_tokens(identity: str, target: str) -> set[str]:
-        tokens: set[str] = set()
-        if target:
-            tokens.add(target)
-            base = target.rsplit("/", 1)[-1]
-            if len(base) >= 4:
-                tokens.add(base)
         material = delivery_material.get(identity)
-        if material is not None:
-            rendered = material[0]
-            for tok in re.findall(r"[\w./-]+\.[A-Za-z]{1,4}\b", rendered):
-                if "/" in tok or tok.startswith("."):
-                    tokens.add(tok.strip())
-                else:
-                    base = tok.rsplit("/", 1)[-1]
-                    if len(base) >= 5:
-                        tokens.add(base)
-            for tok in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]{6,}\b", rendered):
-                if tok.lower() not in _GENERIC_TOKENS:
-                    tokens.add(tok)
-        return {t for t in tokens if len(t) >= 4}
+        rendered = material[0] if material is not None else None
+        return delivery_content_tokens(identity, target, rendered)
 
     def _token_hit(command: str, tokens: frozenset[str] | set[str]) -> str:
         # Word-boundary match: a bare "monitor" must not credit "aiomonitor".
-        for tok in tokens:
-            if re.search(r"(?<![\w])" + re.escape(tok) + r"(?![\w])", command):
-                return tok
-        return ""
+        return token_word_hit(command, tokens)
 
     for row in rows:
         if row.get("event") not in {
