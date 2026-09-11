@@ -803,6 +803,7 @@ class GTSession:
                         target=metadata.get("target", ""),
                         semantics=metadata.get("semantics", "advisory"),
                         artifact_sha256=metadata.get("artifact_sha256", ""),
+                        next_chain_head=metadata.get("next_chain_head", ""),
                         unit_id=localization_unit_id,
                         supersession_key=supersession_key,
                         supersedes=((active["unit_id"],) if active else ()),

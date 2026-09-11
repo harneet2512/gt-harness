@@ -72,6 +72,7 @@ DELIVERY_REFUSAL_REASONS = frozenset({
     "cochange_task_ceiling",
     "delivery_byte_ceiling",
     "duplicate_delivery_identity",
+    "localization_fire_once",
     "request_delivery_byte_ceiling",
 })
 

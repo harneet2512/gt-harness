@@ -161,6 +161,48 @@ def test_identical_current_fact_can_recur_on_a_later_decision(tmp_path):
     assert admit(adapter, 1, rendered)
 
 
+def test_localization_delivery_is_fire_once_per_episode(tmp_path):
+    """The ranked-localization contract is one delivery per episode. The
+    compiled task-start path admits with commit=False, so the delivered
+    dedup key is not stamped into the episode chain at production time —
+    a later reactive ``ranked_localization`` fire (the scripted grep after
+    task start) reproduces the fact and must be refused at admission."""
+    adapter = adapter_for(tmp_path)
+
+    def offer(iteration, text, key):
+        return adapter.admit_model_visible_delivery(
+            lane="sealed", kind="localization", rendered=text,
+            action_index=iteration, iteration=iteration, dedup_key=key,
+        )
+
+    assert offer(0, "ranked rows v1", "loc-a")
+    # A second localization inside the same decision is refused before it
+    # can queue as a parallel pending delivery.
+    assert not offer(0, "ranked rows v2", "loc-b")
+    adapter.bind_provider_payload({
+        "messages": [{"role": "tool", "content": "ranked rows v1"}]
+    })
+    # After the first delivery is visibility-committed, a reactive re-fire
+    # on a later decision is refused outright.
+    assert not offer(1, "ranked rows v2", "loc-b")
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len([
+        row for row in rows
+        if row.get("event") == "evidence_delivery"
+        and row.get("evidence_type") == "localization"
+    ]) == 1
+    assert len([
+        row for row in rows
+        if row.get("event") == "delivery_refused"
+        and row.get("reason") == "localization_fire_once"
+    ]) == 2
+
+
 def test_multidose_request_retains_per_fact_delivery_provenance(tmp_path, monkeypatch):
     adapter = adapter_for(tmp_path)
     session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)

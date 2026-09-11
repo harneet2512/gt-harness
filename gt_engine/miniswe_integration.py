@@ -382,6 +382,7 @@ class MiniSweAdapter(GroundtruthController):
         self._localization_metadata: dict[str, str] = {}
         self._localization_chain: set[str] = set()
         self._localization_head = ""
+        self._localization_delivered = False
         self._pending_verification_candidate = ""
         self._pending_verification_metadata: dict[str, str] = {}
         self._model_visible_delivery_identities: set[str] = set()
@@ -2280,6 +2281,8 @@ class MiniSweAdapter(GroundtruthController):
             self._model_visible_delivery_bytes += len(item.rendered.encode("utf-8"))
             self._model_visible_delivery_identities.add(item.identity)
             self._decision_delivery_identities.add(item.identity)
+            if item.kind == "localization":
+                self._localization_delivered = True
             if (item.kind == "recovery" and self._pending_recovery is not None
                     and item.rendered == self.pending_transient):
                 fingerprint, epoch = self._pending_recovery
@@ -2777,6 +2780,14 @@ class MiniSweAdapter(GroundtruthController):
         reason = ""
         if delivery_identity in seen_identities:
             reason = "duplicate_delivery_identity"
+        elif kind == "localization" and (
+            self._localization_delivered
+            or any(
+                item.kind == "localization"
+                for item in self._pending_provider_deliveries
+            )
+        ):
+            reason = "localization_fire_once"
         elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
         elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
@@ -2924,9 +2935,12 @@ class MiniSweAdapter(GroundtruthController):
         return rendered
 
     def localization_delivery_metadata(self) -> dict[str, str]:
-        return dict(self._localization_metadata or {
+        metadata = dict(self._localization_metadata or {
             "kind": "localization", "dedup_key": "task-start-localization",
         })
+        if self._localization_head:
+            metadata["next_chain_head"] = self._localization_head
+        return metadata
 
     def acknowledge_localization(self, rendered: str) -> None:
         if rendered and rendered == compact_localization(self._localization_candidate):
