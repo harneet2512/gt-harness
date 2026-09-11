@@ -64,10 +64,12 @@ DISTRICT_HUES = [
 PAPER = (247, 248, 250)
 GRID = (224, 228, 234)
 DECK = (233, 235, 238)
-SHORE = (196, 200, 207)
-COMMONS = (169, 198, 162)
-TREE = (110, 150, 105)
-ROUTE = (196, 204, 214)
+SHORE = (186, 191, 199)
+SHADE = (206, 210, 217)
+COMMONS = (158, 190, 148)
+COMMONS_DARK = (138, 172, 128)
+TREE = (104, 146, 98)
+ROUTE = (204, 210, 218)
 EDITED = (206, 160, 96)
 ACTIVE = (227, 213, 162)
 AGENT_COLORS = [
@@ -175,13 +177,26 @@ class TuiCity:
     districts: list[District]
     buildings: dict[str, Building]
     commons: tuple[float, float]
+    park: tuple[float, float, float, float]     # x0, z0, x1, z1
     bounds: tuple[float, float, float, float]
     island: tuple[float, float, float, float]  # cx, cz, halfw, halfd
 
 
+# street grid — one lot per building; the gap between lots is the street.
+LOT = 6.4        # intra-district pitch
+AVE = 8.0        # avenue between districts
+
+
 def build_city(graph: dict[str, Any], edited: set[str]) -> TuiCity:
     """Districts as neighborhoods on one island — the same shelf the web
-    city uses, pulled tight so the gaps read as avenues."""
+    city uses, with a real park carved out for the commons at the root.
+
+    Every file gets a whole lot (`LOT` wide) so towers never overlap;
+    the lot is bigger than any footprint, so the gaps between towers
+    read as streets. Districts shelf-pack into rows with avenues, and
+    a park rectangle is reserved before packing so the commons is a
+    green field with open sky around it — never buried under a block.
+    """
     nodes = graph.get("nodes") or []
     by_dir: dict[str, list[Building]] = {}
     sizes = [n.get("size", 0) for n in nodes]
@@ -192,36 +207,75 @@ def build_city(graph: dict[str, Any], edited: set[str]) -> TuiCity:
             continue
         name = n.get("dir") or "root"
         frac = math.log1p(n.get("size", 0)) / math.log1p(max(1, hi))
-        w = 2.6 + frac * 2.4
-        h = 3.0 + frac * 20.0
+        v = _hash(path)
+        w = 3.4 + frac * 2.0                                     # 3.4..5.4 footprint
+        d = w * (0.82 + ((v >> 16) % 71) / 71 * 0.40)            # slightly rectangular
+        h = 4.5 + frac * 26.0 + ((v >> 6) % 89) / 89 * 3.0       # 4.5..33.5 skyline
         b = Building(path=path, size=n.get("size", 0), district=name,
-                     x=0.0, z=0.0, w=w, d=w, h=h, edited=path in edited)
+                     x=0.0, z=0.0, w=w, d=d, h=h, edited=path in edited)
         by_dir.setdefault(name, []).append(b)
     districts = [District(name=k, files=sorted(v, key=lambda b: -b.size))
                  for k, v in sorted(by_dir.items(), key=lambda kv: -len(kv[1]))]
-
-    # city blocks: shelf-pack, one avenue between neighborhoods.
-    x = z = 0.0
-    row_h = 0.0
-    total_w = max(30.0, math.sqrt(sum(len(d.files) for d in districts)) * 3.4)
     for d in districts:
-        cols = max(2, math.ceil(math.sqrt(len(d.files)) * 1.15))
+        cols = max(2, math.ceil(math.sqrt(len(d.files)) * 1.25))
         rows = max(1, math.ceil(len(d.files) / cols))
-        dw, dh = cols * 3.4, rows * 3.4
-        if x + dw > total_w:
-            x, z, row_h = 0.0, z + row_h + 5.0, 0.0
-        d.x, d.z, d.w, d.h = x, z, dw, dh
-        row_h = max(row_h, dh)
-        x += dw + 3.6                          # the avenue
+        d.w, d.h = cols * LOT, rows * LOT
+
+    # shelf-pack the blocks into rows with avenues between them, then
+    # center each row on the widest — the island reads as one town,
+    # not a pile pushed into a corner.
+    area = sum((d.w + AVE) * (d.h + AVE) for d in districts)
+    total_w = max(48.0, math.sqrt(area) * 1.30)
+    x = z = row_h = 0.0
+    rows: list[list[District]] = [[]]
+    for d in districts:
+        if x + d.w > total_w:
+            x, z, row_h = 0.0, z + row_h + AVE, 0.0
+            rows.append([])
+        d.x, d.z = x, z
+        row_h = max(row_h, d.h)
+        x += d.w + AVE
+        rows[-1].append(d)
+    city_w = max((r[-1].x + r[-1].w for r in rows if r), default=10.0)
+    city_d = max((d.z + d.h for d in districts), default=0)
+    for r in rows:                                   # center each shelf row
+        if not r:
+            continue
+        off = (city_w - (r[-1].x + r[-1].w)) / 2
+        for d in r:
+            d.x += off
+    for d in districts:
+        cols = int(round(d.w / LOT))
         for i, b in enumerate(d.files):
-            b.x = d.x + 1.7 + (i % cols) * 3.4
-            b.z = d.z + 1.7 + (i // cols) * 3.4
-    max_x = max((d.x + d.w for d in districts), default=0) + 4
-    max_z = max((d.z + d.h for d in districts), default=0) + 4
-    commons = (max_x * 0.62, max_z * 0.5)
+            v = _hash(b.path)
+            b.x = d.x + (i % cols + 0.5) * LOT + (((v >> 4) % 61) / 61 - 0.5) * 0.7
+            b.z = d.z + (i // cols + 0.5) * LOT + (((v >> 10) % 61) / 61 - 0.5) * 0.7
+        # downtown gradient + checkerboard undulation: towers rise toward
+        # the middle of each block and alternate high/low so every roof
+        # steps against its neighbors — a skyline, not a flat crust.
+        dcx, dcz = d.x + d.w / 2, d.z + d.h / 2
+        reach = max(1.0, math.hypot(d.w, d.h) / 2)
+        for i, b in enumerate(d.files):
+            r = math.hypot(b.x - dcx, b.z - dcz) / reach
+            check = 0.80 + 0.40 * ((i % cols + i // cols) % 2)
+            b.h *= (1.30 - 0.55 * min(1.0, r)) * check
+
+    # the commons: a town square on the waterfront — a green rectangle
+    # across the city's south edge, centered on the skyline, with an
+    # open promenade between the last block and the grass.
+    park_w = min(46.0, max(26.0, city_w * 0.50))
+    park_d = park_w * 0.62
+    px0 = city_w / 2 - park_w / 2
+    pz0 = city_d + AVE * 0.8
+    px1, pz1 = px0 + park_w, pz0 + park_d
+
+    max_x = max(city_w, px1) + 2
+    max_z = pz1 + 2
+    commons = ((px0 + px1) / 2, (pz0 + pz1) / 2)
     buildings = {b.path: b for d in districts for b in d.files}
-    island = (max_x / 2, max_z / 2, max_x / 2 + 4, max_z / 2 + 4)
-    return TuiCity(districts, buildings, commons, (0, 0, max_x, max_z), island)
+    island = (max_x / 2, max_z / 2, max_x / 2 + 2.5, max_z / 2 + 2.5)
+    return TuiCity(districts, buildings, commons, (px0, pz0, px1, pz1),
+                   (0, 0, max_x, max_z), island)
 
 
 # ------------------------------------------------------------------ #
@@ -245,7 +299,23 @@ class Camera:
         ca, sa = math.cos(self.yaw), math.sin(self.yaw)
         rx, rz = x * ca - z * sa, x * sa + z * ca
         return (rx * self.scale + self.ox,
-                (rz * 0.5 - y) * self.scale + self.oy)
+                (rz * 0.44 - y) * self.scale + self.oy)
+
+    def fit(self, city: TuiCity, W: int, H: int) -> None:
+        """Fill the pane with the island: project the bounding volume at the
+        current yaw, scale it to the framebuffer, center it — valid at every
+        rotation step and tall enough that no roof clips the frame."""
+        self.scale, self.ox, self.oy = 1.0, 0.0, 0.0
+        x0, z0, x1, z1 = city.bounds
+        hmax = max((b.h for b in city.buildings.values()), default=20.0)
+        pts = [self.project(xx, yy, zz)
+               for xx in (x0, x1) for zz in (z0, z1) for yy in (0.0, hmax)]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        ex, ey = max(xs) - min(xs), max(ys) - min(ys)
+        self.scale = min(W * 0.96 / max(1e-6, ex), H * 0.93 / max(1e-6, ey))
+        self.ox = W / 2 - (min(xs) + max(xs)) / 2 * self.scale
+        self.oy = H * 0.54 - (min(ys) + max(ys)) / 2 * self.scale
 
 
 def _quad(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
@@ -270,15 +340,70 @@ def _quad(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
 
 def _box(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
          cam: Camera, x: float, z: float, w: float, d: float, h: float,
-         color: tuple[int, int, int], y0: float = 0.0) -> None:
-    """One building: three visible faces, each its own shade."""
+         color: tuple[int, int, int], y0: float = 0.0,
+         roof: float = 0.38) -> None:
+    """One building: three visible faces, each its own shade — the roof
+    reads as sunlit, the east face falls into shade."""
     c = [cam.project(x, y0, z), cam.project(x + w, y0, z),
          cam.project(x + w, y0, z + d), cam.project(x, y0, z + d)]
     t = [cam.project(x, y0 + h, z), cam.project(x + w, y0 + h, z),
          cam.project(x + w, y0 + h, z + d), cam.project(x, y0 + h, z + d)]
-    _quad(fb, W, H, [c[1], c[2], t[2], t[1]], _dark(color, 0.28))   # east face
-    _quad(fb, W, H, [c[2], c[3], t[3], t[2]], _dark(color, 0.14))   # south face
-    _quad(fb, W, H, t, _mix(color, 0.22))                            # roof
+    _quad(fb, W, H, [c[1], c[2], t[2], t[1]], _dark(color, 0.38))   # east face
+    _quad(fb, W, H, [c[2], c[3], t[3], t[2]], _dark(color, 0.10))   # south face
+    _quad(fb, W, H, t, _mix(color, roof))                            # lit roof
+
+
+def _face_band(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
+               cam: Camera, x: float, z: float, w: float, d: float,
+               y: float, color: tuple[int, int, int]) -> None:
+    """A floor line on the two lit faces — tall towers get striations that
+    read as storeys instead of flat slabs."""
+    s = 0.55
+    _quad(fb, W, H, [cam.project(x + w, y - s, z), cam.project(x + w, y - s, z + d),
+                     cam.project(x + w, y + s, z + d), cam.project(x + w, y + s, z)],
+          _dark(color, 0.44))
+    _quad(fb, W, H, [cam.project(x, y - s, z + d), cam.project(x + w, y - s, z + d),
+                     cam.project(x + w, y + s, z + d), cam.project(x, y + s, z + d)],
+          _dark(color, 0.24))
+
+
+def _building(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
+              cam: Camera, b: "Building", color: tuple[int, int, int]) -> None:
+    """One file, one silhouette — the path hash picks slab / stepped /
+    twin / crowned so a district reads as many buildings, not one mass."""
+    x, z = b.x - b.w / 2, b.z - b.d / 2
+    v = _hash(b.path)
+    style = v % 4
+    h = b.h
+    # every roof gets its own brightness — packed towers separate at the
+    # top even when their walls touch.
+    roof = 0.32 + ((v >> 8) % 97) / 97 * 0.34
+    # contact shadow: a faint skirt hugging the footprint — the crisp edge
+    # that keeps neighboring towers from pouring into one mass.
+    _ground(fb, W, H, cam, x - 0.30, z - 0.30, x + b.w + 0.30,
+            z + b.d + 0.30, _dark(DECK, 0.10), y=0.09)
+    if style == 1 and h > 10:
+        # stepped: street slab, then a setback tower rising out of it.
+        _box(fb, W, H, cam, x, z, b.w, b.d, h * 0.62, color, roof=roof)
+        _box(fb, W, H, cam, x + b.w * 0.17, z + b.d * 0.17,
+             b.w * 0.66, b.d * 0.66, h * 0.38, color, y0=h * 0.62, roof=roof)
+    elif style == 2:
+        # twins: a lower sibling beside the main tower on the same lot.
+        _box(fb, W, H, cam, x, z, b.w * 0.42, b.d * 0.9, h * 0.82, color, roof=roof)
+        _box(fb, W, H, cam, x + b.w * 0.58, z + b.d * 0.05,
+             b.w * 0.42, b.d * 0.9, h, color, roof=roof)
+    elif style == 3 and h > 9:
+        # crowned: slab with a lit penthouse crown on the roof.
+        _box(fb, W, H, cam, x, z, b.w, b.d, h, color, roof=roof)
+        _box(fb, W, H, cam, x + b.w * 0.30, z + b.d * 0.30,
+             b.w * 0.40, b.d * 0.40, h * 0.13 + 0.8, _mix(color, 0.30), y0=h)
+    else:
+        _box(fb, W, H, cam, x, z, b.w, b.d, h, color, roof=roof)
+    if h > 16:                       # storeys on the tall ones
+        floors = min(4, int(h / 8.0))
+        for f in range(1, floors + 1):
+            _face_band(fb, W, H, cam, x, z, b.w, b.d,
+                       h * f / (floors + 1), color)
 
 
 def _ground(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
@@ -289,10 +414,17 @@ def _ground(fb: list[list[tuple[int, int, int] | None]], W: int, H: int,
     _quad(fb, W, H, pts, color)
 
 
-def render(city: TuiCity, cam: Camera, W: int, H: int,
-           agents: list[tuple[float, float, tuple[int, int, int]]],
-           pulses: dict[str, float], now: float) -> Text:
-    """Draw the whole world into a framebuffer, then emit it as `▀` cells."""
+def _paint(city: TuiCity, cam: Camera, W: int, H: int,
+           agents: list[tuple[float, float, float, tuple[int, int, int]]],
+           pulses: dict[str, float], now: float
+           ) -> list[list[tuple[int, int, int] | None]]:
+    """Draw the whole world into a framebuffer and return it.
+
+    Order is the image: paper → island → block plinths → park → routes →
+    shadows → painter-sorted towers + trees → agent beacons. The preview
+    harness calls this directly, so the PNG always matches the terminal.
+    """
+    cam.fit(city, W, H)
     fb: list[list[tuple[int, int, int] | None]] = [[None] * W for _ in range(H)]
 
     # paper + drafting grid.
@@ -300,56 +432,112 @@ def render(city: TuiCity, cam: Camera, W: int, H: int,
         for x in range(W):
             fb[y][x] = GRID if (x % 10 == 0 or y % 6 == 0) else PAPER
 
-    # the island + shore.
+    # the island + shore — a darker rim so the deck reads as land.
     icx, icz, ihw, ihd = city.island
-    _ground(fb, W, H, cam, icx - ihw - 1, icz - ihd - 1,
-            icx + ihw + 1, icz + ihd + 1, SHORE, y=-0.4)
+    _ground(fb, W, H, cam, icx - ihw - 1.2, icz - ihd - 1.2,
+            icx + ihw + 1.2, icz + ihd + 1.2, SHORE, y=-0.4)
     _ground(fb, W, H, cam, icx - ihw, icz - ihd, icx + ihw, icz + ihd, DECK)
 
-    # neighborhood washes — the faintest tint on the deck; the buildings
-    # carry the identity, the ground only whispers the border.
+    # block plinths — a whisper of the district hue under each block;
+    # the buildings carry the identity, the ground only hints the lot.
     for d in city.districts:
-        _ground(fb, W, H, cam, d.x, d.z, d.x + d.w, d.z + d.h,
-                _mix(_hue(d.name), 0.9), y=0.05)
+        _ground(fb, W, H, cam, d.x - 1.0, d.z - 1.0, d.x + d.w + 1.0,
+                d.z + d.h + 1.0, _mix(_hue(d.name), 0.90), y=0.05)
 
-    # the commons — the park at the root.
+    # the commons — a green field with a worn darker edge and a pale
+    # plaza at its heart, open sky all around.
+    px0, pz0, px1, pz1 = city.park
     cx, cz = city.commons
-    _ground(fb, W, H, cam, cx - 5, cz - 3.4, cx + 5, cz + 3.4, COMMONS, y=0.06)
-    for d in city.districts:   # routes: dependency lines to the commons
+    _ground(fb, W, H, cam, px0 - 0.9, pz0 - 0.9, px1 + 0.9, pz1 + 0.9,
+            COMMONS_DARK, y=0.06)
+    _ground(fb, W, H, cam, px0, pz0, px1, pz1, COMMONS, y=0.065)
+    _ground(fb, W, H, cam, cx - 2.6, cz - 2.2, cx + 2.6, cz + 2.2,
+            _mix(COMMONS, 0.62), y=0.07)
+
+    # routes — dotted desire paths from each neighborhood to the commons.
+    for d in city.districts:
         x0, z0 = d.x + d.w / 2, d.z + d.h / 2
-        steps = int(max(abs(cx - x0), abs(cz - z0)))
+        dist = max(abs(cx - x0), abs(cz - z0))
+        steps = int(dist / 2.2)
         for s in range(steps + 1):
             gx = x0 + (cx - x0) * s / max(1, steps)
             gz = z0 + (cz - z0) * s / max(1, steps)
-            _ground(fb, W, H, cam, gx - 0.35, gz - 0.35,
-                    gx + 0.35, gz + 0.35, ROUTE, y=0.07)
+            _ground(fb, W, H, cam, gx - 0.4, gz - 0.4,
+                    gx + 0.4, gz + 0.4, ROUTE, y=0.075)
 
-    # trees — small green boxes, street rows + commons grove.
+    # shadows — every tower throws a short soft shade toward the
+    # south-east; this is what grounds the buildings on the deck.
+    for b in city.buildings.values():
+        _ground(fb, W, H, cam,
+                b.x - b.w / 2 + 0.8, b.z - b.d / 2 + 1.0,
+                b.x + b.w / 2 + 0.8 + b.h * 0.30, b.z + b.d / 2 + 1.0 + b.h * 0.22,
+                SHADE, y=0.08)
+
+    # the painter pass: towers and trees, back to front by depth.
+    ca, sa = math.cos(cam.yaw), math.sin(cam.yaw)
+    jobs: list[tuple[float, Any]] = []
+    for b in city.buildings.values():
+        jobs.append((b.x * ca + b.z * sa, b))
+    for tx, tz in _trees(city):
+        jobs.append((tx * ca + tz * sa, (tx, tz)))
+    jobs.sort(key=lambda j: j[0])
+    for _, job in jobs:
+        if isinstance(job, Building):
+            b = job
+            color = EDITED if b.edited else _tint(b)
+            t = pulses.get(b.path)
+            if t is not None and now - t < 2.5:
+                color = _mix(color, 0.5 + 0.4 * (1 - (now - t) / 2.5))
+            _building(fb, W, H, cam, b, color)
+        else:
+            tx, tz = job
+            _box(fb, W, H, cam, tx - 0.7, tz - 0.7, 1.4, 1.4, 1.8, TREE)
+
+    # agents — a lit beacon hovering over each one's last file.
+    for ax, az, ay, color in agents:
+        _box(fb, W, H, cam, ax - 0.7, az - 0.7, 1.4, 1.4, 1.4, color, y0=ay)
+    return fb
+
+
+def _tint(b: Building) -> tuple[int, int, int]:
+    """One district hue, but every building wears it at its own lightness —
+    the block reads as many towers instead of one poured mass."""
+    k = ((_hash(b.path) >> 2) % 97) / 97
+    tone = 0.90 + k * 0.18                      # 0.90..1.08
+    c = _hue(b.district)
+    return tuple(min(255, round(v * tone)) for v in c)  # type: ignore
+
+
+def _trees(city: TuiCity) -> list[tuple[float, float]]:
+    """Street trees on the avenue in front of each block + a grove in the
+    commons — all inside the shore, never adrift on the water."""
+    icx, icz, ihw, ihd = city.island
+    x0, z0, x1, z1 = icx - ihw, icz - ihd, icx + ihw, icz + ihd
     trees: list[tuple[float, float]] = []
     for d in city.districts:
-        for i in range(6):
-            trees.append((d.x + 1 + i * max(1.0, d.w / 6), d.z + d.h + 0.8))
-    for i in range(8):
-        a = i / 8 * math.pi * 2
-        trees.append((cx + math.cos(a) * 3.6, cz + math.sin(a) * 2.4))
-    for tx, tz in trees:
-        _box(fb, W, H, cam, tx - 0.4, tz - 0.4, 0.8, 0.8, 1.6, TREE)
+        n = max(2, int(d.w / 7.0))
+        for i in range(n):
+            tx, tz = d.x + 2.0 + i * (d.w - 3.0) / max(1, n - 1), d.z + d.h + 2.6
+            if x0 + 1 < tx < x1 - 1 and z0 + 1 < tz < z1 - 1:
+                trees.append((tx, tz))
+    px0, pz0, px1, pz1 = city.park
+    for i in range(14):
+        a = i / 14 * math.pi * 2
+        trees.append((city.commons[0] + math.cos(a) * (px1 - px0) * 0.40,
+                      city.commons[1] + math.sin(a) * (pz1 - pz0) * 0.38))
+    # a loose scattering inside the lawn too — a grove, not just a ring.
+    for i in range(6):
+        trees.append((px0 + (px1 - px0) * (0.2 + 0.6 * ((i * 37) % 10) / 10),
+                      pz0 + (pz1 - pz0) * (0.2 + 0.6 * ((i * 53) % 10) / 10)))
+    return trees
 
-    # buildings — painter order: back to front.
-    order = sorted(city.buildings.values(),
-                   key=lambda b: b.x * math.cos(cam.yaw) + b.z * math.sin(cam.yaw))
-    for b in order:
-        color = EDITED if b.edited else _hue(b.district)
-        t = pulses.get(b.path)
-        if t is not None and now - t < 2.5:
-            color = _mix(color, 0.5 + 0.4 * (1 - (now - t) / 2.5))
-        _box(fb, W, H, cam, b.x - b.w / 2, b.z - b.w / 2, b.w, b.d, b.h, color)
 
-    # agents — a lit marker over where each one last worked.
-    for ax, az, color in agents:
-        _box(fb, W, H, cam, ax - 0.6, az - 0.6, 1.2, 1.2, 1.2, color, y0=6.5)
-
-    # emit: two framebuffer rows per terminal row, `▀` fg=top, bg=bottom.
+def render(city: TuiCity, cam: Camera, W: int, H: int,
+           agents: list[tuple[float, float, float, tuple[int, int, int]]],
+           pulses: dict[str, float], now: float) -> Text:
+    """Paint the world, then emit it as `▀` cells: two framebuffer rows per
+    terminal row, top pixel in the fg, bottom in the bg."""
+    fb = _paint(city, cam, W, H, agents, pulses, now)
     out = Text()
     for y in range(0, H - 1, 2):
         for x in range(W):
@@ -365,10 +553,10 @@ def pick(city: TuiCity, cam: Camera, sx: float, sy: float) -> Building | None:
     best: Building | None = None
     best_depth = -1e9
     for b in city.buildings.values():
-        pts = [cam.project(b.x - b.w / 2, 0, b.z - b.d / 2),
-               cam.project(b.x + b.w / 2, 0, b.z + b.d / 2),
-               cam.project(b.x + b.w / 2, b.h, b.z + b.d / 2),
-               cam.project(b.x - b.w / 2, b.h, b.z - b.d / 2)]
+        x0, x1 = b.x - b.w / 2, b.x + b.w / 2
+        z0, z1 = b.z - b.d / 2, b.z + b.d / 2
+        pts = [cam.project(xx, yy, zz)
+               for xx in (x0, x1) for zz in (z0, z1) for yy in (0.0, b.h)]
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
         if min(xs) <= sx <= max(xs) and min(ys) <= sy <= max(ys):
@@ -500,24 +688,12 @@ def run(session_id: str, host: str, login: str) -> None:
         edited = {f["path"] for f in diff.get("files", []) if isinstance(f, dict)}
         if city is None or len(city.buildings) != len(graph.get("nodes", [])):
             city = build_city(graph, edited)
-            # Fit by projection: put the island's center on the screen's,
-            # biased slightly low so the skyline has room to rise.
-            _, _, w, h = city.bounds
-            cam_w = max(30, console.size.width - 50)
-            cam_h = max(10, console.size.height - 12) * 2
-            span = max(w, h * 1.6)
-            cam.scale = min(cam_w / (span * 1.15), cam_h / (span * 0.65))
-            cam.ox = 0.0
-            cam.oy = 0.0
-            px, py = cam.project(city.island[0], 0, city.island[1])
-            cam.ox = cam_w / 2 - px
-            cam.oy = cam_h * 0.55 - py
         else:
             for p in edited:
                 if p in city.buildings:
                     city.buildings[p].edited = True
 
-        agents_pos: list[tuple[float, float, tuple[int, int, int]]] = []
+        agents_pos: list[tuple[float, float, float, tuple[int, int, int]]] = []
         focus: Building | None = None
         for i, a in enumerate(agents if isinstance(agents, list) else []):
             color = AGENT_COLORS[i % len(AGENT_COLORS)]
@@ -525,11 +701,12 @@ def run(session_id: str, host: str, login: str) -> None:
             path = files[-1] if files else None
             if path and path in city.buildings:
                 b = city.buildings[path]
-                agents_pos.append((b.x, b.z, color))
+                agents_pos.append((b.x, b.z, b.h + 1.6, color))
                 pulses[path] = time.time()
                 focus = b
             else:
-                agents_pos.append((city.commons[0] + i * 2.4 - 2, city.commons[1], color))
+                agents_pos.append((city.commons[0] + i * 2.4 - 2,
+                                   city.commons[1], 2.5, color))
 
         # clicks → pick the building under the pixel (cell → 2 rows/px).
         cam_w = max(30, console.size.width - 50)
