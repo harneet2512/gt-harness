@@ -345,6 +345,7 @@ def test_graph_receipt_names_all_trustworthy_surfaces(tmp_path):
         "process_steps",
         "file_hashes",
         "project_meta",
+        "routes",
     }
     assert receipt["available"] is False
 
