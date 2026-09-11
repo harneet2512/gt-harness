@@ -85,6 +85,8 @@ export interface GraphView {
   editedById: ReadonlyMap<string, DiffFile>;
   attentionById: ReadonlyMap<string, Attention>;
   trailIds: readonly string[];
+  /** Live touches on buildings — one ring per event, decaying. */
+  pulses: readonly import("./graphProps").CityPulse[];
   positionId: string | null;
   /** One per worker agent, in spawn order, each in its own colour. */
   workerTrails: readonly WorkerTrail[];
@@ -315,6 +317,26 @@ export function useGraphView(input: Input): GraphView {
     return out;
   }, [view.trail, particleId]);
 
+  /* ---- live pulses --------------------------------------------------- *
+   * Every touch a step resolves to a building becomes one transient ring.
+   * The id is the step's own key + path, so a pulse is born exactly once —
+   * the renderer decays it, replayed steps simply never join the list. */
+  const pulses = useMemo(() => {
+    if (!live) return [] as const;
+    const out: { id: string; path: string; kind: "read" | "edit" | "fail" | "note" }[] = [];
+    for (const step of steps.slice(-12)) {
+      const kind = step.isError ? "fail" as const
+        : step.gt ? "note" as const
+        : step.actions.some((a) => /edit|write|patch/i.test(a)) ? "edit" as const
+        : "read" as const;
+      for (const path of step.files) {
+        const pid = particleId(path);
+        if (field.byId.has(pid)) out.push({ id: `${step.key}:${path}`, path: pid, kind });
+      }
+    }
+    return out;
+  }, [steps, live, particleId, field.byId]);
+
   /* ---- the diff, replayed ------------------------------------------- *
    * The server has no per-step diff, so behind the live position we show
    * the files a write-shaped command had touched by then, intersected with
@@ -475,6 +497,7 @@ export function useGraphView(input: Input): GraphView {
     editedById,
     attentionById,
     trailIds,
+    pulses,
     positionId: view.position ? particleId(view.position) : null,
     workerTrails,
     agentPresence,

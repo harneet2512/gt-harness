@@ -167,6 +167,7 @@ export default function GraphPanel({
             field={view.field}
             neighbours={view.neighbours}
             attention={view.attentionById}
+            pulses={view.pulses}
             currentStep={view.cutoff}
             edited={view.editedById}
             positionId={view.positionId}

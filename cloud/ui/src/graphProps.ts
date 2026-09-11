@@ -14,6 +14,15 @@ import type { Attention } from "./trail";
 import type { WorkerTrail } from "./useGraphView";
 import type { AgentVisualState } from './cityAgents';
 
+/** One transient touch on a building — a read, an edit, a failure. */
+export interface CityPulse {
+  /** Stable event identity — a pulse is born once and decays. */
+  id: string;
+  /** Particle id the touch landed on. */
+  path: string;
+  kind: "read" | "edit" | "fail" | "note";
+}
+
 export interface GraphViewProps {
   agents?: readonly AgentVisualState[];
   onSelectAgent?: (id: string) => void;
@@ -24,6 +33,8 @@ export interface GraphViewProps {
   neighbours: ReadonlyMap<string, ReadonlySet<string>>;
   /** Keyed by particle id. */
   attention: ReadonlyMap<string, Attention>;
+  /** Live touches on buildings — the city breathes when the agent works. */
+  pulses?: readonly CityPulse[];
   currentStep: number;
   edited: ReadonlyMap<string, DiffFile>;
   positionId: string | null;

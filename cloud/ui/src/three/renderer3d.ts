@@ -30,6 +30,7 @@
   CylinderGeometry,
   TubeGeometry,
   QuadraticBezierCurve3,
+  RingGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -329,6 +330,11 @@ export class Renderer3D {
     this.kick();
   }
   setLayout(layout: CityLayout, _carried: boolean) {
+    for (const [, pu] of this.pulses) {
+      this.scene.remove(pu.mesh);
+      pu.mat.dispose();
+    }
+    this.pulses.clear();
     this.buildings.forEach((m) => {
       this.scene.remove(m);
       m.dispose();
@@ -613,6 +619,16 @@ export class Renderer3D {
     this.frame(this.controls.target.clone(), distance, TIMING.panel);
   }
   private hub = new Vector3(0, 6, 0);
+  /* The living layer: one expanding ring per touch, colour by what the
+     touch was. Born once per event id, dead in under two seconds. */
+  private pulses = new Map<string, { mesh: Mesh; mat: MeshBasicMaterial; start: number }>();
+  private pulseGeometry = new RingGeometry(1, 1.4, 28);
+  private pulseTones: Record<string, number> = {
+    read: 0x6fb0d8,
+    edit: 0xe0a055,
+    fail: 0xd06868,
+    note: 0x9a93d8,
+  };
   private dockPosition(slot:number) {
     /* Idle agents hold station above the forum — the repository root is
        where work converges, so that's where an idle drone belongs. */
@@ -792,6 +808,7 @@ export class Renderer3D {
     busy = busy || moved || this.cameraMotion.busy || this.targetMotion.busy;
     busy = this.rise(this.animationNow) || busy;
     busy = this.paintBuildings(state) || busy;
+    busy = this.paintPulses(state) || busy;
     this.paintEdges(state);
     this.aoCamera.copy(this.camera);this.aoCamera.layers.set(0);
     this.composer.render();
@@ -931,6 +948,44 @@ export class Renderer3D {
       if (t === 1) this.colorAt = -Infinity;
     }
     return t < 1;
+  }
+  /* A pulse is a ring that lands at a building's base, swells, and dies —
+     the building's way of saying "the agent was just here." */
+  private paintPulses(state: Frame3DState) {
+    const now = this.animationNow;
+    for (const p of state.pulses ?? []) {
+      if (this.pulses.has(p.id)) continue;
+      const plot = this.layout?.byId.get(p.path);
+      if (!plot) continue;
+      const mat = new MeshBasicMaterial({
+        color: this.pulseTones[p.kind] ?? 0x6fb0d8,
+        transparent: true,
+        opacity: 0.6,
+        depthWrite: false,
+        side: DoubleSide,
+      });
+      const mesh = new Mesh(this.pulseGeometry, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(plot.x, plot.y + 0.12, plot.z);
+      mesh.raycast = () => {};
+      this.scene.add(mesh);
+      this.pulses.set(p.id, { mesh, mat, start: now });
+    }
+    let active = false;
+    for (const [id, pu] of this.pulses) {
+      const t = (now - pu.start) / 1800;
+      if (t >= 1) {
+        this.scene.remove(pu.mesh);
+        pu.mat.dispose();
+        this.pulses.delete(id);
+        continue;
+      }
+      active = true;
+      const s = 2.5 + (1 - Math.pow(1 - t, 2)) * 11;
+      pu.mesh.scale.set(s, s, 1);
+      pu.mat.opacity = 0.6 * (1 - t) * (1 - t);
+    }
+    return active;
   }
   private paintEdges(state: Frame3DState) {
     const id = state.hoverId ?? state.selectedId;
