@@ -173,7 +173,8 @@
         "har83-context-plan-producer-9e42ff28-ci",
         "har83-context-plan-producer-c4d4a54f-ci",
         "har83-context-plan-producer-87d755a6-ci",
-        "har83-context-plan-producer-df9b983b-ci"
+        "har83-context-plan-producer-df9b983b-ci",
+        "har83-context-plan-producer-f1e0a7f3-ci"
     ],
     "schema": "gt.review_inbox.v1",
     "tickets": {
@@ -410,7 +411,8 @@
             "har83-context-plan-producer-9e42ff28-ci",
             "har83-context-plan-producer-c4d4a54f-ci",
             "har83-context-plan-producer-87d755a6-ci",
-            "har83-context-plan-producer-df9b983b-ci"
+            "har83-context-plan-producer-df9b983b-ci",
+            "har83-context-plan-producer-f1e0a7f3-ci"
         ],
         "HAR-87": [
             "har87-groundtruth-green-ci-193b9d93b"
