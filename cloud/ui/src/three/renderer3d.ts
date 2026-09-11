@@ -154,7 +154,7 @@ export class Renderer3D {
   private contact = new MeshBasicMaterial({
     color: 0x171b20,
     transparent: true,
-    opacity: 0.045,
+    opacity: 0.085,
     depthWrite: false,
   });
   private geometry = Array.from({ length: 6 }, (_, i) => buildingGeometry(i));
@@ -226,9 +226,11 @@ export class Renderer3D {
     this.scene.background = new Color("#f7f8fa");
     this.scene.add(new HemisphereLight(0xfff4e2, 0xa1a9b5, 1.35));
     const key = this.keyLight;
-    key.color.set(0xffe8c4);
-    key.intensity = 1.55;
-    key.position.set(-100, 220, 100);
+    key.color.set(0xffe9c8);
+    key.intensity = 1.6;
+    /* A lower, warmer sun — raking light throws the long shadows that
+       give the model its depth. */
+    key.position.set(-160, 150, 110);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, {
@@ -237,18 +239,22 @@ export class Renderer3D {
       top: 180,
       bottom: -180,
       near: 1,
-      far: 500,
+      far: 620,
     });
     key.shadow.bias = -0.00015;
     key.shadow.normalBias = 0.35;
-    key.shadow.radius = 2.5;
-    key.shadow.intensity = 0.55;
+    key.shadow.radius = 3;
+    key.shadow.intensity = 0.62;
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type = PCFShadowMap;
     this.scene.add(key, key.target);
-    const fill = new DirectionalLight(0xe3eafa, 0.6);
+    const fill = new DirectionalLight(0xe3eafa, 0.55);
     fill.position.set(150, 100, -90);
     this.scene.add(fill);
+    /* A cool rim from behind — the far skyline separates from the sky. */
+    const rim = new DirectionalLight(0xcfe0f4, 0.7);
+    rim.position.set(60, 60, -220);
+    this.scene.add(rim);
     const floor=new Mesh(this.floorGeometry,this.floorMaterial);
     floor.rotation.x=-Math.PI/2;floor.position.y=-.35;floor.receiveShadow=true;
     this.scene.add(floor);
@@ -1241,7 +1247,9 @@ export class Renderer3D {
       if(named.has(d.name))continue;named.add(d.name);
       const count=this.layout.nodes.filter(p=>p.cluster===d.name).length;
       if(!count)continue;
-      label(d.name||"Repository",`${count.toLocaleString()} files`,d.x+d.width*.2,3.5,d.z+d.depth*.15);
+      /* A museum placard: just off the platform's front edge, on the
+         paper — never floating over the skyline it names. */
+      label(d.name||"Repository",`${count.toLocaleString()} files`,d.x+d.width*.22,1.4,d.z-7);
     }
   }
   dispose() {
