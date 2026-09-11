@@ -1280,6 +1280,15 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   review `393b4c92`, lineage PASS. The "amend is faster" claim for matplotlib
   is retired: the 8% was partly divergent work; equal output now costs equal
   time (215.8s vs 218.0s) on this repository.
+  PHASE D ITEM 1 LANDED (`f28108c9`): the producer's `communities`/`processes`
+  tables are now consumed -- `gt_engine/derived_context.py` reads
+  `community_members`(file-kind)+`communities` and `process_steps`+`processes`
+  (via the producer's effective stable_id = COALESCE(nodes.stable_id,
+  resolution_symbols.stable_id)), gated on `derived_*_state=='ok'` plus
+  recorded-vs-live count markers; surfaces them additively through
+  `HybridRanking.attribution_record` (semantic-localization artifact) and
+  `build_graph_projection` facts. 19 RED->GREEN tests; degraded states serve
+  typed empty output, never a fabricated partition.
   GITNEXUS HEAD-TO-HEAD (source-grounded, pinned D:/gitnexus-har81-pinned):
   GitNexus is a retrieval/exploration system (16 MCP tools, agent decides);
   GT is an evidence-delivery system (typed sealed envelopes, abstention,
