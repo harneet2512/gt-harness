@@ -66,6 +66,11 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from gt_engine import contract, contract_embeddings
+from gt_engine.derived_context import (
+    DerivedContext,
+    derived_layer_states,
+    symbol_derived_context,
+)
 from gt_engine.graph_context import graph_revision
 from gt_engine.resolution_provenance import stable_symbol_id
 
@@ -266,6 +271,13 @@ class HybridRanking:
     rrf_k: int = RRF_K
     graph_revision: str = ""
     graph_content_sha256: str = ""
+    # Derived-layer context keyed by fused stable_id: each entry is the
+    # symbol's community membership and witnessed-process participation, or a
+    # typed-empty record when the layer published nothing. ``derived_states``
+    # names each layer's admission state so a receipt can distinguish
+    # "published, not a member" from "the partition was never computed".
+    derived_context: Mapping[str, DerivedContext] = field(default_factory=dict)
+    derived_states: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def available_sources(self) -> tuple[str, ...]:
@@ -320,9 +332,25 @@ class HybridRanking:
                         if row.stable_id in self.provenance
                         else None
                     ),
+                    # Typed-empty by contract: ``None``/``[]`` is what an
+                    # absent or degraded derived layer reports, and
+                    # ``derived_states`` below names which one it was.
+                    "community": (
+                        self.derived_context[row.stable_id].community.as_dict()
+                        if self.derived_context.get(row.stable_id) is not None
+                        and self.derived_context[row.stable_id].community is not None
+                        else None
+                    ),
+                    "processes": [
+                        item.as_dict()
+                        for item in self.derived_context[row.stable_id].processes
+                    ]
+                    if self.derived_context.get(row.stable_id) is not None
+                    else [],
                 }
                 for rank, row in enumerate(self.fused, start=1)
             ],
+            "derived_states": dict(self.derived_states),
             # Retrieval is ranking, not evidence.  Stated in the record so a
             # downstream reader cannot mistake a high rank for a trust tier.
             "promotes_trust": False,
@@ -1224,6 +1252,7 @@ def hybrid_rank(
     """
     provenance: dict[str, SymbolProvenance] = {}
     con, owned = _open(db)
+    path = _database_path(db)
     try:
         # A wider per-source cut than k: fusion needs candidates below each
         # source's top-k to have anything to disagree about.
@@ -1251,7 +1280,32 @@ def hybrid_rank(
                 restrict_to=None,
                 provenance=provenance,
             )
-        path = _database_path(db)
+        fused = tuple(fuse((lexical, properties, dense), rrf_k, limit=k))
+        # Derived-layer read for each surfaced symbol. Each layer gates on its
+        # own published ``derived_*_state``; a degraded or absent layer yields
+        # a typed-empty context and a named state, never a raised fault and
+        # never a fabricated partition. The record deliberately exposes the
+        # membership the producer already paid for -- ranking still promotes
+        # no trust.
+        derived_states: dict[str, str] = {}
+        derived_context: dict[str, DerivedContext] = {}
+        try:
+            derived_states = derived_layer_states(con)
+        except Exception:  # noqa: BLE001 - derived context is advisory
+            derived_states = {}
+        for row in fused:
+            prov = provenance.get(row.stable_id)
+            if prov is None:
+                continue
+            try:
+                derived_context[row.stable_id] = symbol_derived_context(
+                    con,
+                    node_id=prov.node_id,
+                    stable_id=row.stable_id,
+                    file_path=prov.file_path,
+                )
+            except Exception:  # noqa: BLE001 - a sidecar read may not kill a ranking
+                continue
     finally:
         if owned:
             con.close()
@@ -1263,10 +1317,12 @@ def hybrid_rank(
             graph_digest = hashlib.file_digest(graph_file, "sha256").hexdigest()
     return HybridRanking(
         query=query,
-        fused=tuple(fuse(sources, rrf_k, limit=k)),
+        fused=fused,
         sources=sources,
         graph_content_sha256=graph_digest,
         provenance=provenance,
         rrf_k=rrf_k,
         graph_revision=graph_revision(path) if path else "",
+        derived_context=derived_context,
+        derived_states=derived_states,
     )

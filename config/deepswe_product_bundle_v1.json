@@ -1078,6 +1078,7 @@
   "gt_engine/decision_point_eval.py",
   "gt_engine/delivery_budget.py",
   "gt_engine/dense_runtime.py",
+  "gt_engine/derived_context.py",
   "gt_engine/engine_state.py",
   "gt_engine/event_journal.py",
   "gt_engine/evidence_router.py",

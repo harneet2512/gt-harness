@@ -15,6 +15,8 @@ _SURFACE_ACTION = {
     "properties": "check the stored signature, constant, or schema property",
     "assertions": "execute or preserve the indexed invariant",
     "edge_metadata": "inspect the proven related symbol",
+    "communities": "inspect the other members of this file's community",
+    "processes": "trace the witnessed process this symbol participates in",
 }
 
 

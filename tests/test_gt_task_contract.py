@@ -339,6 +339,10 @@ def test_graph_receipt_names_all_trustworthy_surfaces(tmp_path):
         "assertions",
         "cochanges",
         "cochange_sets",
+        "communities",
+        "community_members",
+        "processes",
+        "process_steps",
         "file_hashes",
         "project_meta",
     }

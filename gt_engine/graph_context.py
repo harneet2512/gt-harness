@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gt_engine.derived_context import DERIVED_STATE_OK, derived_layer_states
 from gt_engine.task_contract import TaskContract, significant_tokens
 
 GRAPH_SURFACES = (
@@ -26,6 +27,10 @@ GRAPH_SURFACES = (
     "assertions",
     "cochanges",
     "cochange_sets",
+    "communities",
+    "community_members",
+    "processes",
+    "process_steps",
     "file_hashes",
     "project_meta",
 )
@@ -159,6 +164,11 @@ class GraphProjection:
     surface_hits: tuple[tuple[str, int], ...]
     semantic_facts: tuple[GraphSemanticFact, ...] = ()
     revision: str = ""
+    # The recorded admission state of each derived layer, verbatim
+    # (``ok``/``not_run``/a reason constant) or a reader-named degraded
+    # condition (``unrecorded``/``table_absent``/``count_mismatch``). Empty
+    # only when the states themselves could not be read.
+    derived_states: tuple[tuple[str, str], ...] = ()
 
 
 def build_capability_matrix(
@@ -366,6 +376,13 @@ def build_graph_projection(
     revision = graph_revision(graph_db)
     try:
         tables = _tables(con)
+        # Admission state of each derived layer, read once up front. Only
+        # ``ok`` serves rows -- a degraded, unrecorded or count-mismatched
+        # partition is never projected into the work surface.
+        try:
+            derived_states = derived_layer_states(con, tables)
+        except Exception:  # noqa: BLE001 - derived layers are advisory
+            derived_states = {}
         query = _fts_query(contract)
         if query and "nodes_fts" in tables:
             try:
@@ -691,6 +708,141 @@ def build_graph_projection(
                     files.update(str(row[0]).replace("\\", "/") for row in rows)
             except sqlite3.Error:
                 pass
+        # Community grouping: ``community_members.member`` is a file path, so
+        # every localized file that belongs to a published community emits a
+        # membership fact and pulls its sibling members into the file set --
+        # the same shape as the cochange expansion, one partition level up.
+        if (
+            files
+            and derived_states.get("community") == DERIVED_STATE_OK
+            and {"communities", "community_members"} <= tables
+        ):
+            base_files = sorted(files)[:limit]
+            placeholders = ",".join("?" for _ in base_files)
+            try:
+                rows = con.execute(
+                    "SELECT cm.member,c.id,c.label,c.cohesion,c.member_count "
+                    "FROM community_members cm "
+                    "JOIN communities c ON c.id=cm.community_id "
+                    "WHERE cm.member IN (" + placeholders + ") "
+                    "AND cm.member_kind='file' "
+                    "ORDER BY c.id,cm.member LIMIT ?",
+                    (*base_files, limit),
+                ).fetchall()
+                community_ids: list[str] = []
+                for member, community_id, label, cohesion, member_count in rows:
+                    member = str(member).replace("\\", "/")
+                    hits["community_members"] += 1
+                    if community_id not in community_ids:
+                        community_ids.append(str(community_id))
+                        hits["communities"] += 1
+                    cohesion_text = (
+                        "unmeasured" if cohesion is None
+                        else f"{float(cohesion):.4f}"
+                    )
+                    semantic_facts.append(GraphSemanticFact(
+                        "communities",
+                        0,
+                        member,
+                        "",
+                        "community_membership",
+                        (
+                            f"community={label} cohesion={cohesion_text} "
+                            f"members={int(member_count or 0)}"
+                        )[:500],
+                        confidence=0.8,
+                        revision=revision,
+                    ))
+                if community_ids:
+                    cid_ph = ",".join("?" for _ in community_ids)
+                    member_rows = con.execute(
+                        "SELECT DISTINCT member FROM community_members "
+                        "WHERE community_id IN (" + cid_ph + ") "
+                        "AND member_kind='file' ORDER BY member LIMIT ?",
+                        (*community_ids, limit),
+                    ).fetchall()
+                    for (member,) in member_rows:
+                        files.add(str(member).replace("\\", "/"))
+            except sqlite3.Error:
+                pass
+        # Process participation: ``process_steps.stable_id`` is the producer's
+        # effective stable id -- ``nodes.stable_id`` when stamped, else the
+        # ``resolution_symbols`` id joined on native_id -- so the same
+        # expression resolves which seed nodes sit on a witnessed path.
+        if (
+            seed_ids
+            and derived_states.get("process") == DERIVED_STATE_OK
+            and {"processes", "process_steps"} <= tables
+        ):
+            placeholders = ",".join("?" for _ in seed_ids)
+            try:
+                if "resolution_symbols" in tables:
+                    id_rows = con.execute(
+                        "SELECT n.id,n.file_path,n.name,"
+                        "COALESCE(NULLIF(n.stable_id,''),rs.stable_id,'') "
+                        "FROM nodes n LEFT JOIN resolution_symbols rs "
+                        "ON CAST(rs.native_id AS INTEGER)=n.id "
+                        "WHERE n.id IN (" + placeholders + ")",
+                        seed_ids,
+                    ).fetchall()
+                else:
+                    id_rows = con.execute(
+                        "SELECT n.id,n.file_path,n.name,"
+                        "COALESCE(NULLIF(n.stable_id,''),'') "
+                        "FROM nodes n WHERE n.id IN (" + placeholders + ")",
+                        seed_ids,
+                    ).fetchall()
+                by_stable_id = {
+                    str(sid): (int(nid), str(path).replace("\\", "/"), str(name))
+                    for nid, path, name, sid in id_rows
+                    if sid
+                }
+                if by_stable_id:
+                    sid_ph = ",".join("?" for _ in by_stable_id)
+                    if "resolution_symbols" in tables:
+                        name_expr = "COALESCE(re.qualified_name,p.entry_stable_id)"
+                        name_join = (
+                            "LEFT JOIN resolution_symbols re "
+                            "ON re.stable_id=p.entry_stable_id "
+                        )
+                    else:
+                        name_expr = "p.entry_stable_id"
+                        name_join = ""
+                    prows = con.execute(
+                        "SELECT ps.stable_id,ps.ordinal,p.id,p.kind,"
+                        "p.trust_floor,"
+                        "(SELECT COUNT(*) FROM process_steps s "
+                        "WHERE s.process_id=ps.process_id)," + name_expr + " "
+                        "FROM process_steps ps "
+                        "JOIN processes p ON p.id=ps.process_id "
+                        + name_join
+                        + "WHERE ps.stable_id IN (" + sid_ph + ") "
+                        "ORDER BY ps.ordinal,ps.process_id LIMIT ?",
+                        (*by_stable_id.keys(), limit),
+                    ).fetchall()
+                    hits["processes"] += len({row[2] for row in prows})
+                    hits["process_steps"] += len(prows)
+                    for (
+                        sid, ordinal, _pid, kind, trust_floor, step_count, pname
+                    ) in prows:
+                        nid, path, name = by_stable_id[str(sid)]
+                        semantic_facts.append(GraphSemanticFact(
+                            "processes",
+                            nid,
+                            path,
+                            name,
+                            "process_participation",
+                            (
+                                f"process={pname} "
+                                f"step {int(ordinal or 0) + 1}/"
+                                f"{int(step_count or 0)} "
+                                f"kind={kind} trust={trust_floor}"
+                            )[:500],
+                            confidence=0.8,
+                            revision=revision,
+                        ))
+            except sqlite3.Error:
+                pass
         return GraphProjection(
             files=frozenset(files),
             symbols=frozenset(symbols),
@@ -698,6 +850,7 @@ def build_graph_projection(
             surface_hits=tuple(sorted((k, v) for k, v in hits.items() if v)),
             semantic_facts=tuple(semantic_facts),
             revision=revision,
+            derived_states=tuple(sorted(derived_states.items())),
         )
     finally:
         con.close()
