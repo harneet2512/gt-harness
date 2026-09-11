@@ -12,6 +12,7 @@
   HemisphereLight,
   InstancedMesh,
   LineBasicMaterial,
+  GridHelper,
   Line,
   LineSegments,
   Float32BufferAttribute,
@@ -250,6 +251,13 @@ export class Renderer3D {
     const floor=new Mesh(this.floorGeometry,this.floorMaterial);
     floor.rotation.x=-Math.PI/2;floor.position.y=-.35;floor.receiveShadow=true;
     this.scene.add(floor);
+    /* The drafting table: a faint engineering grid under the whole city —
+       the architectural-model signal that makes paper read as a surface. */
+    const grid = new GridHelper(2400, 240, 0xd8dde4, 0xe8ebef);
+    (grid.material as LineBasicMaterial).transparent = true;
+    (grid.material as LineBasicMaterial).opacity = 0.55;
+    grid.position.y = -0.3;
+    this.scene.add(grid);
     const mark=document.createElement("canvas");mark.width=256;mark.height=128;
     const ink=mark.getContext("2d")!;ink.fillStyle="#ffffff";ink.font="650 100px Arial";ink.textAlign="center";ink.fillText("GT",128,99);
     this.siteMarkTexture=new CanvasTexture(mark);
@@ -456,15 +464,22 @@ export class Renderer3D {
       this.terrain.add(cliff);
       // Planting: a loose ring of trees around the district's mid-terrace.
       const seed=pathHash(d.id);
-      const trees=new InstancedMesh(this.tree,this.leaf,18);
-      for(let i=0;i<18;i++) {
-        const a=(i/18)*Math.PI*2+((seed%97)/97)*Math.PI*2;
+      const trees=new InstancedMesh(this.tree,this.leaf,26);
+      for(let i=0;i<26;i++) {
+        /* Two plantings: a promenade at the platform rim, and a street
+           row down the pedestrian axis the plots deliberately leave
+           open — green where the buildings aren't. */
+        const street = i >= 16;
+        const a=(i/(street?10:16))*Math.PI*2+((seed%97)/97)*Math.PI*2;
         const wobble=((seed+i*31)%100)/100;
-        const r=.45+.05*wobble;
-        const tx=d.x+d.width/2+Math.cos(a)*d.width*r;
-        const tz=d.z+d.depth/2+Math.sin(a)*d.depth*r;
-        const s=4.5+((seed+i*13)%100)/100*3;
-        this.matrix.position.set(tx,.5,tz);
+        const tx=street
+          ? d.x+d.width/2+((i%2)?2.2:-2.2)
+          : d.x+d.width/2+Math.cos(a)*d.width*(.44+.05*wobble);
+        const tz=street
+          ? d.z+d.depth*.15+wobble*d.depth*.7
+          : d.z+d.depth/2+Math.sin(a)*d.depth*(.44+.05*wobble);
+        const s=(street?3.4:4.5)+((seed+i*13)%100)/100*3;
+        this.matrix.position.set(tx, street ? 1.2 : .5, tz);
         this.matrix.scale.set(s,s,s);
         this.matrix.rotation.set(0,a,0);
         this.matrix.updateMatrix();
@@ -498,6 +513,7 @@ export class Renderer3D {
       forum.position.set(cx,0.25,cz);
       forum.receiveShadow=true;
       this.terrain.add(forum);
+      this.hub.set(cx, 6, cz);
       /* A flush inlay ring — pavement detail, not a tower. */
       const inlay=new Mesh(
         new TorusGeometry(10,0.35,8,64),
@@ -596,13 +612,13 @@ export class Renderer3D {
     this.input = false;
     this.frame(this.controls.target.clone(), distance, TIMING.panel);
   }
+  private hub = new Vector3(0, 6, 0);
   private dockPosition(slot:number) {
-    const ds=this.layout?.districts??[];
-    if(!ds.length)return new Vector3(-30,14,slot*40);
-    const centers=ds.map(d=>({u:(d.x+d.width/2-d.z-d.depth/2)*Math.SQRT1_2,v:(d.x+d.width/2+d.z+d.depth/2)*Math.SQRT1_2,r:Math.max(d.width,d.depth)*.62}));
-    const u=Math.min(...centers.map(c=>c.u-c.r))-18;
-    const v=(Math.min(...centers.map(c=>c.v))+Math.max(...centers.map(c=>c.v)))/2+(slot-1)*42;
-    return new Vector3((u+v)*Math.SQRT1_2,14,(v-u)*Math.SQRT1_2);
+    /* Idle agents hold station above the forum — the repository root is
+       where work converges, so that's where an idle drone belongs. */
+    const a = slot * 1.7 + 0.6;
+    const r = 26 + (slot % 3) * 8;
+    return new Vector3(this.hub.x + Math.cos(a) * r, this.hub.y + 12 + (slot % 2) * 7, this.hub.z + Math.sin(a) * r);
   }
   fit() {
     this.userOwned = false;
@@ -881,7 +897,7 @@ export class Renderer3D {
              district so neighborhoods read without saturation slop. */
           const wobble=(pathHash(id)%100)/100;
           const base = wobble < .33 ? "#e8e9eb" : wobble < .66 ? "#efe9dd" : "#e2e6ea";
-          const lean = (pathHash(id) >> 6) % 3 === 0 ? .85 : .5;
+          const lean = (pathHash(id) >> 6) % 3 === 0 ? .9 : .55;
           const c=this.colorTo[k][i]
             .set(base)
             .lerp(tint,lean);
@@ -994,7 +1010,7 @@ export class Renderer3D {
       if (!v) {
         const group = this.factory.create(a.color);
         group.rotation.order = "YXZ";
-        group.scale.setScalar(1);
+        group.scale.setScalar(1.9);
         group.userData.agentId = a.id;
         const scan = new Mesh(this.scanGeometry, this.scanMaterial.clone());
         scan.layers.set(1);
