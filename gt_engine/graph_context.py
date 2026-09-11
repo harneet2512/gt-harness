@@ -844,10 +844,12 @@ def build_graph_projection(
                         ))
             except sqlite3.Error:
                 pass
-        # Route/API surface: HANDLES_ROUTE binds a handler to its route file and
-        # API_CALL binds a client call to the route it resolves to. Both carry
+        # Route/API/data-access surface: HANDLES_ROUTE binds a handler to its
+        # route file, API_CALL binds a client call to the route it resolves to,
+        # QUERIES binds a function to the model it reads through an ORM, and
+        # INJECTS binds a function/ctor to the service type it injects. All carry
         # producer mechanism + confidence; surface them for in-scope files so a
-        # model editing a route handler or an API client sees the API surface
+        # model editing a handler, client, or data-access call sees that surface
         # without having to query a tool.
         if files and {"edges", "nodes"} <= tables:
             base_files = sorted(files)[:limit]
@@ -859,13 +861,19 @@ def build_graph_projection(
                     "FROM edges e "
                     "JOIN nodes src ON src.id=e.source_id "
                     "JOIN nodes tgt ON tgt.id=e.target_id "
-                    "WHERE e.type IN ('HANDLES_ROUTE','API_CALL') "
+                    "WHERE e.type IN ('HANDLES_ROUTE','API_CALL','QUERIES','INJECTS') "
                     "AND (src.file_path IN (" + placeholders + ") "
                     "OR tgt.file_path IN (" + placeholders + ")) "
                     "ORDER BY e.confidence DESC,src.file_path LIMIT ?",
                     (*base_files, *base_files, limit),
                 ).fetchall()
                 hits["routes"] += len(route_rows)
+                _EDGE_FACT_KIND = {
+                    "HANDLES_ROUTE": "route_handler",
+                    "API_CALL": "api_call",
+                    "QUERIES": "data_access",
+                    "INJECTS": "injection",
+                }
                 for (
                     etype, src_path, src_name, src_line,
                     tgt_path, tgt_name, conf, mechanism,
@@ -877,10 +885,7 @@ def build_graph_projection(
                         0,
                         src_path,
                         str(src_name or ""),
-                        (
-                            "route_handler" if etype == "HANDLES_ROUTE"
-                            else "api_call"
-                        ),
+                        _EDGE_FACT_KIND.get(etype, "api_surface"),
                         (
                             f"{etype} {src_name} ({src_path}:{src_line}) -> "
                             f"{tgt_name} ({tgt_path})"

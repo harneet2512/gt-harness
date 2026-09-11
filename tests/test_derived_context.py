@@ -664,6 +664,13 @@ def test_projection_surfaces_route_api_edges_for_localized_files(tmp_path):
             "INSERT INTO edges(source_id,target_id,type,source_line,"
             "confidence,resolution_method) "
             "VALUES(2,4,'API_CALL',8,0.9,'literal_path');"
+            # data-access + injection: parse() queries and injects a service
+            "INSERT INTO edges(source_id,target_id,type,source_line,"
+            "confidence,resolution_method) "
+            "VALUES(1,4,'QUERIES',14,0.85,'orm_data_access');"
+            "INSERT INTO edges(source_id,target_id,type,source_line,"
+            "confidence,resolution_method) "
+            "VALUES(1,4,'INJECTS',11,0.85,'depends_injection');"
         )
         con.commit()
     finally:
@@ -678,8 +685,14 @@ def test_projection_surfaces_route_api_edges_for_localized_files(tmp_path):
     kinds = {fact.kind for fact in route_facts}
     assert "route_handler" in kinds
     assert "api_call" in kinds
+    assert "data_access" in kinds
+    assert "injection" in kinds
     handler = next(f for f in route_facts if f.kind == "route_handler")
     assert handler.file_path == "src/parser.py"
     assert "HANDLES_ROUTE" in handler.value
     assert "src/api.py" in handler.value
     assert handler.confidence == 0.95
+    query = next(f for f in route_facts if f.kind == "data_access")
+    assert "QUERIES" in query.value
+    inject = next(f for f in route_facts if f.kind == "injection")
+    assert "INJECTS" in inject.value
