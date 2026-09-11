@@ -1,8 +1,8 @@
 artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
-source_commit=4525ef38f33465b143a5773920d5809d97fc7a92
-source_tree=fb1ac16f4a980a3612bf43233058b6b1f615b6fc
-sha256=5957162323f495a302e3f457a02045af56030cba848603533a2b82dc33d5a80d
+source_commit=7db2f460810c43059cf1c3797eac99e2ae412ed8
+source_tree=e38deadf9c97096b5f551f50cdcaef6531a9a243
+sha256=79cb35474248adbc116888c8a4be603185cb727c9bbe961f3bae3895d440caec
 build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
 
 Recorded source tree carries 2456 committed files.
