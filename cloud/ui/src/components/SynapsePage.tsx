@@ -306,13 +306,17 @@ export default function SynapsePage() {
     ({ command, arg, raw }: ParsedSlash) => {
       /* The command is echoed the way a shell echoes it: what you typed
          stays in the transcript, above whatever it did. A multi-line
-         `/spawn` is echoed whole — each line is a worker. */
-      note(
-        "user",
-        command.name === "spawn"
-          ? raw
-          : `/${command.name}${arg ? ` ${arg}` : ""}`,
-      );
+         `/spawn` is echoed whole — each line is a worker. `/gha` is not
+         echoed here: the server stores the message itself and it streams
+         back as the user's line. */
+      if (command.name !== "gha") {
+        note(
+          "user",
+          command.name === "spawn"
+            ? raw
+            : `/${command.name}${arg ? ` ${arg}` : ""}`,
+        );
+      }
       switch (command.name) {
         case "stop":
           if (data.isRunning) stop();
@@ -360,6 +364,13 @@ export default function SynapsePage() {
           void data.spawn(draft.tasks).then((error) => {
             if (error) note("system", error);
           });
+          break;
+        }
+        /* `/gha` is a server-side command: the message endpoint parses it,
+           registers the external agent and dispatches the workflow — the
+           same "message that is secretly a command" shape as /spawn. */
+        case "gha": {
+          void data.send(raw);
           break;
         }
         /* The fleet, drawn where it was asked for. It is a block rather

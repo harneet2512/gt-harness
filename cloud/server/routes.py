@@ -17,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
+from . import gha
 from .auth import issue_ingest_token, require_ingest, require_user
 from .deps import get_event_bus, get_manager, get_store
 from .events import EventBus
@@ -80,7 +81,32 @@ IngestDep = Annotated[dict[str, Any], Depends(require_ingest)]
 #: one worker per line: ``/spawn <task>``. A message whose first non-blank
 #: line is one of these is a spawn command and never reaches a model.
 _SPAWN_LINE = re.compile(r"^\s*/spawn\s+(?P<task>\S.*?)\s*$")
+_GHA_LINE = re.compile(r"^\s*/gha(?:\s+(?P<task>\S[\s\S]*?))?\s*$")
 
+
+def _gha_task(content: str) -> str | None:
+    """The task a ``/gha <task>`` message asks for, or ``None``.
+
+    Same strictness as /spawn: the message either *is* the command —
+    one ``/gha`` line plus its task — or it is a message, never the
+    literal word "/gha" fed to a model.
+    """
+    lines = [line for line in content.splitlines() if line.strip()]
+    if not lines:
+        return None
+    match = _GHA_LINE.match(lines[0])
+    if match is None:
+        return None
+    if len(lines) > 1:
+        raise HTTPException(
+            400,
+            "A /gha message is one line: /gha <task>. The lines after it "
+            "would be silently dropped, so the message is rejected instead.",
+        )
+    task = match.group("task")
+    if not task:
+        raise HTTPException(400, "/gha needs a task: /gha <what to do>")
+    return task
 StoreDep = Annotated[SessionStore, Depends(get_store)]
 ManagerDep = Annotated[SessionManager, Depends(get_manager)]
 BusDep = Annotated[EventBus, Depends(get_event_bus)]
@@ -276,6 +302,7 @@ async def list_messages(
 async def post_message(
     session_id: str,
     body: MessageCreate,
+    request: Request,
     store: StoreDep,
     manager: ManagerDep,
     user: UserDep,
@@ -285,6 +312,50 @@ async def post_message(
         raise HTTPException(
             409, f"session is {session['status']} and cannot accept messages"
         )
+    gha_task = _gha_task(body.content)
+    if gha_task is not None:
+        if session["status"] in _CLOSED_TO_EXTERNAL:
+            raise HTTPException(
+                409, f"session is {session['status']} and cannot host agents"
+            )
+        try:
+            agent = await manager.register_external_agent(
+                session,
+                agent_kind="gha",
+                label="github actions",
+                task=gha_task,
+            )
+        except ExternalAgentLimit as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ExternalAgentRefused as exc:
+            raise HTTPException(400, str(exc)) from exc
+        agent_id = str(agent["id"])
+        token = issue_ingest_token(agent_id, session_id)
+        try:
+            await gha.dispatch_run(
+                session_id=session_id,
+                agent_id=agent_id,
+                task=gha_task,
+                repo=str(session["repo"]),
+                ref=str(session["ref"]),
+                ingest_url=_ingest_url(request, agent_id),
+                ingest_token=token,
+            )
+        except gha.GhaUnavailable as exc:
+            # A dispatched agent that never started must not sit "working"
+            # forever — close the row with the honest reason.
+            try:
+                await manager.finish_external_agent(agent, "error", str(exc))
+            except Exception:
+                pass
+            raise HTTPException(400, str(exc)) from exc
+        message = await store.add_message(
+            session_id,
+            role="user",
+            content=body.content,
+            meta={"gha": True, "agent_id": agent_id},
+        )
+        return {"message": message, "delivery": "gha"}
     tasks = _spawn_tasks(body.content)
     if tasks is not None:
         _spawnable(session)

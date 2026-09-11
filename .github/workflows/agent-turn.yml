@@ -1,0 +1,62 @@
+name: agent-turn
+
+# One /gha task = one run of this workflow = one external agent on the
+# session's canvas. Dispatched by the server with the ingest credential
+# as an input — scoped, short-lived, dies with the session.
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: the session this run reports to
+        required: true
+      agent_id:
+        description: the external-agent row this run fills
+        required: true
+      task:
+        description: what the agent should do
+        required: true
+      repo:
+        description: https URL of the repository to work on
+        required: true
+      ref:
+        description: branch on the target repository
+        required: false
+        default: main
+      ingest_url:
+        description: where this agent's events post
+        required: true
+      ingest_token:
+        description: the agent-scoped bearer for that endpoint
+        required: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: check out the worker
+        uses: actions/checkout@v4
+        with:
+          repository: harneet2512/gt-harness
+          ref: cloud/internal-harness
+          path: harness
+
+      - name: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install the agent runtime
+        working-directory: harness
+        run: pip install -e ".[miniswe]" --quiet
+
+      - name: run the turn
+        env:
+          GT_INGEST_URL: ${{ inputs.ingest_url }}
+          GT_INGEST_TOKEN: ${{ inputs.ingest_token }}
+          GT_TASK: ${{ inputs.task }}
+          GT_TARGET_REPO: ${{ inputs.repo }}
+          GT_TARGET_REF: ${{ inputs.ref }}
+          GT_MODEL: ${{ vars.GT_MODEL || 'openrouter/meta/muse-spark-1.2-contributor' }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python -m cloud.adapters.gha_worker

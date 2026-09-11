@@ -13,6 +13,7 @@ export type SlashName =
   | "resume"
   | "settings"
   | "spawn"
+  | "gha"
   | "agents"
   | "connect"
   | "theme"
@@ -39,6 +40,11 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     name: "spawn",
     arg: "<task>",
     hint: "hand a task to a worker agent — one /spawn line per worker, up to 4",
+  },
+  {
+    name: "gha",
+    arg: "<task>",
+    hint: "run the task in GitHub Actions — the run reports back as an agent",
   },
   {
     name: "agents",

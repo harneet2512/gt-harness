@@ -60,7 +60,7 @@ def _clean_ref(value: str) -> str:
 ClosedReason = Literal["user", "expired", "failed"]
 #: ``spawned`` means the message was a ``/spawn`` command: no turn was
 #: started and the message in the response is the server's system note.
-Delivery = Literal["turn_started", "queued_for_running_turn", "spawned"]
+Delivery = Literal["turn_started", "queued_for_running_turn", "spawned", "gha"]
 FileStatus = Literal["added", "modified", "deleted"]
 EdgeKind = Literal["import", "gt_call", "gt_ref", "gt_import"]
 

@@ -452,3 +452,34 @@ user's machine. The Claude Code payload fixtures are captured from a real
 python -m ruff check cloud/adapters/ tests/test_cloud_adapters.py
 python -m pytest tests/test_cloud_adapters.py -q
 ```
+
+---
+
+## GitHub Actions as the runner — `/gha`
+
+`/gha <task>` hands a turn to a runner this process does not host. The
+message endpoint parses the command, registers an ordinary external agent
+(`agent_kind: "gha"`), and dispatches `agent-turn.yml` on the product
+repo's own Actions pool. The run clones the target repo, drives
+mini-swe-agent step by step, and posts the same ingest frames any external
+agent sends — tool calls, results, status, finish — so the workspace and
+the city show it working like any other agent.
+
+Operator configuration (the server's environment):
+
+| Variable | Meaning |
+|---|---|
+| `GHA_TOKEN` | A PAT with `actions:write` on the repo hosting the workflow. The one secret this path needs. |
+| `GHA_REPO` | `owner/name` — whose Actions pool runs the turns. |
+| `GHA_WORKFLOW` | Workflow filename; default `agent-turn.yml`. |
+| `GHA_REF` | Ref the workflow file lives on; default `cloud/internal-harness`. |
+| `PUBLIC_BASE_URL` | Strongly recommended — the ingest URL is handed to a runner on somebody else's computer; a loopback or internal URL is useless to it. |
+
+The runner needs a model key too — `OPENROUTER_API_KEY` as a repo secret on
+the GHA side, plus `GT_MODEL` as a repo variable if the default does not fit.
+The ingest token travels as a workflow input: it is agent-scoped and
+short-lived, and it is the only credential the runner ever holds.
+
+```
+python -m pytest tests/test_cloud_gha.py -q
+```
