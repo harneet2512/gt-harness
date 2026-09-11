@@ -1,4 +1,0 @@
-# The producer fingerprints these files BYTE FOR BYTE (build_gt_index_linux.sh:73
-# hashes file contents), so any end-of-line translation on checkout changes the
-# digest and the correspondence check becomes unreproducible. Never convert.
-* -text
