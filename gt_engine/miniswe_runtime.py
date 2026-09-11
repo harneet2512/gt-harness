@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 from dataclasses import dataclass
 from functools import partial
@@ -309,7 +310,10 @@ def _refusal_text(adapter: MiniSweAdapter) -> str:
     return "\n".join(lines)
 
 
-def _viewed_files(command: str) -> tuple[str, ...]:
+_VIEW_NOISE = re.compile(r"[<>$]")
+
+
+def _viewed_files(command: str, repo_root: str = "") -> tuple[str, ...]:
     from groundtruth.runtime.gateway import KIND_VIEW, classify_command
 
     if classify_command(command or "") != KIND_VIEW:
@@ -332,10 +336,20 @@ def _viewed_files(command: str) -> tuple[str, ...]:
             segments[-1].append(token)
 
     found: list[str] = []
+    cwd = ""
     for segment in segments:
         if not segment:
             continue
         head = Path(segment[0]).name.lower()
+        if head == "cd" and repo_root:
+            if len(segment) > 1 and not segment[1].startswith("-"):
+                target = segment[1]
+                if not os.path.isabs(target):
+                    target = os.path.normpath(
+                        os.path.join(cwd or repo_root, target)
+                    )
+                cwd = target
+            continue
         if head not in _VIEW_COMMANDS:
             continue
         args = segment[1:]
@@ -385,10 +399,28 @@ def _viewed_files(command: str) -> tuple[str, ...]:
                     continue
                 operands.append(value)
                 index += 1
-        found.extend(
-            value for value in operands
-            if value and value != "-" and not value.startswith((">", "<"))
-        )
+        for value in operands:
+            if not value or value == "-" or _VIEW_NOISE.search(value):
+                continue
+            resolved = value
+            if repo_root:
+                if os.path.isabs(value):
+                    if os.path.isfile(value):
+                        resolved = os.path.normpath(value)
+                    else:
+                        continue
+                else:
+                    resolved = next(
+                        (
+                            os.path.normpath(os.path.join(base, value))
+                            for base in (cwd, repo_root)
+                            if base and os.path.isfile(os.path.join(base, value))
+                        ),
+                        "",
+                    )
+                    if not resolved:
+                        continue
+            found.append(resolved)
     return tuple(dict.fromkeys(found))
 
 
@@ -566,7 +598,7 @@ def _run_evidence(
                 action_index=action_index,
                 cwd=adapter.repo_root or os.getcwd(),
                 changed_files=changed_files,
-                viewed_files=_viewed_files(command),
+                viewed_files=_viewed_files(command, adapter.repo_root or ""),
                 test_outcome="fail",
                 output_artifact=output_artifact,
             )
@@ -584,8 +616,7 @@ def _run_evidence(
         action_index=action_index,
         cwd=adapter.repo_root or os.getcwd(),
         changed_files=changed_files,
-        viewed_files=_viewed_files(command),
-        edit_before_after=edit_before_after or None,
+        viewed_files=_viewed_files(command, adapter.repo_root or ""),
         covering=covering,
         test_outcome=_classify_test(command, output, returncode),
         output_artifact=output_artifact,
@@ -716,7 +747,7 @@ def _cochange_prior(
     """Advisory co-change dose for the files this action edited or viewed."""
     from .cochange_evidence import cochange_prior_dose
 
-    files = tuple(dict.fromkeys((*changed_files, *_viewed_files(command))))
+    files = tuple(dict.fromkeys((*changed_files, *_viewed_files(command, adapter.repo_root or ""))))
     if not files:
         return ""
     try:

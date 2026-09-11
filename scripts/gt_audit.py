@@ -687,6 +687,8 @@ class TaskAudit:
     gt_deliveries: int = 0
     gt_delivery_kinds: dict[str, int] = field(default_factory=dict)
     gt_overhead_chars: int = 0
+    delivery_consumption: list[dict] = field(default_factory=list)
+    delivery_consumption_summary: dict[str, int] = field(default_factory=dict)
     gt_blocks_observed: int = 0  # heuristic count, always reported
     # ledger join
     ledger_present: bool = False
@@ -1169,6 +1171,18 @@ def _audit_native_miniswe_task(
     counts = Counter(str(row.get("event") or "") for row in rows)
     a.graph_refresh_count = counts["graph_refreshed"]
     a.graph_refresh_failure_count = counts["graph_refresh_failed"]
+    # The miniswe path records graph availability as `graph_publication` rows in
+    # the event journal — there is no bridge-path surface/projection receipt in
+    # a Mini-SWE trial, so attribution-file absence must not read as "no graph".
+    publications = [row for row in rows if row.get("event") == "graph_publication"]
+    if publications:
+        a.graph_available = True
+        a.graph_surface_counts = {
+            "published_revisions": len(
+                {str(row.get("artifact_sha256") or "")
+                 for row in publications} - {""}
+            )
+        }
     a.bash_observation_count = counts["semantic_observation"]
     a.gt_deliveries = counts["evidence_delivery"] + counts["context_addition_delivery"]
     a.gt_overhead_chars = sum(
@@ -1482,6 +1496,156 @@ def _audit_native_miniswe_task(
         )
         provider_requests[request_id]["_audited_delivery_ids"] = sorted(verified)
         provider_responses[request_id]["_audited_delivery_ids"] = sorted(verified)
+
+    # --- per-delivery consumption verdicts (helpfulness audit) --------------
+    # Chain per delivery: emitted (row exists) → SENT (admitted into a
+    # provider request) → VISIBLE (sealed bytes verified inside the
+    # model-visible messages) → SERVED (the provider returned a response for
+    # that request) → AGENT-DID (the response's own assistant turn emitted an
+    # action) → CONSUMED (that action, or the two turns after it, references
+    # what was delivered). prior_touches is the fairness counter — deliveries
+    # whose target the agent had already touched cannot claim causality.
+    response_by_pid: dict[str, tuple[int, dict]] = {}
+    assistant_positions = [
+        i for i, m in enumerate(messages)
+        if m.get("role") == "assistant" and m.get("tool_calls")
+    ]
+    for pos, i in enumerate(assistant_positions):
+        resp = messages[i].get("extra", {}).get("response")
+        if isinstance(resp, dict) and resp.get("id"):
+            response_by_pid[str(resp["id"])] = (pos, messages[i])
+
+    def _action_commands(message: dict) -> list[str]:
+        out: list[str] = []
+        for call in message.get("tool_calls") or ():
+            if not isinstance(call, dict):
+                continue
+            fn = call.get("function")
+            if not isinstance(fn, dict):
+                continue
+            args = fn.get("arguments")
+            if isinstance(args, str):
+                out.append(args)
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            out.append(content)
+        return out
+
+    _GENERIC_TOKENS = frozenset({
+        "python", "return", "import", "class", "function", "assert",
+        "pytest", "unittest", "self", "none", "true", "false", "result",
+    })
+
+    def _delivery_tokens(identity: str, target: str) -> set[str]:
+        tokens: set[str] = set()
+        if target:
+            tokens.add(target)
+            base = target.rsplit("/", 1)[-1]
+            if len(base) >= 4:
+                tokens.add(base)
+        material = delivery_material.get(identity)
+        if material is not None:
+            rendered = material[0]
+            for tok in re.findall(r"[\w./-]+\.[A-Za-z]{1,4}\b", rendered):
+                if "/" in tok or tok.startswith("."):
+                    tokens.add(tok.strip())
+                else:
+                    base = tok.rsplit("/", 1)[-1]
+                    if len(base) >= 5:
+                        tokens.add(base)
+            for tok in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]{6,}\b", rendered):
+                if tok.lower() not in _GENERIC_TOKENS:
+                    tokens.add(tok)
+        return {t for t in tokens if len(t) >= 4}
+
+    def _token_hit(command: str, tokens: frozenset[str] | set[str]) -> str:
+        # Word-boundary match: a bare "monitor" must not credit "aiomonitor".
+        for tok in tokens:
+            if re.search(r"(?<![\w])" + re.escape(tok) + r"(?![\w])", command):
+                return tok
+        return ""
+
+    for row in rows:
+        if row.get("event") not in {
+            "evidence_delivery", "context_addition_delivery",
+        }:
+            continue
+        delivery_id = str(row.get("delivery_identity") or "")
+        request_id = str(row.get("request_id") or "")
+        target = str(row.get("target") or "")
+        verdict = {
+            "delivery_id": delivery_id,
+            "evidence_type": str(row.get("evidence_type") or row.get("kind") or ""),
+            "feature_id": str(row.get("feature_id") or ""),
+            "iteration": int(row.get("iteration") or 0),
+            "request_id": request_id,
+            "target": target,
+            "sent": False,
+            "visible": False,
+            "served": False,
+            "agent_did": False,
+            "consumed": False,
+            "match": "",
+            "prior_touches": 0,
+            "verdict": "not_sent",
+        }
+        request_row = provider_requests.get(request_id)
+        if request_row is not None:
+            request_delivery_ids = {
+                str(v) for v in request_row.get("delivery_ids") or ()
+            }
+            verdict["sent"] = delivery_id in request_delivery_ids
+            verdict["visible"] = (
+                delivery_id in audited_request_ids.get(request_id, set())
+            )
+        response_row = provider_responses.get(request_id)
+        tokens = _delivery_tokens(delivery_id, target)
+        if response_row is not None:
+            verdict["served"] = True
+            pid = str(response_row.get("provider_response_id") or "")
+            located = response_by_pid.get(pid)
+            if located is not None:
+                pos, _msg = located
+                verdict["agent_did"] = True
+                if target:
+                    touch_tokens = {target, target.rsplit("/", 1)[-1]}
+                    for earlier in assistant_positions[:pos]:
+                        for cmd in _action_commands(messages[earlier]):
+                            if _token_hit(cmd, touch_tokens):
+                                verdict["prior_touches"] += 1
+                                break
+                window = assistant_positions[pos:pos + 3]
+                matched = ""
+                for wi in window:
+                    for cmd in _action_commands(messages[wi]):
+                        hit = _token_hit(cmd, tokens)
+                        if hit:
+                            matched = hit
+                            break
+                    if matched:
+                        break
+                verdict["consumed"] = bool(matched)
+                verdict["match"] = matched
+                verdict["verdict"] = (
+                    "consumed" if matched else "seen_no_action_on_content"
+                )
+            else:
+                verdict["verdict"] = "served_response_not_in_trajectory"
+        elif verdict["sent"] or verdict["visible"]:
+            verdict["verdict"] = (
+                "delivered_not_served" if verdict["sent"] else "not_served"
+            )
+        a.delivery_consumption.append(verdict)
+
+    consumption_counts = Counter(v["verdict"] for v in a.delivery_consumption)
+    a.delivery_consumption_summary = dict(sorted(consumption_counts.items()))
+    a.delivery_consumption_summary["total"] = len(a.delivery_consumption)
+    a.delivery_consumption_summary["consumed_fair"] = sum(
+        1
+        for v in a.delivery_consumption
+        if v["verdict"] == "consumed" and v["prior_touches"] == 0
+    )
+
     plan_projection, plan_issues = _native_plan_projection(rows, state_dir)
     a.attribution_issues.extend(plan_issues)
     a.feature_attribution = _native_feature_projection(rows, plan_projection=plan_projection)
@@ -2395,6 +2559,11 @@ def render_report(audits: list[TaskAudit], run_dir: Path) -> str:
             out.append(f"  - {r}")
         if a.gt_delivery_kinds:
             out.append(f"  - GT delivery kinds: {a.gt_delivery_kinds}")
+        if a.delivery_consumption_summary:
+            out.append(
+                "  - GT delivery consumption: "
+                f"{a.delivery_consumption_summary}"
+            )
         if a.gt_overhead_chars:
             src = "sealed (ledger)" if a.ledger_present else "observable"
             out.append(f"  - GT overhead {src}: {a.gt_overhead_chars} chars")

@@ -92,6 +92,65 @@ class CheckObservation:
     test_source_digest: str = ""
 
 
+def decompose_check_command(command: str):
+    """Split a simple sequential shell command into check segments.
+
+    Returns ``(segments, separators, last_raw_is_check, reason)``.
+    ``segments`` is a list of ``(argv_list, cwd_suffix_or_None)`` where
+    ``cwd_suffix`` folds leading ``cd`` segments; callers resolve it against
+    their own base directory. ``separators`` lists the operators
+    (``&&``/``;``) between raw segments; ``last_raw_is_check`` is True when
+    the final raw segment was emitted as a check segment (not a folded
+    ``cd``). Together they let callers attribute an exit status honestly: an
+    all-``&&`` chain with rc==0 proves every segment passed; a ``;``-chain's
+    rc belongs only to the last raw segment.
+
+    ``reason`` is set (and segments empty) when the command uses operators
+    whose semantics cannot be preserved by independent argv checks: pipes and
+    ``||`` change which exit status matters, ``&``/subshells change the
+    process model, and redirections change the observable.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return None, (), False, "unparseable_shell_command"
+    raw_segments: list[list[str]] = []
+    separators: list[str] = []
+    current: list[str] = []
+    for token in tokens:
+        if token and all(char in ";&|<>()" for char in token):
+            if token not in {"&&", ";"}:
+                return None, (), False, f"unsupported_shell_operator:{token}"
+            if current:
+                raw_segments.append(current)
+                separators.append(token)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        raw_segments.append(current)
+    if not raw_segments:
+        return None, (), False, "empty_command"
+    if "$" in command or "`" in command:
+        return None, (), False, "shell_expansion"
+    segments: list[tuple[list[str], "str | None"]] = []
+    cwd: "str | None" = None
+    last_raw_is_check = False
+    for seg in raw_segments:
+        head = Path(seg[0]).name.lower().removesuffix(".exe") if seg else ""
+        if head == "cd" and len(seg) == 2:
+            cwd = seg[1]
+            last_raw_is_check = False
+            continue
+        segments.append((list(seg), cwd))
+        last_raw_is_check = True
+    if not segments:
+        return None, (), False, "no_executable_segment"
+    return segments, tuple(separators), last_raw_is_check, None
+
+
 def validation_source_digest(spec: CheckSpec, snapshot) -> str:
     """Bind declared test source/configuration; result dependencies remain workspace-wide."""
     if not snapshot.complete:

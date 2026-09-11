@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from gt_harness.canonical_io import atomic_json, atomic_write
@@ -295,6 +296,106 @@ def _read_report(path: Path) -> dict:
         return {}
 
 
+def _seal_terminated_journals(state_dir: Path, *, reason: str, terminal: str,
+                              exit_code: int) -> dict:
+    """Close the run's journals after the child process is dead.
+
+    A deadline/termination kill can leave a provider request admitted but never
+    terminally recorded (the orphan), prepared deliveries staged but never
+    resolved, and no terminal event in the chained journal. Post-mortem, the
+    supervisor is the only writer left, so it seals both journals:
+
+    * ``provider_events.jsonl`` (flat) gets a ``provider_failure`` row for
+      every request id without a terminal row — conservation closes.
+    * ``events.jsonl`` (hash-chained) gets a ``run_terminal`` row appended via
+      the canonical store, recording the orphan set and delivery tallies.
+      A torn final line is truncated first; an invalid chain is left alone —
+      the verifier already flags it, and a partial seal must never fabricate
+      history.
+    """
+    summary = {"orphaned_provider_requests": [], "provider_failures_sealed": 0,
+               "run_terminal_appended": [], "journals_skipped": []}
+    error_type = ("DeadlineExceeded" if reason == "deadline_exceeded"
+                  else "SupervisorTermination")
+    timestamp = datetime.now(UTC).isoformat()
+    orphans_by_journal: dict[str, list[str]] = {}
+    for journal_path in sorted(state_dir.rglob("provider_events.jsonl")):
+        try:
+            rows = [json.loads(line) for line in
+                    journal_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()]
+        except (OSError, ValueError):
+            summary["journals_skipped"].append(journal_path.name)
+            continue
+        requests = {str(row.get("request_id") or "") for row in rows
+                    if row.get("event") == "provider_request"}
+        terminal_ids = {str(row.get("request_id") or "") for row in rows
+                        if row.get("event") in {"provider_response", "provider_failure"}}
+        orphans = sorted(requests - terminal_ids - {""})
+        if orphans:
+            with journal_path.open("a", encoding="utf-8") as handle:
+                for request_id in orphans:
+                    handle.write(json.dumps({
+                        "event": "provider_failure",
+                        "request_id": request_id,
+                        "request_id_kind": "local_correlation",
+                        "schema": "gt.provider-receipt.v2",
+                        "error_type": error_type,
+                        "error": f"supervisor:{reason}",
+                        "timestamp_utc": timestamp,
+                    }, sort_keys=True, separators=(",", ":")) + "\n")
+            summary["provider_failures_sealed"] += len(orphans)
+            orphans_by_journal[journal_path.parent.name] = orphans
+            summary["orphaned_provider_requests"].extend(orphans)
+    from gt_engine.miniswe_integration import ExternalStateStore
+    for journal_path in sorted(state_dir.rglob("events.jsonl")):
+        try:
+            raw = journal_path.read_bytes()
+            lines = raw.splitlines()
+            # A kill can land mid-append: drop a torn final line before sealing.
+            if lines:
+                try:
+                    json.loads(lines[-1])
+                except ValueError:
+                    journal_path.write_bytes(b"\n".join(lines[:-1]) + b"\n")
+            store = ExternalStateStore(journal_path.parent.parent, journal_path.parent.name)
+            if not store.startup_journal_valid:
+                summary["journals_skipped"].append(
+                    f"{journal_path.parent.name}:journal_invalid")
+                continue
+            counts = {"requests": 0, "responses": 0, "failures": 0}
+            provider_journal = journal_path.parent / "provider_events.jsonl"
+            if provider_journal.is_file():
+                for line in provider_journal.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line).get("event")
+                    except ValueError:
+                        continue
+                    if event == "provider_request":
+                        counts["requests"] += 1
+                    elif event == "provider_response":
+                        counts["responses"] += 1
+                    elif event == "provider_failure":
+                        counts["failures"] += 1
+            store.append(
+                "run_terminal",
+                terminal=terminal,
+                exit_code=exit_code,
+                supervisor_reason=reason,
+                orphaned_provider_requests=orphans_by_journal.get(
+                    journal_path.parent.name, []),
+                provider_request_count=counts["requests"],
+                provider_response_count=counts["responses"],
+                provider_failure_count=counts["failures"],
+            )
+            summary["run_terminal_appended"].append(journal_path.parent.name)
+        except OSError:
+            summary["journals_skipped"].append(journal_path.name)
+    return summary
+
+
 def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baseline: str) -> int:
     """Keep real bytes and publish ERROR receipts, even if no model was started."""
     report_path = Path(args.metrics or (Path(args.state_dir) / "supervisor_report.json"))
@@ -342,6 +443,14 @@ def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baselin
             except Exception as recovery_error:
                 report["supervisor"]["checkpoint_recovery_error"] = type(recovery_error).__name__
     # Do not append a synthetic response or fabricate an acknowledged action.
+    # Seal the dead child's journals first so the conserved bytes include the
+    # terminal event and closed provider-request accounting.
+    seal = _seal_terminated_journals(
+        Path(args.state_dir), reason=result.reason, terminal=terminal,
+        exit_code=exit_code,
+    )
+    if seal["orphaned_provider_requests"] or seal["run_terminal_appended"]:
+        report["supervisor"]["terminal_seal"] = seal
     # Bind the conserved journal bytes for later chain/accounting verification.
     journals = []
     for path in sorted(Path(args.state_dir).rglob("events.jsonl")):

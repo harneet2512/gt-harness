@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from gt_engine.miniswe_integration import normalized_model_id
 from gt_engine.delivery_budget import (
     DELIVERY_BYTE_LIMITS,
     DELIVERY_REFUSAL_REASONS,
@@ -721,7 +722,17 @@ def issue_runtime_receipts(
 
     reported_model = str(gt.get("provider_reported_model") or requested_model)
     effective_model = str(gt.get("resolved_model") or requested_model)
-    if reported_model != requested_model:
+    # provider_reported_model carries the litellm transport id
+    # (``openai/deepseek/...``), while requested_model is the catalog id
+    # (``deepseek/...``). Compare canonical identity, mirroring the live gate's
+    # expected set {requested, resolved, fallback} — literal compare rejected a
+    # correctly-served run.
+    expected_models = {
+        normalized_model_id(item)
+        for item in (requested_model, effective_model, str(gt.get("fallback_model") or ""))
+        if item
+    }
+    if normalized_model_id(reported_model) not in expected_models:
         raise ValueError("provider_model_mismatch")
     report_model = str(report.get("model") or requested_model)
     if report_model != requested_model:
@@ -962,6 +973,31 @@ def issue_runtime_receipt_failure(
     gt = report.get("gt")
     gt = gt if isinstance(gt, dict) else {}
     effective_model = str(gt.get("resolved_model") or model_identity.get("resolved") or "") or None
+    if effective_model is None:
+        # A killed run never reaches final_state, so report["gt"] carries no
+        # resolved_model — but every journaled provider_delivery does. Recover
+        # the last recorded resolved model from the event journal rather than
+        # reporting null.
+        try:
+            for journal_path in sorted(
+                (report_path.parent / "gt-state").rglob("events.jsonl")
+            ):
+                for line in reversed(
+                    journal_path.read_text(encoding="utf-8").splitlines()
+                ):
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if row.get("event") == "provider_delivery" and row.get("resolved_model"):
+                        effective_model = str(row["resolved_model"])
+                        break
+                if effective_model is not None:
+                    break
+        except OSError:
+            pass
     info = trajectory.get("info")
     info = info if isinstance(info, dict) else {}
     model_stats = info.get("model_stats")

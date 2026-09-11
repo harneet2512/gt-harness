@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -55,6 +56,44 @@ def isolated_git_fixture_identity(monkeypatch):
 )
 def test_viewed_files_parses_operands_not_options(command, expected):
     assert rt._viewed_files(command) == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat src/a.py 2>/dev/null",
+        "cat src/a.py 2>&1",
+        "for f in src/*.py; do cat $f; done",
+        "cat src/a.py > /tmp/copy.txt",
+        "cat ${FILE}",
+        "cat src/a.py <<EOF",
+        "sed -n '1,5p' src/a.py 1>&2",
+    ],
+)
+def test_viewed_files_drops_shell_noise(command):
+    assert "2>/dev/null" not in rt._viewed_files(command)
+    assert all("$" not in v and ">" not in v and "<" not in v
+               for v in rt._viewed_files(command))
+
+
+def test_viewed_files_resolves_against_cd_and_root(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    target = pkg / "monitor.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    root_file = tmp_path / "types.py"
+    root_file.write_text("y = 1\n", encoding="utf-8")
+    root = str(tmp_path)
+    assert rt._viewed_files(
+        "cd pkg && cat monitor.py", root
+    ) == (os.path.normpath(str(target)),)
+    assert rt._viewed_files(
+        "cat types.py", root
+    ) == (os.path.normpath(str(root_file)),)
+    assert rt._viewed_files(
+        "cd pkg && cat missing.py", root
+    ) == ()
+    assert rt._viewed_files("cat /nonexistent_dir_xyz/f.py", root) == ()
 
 
 def test_newfile_precedent_does_not_preempt_executed_syntax_failure(tmp_path, monkeypatch):

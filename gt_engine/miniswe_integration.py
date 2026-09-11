@@ -105,6 +105,23 @@ class PendingExposure:
     verification_candidate: str = ""
 
 
+_KNOWN_PROVIDER_PREFIXES = frozenset({
+    "openai", "anthropic", "azure", "vertex_ai", "bedrock",
+    "deepseek", "together_ai", "groq", "mistral",
+})
+
+
+def normalized_model_id(model: str) -> str:
+    """Strip a leading litellm transport prefix (``openai/`` etc.) so receipt
+    checks compare catalog identity, not the adapter's routing spelling."""
+    value = (model or "").strip().lower()
+    if "/" in value:
+        prefix, remainder = value.split("/", 1)
+        if prefix in _KNOWN_PROVIDER_PREFIXES:
+            return remainder
+    return value
+
+
 class ProviderModelMismatch(RuntimeError):
     """The provider reported a model outside the requested alias set."""
 
@@ -740,24 +757,47 @@ class MiniSweAdapter(GroundtruthController):
         recovered_rows = self._restore_plan_check_definitions()
         if not self.store.startup_journal_valid:
             return
-        grouped: dict[tuple[str, ...], list[str]] = {}
+        from .persistent_plan.checks import CheckSpec, decompose_check_command
+
+        grouped: dict[tuple[tuple[str, ...], str], list[str]] = {}
         for row in getattr(self.persistent_plan, "rows", ()):
             if not row.verification_command or row.row_id in recovered_rows:
                 continue
+            segments, _seps, _last_check, reason = decompose_check_command(
+                row.verification_command
+            )
+            if segments is None:
+                self.store.append(
+                    "plan_check_binding_pending", row_id=row.row_id, reason=reason
+                )
+                continue
+            # Every decomposed segment must be an admissible check on its own —
+            # a composite like ``make build && pytest`` cannot drop the build
+            # step without changing what the row's verification means.
+            admissible = True
+            for seg_argv, _seg_cwd in segments:
+                try:
+                    CheckSpec.from_dict(
+                        {"argv": seg_argv, "requirement_ids": [row.row_id]},
+                        self.repo_root,
+                    )
+                except ValueError as exc:
+                    self.store.append(
+                        "plan_check_binding_pending",
+                        row_id=row.row_id,
+                        reason=f"non_test_segment:{seg_argv[0]}:{exc}",
+                    )
+                    admissible = False
+                    break
+            if not admissible:
+                continue
+            for seg_argv, seg_cwd in segments:
+                grouped.setdefault((tuple(seg_argv), seg_cwd or "."), []).append(row.row_id)
+        for (argv, cwd), row_ids in grouped.items():
             try:
-                lexer = shlex.shlex(row.verification_command, posix=True, punctuation_chars=True)
-                lexer.whitespace_split = True
-                argv = tuple(lexer)
-                if any(token and all(char in ";&|<>()" for char in token) for token in argv):
-                    raise ValueError("composite_shell_command")
-                if "$" in row.verification_command or "`" in row.verification_command:
-                    raise ValueError("shell_expansion")
-                grouped.setdefault(argv, []).append(row.row_id)
-            except ValueError as exc:
-                self.store.append("plan_check_binding_pending", row_id=row.row_id, reason=str(exc))
-        for argv, row_ids in grouped.items():
-            try:
-                self.bind_plan_check({"argv": list(argv), "requirement_ids": row_ids})
+                self.bind_plan_check(
+                    {"argv": list(argv), "cwd": cwd, "requirement_ids": row_ids}
+                )
             except ValueError as exc:
                 self.store.append("plan_check_binding_pending", row_ids=row_ids, reason=str(exc))
 
@@ -1129,17 +1169,47 @@ class MiniSweAdapter(GroundtruthController):
 
         if before is None or after is None:
             return
+        from .persistent_plan.checks import decompose_check_command
+
         extra = result.get("extra") or {}
         self._current_check_environment_sha256 = str(extra.get("environment_sha256", ""))
+        # A composite agent command (``cd tests && pytest a``) still discharges
+        # each bound segment: decompose it into (argv, effective cwd) pairs the
+        # same way binding decomposes a row's verification_command.
+        base_cwd = str(extra.get("cwd") or Path(self.repo_root).resolve())
+        segments, separators, last_raw_is_check, _ = decompose_check_command(command)
+        rc = result.get("returncode")
+        all_and = separators and all(sep == "&&" for sep in separators)
+        all_semi = separators and all(sep == ";" for sep in separators)
+        attributable: set[int] = set()
+        if segments:
+            if len(segments) == 1 and (not separators or last_raw_is_check):
+                attributable.add(0)
+            elif all_and and rc == 0:
+                # every segment ran and exited 0 — all provably passed
+                attributable.update(range(len(segments)))
+            elif all_semi and last_raw_is_check:
+                # a ;-chain's rc is the last raw segment's alone
+                attributable.add(len(segments) - 1)
+        observed_commands = {}
+        for index, (seg_argv, seg_cwd) in enumerate(segments or []):
+            if index in attributable:
+                key = (shlex.join(seg_argv), str((Path(base_cwd) / (seg_cwd or ".")).resolve()))
+                observed_commands[key] = shlex.join(seg_argv)
+        if not segments:
+            observed_commands.setdefault((command, base_cwd), command)
         observed = False
         for check_id, spec in getattr(self, "_check_specs", {}).items():
-            if command != spec.command or extra.get("cwd") != str((Path(self.repo_root) / spec.cwd).resolve()):
+            matched = observed_commands.get(
+                (spec.command, str((Path(self.repo_root) / spec.cwd).resolve()))
+            )
+            if matched is None:
                 continue
             reference = extra.get("output_artifact")
             output = (environment.evidence_store.bytes(reference["sha256"]).decode("utf-8", "replace")
                       if reference else str(result.get("output", "")))
             execution = compile_execution_evidence(
-                command=command, output=output, returncode=result.get("returncode"),
+                command=matched, output=output, returncode=result.get("returncode"),
                 action_id=self.global_action, repository_revision=after.revision,
                 timed_out=bool(extra.get("timed_out")),
                 environment_sha256=str(extra.get("environment_sha256", "")),
@@ -2585,16 +2655,7 @@ class MiniSweAdapter(GroundtruthController):
 
     @staticmethod
     def _normalized_model_id(model: str) -> str:
-        value = (model or "").strip().lower()
-        known_provider_prefixes = {
-            "openai", "anthropic", "azure", "vertex_ai", "bedrock",
-            "deepseek", "together_ai", "groq", "mistral",
-        }
-        if "/" in value:
-            prefix, remainder = value.split("/", 1)
-            if prefix in known_provider_prefixes:
-                return remainder
-        return value
+        return normalized_model_id(model)
 
     def _provider_model_mismatch(self, reported_model: str) -> bool:
         if not reported_model or not (self.requested_model or self.resolved_model):

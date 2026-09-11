@@ -286,6 +286,81 @@ def test_native_delivery_exact_bytes_are_independently_witnessed(tmp_path):
     assert audit.feature_attribution["cochange_prior"]["status"] == "WITNESSED"
 
 
+def _wire_consumption_fixture(task, command):
+    """Give the fixture a delivery→request→response→assistant chain whose
+    response turn runs ``command``."""
+
+    def convert(rows):
+        for row in rows:
+            if row["event"] == "evidence_delivery":
+                row["request_id"] = "req-1"
+                row["target"] = "pkg/mod.py"
+            elif row["event"] == "provider_response":
+                row["provider_response_id"] = "gen-fixture-1"
+    rewrite_native_events(task, convert)
+
+    traj_path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(traj_path.read_text())
+    for m in trajectory["messages"]:
+        if m.get("role") == "assistant":
+            m["extra"]["response"] = {
+                "id": "gen-fixture-1",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 3},
+            }
+            m["tool_calls"] = [{
+                "function": {
+                    "name": "bash",
+                    "arguments": json.dumps({"command": command}),
+                }
+            }]
+    traj_path.write_text(json.dumps(trajectory))
+
+
+def test_delivery_consumption_marks_action_referencing_target(tmp_path):
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="[GT] callers of helper in pkg/mod.py"
+    )
+    _wire_consumption_fixture(task, "cat pkg/mod.py")
+
+    audit = gt_audit.audit_task(task)
+
+    assert len(audit.delivery_consumption) == 1
+    verdict = audit.delivery_consumption[0]
+    assert verdict["sent"] and verdict["visible"] and verdict["served"]
+    assert verdict["agent_did"] is True
+    assert verdict["consumed"] is True
+    assert verdict["verdict"] == "consumed"
+    assert audit.delivery_consumption_summary["consumed"] == 1
+    assert audit.delivery_consumption_summary["consumed_fair"] == 1
+
+
+def test_delivery_consumption_unrelated_action_is_not_consumed(tmp_path):
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="[GT] callers of helper in pkg/mod.py"
+    )
+    _wire_consumption_fixture(task, "ls /etc")
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["sent"] and verdict["served"] and verdict["agent_did"]
+    assert verdict["consumed"] is False
+    assert verdict["verdict"] == "seen_no_action_on_content"
+
+
+def test_delivery_consumption_word_boundary_not_substring(tmp_path):
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="[GT] callers of helper in pkg/mod.py"
+    )
+    # "mod" inside "mode"/"model" must not count as a reference to pkg/mod.py.
+    _wire_consumption_fixture(task, "cd model && ls")
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["consumed"] is False
+
+
 @pytest.mark.parametrize("expose", [True, False])
 @pytest.mark.parametrize("feature", ["persistent_plan", "plan_gate"])
 def test_native_plan_requires_exact_immediate_provider_bytes(tmp_path, expose, feature):
