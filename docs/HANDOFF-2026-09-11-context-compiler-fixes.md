@@ -1,11 +1,18 @@
 # Handoff — 2026-09-11 — context-compiler fixes + producer rebinding
 
-Branch: `codex/context-plan-integrity`. HEAD: `ec875fbc` (manifest rebind).
-Producer: `D:\gt-context-producer` at `4525ef38f33465b143a5773920d5809d97fc7a92`.
-Vendored wheel sha256: `5957162323f495a302e3f457a02045af56030cba848603533a2b82dc33d5a80d`.
-Producer binary sha256: `1acf7c5fa5ee2533fd9c3a34f58fee950b8255e5f464e311a574a53fb90b46c1`
-(build_tags `netgo,osusergo,sqlite_fts5`, source_fingerprint
-`3053606059aea28f725af15a50ef036f99a9fe59d55148a1a668636cb11286bf`).
+Branch: `codex/context-plan-integrity`. HEAD: `e8881a38` (localization
+fire-once fix).
+Producer: `D:\gt-context-producer` at `7db2f460` (final: `4525ef38` features →
+`b4d33a0c` ruff-lint → `7db2f460` ruff-format; producer CI `34650897819` all
+green).
+Vendored wheel sha256: `79cb3547` (rebuilt from `git archive` of `7db2f460`,
+installed + identity gate green).
+Producer binary: CI build `34650899610` artifact (`545bb28c` executable sha256,
+build_tags `netgo,osusergo,sqlite_fts5`).
+Review packet `har83-context-plan-producer-7db2f460-ci` committed to review
+inbox as `e8a40965` on pinned base `48e8708e`, pushed to a new inbox branch
+(the `gt-review-inbox` remote tip `8a5a5b87` had diverged and dropped packets;
+do not rebase onto it).
 
 ## Why the aiomonitor run burned 638 steps / 115 minutes
 
@@ -54,10 +61,49 @@ source_tree, wheel_sha256, producer_sha256, producer_build). Local identity
 gate + 308 harness tests green after `pip install --force-reinstall` of the
 vendored wheel.
 
+## Acceptance progression (run `34655576496` in flight on `e8881a38`)
+
+| Run | Result |
+|---|---|
+| `34649782844` | failed: producer commit `4525ef38` was local-only; pushed |
+| `34649962502` | failed lineage: stale ancestry path + review packets; repaired via `e8a40965` + manifest `f1ba9c61` |
+| `34652173802` | failed reachability: paid workflow had literal `\|\| true`; `df3eb442` replaced with visible non-fatal warnings / `\|\| :` |
+| `34653052488` | all gates passed except full Python suite: `test_task_start_localization_delivered_with_graph` saw 2 localization deliveries |
+| `34655576496` | dispatched on `e8881a38` (fire-once fix) — in flight |
+
+## Localization fire-once fix (`e8881a38`)
+
+Root cause of the `34653052488` failure: the compiled task-start path admits
+localization via `run_evidence_pipeline(commit=False)`, so `seal_delivery`
+stamped the dedup key into a discarded chain copy; the `GTDecisionCandidate`
+carried no chain heads so `stage_exposure` skipped it — the delivered key
+never entered `_dedup_chain`. A later reactive `ranked_localization` fire
+(the scripted grep) reproduced the fact and delivered it a second time.
+Pre-F15 the producer was a dead seam so the gap was unreachable.
+
+Fix: admission-level fire-once — `kind="localization"` is refused with
+`localization_fire_once` once a localization delivery is visibility-committed
+or already pending (`_localization_delivered` set at provider-request join,
+never at admit — a refused/discarded request does not consume the episode's
+one localization). The candidate now forwards `next_chain_head` so the
+exposure chain records the delivered fact at join. Refusals are journaled,
+so suppression stays auditable. `DELIVERY_REFUSAL_REASONS` is census-derived;
+the new reason is registered there. Regression test:
+`test_localization_delivery_is_fire_once_per_episode`.
+
 ## In flight / remaining
 
-- Provider-free acceptance run `34649782844` dispatched on `ec875fbc` —
-  must succeed before any paid dispatch.
+- Provider-free acceptance run `34655576496` on `e8881a38` — must succeed
+  before any paid dispatch.
+- Trajectory-eval layer (offline, zero spend) under construction: ingests
+  `miniswe_trajectory.json` + `events.jsonl` from `D:\gt_runs\33646776586`,
+  anchors relevance to gold patch + graph closure (never baseline-trajectory
+  votes), computes TTFC / pre-edit recall / revisit rate / first-edit
+  accuracy / recovery rate / delivery→consumption funnel with led-vs-confirmed
+  split, per-task causal timelines, explicit tuning-vs-eval task split.
+- Local Windows suite has known environmental failures unrelated to product
+  code: `test_feature_matrix_outcomes` + `test_persistent_plan_baseline`
+  (nested pytest `spawn_failed` on Windows) — pass on Linux CI.
 - Paid smoke: workflow `347688665` now accepts `cohort_stage=single` +
   `single_task_id`. Next smoke: `bandit-interprocedural-taint-checks`
   (Python, 64-step baseline, 0.75 pass — short + call-graph-shaped).
