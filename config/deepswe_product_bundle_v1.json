@@ -28,7 +28,7 @@
   "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
   "wheel_sha256": "97af90f5480def3f31f0ca9595b4c0fcca828182637b119c1e38ab34b251af3d",
   "producer_path": "vendor/gt-index-linux-amd64",
-  "producer_sha256": "b11af3cc4c61d7d4356b8e69179933138978906500f3ded7eadc74a98195a745",
+  "producer_sha256": "f132885c4686ae214721dfd2163665f2ec7954c321eadb442214ff08c26e1069",
   "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
   "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
   "accepted_default_ref": "origin/gt-trial",
