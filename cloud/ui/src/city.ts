@@ -46,13 +46,6 @@ function plots(count: number) {
   }
   return out.slice(0,count);
 }
-/* The platform is a plinth, not a plinth-stack: three thin steps carry the
-   district's colour while the buildings do the silhouette. */
-export const TERRACE_LEVELS=[{scale:1.14,y:0},{scale:.96,y:.55},{scale:.66,y:1.1}] as const;
-export function plotElevation(x:number,z:number,width:number,depth:number) {
-  const extent=Math.max((Math.abs(x)+6)/(width/2),(Math.abs(z)+6)/(depth/2));
-  return extent<.52?1.75:extent<.75?1.2:.65;
-}
 function newSite(name: string, count: number, districts: District[]): District {
   const capacity = Math.max(4, Math.ceil(count * 1.12 / 4) * 4);
   const slots = plots(capacity);

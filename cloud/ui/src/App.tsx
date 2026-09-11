@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
-import { getMe, LOGIN_URL, type User } from "./api";
+import { getMe, LOGIN_URL, listSessions, type Session, type User } from "./api";
 import { BUILD_SHA } from "./build";
 import { Icon } from "./components/WorkspaceChrome";
 import LandingPage from "./components/LandingPage";
@@ -58,6 +58,35 @@ function SessionRoute() {
   return <SynapsePage key={id} />;
 }
 
+/**
+ * `/` — the workspace is the product, so root takes you straight into the
+ * most recent session. The landing only exists for the day-one case:
+ * nothing to resume yet.
+ */
+function Home() {
+  const [latest, setLatest] = useState<Session | null | "loading">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    listSessions()
+      .then((sessions) => {
+        if (cancelled) return;
+        const primary = sessions.find((s) => !s.parent_id) ?? sessions[0] ?? null;
+        setLatest(primary);
+      })
+      .catch(() => {
+        if (!cancelled) setLatest(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (latest === "loading") return <div className="booting">…</div>;
+  if (latest) return <Navigate to={`/sessions/${latest.id}`} replace />;
+  return <LandingPage />;
+}
+
 export default function App() {
   const [auth, setAuth] = useState<Phase>({ phase: "loading" });
 
@@ -81,7 +110,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/" element={<Home />} />
       <Route path="/sessions/:id" element={<SessionRoute />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

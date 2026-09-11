@@ -91,9 +91,6 @@ export class Renderer3D {
   private floorGeometry=new PlaneGeometry(8000,8000);
   private siteLinesMaterial=new LineBasicMaterial({color:0x8995a4,transparent:true,opacity:.055,depthWrite:false});
   private walkwayMaterial=new MeshStandardMaterial({color:0xdfe4ea,roughness:.75,metalness:.05,emissive:new Color(0x8fb8d8),emissiveIntensity:.55});
-  private siteMarkTexture:CanvasTexture;
-  private siteMarkMaterial:MeshBasicMaterial;
-  private siteMarkGeometry=new PlaneGeometry(30,15);
   /* The warm pool of light the city stands on — a radial wash, paper to
      cream, that makes the composition read as one staged city. */
   private stageTexture:CanvasTexture = (() => {
@@ -147,8 +144,9 @@ export class Renderer3D {
      same repo colors itself identically every time and no repository
      concept is hardcoded. */
   private districtTint(name: string): Color {
-    const palette = ["#7ba7d9", "#b394dd", "#85c4a2", "#dd92a6", "#6fbccb",
-      "#ddb36b", "#9e93d8", "#8fb4d9", "#c9a88a", "#7fc8b4"];
+    /* Muted, desaturated — the palette leans pastel, never loud. */
+    const palette = ["#a4bcd4", "#c3b2da", "#a9d0b8", "#d9b1bf", "#98ccd0",
+      "#dcc49a", "#b8b2d8", "#adc2dc", "#d4bfa9", "#a3d1c2"];
     return new Color(palette[pathHash(name) % palette.length]);
   }
   private contact = new MeshBasicMaterial({
@@ -243,8 +241,8 @@ export class Renderer3D {
     });
     key.shadow.bias = -0.00015;
     key.shadow.normalBias = 0.35;
-    key.shadow.radius = 3;
-    key.shadow.intensity = 0.62;
+    key.shadow.radius = 4;
+    key.shadow.intensity = 0.5;
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type = PCFShadowMap;
     this.scene.add(key, key.target);
@@ -265,10 +263,6 @@ export class Renderer3D {
     (grid.material as LineBasicMaterial).opacity = 0.55;
     grid.position.y = -0.3;
     this.scene.add(grid);
-    const mark=document.createElement("canvas");mark.width=256;mark.height=128;
-    const ink=mark.getContext("2d")!;ink.fillStyle="#ffffff";ink.font="650 100px Arial";ink.textAlign="center";ink.fillText("GT",128,99);
-    this.siteMarkTexture=new CanvasTexture(mark);
-    this.siteMarkMaterial=new MeshBasicMaterial({map:this.siteMarkTexture,color:0x798698,transparent:true,opacity:.38,depthWrite:false});
     this.composer=new EffectComposer(this.gl);
     this.composer.renderTarget1.samples=4;this.composer.renderTarget2.samples=4;
     this.renderPass=new RenderPass(this.scene,this.camera);
@@ -330,6 +324,10 @@ export class Renderer3D {
     this.gl.setSize(w, h, false);
     this.composer.setPixelRatio(this.ratio);
     this.composer.setSize(w,h);
+    /* Ambient occlusion at half resolution — the contact shadow it draws
+       is soft enough that the eye cannot tell, and the pass is the most
+       expensive thing in the composer. */
+    this.ao.setSize(w / 2, h / 2);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     if (!this.framed || !this.userOwned) this.fit();
@@ -341,6 +339,10 @@ export class Renderer3D {
       pu.mat.dispose();
     }
     this.pulses.clear();
+    this.districtCounts.clear();
+    for (const p of layout.nodes) {
+      this.districtCounts.set(p.cluster, (this.districtCounts.get(p.cluster) ?? 0) + 1);
+    }
     this.buildings.forEach((m) => {
       this.scene.remove(m);
       m.dispose();
@@ -372,8 +374,6 @@ export class Renderer3D {
       for(let z=Math.floor(back/step)*step;z<front;z+=step)lines.push(left,-.29,z,right,-.29,z);
       const grid=new BufferGeometry();grid.setAttribute("position",new Float32BufferAttribute(lines,3));this.terraces.push(grid);
       this.terrain.add(new LineSegments(grid,this.siteLinesMaterial));
-      const mark=new Mesh(this.siteMarkGeometry,this.siteMarkMaterial);mark.rotation.x=-Math.PI/2;mark.rotation.z=Math.PI/4;mark.layers.set(1);
-      mark.position.set((left+right)/2,-.27,(back+front)/2);this.terrain.add(mark);
       // Walkways belong to the architectural site; graph relations remain separate.
       const connected=new Set([0]);
       while(connected.size<districts.length) {
@@ -642,6 +642,9 @@ export class Renderer3D {
     this.frame(this.controls.target.clone(), distance, TIMING.panel);
   }
   private hub = new Vector3(0, 6, 0);
+  /* District file counts are layout-stable — computed once at setLayout,
+     not re-filtered through every node every frame. */
+  private districtCounts = new Map<string, number>();
   /* The living layer: one expanding ring per touch, colour by what the
      touch was. Born once per event id, dead in under two seconds. */
   private pulses = new Map<string, { mesh: Mesh; mat: MeshBasicMaterial; start: number }>();
@@ -937,7 +940,7 @@ export class Renderer3D {
              district so neighborhoods read without saturation slop. */
           const wobble=(pathHash(id)%100)/100;
           const base = wobble < .33 ? "#e8e9eb" : wobble < .66 ? "#efe9dd" : "#e2e6ea";
-          const lean = (pathHash(id) >> 6) % 3 === 0 ? .9 : .55;
+          const lean = (pathHash(id) >> 6) % 3 === 0 ? .68 : .38;
           const c=this.colorTo[k][i]
             .set(base)
             .lerp(tint,lean);
@@ -1262,7 +1265,7 @@ export class Renderer3D {
     const named=new Set<string>();
     for(const d of this.layout.districts) {
       if(named.has(d.name))continue;named.add(d.name);
-      const count=this.layout.nodes.filter(p=>p.cluster===d.name).length;
+      const count=this.districtCounts.get(d.name)??0;
       if(!count)continue;
       /* A museum placard: just off the platform's front edge, on the
          paper — never floating over the skyline it names. */
@@ -1301,7 +1304,7 @@ export class Renderer3D {
     this.keyLight.shadow.map?.dispose();
     this.factory.dispose();
     this.floorGeometry.dispose();this.floorMaterial.dispose();
-    this.siteLinesMaterial.dispose();this.siteMarkGeometry.dispose();this.siteMarkMaterial.dispose();this.siteMarkTexture.dispose();
+    this.siteLinesMaterial.dispose();
     this.walkwayMaterial.dispose();
     this.ao.dispose();this.renderPass.dispose();this.outputPass.dispose();this.composer.dispose();
     this.scene.clear();
