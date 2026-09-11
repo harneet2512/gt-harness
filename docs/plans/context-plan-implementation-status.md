@@ -1292,6 +1292,21 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
   `api_impact` from HANDLES_ROUTE/API_CALL edges; (4) `trace` A->B; (5)
   closure/community composite endpoints. Deliberately not copied: rename,
   cypher, watch, wiki, semantic-as-primary (breaks certification).
+  SOLVE-RATE AUDIT (delivery path, source-grounded) -- five critical defects:
+  F1 `groundtruth` typed tool is recorded in every admitted envelope/provider_request
+     but NEVER reaches the wire (miniswe_runtime.py:770 pops _gt_provider_tools,
+     defaulting to [BASH_TOOL]); the whole typed-action surface is dead code and
+     receipts over-claim. F2 commit-before-transport: bind_provider_payload +
+     provider_request_admitted run BEFORE transport; a litellm failure drops all
+     pending GT context while the ledger asserts delivery, and tenacity retries
+     carry no GT content. F3 ProviderRequestTooLarge/Unavailable retried 10x
+     despite retryable=False (not in abort_exceptions). F4 evidence elided from
+     history at >4000 chars with no revocation record (context.py:62-116
+     replaces the whole message). F5 char budget under-fills the window ~2x
+     (char_budget = window*2 while a token-accurate pass already exists).
+  THESE ARE THE SOLVE-RATE SURFACE: an agent that never sees the typed tool,
+  loses delivered evidence on transport failure or the next turn, and gets
+  half its window cannot solve what the graph proves it should.
   IT ALSO LOCALISES THE NONDETERMINISM, which the all-consumer parity item above
   records generically. On all six repositories the ONLY surface that ever moved
   is `edges`. Nodes, properties and assertions are byte-identical across all ten
