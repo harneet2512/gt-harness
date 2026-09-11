@@ -631,3 +631,55 @@ def test_projection_records_the_derived_states_it_read(tmp_path):
         "community": "ok",
         "process": "ok",
     }
+
+
+def test_projection_surfaces_route_api_edges_for_localized_files(tmp_path):
+    """The producer publishes HANDLES_ROUTE / API_CALL edges into graph.db, but
+    no consumer read them into push context — a model editing a route handler
+    or an API client had to query a tool for the API surface. The projection
+    must surface them as semantic facts for in-scope files.
+    """
+    import sqlite3
+
+    from gt_engine.graph_context import build_graph_projection
+
+    db = _with_fts(_graph(tmp_path / "g.db"))
+    con = sqlite3.connect(db)
+    try:
+        con.executescript(
+            "CREATE TABLE edges ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER,"
+            " target_id INTEGER, type TEXT NOT NULL, source_line INTEGER,"
+            " confidence REAL, resolution_method TEXT);"
+            # a route file node the localized handler routes to
+            "INSERT INTO nodes(id,label,name,qualified_name,file_path,"
+            " start_line,end_line,signature,is_test,language,stable_id) "
+            "VALUES(4,'File','api','src/api.py','src/api.py',1,40,'',0,"
+            "'python',NULL);"
+            # parse() is localized; it is the route handler for src/api.py
+            "INSERT INTO edges(source_id,target_id,type,source_line,"
+            "confidence,resolution_method) "
+            "VALUES(1,4,'HANDLES_ROUTE',12,0.95,'decorator_route');"
+            # and a client call into the same route file
+            "INSERT INTO edges(source_id,target_id,type,source_line,"
+            "confidence,resolution_method) "
+            "VALUES(2,4,'API_CALL',8,0.9,'literal_path');"
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    projection = build_graph_projection(db, _contract("parse"), limit=8)
+
+    route_facts = [
+        fact for fact in projection.semantic_facts if fact.surface == "routes"
+    ]
+    assert route_facts, "HANDLES_ROUTE/API_CALL edges must reach the projection"
+    kinds = {fact.kind for fact in route_facts}
+    assert "route_handler" in kinds
+    assert "api_call" in kinds
+    handler = next(f for f in route_facts if f.kind == "route_handler")
+    assert handler.file_path == "src/parser.py"
+    assert "HANDLES_ROUTE" in handler.value
+    assert "src/api.py" in handler.value
+    assert handler.confidence == 0.95

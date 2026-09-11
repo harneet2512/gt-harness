@@ -33,6 +33,7 @@ GRAPH_SURFACES = (
     "process_steps",
     "file_hashes",
     "project_meta",
+    "routes",
 )
 CAPABILITY_MATRIX_SCHEMA = "gt.capability_matrix.v2"
 CAPABILITY_STATES = frozenset({"demonstrated", "partial", "absent", "stale"})
@@ -841,6 +842,52 @@ def build_graph_projection(
                             confidence=0.8,
                             revision=revision,
                         ))
+            except sqlite3.Error:
+                pass
+        # Route/API surface: HANDLES_ROUTE binds a handler to its route file and
+        # API_CALL binds a client call to the route it resolves to. Both carry
+        # producer mechanism + confidence; surface them for in-scope files so a
+        # model editing a route handler or an API client sees the API surface
+        # without having to query a tool.
+        if files and {"edges", "nodes"} <= tables:
+            base_files = sorted(files)[:limit]
+            placeholders = ",".join("?" for _ in base_files)
+            try:
+                route_rows = con.execute(
+                    "SELECT e.type,src.file_path,src.name,src.start_line,"
+                    "tgt.file_path,tgt.name,e.confidence,e.resolution_method "
+                    "FROM edges e "
+                    "JOIN nodes src ON src.id=e.source_id "
+                    "JOIN nodes tgt ON tgt.id=e.target_id "
+                    "WHERE e.type IN ('HANDLES_ROUTE','API_CALL') "
+                    "AND (src.file_path IN (" + placeholders + ") "
+                    "OR tgt.file_path IN (" + placeholders + ")) "
+                    "ORDER BY e.confidence DESC,src.file_path LIMIT ?",
+                    (*base_files, *base_files, limit),
+                ).fetchall()
+                hits["routes"] += len(route_rows)
+                for (
+                    etype, src_path, src_name, src_line,
+                    tgt_path, tgt_name, conf, mechanism,
+                ) in route_rows:
+                    src_path = str(src_path).replace("\\", "/")
+                    tgt_path = str(tgt_path).replace("\\", "/")
+                    semantic_facts.append(GraphSemanticFact(
+                        "routes",
+                        0,
+                        src_path,
+                        str(src_name or ""),
+                        (
+                            "route_handler" if etype == "HANDLES_ROUTE"
+                            else "api_call"
+                        ),
+                        (
+                            f"{etype} {src_name} ({src_path}:{src_line}) -> "
+                            f"{tgt_name} ({tgt_path})"
+                        )[:500],
+                        confidence=None if conf is None else float(conf),
+                        revision=revision,
+                    ))
             except sqlite3.Error:
                 pass
         return GraphProjection(
