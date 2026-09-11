@@ -45,6 +45,51 @@ def _history_marker(reference: Mapping[str, Any], tool_call_id: str) -> str:
     ) + "]"
 
 
+_GT_FACTS_BLOCK = re.compile(r"<gt-facts>.*?</gt-facts>", re.DOTALL)
+
+
+def _split_gt_fact_spans(value: str) -> tuple[list[str], str]:
+    """Separate sealed ``<gt-facts>`` envelopes from raw observation text.
+
+    The envelope is the typed boundary every model-visible delivery is spliced
+    through; it carries the [GT_EVIDENCE:*] / [GT_CONTEXT_UNIT*] / GT_RECOVERY
+    spans the journal already sealed as delivered. Replacing one wholesale
+    would revoke that evidence with no record (and would strip the block the
+    dose check looks for), so elision preserves the envelopes verbatim and
+    bounds only the surrounding tool output.
+    """
+    spans = _GT_FACTS_BLOCK.findall(value)
+    remainder = _GT_FACTS_BLOCK.sub("", value) if spans else value
+    return spans, remainder
+
+
+def _bound_observation(
+    value: str,
+    *,
+    tool_call_id: str,
+    tool_output_chars: int,
+    artifact_store: EvidenceStore | None,
+    references: list[dict[str, Any]] | None,
+) -> str:
+    """Bound one oversized observation without revoking sealed deliveries."""
+    spans, remainder = _split_gt_fact_spans(value)
+    if artifact_store is not None:
+        reference = store_history_evidence(
+            artifact_store, value.encode("utf-8"), kind="tool_result"
+        )
+        if references is not None and reference not in references:
+            references.append(reference)
+        return "\n".join([*spans, _history_marker(reference, tool_call_id)])
+    if len(remainder) > tool_output_chars:
+        head = remainder[: tool_output_chars // 2]
+        tail = remainder[-tool_output_chars // 2:]
+        remainder = (
+            f"{head}\n[older tool output elided: "
+            f"{len(remainder) - tool_output_chars} chars]\n{tail}"
+        )
+    return "\n".join([*spans, remainder] if remainder else spans)
+
+
 def message_chars(messages: list[dict[str, Any]]) -> int:
     """Count all provider-visible strings, including tool arguments."""
     def size(value: Any) -> int:
@@ -75,20 +120,13 @@ def _bound_kept_blocks(
             tool_call_id = str(message.get("tool_call_id") or "")
             value = message["content"]
             if len(value) > tool_output_chars and tool_call_id not in protected_tool_ids:
-                if artifact_store is not None:
-                    reference = store_history_evidence(
-                        artifact_store, value.encode("utf-8"), kind="tool_result"
-                    )
-                    message["content"] = _history_marker(reference, tool_call_id)
-                    if references is not None and reference not in references:
-                        references.append(reference)
-                else:
-                    head = value[: tool_output_chars // 2]
-                    tail = value[-tool_output_chars // 2:]
-                    message["content"] = (
-                        f"{head}\n[older tool output elided: "
-                        f"{len(value) - tool_output_chars} chars]\n{tail}"
-                    )
+                message["content"] = _bound_observation(
+                    value,
+                    tool_call_id=tool_call_id,
+                    tool_output_chars=tool_output_chars,
+                    artifact_store=artifact_store,
+                    references=references,
+                )
         content = message.get("content")
         if not isinstance(content, list):
             continue
@@ -99,20 +137,13 @@ def _bound_kept_blocks(
                 value = str(block.get("content") or "")
                 tool_call_id = str(block.get("tool_use_id") or "")
                 if len(value) > tool_output_chars and tool_call_id not in protected_tool_ids:
-                    if artifact_store is not None:
-                        reference = store_history_evidence(
-                            artifact_store, value.encode("utf-8"), kind="tool_result"
-                        )
-                        block["content"] = _history_marker(reference, tool_call_id)
-                        if references is not None and reference not in references:
-                            references.append(reference)
-                    else:
-                        head = value[: tool_output_chars // 2]
-                        tail = value[-tool_output_chars // 2:]
-                        block["content"] = (
-                            f"{head}\n[older tool output elided: "
-                            f"{len(value) - tool_output_chars} chars]\n{tail}"
-                        )
+                    block["content"] = _bound_observation(
+                        value,
+                        tool_call_id=tool_call_id,
+                        tool_output_chars=tool_output_chars,
+                        artifact_store=artifact_store,
+                        references=references,
+                    )
 
 
 def render_context_units(

@@ -72,6 +72,108 @@ def test_compaction_preserves_reasoning_and_pairs_tool_result_with_retrievable_b
     assert reference["retrieval_command"].startswith("gt-evidence read ")
 
 
+def test_compaction_preserves_sealed_gt_facts_inside_elided_observation(
+    tmp_path: Path,
+) -> None:
+    facts = (
+        "<gt-facts>\n"
+        "[GT_CONTEXT_UNIT] {\"unit_id\":\"loc-1\"}\n"
+        "[GT_EVIDENCE:localization]\nsrc/mod.py:1\n"
+        "GT_RECOVERY: repeated failure steer\n"
+        "</gt-facts>\n"
+    )
+    complete_result = facts + "failure evidence\n" * 2_000
+    messages = [
+        {"role": "system", "content": "policy"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call-1",
+                "function": {"name": "bash", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": complete_result},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call-2",
+                "function": {"name": "bash", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call-2", "content": "current"},
+    ]
+    store = EvidenceStore(tmp_path / "state" / "output_evidence")
+
+    view, receipt = compact_provider_view(
+        messages,
+        checkpoint="state",
+        char_budget=4_000,
+        tail_turns=2,
+        max_tail_turns=2,
+        tool_output_chars=500,
+        artifact_store=store,
+    )
+
+    old_result = next(row for row in view if row.get("tool_call_id") == "call-1")
+    # Sealed deliveries spliced into the observation must survive elision;
+    # the archive marker replaces only the raw tool output around them.
+    assert "<gt-facts>" in old_result["content"]
+    assert "[GT_EVIDENCE:localization]\nsrc/mod.py:1" in old_result["content"]
+    assert "GT_RECOVERY: repeated failure steer" in old_result["content"]
+    assert "[GT_HISTORY_EVIDENCE " in old_result["content"]
+    reference = receipt["evidence_references"][0]
+    assert load_history_evidence(store.root, reference).decode() == complete_result
+
+
+def test_compaction_head_tail_elision_preserves_sealed_gt_facts() -> None:
+    # The envelope is larger than either retained slice, so a head/tail cut
+    # would sever it: only explicit span preservation keeps the sealed
+    # deliveries intact.
+    facts = (
+        "<gt-facts>\n[GT_EVIDENCE:localization]\n"
+        + "\n".join(f"src/module_{index}.py:{index}" for index in range(30))
+        + "\n</gt-facts>\n"
+    )
+    complete_result = facts + "tool output line\n" * 2_000
+    messages = [
+        {"role": "system", "content": "policy"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call-1",
+                "function": {"name": "bash", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": complete_result},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call-2",
+                "function": {"name": "bash", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call-2", "content": "current"},
+    ]
+
+    view, _ = compact_provider_view(
+        messages,
+        checkpoint="state",
+        char_budget=4_000,
+        tail_turns=2,
+        max_tail_turns=2,
+        tool_output_chars=500,
+    )
+
+    old_result = next(row for row in view if row.get("tool_call_id") == "call-1")
+    assert facts in old_result["content"]
+    assert "src/module_29.py:29" in old_result["content"]
+    assert "[older tool output elided:" in old_result["content"]
+
+
 def test_context_units_require_explicit_supersession_and_never_slice_facts(
     tmp_path: Path,
 ) -> None:
