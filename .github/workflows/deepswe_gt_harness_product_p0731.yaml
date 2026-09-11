@@ -771,6 +771,29 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           set -euo pipefail
+          # Mid-run observability: emit a compact run-status.md from the live
+          # journal every 2 minutes and upload it as a uniquely-named artifact.
+          # v4 artifacts are downloadable while the job is still running, which
+          # lets us inspect progress without waiting for job completion.
+          (
+            STATUS_SEQ=0
+            while true; do
+              sleep 120
+              STATUS_SEQ=$((STATUS_SEQ + 1))
+              python scripts/emit_run_status.py \
+                --root results/deepswe \
+                --task "$TASK" \
+                --run-id "$GITHUB_RUN_ID" \
+                --output run-status.md \
+                --budget-seconds "${{ matrix.time_budget_seconds }}" \
+                --stdout-log pier-stdout.log || true
+              python scripts/upload_transient_artifact.py \
+                --file run-status.md \
+                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" || true
+            done
+          ) &
+          MONITOR_PID=$!
+          set +e
           pier run \
             -p deepswe-bench/tasks \
             --include-task-name "$TASK" \
@@ -786,7 +809,13 @@ jobs:
             --ak product_source_sha="${{ needs.plan.outputs.source_sha }}" \
             --ak temperature=1.0 \
             --ak max_iterations=0 \
-            --ak time_budget_seconds="${{ matrix.time_budget_seconds }}"
+            --ak time_budget_seconds="${{ matrix.time_budget_seconds }}" \
+            2>&1 | tee pier-stdout.log
+          pier_status=${PIPESTATUS[0]}
+          set -e
+          kill "$MONITOR_PID" 2>/dev/null || true
+          wait "$MONITOR_PID" 2>/dev/null || true
+          exit "$pier_status"
 
       - name: Bind the Pier reward to the canonical product receipt
         if: always()
