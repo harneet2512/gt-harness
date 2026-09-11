@@ -226,6 +226,13 @@ def test_gt_s_own_post_edit_probe_invalidates_the_carry(tmp_path, monkeypatch):
 
     from gt_engine import miniswe_covering
 
+    # The certified producer boundary parses without writing into the
+    # worktree, so it cannot produce the stale-carry this test guards. Force
+    # the ``py_compile`` fallback -- the only probe path that writes
+    # ``__pycache__`` beside the source -- by making the producer abstain.
+    monkeypatch.setattr(miniswe_covering, "_syntax_probe_rows",
+                        lambda adapter, files: None)
+
     original = miniswe_covering.run_syntax_probe
 
     def probing(adapter, changed_files):
