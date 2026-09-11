@@ -514,14 +514,36 @@ jobs:
           # and reproduces build-info's source_fingerprint exactly from the
           # vendored tree, so a source change without a rebuild fails here.
           #
-          # It hashes file BYTES, so vendor/gt-index-src carries `* -text` to
-          # stop any checkout translating line endings. Getting this to agree
-          # took two corrections worth recording: the tree was first vendored
-          # from a Windows working copy with CRLF, which no Linux build can
-          # match; and the digest was first computed with Git Bash's sha256sum,
-          # which marks binary mode with `*` and so produces a different second
-          # hash than GNU coreutils on Linux. Neither was a defect in the source.
-          computed="$(find . -type f \( -name '*.go' -o -name '*.c' -o -name '*.cc'             -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.s'             -o -name 'go.mod' -o -name 'go.sum' \) -print0             | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+          # The build recipe (build_gt_index_linux.sh:87) stamps the git-OBJECT
+          # fingerprint: `git ls-tree -r HEAD -- gt-index` emits
+          # `mode blob <oid>\t<path>` per file, then greps to source files and
+          # sha256sums the listing. Hashing worktree BYTES (the prior recipe)
+          # can never reproduce that, because the stamp is over blob OIDs, not
+          # content sha256s. Reproduce it here by computing each file's git blob
+          # OID -- sha1("blob <len>\0<bytes>") -- which is content-canonical and
+          # eol-independent (the vendored tree is committed `eol=lf`, matching
+          # the producer's blobs), then folding into the same `mode blob
+          # <oid>\t<path>` listing the build recipe hashes.
+          computed="$(python3 - <<'PY'
+          import hashlib, os, re
+          exts = ('.go', '.c', '.cc', '.cpp', '.h', '.hpp', '.s')
+          lines = []
+          for root, _, files in os.walk('.'):
+              for fn in files:
+                  if not (fn.endswith(exts) or fn in ('go.mod', 'go.sum')):
+                      continue
+                  full = os.path.join(root, fn)
+                  rel = full.replace(os.sep, '/')
+                  if rel.startswith('./'):
+                      rel = rel[2:]
+                  data = open(full, 'rb').read()
+                  oid = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\x00' + data).hexdigest()
+                  mode = '100755' if os.access(full, os.X_OK) else '100644'
+                  lines.append('%s blob %s\t%s' % (mode, oid, rel))
+          lines.sort()
+          print(hashlib.sha256(('\n'.join(lines) + '\n').encode()).hexdigest())
+          PY
+          )"
           declared="$(python3 -c "import json;print(json.load(open('../gt-index-linux-amd64.build-info.json'))['source_fingerprint'])")"
           echo "source_fingerprint declared : $declared"
           echo "source_fingerprint computed : $computed"
