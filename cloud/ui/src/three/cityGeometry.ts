@@ -1,9 +1,13 @@
 import {
   BoxGeometry,
   BufferGeometry,
+  CanvasTexture,
+  ConeGeometry,
+  CylinderGeometry,
   Float32BufferAttribute,
   Matrix4,
   Shape,
+  SRGBColorSpace,
   ExtrudeGeometry,
 } from "three";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
@@ -107,5 +111,73 @@ export function terraceGeometry(seed: number): BufferGeometry {
     colors.set([shade,shade,shade],i*3);
   }
   g.setAttribute("color",new Float32BufferAttribute(colors,3));
+  return g;
+}
+
+/* ---------------- facade detail ----------------
+ * The windows are texture, not geometry: one small canvas per material,
+ * so six archetypes share two draws' worth of texture memory. `facade`
+ * keeps the face near-white so the pastel module tints still read;
+ * `lit` is the sparse warm emissive layer on top. */
+export function facadeTexture(): CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 64; c.height = 96;
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  const g = c.getContext("2d");
+  if (!g) return t;
+  g.fillStyle = "#ffffff";
+  g.fillRect(0, 0, 64, 96);
+  const cols = 5, rows = 10;
+  const cw = 64 / cols, rh = 96 / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      // A hairline window reveal — present, not loud.
+      g.fillStyle = "rgba(96,112,140,0.16)";
+      g.fillRect(col * cw + cw * 0.28, r * rh + rh * 0.30, cw * 0.44, rh * 0.42);
+    }
+  }
+  // The ground floor reads as entrances, slightly deeper.
+  g.fillStyle = "rgba(80,95,120,0.22)";
+  for (let col = 0; col < cols; col++) {
+    g.fillRect(col * cw + cw * 0.30, 96 - rh * 0.62, cw * 0.4, rh * 0.52);
+  }
+  t.needsUpdate = true;
+  return t;
+}
+
+export function litFacadeTexture(seed = 7): CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 64; c.height = 96;
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  const g = c.getContext("2d");
+  if (!g) return t;
+  g.fillStyle = "#000000";
+  g.fillRect(0, 0, 64, 96);
+  const cols = 5, rows = 10;
+  const cw = 64 / cols, rh = 96 / rows;
+  let n = seed;
+  const rand = () => (n = (n * 16807) % 2147483647) / 2147483647;
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      if (rand() < 0.18) {
+        g.fillStyle = `rgba(255,${190 + Math.floor(rand() * 40)},130,${0.55 + rand() * 0.45})`;
+        g.fillRect(col * cw + cw * 0.28, r * rh + rh * 0.30, cw * 0.44, rh * 0.42);
+      }
+    }
+  }
+  t.needsUpdate = true;
+  return t;
+}
+
+/** A small planted tree: cone canopy on a stub trunk, unit-scaled. */
+export function treeGeometry(): BufferGeometry {
+  const canopy = new ConeGeometry(0.16, 0.55, 6);
+  canopy.translate(0, 0.42, 0);
+  const trunk = new CylinderGeometry(0.035, 0.05, 0.22, 5);
+  trunk.translate(0, 0.11, 0);
+  const g = mergeGeometries([canopy, trunk]) ?? canopy;
+  canopy.dispose(); trunk.dispose();
   return g;
 }

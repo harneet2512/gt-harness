@@ -24,6 +24,8 @@
   PCFShadowMap,
   Raycaster,
   Scene,
+  Fog,
+  TorusGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -39,7 +41,7 @@ import type { Node3D } from "../graph3d";
 import { palette } from "../palette";
 import { CameraMotion, TIMING, travel } from "../cityMotion";
 import { occupancy, type AgentVisualState } from "../cityAgents";
-import { buildingGeometry, terraceGeometry, roofFootprint } from "./cityGeometry";
+import { buildingGeometry, terraceGeometry, roofFootprint, facadeTexture, litFacadeTexture, treeGeometry } from "./cityGeometry";
 import { SurveyorFactory } from "./surveyor";
 
 export interface Frame3DState extends GraphViewProps {
@@ -83,7 +85,7 @@ export class Renderer3D {
   private floorMaterial=new MeshStandardMaterial({color:0xf7f8fa,roughness:1,metalness:0});
   private floorGeometry=new PlaneGeometry(8000,8000);
   private siteLinesMaterial=new LineBasicMaterial({color:0x8995a4,transparent:true,opacity:.055,depthWrite:false});
-  private walkwayMaterial=new MeshStandardMaterial({color:0xe5e8eb,roughness:.9,metalness:0});
+  private walkwayMaterial=new MeshStandardMaterial({color:0xe5e8eb,roughness:.9,metalness:0,emissive:new Color(0x9db8cc),emissiveIntensity:.28});
   private siteMarkTexture:CanvasTexture;
   private siteMarkMaterial:MeshBasicMaterial;
   private siteMarkGeometry=new PlaneGeometry(30,15);
@@ -95,11 +97,28 @@ export class Renderer3D {
     roughness: 0.82,
     metalness: 0.05,
     vertexColors: true,
+    map: facadeTexture(),
+    emissiveMap: litFacadeTexture(),
+    emissive: new Color(0xffc890),
+    emissiveIntensity: 0.32,
   });
   private ground = new MeshStandardMaterial({
     roughness: 0.9,
     metalness: 0,
     vertexColors: true,
+  });
+  /* The skirts under a district — rock, not more terrace, so each district
+     reads as a landmass rather than a slab on a table. */
+  private rock = new MeshStandardMaterial({
+    color: 0x878e9a,
+    roughness: 1,
+    metalness: 0,
+    vertexColors: true,
+  });
+  private leaf = new MeshStandardMaterial({
+    color: 0x8fae86,
+    roughness: 1,
+    metalness: 0,
   });
   private contact = new MeshBasicMaterial({
     color: 0x171b20,
@@ -108,6 +127,7 @@ export class Renderer3D {
     depthWrite: false,
   });
   private geometry = Array.from({ length: 6 }, (_, i) => buildingGeometry(i));
+  private tree = treeGeometry();
   private terraces: BufferGeometry[] = [];
   private fittedDistance = 300;
   private box = new BoxGeometry(1, 1, 1);
@@ -379,6 +399,50 @@ export class Renderer3D {
         m.scale.set(d.width * expansion, 1, d.depth * expansion);
         this.terrain.add(m);
       }
+      // The landmass under the terraces: two tapering rock layers so a
+      // district reads as a floating island, not a slab on a table.
+      const cliff=new Mesh(geometry,this.rock);
+      cliff.position.set(d.x+d.width/2,0,d.z+d.depth/2);
+      cliff.scale.set(d.width*1.1,26,d.depth*1.1);
+      cliff.castShadow=true;
+      this.terrain.add(cliff);
+      const cliff2=new Mesh(geometry,this.rock);
+      cliff2.position.set(d.x+d.width/2,-26,d.z+d.depth/2);
+      cliff2.scale.set(d.width*.72,10,d.depth*.72);
+      this.terrain.add(cliff2);
+      // Planting: a loose ring of trees around the district's mid-terrace.
+      const seed=pathHash(d.id);
+      const trees=new InstancedMesh(this.tree,this.leaf,18);
+      for(let i=0;i<18;i++) {
+        const a=(i/18)*Math.PI*2+((seed%97)/97)*Math.PI*2;
+        const wobble=((seed+i*31)%100)/100;
+        const r=.5+.14*wobble;
+        const tx=d.x+d.width/2+Math.cos(a)*d.width*r;
+        const tz=d.z+d.depth/2+Math.sin(a)*d.depth*r;
+        const s=.8+((seed+i*13)%100)/100*.9;
+        this.matrix.position.set(tx,4.6,tz);
+        this.matrix.scale.set(s,s,s);
+        this.matrix.rotation.set(0,a,0);
+        this.matrix.updateMatrix();
+        trees.setMatrixAt(i,this.matrix.matrix);
+      }
+      trees.castShadow=true;
+      this.terrain.add(trees);
+    }
+    if(districts.length>1){
+      // The monument at the city's middle — the mark the site stamp
+      // carries, raised so it can be seen from anywhere.
+      const ring=new Mesh(
+        new TorusGeometry(9,1.1,14,48),
+        new MeshStandardMaterial({color:0xdfe5ec,roughness:.5,metalness:.25,emissive:new Color(0x7fb0d8),emissiveIntensity:.5}),
+      );
+      ring.position.set(cx,20,cz);
+      ring.rotation.x=Math.PI/2;
+      this.terrain.add(ring);
+      const base=new Mesh(this.box,this.ground);
+      base.position.set(cx,7.2,cz);
+      base.scale.set(4,14,4);
+      this.terrain.add(base);
     }
     const contacts = new InstancedMesh(
       this.box,
@@ -476,6 +540,12 @@ export class Renderer3D {
     const distance=hi;
     this.fittedDistance=distance;
     this.overviewDistance = distance;
+    // Aerial perspective: distance softens into the paper sky.
+    this.scene.fog = new Fog(
+      (this.scene.background as Color).getHex(),
+      distance * 1.15,
+      distance * 2.9,
+    );
     this.camera.position.copy(oldPosition);this.camera.quaternion.copy(oldQuaternion);this.camera.updateMatrixWorld();
     this.controls.maxDistance=distance*4;this.controls.minDistance=45;
     if(!this.framed) {
