@@ -90,6 +90,23 @@ export class Renderer3D {
   private siteMarkTexture:CanvasTexture;
   private siteMarkMaterial:MeshBasicMaterial;
   private siteMarkGeometry=new PlaneGeometry(30,15);
+  /* The warm pool of light the city stands on — a radial wash, paper to
+     cream, that makes the composition read as one staged city. */
+  private stageTexture:CanvasTexture = (() => {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 256;
+    const t = new CanvasTexture(c);
+    const g = c.getContext("2d");
+    if (!g) return t;
+    const grad = g.createRadialGradient(128, 128, 10, 128, 128, 128);
+    grad.addColorStop(0, "rgba(240,225,200,0.9)");
+    grad.addColorStop(0.55, "rgba(235,222,205,0.42)");
+    grad.addColorStop(1, "rgba(235,222,205,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    t.needsUpdate = true;
+    return t;
+  })();
   private layout: CityLayout | null = null;
   private buildings: InstancedMesh[] = [];
   private ids: string[][] = [];
@@ -101,7 +118,7 @@ export class Renderer3D {
     map: facadeTexture(),
     emissiveMap: litFacadeTexture(),
     emissive: new Color(0xffc890),
-    emissiveIntensity: 0.32,
+    emissiveIntensity: 0.55,
   });
   private ground = new MeshStandardMaterial({
     roughness: 0.9,
@@ -211,8 +228,10 @@ export class Renderer3D {
     this.gl.toneMapping = ACESFilmicToneMapping;
     this.gl.toneMappingExposure = 1.1;
     this.scene.background = new Color("#f7f8fa");
-    this.scene.add(new HemisphereLight(0xffffff, 0xa1a9b5, 1.4));
+    this.scene.add(new HemisphereLight(0xfff4e2, 0xa1a9b5, 1.35));
     const key = this.keyLight;
+    key.color.set(0xffe8c4);
+    key.intensity = 1.55;
     key.position.set(-100, 220, 100);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -441,7 +460,7 @@ export class Renderer3D {
         const r=.45+.05*wobble;
         const tx=d.x+d.width/2+Math.cos(a)*d.width*r;
         const tz=d.z+d.depth/2+Math.sin(a)*d.depth*r;
-        const s=2.6+((seed+i*13)%100)/100*2.2;
+        const s=4.5+((seed+i*13)%100)/100*3;
         this.matrix.position.set(tx,.5,tz);
         this.matrix.scale.set(s,s,s);
         this.matrix.rotation.set(0,a,0);
@@ -452,6 +471,20 @@ export class Renderer3D {
       this.terrain.add(trees);
     }
     if(districts.length>1){
+      /* The stage: a warm pool of light under the whole city, so the
+         composition reads staged rather than scattered on paper. */
+      const stage = new Mesh(
+        new PlaneGeometry(1, 1),
+        new MeshBasicMaterial({ map: this.stageTexture, transparent: true, opacity: 0.85, depthWrite: false }),
+      );
+      stage.rotation.x = -Math.PI / 2;
+      stage.position.set(cx, -0.4, cz);
+      const stageR = Math.max(
+        ...districts.map((d) => Math.hypot(d.x + d.width / 2 - cx, d.z + d.depth / 2 - cz) + Math.max(d.width, d.depth) * 0.75),
+      );
+      stage.scale.set(stageR * 2.6, stageR * 2.6, 1);
+      stage.renderOrder = -1;
+      this.terrain.add(stage);
       /* The GT hub: a thin circular forum at the city's middle, carrying the
          raised ring. Every district orients around it; the idle drone docks
          here. */
@@ -463,15 +496,15 @@ export class Renderer3D {
       forum.receiveShadow=true;
       this.terrain.add(forum);
       const ring=new Mesh(
-        new TorusGeometry(9,1.1,14,48),
-        new MeshStandardMaterial({color:0xdfe5ec,roughness:.5,metalness:.25,emissive:new Color(0x7fb0d8),emissiveIntensity:.5}),
+        new TorusGeometry(12,1.4,14,48),
+        new MeshStandardMaterial({color:0xdfe5ec,roughness:.5,metalness:.25,emissive:new Color(0x7fb0d8),emissiveIntensity:.6}),
       );
-      ring.position.set(cx,14,cz);
+      ring.position.set(cx,19,cz);
       ring.rotation.x=Math.PI/2;
       this.terrain.add(ring);
       const base=new Mesh(this.box,this.ground);
-      base.position.set(cx,4.5,cz);
-      base.scale.set(4,9,4);
+      base.position.set(cx,6,cz);
+      base.scale.set(5,12,5);
       this.terrain.add(base);
     }
     const contacts = new InstancedMesh(
@@ -535,26 +568,13 @@ export class Renderer3D {
   fit() {
     this.userOwned = false;
     if (!this.layout?.nodes.length || this.width < 2 || this.height < 2) return;
-    /* Fit to the mass, not the outliers: the districts holding 90% of the
-       files frame the shot; a stray one-file site lives at the edge of the
-       frame instead of shrinking the whole city to accommodate it. */
-    const counts = new Map<string, number>();
-    for (const n of this.layout.nodes) counts.set(n.site, (counts.get(n.site) ?? 0) + 1);
-    const total = this.layout.nodes.length;
-    const byMass = [...this.layout.districts].sort(
-      (a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0),
-    );
-    const ds: District[] = [];
-    let mass = 0;
-    for (const d of byMass) {
-      ds.push(d);
-      mass += counts.get(d.id) ?? 0;
-      if (mass >= total * 0.9) break;
-    }
-    const minX=Math.min(...ds.map(d=>d.x-d.width*.1)), maxX=Math.max(...ds.map(d=>d.x+d.width*1.1));
-    const minZ=Math.min(...ds.map(d=>d.z-d.depth*.1)), maxZ=Math.max(...ds.map(d=>d.z+d.depth*1.1));
+    /* Fit every district — the shelf keeps them close enough that no
+       outlier can shrink the skyline. */
+    const ds = this.layout.districts;
+    const minX=Math.min(...ds.map(d=>d.x-d.width*.02)), maxX=Math.max(...ds.map(d=>d.x+d.width*1.02));
+    const minZ=Math.min(...ds.map(d=>d.z-d.depth*.02)), maxZ=Math.max(...ds.map(d=>d.z+d.depth*1.02));
     const target=new Vector3((minX+maxX)/2,8,(minZ+maxZ)/2);
-    const direction=new Vector3(.55,.62,.55).normalize();
+    const direction=new Vector3(.62,.52,.62).normalize();
     const corners: Vector3[]=[];
     for(const d of ds) {
       const geometry=terraceGeometry(pathHash(d.name)%37);
@@ -579,7 +599,7 @@ export class Renderer3D {
       const distance=(lo+hi)/2;
       this.camera.position.copy(target).addScaledVector(direction,distance);
       this.camera.lookAt(target); this.camera.updateMatrixWorld();
-      const fits=corners.every(p=>{const q=p.clone().project(this.camera);return Math.abs(q.x)<=.95 && Math.abs(q.y)<=.92 && q.z<1;});
+      const fits=corners.every(p=>{const q=p.clone().project(this.camera);return Math.abs(q.x)<=.98 && Math.abs(q.y)<=.96 && q.z<1;});
       if(fits) hi=distance; else lo=distance;
     }
     const distance=hi;
@@ -826,9 +846,13 @@ export class Renderer3D {
           ];
           const tint = new Color(named.find(([pattern]) => pattern.test(cluster))?.[1] ??
             ["#c7d8e8", "#d4d5e6", "#d1dfd6"][pathHash(cluster) % 3]);
-          /* Facades stay near-neutral; the district's hue lives on the
-             platform and its labels, not on every wall. */
-          const c=this.colorTo[k][i].set("#f0f2f5").lerp(tint,.22);
+          /* Facades stay near-neutral with a per-building warmth wobble;
+             the district's hue lives on the platform, not on every wall. */
+          const wobble=(pathHash(id)%100)/100;
+          const c=this.colorTo[k][i]
+            .set("#eef0f3")
+            .lerp(new Color(wobble>.5?"#f3ece2":"#e9edf2"),wobble*.5)
+            .lerp(tint,.42);
           if(id === state.selectedId) c.lerp(new Color("#8db6e6"),.45);
           else if(id === state.hoverId) c.multiplyScalar(1.13);
           else if(state.hoverId || (state.matches && !state.matches.has(id))) c.multiplyScalar(.76);

@@ -128,13 +128,13 @@ export function facadeTexture(): CanvasTexture {
   if (!g) return t;
   g.fillStyle = "#ffffff";
   g.fillRect(0, 0, 64, 96);
-  const cols = 5, rows = 10;
+  const cols = 4, rows = 8;
   const cw = 64 / cols, rh = 96 / rows;
   for (let r = 0; r < rows; r++) {
     for (let col = 0; col < cols; col++) {
-      // A hairline window reveal — present, not loud.
-      g.fillStyle = "rgba(96,112,140,0.24)";
-      g.fillRect(col * cw + cw * 0.28, r * rh + rh * 0.30, cw * 0.44, rh * 0.42);
+      // A window reveal that reads from the overview camera.
+      g.fillStyle = "rgba(84,100,128,0.42)";
+      g.fillRect(col * cw + cw * 0.22, r * rh + rh * 0.24, cw * 0.56, rh * 0.5);
     }
   }
   // The ground floor reads as entrances, slightly deeper.
@@ -155,15 +155,15 @@ export function litFacadeTexture(seed = 7): CanvasTexture {
   if (!g) return t;
   g.fillStyle = "#000000";
   g.fillRect(0, 0, 64, 96);
-  const cols = 5, rows = 10;
+  const cols = 4, rows = 8;
   const cw = 64 / cols, rh = 96 / rows;
   let n = seed;
   const rand = () => (n = (n * 16807) % 2147483647) / 2147483647;
   for (let r = 0; r < rows; r++) {
     for (let col = 0; col < cols; col++) {
-      if (rand() < 0.18) {
-        g.fillStyle = `rgba(255,${190 + Math.floor(rand() * 40)},130,${0.55 + rand() * 0.45})`;
-        g.fillRect(col * cw + cw * 0.28, r * rh + rh * 0.30, cw * 0.44, rh * 0.42);
+      if (rand() < 0.16) {
+        g.fillStyle = `rgba(255,${196 + Math.floor(rand() * 40)},140,${0.7 + rand() * 0.3})`;
+        g.fillRect(col * cw + cw * 0.22, r * rh + rh * 0.24, cw * 0.56, rh * 0.5);
       }
     }
   }

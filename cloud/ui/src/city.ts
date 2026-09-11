@@ -77,7 +77,7 @@ export function buildCity(field: ParticleField, previous?: CityLayout | null): C
     const span=Math.max(...districts.map(d=>d.width))*.68;
     const centers: {u:number;v:number;r:number}[]=[];
     districts.forEach((d,i)=>{
-      const anchor=reference[i]??[Math.cos(i*2.4)*(1.1+Math.sqrt(i)*.7),Math.sin(i*2.4)*(1.1+Math.sqrt(i)*.7)];
+      const anchor=reference[i]??[Math.cos(i*2.4)*1.05,Math.sin(i*2.4)*1.05];
       const c={u:anchor[0]*span,v:anchor[1]*span,r:d.width*.62};
       for(let pass=0;pass<32;pass++) for(const other of centers) {
         const dx=c.u-other.u,dz=c.v-other.v,distance=Math.hypot(dx,dz),needed=c.r+other.r+4;
