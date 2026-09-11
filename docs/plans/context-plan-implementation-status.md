@@ -1304,6 +1304,14 @@ The unrelated dirty diagnostics worktree `D:/gt-harness` is untouched.
      history at >4000 chars with no revocation record (context.py:62-116
      replaces the whole message). F5 char budget under-fills the window ~2x
      (char_budget = window*2 while a token-accurate pass already exists).
+  CONTEXT-PRESERVATION FIXES LANDED: F4 at `fb79ab91` (sealed <gt-facts>
+  spans extracted and preserved through observation elision, original
+  bytes CAS-archived; RED->GREEN on two bounded-context witnesses) and
+  F9 at `55f5b774` (stale context-unit markers now carry a retrieval_hint
+  teaching the model `gt-evidence read <sha> 0 8192`). Transport/lifecycle
+  set (F1 typed-tool-on-wire, F2 commit-after-transport, F3 no-retry
+  refusals, F5 token-accurate budget, F6 recovery-steer clear,
+  F12 typed localization record) in flight in the same worktree.
   THESE ARE THE SOLVE-RATE SURFACE: an agent that never sees the typed tool,
   loses delivered evidence on transport failure or the next turn, and gets
   half its window cannot solve what the graph proves it should.
