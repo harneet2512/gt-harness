@@ -1522,17 +1522,22 @@ class GTSession:
             point of this helper is that "we could not tell" and "it worked"
             do not look alike.
 
-            Only `verified` and `corrected` are the tier. Both stamp
-            resolution_method='lsp' at confidence 1.0 (resolve.py:944-959) and
-            nothing else does. `deleted` is NOT a removal and NOT a promotion:
-            it stamps resolution_method='lsp_window_miss' at confidence 0.0 and
-            trust tier SPECULATIVE (resolve.py:994-1008), a non-destructive
-            tombstone the closure excludes from traversal. Summing it made a
-            receipt of verified=0, corrected=0, deleted=40 report WORKING on a
-            graph whose lsp tier was empty and forty of whose edges had just
-            been demoted out of traversal - the same defect this yield check
-            was added to prevent. It is real work and it is reported, but never
-            in the number that decides WORKING.
+            `verified`, `corrected`, and `selected` are the tier. The first two
+            stamp resolution_method='lsp' at confidence 1.0 on a legacy CALLS
+            edge (resolve.py:944-959). `selected` is the same certification
+            recorded on the canonical callsite projection (SELECTED_TARGET +
+            candidate_state='selected' + derivation facts) for callsites with
+            no uniquely-bindable legacy edge — same-line same-lexeme clusters a
+            column-blind edge tuple cannot honestly name, or callsites that
+            emitted no CALLS row at all. `deleted` is NOT a removal and NOT a
+            promotion: it stamps resolution_method='lsp_window_miss' at
+            confidence 0.0 and trust tier SPECULATIVE (resolve.py:994-1008), a
+            non-destructive tombstone the closure excludes from traversal.
+            Summing it made a receipt of verified=0, corrected=0, deleted=40
+            report WORKING on a graph whose lsp tier was empty and forty of
+            whose edges had just been demoted out of traversal - the same
+            defect this yield check was added to prevent. It is real work and
+            it is reported, but never in the number that decides WORKING.
 
             The blob directory comes from the journal's own parent rather than
             store.root, because root is not in the EvidenceStore protocol
@@ -1552,7 +1557,8 @@ class GTSession:
             if not isinstance(receipt, dict):
                 return None
             promoted = sum(
-                int(receipt.get(key) or 0) for key in ("verified", "corrected")
+                int(receipt.get(key) or 0)
+                for key in ("verified", "corrected", "selected")
             )
             # selection_complete says whether the ambiguous-edge SELECTION saw
             # the whole tier. Both callers of _get_ambiguous_edges leave `limit`

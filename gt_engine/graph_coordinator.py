@@ -331,7 +331,8 @@ class GraphBuildCoordinator:
         # promotions terminated `obsolete` against graphs these republications
         # had just replaced. The churn was manufacturing its own cancellations.
         mutations = sum(
-            int(receipt.get(key) or 0) for key in ("verified", "corrected", "deleted")
+            int(receipt.get(key) or 0)
+            for key in ("verified", "corrected", "selected", "deleted")
         )
         if not mutations:
             self._observe_enrichment(request, base, receipt, "no_edge_mutations")

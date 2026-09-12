@@ -882,9 +882,27 @@ jobs:
           path: attestation/tasks
           merge-multiple: true
 
+      - name: Stage the certified producer for feature-witness execution
+        run: |
+          set -euo pipefail
+          # The witness matrix re-runs the graph-backed feature proofs inside
+          # this job; without the certified binary every ensure_index-gated
+          # witness skips and the matrix attests "not_run" instead of
+          # WITNESSED. Stage the same verified artifact the provider-free
+          # acceptance job uses, digest-bound to the bundle manifest's pin.
+          PRODUCER_PATH="/opt/groundtruth/gt-index/gt-index"
+          EXPECTED_PRODUCER_SHA="$(python3 -c \
+            "import json;print(json.load(open('config/deepswe_product_bundle_v1.json'))['groundtruth']['producer_sha256'])")"
+          sudo install -D -m 0755 vendor/gt-index-linux-amd64 "${PRODUCER_PATH}"
+          printf '%s  %s\n' \
+            "${EXPECTED_PRODUCER_SHA}" \
+            "${PRODUCER_PATH}" | sha256sum --check --strict
+          "${PRODUCER_PATH}" -h >/dev/null
+
       - name: Reject dark triggers, telemetry faults, and stale feature evidence
         env:
           EXPECTED_MODEL: ${{ needs.plan.outputs.model }}
+          GT_INDEX_BINARY: /opt/groundtruth/gt-index/gt-index
         run: |
           set -uo pipefail
           AUDIT_EXIT=0

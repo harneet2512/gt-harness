@@ -665,6 +665,20 @@ def check_ledger_integrity(rows: list[LedgerRow]) -> tuple[list[str], list[str]]
 # --------------------------------------------------------------------------- #
 # per-task audit
 # --------------------------------------------------------------------------- #
+def _canonical_task_name(raw: object, task_dir: Path) -> str:
+    """Bind the audit row to the plan's task identity.
+
+    The runner's result.json reports the benchmark's namespaced dataset id
+    (``datacurve/aiomonitor-task-snapshots-diff``) while the plan, the bundle
+    manifest, the official verifier's ``task_id`` and the trial directory all
+    use the bare id (``aiomonitor-task-snapshots-diff``). Attestation compares
+    audit task names to plan task ids, so the namespace must be stripped here —
+    keeping it made every audit row name a task the plan never declared.
+    """
+    name = str(raw or "").rsplit("/", 1)[-1].strip()
+    return name or task_dir.name.split("__", 1)[0]
+
+
 @dataclass
 class TaskAudit:
     task_name: str
@@ -1103,7 +1117,7 @@ def _audit_native_miniswe_task(
     journal_path: Path | None,
     discovery_issues: list[str],
 ) -> TaskAudit:
-    name = rj.get("task_name") or task_dir.name.split("__", 1)[0]
+    name = _canonical_task_name(rj.get("task_name"), task_dir)
     a = TaskAudit(task_name=name, trial_dir=task_dir.name)
     try:
         a.reward = float(rj["verifier_result"]["rewards"]["reward"])
@@ -1757,7 +1771,7 @@ def audit_task(task_dir: Path) -> TaskAudit:
         return _audit_native_miniswe_task(
             task_dir, rj, trajectory_path, journal_path, native_issues
         )
-    name = rj.get("task_name") or task_dir.name.split("__", 1)[0]
+    name = _canonical_task_name(rj.get("task_name"), task_dir)
     a = TaskAudit(task_name=name, trial_dir=task_dir.name)
 
     # result.json facts

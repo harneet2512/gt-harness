@@ -489,6 +489,7 @@ def evaluate_live_gate(
         "faults": faults,
         "unexposed": unexposed,
         "observed_models": sorted(observed_models),
+        "expected_model": expected_model,
         "expected_temperature": expected_temperature,
         "provider_temperatures": sorted(provider_temperatures),
         "complete_census": complete_census,

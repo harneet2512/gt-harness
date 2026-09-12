@@ -310,6 +310,7 @@ def diagnose_artifact_root(root: str | Path, *, strict: bool = False) -> Diagnos
     events: list[DiagnosticEvent] = []
     capabilities: list[dict[str, Any]] = []
     diagnosed_tasks: set[str] = set()
+    diagnostics_digests: dict[str, str] = {}
     paths = sorted(base.rglob("diagnostics.json")) if base.is_dir() else []
     if not paths:
         issues.append("no diagnostics.json artifacts discovered")
@@ -326,8 +327,21 @@ def diagnose_artifact_root(root: str | Path, *, strict: bool = False) -> Diagnos
         if not task_id:
             issues.append(f"{path}: missing task identity")
             continue
+        # The run's evidence corpus stages a second copy of the same document
+        # inside gt-state/ — byte-identical duplicates are one artifact seen
+        # twice, not two diagnostics; divergent copies for one task are a real
+        # integrity issue. Skipping the identical copy also keeps the event
+        # census from double-counting every diagnostic row.
+        canonical_digest = hashlib.sha256(
+            json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
         if task_id in diagnosed_tasks:
-            issues.append(f"task {task_id}: duplicate diagnostics artifacts")
+            if diagnostics_digests.get(task_id) != canonical_digest:
+                issues.append(f"task {task_id}: duplicate diagnostics artifacts")
+            continue
+        diagnostics_digests[task_id] = canonical_digest
         diagnosed_tasks.add(task_id)
         capability_rows = payload.get("capabilities")
         if not isinstance(capability_rows, list):
