@@ -215,6 +215,29 @@ def _decision_candidate_order(candidate: GTDecisionCandidate) -> tuple[int, int,
     return priority, candidate.source_ordinal, kind, identity
 
 
+def _bounded_unit_view(header: str, body: str, limit: int) -> str | None:
+    """Head/tail render of an oversized context unit inside the byte limit.
+
+    Returns None when the header alone cannot fit; the caller records a typed
+    refusal in that case. The complete unit bytes remain in the evidence CAS
+    through the delivery's artifact_sha256 - the model-visible view is honest
+    about what was elided without printing a retrieval affordance.
+    """
+    encoded_header = (header + "\n").encode("utf-8")
+    room = limit - len(encoded_header) - 96
+    if room <= 0:
+        return None
+    body_bytes = body.encode("utf-8")
+    if len(body_bytes) <= room:
+        return f"{header}\n{body}"
+    head_len = room * 2 // 3
+    tail_len = room - head_len
+    head = body_bytes[:head_len].decode("utf-8", "ignore")
+    tail = body_bytes[-tail_len:].decode("utf-8", "ignore") if tail_len else ""
+    omitted = len(body_bytes) - len(head.encode("utf-8")) - len(tail.encode("utf-8"))
+    return f"{header}\n{head}\n[{omitted} utf8 bytes of this context unit elided]\n{tail}"
+
+
 class GTSession:
     """Single-owner GT session facade.
 
@@ -1042,23 +1065,6 @@ class GTSession:
                 supersedes = ()
             rendered = candidate.rendered
             if candidate.supersession_key:
-                visible_reference = {
-                    key: artifact_reference[key]
-                    for key in (
-                        "schema", "sha256", "total_length", "encoding", "kind",
-                        "retrieval_command",
-                    )
-                    if key in artifact_reference
-                }
-                if visible_reference:
-                    # A bare pointer is undocumented plumbing to the model: the
-                    # marker itself must name the retrieval affordance or the
-                    # degraded unit is unrecoverable in-context.
-                    visible_reference["retrieval_hint"] = (
-                        "unit elided to a reference; run the retrieval_command "
-                        "(gt-evidence read <sha256> 0 8192) in the task shell "
-                        "to load the complete unit bytes"
-                    )
                 metadata = {
                     "unit_id": unit_id,
                     "supersession_key": candidate.supersession_key,
@@ -1072,27 +1078,26 @@ class GTSession:
                 )
                 full = f"{header}\n{candidate.rendered}"
                 limit = delivery_byte_limit(lane=candidate.lane, kind=candidate.kind)
-                if historical and visible_reference:
-                    rendered = f"{header}\n[GT_CONTEXT_UNIT_REFERENCE] " + json.dumps(
-                        visible_reference, ensure_ascii=True, sort_keys=True,
-                        separators=(",", ":"),
-                    )
-                elif len(full.encode("utf-8")) <= limit:
+                # Stale-revision units still carry context, but only a tight
+                # inline view: the complete bytes stay in the evidence CAS and
+                # the model never gets a fetch chore (run 34656860834).
+                if historical:
+                    limit = min(limit, 4_096)
+                if len(full.encode("utf-8")) <= limit:
                     rendered = full
-                elif visible_reference:
-                    rendered = f"{header}\n[GT_CONTEXT_UNIT_REFERENCE] " + json.dumps(
-                        visible_reference, ensure_ascii=True, sort_keys=True,
-                        separators=(",", ":"),
-                    )
                 else:
-                    self._engine.store.append(
-                        "decision_context_unit_refused",
-                        reason="context_unit_metadata_byte_ceiling",
-                        unit_id=unit_id,
-                        supersession_key=candidate.supersession_key,
-                        source_revision=candidate.source_revision,
-                    )
-                    continue
+                    bounded = _bounded_unit_view(header, candidate.rendered, limit)
+                    if bounded is not None:
+                        rendered = bounded
+                    else:
+                        self._engine.store.append(
+                            "decision_context_unit_refused",
+                            reason="context_unit_metadata_byte_ceiling",
+                            unit_id=unit_id,
+                            supersession_key=candidate.supersession_key,
+                            source_revision=candidate.source_revision,
+                        )
+                        continue
             payload_sha256 = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
             admitted = self._engine.admit_model_visible_delivery(
                 lane=candidate.lane,

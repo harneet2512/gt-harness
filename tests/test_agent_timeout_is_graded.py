@@ -40,7 +40,7 @@ def test_timeout_exit_code_still_matches_the_supervisor_contract():
 
     source = inspect.getsource(miniswe_supervisor.conserve_failure)
     assert 'exit_code = 3 if terminal == "timeout" else 5' in source
-    assert '{3: "timeout", 4: "provider_failed", 5: "internal_error", 6: "setup_error"}' in source
+    assert '{3: "timeout", 4: "provider_failed", 5: "internal_error", 6: "setup_error", 7: "churn_abort"}' in source
     assert SUPERVISOR_TIMEOUT_EXIT_CODE == 3
 
 

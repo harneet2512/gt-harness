@@ -1278,6 +1278,7 @@ def _audit_native_miniswe_task(
 
     provider_requests: dict[str, dict] = {}
     provider_responses: dict[str, dict] = {}
+    provider_failures: dict[str, dict] = {}
     audited_request_ids: dict[str, set[str]] = {}
     for row in rows:
         event = row.get("event")
@@ -1486,8 +1487,21 @@ def _audit_native_miniswe_task(
                 )
             else:
                 a.cache_read = (a.cache_read or 0) + cached_tokens
-    missing_responses = sorted(set(provider_requests) - set(provider_responses))
+        elif event == "provider_failure":
+            if request_id in provider_failures:
+                a.attribution_issues.append(
+                    f"duplicate provider failure request_id: {request_id}"
+                )
+            provider_failures[request_id] = row
+    # A request is closed by a response OR by a typed provider_failure (e.g.
+    # the FormatError on run 34656860834 request-83, after which the transport
+    # retried inside the same agent call). Only requests with neither event
+    # are missing.
+    missing_responses = sorted(
+        set(provider_requests) - set(provider_responses) - set(provider_failures)
+    )
     extra_responses = sorted(set(provider_responses) - set(provider_requests))
+    extra_failures = sorted(set(provider_failures) - set(provider_requests))
     if missing_responses:
         a.attribution_issues.append(
             f"provider request(s) without response: {missing_responses}"
@@ -1495,6 +1509,10 @@ def _audit_native_miniswe_task(
     if extra_responses:
         a.attribution_issues.append(
             f"provider response(s) without request: {extra_responses}"
+        )
+    if extra_failures:
+        a.attribution_issues.append(
+            f"provider failure(s) without request: {extra_failures}"
         )
     ordered_request_iterations = [
         int(row.get("iteration") or 0)

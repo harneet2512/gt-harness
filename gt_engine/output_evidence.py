@@ -15,6 +15,13 @@ from pathlib import Path
 
 PAGE_BYTES = 8192
 
+# Model-visible preview bound. Sized for the provider window, not for
+# prompt-economy: a source file or test log under ~64KB arrives complete;
+# only genuinely large outputs are head+tail truncated.
+PREVIEW_CHARS = 65_536
+PREVIEW_HEAD_CHARS = 49_152
+PREVIEW_TAIL_CHARS = 16_384
+
 
 class EvidenceStore:
     def __init__(self, root: str | Path):
@@ -164,17 +171,24 @@ class EvidenceStore:
     def preview(self, reference: dict, *, retrieval_result: bool = False) -> str:
         if retrieval_result and reference["total_length"] <= PAGE_BYTES * 6 + 2048:
             return self.bytes(reference["sha256"]).decode("utf-8", "strict")
-        page = self.read(reference["sha256"], 0, PAGE_BYTES)
-        if (page["total_length"] != reference["total_length"]
-                or page["artifact_encoding"] != reference["encoding"]):
-            raise ValueError("artifact metadata mismatch")
-        if page["encoding"] == "utf-8" and page["continuation_offset"] is None:
-            return page["text"]
-        content = page.get("text", "[base64]\n" + page.get("base64", ""))
-        offset = page["continuation_offset"] or 0
-        return (content + "\n[GT_OUTPUT_ARTIFACT " + json.dumps(reference, sort_keys=True)
-                + f"]\nRetrieve exact bytes: gt-evidence read {reference['sha256']} {offset} {PAGE_BYTES}\n"
-                + "Preview only; the artifact is the complete captured output.")
+        # Model-visible truncation. A pointer here is not free: resolving it
+        # costs the agent a whole turn per page, and on a long task the
+        # fetch-chores crowded out the task itself (run 34656860834 spent
+        # ~54% of its commands dereferencing GT artifacts instead of
+        # implementing). Head+tail keeps the two ends agents actually read —
+        # the start of a file and the tail of a test log — and the elision
+        # note invites the agent-native recovery (re-run with sed/head/tail
+        # ranges) rather than a GT-internal fetch protocol. Complete bytes
+        # stay in the artifact for the canonical analyzers either way.
+        text = self.bytes(reference["sha256"]).decode("utf-8", "replace")
+        if len(text) <= PREVIEW_HEAD_CHARS + PREVIEW_TAIL_CHARS:
+            return text
+        head = text[: PREVIEW_HEAD_CHARS]
+        tail = text[-PREVIEW_TAIL_CHARS:]
+        elided = len(text) - len(head) - len(tail)
+        return (head + f"\n[output truncated: {elided} of "
+                f"{len(text)} chars elided; use sed -n/head/tail for other ranges]\n"
+                + tail)
 
 
 def main() -> int:

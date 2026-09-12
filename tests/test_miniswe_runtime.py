@@ -375,6 +375,18 @@ def test_plan_render_receipt_matches_native_request_bytes(tmp_path, monkeypatch)
     agent = FakeAgent()
     agent.model = TransportFakeModel()
     agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": task}]
+    # The production block cap is deliberately generous now — the durable
+    # task anchor is prefix-cached, so inline rows are the cheap place to
+    # spend bytes. Pin a small limit here so the indexed-vs-delivered
+    # receipt fields below still exercise an omission.
+    from gt_engine.persistent_plan import render as render_module
+
+    real_render = render_module.render_plan_block
+    monkeypatch.setattr(
+        render_module,
+        "render_plan_block",
+        lambda plan, **kw: real_render(plan, **{**kw, "limit": 4_000}),
+    )
     install_runtime_hooks(agent, _session(adapter))
     agent.model.query(agent.messages)
     rows = [json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()]
@@ -2544,8 +2556,11 @@ def test_provider_view_budget_tracks_tokens_and_tail_is_bounded(
     ``char_budget = window * 2`` asked for ~2 chars/token while code runs
     ~3.5-4, so history was elided roughly twice as early as the real window
     required -- even though a token-accurate admission pass already exists.
-    And ``max_tail_turns = len(messages)`` disabled the tail bound, so the
-    structural turn selection in ``compact_provider_view`` could never fire.
+    And the turn cap must come from the window, not a fixed count: a hard
+    ``max_tail_turns`` gave the provider an eight-turn working memory on a
+    multi-hundred-turn task (run 34656860834), so the call site passes an
+    unbounded count and lets ``compact_provider_view``'s byte budget decide
+    how much contiguous tail survives.
     """
     from gt_engine import context as context_module
     from gt_engine.context import message_chars
@@ -2584,7 +2599,8 @@ def test_provider_view_budget_tracks_tokens_and_tail_is_bounded(
     assert captured["char_budget"] == probe_chars * 1800 // 1200
     assert captured["char_budget"] >= probe_chars
     assert captured["char_budget"] != 1800 * 2
-    # A real bound, not len(messages): structural tail selection must be
-    # able to fire when the history runs long.
-    assert captured["max_tail_turns"] == rt.PROVIDER_VIEW_MAX_TAIL_TURNS
-    assert 2 <= captured["max_tail_turns"] < len(messages)
+    # No fixed turn cap: the byte budget — derived from this request's
+    # measured token density — is the only structural bound on retained
+    # tail. Passing len(messages) makes the count cap unreachable so the
+    # backfill in compact_provider_view stops at the budget, not a count.
+    assert captured["max_tail_turns"] == len(messages)

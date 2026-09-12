@@ -194,8 +194,11 @@ def test_the_block_is_capped_and_says_what_it_dropped():
             PlanRow(row_id=row.row_id, text=row.text) for row in ledger.rows
         ),
     )
-    block = render_plan_block(plan)
-    assert len(block) <= MAX_BLOCK_CHARS + 200
+    # The production cap is deliberately generous — the durable anchor is
+    # prefix-cached, so inline rows are the cheap place to spend bytes. A
+    # small explicit limit exercises the same cap-honesty path.
+    block = render_plan_block(plan, limit=8_000)
+    assert len(block) <= 8_000 + 200
     assert "more plan lines omitted" in block
 
 

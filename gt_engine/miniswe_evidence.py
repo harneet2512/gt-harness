@@ -376,34 +376,24 @@ def run_evidence_pipeline(
                 artifact_store, rendered.encode("utf-8"), kind="decision_evidence"
             )
         if not fits_budget(rendered, max_delta_chars=max_chars):
-            if artifact_store is None:
-                omissions.append(EvidenceOmission(
-                    str(candidate.evidence_type or ""),
-                    str(candidate.dedup_key or ""),
-                    "artifact_store_unavailable",
-                ))
-                continue
-            visible_reference = {
-                "schema": artifact_reference["schema"],
-                "sha256": artifact_reference["sha256"],
-                "total_length": artifact_reference["total_length"],
-                "encoding": artifact_reference["encoding"],
-                "kind": artifact_reference["kind"],
-                "retrieval_command": artifact_reference["retrieval_command"],
-                "omission_reason": "decision_byte_budget_exceeded",
-            }
+            # An oversized dose used to ship as a fetchable reference stub;
+            # each dereference cost the agent a full turn and the pointers
+            # starved the task (run 34656860834). Ship an explicitly bounded
+            # head/tail view instead: the sealed bytes are exactly what the
+            # model sees, the elision is declared inside them, and the
+            # artifact store keeps the unelided bytes for audit.
+            inline = max(200, max_chars - 120)
+            head = rendered[: inline // 2]
+            tail = rendered[-(inline - inline // 2):]
             rendered = (
-                f"[GT_EVIDENCE_REFERENCE:{candidate.evidence_type}]\n"
-                + json.dumps(
-                    visible_reference, sort_keys=True, separators=(",", ":"),
-                    ensure_ascii=True,
-                )
+                f"{head}\n[{candidate.evidence_type} bounded: "
+                f"{len(rendered) - len(head) - len(tail)} chars elided]\n{tail}"
             )
             if not fits_budget(rendered, max_delta_chars=max_chars):
                 omissions.append(EvidenceOmission(
                     str(candidate.evidence_type or ""),
                     str(candidate.dedup_key or ""),
-                    "artifact_reference_byte_budget_exceeded",
+                    "dose_byte_budget_exceeded",
                 ))
                 continue
         sealed, new_head = seal_delivery(

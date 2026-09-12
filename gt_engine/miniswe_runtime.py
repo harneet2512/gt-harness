@@ -69,12 +69,15 @@ PLAN_BLOCK_TAG = "[GT_PERSISTENT_PLAN]"
 # exactly AT the ceiling, which is what a binding limit looks like. The ask is
 # smaller now; this is the headroom that lets a converging chain finish.
 PLAN_MAX_OUTPUT_TOKENS = 32768
-# Bound on how many complete trailing turn-groups the provider view keeps
-# inline when compacting; older complete turns are archived with a
-# retrievable reference. The caller used to pass ``len(messages)``, which
-# made the bound unreachable and collapsed the structural turn selection in
-# ``compact_provider_view`` to a byte-budget-only fill.
-PROVIDER_VIEW_MAX_TAIL_TURNS = 8
+# Model-visible bound on one tool observation inside the provider view.
+# Sized for the provider window, not for prompt-economy: the 2026-09-11 paid
+# smoke (run 34656860834) showed a 4KB cap plus a hard 8-turn tail bound left
+# the agent with ~43K visible chars out of ~6M of history — an 8-turn memory
+# on a 769-turn task — and it spent its budget dereferencing GT artifacts
+# instead of implementing. The provider window is the honest limit; whole
+# turn-groups are still the elision unit, so the byte budget decides how much
+# history survives, not an arbitrary turn count.
+PROVIDER_VIEW_TOOL_OUTPUT_CHARS = 65_536
 
 _SUBMIT_REFUSED_OUTPUT = "submission withheld by the Groundtruth contract gate"
 
@@ -923,6 +926,9 @@ def install_runtime_hooks(
             recovery = adapter.prepare_recovery_delivery()
             if recovery:
                 messages = [*messages, {"role": "user", "content": recovery}]
+            churn_steer = adapter.prepare_churn_steer_delivery()
+            if churn_steer:
+                messages = [*messages, {"role": "user", "content": churn_steer}]
         context_window = int(os.environ.get("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "0") or 0)
         reserved_output = int(
             os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "0") or 0
@@ -978,7 +984,12 @@ def install_runtime_hooks(
             messages, history_receipt = compact_provider_view(
                 messages, checkpoint="",
                 char_budget=char_budget,
-                max_tail_turns=PROVIDER_VIEW_MAX_TAIL_TURNS,
+                # Keep the longest contiguous tail of complete turn-groups
+                # that fits the byte budget: elision stays structural (whole
+                # groups, oldest first) but the provider window — not an
+                # arbitrary turn count — decides how much history survives.
+                max_tail_turns=len(messages),
+                tool_output_chars=PROVIDER_VIEW_TOOL_OUTPUT_CHARS,
                 artifact_store=EvidenceStore(adapter.engine_state.layout.evidence_root),
             )
             adapter.store.append("context_assembly", **history_receipt)
@@ -1705,6 +1716,22 @@ def install_runtime_hooks(
                 execution_candidates = []
                 if pre_snapshot is not None:
                     adapter.observe_plan_checks(command, result, pre_snapshot, post_snapshot, environment)
+                churn_signal = adapter.churn_governor.observe(
+                    command, productive=bool(changed_files)
+                )
+                if churn_signal == "steer":
+                    stall = adapter.churn_governor.stall_turns
+                    adapter.queue_churn_steer(
+                        "GT_CHURN_STEER: you have spent "
+                        f"{stall} consecutive actions without a workspace edit "
+                        "or check run, and most recent commands read GT state "
+                        "or artifact stores instead of the task. Those bytes "
+                        "cannot contain the solution. Return to the task now: "
+                        "make the code change and run the project's checks. "
+                        "Continued churn terminates this run."
+                    )
+                elif churn_signal == "abort":
+                    adapter.signal_churn_abort()
                 execution = compile_execution_evidence(
                     command=command,
                     output=output,

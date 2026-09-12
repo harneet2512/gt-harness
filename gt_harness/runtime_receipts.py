@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sqlite3
+import statistics
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -885,6 +886,8 @@ def issue_runtime_receipts(
         "reproducibility_manifest": reproduction,
         "graph_certification": graph,
         "graph_publication_state": _graph_publication_state(event_rows),
+        "context_health": _context_health(event_rows),
+        "churn_governor": _churn_summary(event_rows),
     }
     product: dict[str, Any] = {
         "schema": "gt.run_receipt.v1",
@@ -903,6 +906,12 @@ def issue_runtime_receipts(
         "agent_turn_calls": agent_turn_calls,
         "select_catalog_bootstrap_calls": bootstrap_calls,
         "persistent_plan_bootstrap_calls": plan_calls,
+        # Attempt boundary: transport admissions, including retries and
+        # attempts killed in flight. provider_calls stays the logical call
+        # count (agent turns + GT bootstrap calls); conservation below must
+        # compare completed+failed against attempts, because a transport
+        # retry admits two attempts for one logical call.
+        "provider_attempts": provider_attempts,
         **provider_usage,
         "research_valid": bool(report.get("research_valid")),
         "treatment_receipt": treatment_receipt,
@@ -935,6 +944,250 @@ def issue_runtime_receipts(
     return product
 
 
+def _journal_derived_accounting(
+    state_dir: Path,
+) -> tuple[Path | None, list[dict[str, Any]], dict[str, Any]]:
+    """Recompute provider accounting from the sealed event journal.
+
+    A killed or timed-out run never reaches ``final_state()``, so
+    ``report["gt"]`` carries no counters — but the supervisor seals the
+    journal before issuing the failure receipt, so every conservation input
+    is recoverable here. The boundaries mirror ``issue_runtime_receipts``:
+    ``provider_attempts`` counts transport admissions (including retries and
+    attempts killed in flight), ``provider_calls`` stays the logical count
+    (agent turns + GT-internal bootstrap calls), and completed/failed split
+    at the attempt boundary.
+    """
+
+    events_path, event_rows = _events(state_dir)
+    accounting: dict[str, Any] = {}
+    if events_path is None or not event_rows:
+        return events_path, event_rows, accounting
+    provider_admissions = _provider_admissions(event_rows)
+    provider_attempts = len(provider_admissions)
+    provider_usage = _provider_usage(event_rows, attempted_calls=provider_attempts)
+    catalog_calls = sum(
+        1
+        for row in event_rows
+        if row.get("event") == "select_catalog_lifecycle"
+        and row.get("reason") == "provider_request_admitted"
+    )
+    # The plan bootstrap is counted at the transport when native_query
+    # returns; a live build journals persistent_plan_built with a real
+    # finish_reason, while a checkpoint restore records "restored" and spent
+    # no call.
+    plan_calls = sum(
+        1
+        for row in event_rows
+        if row.get("event") == "persistent_plan_built"
+        and str(row.get("finish_reason") or "") not in {"", "restored"}
+    )
+    accounting.update(
+        provider_attempts=provider_attempts,
+        provider_completed_calls=provider_usage["provider_completed_calls"],
+        provider_failed_calls=provider_usage["provider_failed_calls"],
+        input_tokens=provider_usage["input_tokens"],
+        output_tokens=provider_usage["output_tokens"],
+        cached_tokens=provider_usage["cached_tokens"],
+        total_cost=provider_usage["total_cost"],
+        select_catalog_bootstrap_calls=catalog_calls,
+        persistent_plan_bootstrap_calls=plan_calls,
+    )
+    return events_path, event_rows, accounting
+
+
+def _context_health(event_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Working-memory quality the journal already recorded, made attested.
+
+    context_assembly rows carry raw/active chars per provider request. A run
+    whose median retention collapses (the paid run ran at 0.7%) is defective
+    evidence even when every byte was conserved: the agent effectively had
+    no memory of its own observations. Starvation and control-plane pointer
+    emissions turn that telemetry into an attestation-visible fact.
+    """
+    assemblies = [r for r in event_rows if r.get("event") == "context_assembly"]
+    retentions = [
+        r["active_message_chars"] / r["raw_message_chars"]
+        for r in assemblies
+        if isinstance(r.get("raw_message_chars"), (int, float))
+        and r["raw_message_chars"] > 0
+        and isinstance(r.get("active_message_chars"), (int, float))
+    ]
+    median = statistics.median(retentions) if retentions else None
+    return {
+        "assemblies": len(assemblies),
+        "median_active_retention": median,
+        "starved": len(retentions) >= 20 and (median or 1.0) < 0.02,
+        "anchor_pointer_emissions": sum(
+            int(r.get("model_facing_pointer_count") or 0) for r in assemblies
+        ),
+    }
+
+
+def _churn_summary(event_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    steers = sum(1 for r in event_rows if r.get("event") == "churn_steer")
+    aborts = [r for r in event_rows if r.get("event") == "churn_abort"]
+    summary: dict[str, Any] = {
+        "steers_delivered": steers,
+        "aborted": bool(aborts),
+    }
+    if aborts:
+        last = aborts[-1]
+        for key in ("turns_observed", "stall_turns", "steers_issued"):
+            if last.get(key) is not None:
+                summary[key] = last[key]
+    return summary
+
+
+def _journal_derived_treatment_receipt(
+    *,
+    state_dir: Path,
+    event_rows: list[dict[str, Any]],
+    treatment: str,
+    requested_model: str,
+    effective_model: str | None,
+    gt_mode: str,
+    task_id: str,
+    product_source_sha: str,
+    terminal: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build the treatment receipt a killed run can still honestly carry.
+
+    The census fields are produced by the same helpers the completed path
+    uses, so they match the observed journal by construction. Fields sourced
+    from ``report["gt"]`` on the completed path get journal-derived or typed
+    fallbacks here, marked with ``reconstructed_from_journal`` so the
+    provenance is auditable rather than implied.
+    """
+
+    delivery_events = _delivery_rows(event_rows)
+    evidence_events = [row for row in delivery_events if row["lane"] == "sealed"]
+    prompt_events = [row for row in delivery_events if row["lane"] == "prompt"]
+    refused_deliveries = _delivery_refusals(event_rows)
+    deliveries = _provider_delivery_receipts(event_rows)
+    provider_admissions = _provider_admissions(event_rows)
+    # The task contract travels prompt-lane (context_contract /
+    # context_delta), not sealed-lane: check every admitted delivery row.
+    shipped_kinds = {
+        str(row.get("kind") or row.get("evidence_type") or "")
+        for row in delivery_events
+    }
+    contract_shipped = bool({"context_contract", "context_delta"} & shipped_kinds)
+    last_delivery = next(
+        (
+            row
+            for row in reversed(event_rows)
+            if row.get("event") == "provider_delivery"
+        ),
+        {},
+    )
+    dense_runs = _dense_execution_receipts(event_rows)
+    dense_index = (
+        dense_runs[-1] if dense_runs
+        else {
+            "schema": "gt.dense_index_receipt.v1",
+            "query_ready": False,
+            "reason": "dense_index_receipt_missing",
+        }
+    )
+    optional: dict[str, Any] = {}
+    integrity_extras: dict[str, Any] = {}
+    try:
+        _, reproduction = _single_optional(state_dir, "reproducibility_manifest.json")
+        optional["reproducibility_manifest"] = reproduction or {}
+    except (ValueError, OSError):
+        optional["reproducibility_manifest"] = {}
+    try:
+        graph_manifest_path, graph = _published_graph(state_dir, event_rows)
+        optional["graph_certification"] = graph or {}
+        if graph_manifest_path is not None:
+            integrity_extras["graph_manifest_sha256"] = _sha256(graph_manifest_path)
+    except (ValueError, OSError):
+        optional["graph_certification"] = {}
+    try:
+        optional["graph_utilisation"] = graph_utilisation(
+            deliveries,
+            cochange_rows=(optional["graph_certification"] or {}).get("cochange_rows"),
+            verified_graph_deliveries=_semantic_graph_deliveries(
+                state_dir, event_rows, deliveries,
+                task_id=task_id, product_source_sha=product_source_sha,
+            ),
+        )
+    except (ValueError, OSError):
+        optional["graph_utilisation"] = {
+            "schema": "gt.graph_utilisation.v1",
+            "status": "unavailable_after_terminal_kill",
+        }
+    try:
+        optional["lsp_promotion"] = _lsp_promotion_receipt(state_dir, event_rows)
+    except (ValueError, OSError):
+        optional["lsp_promotion"] = {
+            "schema": "gt.lsp_promotion_receipt.v1",
+            "status": "unavailable_after_terminal_kill",
+        }
+    reported_model = str(
+        last_delivery.get("requested_model") or requested_model
+    )
+    return {
+        "schema": "gt.miniswe_treatment_receipt.v1",
+        "treatment": treatment,
+        "treatment_status": "ACTIVE" if treatment == "groundtruth" else "INACTIVE",
+        "gt_mode": gt_mode,
+        "terminal": terminal,
+        "reconstructed_from_journal": True,
+        "contract_shipped": contract_shipped,
+        "verified": False,
+        "unmet_predicates": [],
+        "unverified_predicates": [],
+        "delivery_count": len(deliveries),
+        "prompt_delivery_count": len(prompt_events),
+        "sealed_delivery_count": len(evidence_events),
+        "evidence_items_delivered": len(evidence_events),
+        "evidence_event_count": len(evidence_events),
+        "evidence_deliveries": evidence_events,
+        "prompt_context_deliveries": prompt_events,
+        "provider_delivery_receipts": deliveries,
+        "refused_deliveries": refused_deliveries,
+        "delivery_budget": {
+            "schema": "gt.delivery_budget.v2",
+            "unit": "utf8_bytes",
+            "conversion_from_legacy_tokens": "4_bytes_per_token",
+            "sealed_limit": DELIVERY_BYTE_LIMITS["sealed"],
+            "prompt_contract_limit": DELIVERY_BYTE_LIMITS["context_contract"],
+            "prompt_delta_limit": DELIVERY_BYTE_LIMITS["context_delta"],
+            "total_limit": _TOTAL_DELIVERY_BYTE_LIMIT,
+            "total_observed": sum(row["context_byte_count"] for row in deliveries),
+            "task_delivery_limit": None,
+            "boundary_claim_limit": MAX_BOUNDARY_CLAIMS,
+            "scope": "provider_decision",
+            "admitted_count": len(deliveries),
+            "refused_count": len(refused_deliveries),
+        },
+        "provider_admissions": provider_admissions,
+        "retrieval_mode": "hybrid_required",
+        "dense_index_receipt": dense_index,
+        "dense_execution_receipts": dense_runs,
+        "event_journal": {
+            "schema": "gt.event_journal_receipt.v1",
+            "valid": True,
+            "issues": [],
+            "event_count": len(event_rows),
+            "event_head": str(event_rows[-1].get("event_hash") or ""),
+        },
+        "completion_state_event_journal": {},
+        "provider_identity": {
+            "requested": requested_model,
+            "resolved": effective_model,
+            "reported": reported_model,
+            "match": reported_model == requested_model,
+        },
+        "graph_publication_state": _graph_publication_state(event_rows),
+        "context_health": _context_health(event_rows),
+        "churn_governor": _churn_summary(event_rows),
+        **optional,
+    }, integrity_extras
+
+
 def issue_runtime_receipt_failure(
     *,
     report_path: Path,
@@ -955,7 +1208,11 @@ def issue_runtime_receipt_failure(
 
     This path makes a receipt-construction defect visible to downstream
     attestation while preserving the agent's native terminal state and exit
-    code.  It intentionally makes no treatment, evidence, or research claim.
+    code.  It intentionally makes no research claim; it does carry the
+    journal-derived treatment and accounting evidence, because a timeout or
+    killed run is still a conserved trial — the supervisor seals the journal
+    before issuing this receipt, so attestation should be able to reconcile
+    it rather than find the conservation fields absent.
     """
 
     report: dict[str, Any] = {}
@@ -1002,8 +1259,44 @@ def issue_runtime_receipt_failure(
     info = info if isinstance(info, dict) else {}
     model_stats = info.get("model_stats")
     model_stats = model_stats if isinstance(model_stats, dict) else {}
-    provider_calls = model_stats.get("api_calls")
-    provider_calls = int(provider_calls) if provider_calls is not None else None
+    agent_turn_calls = model_stats.get("api_calls")
+    agent_turn_calls = int(agent_turn_calls) if agent_turn_calls is not None else None
+
+    state_dir = report_path.parent / "gt-state"
+    accounting: dict[str, Any] = {}
+    treatment_receipt: dict[str, Any] | None = None
+    integrity_extras: dict[str, Any] = {}
+    events_path: Path | None = None
+    try:
+        events_path, event_rows, accounting = _journal_derived_accounting(state_dir)
+        if event_rows:
+            treatment_receipt, integrity_extras = _journal_derived_treatment_receipt(
+                state_dir=state_dir,
+                event_rows=event_rows,
+                treatment=treatment,
+                requested_model=requested_model,
+                effective_model=effective_model,
+                gt_mode=str(report.get("gt_mode") or ""),
+                task_id=task_id,
+                product_source_sha=product_source_sha,
+                terminal=terminal,
+            )
+    except (ValueError, OSError, KeyError, TypeError):
+        # A receipt must never fail closed because the conservation fields
+        # were hard to recompute: the minimal ERROR receipt still records the
+        # terminal outcome, and the missing fields remain visible as missing.
+        accounting = {}
+        treatment_receipt = None
+        integrity_extras = {}
+        events_path = None
+
+    provider_calls = None
+    if agent_turn_calls is not None:
+        provider_calls = (
+            agent_turn_calls
+            + int(accounting.get("select_catalog_bootstrap_calls") or 0)
+            + int(accounting.get("persistent_plan_bootstrap_calls") or 0)
+        )
 
     failure = {
         "code": "runtime_receipt_issuance_failed",
@@ -1014,6 +1307,9 @@ def issue_runtime_receipt_failure(
         "report_sha256": _sha256(report_path) if report_path.is_file() else None,
         "trajectory_sha256": (_sha256(trajectory_path) if trajectory_path.is_file() else None),
     }
+    if events_path is not None:
+        integrity["events_sha256"] = _sha256(events_path)
+    integrity.update(integrity_extras)
     product: dict[str, Any] = {
         "schema": "gt.run_receipt.v1",
         "task_id": task_id,
@@ -1033,6 +1329,32 @@ def issue_runtime_receipt_failure(
         "receipt_issuance": failure,
         "integrity": integrity,
     }
+    if agent_turn_calls is not None:
+        product["agent_turn_calls"] = agent_turn_calls
+        product["select_catalog_bootstrap_calls"] = int(
+            accounting.get("select_catalog_bootstrap_calls") or 0
+        )
+        product["persistent_plan_bootstrap_calls"] = int(
+            accounting.get("persistent_plan_bootstrap_calls") or 0
+        )
+    product.update(
+        {
+            key: value
+            for key, value in accounting.items()
+            if key
+            in {
+                "provider_attempts",
+                "provider_completed_calls",
+                "provider_failed_calls",
+                "input_tokens",
+                "output_tokens",
+                "cached_tokens",
+                "total_cost",
+            }
+        }
+    )
+    if treatment_receipt is not None:
+        product["treatment_receipt"] = treatment_receipt
     adapter: dict[str, Any] = {
         "schema": "gt.benchmark_adapter_receipt.v1",
         "task_id": task_id,
@@ -1132,7 +1454,14 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         )
         if int(calls) != agent_turn_calls or declared != reconciled:
             errors.append("product_provider_calls_mismatch")
-    attempted_calls = int(receipt.get("provider_calls") or 0)
+    # Conservation is checked at the attempt boundary, not the logical-call
+    # boundary: a transport retry inside one agent call admits two attempts,
+    # so completed+failed can exceed provider_calls while still conserving
+    # every admitted attempt. provider_attempts is the admission census;
+    # legacy receipts without it fall back to provider_calls.
+    attempted_calls = int(
+        receipt.get("provider_attempts") or receipt.get("provider_calls") or 0
+    )
     completed_calls = int(receipt.get("provider_completed_calls") or 0)
     failed_calls = int(receipt.get("provider_failed_calls") or 0)
     if (
@@ -1480,6 +1809,16 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     indexed_files = int(certification.get("indexed_file_count") or 0)
     if indexed_files > 0 and not utilisation.get("graph_backed_delivery"):
         errors.append("treatment_graph_evidence_absent")
+    # Context health is judged journal-side, not from the receipt's claim:
+    # a starved provider view or control-plane pointer emission makes the
+    # run defective GT-on evidence regardless of how its bytes conserved.
+    expected_health = _context_health(runtime_events)
+    if treatment.get("context_health") != expected_health:
+        errors.append("treatment_context_health_mismatch")
+    if expected_health["starved"]:
+        errors.append("treatment_context_starvation_detected")
+    if expected_health["anchor_pointer_emissions"] > 0:
+        errors.append("context_anchor_pointer_emitted")
     return errors
 
 

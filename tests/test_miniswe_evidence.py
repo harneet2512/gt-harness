@@ -104,7 +104,11 @@ def test_artifact_backed_event_routes_complete_output_into_canonical_gateway(
 
     store = EvidenceStore(tmp_path / "evidence")
     source = tmp_path / "stdout"
-    source.write_bytes(b" " * 20_000 + b"\nsrc/beyond_preview.py:731:def target\n")
+    # The fact sits in the elided middle of an over-cap output, so the model
+    # preview cannot contain it; the canonical gateway must read the artifact.
+    source.write_bytes(
+        b" " * 60_000 + b"\nsrc/beyond_preview.py:731:def target\n" + b" " * 60_000
+    )
     reference = store.publish(source)
     preview = store.preview(reference)
     assert "src/beyond_preview.py" not in preview
@@ -139,10 +143,10 @@ def test_artifact_backed_empty_search_ignores_transport_reference_text(tmp_path)
 
     store = EvidenceStore(tmp_path / "evidence")
     source = tmp_path / "stdout"
-    source.write_bytes(b" " * 20_000)
+    source.write_bytes(b" " * 80_000)
     reference = store.publish(source)
     preview = store.preview(reference)
-    assert "GT_OUTPUT_ARTIFACT" in preview
+    assert "output truncated" in preview
 
     event = me.classify_event(
         "rg -c missing .",
@@ -310,12 +314,18 @@ def test_over_budget_candidate_does_not_starve_smaller_candidate():
             me.classify_event("rg small", "src/small.py:1", 0, action_index=5),
             dedup_chain=set(), chain_head="", episode_id="e", event_id="e:5",
         )
-        assert [dose.envelope.dedup_key for dose in result.doses] == ["small"]
+        # The oversized dose no longer starves: it ships as an explicitly
+        # bounded whole unit instead of being dropped or replaced by a
+        # fetchable reference stub (run 34656860834 pointer tax).
+        assert [dose.envelope.dedup_key for dose in result.doses] == ["large", "small"]
+        large = next(d for d in result.doses if d.envelope.dedup_key == "large")
+        assert "chars elided" in large.rendered
+        assert "gt-evidence" not in large.rendered
     finally:
         me.augment = original
 
 
-def test_over_budget_candidate_is_replaced_by_retrievable_whole_unit(tmp_path):
+def test_over_budget_candidate_ships_bounded_whole_unit(tmp_path):
     from gt_engine.output_evidence import EvidenceStore
     from gt_engine.request_history import load_history_evidence
 
@@ -340,8 +350,9 @@ def test_over_budget_candidate_is_replaced_by_retrievable_whole_unit(tmp_path):
 
         assert len(result.doses) == 1
         dose = result.doses[0]
-        assert dose.rendered.startswith("[GT_EVIDENCE_REFERENCE:covering_red]\n")
-        assert "gt-evidence read " in dose.rendered
+        assert dose.rendered.startswith("[GT_EVIDENCE:covering_red]\n")
+        assert "bounded:" in dose.rendered and "chars elided" in dose.rendered
+        assert "gt-evidence read" not in dose.rendered
         assert dose.artifact_reference is not None
         complete = load_history_evidence(store.root, dose.artifact_reference).decode()
         assert complete.startswith("[GT_EVIDENCE:covering_red]\n")
@@ -369,7 +380,7 @@ def test_run_evidence_pipeline_correct_quiet_when_no_envelopes():
         me.augment = original
 
 
-def test_run_evidence_pipeline_drops_over_budget_delta():
+def test_run_evidence_pipeline_bounds_over_budget_delta():
     env = EvidenceEnvelope(
         producer="test",
         fact_id="big",
@@ -392,7 +403,10 @@ def test_run_evidence_pipeline_drops_over_budget_delta():
             me.classify_event("grep -rn compute src/", "hit", 0, action_index=1),
             dedup_chain=set(), chain_head="", episode_id="e", event_id="e:1",
         )
-        assert result.rendered == ""
-        assert result.sealed is False
+        # Over-budget deltas ship as a declared head/tail view, not a drop or
+        # a pointer stub; the elision is part of the sealed bytes.
+        assert "chars elided" in result.rendered
+        assert "gt-evidence" not in result.rendered
+        assert result.sealed is True
     finally:
         me.augment = original

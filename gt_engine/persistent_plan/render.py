@@ -19,7 +19,13 @@ import hashlib
 from . import PersistentPlan
 
 PLAN_TAG = "GT_PERSISTENT_PLAN"
-MAX_BLOCK_CHARS = 8_000
+# The block sits in the durable task message, which is byte-identical across
+# requests and rides the provider prefix cache — the one surface where full
+# content is free. An 8K cap used to truncate every requirement body below
+# the index, turning the plan into a pointer to `gt-plan show` that cost the
+# agent a turn per row (run 34656860834 fetched rows at cmd 113, lost them to
+# history elision, and re-fetched at cmd 526).
+MAX_BLOCK_CHARS = 48_000
 
 
 def _truncate(lines: list[str], limit: int) -> tuple[list[str], int]:
@@ -45,10 +51,12 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
     head = [
         f"[{PLAN_TAG}]",
         "Requirement index: " + ", ".join(row.row_id for row in plan.rows),
-        "Inspect full rows with `gt-plan show <row-id>` and retained source/examples "
-        "with `gt-plan show --source`. Revise a design with "
-        "`gt-plan revise <row-id> --file <json>`; bind an argv check with "
-        "`gt-plan bind-check <row-id> --file <json>`. These requests cannot grant evidence.",
+        "Each requirement's design and acceptance check are inlined below. "
+        "`gt-plan show <row-id>` shows a row's full record and "
+        "`gt-plan show --source` the retained source/examples; revise "
+        "a design with `gt-plan revise <row-id> --file <json>` or bind an argv "
+        "check with `gt-plan bind-check <row-id> --file <json>`. "
+        "These requests cannot grant evidence.",
         "Design produced before implementation began, from the change request "
         "and a verified code graph. It is advisory: inspect anything, disagree "
         "with anything, and follow your own evidence. It is not a boundary.",

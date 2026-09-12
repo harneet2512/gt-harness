@@ -83,21 +83,24 @@ _SENSITIVE_SHELL_ENV = {
 }
 
 def _history_reference_marker(digest: str, size: int) -> str:
-    """The provider-visible reference, which must not name its anchor.
+    """The provider-visible note for an elided duplicate result.
 
-    The anchor is the newest full copy of an identical result, so it MOVES
-    every time another duplicate arrives. Naming it in the wire text made
-    every older marker change with it, rewriting messages the provider had
-    already seen and discarding their cached prefix: on the 2026-09-07
-    codespace run one such move at message 35 invalidated fifteen
-    byte-identical messages behind it, re-sending 26,645 bytes uncached to
-    change 533. The digest identifies the payload and does not move, so the
-    marker is stable for the life of the history. The anchor is still
-    recorded under ``extra``, which is audit state and never sent.
+    Two constraints shaped this text. It must not name its anchor: the anchor
+    is the newest full copy of an identical result, so it MOVES every time
+    another duplicate arrives, and naming it rewrote messages the provider
+    had already seen and discarded their cached prefix (on the 2026-09-07
+    codespace run one move at message 35 invalidated fifteen byte-identical
+    messages behind it, re-sending 26,645 bytes uncached to change 533).
+    It must also not print a sha or a retrieval command: the digest is a
+    content identity, not an evidence-store key, so a printed reference is
+    unresolvable — and on the 2026-09-11 paid smoke the model responded by
+    mining its own state directory for the missing bytes. A plain note keeps
+    the pairing honest and lets the agent re-run the command if it still
+    needs the output. The anchor is still recorded under ``extra``, which is
+    audit state and never sent.
     """
 
-    reference = {"sha256": digest, "utf8_bytes": size}
-    return "[GT_HISTORY_REF " + json.dumps(reference, sort_keys=True, separators=(",", ":")) + "]"
+    return f"[identical tool output already shown ({size} bytes); elided]"
 
 
 def _compact_miniswe_history(messages: list[dict]) -> None:

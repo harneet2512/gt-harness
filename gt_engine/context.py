@@ -38,13 +38,6 @@ class ContextAssemblyError(ValueError):
     """The selected context units cannot be assembled without ambiguity."""
 
 
-def _history_marker(reference: Mapping[str, Any], tool_call_id: str) -> str:
-    body = {**dict(reference), "tool_call_id": tool_call_id}
-    return "[GT_HISTORY_EVIDENCE " + json.dumps(
-        body, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ) + "]"
-
-
 _GT_FACTS_BLOCK = re.compile(r"<gt-facts>.*?</gt-facts>", re.DOTALL)
 
 
@@ -63,23 +56,16 @@ def _split_gt_fact_spans(value: str) -> tuple[list[str], str]:
     return spans, remainder
 
 
-def _bound_observation(
-    value: str,
-    *,
-    tool_call_id: str,
-    tool_output_chars: int,
-    artifact_store: EvidenceStore | None,
-    references: list[dict[str, Any]] | None,
-) -> str:
-    """Bound one oversized observation without revoking sealed deliveries."""
+def _bound_observation(value: str, *, tool_output_chars: int) -> str:
+    """Bound one oversized observation without revoking sealed deliveries.
+
+    Elision is head/tail and inline: this seam used to substitute a
+    fetchable artifact marker, and every dereference cost the agent a full
+    provider turn — the loop that starved run 34656860834. The model-facing
+    text therefore carries no sha and no retrieval command; exact bytes stay
+    durable in the artifact store through the journal receipts instead.
+    """
     spans, remainder = _split_gt_fact_spans(value)
-    if artifact_store is not None:
-        reference = store_history_evidence(
-            artifact_store, value.encode("utf-8"), kind="tool_result"
-        )
-        if references is not None and reference not in references:
-            references.append(reference)
-        return "\n".join([*spans, _history_marker(reference, tool_call_id)])
     if len(remainder) > tool_output_chars:
         head = remainder[: tool_output_chars // 2]
         tail = remainder[-tool_output_chars // 2:]
@@ -108,9 +94,7 @@ def _bound_kept_blocks(
     messages: list[dict[str, Any]],
     *,
     tool_output_chars: int,
-    artifact_store: EvidenceStore | None = None,
     protected_tool_ids: frozenset[str] = frozenset(),
-    references: list[dict[str, Any]] | None = None,
 ) -> None:
     for message in messages:
         if (
@@ -121,11 +105,7 @@ def _bound_kept_blocks(
             value = message["content"]
             if len(value) > tool_output_chars and tool_call_id not in protected_tool_ids:
                 message["content"] = _bound_observation(
-                    value,
-                    tool_call_id=tool_call_id,
-                    tool_output_chars=tool_output_chars,
-                    artifact_store=artifact_store,
-                    references=references,
+                    value, tool_output_chars=tool_output_chars
                 )
         content = message.get("content")
         if not isinstance(content, list):
@@ -138,12 +118,38 @@ def _bound_kept_blocks(
                 tool_call_id = str(block.get("tool_use_id") or "")
                 if len(value) > tool_output_chars and tool_call_id not in protected_tool_ids:
                     block["content"] = _bound_observation(
-                        value,
-                        tool_call_id=tool_call_id,
-                        tool_output_chars=tool_output_chars,
-                        artifact_store=artifact_store,
-                        references=references,
+                        value, tool_output_chars=tool_output_chars
                     )
+
+
+# Machine-emitted pointer prefixes - the bracketed marker forms only. The
+# task prompt legitimately teaches `gt-evidence read` in prose; these
+# bracketed emissions are the tripwire for the fetch-chore regression that
+# starved run 34656860834.
+_MODEL_FACING_POINTER_PREFIXES = (
+    "[GT_HISTORY_ARCHIVE",
+    "[GT_HISTORY_EVIDENCE",
+    "[GT_OUTPUT_ARTIFACT",
+    "[GT_EVIDENCE_REFERENCE",
+    "[GT_HISTORY_REF",
+)
+
+
+def _pointer_markers(text: str) -> int:
+    return sum(text.count(prefix) for prefix in _MODEL_FACING_POINTER_PREFIXES)
+
+
+def _pointer_markers_in_message(message: Mapping[str, Any]) -> int:
+    content = message.get("content")
+    if isinstance(content, str):
+        return _pointer_markers(content)
+    if isinstance(content, list):
+        return sum(
+            _pointer_markers(str(block.get("text") or block.get("content") or ""))
+            for block in content
+            if isinstance(block, Mapping)
+        )
+    return 0
 
 
 def render_context_units(
@@ -333,8 +339,7 @@ def compact_provider_view(
     full_view = [anchor] + [item for group in groups for item in group]
     _bound_kept_blocks(
         full_view, tool_output_chars=tool_output_chars,
-        artifact_store=artifact_store, protected_tool_ids=protected_tool_ids,
-        references=references,
+        protected_tool_ids=protected_tool_ids,
     )
     if (
         message_chars(full_view) <= target_budget
@@ -351,6 +356,7 @@ def compact_provider_view(
             "omitted_group_hashes": [],
             "evidence_references": references,
             "history_archive_reference": None,
+            "model_facing_pointer_count": _pointer_markers_in_message(anchor),
         }
 
     keep_count = min(max(1, int(tail_turns)), len(groups))
@@ -382,9 +388,7 @@ def compact_provider_view(
         _bound_kept_blocks(
             candidate_view,
             tool_output_chars=tool_output_chars,
-            artifact_store=artifact_store,
             protected_tool_ids=protected_tool_ids,
-            references=references,
         )
         if message_chars(candidate_view) <= target_budget:
             selected_indices.add(index)
@@ -408,9 +412,7 @@ def compact_provider_view(
         _bound_kept_blocks(
             candidate_view,
             tool_output_chars=tool_output_chars,
-            artifact_store=artifact_store,
             protected_tool_ids=protected_tool_ids,
-            references=references,
         )
         if message_chars(candidate_view) > target_budget:
             break
@@ -421,8 +423,7 @@ def compact_provider_view(
     view = [anchor] + [item for group in selected for item in group]
     _bound_kept_blocks(
         view, tool_output_chars=tool_output_chars,
-        artifact_store=artifact_store, protected_tool_ids=protected_tool_ids,
-        references=references,
+        protected_tool_ids=protected_tool_ids,
     )
     omitted = len(durable) - len(view)
     omitted_group_hashes = [
@@ -453,10 +454,15 @@ def compact_provider_view(
         history_archive_reference = store_history_evidence(
             artifact_store, archive, kind="provider_history_archive"
         )
-        marker = "[GT_HISTORY_ARCHIVE " + json.dumps(
-            history_archive_reference, sort_keys=True, separators=(",", ":"),
-            ensure_ascii=True,
-        ) + "]"
+        # The archive stays auditable through the receipt, but the model gets
+        # no sha and no retrieval command: a printed pointer converts an
+        # elision into a fetch chore, and on a long task the chores starved
+        # the task (run 34656860834). The note keeps the elision honest
+        # without teaching archaeology.
+        marker = (
+            f"[{len(omitted_group_hashes)} earlier turn-group(s) elided "
+            "from this view]"
+        )
         anchor_content = anchor.get("content")
         if isinstance(anchor_content, str):
             anchor["content"] = anchor_content.rstrip() + "\n\n" + marker
@@ -472,9 +478,7 @@ def compact_provider_view(
         inline_limit = max(200, inline_limit // 2)
         _bound_kept_blocks(
             view, tool_output_chars=inline_limit,
-            artifact_store=artifact_store,
             protected_tool_ids=protected_tool_ids,
-            references=references,
         )
     active_chars = message_chars(view)
     return view, {
@@ -487,6 +491,7 @@ def compact_provider_view(
         "omitted_group_hashes": omitted_group_hashes,
         "evidence_references": references,
         "history_archive_reference": history_archive_reference,
+        "model_facing_pointer_count": _pointer_markers_in_message(anchor),
     }
 
 

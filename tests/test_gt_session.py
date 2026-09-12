@@ -275,7 +275,10 @@ def test_prompt_context_addition_is_bounded_and_receipt_visible(
     rendered = batch.context_additions[0]
     encoded = rendered.encode("utf-8")
     assert len(encoded) <= 2_000
-    assert "[GT_CONTEXT_UNIT_REFERENCE]" in rendered
+    assert "[GT_CONTEXT_UNIT]" in rendered
+    assert "[GT_CONTEXT_UNIT_REFERENCE]" not in rendered
+    assert "gt-evidence" not in rendered
+    assert "utf8 bytes of this context unit elided" in rendered
     prepared_unit = next(
         json.loads(line)
         for line in a.store.path.read_text(encoding="utf-8").splitlines()
@@ -534,7 +537,8 @@ def test_current_engine_revision_cannot_be_superseded_by_historical_evidence(
         if '"unit_id":"historical-r1"' in item
     )
     assert '"historical":true' in historical_unit
-    assert "[GT_CONTEXT_UNIT_REFERENCE]" in historical_unit
+    assert "[GT_CONTEXT_UNIT_REFERENCE]" not in historical_unit
+    assert "gt-evidence" not in historical_unit
     prepared = [
         json.loads(line) for line in a.store.path.read_text().splitlines()
         if '"decision_context_unit_prepared"' in line
@@ -599,7 +603,7 @@ def test_admitted_unit_retains_its_retrieval_reference(tmp_path):
     assert admitted["artifact_reference"] == reference
 
 
-def test_stale_unit_reference_marker_teaches_retrieval(tmp_path):
+def test_stale_unit_ships_bounded_inline_without_retrieval_pointer(tmp_path):
     a = _adapter(tmp_path)
     a.repository_revision = "r2"
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)
@@ -610,14 +614,16 @@ def test_stale_unit_reference_marker_teaches_retrieval(tmp_path):
 
     batch = s.admit_decision_packet([stale], iteration=0, action_index=1)
 
-    marker = batch.context_additions[0]
-    assert "[GT_CONTEXT_UNIT_REFERENCE]" in marker
-    reference = json.loads(marker.split("[GT_CONTEXT_UNIT_REFERENCE] ", 1)[1])
-    assert reference["retrieval_command"].startswith("gt-evidence read ")
-    # The pointer alone is undocumented plumbing; the marker itself must tell
-    # the model the unit is retrievable via `gt-evidence read`.
-    hint = str(reference.get("retrieval_hint") or "")
-    assert "gt-evidence read" in hint
+    rendered = batch.context_additions[0]
+    assert "[GT_CONTEXT_UNIT]" in rendered
+    assert '"historical":true' in rendered
+    assert "stale fact bytes from r1" in rendered
+    # A stale unit used to ship as a bare pointer; each dereference cost the
+    # agent a full turn (run 34656860834). The bounded inline view carries the
+    # bytes directly and the complete unit stays audit-side in the CAS.
+    assert "[GT_CONTEXT_UNIT_REFERENCE]" not in rendered
+    assert "gt-evidence" not in rendered
+    assert "retrieval_command" not in rendered
 
 
 def test_nonexistent_or_wrong_root_reference_is_refused(tmp_path):

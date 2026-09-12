@@ -56,7 +56,14 @@ def test_localization_receipt_matches_final_structurally_compacted_bytes(tmp_pat
     session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
     rendered = session.before_model([], iteration=0).context_additions[0]
     assert len(rendered.encode()) <= 1400
-    assert "[GT_CONTEXT_UNIT_REFERENCE]" in rendered
+    # Oversized units ship a bounded head/tail view inline; the complete
+    # bytes stay audit-side in the CAS. The model never gets a retrieval
+    # command - a printed pointer is a fetch chore (run 34656860834).
+    assert "[GT_CONTEXT_UNIT]" in rendered
+    assert "[GT_CONTEXT_UNIT_REFERENCE]" not in rendered
+    assert "gt-evidence read" not in rendered
+    assert "elided]" in rendered
+    assert "[GT_EVIDENCE:localization]" in rendered
     prepared = next(
         json.loads(line)
         for line in adapter.store.path.read_text().splitlines()

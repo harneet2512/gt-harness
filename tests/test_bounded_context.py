@@ -19,7 +19,7 @@ from gt_engine.provider_limits import (
 from gt_engine.request_history import load_history_evidence
 
 
-def test_compaction_preserves_reasoning_and_pairs_tool_result_with_retrievable_bytes(
+def test_compaction_preserves_reasoning_and_bounds_tool_result_inline(
     tmp_path: Path,
 ) -> None:
     reasoning = "private reasoning that the provider requires"
@@ -66,10 +66,16 @@ def test_compaction_preserves_reasoning_and_pairs_tool_result_with_retrievable_b
     old_result = next(row for row in view if row.get("tool_call_id") == "call-1")
     assert old_assistant["provider_specific_fields"]["reasoning"] == reasoning
     assert old_assistant["tool_calls"][0]["function"]["arguments"] == arguments
-    assert old_result["content"].startswith("[GT_HISTORY_EVIDENCE ")
-    reference = receipt["evidence_references"][0]
-    assert load_history_evidence(store.root, reference).decode() == complete_result
-    assert reference["retrieval_command"].startswith("gt-evidence read ")
+    # Oversized observations elide head/tail INLINE. A fetchable pointer here
+    # converts one bounded view into a multi-turn recovery chore — the loop
+    # that starved run 34656860834 — so the model-facing text carries no sha
+    # and no retrieval command.
+    assert old_result["content"].startswith("failure evidence")
+    assert "[older tool output elided:" in old_result["content"]
+    assert old_result["content"].endswith("failure evidence\n")
+    assert "gt-evidence read" not in old_result["content"]
+    assert "[GT_HISTORY_EVIDENCE" not in old_result["content"]
+    assert receipt["evidence_references"] == []
 
 
 def test_compaction_preserves_sealed_gt_facts_inside_elided_observation(
@@ -118,13 +124,13 @@ def test_compaction_preserves_sealed_gt_facts_inside_elided_observation(
 
     old_result = next(row for row in view if row.get("tool_call_id") == "call-1")
     # Sealed deliveries spliced into the observation must survive elision;
-    # the archive marker replaces only the raw tool output around them.
+    # only the raw tool output around them is elided head/tail.
     assert "<gt-facts>" in old_result["content"]
     assert "[GT_EVIDENCE:localization]\nsrc/mod.py:1" in old_result["content"]
     assert "GT_RECOVERY: repeated failure steer" in old_result["content"]
-    assert "[GT_HISTORY_EVIDENCE " in old_result["content"]
-    reference = receipt["evidence_references"][0]
-    assert load_history_evidence(store.root, reference).decode() == complete_result
+    assert "[older tool output elided:" in old_result["content"]
+    assert "gt-evidence read" not in old_result["content"]
+    assert receipt["evidence_references"] == []
 
 
 def test_compaction_head_tail_elision_preserves_sealed_gt_facts() -> None:
@@ -232,7 +238,12 @@ def test_omitted_turns_are_preserved_as_paired_retrievable_groups(
         max_tail_turns=1, artifact_store=store,
     )
 
-    assert "GT_HISTORY_ARCHIVE" in str(view[0]["content"])
+    # The model sees a plain elision note — the archive stays auditable
+    # through the receipt, but no sha or retrieval command is printed:
+    # a rendered pointer converts an elision into a fetch chore.
+    assert "earlier turn-group(s) elided" in str(view[0]["content"])
+    assert "gt-evidence read" not in str(view[0]["content"])
+    assert "GT_HISTORY_ARCHIVE" not in str(view[0]["content"])
     archive = json.loads(load_history_evidence(
         store.root, receipt["history_archive_reference"]
     ))
@@ -323,7 +334,11 @@ def test_installed_history_archive_pages_drive_the_next_real_action(tmp_path):
         artifact_store=store,
     )
     reference = receipt["history_archive_reference"]
-    assert reference["retrieval_command"] in view[0]["content"]
+    # The model-facing view carries only a plain elision note; the paged
+    # recovery below exercises the audit-side receipt reference, which is
+    # where the retrieval command legitimately lives.
+    assert reference["retrieval_command"] not in view[0]["content"]
+    assert "earlier turn-group(s) elided" in str(view[0]["content"])
     env = {**os.environ, "GT_EVIDENCE_ROOT": str(store.root)}
 
     def retrieve(ref):

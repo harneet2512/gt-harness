@@ -398,6 +398,11 @@ class MiniSweAdapter(GroundtruthController):
         self._pending_exposures: dict[str, PendingExposure] = {}
         self.pending_transient = ""
         self._pending_recovery: tuple[str, int] | None = None
+        self._pending_churn_steer = ""
+        self._churn_abort_signaled = False
+        from .churn_governor import ChurnGovernor
+
+        self.churn_governor = ChurnGovernor()
         self.pending_directives: list[str] = []
         self._refusal_count = 0
         self._last_refusal_signature: tuple[tuple[str, str], ...] = ()
@@ -1316,6 +1321,14 @@ class MiniSweAdapter(GroundtruthController):
             self.pending_transient = ""
             self._pending_provider_deliveries = [
                 item for item in self._pending_provider_deliveries if item.kind != "recovery"
+            ]
+        if self._pending_churn_steer:
+            # The edit is the steer working: an undelivered steer is moot.
+            self.store.append("churn_steer_invalidated", epoch=self.workspace_epoch)
+            self._pending_churn_steer = ""
+            self._pending_provider_deliveries = [
+                item for item in self._pending_provider_deliveries
+                if item.kind != "churn_steer"
             ]
         if active_red:
             self.store.append(
@@ -2293,6 +2306,12 @@ class MiniSweAdapter(GroundtruthController):
                                   delivery_identity=item.identity)
                 self._pending_recovery = None
                 self.pending_transient = ""
+            if item.kind == "churn_steer" and item.rendered == self._pending_churn_steer:
+                self._pending_churn_steer = ""
+                self.store.append(
+                    "churn_steer", delivered=True, request_id=request_id,
+                    delivery_identity=item.identity,
+                )
             for exposure in exposures_by_delivery.get(item.identity, ()):
                 if exposure.next_chain_head:
                     self._chain_head = exposure.next_chain_head
@@ -3359,6 +3378,61 @@ class MiniSweAdapter(GroundtruthController):
         ):
             return self.pending_transient
         return ""
+
+    def queue_churn_steer(self, rendered: str) -> None:
+        """Hold the churn governor's steering text for the next request."""
+        self._pending_churn_steer = rendered
+
+    def prepare_churn_steer_delivery(self) -> str:
+        """Admit a queued churn steer on the same transient-delivery contract
+        as a recovery steer: retried until carried, cleared on exposure."""
+        if not self._pending_churn_steer:
+            return ""
+        if self.admit_model_visible_delivery(
+            lane="sealed", kind="churn_steer",
+            rendered=self._pending_churn_steer,
+            action_index=self.global_action, iteration=self.iteration,
+            dedup_key=f"churn_steer:{self.iteration}",
+        ):
+            return self._pending_churn_steer
+        return ""
+
+    def signal_churn_abort(self) -> None:
+        """Journal the abort and drop the flag the supervisor polls.
+
+        The supervisor holds kill authority so the journals seal through the
+        same terminal path as a deadline kill; the flag file is the cheap
+        cross-process signal, the journal row is the auditable one.
+        """
+        governor = self.churn_governor
+        if self._churn_abort_signaled:
+            return
+        self._churn_abort_signaled = True
+        self.store.append(
+            "churn_abort",
+            turns_observed=governor.turns_observed,
+            stall_turns=governor.stall_turns,
+            steers_issued=governor.steers_issued,
+        )
+        flag = {
+            "schema": "gt.churn_abort.v1",
+            "task_id": self.task_id,
+            "turns_observed": governor.turns_observed,
+            "stall_turns": governor.stall_turns,
+            "steers_issued": governor.steers_issued,
+        }
+        flag_path = self.engine_state.layout.state_root / "churn_abort.json"
+        try:
+            from gt_harness.canonical_io import atomic_write
+
+            atomic_write(flag_path, json.dumps(flag).encode("utf-8"))
+        except (OSError, ImportError):
+            # The journal row is the durable signal; a flag write failure only
+            # delays the supervisor's notice until its next journal-aware path.
+            try:
+                flag_path.write_text(json.dumps(flag), encoding="utf-8")
+            except OSError:
+                pass
 
     def _refusal_escalates(self) -> bool:
         """True once two consecutive refusals show NO predicate-state change.

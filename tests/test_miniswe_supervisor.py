@@ -179,3 +179,111 @@ def test_submission_state_unavailable_is_not_empty_patch(tmp_path):
     state = supervisor.submission_patch_state(tmp_path, "missing")
     assert state["status"] == "unavailable"
     assert "committed_patch_empty" not in state
+
+
+def test_conserve_failure_rebuilds_gt_section_from_sealed_journal(tmp_path):
+    """A killed child never reaches final_state(), so report["gt"] would be
+    absent and attestation would read zeros where the journal proves calls
+    were spent. The supervisor rebuilds the honest minimum journal-side."""
+    import argparse
+
+    state_dir = tmp_path / "gt-state"
+    task_state = state_dir / "task-x"
+    task_state.mkdir(parents=True)
+    events = [
+        {"event": "context_addition_delivery", "lane": "prompt",
+         "kind": "context_contract", "evidence_type": "context_contract",
+         "dedup_key": "prompt-contract-1", "payload_sha256": "a" * 64,
+         "iteration": 0, "sequence": 1, "event_hash": "1" * 64},
+        {"event": "select_catalog_lifecycle", "sequence": 2,
+         "reason": "provider_request_admitted", "event_hash": "2" * 64},
+        {"event": "provider_delivery", "sequence": 3, "iteration": 1,
+         "request_id": "request-1",
+         "resolved_model": "openai/test-model", "event_hash": "3" * 64},
+        {"event": "provider_response", "sequence": 4, "request_id": "request-1",
+         "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+         "event_hash": "4" * 64},
+        {"event": "persistent_plan_built", "sequence": 5,
+         "finish_reason": "tool_calls", "event_hash": "5" * 64},
+        {"event": "provider_delivery", "sequence": 6, "iteration": 2,
+         "request_id": "request-2",
+         "resolved_model": "openai/test-model", "event_hash": "6" * 64},
+        {"event": "provider_response", "sequence": 7, "request_id": "request-2",
+         "usage": {"prompt_tokens": 30, "completion_tokens": 4},
+         "event_hash": "7" * 64},
+    ]
+    (task_state / "events.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in events), encoding="utf-8"
+    )
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({"model": "test-model"}), encoding="utf-8")
+    args = argparse.Namespace(
+        metrics=str(report_path), state_dir=str(state_dir), cwd=str(tmp_path),
+        patch_output="", synthetic_transport=False, gt_off=False,
+        gt_mode="advisory", product_receipt="", adapter_receipt="",
+        checkpoint_directory="", checkpoint_run_nonce="",
+        checkpoint_workspace_sha256="",
+    )
+    result = supervisor.SupervisedResult(
+        reason="deadline_exceeded", returncode=-9, elapsed_seconds=5400.0,
+    )
+
+    supervisor.conserve_failure(args, result, "")
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["terminal"] == "timeout"
+    gt = report["gt"]
+    assert gt["reconstructed_from_journal"] is True
+    assert gt["verified"] is False
+    assert gt["resolved_model"] == "openai/test-model"
+    assert gt["select_catalog_bootstrap_calls"] == 1
+    assert gt["persistent_plan_bootstrap_calls"] == 1
+    assert gt["contract_shipped"] is True
+    assert gt["usage"] == {"prompt_tokens": 40, "completion_tokens": 6}
+    assert report["gt_mode"] == "advisory"
+
+
+def test_abort_probe_reason_kills_child_and_is_preserved(tmp_path):
+    """The churn flag must terminate the child through the normal seal path
+    and surface as the result reason, not as a generic deadline."""
+    started = time.monotonic()
+    flag = tmp_path / "churn_abort.json"
+    ticks = {"n": 0}
+
+    def probe():
+        ticks["n"] += 1
+        if ticks["n"] >= 3:
+            flag.write_text("{}", encoding="utf-8")
+            return "churn_abort"
+        return None
+
+    result = supervisor.supervise(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        deadline=started + 60.0, termination_grace_seconds=0.1,
+        abort_probe=probe,
+    )
+    assert result.reason == "churn_abort"
+    assert result.returncode is not None
+    assert time.monotonic() - started < 8
+
+
+def test_churn_abort_maps_to_typed_terminal(tmp_path):
+    import argparse
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({"model": "m"}), encoding="utf-8")
+    args = argparse.Namespace(
+        metrics=str(report_path), state_dir=str(tmp_path / "gt-state"),
+        cwd=str(tmp_path), patch_output="", synthetic_transport=False,
+        gt_off=False, gt_mode="advisory", product_receipt="",
+        adapter_receipt="", checkpoint_directory="",
+        checkpoint_run_nonce="", checkpoint_workspace_sha256="",
+    )
+    result = supervisor.SupervisedResult(
+        reason="churn_abort", returncode=-9, elapsed_seconds=1200.0,
+    )
+    supervisor.conserve_failure(args, result, "")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["terminal"] == "churn_abort"
+    assert report["exit_code"] == 7
+    assert report["supervisor"]["reason"] == "churn_abort"

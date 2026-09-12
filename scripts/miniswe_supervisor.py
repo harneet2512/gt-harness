@@ -95,8 +95,16 @@ def _signal_worker(process: subprocess.Popen, *, force: bool) -> None:
 def supervise(command: list[str], *, deadline: float,
               termination_grace_seconds: float = 15.0,
               checkpoint_command: list[str] | None = None,
-              checkpoint_status_path: Path | None = None) -> SupervisedResult:
-    """Run a process group until one absolute monotonic deadline, then reap it."""
+              checkpoint_status_path: Path | None = None,
+              abort_probe: "Callable[[], str | None] | None" = None) -> SupervisedResult:
+    """Run a process group until one absolute monotonic deadline, then reap it.
+
+    ``abort_probe`` is an optional cheap callable polled every tick; when it
+    returns a reason string the child is terminated through the same path as
+    a deadline kill, with the probe's reason preserved on the result. The
+    churn governor uses this: detection lives in-process where the command
+    stream is, kill authority stays here where journal sealing lives.
+    """
     started = time.monotonic()
     if started >= deadline:
         return SupervisedResult("deadline_exceeded", None, 0.0)
@@ -128,8 +136,12 @@ def supervise(command: list[str], *, deadline: float,
         process = subprocess.Popen(command, start_new_session=os.name != "nt")
         while process.poll() is None:
             remaining = deadline - time.monotonic()
-            if termination_requested or remaining <= 0:
-                reason = "supervisor_termination" if termination_requested else "deadline_exceeded"
+            abort_reason = abort_probe() if abort_probe is not None else None
+            if abort_reason or termination_requested or remaining <= 0:
+                reason = (
+                    abort_reason
+                    or ("supervisor_termination" if termination_requested else "deadline_exceeded")
+                )
                 # On Windows kill the whole tree before its root can disappear.
                 _signal_worker(process, force=os.name == "nt")
                 try:
@@ -402,8 +414,11 @@ def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baselin
     report = _read_report(report_path)
     terminal = "timeout" if result.reason in {"deadline_exceeded", "supervisor_termination"} else "internal_error"
     exit_code = 3 if terminal == "timeout" else 5
-    if result.reason == "exited" and result.returncode in {3, 4, 5, 6}:
-        terminal = {3: "timeout", 4: "provider_failed", 5: "internal_error", 6: "setup_error"}[result.returncode]
+    if result.reason == "churn_abort":
+        terminal = "churn_abort"
+        exit_code = 7
+    if result.reason == "exited" and result.returncode in {3, 4, 5, 6, 7}:
+        terminal = {3: "timeout", 4: "provider_failed", 5: "internal_error", 6: "setup_error", 7: "churn_abort"}[result.returncode]
         exit_code = result.returncode
     report.update(terminal=terminal, exit_code=exit_code, research_valid=False,
                   synthetic_transport=bool(getattr(args, "synthetic_transport", False)),
@@ -458,6 +473,73 @@ def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baselin
         journals.append({"path": path.relative_to(args.state_dir).as_posix(),
                          "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
     report["supervisor"]["conserved_journals"] = journals
+    # A killed child never reaches final_state(), so report["gt"] and the
+    # bootstrap counters it carries would be absent — and attestation then
+    # reads zeros where the sealed journal proves calls were spent. Rebuild
+    # the minimum honest gt section from the sealed journal: resolved model,
+    # summed usage, and the GT-internal bootstrap census. Marked as
+    # journal-derived so the provenance is auditable, never implied.
+    if not args.gt_off and args.gt_mode != "off" and "gt" not in report:
+        try:
+            gt_state: dict = {
+                "verified": False,
+                "reconstructed_from_journal": True,
+            }
+            prompt_tokens = completion_tokens = 0
+            for journal in journals:
+                journal_path = Path(args.state_dir) / journal["path"]
+                for line in journal_path.read_text(
+                    encoding="utf-8"
+                ).splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    event = row.get("event")
+                    if event == "provider_delivery" and row.get("resolved_model"):
+                        gt_state["resolved_model"] = str(row["resolved_model"])
+                    elif event == "provider_response":
+                        usage = row.get("usage")
+                        if isinstance(usage, dict):
+                            prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                            completion_tokens += int(
+                                usage.get("completion_tokens") or 0
+                            )
+                    elif (
+                        event == "select_catalog_lifecycle"
+                        and row.get("reason") == "provider_request_admitted"
+                    ):
+                        gt_state["select_catalog_bootstrap_calls"] = (
+                            gt_state.get("select_catalog_bootstrap_calls", 0) + 1
+                        )
+                    elif (
+                        event == "persistent_plan_built"
+                        and str(row.get("finish_reason") or "") not in {"", "restored"}
+                    ):
+                        gt_state["persistent_plan_bootstrap_calls"] = (
+                            gt_state.get("persistent_plan_bootstrap_calls", 0) + 1
+                        )
+                    elif event in {"evidence_delivery", "context_addition_delivery"}:
+                        if str(row.get("kind") or row.get("evidence_type") or "") in {
+                            "context_contract",
+                            "context_delta",
+                        }:
+                            gt_state["contract_shipped"] = True
+            gt_state.setdefault("select_catalog_bootstrap_calls", 0)
+            gt_state.setdefault("persistent_plan_bootstrap_calls", 0)
+            gt_state.setdefault("contract_shipped", False)
+            gt_state["usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            }
+            report["gt"] = gt_state
+            report["gt_mode"] = args.gt_mode
+        except (OSError, ValueError):
+            # The typed failure report must still be written; a missing gt
+            # section stays missing rather than fabricated.
+            pass
     atomic_json(report_path, report)
     if args.product_receipt and args.adapter_receipt:
         from gt_harness.runtime_receipts import issue_runtime_receipt_failure
@@ -522,11 +604,30 @@ def main() -> int:
         args.checkpoint_directory = str(directory)
         args.checkpoint_run_nonce = run_nonce
         args.checkpoint_workspace_sha256 = workspace_sha256
+    _wall_start = time.time()
+
+    def _churn_abort_probe() -> str | None:
+        """The in-process churn governor drops a flag when a run loops.
+
+        Cheap poll: a flag file, not a journal parse - the journal row is
+        the durable record; this file only hastens the kill. A flag older
+        than this child's start is a leftover from a recycled state dir and
+        must not kill a fresh run.
+        """
+        for path in Path(args.state_dir).rglob("churn_abort.json"):
+            try:
+                if path.is_file() and path.stat().st_mtime >= _wall_start:
+                    return "churn_abort"
+            except OSError:
+                continue
+        return None
+
     try:
         result = supervise([sys.executable, "-m", "scripts.miniswe_gt_run", *sys.argv[1:]],
                            deadline=started + max(0, args.time_budget_seconds),
                            checkpoint_command=checkpoint_command,
-                           checkpoint_status_path=checkpoint_status_path)
+                           checkpoint_status_path=checkpoint_status_path,
+                           abort_probe=_churn_abort_probe)
     except (OSError, subprocess.SubprocessError) as exc:
         result = SupervisedResult(
             "supervisor_process_failure", None, time.monotonic() - started,

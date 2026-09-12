@@ -1792,3 +1792,99 @@ def test_gt_l1_inside_a_panel_is_flagged(tmp_path):
     a = gt_audit.audit_run(tmp_path)[0]
     assert any("[GT L1] telemetry INSIDE" in f for f in a.review_flags)
     assert a.verdict == "YELLOW"
+
+
+def _failure_row(request_id: str, iteration: int, sequence: int) -> dict:
+    return {
+        "schema": "gt.event.v1",
+        "event": "provider_failure",
+        "sequence": sequence,
+        "iteration": iteration,
+        "request_id": request_id,
+        "error_type": "FormatError",
+        "error_message": "provider returned unparseable output",
+    }
+
+
+def test_provider_failure_closes_its_request(tmp_path):
+    """A typed provider_failure is a terminal outcome for its request.
+
+    Run 34656860834 request-83 failed with FormatError and the transport
+    retried inside the same agent call: the journal carries delivery+failure
+    and that request is closed, not orphaned.
+    """
+    task = make_native_miniswe_task(tmp_path)
+
+    def mutate(rows):
+        request = next(r for r in rows if r.get("event") == "provider_delivery")
+        response = next(r for r in rows if r.get("event") == "provider_response")
+        rows.append({**request, "request_id": "req-2", "iteration": 2,
+                     "sequence": max(r["sequence"] for r in rows) + 1})
+        rows.append(_failure_row("req-2", 2, max(r["sequence"] for r in rows) + 1))
+        # Keep the census consistent: two logical requests were delivered.
+        response["request_id"] = "req-1"
+
+    rewrite_native_events(task, mutate)
+    trajectory_path = task / "agent" / "miniswe_trajectory.json"
+    trajectory = json.loads(trajectory_path.read_text())
+    trajectory["info"]["model_stats"]["api_calls"] = 2
+    trajectory_path.write_text(json.dumps(trajectory))
+
+    audit = gt_audit.audit_task(task)
+
+    assert not any(
+        "without response" in issue for issue in audit.attribution_issues
+    ), audit.attribution_issues
+
+
+def test_request_with_neither_response_nor_failure_is_missing(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+
+    def mutate(rows):
+        rows[:] = [
+            row for row in rows if row.get("event") != "provider_response"
+        ]
+
+    rewrite_native_events(task, mutate)
+
+    audit = gt_audit.audit_task(task)
+
+    assert any(
+        "provider request(s) without response" in issue
+        and "req-1" in issue
+        for issue in audit.attribution_issues
+    ), audit.attribution_issues
+
+
+def test_failure_without_a_matching_request_is_flagged(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+
+    def mutate(rows):
+        rows.append(_failure_row("req-99", 99, max(r["sequence"] for r in rows) + 1))
+
+    rewrite_native_events(task, mutate)
+
+    audit = gt_audit.audit_task(task)
+
+    assert any(
+        "provider failure(s) without request" in issue and "req-99" in issue
+        for issue in audit.attribution_issues
+    ), audit.attribution_issues
+
+
+def test_duplicate_provider_failure_is_flagged(tmp_path):
+    task = make_native_miniswe_task(tmp_path)
+
+    def mutate(rows):
+        next_seq = max(r["sequence"] for r in rows) + 1
+        rows.append(_failure_row("req-1", 1, next_seq))
+        rows.append(_failure_row("req-1", 1, next_seq + 1))
+
+    rewrite_native_events(task, mutate)
+
+    audit = gt_audit.audit_task(task)
+
+    assert any(
+        "duplicate provider failure request_id" in issue
+        for issue in audit.attribution_issues
+    ), audit.attribution_issues

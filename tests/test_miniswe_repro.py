@@ -363,20 +363,27 @@ def test_agent_shell_environment_excludes_host_credentials(monkeypatch, tmp_path
 
 
 def test_miniswe_tool_output_is_bounded_with_recoverable_tail(tmp_path) -> None:
-    from gt_engine.output_evidence import EvidenceStore
+    from gt_engine.output_evidence import (
+        PREVIEW_HEAD_CHARS,
+        PREVIEW_TAIL_CHARS,
+        EvidenceStore,
+    )
 
-    raw = "HEAD" + ("x" * (MAX_TOOL_OUTPUT_CHARS * 2)) + "TAIL"
+    raw = "HEAD" + ("x" * ((PREVIEW_HEAD_CHARS + PREVIEW_TAIL_CHARS) * 2)) + "TAIL"
     store = EvidenceStore(tmp_path / "evidence")
     spool = tmp_path / "spool"
     spool.write_bytes(raw.encode())
     reference = store.publish(spool)
     bounded = store.preview(reference)
     assert len(bounded) < len(raw)
-    assert len(bounded) <= MAX_TOOL_OUTPUT_CHARS + 100
     assert bounded.startswith("HEAD")
-    assert "gt-evidence read" in bounded
+    assert bounded.endswith("TAIL")
+    assert "output truncated" in bounded
+    # A printed pointer is not free: resolving it costs the agent a full
+    # turn per page. The preview stays content, and complete bytes remain
+    # recoverable from the artifact for audit.
+    assert "gt-evidence read" not in bounded
     assert store.read(reference["sha256"], len(raw) - 4, 4)["text"] == "TAIL"
-    assert "Preview only" in bounded
 
 
 def test_miniswe_history_references_duplicates_below_old_size_threshold() -> None:
@@ -388,7 +395,7 @@ def test_miniswe_history_references_duplicates_below_old_size_threshold() -> Non
         {"role": "tool", "tool_call_id": "new", "content": payload},
     ]
     _compact_miniswe_history(messages)
-    assert messages[1]["content"].startswith("[GT_HISTORY_REF ")
+    assert messages[1]["content"].startswith("[identical tool output already shown")
     assert messages[1]["extra"]["gt_history_reference"]["original_content"] == payload
     assert messages[-1]["content"] == payload
 
@@ -476,7 +483,7 @@ def test_real_agent_query_sends_references_and_retains_audit_content(tmp_path) -
     payload = "verified tool result\n" * 1000
     agent.messages = _repeated_history(payload)
     agent.query()
-    assert model.received[1]["content"].startswith("[GT_HISTORY_REF ")
+    assert model.received[1]["content"].startswith("[identical tool output already shown")
     assert model.received[-1]["content"] == payload
     assert agent.messages[1]["extra"]["gt_history_reference"]["original_content"] == payload
     assert agent.n_calls == 1
@@ -518,7 +525,7 @@ def test_miniswe_history_drops_old_tool_payloads_before_quadratic_replay() -> No
     )
     assert provider_chars < 30_000
     assert sum(
-        str(row.get("content", "")).startswith("[GT_HISTORY_REF ") for row in messages
+        str(row.get("content", "")).startswith("[identical tool output already shown") for row in messages
     ) == 19
     assert messages[-1]["content"] == "x" * MAX_TOOL_OUTPUT_CHARS
     assert messages[2]["extra"]["raw_output"] == "x" * MAX_TOOL_OUTPUT_CHARS
@@ -604,18 +611,29 @@ def test_miniswe_history_preserves_every_result_in_latest_multi_tool_turn() -> N
 
 
 def test_environment_bounds_model_output_but_preserves_exact_raw_output(tmp_path) -> None:
-    raw = "HEAD" + ("x" * (MAX_TOOL_OUTPUT_CHARS * 2)) + "TAIL"
+    from gt_engine.output_evidence import (
+        PREVIEW_HEAD_CHARS,
+        PREVIEW_TAIL_CHARS,
+        EvidenceStore,
+    )
+
+    # The model-visible bound is the preview window, not the old 8KB page:
+    # outputs up to it pass whole (a pointer costs an entire turn to
+    # dereference), and only beyond it the preview elides head/tail.
+    raw = "HEAD" + ("x" * ((PREVIEW_HEAD_CHARS + PREVIEW_TAIL_CHARS) * 2)) + "TAIL"
     command = (
         f'{sys.executable} -c "print(\'HEAD\' + \'x\' * '
-        f'{MAX_TOOL_OUTPUT_CHARS * 2} + \'TAIL\', end=\'\')"'
+        f'{(PREVIEW_HEAD_CHARS + PREVIEW_TAIL_CHARS) * 2} + \'TAIL\', end=\'\')"'
     )
     env = CredentialIsolatedLocalEnvironment(cwd=str(tmp_path), timeout=5)
 
     result = env.execute({"command": command})
 
     assert len(result["output"]) < len(raw)
-    from gt_engine.output_evidence import EvidenceStore
-
+    assert result["output"].startswith("HEAD")
+    assert result["output"].endswith("TAIL")
+    assert "output truncated" in result["output"]
+    assert "gt-evidence read" not in result["output"]
     ref = result["extra"]["output_artifact"]
     assert EvidenceStore(ref["root"]).bytes(ref["sha256"]) == raw.encode()
 

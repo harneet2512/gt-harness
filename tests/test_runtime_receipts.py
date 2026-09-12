@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from gt_harness.runtime_receipts import issue_runtime_receipts, verify_runtime_receipt
+from gt_harness.runtime_receipts import (
+    issue_runtime_receipt_failure,
+    issue_runtime_receipts,
+    verify_runtime_receipt,
+)
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -685,3 +689,517 @@ def test_the_lsp_seal_is_read_from_the_published_graph_not_by_uniqueness(tmp_pat
     # The seal for the graph that was actually published, not the first found.
     assert receipt["server_count"] == 4
     assert receipt["servers_detected"] == ["go", "python", "rust", "typescript"]
+
+
+
+def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
+    tmp_path: Path,
+) -> None:
+    """A timeout/killed run must still carry a conserved, attestable receipt.
+
+    Run 34656860834 hit the wall: the worker never reached final_state(), so
+    report["gt"] was empty and the failure receipt carried none of the
+    conservation fields the sealed journal already contained. The failure
+    path now rebuilds them journal-side. This fixture mirrors the real
+    census shape: 2 agent turns + 1 catalog bootstrap + 1 plan bootstrap =
+    4 logical calls; 6 admissions = 4 delivered + 1 retry + 1 attempt
+    killed in flight; 4 responses + 1 typed failure.
+    """
+    state = tmp_path / "gt-state"
+    task_state = state / "task-hash"
+    trajectory = tmp_path / "miniswe_trajectory.json"
+    report = tmp_path / "miniswe_report.json"
+    product = tmp_path / "gt-run.json"
+    adapter = tmp_path / "benchmark-adapter.json"
+    _write_json(
+        trajectory,
+        {
+            "messages": [{"role": "assistant", "content": "still working"}],
+            "info": {"model_stats": {"api_calls": 2}, "exit_status": ""},
+        },
+    )
+    # The report shape the supervisor produces after killing the child: the
+    # gt section is rebuilt from the sealed journal (resolved model, summed
+    # usage, bootstrap census) — never fabricated as a completed state.
+    _write_json(
+        report,
+        {
+            "synthetic_transport": False,
+            "terminal": "timeout",
+            "exit_code": 3,
+            "gt_mode": "advisory",
+            "gt": {
+                "verified": False,
+                "reconstructed_from_journal": True,
+                "resolved_model": "openai/meta/muse-spark-1.2-contributor",
+                "select_catalog_bootstrap_calls": 1,
+                "persistent_plan_bootstrap_calls": 1,
+                "contract_shipped": True,
+                "usage": {"prompt_tokens": 40, "completion_tokens": 5},
+            },
+        },
+    )
+
+    admission = {
+        "status": "admitted",
+        "reason": "within_provider_window",
+        "context_window_tokens": 131072,
+        "reserved_output_tokens": 16384,
+        "input_budget_tokens": 114688,
+        "metadata_source": "openrouter:/models",
+    }
+
+    def admitted(seq: int, tokens: int) -> dict:
+        return {
+            "event": "provider_admission",
+            "event_hash": f"{seq:064x}",
+            "sequence": seq,
+            "request_tokens": tokens,
+            "request_bytes": tokens * 4,
+            **admission,
+        }
+
+    events = [
+        {   # 1: task contract ships prompt-lane before the first call
+            "event": "context_addition_delivery",
+            "event_hash": "1" * 64,
+            "sequence": 1,
+            "lane": "prompt",
+            "kind": "context_contract",
+            "evidence_type": "context_contract",
+            "dedup_key": "prompt-contract-1",
+            "target": "provider_prompt",
+            "payload_sha256": "a" * 64,
+            "action_index": 0,
+            "iteration": 0,
+            "rendered_bytes": 100,
+        },
+        {   # 2: sealed receipt for the contract delivery
+            "event": "receipt",
+            "event_hash": "2" * 64,
+            "sequence": 2,
+            "transition": "delivered",
+            "dedup_key": "prompt-contract-1",
+            "evidence_type": "context_contract",
+            "iteration": 0,
+            "payload_hash": "a" * 64,
+        },
+        {   # 3: select-catalog bootstrap admits its provider request
+            "event": "select_catalog_lifecycle",
+            "event_hash": "3" * 64,
+            "sequence": 3,
+            "reason": "provider_request_admitted",
+        },
+        {   # 4: the catalog bootstrap call itself is a provider delivery
+            "event": "provider_delivery",
+            "event_hash": "4" * 64,
+            "sequence": 4,
+            "iteration": 1,
+            "request_id": "request-1",
+            "delivery_ids": ["a" * 64],
+            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
+        },
+        admitted(5, 100),
+        {   # 6
+            "event": "provider_response",
+            "event_hash": "6" * 64,
+            "sequence": 6,
+            "request_id": "request-1",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 1,
+                "prompt_tokens_details": {"cached_tokens": 2},
+                "cost": 0.01,
+            },
+        },
+        {   # 7: persistent-plan bootstrap also spends a provider call
+            "event": "persistent_plan_built",
+            "event_hash": "7" * 64,
+            "sequence": 7,
+            "finish_reason": "tool_calls",
+        },
+        {   # 8
+            "event": "provider_delivery",
+            "event_hash": "8" * 64,
+            "sequence": 8,
+            "iteration": 2,
+            "request_id": "request-2",
+            "delivery_ids": [],
+            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
+        },
+        admitted(9, 200),
+        {   # 10
+            "event": "provider_response",
+            "event_hash": "0a" * 32,
+            "sequence": 10,
+            "request_id": "request-2",
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 1,
+                "prompt_tokens_details": {"cached_tokens": 3},
+                "cost": 0.01,
+            },
+        },
+        {   # 11: a sealed localization lands before agent turn 1
+            "event": "evidence_delivery",
+            "event_hash": "0b" * 32,
+            "sequence": 11,
+            "lane": "sealed",
+            "kind": "localization",
+            "evidence_type": "localization",
+            "dedup_key": "localization-1",
+            "payload_sha256": "9" * 64,
+            "action_index": 0,
+            "iteration": 2,
+            "rendered_bytes": 123,
+        },
+        {   # 12
+            "event": "receipt",
+            "event_hash": "0c" * 32,
+            "sequence": 12,
+            "transition": "delivered",
+            "dedup_key": "localization-1",
+            "evidence_type": "localization",
+            "iteration": 2,
+            "payload_hash": "9" * 64,
+        },
+        {   # 13: agent turn 1 carries the localization
+            "event": "provider_delivery",
+            "event_hash": "0d" * 32,
+            "sequence": 13,
+            "iteration": 3,
+            "request_id": "request-3",
+            "delivery_ids": ["9" * 64],
+            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
+        },
+        admitted(14, 300),
+        {   # 15
+            "event": "provider_response",
+            "event_hash": "0e" * 32,
+            "sequence": 15,
+            "request_id": "request-3",
+            "usage": {
+                "prompt_tokens": 18,
+                "completion_tokens": 3,
+                "prompt_tokens_details": {"cached_tokens": 6},
+                "cost": 0.02,
+            },
+        },
+        {   # 16: agent turn 2 is delivered, then fails with FormatError
+            "event": "provider_delivery",
+            "event_hash": "0f" * 32,
+            "sequence": 16,
+            "iteration": 4,
+            "request_id": "request-4",
+            "delivery_ids": [],
+            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
+        },
+        admitted(17, 400),
+        {   # 18: typed failure closes request-4's first attempt
+            "event": "provider_failure",
+            "event_hash": "10" * 32,
+            "sequence": 18,
+            "request_id": "request-4",
+            "error_type": "FormatError",
+        },
+        admitted(19, 400),  # 19: the transport retries inside the same call
+        {   # 20
+            "event": "provider_response",
+            "event_hash": "11" * 32,
+            "sequence": 20,
+            "request_id": "request-4",
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "prompt_tokens_details": {"cached_tokens": 0},
+                "cost": 0.0,
+            },
+        },
+        admitted(21, 500),  # 21: admitted, killed in flight by the supervisor
+    ]
+    task_state.mkdir(parents=True)
+    (task_state / "events.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in events), encoding="utf-8"
+    )
+
+    issued = issue_runtime_receipt_failure(
+        report_path=report,
+        trajectory_path=trajectory,
+        product_receipt_path=product,
+        adapter_receipt_path=adapter,
+        task_id="task-a",
+        product_source_sha="f" * 40,
+        treatment="groundtruth",
+        requested_model="meta/muse-spark-1.2-contributor",
+        scaffold_version="2.4.6",
+        time_budget_seconds=3600,
+        terminal="timeout",
+        exit_code=3,
+        error=RuntimeError("provider_manifest_count_mismatch"),
+    )
+
+    product_row = json.loads(product.read_text(encoding="utf-8"))
+    assert issued == product_row
+    assert product_row["status"] == "ERROR"
+    assert product_row["terminal"] == "timeout"
+    assert product_row["agent_turn_calls"] == 2
+    assert product_row["select_catalog_bootstrap_calls"] == 1
+    assert product_row["persistent_plan_bootstrap_calls"] == 1
+    assert product_row["provider_calls"] == 4
+    # Attempts, not logical calls: 4 deliveries + 1 retry + 1 in-flight kill.
+    assert product_row["provider_attempts"] == 6
+    assert product_row["provider_completed_calls"] == 4
+    assert product_row["provider_failed_calls"] == 2
+    assert product_row["input_tokens"] == 40
+    assert product_row["output_tokens"] == 5
+    assert product_row["cached_tokens"] == 11
+    assert product_row["total_cost"] == 0.04
+    assert product_row["effective_model"] == "openai/meta/muse-spark-1.2-contributor"
+    assert product_row["integrity"]["events_sha256"] == hashlib.sha256(
+        (task_state / "events.jsonl").read_bytes()
+    ).hexdigest()
+    assert product_row["research_valid"] is False
+    assert product_row["receipt_issuance"]["type"] == "RuntimeError"
+
+    treatment = product_row["treatment_receipt"]
+    assert treatment["schema"] == "gt.miniswe_treatment_receipt.v1"
+    assert treatment["treatment_status"] == "ACTIVE"
+    assert treatment["reconstructed_from_journal"] is True
+    assert treatment["verified"] is False
+    assert treatment["contract_shipped"] is True
+    assert treatment["delivery_count"] == 2
+    assert treatment["prompt_delivery_count"] == 1
+    assert treatment["sealed_delivery_count"] == 1
+    assert treatment["event_journal"]["event_count"] == len(events)
+    assert treatment["event_journal"]["event_head"] == events[-1]["event_hash"]
+    assert [row["request_tokens"] for row in treatment["provider_admissions"]] == [
+        100, 200, 300, 400, 400, 500,
+    ]
+
+    # Attestation of a killed run must surface only honest terminal errors —
+    # the run ISN'T completed — never the conservation cascade the missing
+    # fields used to produce.
+    errors = verify_runtime_receipt(product)
+    assert "product_not_completed" in errors
+    forbidden = {
+        "product_provider_calls_missing",
+        "product_provider_calls_mismatch",
+        "product_provider_call_conservation_failed",
+        "product_input_token_conservation_failed",
+        "product_output_token_conservation_failed",
+        "product_effective_model_report_mismatch",
+        "product_event_journal_digest_mismatch",
+        "product_event_journal_conservation_failed",
+        "treatment_receipt_missing",
+        "treatment_provider_admission_census_mismatch",
+        "treatment_prompt_delivery_census_mismatch",
+        "treatment_sealed_delivery_census_mismatch",
+        "treatment_provider_delivery_census_mismatch",
+        "product_report_digest_mismatch",
+        "product_trajectory_digest_mismatch",
+    }
+    assert forbidden.isdisjoint(errors), errors
+
+
+def test_killed_run_receipt_survives_without_a_journal(tmp_path: Path) -> None:
+    """No journal -> the minimal honest ERROR receipt, never a crash."""
+    trajectory = tmp_path / "miniswe_trajectory.json"
+    report = tmp_path / "miniswe_report.json"
+    product = tmp_path / "gt-run.json"
+    adapter = tmp_path / "benchmark-adapter.json"
+    _write_json(
+        trajectory,
+        {"messages": [], "info": {"model_stats": {"api_calls": 5}}},
+    )
+    _write_json(report, {"terminal": "timeout", "exit_code": 3})
+
+    product_row = issue_runtime_receipt_failure(
+        report_path=report,
+        trajectory_path=trajectory,
+        product_receipt_path=product,
+        adapter_receipt_path=adapter,
+        task_id="task-a",
+        product_source_sha="f" * 40,
+        treatment="groundtruth",
+        requested_model="meta/muse-spark-1.2-contributor",
+        scaffold_version="2.4.6",
+        time_budget_seconds=3600,
+        terminal="timeout",
+        exit_code=3,
+        error=RuntimeError("boom"),
+    )
+
+    assert product_row["status"] == "ERROR"
+    assert product_row["provider_calls"] == 5
+    assert "provider_attempts" not in product_row
+    assert "treatment_receipt" not in product_row
+    assert product_row["integrity"]["report_sha256"] == hashlib.sha256(
+        report.read_bytes()
+    ).hexdigest()
+
+
+def _assembly_row(seq, raw, active, pointers=0):
+    return {
+        "event": "context_assembly",
+        "sequence": seq,
+        "raw_message_chars": raw,
+        "active_message_chars": active,
+        "model_facing_pointer_count": pointers,
+        "event_hash": "a" * 64,
+        "schema": "gt.event.v1",
+    }
+
+
+def _journal_with(rows, task_state):
+    task_state.mkdir(parents=True, exist_ok=True)
+    path = task_state / "events.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return path
+
+
+def test_starved_context_is_attested_as_defective(tmp_path):
+    """A run whose provider view kept ~1% of its history is not valid GT-on
+    evidence even when every byte was conserved - the starvation must show
+    up in attestation, not just in telemetry."""
+    state_dir = tmp_path / "gt-state"
+    task_state = state_dir / "task-x"
+    rows = [
+        {"event": "context_addition_delivery", "lane": "prompt",
+         "kind": "context_contract", "evidence_type": "context_contract",
+         "dedup_key": "k", "payload_sha256": "a" * 64, "iteration": 0,
+         "sequence": 1, "event_hash": "1" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_admission", "sequence": 2, "status": "admitted",
+         "reason": "within_provider_window", "request_id": "r1",
+         "iteration": 1, "metadata_source": "test",
+         "request_tokens": 6, "request_bytes": 24,
+         "context_window_tokens": 1000, "reserved_output_tokens": 10,
+         "input_budget_tokens": 990,
+         "event_hash": "a" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_delivery", "sequence": 3, "iteration": 1,
+         "request_id": "r1", "resolved_model": "openai/m",
+         "event_hash": "2" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_response", "sequence": 4, "request_id": "r1",
+         "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+         "event_hash": "3" * 64, "schema": "gt.event.v1"},
+    ]
+    rows += [
+        _assembly_row(5 + i, raw=1_000_000, active=7_000)
+        for i in range(30)
+    ]
+    _journal_with(rows, task_state)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({
+        "model": "m", "gt_mode": "advisory", "terminal": "timeout",
+        "exit_code": 3, "model_stats": {"api_calls": 1},
+    }), encoding="utf-8")
+    (tmp_path / "traj.json").write_text("{}", encoding="utf-8")
+    product = tmp_path / "gt-run.json"
+
+    issue_runtime_receipt_failure(
+        report_path=report, trajectory_path=tmp_path / "traj.json",
+        product_receipt_path=product, adapter_receipt_path=tmp_path / "ad.json",
+        task_id="task-x", product_source_sha="f" * 40,
+        treatment="groundtruth", requested_model="m",
+        scaffold_version="2.4.6", time_budget_seconds=60,
+        terminal="timeout", exit_code=3, error=RuntimeError("killed"),
+    )
+    receipt = json.loads(product.read_text(encoding="utf-8"))
+    health = receipt["treatment_receipt"]["context_health"]
+    assert health["assemblies"] == 30
+    assert health["starved"] is True
+    assert health["median_active_retention"] < 0.02
+
+    errors = verify_runtime_receipt(product)
+    assert "treatment_context_starvation_detected" in errors
+
+
+def test_anchor_pointer_emission_is_attested(tmp_path):
+    """A control-plane pointer emitted into the model's context is the exact
+    regression that starved the paid run; attestation must trip on it."""
+    state_dir = tmp_path / "gt-state"
+    task_state = state_dir / "task-x"
+    rows = [
+        {"event": "provider_admission", "sequence": 1, "status": "admitted",
+         "reason": "within_provider_window", "request_id": "r1",
+         "iteration": 1, "metadata_source": "test",
+         "request_tokens": 6, "request_bytes": 24,
+         "context_window_tokens": 1000, "reserved_output_tokens": 10,
+         "input_budget_tokens": 990,
+         "event_hash": "a" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_delivery", "sequence": 2, "iteration": 1,
+         "request_id": "r1", "resolved_model": "openai/m",
+         "event_hash": "1" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_response", "sequence": 3, "request_id": "r1",
+         "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+         "event_hash": "2" * 64, "schema": "gt.event.v1"},
+        _assembly_row(4, raw=100_000, active=50_000, pointers=2),
+    ]
+    _journal_with(rows, task_state)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({
+        "model": "m", "gt_mode": "advisory", "terminal": "timeout",
+        "exit_code": 3, "model_stats": {"api_calls": 1},
+    }), encoding="utf-8")
+    (tmp_path / "traj.json").write_text("{}", encoding="utf-8")
+    product = tmp_path / "gt-run.json"
+
+    issue_runtime_receipt_failure(
+        report_path=report, trajectory_path=tmp_path / "traj.json",
+        product_receipt_path=product, adapter_receipt_path=tmp_path / "ad.json",
+        task_id="task-x", product_source_sha="f" * 40,
+        treatment="groundtruth", requested_model="m",
+        scaffold_version="2.4.6", time_budget_seconds=60,
+        terminal="timeout", exit_code=3, error=RuntimeError("killed"),
+    )
+    errors = verify_runtime_receipt(product)
+    assert "context_anchor_pointer_emitted" in errors
+
+
+def test_churn_events_flow_into_treatment_receipt(tmp_path):
+    state_dir = tmp_path / "gt-state"
+    task_state = state_dir / "task-x"
+    rows = [
+        {"event": "provider_admission", "sequence": 1, "status": "admitted",
+         "reason": "within_provider_window", "request_id": "r1",
+         "iteration": 1, "metadata_source": "test",
+         "request_tokens": 6, "request_bytes": 24,
+         "context_window_tokens": 1000, "reserved_output_tokens": 10,
+         "input_budget_tokens": 990,
+         "event_hash": "a" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_delivery", "sequence": 2, "iteration": 1,
+         "request_id": "r1", "resolved_model": "openai/m",
+         "event_hash": "1" * 64, "schema": "gt.event.v1"},
+        {"event": "provider_response", "sequence": 3, "request_id": "r1",
+         "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+         "event_hash": "2" * 64, "schema": "gt.event.v1"},
+        {"event": "churn_steer", "sequence": 3, "delivered": True,
+         "request_id": "r1", "delivery_identity": "d" * 64,
+         "event_hash": "3" * 64, "schema": "gt.event.v1"},
+        {"event": "churn_abort", "sequence": 4, "turns_observed": 49,
+         "stall_turns": 50, "steers_issued": 1,
+         "event_hash": "4" * 64, "schema": "gt.event.v1"},
+    ]
+    _journal_with(rows, task_state)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({
+        "model": "m", "gt_mode": "advisory", "terminal": "churn_abort",
+        "exit_code": 7, "model_stats": {"api_calls": 1},
+    }), encoding="utf-8")
+    (tmp_path / "traj.json").write_text("{}", encoding="utf-8")
+    product = tmp_path / "gt-run.json"
+
+    issue_runtime_receipt_failure(
+        report_path=report, trajectory_path=tmp_path / "traj.json",
+        product_receipt_path=product, adapter_receipt_path=tmp_path / "ad.json",
+        task_id="task-x", product_source_sha="f" * 40,
+        treatment="groundtruth", requested_model="m",
+        scaffold_version="2.4.6", time_budget_seconds=60,
+        terminal="churn_abort", exit_code=7, error=RuntimeError("churn"),
+    )
+    receipt = json.loads(product.read_text(encoding="utf-8"))
+    churn = receipt["treatment_receipt"]["churn_governor"]
+    assert churn == {
+        "steers_delivered": 1, "aborted": True,
+        "turns_observed": 49, "stall_turns": 50, "steers_issued": 1,
+    }
+    assert receipt["terminal"] == "churn_abort"

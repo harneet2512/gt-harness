@@ -15,18 +15,21 @@ from scripts.miniswe_gt_run import CredentialIsolatedLocalEnvironment
 
 def test_environment_recovers_fact_beyond_preview(tmp_path):
     script = tmp_path / "emit.py"
-    payload = b"x" * 25000 + b"\nNEEDED_FACT=731\n" + b"y" * 25000
+    payload = b"x" * 60_000 + b"\nNEEDED_FACT=731\n" + b"y" * 60_000
     script.write_text(f"import sys; sys.stdout.buffer.write({payload!r})")
     env = CredentialIsolatedLocalEnvironment(cwd=str(tmp_path), timeout=5)
     result = env.execute({"command": f'"{sys.executable}" "{script}"'})
-    assert "gt-evidence read" in result["output"]
+    # The model gets a bounded head/tail view, not a retrieval pointer; the
+    # paged reader stays available for analyzers and recovery.
+    assert "output truncated" in result["output"]
+    assert "gt-evidence" not in result["output"]
     assert "NEEDED_FACT" not in result["output"]
     ref = result["extra"]["output_artifact"]
     assert ref["sha256"] == hashlib.sha256(payload).hexdigest()
     assert "raw_output" not in result["extra"]
     from gt_engine.output_evidence import EvidenceStore
     store = EvidenceStore(ref["root"])
-    page = store.read(ref["sha256"], 25000, 100)
+    page = store.read(ref["sha256"], 60_000, 200)
     assert "NEEDED_FACT=731" in page["text"]
     rebuilt = bytearray()
     offset = 0
@@ -172,12 +175,14 @@ def test_transport_preview_does_not_replace_complete_gt_analysis(tmp_path):
 
     store = EvidenceStore(tmp_path / "evidence")
     source = tmp_path / "stdout"
-    complete = "progress\n" * 5000 + "25 passed in 1.00s\n"
+    complete = "progress\n" * 10_000 + "25 passed in 1.00s\n"
     source.write_bytes(complete.encode())
     reference = store.publish(source)
     result = {"output": store.preview(reference), "returncode": 0,
               "extra": {"output_artifact": reference}}
-    assert "25 passed" not in result["output"]
+    # The preview is bounded (middle elided; the tail keeps the summary), and
+    # the canonical analyzer still consumes the complete artifact bytes.
+    assert "output truncated" in result["output"]
     analyzed = _observation_output(result)
     assert analyzed == complete
     verification = compile_execution_evidence(
