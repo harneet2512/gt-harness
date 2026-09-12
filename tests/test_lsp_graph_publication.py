@@ -48,9 +48,14 @@ def successful_receipt(source: str = "r1", graph: str = "g1") -> dict:
     }
 
 
-def test_core_is_published_before_current_enrichment_candidate() -> None:
+def test_core_is_published_before_current_enrichment_candidate(tmp_path) -> None:
+    core_db = tmp_path / "core.db"
+    core_db.write_bytes(b"core")
+    candidate = tmp_path / "candidate.db"
     state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
-    handle = EnrichmentHandle(successful_receipt())
+    handle = EnrichmentHandle(
+        {**successful_receipt(), "candidate_path": str(candidate)}
+    )
     factory_calls = []
 
     def factory(item, core):
@@ -60,32 +65,39 @@ def test_core_is_published_before_current_enrichment_candidate() -> None:
     def certify(item, core, receipt):
         assert item.source_revision == receipt["source_revision"]
         assert core.graph_revision == receipt["input_graph_revision"]
+        candidate.write_bytes(b"candidate")
         return GraphBuildArtifact(True, receipt["candidate_path"], "g1+lsp")
 
     coordinator = GraphBuildCoordinator(
-        state, lambda _: GraphBuildArtifact(True, "core.db", "g1"),
+        state, lambda _: GraphBuildArtifact(True, str(core_db), "g1"),
         enrichment_factory=factory, candidate_certifier=certify,
     )
     try:
         coordinator.schedule(request("r1"))
         assert coordinator.wait_idle(timeout=3)
         assert coordinator.poll() == 1
-        assert state.graph_path == "core.db"
-        assert factory_calls == [("r1", "g1", "core.db")]
+        assert state.graph_path == str(core_db)
+        assert factory_calls == [("r1", "g1", str(core_db))]
 
         assert coordinator.poll() == 1
-        assert state.graph_path == "candidate.db"
+        assert state.graph_path == str(candidate)
         assert state.graph_revision == "g1+lsp"
     finally:
         coordinator.close(wait=True)
 
 
-def test_edit_cancels_obsolete_enrichment_and_it_never_publishes() -> None:
+def test_edit_cancels_obsolete_enrichment_and_it_never_publishes(tmp_path) -> None:
     state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
     handle = EnrichmentHandle(successful_receipt(), done=False)
     observed = []
+
+    def build(item):
+        graph = tmp_path / f"{item.source_revision}.db"
+        graph.write_bytes(b"graph")
+        return GraphBuildArtifact(True, str(graph), item.source_revision)
+
     coordinator = GraphBuildCoordinator(
-        state, lambda item: GraphBuildArtifact(True, f"{item.source_revision}.db", item.source_revision),
+        state, build,
         enrichment_factory=lambda _item, _core: handle,
         candidate_certifier=lambda _item, _core, receipt: GraphBuildArtifact(
             True, receipt["candidate_path"], "g1+lsp"
@@ -98,7 +110,7 @@ def test_edit_cancels_obsolete_enrichment_and_it_never_publishes() -> None:
         coordinator.schedule(request("r1"))
         assert coordinator.wait_idle(timeout=3)
         coordinator.poll()
-        assert state.graph_path == "r1.db"
+        assert state.graph_path == str(tmp_path / "r1.db")
 
         state.mark_paths_dirty(("x.py",), revision="r2")
         coordinator.schedule(request("r2", b"x = 2\n"))
@@ -111,23 +123,30 @@ def test_edit_cancels_obsolete_enrichment_and_it_never_publishes() -> None:
         }
         handle.done = True
         coordinator.poll()
-        assert state.graph_path == "r1.db"
+        assert state.graph_path == str(tmp_path / "r1.db")
         assert state.source_revision == "r2"
         assert observed == [("cancelled", "obsolete")]
     finally:
         coordinator.close(wait=True)
 
 
-def test_new_core_publication_cancels_previous_same_source_enrichment() -> None:
+def test_new_core_publication_cancels_previous_same_source_enrichment(tmp_path) -> None:
     state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
     handles = [EnrichmentHandle(successful_receipt(graph="g1"), done=False),
                EnrichmentHandle(successful_receipt(graph="g2"), done=False)]
+
+    def build(item):
+        name = "one.db" if item.files[0][1] == b"one" else "two.db"
+        graph = tmp_path / name
+        graph.write_bytes(b"graph")
+        return GraphBuildArtifact(
+            True, str(graph),
+            "g1" if item.files[0][1] == b"one" else "g2",
+        )
+
     coordinator = GraphBuildCoordinator(
         state,
-        lambda item: GraphBuildArtifact(
-            True, "one.db" if item.files[0][1] == b"one" else "two.db",
-            "g1" if item.files[0][1] == b"one" else "g2",
-        ),
+        build,
         enrichment_factory=lambda _item, _core: handles.pop(0),
         candidate_certifier=lambda _item, _core, _receipt: GraphBuildArtifact(
             True, "candidate.db", "candidate"
@@ -142,12 +161,14 @@ def test_new_core_publication_cancels_previous_same_source_enrichment() -> None:
         assert coordinator.wait_idle(timeout=3)
         coordinator.poll()
         assert first.cancelled
-        assert state.graph_path == "two.db"
+        assert state.graph_path == str(tmp_path / "two.db")
     finally:
         coordinator.close(wait=True)
 
 
-def test_failed_or_mismatched_enrichment_receipt_never_publishes() -> None:
+def test_failed_or_mismatched_enrichment_receipt_never_publishes(tmp_path) -> None:
+    core_db = tmp_path / "core.db"
+    core_db.write_bytes(b"core")
     for receipt in (
         {**successful_receipt(), "status": "failed", "publishable": False},
         {**successful_receipt(), "input_graph_revision": "other"},
@@ -155,7 +176,7 @@ def test_failed_or_mismatched_enrichment_receipt_never_publishes() -> None:
         state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
         observed = []
         coordinator = GraphBuildCoordinator(
-            state, lambda _: GraphBuildArtifact(True, "core.db", "g1"),
+            state, lambda _: GraphBuildArtifact(True, str(core_db), "g1"),
             enrichment_factory=lambda _item, _core, value=receipt: EnrichmentHandle(value),
             candidate_certifier=lambda _item, _core, value: GraphBuildArtifact(
                 True, value["candidate_path"], "g1+lsp"
@@ -171,7 +192,7 @@ def test_failed_or_mismatched_enrichment_receipt_never_publishes() -> None:
             assert coordinator.wait_idle(timeout=3)
             coordinator.poll()
             coordinator.poll()
-            assert state.graph_path == "core.db"
+            assert state.graph_path == str(core_db)
             assert coordinator.last_error.startswith("enrichment_")
             assert len(observed) == 1
         finally:
