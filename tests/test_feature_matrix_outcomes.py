@@ -38,3 +38,21 @@ def test_missing_requested_node_cannot_borrow_another_pass(tmp_path):
     evidence = _run_evidence(("test_probe.py::test_probe",), repo_root=tmp_path)
     evidence["node_ids"].append("test_probe.py::test_missing")
     assert _disposition_from_evidence({"positive": evidence, "negative": evidence}) == "not_run"
+
+
+def test_ancestor_inifile_cannot_hijack_witness_nodeids(tmp_path):
+    """A stray inifile above the repo must not prefix collected node ids.
+
+    Measured: a leftover pyproject.toml under the temp root declared
+    [tool.pytest.ini_options], became the child run's rootdir, and every
+    collected nodeid arrived prefixed -- the witness matcher then reported
+    not_run for a suite that had passed. The evidence run pins its own
+    inifile and rootdir so node identity cannot depend on where tmp lands.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = ['elsewhere']\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_probe.py").write_text("def test_probe():\n    assert True\n", encoding="utf-8")
+    evidence = _run_evidence(("test_probe.py::test_probe",), repo_root=repo)
+    assert _disposition_from_evidence({"positive": evidence, "negative": evidence}) == "WITNESSED"

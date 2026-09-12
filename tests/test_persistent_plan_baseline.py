@@ -52,6 +52,9 @@ def _pytest_command() -> tuple[str, ...]:
     return (sys.executable, "-m", "pytest", "-v", "-p", "no:cacheprovider")
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_nonzero_exit_after_passing_summary_cannot_establish_intact_baseline(tmp_path):
     (tmp_path / "test_ok.py").write_text("def test_ok(): assert True\n", encoding="utf-8")
     before = run_baseline(str(tmp_path), budget_seconds=15, command=_pytest_command())
@@ -106,6 +109,9 @@ def test_pytest_config_is_discovered(repo):
     assert confidence == "medium"
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_capture_records_the_green_and_red_split(repo):
     result = run_baseline(
         str(repo), budget_seconds=120, command=_pytest_command(),
@@ -159,6 +165,9 @@ def test_baseline_timeout_reaps_grandchildren(tmp_path):
             pass
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_a_suite_that_dirties_the_worktree_is_not_destructively_restored(tmp_path):
     """Automatic checks may not discard source mutations."""
     root = tmp_path / "dirty"
@@ -182,6 +191,9 @@ def test_a_suite_that_dirties_the_worktree_is_not_destructively_restored(tmp_pat
     assert (root / "data.txt").read_text(encoding="utf-8") == "mutated\n"
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_a_runner_with_no_parseable_result_is_not_a_baseline(tmp_path):
     root = tmp_path / "empty"
     root.mkdir()
@@ -194,6 +206,9 @@ def test_a_runner_with_no_parseable_result_is_not_a_baseline(tmp_path):
     assert not result.captured
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_an_intact_suite_reports_no_regression(repo):
     baseline = run_baseline(str(repo), budget_seconds=120, command=_pytest_command())
     report = compare_to_baseline(baseline, str(repo), budget_seconds=120)
@@ -202,6 +217,9 @@ def test_an_intact_suite_reports_no_regression(repo):
     assert report.newly_failing == ()
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_breaking_a_previously_green_test_is_a_regression(repo):
     baseline = run_baseline(str(repo), budget_seconds=120, command=_pytest_command())
     assert baseline.passed == 2
@@ -215,6 +233,9 @@ def test_breaking_a_previously_green_test_is_a_regression(repo):
     assert report.passed_delta < 0
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_an_already_failing_test_is_not_charged_to_the_agent(repo):
     """The suite arrives red; staying red is context, not a regression."""
     baseline = run_baseline(str(repo), budget_seconds=120, command=_pytest_command())
@@ -222,6 +243,9 @@ def test_an_already_failing_test_is_not_charged_to_the_agent(repo):
     assert report.status == "intact"
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_a_new_failing_test_is_not_reported_as_previously_passing(repo):
     baseline = run_baseline(str(repo), budget_seconds=120, command=_pytest_command())
     (repo / "tests" / "test_new.py").write_text(
@@ -233,6 +257,9 @@ def test_a_new_failing_test_is_not_reported_as_previously_passing(repo):
     assert report.after.failed > baseline.failed
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_environment_change_cannot_establish_baseline_conservation(repo):
     import os
 
@@ -248,6 +275,9 @@ def test_environment_change_cannot_establish_baseline_conservation(repo):
     assert report.as_dict()["after_environment_sha256"] == report.after.environment_sha256
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_historical_baseline_without_environment_binding_remains_unknown(repo):
     from dataclasses import replace
 
@@ -273,6 +303,9 @@ def test_plan_inputs_forward_the_task_environment(repo, monkeypatch):
     assert seen == [environment]
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_real_agent_baseline_uses_its_task_environment(repo, tmp_path, monkeypatch):
     import hashlib
 
@@ -302,6 +335,9 @@ def test_comparison_without_a_baseline_never_blocks(tmp_path):
     assert not report.regressed
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_an_unparseable_recheck_is_unknown_not_a_block(repo, monkeypatch):
     baseline = run_baseline(str(repo), budget_seconds=120, command=_pytest_command())
 
@@ -314,6 +350,9 @@ def test_an_unparseable_recheck_is_unknown_not_a_block(repo, monkeypatch):
     assert not report.regressed
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="Linux descendant containment: capture_complete "
+                    "is only attested under the contained subreaper path")
 def test_a_runner_the_container_lacks_falls_back_to_this_interpreter(repo):
     """A low-confidence guess that cannot spawn must not cost the baseline.
 
