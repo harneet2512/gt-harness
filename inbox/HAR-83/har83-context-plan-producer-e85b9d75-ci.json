@@ -1,0 +1,39 @@
+{
+ "basis": "exact_ci_static_build_callsite_driven_lsp_enumeration",
+ "detail": {
+  "build_conclusion": "success",
+  "build_info_sha256": "bff3c24237c0d1b907e9ed1b841d572d96e8d40744a55806715d3d26c06d757a",
+  "build_tags": "netgo,osusergo,sqlite_fts5",
+  "build_workflow_run_id": 34675762791,
+  "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+  "changes": [
+   "e85b9d75 fix(lsp): enumerate ambiguous callsites with no bound CALLS edge \u2014 callsite-driven discovery for same-line same-lexeme clusters and callsites that emitted no CALLS row; edge-less rows certify canonically (SELECTED_TARGET + candidate_state=selected) and count as \"selected\"; tombstone paths guard on a bound edge so no phantom deletes"
+  ],
+  "full_producer_ci_conclusion": "success",
+  "full_producer_ci_run_id": 34675763905,
+  "go_toolchain": "go1.22.5",
+  "measured": {
+   "binding": "producer_build VERIFIED: producer_sha256==416fce39, source_commit==e85b9d75, source_tree==6f3de68a (root tree), build_info_sha256==bff3c242, source_fingerprint==30536060 (identical to 7db2f460 \u2014 Go subtree unchanged, Python-only diff)",
+   "edges": "callsite-driven enumeration on run-34670377532 artifact graph: javascript 63/63 ambiguous callsites reachable (was 4), python 60/60 (was 22); same-line clusters resolve at each callsite own column; selection_complete=True on both languages",
+   "go_tests": "CI go-build green on e85b9d75 (unchanged Go tree, fingerprint 30536060 identical)",
+   "python_tests": "CI test matrix green ubuntu/windows/macos 3.11+3.12 on e85b9d75; 2 test assertions updated to callsite-driven enumeration contract (edge abstain preserved)",
+   "wheel": "groundtruth_mcp-1.0.0-py3-none-any.whl sha256=b1b8b2ba built from git archive e85b9d75; verify_wheel_source correspondence PASS vs src/ (323 files)"
+  },
+  "producer_sha256": "416fce394199cf12a7cd2190abc6c35b2e43825febb86bb2158a53a123950976",
+  "remaining": [
+   "canonical provider-free acceptance on final bundle SHA",
+   "installed full-flow rehearsal on new wheel+binary",
+   "paid smoke approval gate"
+  ],
+  "repository": "harneet2512/groundtruth",
+  "scope": "LSP promotion coverage: _get_ambiguous_edges now enumerates ambiguous callsites directly (keyed callsite_stable_id) after the edge-bound set, reaching callsites that own no uniquely-bound legacy CALLS edge; _apply_lsp_resolution gains the selected outcome for edge-less canonical certification; terminal/language receipts and closure-rebuild trigger count selected",
+  "source_tree": "6f3de68a88a9a41d8534185c4baf065158e77e38"
+ },
+ "head_sha": "e85b9d7578cc68d10312d15d88d7815e46697e4f",
+ "kind": "check_outcome",
+ "packet_digest_sha256": "be70c320d2849c48e87db25972afcd6d0fe62de87e5630966540955a4798f63c",
+ "packet_id": "har83-context-plan-producer-e85b9d75-ci",
+ "schema": "gt.review_packet.v1",
+ "status": "PASS",
+ "ticket": "HAR-83"
+}
