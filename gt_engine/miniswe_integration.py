@@ -1634,6 +1634,7 @@ class MiniSweAdapter(GroundtruthController):
                     enrichment_factory=self._schedule_lsp_candidate,
                     candidate_certifier=self._certify_lsp_candidate,
                     enrichment_observer=self._record_lsp_terminal,
+                    reclaimer=self._graph_revision_reclaim,
                 )
             if self.engine_state.graph_current:
                 self._graph_coordinator.consider_enrichment(request, GraphBuildArtifact(
@@ -1777,6 +1778,30 @@ class MiniSweAdapter(GroundtruthController):
     # budget; this one was never reached to need one.
     REBUILD_EMBEDDING_BUDGET_SECONDS = 60.0
 
+    # Reclaim revisions only where adoption is decided. The frozen builds below
+    # publish on the production clock (reclaim=False); this callback runs on
+    # the owner thread inside GraphBuildCoordinator.poll(), after
+    # publish_graph rules. Adopted -> prune keyed on the adopted graph with the
+    # authority-named set protected; refused -> the produced revision can never
+    # be named, so discard it directly. This replaces the write-path prune that
+    # evicted the still-named parent and livelocked arktype for 82.4 minutes
+    # in run 34701523365.
+    @staticmethod
+    def _graph_revision_reclaim(
+        request: FrozenBuildInput, result: GraphBuildArtifact,
+        adopted: bool, protected: frozenset[str],
+    ) -> None:
+        from .indexer import discard_revision, prune_graph_revisions
+
+        produced = Path(result.graph_path).parent if result.graph_path else None
+        protected_dirs = frozenset(Path(path).parent for path in protected if path)
+        if adopted:
+            if produced is not None:
+                prune_graph_revisions(produced, protected=protected_dirs)
+            return
+        if produced is not None and produced not in protected_dirs:
+            discard_revision(produced)
+
     def _build_frozen_graph(self, request: FrozenBuildInput) -> GraphBuildArtifact:
         from .indexer import _freeze_history, ensure_index_with_receipt, refresh_index_files
 
@@ -1809,6 +1834,7 @@ class MiniSweAdapter(GroundtruthController):
                     layout=self.engine_state.layout,
                     source_revision=request.source_revision,
                     embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
+                    reclaim=False,
                 )
             else:
                 # Name it. `mode=full` with an empty reason is the silent
@@ -1824,6 +1850,7 @@ class MiniSweAdapter(GroundtruthController):
                     root, layout=self.engine_state.layout,
                     source_revision=request.source_revision,
                     embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
+                    reclaim=False,
                 )
                 receipt = replace(receipt, build_mode="full",
                                   build_mode_reason=fallback_reason)

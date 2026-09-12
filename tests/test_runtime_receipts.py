@@ -374,6 +374,37 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     adapter.unlink()
     assert "product_adapter_receipt_missing_or_invalid" in verify_runtime_receipt(product)
     adapter.write_bytes(original_adapter)
+    # request_count is the manifest's census of admitted ATTEMPTS; a transport
+    # retry raises it above logical provider_calls without any receipt being
+    # absent. Comparing it to provider_calls false-flagged abs-stepped in run
+    # 34701523365 (253 attempts vs 250 calls); the check runs against
+    # provider_attempts, falling back to provider_calls on legacy receipts.
+    retried = deepcopy(product_row)
+    # One call retried then completed: 3 logical calls, 4 admitted attempts,
+    # conservation intact (3 completed + 1 failed = 4).
+    retried["provider_attempts"] = product_row["provider_calls"] + 1
+    retried["provider_completed_calls"] = product_row["provider_completed_calls"] + 1
+    retried["treatment_receipt"]["reproducibility_manifest"]["provider_receipts"][
+        "request_count"
+    ] = product_row["provider_calls"] + 1
+    _write_json(product, retried)
+    assert "treatment_provider_receipt_count_mismatch" not in (
+        retried_errors := verify_runtime_receipt(product)
+    ), retried_errors
+    # A genuine gap -- an admitted attempt with no request receipt -- still fires.
+    retried["treatment_receipt"]["reproducibility_manifest"]["provider_receipts"][
+        "request_count"
+    ] = product_row["provider_calls"] + 2
+    _write_json(product, retried)
+    assert "treatment_provider_receipt_count_mismatch" in verify_runtime_receipt(product)
+    legacy = deepcopy(product_row)
+    legacy.pop("provider_attempts", None)
+    legacy["treatment_receipt"]["reproducibility_manifest"]["provider_receipts"][
+        "request_count"
+    ] = product_row["provider_calls"] + 1
+    _write_json(product, legacy)
+    assert "treatment_provider_receipt_count_mismatch" in verify_runtime_receipt(product)
+    product.write_text(intact, encoding="utf-8")
     if synthetic_transport:
         concealed = {**product_row, "synthetic_transport": False}
         _write_json(product, concealed)

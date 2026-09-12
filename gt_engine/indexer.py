@@ -26,7 +26,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -80,7 +80,27 @@ LSP_TERMINAL_SCHEMA = "gt.lsp_promotion_task.v1"
 LSP_DERIVATION_SCHEMA = "gt.graph_derivation.v1"
 _INDEX_GOMEMLIMIT_BYTES = 3 * 1024**3
 _INDEX_RSS_LIMIT_BYTES = 4 * 1024**3
-_INDEX_TIMEOUT_SECONDS = 600
+
+
+def _env_seconds(name: str, default: int) -> int:
+    """Operator-tunable bound; a malformed override must not break import."""
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+# No artificial wall-clock cap on a build. boa died on the 600s bound with
+# zero coverage, and the producer-scale study (>900s on a 5k-file repo, still
+# running when killed) says size -- not a hang -- is what crosses these
+# numbers. A build that can finish inside the task envelope must be allowed
+# to: the real bounds are the enclosing task budget (which kills the run, not
+# the index) and the RSS guard (which still kills a runaway child).
+# GT_INDEX_TIMEOUT_SECONDS restores an explicit bound for operators who want
+# one; the typed GT_INDEX_TIMEOUT outcome fires only under that configured
+# bound. Unbounded also covers the publication-lock wait, whose hold time IS
+# the build's.
+_INDEX_TIMEOUT_SECONDS = _env_seconds("GT_INDEX_TIMEOUT_SECONDS", 0)
 _INDEX_MAX_PROCS = 2
 # gt-index defaults to -max-files 10000 and silently truncates the walk at
 # that point, so a large repository yields a partial graph with no signal.
@@ -777,7 +797,10 @@ def _run_index_bounded(root: str, output: Path, log_dir: Path, *,
                 error_code = "GT_INDEX_MEMORY_GUARD_TRIGGERED"
                 _kill_index_process_tree(process)
                 break
-            if time.monotonic() - started > _INDEX_TIMEOUT_SECONDS:
+            if (
+                _INDEX_TIMEOUT_SECONDS > 0
+                and time.monotonic() - started > _INDEX_TIMEOUT_SECONDS
+            ):
                 status = "timeout"
                 error_code = "GT_INDEX_TIMEOUT"
                 _kill_index_process_tree(process)
@@ -884,6 +907,11 @@ def _build_index_with_attempts(
             break
         # A partial database from a failed attempt must never be reused.
         output.unlink(missing_ok=True)
+        if result.error_code == "GT_INDEX_TIMEOUT":
+            # The cap is a size bound, not a transient: a second attempt on the
+            # same input cannot finish faster, it can only re-pay the same
+            # minutes. The typed timeout is the answer, not a retry.
+            break
     assert result is not None
     return result, tuple(attempts)
 
@@ -1137,8 +1165,18 @@ def _pinned_revisions(parent: Path) -> set[Path]:
     return pinned
 
 
-def _prune_superseded_revisions(live: Path) -> None:
-    """Drop superseded sibling revisions that nothing still references."""
+def _prune_superseded_revisions(live: Path, extra_protected: Iterable[Path] = ()) -> None:
+    """Drop superseded sibling revisions that nothing still references.
+
+    ``live`` must be the graph the adoption authority currently names -- the
+    revision EngineState adopted -- not merely the newest file written. The
+    caller, not this function, is responsible for that choice: run
+    34701523365 pruned relative to the last-written file while adoption kept
+    refusing superseded builds, and retention evicted the still-named parent
+    nineteen builds in a row. ``extra_protected`` carries the other paths the
+    authority is about to need -- the frozen parents of pending and running
+    builds -- which production order cannot see.
+    """
     parent = live.parent
     if parent.name != "revisions":
         return  # not the layout-bound scheme; nothing here is ours to remove
@@ -1149,7 +1187,9 @@ def _prune_superseded_revisions(live: Path) -> None:
         ]
     except OSError:
         return
-    protected = _referenced_revisions(parent) | _pinned_revisions(parent)
+    protected = _referenced_revisions(parent) | _pinned_revisions(parent) | {
+        path.resolve() for path in extra_protected
+    }
     siblings = [path for path in siblings if path.resolve() not in protected]
     # Order by the GRAPH's mtime, not the directory's. A directory's mtime moves
     # whenever an entry is added or removed - lsp-promotion.json is written into
@@ -1178,6 +1218,37 @@ def _prune_superseded_revisions(live: Path) -> None:
         except OSError:
             continue
         shutil.rmtree(condemned, ignore_errors=True)
+
+
+def prune_graph_revisions(live_revision: Path, *, protected: Iterable[Path] = ()) -> None:
+    """Reclaim superseded revisions on the adoption clock.
+
+    Called by the owner thread after ``EngineState.publish_graph`` decides --
+    ``live_revision`` is the directory of the graph that was adopted (or is
+    still adopted), and ``protected`` carries the frozen parent directories
+    in-flight builds still need. Publishing stays on the write path; deciding
+    what may be deleted stays with the authority that names the live graph.
+    """
+    _prune_superseded_revisions(live_revision, extra_protected=protected)
+
+
+def discard_revision(revision_dir: Path) -> None:
+    """Remove a produced-but-never-adopted revision; nothing can name it.
+
+    A build refused by ``publish_graph`` produced a revision no advisory,
+    receipt or pending parent will ever reference -- deliveries and pins only
+    ever name adopted graphs. Leaving it occupies the retained-superseded slot
+    and drives the next prune, so it is deleted with the same
+    rename-out-of-the-scheme discipline the prune uses.
+    """
+    if revision_dir.parent.name != "revisions" or not revision_dir.is_dir():
+        return
+    try:
+        condemned = revision_dir.with_name(f".pruned-{revision_dir.name}")
+        os.replace(revision_dir, condemned)
+    except OSError:
+        return
+    shutil.rmtree(condemned, ignore_errors=True)
 
 
 def _revision_identity(reuse_key: IndexReuseKey) -> str:
@@ -1416,7 +1487,15 @@ def _publish_candidate(
         manifest_backup.unlink(missing_ok=True)
     failure_manifest.unlink(missing_ok=True)
     (gt_dir / "index-failure-resource.json").unlink(missing_ok=True)
-    _prune_superseded_revisions(gt_dir)
+    # Reclamation deliberately does NOT run here. This is the write path and it
+    # publishes on the production clock: a coordinator build the adoption gate
+    # later refuses (source_revision_superseded) used to prune anyway, keyed on
+    # itself as live, and two such publishes evicted the revision
+    # engine_state.graph_path still named -- nineteen consecutive
+    # parent_graph_missing full rebuilds, 82.4 minutes, run 34701523365.
+    # Pruning now happens where adoption happens: GraphBuildCoordinator.poll()
+    # calls prune_graph_revisions with live=the adopted graph, and synchronous
+    # callers get it from ensure_index/refresh_index_files (reclaim=True).
     # The graph is published and usable from here; promotion only improves it.
     promotion = start_lsp_promotion(db, root)
     # Sealed beside the graph: an unrecorded promotion cannot be told apart
@@ -1803,11 +1882,17 @@ def _ensure_index_incremental_unlocked(
 
 def ensure_index(root: str, *, state_dir: str | None = None,
                  excluded_roots: tuple[Path, ...] = (),
-                 layout: RuntimeLayout | None = None) -> str | None:
+                 layout: RuntimeLayout | None = None,
+                 reclaim: bool = True) -> str | None:
     """Build/reuse one graph under an inter-process publication lock.
 
     Correct-or-quiet for local work; fail-closed for a benchmark-bound run,
     where an absent graph is a defect rather than a degraded mode.
+
+    ``reclaim`` prunes superseded revisions keyed on the returned graph -- the
+    graph a synchronous caller is about to use IS its adoption. The async
+    coordinator path passes ``False``: its produced graph is adopted or
+    refused later by ``publish_graph``, and reclamation runs there instead.
     """
 
     graph: str | None = None
@@ -1831,6 +1916,8 @@ def ensure_index(root: str, *, state_dir: str | None = None,
                 graph = _ensure_index_unlocked(root, state_dir=state_dir, diagnostics=diagnostics, **(
                     {"excluded_roots": excluded_roots} if excluded_roots else {}
                 ), **({"layout": layout} if layout is not None else {}))
+                if graph is not None and reclaim:
+                    _prune_superseded_revisions(Path(graph).parent)
     except Exception as exc:  # noqa: BLE001 - indexing remains correct-or-quiet
         diagnostics.append(f"{type(exc).__name__}: {exc}")
         graph = None
@@ -1937,25 +2024,31 @@ def _graph_publication_lock(path: Path):
         if os.name == "nt":
             import msvcrt
 
-            deadline = time.monotonic() + _INDEX_TIMEOUT_SECONDS + 30
+            deadline = (
+                time.monotonic() + _INDEX_TIMEOUT_SECONDS + 30
+                if _INDEX_TIMEOUT_SECONDS > 0 else None
+            )
             while True:
                 try:
                     msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError:
-                    if time.monotonic() >= deadline:
+                    if deadline is not None and time.monotonic() >= deadline:
                         raise TimeoutError("gt-index publication lock timed out") from None
                     time.sleep(0.05)
         else:
             import fcntl
 
-            deadline = time.monotonic() + _INDEX_TIMEOUT_SECONDS + 30
+            deadline = (
+                time.monotonic() + _INDEX_TIMEOUT_SECONDS + 30
+                if _INDEX_TIMEOUT_SECONDS > 0 else None
+            )
             while True:
                 try:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except BlockingIOError:
-                    if time.monotonic() >= deadline:
+                    if deadline is not None and time.monotonic() >= deadline:
                         raise TimeoutError("gt-index publication lock timed out") from None
                     time.sleep(0.05)
         try:
@@ -2606,7 +2699,8 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
                               excluded_roots: tuple[Path, ...] = (),
                               embedding_budget_seconds: float | None = None,
                               contract_store_path: Path | None = None,
-                              layout: RuntimeLayout | None = None) -> IndexBuildReceipt:
+                              layout: RuntimeLayout | None = None,
+                              reclaim: bool = True) -> IndexBuildReceipt:
     root_path = Path(root)
     if layout is not None:
         excluded_roots = tuple(dict.fromkeys((*excluded_roots, *layout.excluded_roots)))
@@ -2623,6 +2717,7 @@ def ensure_index_with_receipt(root: str | Path, *, state_dir: str | Path | None 
         return IndexBuildReceipt(IndexBuildStatus.NOT_APPLICABLE, source_revision=source_revision)
     try:
         graph = ensure_index(str(root_path), state_dir=str(state_dir) if state_dir else None,
+                             reclaim=reclaim,
                              **({"excluded_roots": excluded_roots} if excluded_roots else {}),
                              **({"layout": layout} if layout is not None else {}))
     except BenchmarkGraphRequired:
@@ -2783,7 +2878,8 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
                         excluded_roots: tuple[Path, ...] = (),
                         embedding_budget_seconds: float | None = None,
                         contract_store_path: Path | None = None,
-                        layout: RuntimeLayout | None = None) -> IndexBuildReceipt:
+                        layout: RuntimeLayout | None = None,
+                        reclaim: bool = True) -> IndexBuildReceipt:
     """Amend ``changed_paths`` into a copy of ``graph``, or rebuild in full.
 
     This is the seam blocker 7c named. The producer has had a per-file amend
@@ -2814,6 +2910,8 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
                     str(root_path), layout=layout, parent_graph=Path(graph),
                     changed_paths=tuple(changed_paths), excluded_roots=excluded_roots,
                 )
+                if published and reclaim:
+                    _prune_superseded_revisions(Path(published).parent)
         except Exception as exc:  # noqa: BLE001 - a refused amend is a full rebuild
             published, reason = None, f"{type(exc).__name__}: {exc}"[:200]
     elif not graph:
@@ -2834,6 +2932,7 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
         root_path, source_revision=source_revision, excluded_roots=excluded_roots,
         embedding_budget_seconds=embedding_budget_seconds,
         contract_store_path=contract_store_path, layout=layout,
+        reclaim=reclaim,
     )
     return replace(receipt, build_mode="full", build_mode_reason=reason,
                    incremental_results=results)

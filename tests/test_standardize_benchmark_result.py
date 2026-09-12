@@ -26,6 +26,7 @@ def _write_case(
     aggregate: dict[str, object],
     trial: dict[str, object],
     product: bool = True,
+    terminal: str | None = None,
 ) -> Path:
     job = root / "job"
     trial_dir = job / "task-a__trial"
@@ -34,10 +35,12 @@ def _write_case(
     (job / "result.json").write_text(json.dumps(aggregate), encoding="utf-8")
     (trial_dir / "result.json").write_text(json.dumps(trial), encoding="utf-8")
     if product:
+        receipt = {"schema": "gt.run_receipt.v1", "task_id": "task-a",
+                   "product_source_sha": "a" * 40}
+        if terminal is not None:
+            receipt["terminal"] = terminal
         (agent / "gt-run.json").write_text(
-            json.dumps({"schema": "gt.run_receipt.v1", "task_id": "task-a",
-                        "product_source_sha": "a" * 40}),
-            encoding="utf-8",
+            json.dumps(receipt), encoding="utf-8",
         )
     return agent
 
@@ -500,3 +503,76 @@ def test_conservative_outcomes_rejects_boolean_reward() -> None:
 
     assert outcomes["task-a"]["graded"] is False
     assert outcomes["task-a"]["solved"] is False
+
+
+def test_churn_abort_terminal_is_governor_abort_not_setup_failure(tmp_path: Path) -> None:
+    """A deliberate runtime-governor abort must not read as runner failure.
+
+    adaptix in run 34701523365 ended terminal=churn_abort (exit 7) and the
+    generic NonZeroAgentExitCodeError collapse reported it as
+    runner_setup_or_execution_failed -- erasing the typed outcome.
+    """
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 7)",
+            },
+        },
+        terminal="churn_abort",
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["reward"] is None
+    assert receipt["failure_class"] == "governor_abort"
+    assert receipt["error_code"] == "churn_abort"
+
+
+def test_specific_exception_evidence_still_beats_the_terminal(tmp_path: Path) -> None:
+    """The terminal labels the outcome; exception evidence names the cause."""
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "ApiRateLimitError",
+                "exception_message": "OpenAIException - Insufficient Balance",
+            },
+        },
+        terminal="provider_failed",
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "provider_billing_failure"
+    assert receipt["error_code"] == "provider_insufficient_balance"
+
+
+def test_unknown_or_absent_terminal_keeps_legacy_classification(tmp_path: Path) -> None:
+    """Terminals outside the typed map must not rewrite recorded semantics."""
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed (exit 9)",
+            },
+        },
+        terminal="submitted_unverified",
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["failure_class"] == "setup_failure"
+    assert receipt["error_code"] == "runner_setup_or_execution_failed"

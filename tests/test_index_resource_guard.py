@@ -641,3 +641,51 @@ def test_failure_receipt_rejects_semantically_mismatched_pair(
 
     receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
     assert receipt.error_type == "index_failure_evidence_invalid"
+
+
+def test_index_timeout_is_a_bound_not_a_retryable_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """GT_INDEX_TIMEOUT is a deterministic size bound: a second attempt on the
+    same input can only re-pay the same minutes. One attempt, typed timeout.
+    """
+    repo = tmp_path / "repo"
+    state = tmp_path / "state"
+    repo.mkdir()
+    (repo / "main.py").write_text("pass\n", encoding="utf-8")
+    calls: list[tuple] = []
+
+    def bounded(*args):
+        calls.append(args)
+        return indexer.IndexProcessResult(
+            False, "timeout", "GT_INDEX_TIMEOUT", exit_code=-9
+        )
+
+    monkeypatch.setattr(indexer, "_run_index_bounded", bounded)
+    monkeypatch.setattr(
+        indexer,
+        "_binary_certification",
+        lambda: {"path_sha256": "a" * 64, "binary_sha256": "b" * 64},
+    )
+
+    receipt = indexer.ensure_index_with_receipt(repo, state_dir=state)
+
+    assert receipt.error_type == "GT_INDEX_TIMEOUT"
+    assert len(calls) == 1, "a size-bound timeout must not be retried"
+
+
+def test_index_timeout_env_override_and_malformed_fallback(monkeypatch) -> None:
+    """The bound is operator-tunable; a malformed override falls back safely.
+
+    _INDEX_TIMEOUT_SECONDS binds at import, so the override is exercised at
+    the parse seam -- the same code the module ran at import time. The
+    production default is unbounded (0): the task envelope is the real bound
+    and GT_INDEX_TIMEOUT fires only under an operator-set cap.
+    """
+    monkeypatch.setenv("GT_INDEX_TIMEOUT_SECONDS", "45")
+    assert indexer._env_seconds("GT_INDEX_TIMEOUT_SECONDS", 0) == 45
+    monkeypatch.setenv("GT_INDEX_TIMEOUT_SECONDS", "not-a-number")
+    assert indexer._env_seconds("GT_INDEX_TIMEOUT_SECONDS", 0) == 0
+    monkeypatch.delenv("GT_INDEX_TIMEOUT_SECONDS")
+    assert indexer._env_seconds("GT_INDEX_TIMEOUT_SECONDS", 0) == 0
+    assert indexer._INDEX_TIMEOUT_SECONDS == 0

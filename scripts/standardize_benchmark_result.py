@@ -146,11 +146,31 @@ def _runner_results(
     return canonical[0], canonical[1], trials[0][1] if len(trials) == 1 else None
 
 
+# The product receipt's terminal is the typed runtime outcome the supervisor
+# already decided. Consulted before the generic exception_type collapse so a
+# deliberate governor abort (exit 7) does not read as
+# runner_setup_or_execution_failed -- the misclassification adaptix carried in
+# run 34701523365. Specific exception evidence (billing, provider, OOM) still
+# wins because it names the cause the terminal only labels. Unknown or absent
+# terminals keep the legacy classification.
+_PRODUCT_TERMINAL_FAILURES: dict[str, tuple[str, str]] = {
+    "churn_abort": ("governor_abort", "churn_abort"),
+    "timeout": ("budget_exhausted", "agent_loop_timeout"),
+    "budget_exhausted": ("budget_exhausted", "agent_budget_exhausted"),
+    "provider_failed": ("provider_failure", "provider_request_failed"),
+    "provider_model_mismatch": ("provider_failure", "provider_model_mismatch"),
+    "setup_error": ("setup_failure", "product_setup_error"),
+    "not_started": ("setup_failure", "product_not_started"),
+    "internal_error": ("setup_failure", "product_internal_error"),
+}
+
+
 def _failure_class(
     trial: dict[str, Any] | None,
     *,
     runner_result_present: bool,
     resource_evidence: dict[str, Any] | None = None,
+    product_terminal: str = "",
 ) -> tuple[str, str]:
     if not runner_result_present:
         return "setup_failure", "runner_result_missing"
@@ -168,6 +188,8 @@ def _failure_class(
         if evidence.get("memory_evidence") is True and code == "GT_AGENT_CGROUP_OOM":
             return "resource_exhaustion", "agent_cgroup_oom"
         return "process_signal_failure", "process_exit_137_unattributed"
+    if product_terminal in _PRODUCT_TERMINAL_FAILURES:
+        return _PRODUCT_TERMINAL_FAILURES[product_terminal]
     if exception_type:
         return "setup_failure", "runner_setup_or_execution_failed"
     return "missing_verifier", "official_verifier_missing"
@@ -285,6 +307,7 @@ def standardize_result(
             trial,
             runner_result_present=result_path is not None,
             resource_evidence=resource_evidence,
+            product_terminal=str((product or {}).get("terminal") or ""),
         )
     )
     receipt: dict[str, object] = {

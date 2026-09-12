@@ -160,6 +160,58 @@ capability until the churn governor fired.
 - Provider-free acceptance on the fix SHA, then a repeat of this 10-task
   subset is the cheapest comparable re-measurement.
 
+## Resolution (implemented on `codex/context-plan-integrity`)
+
+The general invariant landed: **reclaim only what the authority does not
+name.** Publication stays on the production clock; reclamation moved behind
+the adoption gate.
+
+- **Prune off the write path.** `_publish_candidate` no longer prunes;
+  `prune_graph_revisions(live, protected=)` runs inside
+  `GraphBuildCoordinator.poll()` after `publish_graph` decides, keyed on the
+  adopted graph with protected = {live graph, pending parent, running parent,
+  manifest references, pins}. Synchronous callers (`ensure_index`,
+  `refresh_index_files`) keep a prune keyed on their own product via
+  `reclaim=True`; the coordinator's worker calls pass `reclaim=False`.
+- **Refused output is discarded** via `discard_revision` — a build
+  `publish_graph` rejects can never be named, so it no longer occupies the
+  retained-superseded slot.
+- **Stale pending builds drop** at `_start_locked`
+  (`pending_superseded_before_start`); the overlay survives in EngineState
+  and the next schedule re-freezes it. `schedule()` reports
+  `superseded_before_start` for an already-stale request.
+- **`already_completed` replay validates the artifact** — a cached success
+  whose file reclamation removed is invalidated (`graph_artifact_missing`)
+  instead of installing a dead path under `graph_current`.
+- **`churn_abort` classifies distinctly**: `_failure_class` consults the
+  product receipt's `terminal` before the generic exception collapse
+  (`governor_abort`/`churn_abort`), and `attest_deepswe.py` recomputes with
+  the same terminal. Unknown terminals keep legacy classification; specific
+  exception evidence (billing, OOM, provider) still wins.
+- **Provider accounting fixed**: manifest `request_count` (admission census)
+  now compares against `provider_attempts`, falling back to `provider_calls`
+  on legacy receipts. abs-stepped's 253-vs-250 was this bug, not a gap.
+- **Index wall-clock cap removed** — `_INDEX_TIMEOUT_SECONDS` defaults to 0
+  (unbounded). The task envelope (benchmark 5400s + GT overhead) is the real
+  bound and the RSS guard still kills a runaway child; `GT_INDEX_TIMEOUT`
+  remains the typed outcome under an operator-set `GT_INDEX_TIMEOUT_SECONDS`,
+  and a timeout exits the retry loop after one attempt. The initial-build
+  embedding budget likewise dropped its flat 1800s cap and keeps the
+  proportional `0.35 * wall_time_limit` bound.
+
+Regression coverage: prune-under-named-parent, protected pending/running
+parents, refused-output discard, stale-pending drop, reclaimed-artifact
+replay rebuild, churn_abort classification, attempts-vs-calls, timeout
+no-retry + env override.
+
+**Documented residuals, not fixed here:** superseded *enrichment* candidates
+live outside `revisions/` and can orphan (~900 MB each) — needs a
+receipts-aware sweep policy; grade-vs-health conflation (a valid grade can
+overwrite a coexisting timeout in `failure_class`); resumable/chunked initial
+indexing for terraform-class repos (the 1800s cap is policy, not a fix);
+katex `dense_index_not_ready` — expected to resolve once adoption lands,
+verify on the re-run rather than patch the symptom.
+
 ## Review surface (for external review of `595c25b0`/`a9c74095`)
 
 - `gt_engine/graph_coordinator.py` — schedule/coalesce/adoption boundary.

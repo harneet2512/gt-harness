@@ -57,6 +57,16 @@ CandidateCertifier = Callable[
 EnrichmentObserver = Callable[
     [FrozenBuildInput, GraphBuildArtifact, Mapping[str, Any], str], None
 ]
+# Reclaim a produced revision after the adoption decision. Arguments: the
+# request that produced it, the artifact, whether publish_graph adopted it,
+# and the graph paths the authority still names (adopted live graph, frozen
+# parents of pending/running builds). Reclamation runs HERE because the owner
+# thread is the only place produced-vs-adopted is decidable: a worker that
+# prunes on write deletes the parent the next build needs whenever adoption
+# lags production -- the 82-minute rebuild livelock of run 34701523365.
+RevisionReclaimer = Callable[
+    [FrozenBuildInput, GraphBuildArtifact, bool, frozenset[str]], None
+]
 
 
 class GraphBuildCoordinator:
@@ -70,6 +80,7 @@ class GraphBuildCoordinator:
         enrichment_factory: EnrichmentFactory | None = None,
         candidate_certifier: CandidateCertifier | None = None,
         enrichment_observer: EnrichmentObserver | None = None,
+        reclaimer: RevisionReclaimer | None = None,
     ) -> None:
         if (enrichment_factory is None) != (candidate_certifier is None):
             raise ValueError("enrichment factory and candidate certifier are required together")
@@ -78,6 +89,7 @@ class GraphBuildCoordinator:
         self._enrichment_factory = enrichment_factory
         self._candidate_certifier = candidate_certifier
         self._enrichment_observer = enrichment_observer
+        self._reclaimer = reclaimer
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gt-graph")
         self._lock = threading.Condition()
         self._running: FrozenBuildInput | None = None
@@ -142,8 +154,10 @@ class GraphBuildCoordinator:
                     self._completed.append(self._successful)
                 disposition = "already_completed"
             elif self._running is None:
-                self._start_locked(request)
-                disposition = "scheduled"
+                disposition = (
+                    "scheduled" if self._start_locked(request)
+                    else "superseded_before_start"
+                )
             else:
                 unresolved = set(self._running.dirty_paths)
                 if self._pending is not None:
@@ -168,10 +182,20 @@ class GraphBuildCoordinator:
             obsolete.cancel()
         return disposition
 
-    def _start_locked(self, request: FrozenBuildInput) -> None:
+    def _start_locked(self, request: FrozenBuildInput) -> bool:
+        current = self._state.source_revision
+        if current and request.source_revision != current:
+            # Frozen before the latest edit: publish_graph will refuse it, so
+            # the build can only burn budget. Dropping it loses nothing -- the
+            # dirty set lives in the engine's overlay and the next schedule()
+            # re-freezes a request that carries all of it. The check is
+            # advisory (on this path it runs on the worker callback thread);
+            # publish_graph remains the correctness gate.
+            return False
         self._running = request
         future = self._executor.submit(self._invoke, request)
         future.add_done_callback(self._finish)
+        return True
 
     def _invoke(self, request: FrozenBuildInput) -> GraphBuildArtifact:
         try:
@@ -192,8 +216,12 @@ class GraphBuildCoordinator:
                     self._successful = (request, result)
             self._running = None
             pending, self._pending = self._pending, None
-            if pending is not None and not self._closed:
-                self._start_locked(pending)
+            if (
+                pending is not None
+                and not self._closed
+                and not self._start_locked(pending)
+            ):
+                self.last_error = "pending_superseded_before_start"
             self._lock.notify_all()
 
     @staticmethod
@@ -483,14 +511,29 @@ class GraphBuildCoordinator:
             completed, self._completed = self._completed, []
             active_enrichment = self._enrichment
             draining_enrichments = list(self._draining_enrichments)
+            successful = self._successful
         for request, result in completed:
             if not result.success:
                 self.last_error = result.error or "graph_build_failed"
                 continue
-            if not self._state.publish_graph(
+            if not result.graph_path or not Path(result.graph_path).is_file():
+                # A produced graph already gone must not be adopted:
+                # publish_graph records the path blindly and graph_current
+                # would report true on a missing artifact. The reachable case
+                # is already_completed replaying a success whose file
+                # reclamation removed; void the recorded success so a later
+                # identical request rebuilds instead of looping forever.
+                self.last_error = "graph_artifact_missing"
+                with self._lock:
+                    if successful is not None and self._successful is successful:
+                        self._successful = None
+                continue
+            adopted = self._state.publish_graph(
                 graph_path=result.graph_path, graph_revision=result.graph_revision,
                 source_revision=request.source_revision,
-            ):
+            )
+            self._reclaim(request, result, adopted)
+            if not adopted:
                 self.last_error = "source_revision_superseded"
             else:
                 self.last_error = ""
@@ -513,6 +556,33 @@ class GraphBuildCoordinator:
             self._poll_draining_enrichment(item) for item in draining_enrichments
         )
         return len(completed) + enrichment_count
+
+    def _reclaim(
+        self,
+        request: FrozenBuildInput,
+        result: GraphBuildArtifact,
+        adopted: bool,
+    ) -> None:
+        """Hand the adoption outcome to the injected reclaimer, if any.
+
+        The protected set is everything the authority still names: the adopted
+        live graph plus the frozen parents of pending and running builds. A
+        refused build's output is named by none of them and is reclaimed as
+        garbage; an adopted build's prune keeps all of them.
+        """
+        if self._reclaimer is None:
+            return
+        with self._lock:
+            named = (
+                self._state.graph_path,
+                self._pending.parent_graph_path if self._pending else "",
+                self._running.parent_graph_path if self._running else "",
+            )
+        protected = frozenset(path for path in named if path)
+        try:
+            self._reclaimer(request, result, adopted, protected)
+        except Exception as exc:  # reclamation must never break the poll loop
+            self.last_error = f"reclaim_exception:{type(exc).__name__}"
 
     def wait_idle(self, *, timeout: float) -> bool:
         deadline = time.monotonic() + max(0.0, timeout)

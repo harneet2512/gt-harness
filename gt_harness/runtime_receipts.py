@@ -1749,7 +1749,13 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     provider = reproduction.get("provider_receipts") if isinstance(reproduction, dict) else None
     if not isinstance(provider, dict) or provider.get("valid") is not True:
         errors.append("treatment_provider_receipts_invalid")
-    elif int(provider.get("request_count") or 0) != int(receipt.get("provider_calls") or 0):
+    elif int(provider.get("request_count") or 0) != int(
+        receipt.get("provider_attempts") or receipt.get("provider_calls") or 0
+    ):
+        # request_count is the manifest's census of admitted attempts, which
+        # includes transport retries; provider_calls is the logical count.
+        # Comparing the two mismatched abs-stepped in run 34701523365 (253
+        # attempts vs 250 calls) without any receipt actually being absent.
         errors.append("treatment_provider_receipt_count_mismatch")
     graph = treatment.get("graph_certification")
     if not isinstance(graph, dict) or not (

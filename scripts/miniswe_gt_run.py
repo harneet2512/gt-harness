@@ -757,10 +757,14 @@ def build_agent(
                 #
                 # After length-bucketing the pass projects to ~1,120s, so give
                 # it room to complete and let both consumers read the result.
-                # The per-REBUILD budget stays at 60s (MiniSweAdapter): a
-                # rebuild's plan is incremental and a full re-embed there is
-                # never the right answer.
-                min(1800.0, 0.35 * wall_time_limit_seconds)
+                # No flat cap on top of the proportional bound: a repository
+                # whose embed legitimately needs more than a fixed constant
+                # gets the share of the task envelope the fraction allows,
+                # not a silent dense-retrieval skip. The per-REBUILD budget
+                # stays at 60s (MiniSweAdapter): a rebuild's plan is
+                # incremental and a full re-embed there is never the right
+                # answer.
+                0.35 * wall_time_limit_seconds
                 if wall_time_limit_seconds and wall_time_limit_seconds > 0
                 else None
             ),

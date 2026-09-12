@@ -1,8 +1,14 @@
 """Retention must keep a revision a delivered artifact still needs."""
 import json
+import os
 from pathlib import Path
 
-from gt_engine.indexer import _pinned_revisions, _prune_superseded_revisions
+from gt_engine.indexer import (
+    _pinned_revisions,
+    _prune_superseded_revisions,
+    discard_revision,
+    prune_graph_revisions,
+)
 
 
 def _revision(root: Path, name: str, *, pinned: bool = False) -> Path:
@@ -105,3 +111,115 @@ def test_pinning_is_bounded_and_says_so(tmp_path):
     refused = [r for r in rows if r.get("event") == "revision_pin_refused"]
     assert refused, "hitting the pin budget must be visible in the journal"
     assert refused[0]["reason"] == "pin_budget_exhausted"
+
+
+def _graph_mtime(revision: Path, when: float) -> None:
+    """Deterministic publication order: the prune ranks on graph.db's mtime."""
+    os.utime(revision / "graph.db", (when, when))
+
+
+def test_adoption_keyed_prune_keeps_the_named_parent(tmp_path):
+    """The livelock regression: pruning on the production clock evicts the
+    revision the authority still names.
+
+    Run 34701523365: two refused builds each pruned keyed on themselves as
+    live; retention kept the newest write and deleted the adopted parent,
+    and every later build fell back to a 4-minute full rebuild. Pruning
+    keyed on the adopted revision instead keeps that parent no matter how
+    many newer candidates exist.
+    """
+    revisions = tmp_path / "revisions"
+    named_parent = _revision(revisions, "named-parent")
+    refused_older = _revision(revisions, "refused-older")
+    refused_newer = _revision(revisions, "refused-newer")
+    _graph_mtime(named_parent, 1000)
+    _graph_mtime(refused_older, 2000)
+    _graph_mtime(refused_newer, 3000)
+
+    prune_graph_revisions(named_parent)
+
+    assert named_parent.is_dir(), "the revision the authority names must survive"
+    assert refused_newer.is_dir(), "retention still keeps one superseded sibling"
+    assert not refused_older.is_dir()
+
+
+def test_prune_protects_pending_and_running_parents(tmp_path):
+    """The protected set covers what in-flight work names, not only pins."""
+    revisions = tmp_path / "revisions"
+    adopted = _revision(revisions, "adopted")
+    pending_parent = _revision(revisions, "pending-parent")
+    unclaimed_new = _revision(revisions, "unclaimed-new")
+    unclaimed_old = _revision(revisions, "unclaimed-old")
+    _graph_mtime(adopted, 4000)
+    _graph_mtime(pending_parent, 1000)
+    _graph_mtime(unclaimed_old, 2000)
+    _graph_mtime(unclaimed_new, 3000)
+
+    prune_graph_revisions(
+        adopted, protected=[pending_parent]
+    )
+
+    assert adopted.is_dir()
+    assert pending_parent.is_dir(), "a pending build's frozen parent is named"
+    assert unclaimed_new.is_dir(), "retention keeps one superseded sibling"
+    assert not unclaimed_old.is_dir()
+
+
+def test_discard_revision_removes_never_adopted_output(tmp_path):
+    """A refused build's output is garbage nothing can name; delete it."""
+    revisions = tmp_path / "revisions"
+    produced = _revision(revisions, "produced")
+    adopted = _revision(revisions, "adopted")
+
+    discard_revision(produced)
+
+    assert not produced.is_dir()
+    assert adopted.is_dir()
+
+
+def test_discard_revision_refuses_paths_outside_the_scheme(tmp_path):
+    """Reclamation only ever touches revisions/ children."""
+    stray = tmp_path / "elsewhere" / "not-a-revision"
+    stray.mkdir(parents=True)
+    (stray / "graph.db").write_bytes(b"graph")
+
+    discard_revision(stray)
+    discard_revision(tmp_path / "does-not-exist")
+
+    assert stray.is_dir()
+
+
+def test_ensure_index_reclaims_only_for_synchronous_callers(monkeypatch, tmp_path):
+    """reclaim=True keys the prune on the caller's own graph -- a synchronous
+    caller's product IS its adoption. The coordinator path passes False: its
+    produced graph is adopted or refused later by publish_graph, and
+    reclamation runs in poll() where the verdict is known.
+    """
+    from gt_engine import indexer
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "x.py").write_text("x = 1\n", encoding="utf-8")
+    state = tmp_path / "state"
+    produced = state / "revisions" / "r1"
+    produced.mkdir(parents=True)
+    graph = produced / "graph.db"
+    graph.write_bytes(b"graph")
+    monkeypatch.setattr(
+        indexer, "_ensure_index_unlocked",
+        lambda *args, **kwargs: str(graph),
+    )
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        indexer, "_prune_superseded_revisions",
+        lambda live, extra_protected=(): calls.append(live),
+    )
+
+    assert indexer.ensure_index(str(repo), state_dir=str(state)) == str(graph)
+    assert calls == [produced], "a synchronous caller prunes on its product"
+
+    calls.clear()
+    assert indexer.ensure_index(
+        str(repo), state_dir=str(state), reclaim=False
+    ) == str(graph)
+    assert not calls, "coordinator-managed output is reclaimed at adoption"

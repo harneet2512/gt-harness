@@ -576,7 +576,10 @@ def attest_deepswe(
         if status == "ERROR":
             try:
                 expected_failure, expected_error = _failure_class(
-                    trial_row, runner_result_present=expected_result_path is not None
+                    trial_row, runner_result_present=expected_result_path is not None,
+                    product_terminal=str(
+                        (product_runs.get(task) or {}).get("terminal") or ""
+                    ),
                 )
             except (AttributeError, TypeError, ValueError):
                 expected_failure, expected_error = "", ""
