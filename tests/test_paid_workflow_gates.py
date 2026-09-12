@@ -52,6 +52,17 @@ def test_paid_workflow_stages_and_installs_the_exact_treatment_bundle() -> None:
     assert 'python -m pip install --disable-pip-version-check --no-deps "$GT_HARNESS_WHEEL_HOST"' in source
 
 
+def test_attest_job_installs_the_harness_package_for_contained_witnesses() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+    attest = source.split("\n  attest:\n", 1)[1]
+
+    # Contained check witnesses spawn `python -I -m scripts.miniswe_supervisor`;
+    # isolated mode resolves `scripts` only from site-packages, so the harness
+    # package itself must be installed before the feature matrix re-runs them.
+    assert "python -m pip install --disable-pip-version-check --no-deps ." in attest
+    assert attest.index("--no-deps .") < attest.index("issue_feature_matrix")
+
+
 def test_paid_workflow_masks_attestation_key_and_archives_container_evidence() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 

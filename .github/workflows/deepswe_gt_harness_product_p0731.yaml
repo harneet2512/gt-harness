@@ -860,6 +860,13 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check \
             --require-hashes -r config/product-requirements.lock
+          # The feature-matrix witness proofs execute real checks through
+          # CredentialIsolatedLocalEnvironment, which spawns
+          # `python -I -m scripts.miniswe_supervisor` on Linux. Isolated mode
+          # resolves `scripts` only from site-packages, so the harness package
+          # itself must be installed here exactly as the provider-free
+          # acceptance job installs it.
+          python -m pip install --disable-pip-version-check --no-deps .
           python -c "import subprocess, sys; from eval.miniswe_agent import MiniSweAgent; subprocess.run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', str(MiniSweAgent._gt_wheel())], check=True)"
           python -c "import groundtruth.runtime.gateway"
 
