@@ -16,7 +16,25 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_KEY = re.compile(
     r"(?:api[_-]?key|authorization|credential|password|secret|token)$", re.I
 )
-_SECRET_VALUE = re.compile(r"(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)", re.I)
+# A key-shaped token must start a standalone word: "aiomonitor-task-snapshots"
+# embeds "sk-snapshots", which is a task name, not a credential. Require a
+# non-alphanumeric left boundary so hyphenated identifiers cannot false-fire.
+_SECRET_VALUE = re.compile(
+    r"(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)", re.I
+)
+_SECRET_ASSIGN_VALUE = re.compile(
+    r"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*\S+"
+)
+
+
+def redact_secret_text(text: Any) -> str:
+    """Remove credential-shaped material from text retained in artifacts.
+
+    Provider error bodies can echo request headers; journals and diagnostics
+    are uploaded evidence, so the value is masked rather than trusted.
+    """
+    scrubbed = _SECRET_VALUE.sub("[redacted]", str(text))
+    return _SECRET_ASSIGN_VALUE.sub(lambda m: f"{m.group(1)}=[redacted]", scrubbed)
 
 class DiagnosticCode(StrEnum):
     GT_DENSE_MODEL_UNAVAILABLE = "GT_DENSE_MODEL_UNAVAILABLE"

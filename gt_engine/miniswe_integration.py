@@ -2718,12 +2718,14 @@ class MiniSweAdapter(GroundtruthController):
 
     def bind_provider_failure(self, error: BaseException) -> None:
         """Record a provider terminal failure symmetrically with a response."""
+        from .run_diagnostics import redact_secret_text
+
         self.store.append(
             "provider_failure",
             iteration=self.iteration,
             request_id=self._latest_delivery.request_id if self._latest_delivery else "",
             error_type=type(error).__name__,
-            error=str(error)[:500],
+            error=redact_secret_text(str(error))[:500],
         )
         if self._latest_delivery is not None:
             self._terminal_request_ids.add(self._latest_delivery.request_id)

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from scripts.standardize_benchmark_result import (
+    _PRODUCT_TERMINAL_FAILURES,
     conservative_outcomes,
     main,
     standardize_result,
@@ -554,6 +555,41 @@ def test_specific_exception_evidence_still_beats_the_terminal(tmp_path: Path) ->
 
     assert receipt["failure_class"] == "provider_billing_failure"
     assert receipt["error_code"] == "provider_insufficient_balance"
+
+
+@pytest.mark.parametrize(
+    ("terminal", "failure_class", "error_code"),
+    sorted(
+        (terminal, failure_class, error_code)
+        for terminal, (failure_class, error_code)
+        in _PRODUCT_TERMINAL_FAILURES.items()
+    ),
+)
+def test_every_product_terminal_maps_to_its_typed_outcome(
+    tmp_path: Path, terminal: str, failure_class: str, error_code: str
+) -> None:
+    """The terminal x stage matrix: every supervisor terminal must standardize
+    to its declared class so attestation recomputes identically and no typed
+    outcome collapses into runner_setup_or_execution_failed."""
+    _write_case(
+        tmp_path,
+        aggregate={"n_total_trials": 1, "stats": {"evals": {}}},
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "exception_info": {
+                "exception_type": "NonZeroAgentExitCodeError",
+                "exception_message": "Command failed",
+            },
+        },
+        terminal=terminal,
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["failure_class"] == failure_class
+    assert receipt["error_code"] == error_code
 
 
 def test_unknown_or_absent_terminal_keeps_legacy_classification(tmp_path: Path) -> None:

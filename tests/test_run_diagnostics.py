@@ -69,6 +69,48 @@ def test_diagnostic_event_rejects_unknown_codes_and_secret_material():
         )
 
 
+def test_hyphenated_task_ids_embedding_key_shaped_words_are_not_secrets():
+    # Run 34715686102: the provider_failure receipt for
+    # "aiomonitor-task-snapshots-diff" raised ValueError because the task id
+    # contains "sk-snapshots-diff", which matched the sk-... canary shape and
+    # converted a typed provider failure into a run-killing internal_error.
+    # Key-shaped material requires a standalone word boundary.
+    task_ids = {"aiomonitor-task-snapshots-diff", "task-snapshot-diff",
+                "x-sketchy-behavior"}
+    # Every declared cohort task id must survive diagnostics: any eval/*.json
+    # carrying a task list is part of the sweep, not just the smoke20 set.
+    for eval_spec in Path(__file__).resolve().parent.parent.glob("eval/*.json"):
+        try:
+            payload = json.loads(eval_spec.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        ids = payload.get("task_ids") if isinstance(payload, dict) else None
+        if isinstance(ids, list):
+            task_ids.update(str(item) for item in ids)
+    for task_id in sorted(task_ids):
+        event = DiagnosticEvent.create(
+            code=DiagnosticCode.GT_PROVIDER_MALFORMED_RESPONSE,
+            severity="ERROR", phase="provider_transport", subsystem="provider",
+            capability="provider_transport", task_id=task_id,
+            classification="primary", cause="FormatError",
+            impact="provider_response_unavailable",
+            recovery="refine_request_before_retry",
+            retryable=False, event_sequence=1,
+        )
+        assert event.task_id == task_id
+    for secret in ("sk-or-v1-abcdef1234567890", "sk-abcdefgh1234", "Bearer abc.def"):
+        with pytest.raises(ValueError, match="secret-like"):
+            DiagnosticEvent.create(
+                code=DiagnosticCode.GT_PROVIDER_MALFORMED_RESPONSE,
+                severity="ERROR", phase="provider_transport", subsystem="provider",
+                capability="provider_transport", task_id="task",
+                classification="primary", cause=f"provider said {secret}",
+                impact="provider_response_unavailable",
+                recovery="refine_request_before_retry",
+                retryable=False, event_sequence=1,
+            )
+
+
 @pytest.mark.parametrize(
     ("exc", "code", "retryable"),
     [
