@@ -62,14 +62,24 @@ class RehearsalTransport(BaseHTTPRequestHandler):
         elif ordinal == 1:
             command = "cat calculator.py test_calculator.py"
         elif ordinal == 2:
-            command = "python3 -c \"print('x'*25000); print('REPAIR_OPERATOR=+'); print('y'*25000)\""
+            # Marker must land in the elided middle of the bounded preview
+            # (head 49152 + tail 16384 = 65536 inline budget): 52000-char pads
+            # put REPAIR_OPERATOR past the head and before the tail, so the
+            # observation carries the truncation note instead of the fact.
+            command = "python3 -c \"print('x'*52000); print('REPAIR_OPERATOR=+'); print('y'*52000)\""
         elif ordinal == 3:
             observed = json.dumps(request["messages"][-1])
-            reference = re.search(r"gt-evidence read ([0-9a-f]{64})", observed)
-            if reference is None:
-                self.send_error(422, "recoverable artifact absent")
+            # Post-pointer-tax contract: oversized output renders head+tail
+            # with an elision note, never a gt-evidence pointer. Recovery is
+            # agent-native — re-run ranged — which is what the note invites.
+            if "[output truncated:" not in observed:
+                self.send_error(422, "bounded preview note absent")
                 return
-            command = f"gt-evidence read {reference.group(1)} 25001 128"
+            if "REPAIR_OPERATOR=+" in observed:
+                self.send_error(422, "marker leaked into bounded preview")
+                return
+            command = ("python3 -c \"print('x'*52000); print('REPAIR_OPERATOR=+'); "
+                       "print('y'*52000)\" | sed -n '2p'")
         elif ordinal == 4:
             observed = json.dumps(request["messages"][-1])
             if "REPAIR_OPERATOR=+" not in observed:
