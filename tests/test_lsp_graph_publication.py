@@ -1,250 +1,225 @@
+"""LSP promotion lifecycle on the post-coordinator path.
+
+The coordinator is deleted; the disposition chain it enforced now lives in
+``_lsp_terminal_disposition`` and the schedule/poll triggers in
+``_maybe_schedule_lsp_promotion``/``_poll_lsp_promotions``. These tests
+exercise the adapter directly: what the coordinator's poll proved, the
+boundary drain now proves.
+"""
 from __future__ import annotations
 
-from gt_engine.engine_state import EngineState
-from gt_engine.graph_coordinator import (
-    FrozenBuildInput,
-    GraphBuildArtifact,
-    GraphBuildCoordinator,
-)
+import hashlib
+from pathlib import Path
+from types import SimpleNamespace
+
+from gt_engine.graph_coordinator import FrozenBuildInput, GraphBuildArtifact
+from tests.test_scoped_merge import _adapter_with_live, _journal_events
 
 
-def request(revision: str, content: bytes = b"x = 1\n") -> FrozenBuildInput:
+def _request(revision: str, content: bytes = b"x = 1\n") -> FrozenBuildInput:
     return FrozenBuildInput(revision, ("x.py",), (("x.py", content),))
 
 
-class EnrichmentHandle:
-    def __init__(self, receipt: dict, *, done: bool = True) -> None:
+class _Handle:
+    def __init__(self, task_id: str, receipt: dict, *, done: bool = True) -> None:
+        self.task_id = task_id
         self.receipt = receipt
         self.done = done
-        self.cancelled = False
-
-    def cancel(self) -> bool:
-        self.cancelled = True
-        return True
 
     def terminal_receipt(self, *, timeout=None) -> dict:
         assert self.done and timeout == 0
         return dict(self.receipt)
 
 
-def successful_receipt(source: str = "r1", graph: str = "g1") -> dict:
-    return {
+def _scheduler(*handles: _Handle):
+    return SimpleNamespace(
+        _handles=list(handles), close=lambda wait=False: None
+    )
+
+
+def _receipt(task_id: str, source: str, graph: str, candidate: Path,
+             **overrides) -> dict:
+    terminal = {
         "terminal": True,
         "status": "succeeded",
         "publishable": True,
+        "task_id": task_id,
         "source_revision": source,
         "input_graph_revision": graph,
-        "candidate_path": "candidate.db",
-        "output_graph_sha256": "a" * 64,
-        # A promotion that SUCCEEDED produced edges. Publication is now gated on
-        # verified+corrected+deleted > 0, because run 34077224456 published four
-        # 912MB candidates carrying zero new edges - each one changing the graph
-        # identity the agent queried against for nothing, and cancelling the
-        # enrichment in flight behind it. A fixture named successful_receipt
-        # that yields nothing was describing the churn, not the success.
+        "candidate_path": str(candidate),
+        # A promotion that succeeded produced edges. Publication is gated on
+        # verified+corrected+selected+deleted > 0, because run 34077224456
+        # published four 912MB candidates carrying zero new edges.
         "verified": 12,
         "corrected": 3,
+        "selected": 0,
         "deleted": 0,
     }
+    terminal.update(overrides)
+    return terminal
 
 
-def test_core_is_published_before_current_enrichment_candidate(tmp_path) -> None:
-    core_db = tmp_path / "core.db"
-    core_db.write_bytes(b"core")
+def _schedule_stub(adapter, monkeypatch, handles):
+    """Bypass the freeze + producer seams: return canned handles."""
+    requests: list[FrozenBuildInput] = []
+    monkeypatch.setattr(
+        adapter, "_frozen_graph_input",
+        lambda snapshot: _request(adapter.engine_state.source_revision),
+    )
+    monkeypatch.setattr(
+        adapter, "_schedule_lsp_candidate",
+        lambda request, base: requests.append(request) or handles.pop(0),
+    )
+    return requests
+
+
+def test_promotion_publishes_when_the_base_is_still_adopted(
+    tmp_path, monkeypatch
+) -> None:
+    adapter, live = _adapter_with_live(tmp_path)
     candidate = tmp_path / "candidate.db"
-    state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
-    handle = EnrichmentHandle(
-        {**successful_receipt(), "candidate_path": str(candidate)}
+    candidate.write_bytes(b"candidate")
+    handle = _Handle(
+        "task-1",
+        _receipt("task-1", "source-r2", adapter.engine_state.graph_revision,
+                 candidate),
     )
-    factory_calls = []
-
-    def factory(item, core):
-        factory_calls.append((item.source_revision, core.graph_revision, state.graph_path))
-        return handle
-
-    def certify(item, core, receipt):
-        assert item.source_revision == receipt["source_revision"]
-        assert core.graph_revision == receipt["input_graph_revision"]
-        candidate.write_bytes(b"candidate")
-        return GraphBuildArtifact(True, receipt["candidate_path"], "g1+lsp")
-
-    coordinator = GraphBuildCoordinator(
-        state, lambda _: GraphBuildArtifact(True, str(core_db), "g1"),
-        enrichment_factory=factory, candidate_certifier=certify,
-    )
-    try:
-        coordinator.schedule(request("r1"))
-        assert coordinator.wait_idle(timeout=3)
-        assert coordinator.poll() == 1
-        assert state.graph_path == str(core_db)
-        assert factory_calls == [("r1", "g1", str(core_db))]
-
-        assert coordinator.poll() == 1
-        assert state.graph_path == str(candidate)
-        assert state.graph_revision == "g1+lsp"
-    finally:
-        coordinator.close(wait=True)
-
-
-def test_edit_cancels_obsolete_enrichment_and_it_never_publishes(tmp_path) -> None:
-    state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
-    handle = EnrichmentHandle(successful_receipt(), done=False)
-    observed = []
-
-    def build(item):
-        graph = tmp_path / f"{item.source_revision}.db"
-        graph.write_bytes(b"graph")
-        return GraphBuildArtifact(True, str(graph), item.source_revision)
-
-    coordinator = GraphBuildCoordinator(
-        state, build,
-        enrichment_factory=lambda _item, _core: handle,
-        candidate_certifier=lambda _item, _core, receipt: GraphBuildArtifact(
-            True, receipt["candidate_path"], "g1+lsp"
-        ),
-        enrichment_observer=lambda _item, _core, receipt, disposition: observed.append(
-            (receipt["status"], disposition)
+    _schedule_stub(adapter, monkeypatch, [handle])
+    monkeypatch.setattr(
+        adapter, "_certify_lsp_candidate",
+        lambda request, base, terminal: GraphBuildArtifact(
+            True, str(candidate), "g1+lsp"
         ),
     )
+    adapter._lsp_scheduler = _scheduler(handle)
+    adapter._latest_workspace_snapshot = SimpleNamespace()
     try:
-        coordinator.schedule(request("r1"))
-        assert coordinator.wait_idle(timeout=3)
-        coordinator.poll()
-        assert state.graph_path == str(tmp_path / "r1.db")
-
-        state.mark_paths_dirty(("x.py",), revision="r2")
-        coordinator.schedule(request("r2", b"x = 2\n"))
-        assert handle.cancelled
-        handle.receipt = {
-            **handle.receipt,
-            "status": "cancelled",
-            "publishable": False,
-            "reason": "cancel_requested",
-        }
-        handle.done = True
-        coordinator.poll()
-        assert state.graph_path == str(tmp_path / "r1.db")
-        assert state.source_revision == "r2"
-        assert observed == [("cancelled", "obsolete")]
+        adapter._maybe_schedule_lsp_promotion()
+        assert adapter._lsp_active == "task-1"
+        adapter._poll_lsp_promotions()
+        assert adapter.engine_state.graph_path == str(candidate)
+        assert adapter.engine_state.graph_revision == "g1+lsp"
+        assert adapter._lsp_active is None
+        terminal = [
+            row for row in _journal_events(adapter)
+            if row["event"] == "lsp_promotion_terminal"
+        ]
+        assert terminal[-1]["disposition"] == "published"
     finally:
-        coordinator.close(wait=True)
+        adapter.close_graph_lifecycle()
 
 
-def test_new_core_publication_cancels_previous_same_source_enrichment(tmp_path) -> None:
-    state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
-    handles = [EnrichmentHandle(successful_receipt(graph="g1"), done=False),
-               EnrichmentHandle(successful_receipt(graph="g2"), done=False)]
-
-    def build(item):
-        name = "one.db" if item.files[0][1] == b"one" else "two.db"
-        graph = tmp_path / name
-        graph.write_bytes(b"graph")
-        return GraphBuildArtifact(
-            True, str(graph),
-            "g1" if item.files[0][1] == b"one" else "g2",
-        )
-
-    coordinator = GraphBuildCoordinator(
-        state,
-        build,
-        enrichment_factory=lambda _item, _core: handles.pop(0),
-        candidate_certifier=lambda _item, _core, _receipt: GraphBuildArtifact(
-            True, "candidate.db", "candidate"
-        ),
+def test_superseded_promotion_observes_obsolete_and_never_publishes(
+    tmp_path, monkeypatch
+) -> None:
+    adapter, live = _adapter_with_live(tmp_path)
+    candidate = tmp_path / "candidate.db"
+    candidate.write_bytes(b"candidate")
+    base_revision = adapter.engine_state.graph_revision
+    handle = _Handle(
+        "task-2",
+        _receipt("task-2", "source-r2", base_revision, candidate),
     )
+    _schedule_stub(adapter, monkeypatch, [handle])
+    adapter._lsp_scheduler = _scheduler(handle)
+    adapter._latest_workspace_snapshot = SimpleNamespace()
     try:
-        coordinator.schedule(request("r1", b"one"))
-        assert coordinator.wait_idle(timeout=3)
-        coordinator.poll()
-        first = coordinator.enrichment_handle
-        coordinator.schedule(request("r1", b"two"))
-        assert coordinator.wait_idle(timeout=3)
-        coordinator.poll()
-        assert first.cancelled
-        assert state.graph_path == str(tmp_path / "two.db")
+        adapter._maybe_schedule_lsp_promotion()
+        # The authority moves before the promotion drains.
+        adapter.engine_state.source_revision = "source-r3"
+        adapter._poll_lsp_promotions()
+        assert adapter.engine_state.graph_path == str(live)
+        terminal = [
+            row for row in _journal_events(adapter)
+            if row["event"] == "lsp_promotion_terminal"
+        ]
+        assert terminal[-1]["disposition"] == "obsolete"
+        # Refusal deletes the candidate unless salvage claimed it first;
+        # either way it is not adopted.
+        assert adapter.engine_state.graph_revision == base_revision
     finally:
-        coordinator.close(wait=True)
+        adapter.close_graph_lifecycle()
 
 
-def test_failed_or_mismatched_enrichment_receipt_never_publishes(tmp_path) -> None:
-    core_db = tmp_path / "core.db"
-    core_db.write_bytes(b"core")
-    for receipt in (
-        {**successful_receipt(), "status": "failed", "publishable": False},
-        {**successful_receipt(), "input_graph_revision": "other"},
+def test_one_active_promotion_and_considered_identities_dedupe(
+    tmp_path, monkeypatch
+) -> None:
+    adapter, live = _adapter_with_live(tmp_path)
+    handle = _Handle(
+        "task-3",
+        _receipt("task-3", "source-r2",
+                 adapter.engine_state.graph_revision, tmp_path / "c.db"),
+        done=False,
+    )
+    requests = _schedule_stub(adapter, monkeypatch, [handle])
+    adapter._lsp_scheduler = _scheduler(handle)
+    adapter._latest_workspace_snapshot = SimpleNamespace()
+    try:
+        adapter._maybe_schedule_lsp_promotion()
+        adapter._maybe_schedule_lsp_promotion()
+        assert len(requests) == 1, "one active promotion, never two"
+        adapter._lsp_active = None
+        adapter._maybe_schedule_lsp_promotion()
+        assert len(requests) == 1, "same input identity is already considered"
+    finally:
+        adapter.close_graph_lifecycle()
+
+
+def test_failed_and_mismatched_receipts_never_publish(
+    tmp_path, monkeypatch
+) -> None:
+    for overrides, expected in (
+        ({"status": "failed", "publishable": False}, "not_publishable"),
+        ({"verified": 0, "corrected": 0, "selected": 0, "deleted": 0},
+         "no_edge_mutations"),
+        ({"input_graph_revision": "other"}, "identity_mismatch"),
     ):
-        state = EngineState(graph_path="base.db", graph_revision="g0", source_revision="r1")
-        observed = []
-        coordinator = GraphBuildCoordinator(
-            state, lambda _: GraphBuildArtifact(True, str(core_db), "g1"),
-            enrichment_factory=lambda _item, _core, value=receipt: EnrichmentHandle(value),
-            candidate_certifier=lambda _item, _core, value: GraphBuildArtifact(
-                True, value["candidate_path"], "g1+lsp"
-            ),
-            enrichment_observer=(
-                lambda _item, _core, value, disposition, sink=observed: sink.append(
-                    (value["status"], disposition)
-                )
-            ),
+        subdir = tmp_path / expected
+        subdir.mkdir()
+        adapter, live = _adapter_with_live(subdir)
+        candidate = tmp_path / f"{expected}.db"
+        candidate.write_bytes(b"candidate")
+        terminal = _receipt(
+            "task-x", "source-r2", adapter.engine_state.graph_revision,
+            candidate, **overrides,
         )
+        base = GraphBuildArtifact(
+            True, str(live), adapter.engine_state.graph_revision
+        )
+        request = _request("source-r2")
         try:
-            coordinator.schedule(request("r1"))
-            assert coordinator.wait_idle(timeout=3)
-            coordinator.poll()
-            coordinator.poll()
-            assert state.graph_path == str(core_db)
-            assert coordinator.last_error.startswith("enrichment_")
-            assert len(observed) == 1
+            disposition = adapter._lsp_terminal_disposition(
+                request, base, terminal
+            )
+            assert disposition == expected
+            assert adapter.engine_state.graph_path == str(live)
         finally:
-            coordinator.close(wait=True)
+            adapter.close_graph_lifecycle()
 
 
-def test_initial_current_graph_can_be_considered_once_without_rebuild() -> None:
-    state = EngineState(graph_path="initial.db", graph_revision="g0", source_revision="r0")
-    handle = EnrichmentHandle(successful_receipt("r0", "g0"), done=False)
-    calls = []
-    coordinator = GraphBuildCoordinator(
-        state, lambda _: GraphBuildArtifact(False, "", ""),
-        enrichment_factory=lambda item, base: calls.append(
-            (item.source_revision, base.graph_revision)
-        ) or handle,
-        candidate_certifier=lambda _item, _base, _receipt: GraphBuildArtifact(
-            True, "initial-lsp.db", "g0+lsp"
-        ),
+def test_schedule_exception_is_terminal_journaled_data(
+    tmp_path, monkeypatch
+) -> None:
+    adapter, live = _adapter_with_live(tmp_path)
+    monkeypatch.setattr(
+        adapter, "_frozen_graph_input",
+        lambda snapshot: _request(adapter.engine_state.source_revision),
     )
-    try:
-        initial = GraphBuildArtifact(True, "initial.db", "g0")
-        assert coordinator.consider_enrichment(request("r0"), initial) == "scheduled"
-        assert coordinator.consider_enrichment(request("r0"), initial) == "already_active"
-        assert calls == [("r0", "g0")]
-    finally:
-        coordinator.close(wait=False)
 
-
-def test_factory_exception_is_terminal_observed_data_and_core_stays_usable() -> None:
-    state = EngineState(graph_path="initial.db", graph_revision="g0", source_revision="r0")
-    observed = []
-
-    def unavailable(_item, _base):
+    def unavailable(request, base):
         raise ImportError("installed scheduler unavailable")
 
-    coordinator = GraphBuildCoordinator(
-        state, lambda _: GraphBuildArtifact(False, "", ""),
-        enrichment_factory=unavailable,
-        candidate_certifier=lambda _item, _base, _receipt: GraphBuildArtifact(
-            False, "", "", "must_not_run"
-        ),
-        enrichment_observer=lambda _item, _base, receipt, disposition: observed.append(
-            (receipt["status"], receipt["reason"], disposition)
-        ),
-    )
+    monkeypatch.setattr(adapter, "_schedule_lsp_candidate", unavailable)
+    adapter._latest_workspace_snapshot = SimpleNamespace()
     try:
-        initial = GraphBuildArtifact(True, "initial.db", "g0")
-        assert coordinator.consider_enrichment(request("r0"), initial) == "failed"
-        assert coordinator.consider_enrichment(request("r0"), initial) == "already_considered"
-        assert observed == [
-            ("failed", "factory_exception:ImportError", "factory_exception")
+        adapter._maybe_schedule_lsp_promotion()
+        assert adapter._lsp_active is None
+        terminal = [
+            row for row in _journal_events(adapter)
+            if row["event"] == "lsp_promotion_terminal"
         ]
-        assert state.graph_current and state.graph_path == "initial.db"
+        assert terminal[-1]["disposition"] == "schedule_exception"
+        assert terminal[-1]["status"] == "failed"
+        assert adapter.engine_state.graph_current
     finally:
-        coordinator.close(wait=True)
+        adapter.close_graph_lifecycle()

@@ -180,25 +180,20 @@ def test_rapid_sequential_edits_stay_current(tmp_path, fake_amend):
         assert all(row.get("adopted") for row in amends)
         assert len(fake_amend) == 15
     finally:
-        adapter.close_graph_coordinator()
+        adapter.close_graph_lifecycle()
 
 
-def test_superseded_async_build_never_publishes_and_named_survives(
+def test_superseded_produced_graph_never_publishes_and_named_survives(
     tmp_path, fake_amend, monkeypatch
 ):
-    """The arktype invariant, replayed on the coordination plane.
+    """The arktype invariant on the adoption path.
 
-    A build frozen at r2 finishes after an edit moved the source to r3
-    and the sync amend already published r3. The poll must refuse the
-    stale artifact, reclaim must delete the produced revision, and the
-    adopted r3 graph - the one the authority names - must survive.
+    A receipt produced against r2 arrives after an edit moved the source
+    to r3 and the sync amend already published it. publish_graph refuses
+    the stale artifact, the adopted r3 graph survives, and the refused
+    produce is retained as the certified fallback parent - reclaim only
+    ever deletes what no authority names.
     """
-    from gt_engine.graph_coordinator import (
-        FrozenBuildInput,
-        GraphBuildArtifact,
-        GraphBuildCoordinator,
-    )
-
     adapter, live = _adapter_with_live(tmp_path)
     layout = adapter.engine_state.layout
     produced_dir = layout.graph_root / "revisions" / "stale-build"
@@ -206,35 +201,7 @@ def test_superseded_async_build_never_publishes_and_named_survives(
     produced = produced_dir / "graph.db"
     produced.write_bytes(live.read_bytes())
 
-    release = threading.Event()
-    builds: list[str] = []
-
-    def builder(request):
-        builds.append(request.source_revision)
-        release.wait(timeout=10)
-        return GraphBuildArtifact(True, str(produced), "rev-stale")
-
-    coordinator = GraphBuildCoordinator(
-        adapter.engine_state, builder,
-        reclaimer=adapter._graph_revision_reclaim,
-    )
     try:
-        request = FrozenBuildInput(
-            source_revision="source-r2",
-            dirty_paths=("file1.py",),
-            files=(("file1.py", b"x = 1\n"),),
-            history="",
-            parent_graph_path=str(live),
-            parent_graph_revision=adapter.engine_state.graph_revision,
-        )
-        assert coordinator.schedule(request) == "scheduled"
-        deadline = time.monotonic() + 5
-        while not builds and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert builds == ["source-r2"]
-
-        # The edit lands mid-build: the sync amend publishes r3 and the
-        # frozen r2 result becomes unreachable authority.
         adapter.record_edit_transaction(
             _transaction("r3", ["file1.py"], action_id=2)
         )
@@ -242,22 +209,24 @@ def test_superseded_async_build_never_publishes_and_named_survives(
         adopted_path = adapter.engine_state.graph_path
         assert "amend-" in adopted_path
 
-        release.set()
-        assert coordinator.wait_idle(timeout=10)
-        coordinator.poll()
+        stale = SimpleNamespace(
+            success=True, graph_db=str(produced), graph_revision="rev-stale",
+            source_revision="source-r2", build_mode="incremental",
+            build_mode_reason="", embedding_state="skipped",
+        )
+        adapter._adopt_graph_receipt(stale, event="graph_boundary_amend")
 
         assert adapter.engine_state.graph_path == adopted_path
         assert Path(adopted_path).is_file()
         assert adapter.engine_state.graph_current
         assert adapter.engine_state.graph_source_revision == "r3"
-        assert not produced.exists(), (
-            "the refused artifact must be reclaimed, never adopted"
-        )
-        assert coordinator.last_error == "source_revision_superseded"
+        # The refused produce survives as the named fallback parent; the
+        # next boundary amend can build on it rather than recovering
+        # from scratch.
+        assert produced.exists()
+        assert adapter._unadopted_graph == (str(produced), "rev-stale")
     finally:
-        release.set()
-        coordinator.close(wait=False)
-        adapter.close_graph_coordinator()
+        adapter.close_graph_lifecycle()
 
 
 def test_dirty_window_is_partial_and_masked_never_stale_silent(
@@ -269,7 +238,7 @@ def test_dirty_window_is_partial_and_masked_never_stale_silent(
     try:
         many = [f"dir/file{i}.py" for i in range(20)]
         adapter.record_edit_transaction(
-            _transaction("r3", many, action_id=3)
+            _transaction("r2", many, action_id=3)
         )
         assert not adapter.engine_state.graph_current
         snapshot = adapter.engine_state.query_snapshot()
@@ -281,8 +250,22 @@ def test_dirty_window_is_partial_and_masked_never_stale_silent(
         )
         # The named graph is still the pre-edit artifact and still exists.
         assert Path(adapter.engine_state.graph_path).is_file()
+
+        # The serving boundary completes the deferred amend inline: the
+        # dirty window closes before any consumer can observe the graph
+        # behind the source. This is the post-coordinator contract --
+        # staleness is a boundary, not a queue position.
+        assert adapter.refresh_graph(phase="test") is True
+        assert adapter.engine_state.graph_current
+        assert len(fake_amend) == 1
+        assert set(fake_amend[0][1]) == set(many)
+        boundary = [
+            row for row in _journal_events(adapter)
+            if row.get("event") == "graph_boundary_amend"
+        ]
+        assert boundary and boundary[-1]["adopted"] is True
     finally:
-        adapter.close_graph_coordinator()
+        adapter.close_graph_lifecycle()
 
 
 def test_salvage_superseded_mid_flight_stays_unpublished(
@@ -358,15 +341,18 @@ def test_salvage_superseded_mid_flight_stays_unpublished(
         "superseded", "live_not_current", "candidate_missing",
         "input_missing",
     }, outcomes[-1]
-    adapter.close_graph_coordinator()
+    adapter.close_graph_lifecycle()
 
 
-def test_unenumerated_edit_blocks_sync_amend_and_stays_partial(
-    tmp_path, fake_amend
+def test_unenumerated_edit_blocks_sync_amend_and_recovers_at_boundary(
+    tmp_path, fake_amend, monkeypatch
 ):
-    """An incomplete transaction poisons both the sync amend and the
-    salvage stale set: the graph stays PARTIAL, nothing publishes on
-    faith."""
+    """An incomplete transaction poisons the sync amend: the dirty set is
+    unknowable, so nothing publishes on faith. The serving boundary
+    resyncs with the one build whose coverage does not depend on the
+    dirty set -- a whole-tree recovery -- and journals the reason."""
+    from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
+
     adapter, live = _adapter_with_live(tmp_path)
     try:
         incomplete = _transaction("r3", ["a.py"], action_id=4,
@@ -378,8 +364,32 @@ def test_unenumerated_edit_blocks_sync_amend_and_stays_partial(
         snapshot = adapter.engine_state.query_snapshot()
         assert snapshot.completeness is QueryCompleteness.CURRENT_PARTIAL
         assert snapshot.omissions
+
+        recovered = tmp_path / "recovered.db"
+        recovered.write_bytes(b"recovered")
+        monkeypatch.setattr(
+            "gt_engine.indexer.ensure_index_with_receipt",
+            lambda root, **kwargs: IndexBuildReceipt(
+                IndexBuildStatus.BUILT, graph_db=str(recovered),
+                graph_revision="d" * 64, analysis_state="complete",
+                source_revision="r3",
+            ),
+        )
+        assert adapter.refresh_graph(phase="test") is True
+        assert adapter.engine_state.graph_current
+        resync = [
+            row for row in _journal_events(adapter)
+            if row.get("event") == "graph_resync_incomplete"
+        ]
+        assert resync and "unenumerated_paths" in resync[-1]["omissions"]
+        recovery = [
+            row for row in _journal_events(adapter)
+            if row.get("event") == "graph_recovery"
+        ]
+        assert recovery and recovery[-1]["adopted"]
+        assert len(fake_amend) == 0
     finally:
-        adapter.close_graph_coordinator()
+        adapter.close_graph_lifecycle()
 
 
 def test_arktype_incident_sequence_produces_no_rebuild_storm(
@@ -457,4 +467,4 @@ def test_arktype_incident_sequence_produces_no_rebuild_storm(
             "nothing in this design can arrive already superseded"
         )
     finally:
-        adapter.close_graph_coordinator()
+        adapter.close_graph_lifecycle()

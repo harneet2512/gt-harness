@@ -27,7 +27,6 @@ SUITES: dict[str, tuple[str, ...]] = {
     ),
     "state": (
         "tests/test_engine_state.py",
-        "tests/test_graph_coordinator.py",
         "tests/test_graph_lease.py",
         "tests/test_runtime_observation.py",
         "tests/test_parser_inspection.py",
@@ -46,7 +45,6 @@ SUITES: dict[str, tuple[str, ...]] = {
         "tests/test_miniswe_receipt.py",
     ),
     "performance": (
-        "tests/test_graph_coordinator.py",
         "tests/test_delivery_budget.py",
         "tests/test_dense_runtime.py",
         "tests/test_request_history.py",

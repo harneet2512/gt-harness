@@ -10,13 +10,10 @@ anything, so it applies to runs already on disk.
 
 Three things it has to get right, each of which is a way the number could lie:
 
-BLOCKED TIME IS ZERO BY CONSTRUCTION, and that is a finding, not an omission.
-`GraphBuildCoordinator.wait_idle` exists and NOTHING on the live path calls it;
-`close_graph_coordinator` closes with `wait=False` on purpose, because an
-uncooperative in-flight pass otherwise holds the process past its deadline and
-the supervisor turns a scored submission into an infra timeout. So the run never
-waits for a graph. Reporting "blocked: 0.0s" without saying why invites the
-reading that graph builds are free.
+BLOCKED TIME IS MEASURED, NOT ASSUMED. The build coordinator is gone: amends
+run inside the edit boundary (`graph_sync_amend`) or at a serving boundary
+(`graph_boundary_amend`, `graph_recovery`) and carry `elapsed_ms`. Their sum
+is what graph work costs the agent's clock.
 
 WHAT THEY ACTUALLY COST IS GRAPH-DARK TIME. Between the edit that invalidates the
 graph and the publication that adopts the rebuild, every caller query, anchor and
@@ -147,28 +144,36 @@ def test_an_empty_journal_reports_nothing_rather_than_zero_cost():
     assert result["graph_dark_seconds"] is None
 
 
+def test_blocked_time_is_the_sum_of_boundary_amends():
+    rows = [
+        _row("graph_publication", 0),
+        _row("graph_sync_amend", 5, elapsed_ms=1200),
+        _row("graph_boundary_amend", 9, elapsed_ms=3400),
+        _row("session_closed", 20),
+    ]
+    result = account_run_loop(rows)
+    assert result["blocked_seconds"] == 4.6
+    assert result["builds"] == 2
+    assert "elapsed_ms" in result["blocked_basis"]
+
+
 def test_blocked_time_carries_the_reason_it_is_zero():
     """A bare 0.0 reads as "graph builds are free". It is not why."""
     result = account_run_loop([_row("session_closed", 1)])
     assert result["blocked_seconds"] == 0.0
-    assert "wait_idle" in result["blocked_basis"]
+    assert "elapsed_ms" in result["blocked_basis"]
 
 
-def test_nothing_on_the_live_path_waits_for_a_graph_build():
-    """The claim above, checked against the source rather than restated.
-
-    If a caller ever appears, `blocked_seconds` silently becomes a lie, and it
-    is the kind of lie nobody re-derives -- a zero looks like a measurement.
-    """
+def test_no_worker_exists_to_wait_for():
+    """The coordinator is deleted, not merely unwired: if a wait primitive
+    ever reappears, blocked_seconds silently becomes a lie."""
     import inspect
 
     from gt_engine import graph_coordinator, miniswe_integration, miniswe_runtime
 
-    for module in (miniswe_integration, miniswe_runtime):
+    for module in (graph_coordinator, miniswe_integration, miniswe_runtime):
         assert "wait_idle" not in inspect.getsource(module), module.__name__
-    # It still has to EXIST, or the accounting is describing a coordinator that
-    # is not the one shipped.
-    assert hasattr(graph_coordinator.GraphBuildCoordinator, "wait_idle")
+    assert not hasattr(graph_coordinator, "GraphBuildCoordinator")
 
 
 @pytest.mark.parametrize("event", ["graph_invalidated", "edit_transaction"])

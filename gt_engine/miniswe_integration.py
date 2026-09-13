@@ -33,7 +33,7 @@ from .event_journal import (
     read_verified_events,
     verify_event_journal,
 )
-from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
+from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
 from .provider_wait import ProviderWaitScheduler
 from .persistent_plan.provenance import cleared_check_provenance
@@ -443,13 +443,18 @@ class MiniSweAdapter(GroundtruthController):
         self._closed_blockers: Any | None = None
         self._submit_invalidation_keys: dict[str, str] = {}
         self._latest_workspace_snapshot: Any | None = None
-        # Set at close_graph_coordinator. A build still in flight may not
+        # Set at close_graph_lifecycle. Work still in flight may not
         # append past the point the run seals its manifest.
         self._journal_sealed = False
         self._dropped_observations = 0
-        self._graph_coordinator: GraphBuildCoordinator | None = None
         self._lsp_scheduler: Any | None = None
         self._lsp_requests: dict[str, Any] = {}
+        # Promotion bookkeeping moved out of the coordinator: the (request,
+        # base) pair each scheduled promotion certified against, the
+        # already-considered input identities, and the single active task.
+        self._lsp_bases: dict[str, tuple[FrozenBuildInput, GraphBuildArtifact]] = {}
+        self._lsp_considered: set[tuple[Any, ...]] = set()
+        self._lsp_active: str | None = None
         # Async initial index: the runner starts ensure_index on a worker and
         # hands the future here. The host loop runs immediately; the graph
         # publishes through engine_state when the build lands, or becomes the
@@ -670,9 +675,9 @@ class MiniSweAdapter(GroundtruthController):
     def provider_wait_end(self) -> None:
         """Boundary after the provider call; collect whatever landed."""
         try:
-            if self._wait_scheduler is None:
-                return
-            self._drain_wait_work()
+            if self._wait_scheduler is not None:
+                self._drain_wait_work()
+            self._poll_lsp_promotions()
         except Exception as exc:  # noqa: BLE001
             self._append_observation(
                 "provider_wait_end_fault", error_type=type(exc).__name__
@@ -1959,11 +1964,16 @@ class MiniSweAdapter(GroundtruthController):
                 or self._startup_index is not None):
             return
         snapshot = self.engine_state.query_snapshot()
-        if snapshot.omissions:
+        if any(value != "transaction_bytes_unavailable"
+               for value in snapshot.omissions):
             # The overlay is not the whole dirty state: an earlier incomplete
             # transaction recorded unenumerated changes into omissions, and
             # publish_graph would clear them on top of a graph that never
-            # covered them. The async path fails closed on the same data.
+            # covered them. The serving boundary resyncs on the same data.
+            # A lone transaction_bytes_unavailable is different: every dirty
+            # path IS enumerated -- only its byte record is missing -- and
+            # the producer re-reads live bytes, so the amend still covers
+            # the whole dirty set.
             return
         dirty = tuple(sorted(snapshot.masked_paths))
         if not dirty or len(dirty) > self.SYNC_AMEND_MAX_PATHS:
@@ -1997,8 +2007,8 @@ class MiniSweAdapter(GroundtruthController):
             published, reason, results = None, f"{type(exc).__name__}: {exc}"[:200], ()
         elapsed_ms = int((time.monotonic() - started) * 1000)
         if not published:
-            # Not a rebuild trigger. The coordinator amends this same dirty
-            # set on its own clock; the refusal is journaled so a path that
+            # Not a rebuild trigger. The next serving boundary amends this
+            # same dirty set inline; the refusal is journaled so a path that
             # never syncs is visible instead of silently slow.
             self.store.append(
                 "graph_sync_amend_refused", reason=reason[:200],
@@ -2011,32 +2021,12 @@ class MiniSweAdapter(GroundtruthController):
             embedding_budget_seconds=self.SYNC_AMEND_EMBEDDING_BUDGET_SECONDS,
             layout=layout, build_mode="incremental", incremental_results=results,
         )
-        adopted = bool(receipt.success) and self.engine_state.publish_graph(
-            graph_path=receipt.graph_db, graph_revision=receipt.graph_revision,
-            source_revision=receipt.source_revision,
-        )
-        self.store.append(
-            "graph_sync_amend",
-            adopted=adopted, dirty_paths=list(dirty),
+        self._adopt_graph_receipt(
+            receipt, event="graph_sync_amend", dirty_paths=list(dirty),
             parent_graph=str(parent),
-            graph_revision=str(receipt.graph_revision or ""),
-            source_revision=str(receipt.source_revision or ""),
             amended=[dict(row) for row in results],
-            embedding_state=str(receipt.embedding_state or ""),
             elapsed_ms=elapsed_ms,
         )
-        if adopted:
-            self.graph_db = self.engine_state.graph_path
-            self._gateway_state = None
-            self.graph_stale_since_revision = ""
-            self._record_graph_publication()
-        elif receipt.success:
-            # publish_graph refuses only on a revision race, and this thread
-            # owns the boundary - a refusal here is itself the anomaly worth
-            # journaling rather than silently dropping the certified graph.
-            self._unadopted_graph = (
-                str(receipt.graph_db or ""), str(receipt.graph_revision or "")
-            )
 
     def record_transaction_artifacts(self, artifacts: Mapping[str, Any]) -> str:
         encoded = json.dumps(
@@ -2327,6 +2317,7 @@ class MiniSweAdapter(GroundtruthController):
                     self.graph_db = self.engine_state.graph_path
                     self._unadopted_graph = ("", "")
                     self._record_graph_publication()
+                    self._maybe_schedule_lsp_promotion()
                 else:
                     # Superseded by edits: not publishable as current, but
                     # exactly the certified parent the next amend builds on.
@@ -2334,6 +2325,10 @@ class MiniSweAdapter(GroundtruthController):
                         str(receipt.graph_db or ""),
                         str(receipt.graph_revision or ""),
                     )
+                self._reclaim_produced_graph(
+                    str(receipt.graph_db or ""),
+                    success=True, adopted=adopted,
+                )
                 self.store.append(
                     "initial_index_ready",
                     adopted=adopted,
@@ -2421,60 +2416,400 @@ class MiniSweAdapter(GroundtruthController):
                 self._journal_compiled_predicates("plan", added)
 
     def refresh_graph(self, *, phase: str = "graph_query") -> bool:
-        """Poll or schedule a frozen-input rebuild without blocking Mini-SWE."""
+        """Make the adopted graph current at this boundary, inline.
+
+        There is no scheduler: whatever the transaction-boundary amend
+        deferred (over-cap dirty sets, refused amends) is completed HERE,
+        before any consumer can observe the graph behind the source. A
+        dirty set that cannot be enumerated is a typed failure, never a
+        stale serve.
+        """
         self._poll_startup_index()
         if self._startup_index is not None:
-            # The startup build IS the scheduled build for the bound revision.
-            # Scheduling a second one through the coordinator would run two
-            # concurrent indexes of identical input and halve the CPU each
-            # gets - on the repositories this path exists for, that is the
-            # difference between landing and starving.
             return False
-        if self._graph_coordinator is not None:
-            self._graph_coordinator.poll()
-            if self.engine_state.graph_current:
-                self.graph_db = self.engine_state.graph_path
-                self._gateway_state = None
-                self.graph_stale_since_revision = ""
-                self._record_graph_publication()
-                return True
-        if not self.repo_root or self._latest_workspace_snapshot is None:
-            self._record_graph_refresh_failure("frozen_source_unavailable", phase=phase)
+        if not self.engine_state.graph_current:
+            self._amend_graph_inline(phase=phase)
+        if not self.engine_state.graph_current:
             return False
-        try:
-            request = self._frozen_graph_input(self._latest_workspace_snapshot)
-            from .indexer import SOURCE_EXTS
+        self.graph_db = self.engine_state.graph_path
+        self._gateway_state = None
+        self.graph_stale_since_revision = ""
+        self._record_graph_publication()
+        self._poll_lsp_promotions()
+        self._maybe_schedule_lsp_promotion()
+        return True
 
-            if not any(Path(path).suffix.lower() in SOURCE_EXTS for path, _ in request.files):
-                return False
-            if self._graph_coordinator is None:
-                self._graph_coordinator = GraphBuildCoordinator(
-                    self.engine_state, self._build_frozen_graph,
-                    enrichment_factory=self._schedule_lsp_candidate,
-                    candidate_certifier=self._certify_lsp_candidate,
-                    enrichment_observer=self._record_lsp_terminal,
-                    reclaimer=self._graph_revision_reclaim,
-                )
-            if self.engine_state.graph_current:
-                self._graph_coordinator.consider_enrichment(request, GraphBuildArtifact(
-                    True, self.engine_state.graph_path, self.engine_state.graph_revision,
-                ))
-                return True
-            disposition = self._graph_coordinator.schedule(request)
-        except Exception as exc:  # noqa: BLE001 - freshness is fail-open
+    def _amend_graph_inline(self, *, phase: str) -> None:
+        """Catch the adopted graph up to the overlay, at a serving boundary.
+
+        Same machinery as the transaction-boundary amend but unbounded on
+        path count: the boundary is where mass mutations finish syncing.
+        The dirty set is the engine's overlay -- never just the last edit --
+        and a parent that can never serve again earns a named recovery
+        build, not a silent full re-index.
+        """
+        if not self.repo_root:
+            self._record_graph_refresh_failure("repo_root_unavailable", phase=phase)
+            return
+        snapshot = self.engine_state.query_snapshot()
+        unenumerated = [
+            value for value in snapshot.omissions
+            if value != "transaction_bytes_unavailable"
+        ]
+        if unenumerated:
+            # The dirty set is unknowable, so no amend can cover it. The one
+            # honest resync is a whole-tree build: it publishes on the live
+            # tree, not on the dirty set, and clears the omissions on
+            # adoption. Refusing instead would leave the omissions forever,
+            # which is permanent PARTIAL masquerading as caution.
             self.store.append(
-                "graph_refresh_failed", error_type=type(exc).__name__,
-                error_detail=str(exc)[:200],
+                "graph_resync_incomplete", phase=phase,
+                omissions=list(snapshot.omissions),
+            )
+            self._recovery_build_inline(phase=phase)
+            return
+        dirty = tuple(sorted(snapshot.masked_paths))
+        parent = self.engine_state.graph_path or self._unadopted_graph[0]
+        if not parent:
+            # Nothing to amend from -- the one legitimate from-scratch
+            # build, whether paths are masked or not.
+            self._recovery_build_inline(phase=phase)
+            return
+        if not dirty:
+            # Non-current with a bound parent and nothing masked is a stale
+            # marking, not a build trigger.
+            return
+        from . import indexer
+        from .indexer import _graph_publication_lock
+
+        layout = self.engine_state.layout
+        started = time.monotonic()
+        try:
+            with _graph_publication_lock(layout.graph_root / ".graph.lock"):
+                published, reason, results = indexer._ensure_index_incremental_unlocked(
+                    str(self.repo_root), layout=layout,
+                    parent_graph=Path(parent), changed_paths=dirty,
+                    excluded_roots=tuple(layout.excluded_roots),
+                ) if parent else (None, "no_parent_graph", ())
+        except Exception as exc:  # noqa: BLE001 - an amend failure is data
+            published, reason, results = None, f"{type(exc).__name__}: {exc}"[:200], ()
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        if not published and (
+            (reason or "").startswith("incremental_parent_uncertifiable")
+            or (parent and reason in {
+                "parent_graph_missing", "parent_manifest_missing",
+                "immutable_graph_artifact_invalid",
+            })
+        ):
+            # The chain's base is gone: the one legitimate rebuild.
+            self._recovery_build_inline(phase=phase)
+            return
+        if not published:
+            self.store.append(
+                "graph_boundary_amend_refused", reason=reason[:200],
+                dirty_paths=list(dirty), parent_graph=str(parent), phase=phase,
+            )
+            self._record_graph_refresh_failure(
+                f"amend_refused:{reason[:80]}", phase=phase,
+            )
+            return
+        receipt = indexer._receipt_for_published_graph(
+            published, source_revision=self.engine_state.source_revision,
+            embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
+            layout=layout, build_mode="incremental", incremental_results=results,
+        )
+        self._adopt_graph_receipt(
+            receipt, event="graph_boundary_amend", dirty_paths=list(dirty),
+            parent_graph=str(parent), elapsed_ms=elapsed_ms,
+            amended=[dict(row) for row in results],
+        )
+
+    def _recovery_build_inline(self, *, phase: str) -> None:
+        """The only from-scratch build outside task start: the amend chain's
+        base can never serve again, so the boundary rebuilds inline."""
+        from dataclasses import replace
+
+        from .indexer import ensure_index_with_receipt
+
+        started = time.monotonic()
+        try:
+            receipt = ensure_index_with_receipt(
+                Path(self.repo_root), layout=self.engine_state.layout,
+                source_revision=self.engine_state.source_revision,
+                embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
+                reclaim=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - build failure is data
+            self.store.append(
+                "graph_recovery_failed", phase=phase,
+                error_type=type(exc).__name__, error_detail=str(exc)[:200],
             )
             self._record_graph_refresh_failure(type(exc).__name__, phase=phase)
-            return False
-        self.store.append(
-            "graph_refresh_scheduled",
-            disposition=disposition,
-            repository_revision=self.repository_revision,
-            dirty_paths=list(request.dirty_paths),
+            return
+        try:
+            # The requested revision is the adoption claim, not whatever the
+            # producer echoed back - publish_graph compares against it.
+            receipt = replace(
+                receipt, source_revision=self.engine_state.source_revision)
+        except TypeError:
+            # A test double whose receipt is not a dataclass still carries the
+            # requested revision through publish_graph's own argument.
+            pass
+        self._adopt_graph_receipt(
+            receipt, event="graph_recovery", phase=phase,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
         )
-        return False
+
+    def _adopt_graph_receipt(
+        self, receipt: Any, *, event: str, phase: str = "", **fields: Any,
+    ) -> None:
+        """Publish, journal, and reclaim a produced graph, on the owner thread.
+
+        Reclamation keys on the adoption decision: adopted -> prune siblings
+        the authority no longer names; refused -> the produced revision can
+        never be named, so discard it directly.
+        """
+        adopted = bool(receipt.success) and self.engine_state.publish_graph(
+            graph_path=receipt.graph_db, graph_revision=receipt.graph_revision,
+            source_revision=receipt.source_revision,
+        )
+        row = {
+            "adopted": adopted,
+            "graph_revision": str(receipt.graph_revision or ""),
+            "source_revision": str(receipt.source_revision or ""),
+            "build_mode": str(getattr(receipt, "build_mode", "") or ""),
+            "build_mode_reason": str(getattr(receipt, "build_mode_reason", "") or ""),
+            "analysis_state": str(getattr(receipt, "analysis_state", "") or ""),
+            "embedding_state": str(getattr(receipt, "embedding_state", "") or ""),
+            **fields,
+        }
+        if phase:
+            row["phase"] = phase
+        self.store.append(event, **row)
+        self._reclaim_produced_graph(
+            str(receipt.graph_db or ""), success=bool(receipt.success),
+            adopted=adopted,
+        )
+        if adopted:
+            self.graph_db = self.engine_state.graph_path
+            self._gateway_state = None
+            self.graph_stale_since_revision = ""
+            self._unadopted_graph = ("", "")
+            self._record_graph_publication()
+            self._maybe_schedule_lsp_promotion()
+        elif receipt.success:
+            # publish_graph refuses only on a revision race; journaled rather
+            # than silently dropped. The artifact stays: it is the certified
+            # parent the next amend builds on.
+            self._unadopted_graph = (
+                str(receipt.graph_db or ""), str(receipt.graph_revision or "")
+            )
+        else:
+            self._record_graph_refresh_failure(
+                str(getattr(receipt, "error_type", "") or "build_failed"),
+                phase=phase or event,
+            )
+
+    def _reclaim_produced_graph(
+        self, graph_db: str, *, success: bool, adopted: bool
+    ) -> None:
+        """Prune or discard a produced revision by its adoption outcome.
+
+        The protected set is what the authority still names: the adopted
+        graph and the certified fallback parent. Pinned and
+        manifest-referenced revisions are protected inside the prune.
+        """
+        if not graph_db:
+            return
+        produced = Path(graph_db).parent
+        try:
+            if adopted:
+                from .indexer import prune_graph_revisions
+
+                named = {
+                    str(self.engine_state.graph_path or ""),
+                    str(self._unadopted_graph[0] or ""),
+                }
+                prune_graph_revisions(
+                    produced,
+                    protected=frozenset(
+                        Path(path).parent for path in named if path
+                    ),
+                )
+            elif not success:
+                # A failed produce named by no authority is garbage. A
+                # refused-but-successful one survives as the certified
+                # fallback parent.
+                from .indexer import discard_revision
+
+                discard_revision(produced)
+        except Exception:  # noqa: BLE001 - reclamation never breaks a boundary
+            pass
+
+    def _maybe_schedule_lsp_promotion(self) -> None:
+        """Schedule one LSP promotion against the adopted graph.
+
+        What ``consider_enrichment`` did without a coordinator: one active
+        promotion at a time, deduplicated on the frozen input identity, and
+        only ever against a graph the authority currently names. The freeze
+        can refuse on unreadable source -- a skipped promotion is journaled,
+        never fatal.
+        """
+        if (
+            not self.engine_state.graph_current
+            or self._lsp_active is not None
+            or self._latest_workspace_snapshot is None
+        ):
+            return
+        try:
+            request = self._frozen_graph_input(self._latest_workspace_snapshot)
+        except Exception as exc:  # noqa: BLE001 - a refused freeze is data
+            self.store.append(
+                "lsp_promotion_schedule_refused",
+                reason=str(exc)[:200],
+            )
+            return
+        base = GraphBuildArtifact(
+            True, self.engine_state.graph_path, self.engine_state.graph_revision,
+        )
+        identity = self._lsp_enrichment_identity(request, base)
+        if identity in self._lsp_considered:
+            return
+        self._lsp_considered.add(identity)
+        try:
+            handle = self._schedule_lsp_candidate(request, base)
+        except Exception as exc:  # noqa: BLE001 - a failed schedule is data
+            receipt = {
+                "terminal": True, "status": "failed",
+                "reason": f"schedule_exception:{type(exc).__name__}",
+                "publishable": False,
+                "source_revision": request.source_revision,
+                "input_graph_revision": base.graph_revision,
+            }
+            self._record_lsp_terminal(request, base, receipt, "schedule_exception")
+            return
+        self._lsp_bases[handle.task_id] = (request, base)
+        self._lsp_active = handle.task_id
+
+    @staticmethod
+    def _lsp_enrichment_identity(
+        request: FrozenBuildInput, base: GraphBuildArtifact
+    ) -> tuple[Any, ...]:
+        digest = hashlib.sha256()
+        for path, content in request.files:
+            name = path.encode("utf-8", "surrogatepass")
+            digest.update(len(name).to_bytes(8, "big"))
+            digest.update(name)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+        return (
+            request.source_revision, digest.hexdigest(), request.history,
+            base.graph_path, base.graph_revision,
+        )
+
+    def _poll_lsp_promotions(self) -> None:
+        """Drain finished promotions: certify, adopt, salvage, or discard.
+
+        The coordinator's ``_poll_enrichment`` disposition chain, unchanged:
+        a promotion is only adopted while the graph it enriched is still the
+        one the authority names; a superseded-but-valid candidate is staged
+        for scoped salvage; everything else is discarded so refusal cannot
+        leak ~1GB candidates onto the artifact.
+        """
+        if self._lsp_scheduler is None:
+            return
+        for handle in list(getattr(self._lsp_scheduler, "_handles", ()) or ()):
+            task_id = str(getattr(handle, "task_id", "") or "")
+            entry = self._lsp_bases.get(task_id)
+            if entry is None:
+                continue
+            try:
+                done = handle.done
+            except Exception:  # noqa: BLE001
+                done = True
+            if not done:
+                continue
+            request, base = entry
+            try:
+                terminal = dict(handle.terminal_receipt(timeout=0))
+            except Exception as exc:  # noqa: BLE001
+                terminal = {
+                    "terminal": True, "status": "failed",
+                    "reason": f"receipt_exception:{type(exc).__name__}",
+                    "publishable": False,
+                }
+            if self._lsp_active == task_id:
+                self._lsp_active = None
+            disposition = self._lsp_terminal_disposition(request, base, terminal)
+            self._record_lsp_terminal(request, base, terminal, disposition)
+            if disposition != "published":
+                self._discard_lsp_candidate(terminal)
+            self._lsp_bases.pop(task_id, None)
+
+    def _lsp_terminal_disposition(
+        self,
+        request: FrozenBuildInput,
+        base: GraphBuildArtifact,
+        terminal: Mapping[str, Any],
+    ) -> str:
+        if (
+            terminal.get("terminal") is not True
+            or terminal.get("status") != "succeeded"
+            or terminal.get("publishable") is not True
+        ):
+            return "not_publishable"
+        # Zero edge mutations is not worth a republication: the producer
+        # still seals and returns publishable, so the refusal lands here.
+        if not sum(
+            int(terminal.get(key) or 0)
+            for key in ("verified", "corrected", "selected", "deleted")
+        ):
+            return "no_edge_mutations"
+        if (
+            terminal.get("source_revision") != request.source_revision
+            or terminal.get("input_graph_revision") != base.graph_revision
+        ):
+            return "identity_mismatch"
+        if (
+            self.engine_state.source_revision != request.source_revision
+            or self.engine_state.graph_revision != base.graph_revision
+            or self.engine_state.graph_path != base.graph_path
+        ):
+            return "obsolete"
+        try:
+            candidate = self._certify_lsp_candidate(request, base, terminal)
+        except Exception:  # noqa: BLE001
+            return "certifier_exception"
+        if not candidate.success:
+            return "certification_failed"
+        if (
+            self.engine_state.graph_revision != base.graph_revision
+            or self.engine_state.graph_path != base.graph_path
+            or not self.engine_state.publish_graph(
+                graph_path=candidate.graph_path,
+                graph_revision=candidate.graph_revision,
+                source_revision=request.source_revision,
+            )
+        ):
+            return "obsolete_after_certification"
+        return "published"
+
+    @staticmethod
+    def _discard_lsp_candidate(terminal: Mapping[str, Any]) -> None:
+        """Delete a refused candidate's database files.
+
+        The producer deletes on its own failures but keeps a publishable
+        candidate for publication to consume; a refusal here owns the
+        cleanup, or every refusal leaks ~1GB onto the task artifact."""
+        candidate = terminal.get("candidate_path")
+        if not isinstance(candidate, str) or not candidate:
+            return
+        path = Path(candidate)
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            try:
+                path.with_name(path.name + suffix).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     @staticmethod
     def _symlink_alias_target(item: Any) -> str | None:
@@ -2630,161 +2965,17 @@ class MiniSweAdapter(GroundtruthController):
             parent_revision,
         )
 
-    # A REBUILD's embedding plan is incremental by construction: the agent
-    # edited a few files, so a few contracts moved. 60s is ~5 batches at the
-    # measured 12.1s, which is generous for that and refuses a full-corpus
-    # re-embed outright.
+    # Embedding budget for boundary amends and recovery builds. The plan is
+    # incremental by construction: the agent edited a few files, so a few
+    # contracts moved. 60s is ~5 batches at the measured 12.1s, which is
+    # generous for that and refuses a full-corpus re-embed outright.
     #
     # It has to refuse, because the full corpus costs ~1,458s (3,808 symbols)
-    # and a rebuild that takes 25 minutes is a rebuild that never finishes
-    # before the next edit. engine_state.graph_current would then stay false for
-    # the rest of the run, every refresh_graph would schedule another rebuild,
-    # and consider_enrichment -- which requires graph_current -- would never
-    # fire. LSP promotion would still never run, for a brand-new reason, and
-    # ad58b7d9 would have traded one permanent staleness for another.
-    #
-    # Until ad58b7d9 this call site was dead: _frozen_graph_input raised on
-    # every one of 600 attempts, so no rebuild ever happened and the missing
-    # budget could not be observed. The initial index in build_agent got its
-    # budget; this one was never reached to need one.
+    # and a boundary that spent 25 minutes embedding would starve the agent
+    # the same way the unbounded fallback starved boa. A skip is honest --
+    # dense degrades, the receipt says why -- while a silent full re-embed
+    # inside a tool call is not.
     REBUILD_EMBEDDING_BUDGET_SECONDS = 60.0
-
-    # Reclaim revisions only where adoption is decided. The frozen builds below
-    # publish on the production clock (reclaim=False); this callback runs on
-    # the owner thread inside GraphBuildCoordinator.poll(), after
-    # publish_graph rules. Adopted -> prune keyed on the adopted graph with the
-    # authority-named set protected; refused -> the produced revision can never
-    # be named, so discard it directly. This replaces the write-path prune that
-    # evicted the still-named parent and livelocked arktype for 82.4 minutes
-    # in run 34701523365.
-    @staticmethod
-    def _graph_revision_reclaim(
-        request: FrozenBuildInput, result: GraphBuildArtifact,
-        adopted: bool, protected: frozenset[str],
-    ) -> None:
-        from .indexer import discard_revision, prune_graph_revisions
-
-        produced = Path(result.graph_path).parent if result.graph_path else None
-        protected_dirs = frozenset(Path(path).parent for path in protected if path)
-        if adopted:
-            if produced is not None:
-                prune_graph_revisions(produced, protected=protected_dirs)
-            return
-        if produced is not None and produced not in protected_dirs:
-            discard_revision(produced)
-
-    def _build_frozen_graph(self, request: FrozenBuildInput) -> GraphBuildArtifact:
-        from .indexer import _freeze_history, ensure_index_with_receipt, refresh_index_files
-
-        with tempfile.TemporaryDirectory(prefix="gt-frozen-source-") as temporary:
-            root = Path(temporary)
-            _freeze_history(Path(self.repo_root), root, request.history)
-            for relative, payload in request.files:
-                target = (root / relative).resolve()
-                if root.resolve() not in target.parents:
-                    return GraphBuildArtifact(False, "", "", "unsafe_source_path")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(payload)
-            # No contract_store_path here on purpose. The layout carries it and
-            # ensure_index_with_receipt derives it, so this call cannot reach
-            # the graph-keyed store whether or not anyone remembers to pass it -
-            # which is the whole point, since forgetting is exactly what
-            # happened. Passing it as well would add a second mechanism that
-            # must agree with the first, and would break every existing test
-            # double for this function: three of them monkeypatch a lambda whose
-            # signature does not accept the argument, and stub signatures
-            # lagging a new parameter has already cost two red commits here.
-            started = time.monotonic()
-            if request.parent_graph_path:
-                # The amend path. refresh_index_files never rebuilds on a
-                # refusal: a transient refusal stays stale-marked for the
-                # next trigger to retry, and only a parent that can never
-                # serve again earns a build - named "recovery", not a
-                # fallback, because the amend chain's base is what is gone.
-                receipt = refresh_index_files(
-                    root, request.parent_graph_path, request.dirty_paths,
-                    layout=self.engine_state.layout,
-                    source_revision=request.source_revision,
-                    embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
-                    reclaim=False,
-                )
-                if receipt.build_mode == "amend_refused" and (
-                    receipt.build_mode_reason
-                    in {"parent_graph_missing", "parent_manifest_missing",
-                        "immutable_graph_artifact_invalid"}
-                    or receipt.build_mode_reason.startswith(
-                        "incremental_parent_uncertifiable")
-                ):
-                    recovery_reason = receipt.build_mode_reason
-                    receipt = ensure_index_with_receipt(
-                        root, layout=self.engine_state.layout,
-                        source_revision=request.source_revision,
-                        embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
-                        reclaim=False,
-                    )
-                    receipt = replace(
-                        receipt, build_mode="recovery",
-                        build_mode_reason=recovery_reason)
-            else:
-                # Name it. `mode=full` with an empty reason is the silent
-                # fallback this row exists to prevent, and it is exactly what
-                # the coalescing defect produced: two unexplained full rebuilds
-                # that read as ordinary until the parent revision was found
-                # empty.
-                fallback_reason = (
-                    "no_parent_graph" if not request.parent_graph_path
-                    else "no_dirty_paths"
-                )
-                receipt = ensure_index_with_receipt(
-                    root, layout=self.engine_state.layout,
-                    source_revision=request.source_revision,
-                    embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
-                    reclaim=False,
-                )
-                receipt = replace(receipt, build_mode="full",
-                                  build_mode_reason=fallback_reason)
-            elapsed_ms = int((time.monotonic() - started) * 1000)
-        # Say what the bound above actually did. The 60s allowance rests on an
-        # assumption I have not measured - that a rebuild's plan is small
-        # because only a few contracts moved - and if a single edit to a widely
-        # imported file moves hundreds of digests, every rebuild skips and dense
-        # retrieval degrades for the whole run with nothing calling it a fault.
-        # Reporting it turns an unmeasured assumption into an observed one: a
-        # journal carrying "planned 3808, budget 60s, skipped" fifteen times
-        # says so plainly, and the run corrects the constant instead of the
-        # constant silently deciding the run.
-        # Which path ran, and why. Without this row an amend and a full rebuild
-        # are indistinguishable in the journal, and the last time that mattered
-        # a caller_coverage improvement was credited to producer code that had
-        # never executed. build_mode_reason is what turns a permanent silent
-        # fallback into something the first edit reports.
-        self._append_observation(
-                "graph_build_mode",
-                mode=receipt.build_mode,
-                reason=receipt.build_mode_reason,
-                parent_graph_revision=request.parent_graph_revision,
-                # The PATH, not just the revision. parent_graph_missing took 7
-                # of 10 fallbacks in the 2026-09-08 run and could not be
-                # diagnosed from the journal: the revision alone cannot say
-                # whether the file was pruned, never written where the engine
-                # expected it, or written under a different revision directory.
-                parent_graph_path=request.parent_graph_path,
-                dirty_path_count=len(request.dirty_paths),
-                amended=[dict(row) for row in receipt.incremental_results],
-                analysis_state=receipt.analysis_state,
-                elapsed_ms=elapsed_ms,
-        )
-        self._append_observation(
-                "graph_rebuild_embedding",
-                state=receipt.embedding_state,
-                measurement=receipt.embedding_measurement,
-                reason=receipt.embedding_failure_reason,
-                budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
-        )
-        return GraphBuildArtifact(
-            bool(receipt.success and receipt.graph_db), str(receipt.graph_db or ""),
-            str(receipt.graph_revision or ""), receipt.error_type or "",
-        )
 
     #: Wall-clock at import, so a directory older than this process cannot be
     #: one of its own candidates. Compared against mtime rather than tracked in
@@ -3182,61 +3373,37 @@ class MiniSweAdapter(GroundtruthController):
             return False
         return True
 
-    def close_graph_coordinator(self) -> None:
-        # A refresh that completed after the last action was never observed.
-        # `_record_graph_publication` runs only from `record_repository_snapshot`,
-        # so a rebuild finishing after the final action leaves no record even
-        # though it happened. Measured across two rehearsals of one fixture: the
-        # second rebuild landed at journal row 155 with a snapshot at 171 after
-        # it and WAS published; on the next run it landed at row 183 with the
-        # last snapshot at 178 and was not, and `native_graph_refresh_verified`
-        # then reported False for a refresh whose own row says
-        # `analysis_state: complete`.
+    def close_graph_lifecycle(self) -> None:
+        # A publication that completed after the last action was never
+        # observed. `_record_graph_publication` runs only from
+        # `record_repository_snapshot`, so an adoption after the final action
+        # leaves no record even though it happened.
         #
-        # Close is the last moment the run knows no further rebuild will be
+        # Close is the last moment the run knows no further graph will be
         # adopted, and it runs before `session_closed` and before the manifest
         # is sealed, so recording here cannot disturb conservation. It is
-        # correct-or-quiet: an unrecorded publication is the bug, and failing to
-        # record one must not take the run down with it.
-        #
-        # Recording is not enough on its own. `_record_graph_publication` reads
-        # `engine_state.graph_current`, and a finished build does not make the
-        # graph current: the coordinator parks the artifact in `_completed` and
-        # only `poll()` calls `publish_graph`. A build that finishes after the
-        # last action is therefore unadopted, not merely unobserved. So close
-        # the coordinator FIRST -- which sets `_closed`, drops queued work and
-        # makes `consider_enrichment` return "closed" so the poll cannot spawn
-        # enrichment on the way out -- then drain it, then record. Every step
-        # is nonblocking: a RUNNING build is still not waited for.
-        #
-        # Adoption remains the authority, which is what keeps this honest.
-        # Rehearsal 07's finished build was for revision eae5f8bd while the
-        # tree had moved to 5e8ffa36; `publish_graph` refuses it as
-        # `source_revision_superseded` and no publication is recorded, because
-        # there is genuinely nothing to publish. Close only stops asking too
-        # early; it does not lower the bar.
-        if self._graph_coordinator is not None:
-            self._graph_coordinator.close(wait=False)
-            try:
-                self._graph_coordinator.poll()
-            except Exception:  # noqa: BLE001 - draining never fails a close
-                pass
+        # correct-or-quiet: an unrecorded publication is the bug, and failing
+        # to record one must not take the run down with it.
+        try:
+            self._poll_startup_index()
+            self._poll_lsp_promotions()
+        except Exception:  # noqa: BLE001 - draining never fails a close
+            pass
         try:
             self._record_graph_publication()
         except Exception:  # noqa: BLE001 - observing a refresh never fails a close
             pass
         # From here the journal is sealed for observations. The run is about to
-        # write `session_closed` and then seal its manifest; a build still in
+        # write `session_closed` and then seal its manifest; work still in
         # flight must not append past that point.
         self._journal_sealed = True
         if self._lsp_scheduler is not None:
             self._lsp_scheduler.close(wait=False)
             self._drain_promotions()
         if self._wait_scheduler is not None:
-            # Same rule as the coordinator close: queued work is dropped,
-            # a running job is not joined. The dense store is written by
-            # the worker's own SQLite commits, so an interrupted refresh
-            # leaves a valid earlier state, not a torn one.
+            # Queued work is dropped, a running job is not joined. The dense
+            # store is written by the worker's own SQLite commits, so an
+            # interrupted refresh leaves a valid earlier state, not a torn one.
             self._wait_scheduler.close(wait=False)
 
     def _drain_promotions(self) -> None:

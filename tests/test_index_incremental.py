@@ -795,11 +795,15 @@ def test_sync_amend_dirty_set_covers_earlier_unpatched_edits(tmp_path, monkeypat
 
 
 def test_sync_amend_skips_when_unaccounted_changes_exist(tmp_path, monkeypatch):
-    """Omissions mean changes nobody enumerated; publishing would clear them
-    on top of a graph that never covered them."""
+    """Unenumerated omissions mean changes nobody enumerated; publishing
+    would clear them on top of a graph that never covered them. A lone
+    transaction_bytes_unavailable is different -- every dirty path is
+    still enumerated -- and does not block the amend."""
     adapter = _adapter(tmp_path)
     _adopted_parent(adapter, tmp_path)
-    adapter.engine_state.mark_paths_dirty(("b.py",), revision="rev0.5")
+    incomplete = _txn("rev0.5", ("b.py",), complete=False)
+    incomplete.omissions = ("unenumerated_paths",)
+    adapter.record_edit_transaction(incomplete)
 
     calls = {}
     def forbidden(root, *, layout, parent_graph, changed_paths,
@@ -810,6 +814,26 @@ def test_sync_amend_skips_when_unaccounted_changes_exist(tmp_path, monkeypatch):
 
     adapter.record_edit_transaction(_txn("rev1", ("a.py",)))
     assert "paths" not in calls
+
+
+def test_boundary_amend_covers_byte_unrecorded_paths(tmp_path, monkeypatch):
+    """mark_paths_dirty's byte-unavailable marking still enumerates every
+    dirty path; the boundary amend covers them because the producer
+    re-reads live bytes rather than trusting a transaction record."""
+    adapter = _adapter(tmp_path)
+    parent = _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("b.py",), revision="rev0.5")
+
+    calls = {}
+    def fake_amend(root, *, layout, parent_graph, changed_paths, **kwargs):
+        calls["paths"] = changed_paths
+        return str(parent), "", ()
+    monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", fake_amend)
+    monkeypatch.setattr(indexer, "_receipt_for_published_graph", _fake_receipt)
+
+    assert adapter.refresh_graph() is True
+    assert calls["paths"] == ("b.py",)
+    assert adapter.engine_state.graph_current
 
 
 def test_sync_amend_refusal_is_journaled_and_parent_kept(tmp_path, monkeypatch):

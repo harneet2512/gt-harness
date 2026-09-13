@@ -40,8 +40,8 @@ def isolated_git_fixture_identity(monkeypatch):
     monkeypatch.setattr(MiniSweAdapter, "__init__", tracked_initialize)
     yield
     for instance in instances:
-        if instance._graph_coordinator is not None:
-            instance._graph_coordinator.close(wait=True)
+        if instance._lsp_scheduler is not None:
+            instance._lsp_scheduler.close(wait=True)
 
 
 @pytest.mark.parametrize(
@@ -628,14 +628,14 @@ def test_native_first_source_creation_bootstraps_installed_graph(tmp_path):
     agent.env.execute = execute
     install_runtime_hooks(agent, _session(adapter))
     agent.execute_actions({"extra": {"actions": [{"command": "printf ready"}]}})
-    assert adapter._graph_coordinator is None
+    assert not adapter.engine_state.graph_path
     agent.execute_actions({"extra": {"actions": [
         {"command": "printf 'def first(): return 1\\n' > first.py"}
     ]}})
     assert (root / "first.py").read_text() == "def first(): return 1\n"
-    assert adapter._graph_coordinator is not None
-    assert adapter._graph_coordinator.wait_idle(timeout=60)
-    # A normal native view must consume the completed publication.
+    # The boundary build is synchronous: no worker exists to wait on, and a
+    # normal native view must consume the completed publication.
+    adapter.refresh_graph()
     agent.execute_actions({"extra": {"actions": [{"command": "cat first.py"}]}})
     assert adapter.graph_fresh
     rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]

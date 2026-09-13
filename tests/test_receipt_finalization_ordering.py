@@ -17,7 +17,7 @@ Measured on two real rehearsals:
 The two extra rows in 05 are `graph_build_mode` and `graph_rebuild_embedding`:
 a background graph build that was still running when the run finished and
 appended after the manifest was sealed. The ordering that allows it is
-deliberate at every step. `GTSession.close` calls `close_graph_coordinator`,
+deliberate at every step. `GTSession.close` calls `close_graph_lifecycle`,
 which calls `close(wait=False)` on purpose -- an uncooperative in-flight pass
 otherwise holds the process open past its deadline and the supervisor turns a
 scored submission into an infra timeout. `close(wait=False)` cancels QUEUED work
@@ -33,7 +33,7 @@ substitution as editing a rehearsal's expected-error list. What yields is the
 one thing that is neither: the two rows are DIAGNOSTICS, written by the build
 worker inside `except Exception: pass` under "reporting never fails a rebuild".
 They now go through `MiniSweAdapter._append_observation`, which drops them once
-`close_graph_coordinator` has sealed the journal and counts what it dropped, so
+`close_graph_lifecycle` has sealed the journal and counts what it dropped, so
 the loss is a number the run can report rather than a silent hole. A diagnostic
 is a cheaper thing to lose than every token, call counter and treatment receipt
 on the run's receipt.
@@ -228,10 +228,9 @@ def test_a_build_that_finished_unpolled_is_adopted_and_published_at_close(tmp_pa
     publication, and `native_graph_refresh_verified` False for a rebuild that
     completed for the current revision.
 
-    Close is the last chance to drain it. The coordinator is closed FIRST so
-    the poll cannot spawn enrichment work on the way out (`consider_enrichment`
-    returns "closed" once `_closed` is set), and the whole thing still runs
-    before the journal is sealed.
+    Close is the last chance to drain it: the startup build is the only
+    async produce left, and `_poll_startup_index` runs inside
+    `close_graph_lifecycle` before the journal seals.
 
     Contrast rehearsal 07, which this must NOT paper over: there the finished
     build was for revision eae5f8bd while the tree had moved to 5e8ffa36, so
@@ -239,7 +238,8 @@ def test_a_build_that_finished_unpolled_is_adopted_and_published_at_close(tmp_pa
     genuinely nothing to publish. Adoption stays the authority; close only
     stops asking too early.
     """
-    from gt_engine.graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
+    from concurrent.futures import Future
+    from types import SimpleNamespace
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -252,18 +252,20 @@ def test_a_build_that_finished_unpolled_is_adopted_and_published_at_close(tmp_pa
         json.dumps({"graph_sha256": "c" * 64}), encoding="utf-8")
 
     adapter.engine_state.bind_initial_source("rev-1")
-    artifact = GraphBuildArtifact(True, str(graph), "graph-rev-1")
-    coordinator = GraphBuildCoordinator(adapter.engine_state, lambda request: artifact)
-    adapter._graph_coordinator = coordinator
-    coordinator.schedule(FrozenBuildInput("rev-1", ("calculator.py",),
-                                          (("calculator.py", b"x = 1\n"),)))
-    assert coordinator.wait_idle(timeout=10), "the fixture build never finished"
+    receipt = SimpleNamespace(
+        success=True, graph_db=str(graph), graph_revision="graph-rev-1",
+        source_revision="rev-1", elapsed_ms=10, analysis_state="complete",
+        embedding_state="skipped",
+    )
+    future: Future = Future()
+    future.set_result(receipt)
+    adapter._startup_index = future
 
     # Nothing polls it -- the run's last action is already over.
     assert not adapter.engine_state.graph_current, (
         "precondition: a finished build must not be current before a poll")
 
-    adapter.close_graph_coordinator()
+    adapter.close_graph_lifecycle()
 
     events = [row["event"] for row in _journal_rows(adapter)]
     assert "graph_publication" in events, (

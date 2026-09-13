@@ -117,8 +117,8 @@ def _lsp_promotion_receipt(
     more than the file can support: lsp-promotion.json is sealed by indexer's
     start_lsp_promotion, which runs detect_available_servers() and reports.
     It does NOT schedule promotion on the benchmark path - that is
-    GraphBuildCoordinator.consider_enrichment -> _schedule_lsp_candidate, which
-    reports through the journal, not here. So this receipt proves exactly one
+    _maybe_schedule_lsp_promotion -> _schedule_lsp_candidate at the adoption
+    boundary, which reports through the journal, not here. So this receipt proves exactly one
     thing: whether language servers existed and were discoverable when the
     graph was published. Its status field always reads promotion_not_scheduled
     on that path and carries no information about whether promotion fired.

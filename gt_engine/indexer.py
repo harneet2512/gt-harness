@@ -1501,9 +1501,10 @@ def _publish_candidate(
     # itself as live, and two such publishes evicted the revision
     # engine_state.graph_path still named -- nineteen consecutive
     # parent_graph_missing full rebuilds, 82.4 minutes, run 34701523365.
-    # Pruning now happens where adoption happens: GraphBuildCoordinator.poll()
-    # calls prune_graph_revisions with live=the adopted graph, and synchronous
-    # callers get it from ensure_index/refresh_index_files (reclaim=True).
+    # Pruning now happens where adoption happens: the owner-thread adoption
+    # path calls prune_graph_revisions with live=the adopted graph, and
+    # synchronous callers get it from ensure_index/refresh_index_files
+    # (reclaim=True).
     # The graph is published and usable from here; promotion only improves it.
     promotion = start_lsp_promotion(db, root)
     # Sealed beside the graph: an unrecorded promotion cannot be told apart
@@ -2829,8 +2830,7 @@ def _receipt_for_published_graph(
 
             # The layout decides when the caller does not, because a caller
             # that forgets is not hypothetical: three call sites needed this
-            # path, two passed it and the rebuild in GraphBuildCoordinator
-            # simply omitted it. It fell through to default_store_path, which
+            # path, two passed it and the rebuild path simply omitted it. It fell through to default_store_path, which
             # is keyed on the graph and therefore empty at exactly the moment
             # the store matters - after a republication. Run 34095557374
             # re-planned the whole corpus sixteen times

@@ -802,8 +802,8 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     rebuilt = tmp_path / "rebuilt.db"
     rebuilt.write_bytes(b"new")
     # **_kwargs on purpose. A stub whose signature lags the real one has
-    # already cost two red commits here, and the builder now reaches this
-    # function through refresh_index_files' fallback as well as directly.
+    # already cost two red commits here, and the boundary reaches this
+    # function through the recovery build as well as directly.
     monkeypatch.setattr(
         "gt_engine.indexer.ensure_index_with_receipt",
         lambda root, **_kwargs: IndexBuildReceipt(
@@ -813,8 +813,9 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
             analysis_state="complete",
         ),
     )
-    assert a.refresh_graph() is False
-    assert a._graph_coordinator.wait_idle(timeout=3)
+    # The parent has no manifest, so the boundary amend refuses with a
+    # parent-loss reason and the recovery build runs inline -- the graph is
+    # current at the end of the same refresh_graph call.
     assert a.refresh_graph() is True
     assert a.graph_fresh is True
     assert a.graph_db == str(rebuilt)
@@ -825,7 +826,8 @@ def _build_mode_rows(adapter) -> list[dict]:
     lines = Path(adapter.store.path).read_text(encoding="utf-8").splitlines()
     return [
         row for line in lines
-        if (row := json.loads(line)).get("event") == "graph_build_mode"
+        if (row := json.loads(line)).get("event")
+        in {"graph_sync_amend", "graph_boundary_amend", "graph_recovery"}
     ]
 
 
@@ -858,26 +860,32 @@ def test_an_edit_takes_the_amend_path_and_the_journal_says_which(monkeypatch, tm
 
     seen: dict[str, object] = {}
 
-    def fake_refresh(root, parent, changed_paths, **kwargs):
-        seen["parent"] = str(parent)
+    def fake_amend(root, *, parent_graph, changed_paths, **kwargs):
+        seen["parent"] = str(parent_graph)
         seen["changed_paths"] = tuple(changed_paths)
-        return IndexBuildReceipt(
-            IndexBuildStatus.BUILT_CORE_ONLY, graph_db=str(rebuilt),
+        return str(rebuilt), "", ({"path": "mod.py", "updated": 1,
+                                  "symbols_reminted": 3},)
+
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked", fake_amend)
+    monkeypatch.setattr(
+        "gt_engine.indexer._receipt_for_published_graph",
+        lambda graph, **kwargs: IndexBuildReceipt(
+            IndexBuildStatus.BUILT_CORE_ONLY, graph_db=graph,
             graph_revision="c" * 64, analysis_state="not_run",
             build_mode="incremental",
+            source_revision=str(kwargs.get("source_revision") or ""),
             incremental_results=({"path": "mod.py", "updated": 1,
                                   "symbols_reminted": 3},),
-        )
-
-    monkeypatch.setattr("gt_engine.indexer.refresh_index_files", fake_refresh)
+        ),
+    )
 
     def forbidden(*args, **kwargs):
         pytest.fail("a full rebuild ran while an amend was available")
 
     monkeypatch.setattr("gt_engine.indexer.ensure_index_with_receipt", forbidden)
 
-    assert adapter.refresh_graph() is False
-    assert adapter._graph_coordinator.wait_idle(timeout=10)
+    # The boundary amends inline: one call, graph current at return.
     assert adapter.refresh_graph() is True
 
     # The amend was handed the published graph and the paths the edit dirtied.
@@ -885,9 +893,10 @@ def test_an_edit_takes_the_amend_path_and_the_journal_says_which(monkeypatch, tm
     assert seen["changed_paths"] == ("mod.py",)
 
     row = _build_mode_rows(adapter)[-1]
-    assert row["mode"] == "incremental"
-    assert row["reason"] == ""
-    assert row["dirty_path_count"] == 1
+    assert row["event"] == "graph_boundary_amend"
+    assert row["build_mode"] == "incremental"
+    assert row["build_mode_reason"] == ""
+    assert row["dirty_paths"] == ["mod.py"]
     assert row["amended"] == [{"path": "mod.py", "updated": 1, "symbols_reminted": 3}]
     assert row["analysis_state"] == "not_run"
     assert isinstance(row["elapsed_ms"], int)
@@ -896,7 +905,7 @@ def test_an_edit_takes_the_amend_path_and_the_journal_says_which(monkeypatch, tm
 def test_an_amend_refusal_is_named_and_never_rebuilds(monkeypatch, tmp_path):
     """A permanent silent fallback is how the amend path stayed dead.
 
-    The real refresh_index_files runs here, refuses because no producer
+    The real incremental producer runs here, refuses because no producer
     declares the amend capability, and must NOT fall back: a rebuild cannot
     restore amend capability, so the honest outcome is the named refusal with
     the stale-marked parent kept. ensure_index_with_receipt is forbidden to
@@ -913,19 +922,23 @@ def test_an_amend_refusal_is_named_and_never_rebuilds(monkeypatch, tmp_path):
     monkeypatch.setattr("gt_engine.indexer.ensure_index_with_receipt", forbidden)
 
     assert adapter.refresh_graph() is False
-    assert adapter._graph_coordinator.wait_idle(timeout=10)
-    # Stays stale-marked: the refusal is an answer, and the next trigger
+    # Stays stale-marked: the refusal is an answer, and the next boundary
     # retries the amend - the graph is never silently rebuilt behind it.
     assert adapter.refresh_graph() is False
 
-    row = _build_mode_rows(adapter)[-1]
-    assert row["mode"] == "amend_refused"
-    assert row["reason"] == "producer_lacks_amend_capability"
-    assert row["amended"] == []
+    lines = Path(adapter.store.path).read_text(encoding="utf-8").splitlines()
+    refused = [
+        row for line in lines
+        if (row := json.loads(line)).get("event") == "graph_boundary_amend_refused"
+    ]
+    assert refused[-1]["reason"] == "producer_lacks_amend_capability"
+    assert refused[-1]["dirty_paths"] == ["mod.py"]
 
 
 class _StubEnrichmentHandle:
     """A scheduled promotion that has not finished, so polling stays a no-op."""
+
+    task_id = "stub-promotion"
 
     def __init__(self) -> None:
         self.cancelled = False
@@ -943,15 +956,13 @@ class _StubEnrichmentHandle:
 
 
 def test_enrichment_is_offered_on_a_rebuilt_current_graph(monkeypatch, tmp_path):
-    """Every rebuilt graph is offered for LSP promotion, through the real path.
+    """Every adopted graph is offered for LSP promotion, through the real path.
 
-    Two callers reach consider_enrichment and between them they cover both
-    kinds of graph: refresh_graph offers the INITIAL graph, which the
-    coordinator never built, and poll() offers every graph the coordinator
-    publishes (graph_coordinator.py:181), which is what an edit boundary
-    produces. Every existing test called consider_enrichment directly, so
-    nothing proved the offer survives the route the benchmark actually takes -
-    an edit, a rebuild, and the next refresh_graph. This drives that route.
+    _maybe_schedule_lsp_promotion runs at the end of refresh_graph on both
+    kinds of boundary: the one that just adopted a graph and the
+    already-current early return every later boundary takes. Nothing else
+    proved the offer survives the route the benchmark actually takes - an
+    edit, an inline rebuild, and the next refresh_graph. This drives it.
     """
     from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
     from gt_engine.runtime_observation import capture_workspace
@@ -972,8 +983,8 @@ def test_enrichment_is_offered_on_a_rebuilt_current_graph(monkeypatch, tmp_path)
         offers.append((request.source_revision, base.graph_revision))
         return _StubEnrichmentHandle()
 
-    # Bound before the coordinator is built, because refresh_graph captures
-    # this attribute as the coordinator's enrichment factory.
+    # Bound before the first boundary, because refresh_graph calls this
+    # attribute as the promotion factory after adopting.
     monkeypatch.setattr(a, "_schedule_lsp_candidate", stub_factory)
 
     a.start_task()
@@ -992,10 +1003,10 @@ def test_enrichment_is_offered_on_a_rebuilt_current_graph(monkeypatch, tmp_path)
         ),
     )
 
-    assert a.refresh_graph() is False
-    assert a._graph_coordinator.wait_idle(timeout=3)
-    # The second call takes the already-current early return. That is the
-    # branch every later boundary takes, and the one the offer was missing.
+    # The recovery build lands inline and the offer fires at the same
+    # boundary; the second call takes the already-current early return, the
+    # branch every later boundary takes and the one the offer was missing.
+    assert a.refresh_graph() is True
     assert a.refresh_graph() is True
 
     # The rebuilt graph - not the pre-edit one - is what gets promoted.
@@ -1039,9 +1050,6 @@ def test_a_repeated_boundary_does_not_re_offer_the_same_graph(monkeypatch, tmp_p
             graph_revision="b" * 64, analysis_state="complete",
         ),
     )
-    assert a.refresh_graph() is False
-    assert a._graph_coordinator.wait_idle(timeout=3)
-
     assert a.refresh_graph() is True
     assert a.refresh_graph() is True
     assert a.refresh_graph() is True

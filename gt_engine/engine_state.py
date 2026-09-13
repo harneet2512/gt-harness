@@ -62,7 +62,8 @@ class RuntimeLayout:
 
         Three callers needed this path and each retyped the expression: the
         initial build in miniswe_gt_run, the retrieval reader, and the rebuild
-        in GraphBuildCoordinator. Two matched and the third was simply omitted,
+        path (GraphBuildCoordinator at the time). Two matched and the third
+        was simply omitted,
         so the rebuild fell through to the graph-keyed default, found an empty
         store, and re-planned the entire corpus on every republication:
         `planned=3809 ... 3822, estimated=913s, budget=60s, budget_insufficient`
@@ -149,12 +150,18 @@ class EngineState:
 
     def mark_paths_dirty(self, paths: tuple[str, ...], *, revision: str) -> None:
         self.source_revision = revision
+        unrecorded = False
         for path in paths:
             if path and path not in self._overlay:
                 self._overlay[path] = OverlayEntry(
                     path, "unknown", None, None, None, revision
                 )
-        self._omissions.add("transaction_bytes_unavailable")
+                unrecorded = True
+        # Only a path dirtied without a transaction byte record is an
+        # omission; entries a complete transaction already wrote carry their
+        # identity and prove nothing is missing.
+        if unrecorded:
+            self._omissions.add("transaction_bytes_unavailable")
 
     def apply_transaction(self, transaction: Any) -> None:
         revision = str(transaction.post_revision)

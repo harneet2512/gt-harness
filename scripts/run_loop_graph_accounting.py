@@ -10,16 +10,14 @@ It reads a run's own event journal and computes nothing the run did not already
 record, which matters twice: it applies to runs already on disk, and it cannot
 perturb the timings it is reporting.
 
-THE BLOCKED/BACKGROUND SPLIT HAS A DEGENERATE ANSWER, and saying so plainly is
-the point. `GraphBuildCoordinator.wait_idle` exists and NOTHING on the live path
-calls it. `close_graph_coordinator` closes with `wait=False` deliberately: an
-uncooperative in-flight pass otherwise holds the process past its deadline and
-the supervisor turns a scored submission into an infra timeout. So the run never
-waits for a graph build, and blocked time is zero by construction rather than by
-measurement. Reported with its reason attached, because a bare `0.0` invites the
-reading that graph builds are free.
+BLOCKED TIME IS MEASURED, NOT ASSUMED. The coordinator is gone: amends run
+synchronously inside the edit boundary (`graph_sync_amend`) or at the next
+serving boundary (`graph_boundary_amend`, `graph_recovery`), and each row
+carries its own `elapsed_ms`. That sum is what graph maintenance actually
+cost the agent's clock -- no wait_idle exists because no worker exists to
+wait for.
 
-THEY ARE NOT FREE. What a transition costs the run is GRAPH-DARK TIME: the
+GRAPH-DARK TIME is the other half: the
 interval between the edit that invalidates the graph and the publication that
 adopts the rebuild. Inside it every caller query, anchor and covering-test
 selection abstains -- this is the interval that, on arktype, never closed at all
@@ -45,10 +43,14 @@ from typing import Any, Mapping, Sequence
 INVALIDATION_EVENTS = ("graph_invalidated", "edit_transaction")
 
 BLOCKED_BASIS = (
-    "zero by construction: GraphBuildCoordinator.wait_idle has no caller on the "
-    "live path and close_graph_coordinator closes with wait=False, so the run "
-    "never waits for a graph build"
+    "measured: synchronous amends and boundary resyncs carry elapsed_ms on "
+    "graph_sync_amend / graph_boundary_amend / graph_recovery rows; no worker "
+    "exists to wait for, so there is no other blocked time"
 )
+
+# Events whose elapsed_ms is agent-visible blocked time: the synchronous amend
+# inside the edit boundary, and the catch-up/resync at a serving boundary.
+BLOCKED_EVENTS = ("graph_sync_amend", "graph_boundary_amend", "graph_recovery")
 
 
 def _seconds(row: Mapping[str, Any]) -> float | None:
@@ -89,6 +91,7 @@ def account_run_loop(rows: Sequence[Mapping[str, Any]]) -> dict:
     invalidations = 0
     publications = 0
     builds = 0
+    blocked = 0.0
     background = 0.0
     executions = 0
     checks = 0
@@ -112,6 +115,10 @@ def account_run_loop(rows: Sequence[Mapping[str, Any]]) -> dict:
                 dark_since = None
         elif event == "graph_build_mode":
             builds += 1
+            background += _build_seconds(row)
+        elif event in BLOCKED_EVENTS:
+            builds += 1
+            blocked += float(row.get("elapsed_ms") or 0) / 1000.0
             background += _build_seconds(row)
         elif event == "graph_refresh_scheduled":
             key = str(row.get("disposition") or "unknown")
@@ -142,8 +149,9 @@ def account_run_loop(rows: Sequence[Mapping[str, Any]]) -> dict:
         "schema": "gt.run_loop_graph_accounting.v1",
         "status": "measured",
         "wall_seconds": wall,
-        # Zero, and the reason travels with it.
-        "blocked_seconds": 0.0,
+        # Measured inside the edit and serving boundaries; the basis says
+        # why nothing else can exist.
+        "blocked_seconds": round(blocked, 3),
         "blocked_basis": BLOCKED_BASIS,
         "background_build_seconds": round(background, 3),
         "graph_dark_seconds": dark,

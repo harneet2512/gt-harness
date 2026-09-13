@@ -104,8 +104,10 @@ def test_deepening_changes_identity_and_freezes_original_boundary(tmp_path):
 
 @pytest.mark.skipif(os.name != "posix" or not os.environ.get("GT_INDEX_BINARY"),
                     reason="installed Linux producer required")
-def test_background_producer_retains_real_cochange_history(tmp_path):
+def test_producer_retains_real_cochange_history(tmp_path):
     import sqlite3
+
+    from gt_engine.indexer import ensure_index_with_receipt
 
     root, git = repository(tmp_path)
     for version in range(3):
@@ -115,10 +117,8 @@ def test_background_producer_retains_real_cochange_history(tmp_path):
         git("-c", "core.hooksPath=", "commit", "-qm", f"paired change {version}")
     adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path / "state",
                              repo_root=root, predicates=[])
-    request = adapter._frozen_graph_input(capture_workspace(root))
-    git("-c", "core.hooksPath=", "commit", "--allow-empty", "-qm", "after request")
-    result = adapter._build_frozen_graph(request)
-    assert result.success, result.error
-    with sqlite3.connect(result.graph_path) as connection:
+    result = ensure_index_with_receipt(root, layout=adapter.engine_state.layout)
+    assert result.success, result.error_type
+    with sqlite3.connect(result.graph_db) as connection:
         rows = connection.execute("SELECT * FROM cochanges").fetchall()
-    assert rows, "background refresh discarded eligible Git co-change history"
+    assert rows, "the build discarded eligible Git co-change history"

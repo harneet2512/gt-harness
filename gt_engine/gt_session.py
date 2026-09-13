@@ -1669,7 +1669,7 @@ class GTSession:
         whose coordinator promoted successfully would still have been named as
         a capability that did not work, and the gate built on it enforced
         language-server presence while claiming to enforce promotion. The
-        benchmark tap is GraphBuildCoordinator.consider_enrichment ->
+        benchmark tap is _maybe_schedule_lsp_promotion (at adoption) ->
         _schedule_lsp_candidate, which journals lsp_promotion_scheduled and
         then lsp_promotion_terminal, so those are what get read.
         """
@@ -2065,7 +2065,7 @@ class GTSession:
     def close(self, terminal: str) -> None:
         self._terminal = terminal
         if self._engine is not None:
-            closer = getattr(self._engine, "close_graph_coordinator", None)
+            closer = getattr(self._engine, "close_graph_lifecycle", None)
             if callable(closer):
                 closer()
         if self._engine is not None:

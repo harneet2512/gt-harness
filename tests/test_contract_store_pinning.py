@@ -15,8 +15,8 @@ delta -- and dense retrieval never refreshed once in 78 minutes.
 
 The repair was to pin the store to the TASK via `RuntimeLayout`, and three call
 sites had to be corrected: the initial build in `miniswe_gt_run`, the retrieval
-reader, and the rebuild in `GraphBuildCoordinator`. Two matched and the third
-had simply omitted it.
+reader, and the rebuild path (GraphBuildCoordinator at the time). Two matched
+and the third had simply omitted it.
 
 Nothing tested any of that. It was held in place by three comments, and a fourth
 caller -- or a dropped `layout=` -- puts the run back to re-embedding the entire

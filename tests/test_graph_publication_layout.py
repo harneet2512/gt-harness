@@ -76,16 +76,18 @@ def test_collector_uses_published_revision_among_retained_artifacts(tmp_path):
 
 @pytest.mark.skipif(os.name != "posix" or not os.environ.get("GT_INDEX_BINARY"),
                     reason="installed Linux producer required")
-def test_background_publications_keep_workspace_identity_and_immutable_base(tmp_path):
+def test_boundary_publications_keep_workspace_identity_and_immutable_base(tmp_path):
+    from gt_engine.indexer import ensure_index_with_receipt
+
     root = tmp_path / "repo"
     root.mkdir()
     source = root / "one.py"
     source.write_text("def one(): return 1\n")
     adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path / "state",
                              repo_root=root, predicates=[])
-    first = adapter._build_frozen_graph(adapter._frozen_graph_input(capture_workspace(root)))
-    assert first.success, first.error
-    graph = Path(first.graph_path)
+    first = ensure_index_with_receipt(root, layout=adapter.engine_state.layout)
+    assert first.success, first.error_type
+    graph = Path(first.graph_db)
     original = graph.read_bytes()
     valid, reason = certify_graph_artifact(
         graph, graph.with_suffix(".manifest.json"),
@@ -117,13 +119,13 @@ def test_background_publications_keep_workspace_identity_and_immutable_base(tmp_
         manifest_path.write_bytes(manifest_original)
         resource_path.write_bytes(resource_original)
     source.write_text("def one(): return 2\n")
-    second = adapter._build_frozen_graph(adapter._frozen_graph_input(capture_workspace(root)))
-    assert second.success, second.error
-    assert second.graph_path != first.graph_path
+    second = ensure_index_with_receipt(root, layout=adapter.engine_state.layout)
+    assert second.success, second.error_type
+    assert second.graph_db != first.graph_db
     assert graph.read_bytes() == original
     assert graph.parent.parent == adapter.engine_state.layout.graph_root / "revisions"
     source.write_text("def one(): return 1\n")
     graph.write_bytes(b"corrupted published artifact")
-    refused = adapter._build_frozen_graph(adapter._frozen_graph_input(capture_workspace(root)))
+    refused = ensure_index_with_receipt(root, layout=adapter.engine_state.layout)
     assert not refused.success
     assert graph.read_bytes() == b"corrupted published artifact"
