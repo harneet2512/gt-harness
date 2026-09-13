@@ -653,7 +653,17 @@ async def run(args) -> dict:
         # silently switches this predicate off instead of failing it, and a
         # predicate that declines to evaluate is indistinguishable from one that
         # found a violation.
-        agent_requests = len(handler.requests) - len(handler.bootstrap_requests)
+        # Bind by agent-request ordinal, not flat transport position: bootstrap
+        # turns land wherever the startup index completes, so offsetting from
+        # the total bootstrap count mis-aims whenever an agent request precedes
+        # them (a run whose second agent request delivers evidence before the
+        # catalog bootstrap fires).
+        bootstrap_ids = {id(request) for request in handler.bootstrap_requests}
+        agent_request_list = [
+            request for request in handler.requests
+            if id(request) not in bootstrap_ids
+        ]
+        agent_requests = len(agent_request_list)
         # An interrupted run CANNOT produce the two checks these predicates
         # audit: the second unittest is the very step the interruption blocks.
         # Measured on the real transport at interrupt_at_ordinal=6 - 6 commands
@@ -681,8 +691,8 @@ async def run(args) -> dict:
                 (checks[0], 0, "fail", 1),
                 (checks[1], 6, "pass", 0),
             ):
-                request_index = step_ordinal + 1 + len(handler.bootstrap_requests)
-                if step_ordinal >= len(handler.commands) or request_index >= len(handler.requests):
+                request_index = step_ordinal + 1
+                if step_ordinal >= len(handler.commands) or request_index >= len(agent_request_list):
                     chain_valid = False
                     break
                 command = handler.commands[step_ordinal]
@@ -703,7 +713,7 @@ async def run(args) -> dict:
                 expected_block = "[GT_EXECUTION_EVIDENCE]\n" + expected_line
                 admitted = any(
                     expected_block in str(message.get("content") or "")
-                    for message in handler.requests[request_index].get("messages", [])
+                    for message in agent_request_list[request_index].get("messages", [])
                 )
                 chain_valid &= (
                     hashlib.sha256(blob).hexdigest() == row["artifact_sha256"]
