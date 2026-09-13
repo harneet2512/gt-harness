@@ -49,6 +49,43 @@ def test_finalization_reminders_are_bounded_and_do_not_commit(tmp_path, monkeypa
     assert verify_event_journal(adapter.store.path).valid
 
 
+def test_close_journals_the_terminal_patch_observation(tmp_path, monkeypatch):
+    """Gate-one's journal had no row stating what the submitted tree
+    contained: patch observation fired only on prompt-path finalization
+    stages. The terminal row at close() is the submit-time record."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True).stdout
+    git("init")
+    (repo / "a.py").write_text("x = 1\n")
+    git("add", ".")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "core.hooksPath=", "commit", "-m", "fixture")
+    head = git("rev-parse", "HEAD").decode().strip()
+    (repo / "a.py").write_text("x = 2\n")
+    adapter = MiniSweAdapter(task_id="close", repo_root=str(repo),
+                           state_dir=tmp_path / "state", predicates=())
+    adapter.start_task()
+    session = GTSession(GTSessionConfig(task_id="close", repo_root=str(repo),
+                                        mode="advisory"), engine=adapter)
+    session._patch_baseline = head
+
+    session.close("submitted_unverified")
+
+    events = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    rows = [row for row in events if row["event"] == "submission_patch_observed"]
+    assert len(rows) == 1
+    assert rows[0]["stage"] == "submit"
+    assert rows[0]["status"] == "observed"
+    assert rows[0]["baseline"] == head
+    assert rows[0]["committed_patch_empty"] is True
+    assert rows[0]["uncommitted_tracked"] is True
+    assert verify_event_journal(adapter.store.path).valid
+
+
 @pytest.mark.parametrize(("phase", "seconds", "steps", "executes"), [
     ("VERIFY", 1000, None, True),
     ("IMPLEMENT", 1000, None, False),
@@ -146,7 +183,8 @@ def test_current_failure_is_not_hidden_by_another_evidence_channel(tmp_path, mon
     evidence = next(row["evidence"] for row in reversed(events) if row["event"] == "plan_gate_decision")
     assert evidence["predicate_mapped_rows"] == [row_id]
     assert evidence["check_passed_rows" if check_passes else "check_failed_rows"] == [row_id]
-    assert evidence["completion_assessment"] == "not_established"
+    assert evidence["completion_assessment"] == (
+        "all_rows_verified" if check_passes else "rows_unverified")
     assert verify_event_journal(adapter.store.path).valid
 
 

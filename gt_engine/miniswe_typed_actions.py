@@ -119,7 +119,7 @@ def _core_compiler() -> _CoreCompiler | ModuleType | None:
 
 
 def _format_error(template: str, error: str) -> FormatError:
-    return FormatError(
+    exc = FormatError(
         {
             "role": "user",
             "content": Template(template, undefined=StrictUndefined).render(
@@ -128,6 +128,11 @@ def _format_error(template: str, error: str) -> FormatError:
             "extra": {"interrupt_type": "FormatError"},
         }
     )
+    # InterruptAgentFlow calls super().__init__() with no args, so str(exc) is
+    # "" for every instance: the provider_failure journal row would carry an
+    # empty error forever. Keep the raw reason on the exception itself.
+    exc.gt_error_detail = error
+    return exc
 
 
 def parse_groundtruth_toolcalls(

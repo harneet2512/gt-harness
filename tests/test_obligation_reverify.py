@@ -1,10 +1,14 @@
-"""The post-edit reverification pass, which had never once done its work.
+"""The post-edit reverification queue, which had never once done its work.
 
 `obligation_reverified` produced 0 rows in every run ever recorded, while the
 same runs discarded proofs 33 times and the model paid roughly ten steps to
 re-establish each one. The pass was not unreachable: it ran on every edit and
 returned at its first line, because candidacy and invalidation were decided by
 two different rules that never intersected.
+
+The event is now `obligation_reverify_queued`: the pass coalesces registered
+checks for the verification-boundary drain and runs nothing itself, so the
+old name claimed an execution that never occurred.
 
 Candidacy came from `_affected_predicate_ids`, which requires the obligation's
 English text to literally quote a filename (`_PATH_RE` over the obligation
@@ -105,7 +109,7 @@ def test_an_unrelated_edit_invalidates_without_replaying_shell(tmp_path, monkeyp
 
     _edit(adapter, repo, "docs/readme.md", "notes, revised\n")
 
-    reverified = _rows(adapter, "obligation_reverified")
+    reverified = _rows(adapter, "obligation_reverify_queued")
     assert reverified, "the reverification pass produced no row at all"
     row = reverified[-1]
     assert row["skipped"] == "no_registered_check"
@@ -123,7 +127,7 @@ def test_a_breaking_edit_leaves_the_proof_discarded(tmp_path, monkeypatch):
 
     _edit(adapter, repo, "src/helper.py", "answer = 2\n")
 
-    row = _rows(adapter, "obligation_reverified")[-1]
+    row = _rows(adapter, "obligation_reverify_queued")[-1]
     assert row["commands_run"] == 0
     assert row["preserved"] == []
     assert adapter.predicate_status(predicate_id) is PredicateStatus.UNKNOWN
@@ -140,7 +144,7 @@ def test_a_pass_that_does_nothing_says_so(tmp_path, monkeypatch):
 
     _edit(adapter, repo, "docs/readme.md", "notes, revised\n")
 
-    row = _rows(adapter, "obligation_reverified")[-1]
+    row = _rows(adapter, "obligation_reverify_queued")[-1]
     assert row["skipped"] == "no_registered_check"
     assert row["commands_run"] == 0
     assert row["candidates"] == [predicate_id]
@@ -198,6 +202,6 @@ def test_no_proofs_means_a_named_skip_not_silence(tmp_path, monkeypatch):
 
     adapter.note_edit(("app.py",))
 
-    row = _rows(adapter, "obligation_reverified")[-1]
+    row = _rows(adapter, "obligation_reverify_queued")[-1]
     assert row["skipped"] == "no_registered_check"
     assert row["preserved"] == []

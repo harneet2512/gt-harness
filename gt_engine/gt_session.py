@@ -303,6 +303,11 @@ class GTSession:
         self._pending_localization = ""
         self._pending_localization_identity = ""
         self._queued_decision_candidates: list[GTDecisionCandidate] = []
+        # Abstain-once keys for dead/unresolvable delivery lanes: a recipe that
+        # cannot render at this graph revision is recorded once, then repeats of
+        # the same query drop silently instead of filling the journal with
+        # identical skips (run 34766499875 logged 149 such rows).
+        self._recipe_unresolved_seen: set[tuple[str, str, str, str, str]] = set()
         self._active_context_units: dict[str, dict[str, Any]] = {}
         # None until the first cursor: an empty tuple is a real state (every row
         # proven) and must not be confused with "never looked".
@@ -1084,10 +1089,49 @@ class GTSession:
             )
             return None
         if not resolved or not resolved[0]:
+            reason = str(
+                getattr(self._engine, "_recipe_empty_reason", "") or "empty_render"
+            )
+            # A lane-dead reason (``*_unavailable``) is a run-level fact and
+            # dedups on its own; a content-empty answer dedups per query shape
+            # (paths/files minus per-transaction volatility) so a retried edit
+            # does not re-log an identical skip while a genuinely different
+            # query still gets its own row.
+            params = recipe.get("params") or {}
+            if reason.endswith("_unavailable") or reason == "graph_unavailable":
+                params_key = ""
+            else:
+                stable = {
+                    key: value
+                    for key, value in params.items()
+                    if key not in {"transaction_sha256", "post_revision"}
+                }
+                params_key = hashlib.sha256(
+                    json.dumps(stable, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()[:16]
+            graph_revision = ""
+            snapshot_fn = getattr(self._engine, "graph_query_snapshot", None)
+            if callable(snapshot_fn):
+                try:
+                    graph_revision = str(
+                        getattr(snapshot_fn(), "graph_revision", "") or ""
+                    )
+                except Exception:  # noqa: BLE001 - telemetry never blocks a skip
+                    graph_revision = ""
+            dedup = (
+                kind,
+                reason,
+                str(candidate.supersession_key or ""),
+                graph_revision,
+                params_key,
+            )
+            if dedup in self._recipe_unresolved_seen:
+                return None
+            self._recipe_unresolved_seen.add(dedup)
             self._engine.store.append(
                 "delivery_recipe_unresolved",
                 kind=kind,
-                reason="empty_render",
+                reason=reason,
                 supersession_key=candidate.supersession_key,
             )
             return None
@@ -2237,6 +2281,28 @@ class GTSession:
             if callable(closer):
                 closer()
         if self._engine is not None:
+            # Terminal patch observation at the submission boundary. The
+            # finalization-stage rows in _finalization_candidate fired only on
+            # prompt-path stages and only when a --patch-output baseline was
+            # captured, so gate-one's journal recorded nothing about what the
+            # submitted tree contained. Emit the terminal row unconditionally:
+            # status:unavailable names the non-Git case instead of going quiet.
+            baseline = getattr(self, "_patch_baseline", "")
+            try:
+                from pathlib import Path
+
+                from scripts.miniswe_supervisor import submission_patch_state
+
+                patch_state = submission_patch_state(
+                    Path(self.config.repo_root), baseline)
+            except Exception as exc:  # noqa: BLE001 - observation must not mask close
+                patch_state = {
+                    "layout": "gt.submission_patch_state.v1",
+                    "baseline": baseline, "status": "unavailable",
+                    "reason": type(exc).__name__,
+                }
+            self._engine.store.append(
+                "submission_patch_observed", stage="submit", **patch_state)
             self._engine.store.append("session_closed", terminal=terminal)
             diagnostics = getattr(self._engine, "diagnostics", None)
             if diagnostics is not None:

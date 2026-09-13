@@ -484,6 +484,53 @@ def test_failing_agent_run_check_does_not_fabricate_green(tmp_path: Path) -> Non
     assert adapter.unmet_plan_rows() == ("req-1",)
 
 
+def test_changelog_fragment_edit_keeps_a_bound_check_proof(tmp_path: Path) -> None:
+    """F7 (run 34766499875, epoch 36): the towncrier fragment
+    ``changes/460.enhancement`` discarded all eleven GREEN bound-check
+    predicates because every receipt carried the conservative workspace-wide
+    footprint. A receipt bound to declared test sources survives the edit:
+    the path is outside every declared scope root and has no import channel.
+    A code edit inside or outside the scope still invalidates it."""
+    from types import SimpleNamespace
+
+    from gt_engine.miniswe_controller import Predicate, PredicateStatus
+
+    adapter = _adapter(tmp_path)
+    adapter.start_task()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter.repo_root = str(repo)
+    adapter.repository_revision = "rev"
+
+    row = SimpleNamespace(row_id="req-1",
+                          verification_command="pytest tests/test_snapshots.py")
+    adapter.persistent_plan = SimpleNamespace(rows=[row])
+    adapter.plan_row_predicates = {"req-1": ("pred-1",)}
+    adapter.predicates["pred-1"] = Predicate("pred-1", "obligation text")
+    adapter._status["pred-1"] = PredicateStatus.UNKNOWN
+    adapter.publish_plan_state = lambda: None
+
+    spec = _spec(repo, ["pytest", "tests/test_snapshots.py"],
+                 test_source_paths=["tests/test_snapshots.py"])
+    adapter._check_specs = {spec.check_id: spec}
+    adapter._pending_check_ids = {spec.check_id}
+    files = [_File("tests/test_snapshots.py", sha256="a" * 64)]
+    adapter.observe_plan_checks(
+        "pytest tests/test_snapshots.py",
+        {"returncode": 0, "output": "1 passed",
+         "extra": {"environment_sha256": "env", "cwd": str(repo),
+                   "capture_complete": True}},
+        _ExecSnapshot(repo, files), _ExecSnapshot(repo, files), _Env(),
+    )
+    assert adapter._status["pred-1"] is PredicateStatus.GREEN
+
+    adapter.note_edit(["changes/460.enhancement"])
+    assert adapter._status["pred-1"] is PredicateStatus.GREEN
+
+    adapter.note_edit(["src/mod.py"])
+    assert adapter._status["pred-1"] is PredicateStatus.UNKNOWN
+
+
 # ---------------------------------------------------------------------------
 # dense_rank runtime-embed ceiling: cold corpus degrades, never starves
 # ---------------------------------------------------------------------------

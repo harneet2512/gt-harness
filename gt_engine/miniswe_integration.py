@@ -47,11 +47,14 @@ from .task_contract import (
     render_task_contract,
 )
 from .verification_contract import (
+    DependencyFootprint,
+    DependencyIdentity,
     certified_path_footprint,
     compile_obligation_predicates,
     conservative_execution_footprint,
     evaluate_passing_observation,
     is_executable_check,
+    normalize_dependency_path,
     predicate_receipt_footprint,
 )
 
@@ -1026,8 +1029,14 @@ class MiniSweAdapter(GroundtruthController):
         # certified. A second edit supersedes, rather than duplicates, work.
         pending.update(specs)
         self._pending_check_ids = pending
+        # This row was journaled as `obligation_reverified` while running zero
+        # commands -- the name claimed a pass that never happened. The work is
+        # real, but it is a QUEUE: drain_plan_checks runs the registered checks
+        # at the verification boundary. The kind is renamed so the journal
+        # stops asserting an execution that did not occur; journals are
+        # append-only, so the honest kind is a new event, not a rewrite.
         self.store.append(
-            "obligation_reverified", candidates=sorted(candidates),
+            "obligation_reverify_queued", candidates=sorted(candidates),
             distinct_commands=len(set(candidates.values())), commands_run=0,
             preserved=[], skipped="queued_registered_checks" if pending else "no_registered_check",
             pending_check_ids=sorted(pending), epoch=self.workspace_epoch,
@@ -1035,10 +1044,87 @@ class MiniSweAdapter(GroundtruthController):
         )
 
     def bind_plan_check(self, value: dict) -> str:
-        from .persistent_plan.checks import CheckSpec, validation_source_digest
-        from .runtime_observation import capture_workspace
+        import shlex as _shlex
 
-        spec = CheckSpec.from_dict(value, self.repo_root)
+        from .persistent_plan.checks import (
+            CheckSpec,
+            _looks_like_test_source,
+            validation_source_digest,
+        )
+        from .runtime_observation import _protocol, capture_workspace
+
+        # Test identity is bound here, not at observation: the smoke cohort
+        # journaled plan_check_bound rows with empty protocol, no selected
+        # tests, no source paths and no environment -- a spec that admits any
+        # execution of the same argv. What is derivable is derived; what is
+        # not is named in test_identity_basis so the journal shows which part
+        # of the identity was never bound.
+        material = dict(value)
+        argv = material.get("argv")
+        argv_ok = (
+            isinstance(argv, (list, tuple)) and bool(argv)
+            and all(isinstance(arg, str) and arg for arg in argv)
+        )
+        basis: dict[str, str] = {}
+        if material.get("protocol"):
+            basis["protocol"] = "declared"
+        elif argv_ok:
+            derived_protocol = _protocol(_shlex.join(list(argv)))
+            if derived_protocol != "unknown":
+                material["protocol"] = derived_protocol
+                basis["protocol"] = "argv_derived"
+            else:
+                basis["protocol"] = "unbound"
+        else:
+            basis["protocol"] = "unbound"
+        if material.get("test_source_paths"):
+            basis["test_source_paths"] = "declared"
+        elif argv_ok:
+            root = Path(self.repo_root).resolve()
+            bound_paths: list[str] = []
+            for arg in list(argv)[1:]:
+                if arg.startswith("-"):
+                    continue
+                candidate = (
+                    root / str(material.get("cwd") or ".") / arg.split("::", 1)[0]
+                ).resolve()
+                if candidate == root or root not in candidate.parents:
+                    continue
+                relative = candidate.relative_to(root).as_posix()
+                if candidate.exists() and _looks_like_test_source(relative):
+                    bound_paths.append(relative)
+            if bound_paths:
+                material["test_source_paths"] = sorted(set(bound_paths))
+                basis["test_source_paths"] = "argv_derived"
+            else:
+                basis["test_source_paths"] = "unbound"
+        else:
+            basis["test_source_paths"] = "unbound"
+        if material.get("selected_test_ids"):
+            basis["selected_test_ids"] = "declared"
+        elif argv_ok:
+            node_ids = sorted({
+                arg for arg in list(argv)[1:]
+                if "::" in arg and not arg.startswith("-")
+            })
+            if node_ids:
+                material["selected_test_ids"] = node_ids
+                basis["selected_test_ids"] = "argv_derived"
+            else:
+                basis["selected_test_ids"] = "unbound"
+        else:
+            basis["selected_test_ids"] = "unbound"
+        if material.get("environment_sha256"):
+            basis["environment_sha256"] = "declared"
+        else:
+            environment = getattr(self, "_current_check_environment_sha256", "")
+            if environment:
+                material["environment_sha256"] = environment
+                basis["environment_sha256"] = "bind_context"
+            else:
+                basis["environment_sha256"] = "unbound"
+
+        spec = CheckSpec.from_dict(material, self.repo_root)
         known = {row.row_id for row in getattr(self.persistent_plan, "rows", ())}
         if not set(spec.requirement_ids).issubset(known):
             raise ValueError("check references unknown plan row")
@@ -1060,7 +1146,8 @@ class MiniSweAdapter(GroundtruthController):
         pending = getattr(self, "_pending_check_ids", set())
         pending.add(spec.check_id)
         self._pending_check_ids = pending
-        self.store.append("plan_check_bound", **spec.as_dict())
+        self.store.append(
+            "plan_check_bound", test_identity_basis=basis, **spec.as_dict())
         return spec.check_id
 
     def bind_initial_plan_checks(self) -> None:
@@ -1545,6 +1632,24 @@ class MiniSweAdapter(GroundtruthController):
         Only GREEN is recorded: a failed automatic check (including
         env_fail) is not evidence the obligation is unmet.
         """
+        # The receipt's dependency scope is what the bound check declared at
+        # bind time. That footprint is still not complete - an import the
+        # graph never recorded or a path the test opens outside its declared
+        # sources can hide - but it is the declared surface on which the
+        # provably-inert narrowing in note_edit may rely.
+        declared_sources = tuple(
+            DependencyIdentity("path", path)
+            for raw in getattr(spec, "test_source_paths", ()) or ()
+            if (path := normalize_dependency_path(raw))
+        )
+        footprint = (
+            DependencyFootprint(
+                identities=declared_sources,
+                complete=False,
+                basis="bound_check_declared_test_sources",
+            )
+            if declared_sources else None
+        )
         for row_id in spec.requirement_ids:
             for predicate_id in getattr(self, "plan_row_predicates", {}).get(
                 row_id, ()
@@ -1565,6 +1670,7 @@ class MiniSweAdapter(GroundtruthController):
                     epoch=self.workspace_epoch,
                     status="GREEN",
                     semantic=True,
+                    dependency_footprint=footprint,
                     evidence_kind="bound_check",
                     coverage_basis="plan_check_observation",
                     source_revision_at_observation=self.repository_revision,
@@ -2200,9 +2306,11 @@ class MiniSweAdapter(GroundtruthController):
             or not snapshot.graph_current
             or not snapshot.graph_path
         ):
+            self._recipe_empty_reason = "graph_unavailable"
             return ""
         paths = tuple(sorted({str(path) for path in params.get("paths") or () if path}))
         if not paths:
+            self._recipe_empty_reason = "no_changed_paths"
             return ""
         transaction_sha256 = str(params.get("transaction_sha256") or "")
         patch_revision = str(
@@ -2222,6 +2330,7 @@ class MiniSweAdapter(GroundtruthController):
                     if row[0]
                 )
             if not entities:
+                self._recipe_empty_reason = "no_resolution_symbols"
                 return ""
             from groundtruth.runtime.verification_plan import build_verification_plan
 
@@ -2262,6 +2371,7 @@ class MiniSweAdapter(GroundtruthController):
                 if len(lines) == 3:
                     break
             if not lines:
+                self._recipe_empty_reason = "empty_plan_checks"
                 return ""
             rendered = "[GT_EVIDENCE:verification_plan]\n" + "\n".join(lines)
             dedup_key = f"verification:{transaction_sha256}:{digest}"
@@ -2294,6 +2404,7 @@ class MiniSweAdapter(GroundtruthController):
                 transaction_sha256=transaction_sha256,
                 error_type=type(exc).__name__,
             )
+            self._recipe_empty_reason = "render_error"
             return ""
 
     def verification_candidate(self) -> tuple[str, dict[str, str]]:
@@ -4069,8 +4180,17 @@ class MiniSweAdapter(GroundtruthController):
             ),
             None,
         )
+        # Dispatch-skip rows (layer ``producer.dispatch``) carry ``skip_reason``
+        # and never computed a registry verdict: the key is simply absent.
+        # Mapping the absent key to ``False`` would fabricate a denial the
+        # registry never made - run 34766499875 journaled 40 such rows as
+        # ``registry_allowed: false`` when the real story was
+        # ``kill_switch_off`` / ``not_file_creation``. None stays unknown.
+        registry_allowed = safe.get("registry_allowed")
         self.store.append(
             "producer_invocation",
+            layer=str(safe.get("layer") or ""),
+            skip_reason=str(safe.get("skip_reason") or ""),
             invocation_schema=str(safe.get("schema") or "gt.producer_invocation.v1"),
             invocation_id=str(safe.get("invocation_id") or ""),
             producer=str(safe.get("producer") or ""),
@@ -4085,7 +4205,9 @@ class MiniSweAdapter(GroundtruthController):
             decision_id=str(safe.get("decision_id") or ""),
             returned_fact=bool(safe.get("returned_fact")),
             returned_nothing=bool(safe.get("returned_nothing")),
-            registry_allowed=bool(safe.get("registry_allowed")),
+            registry_allowed=(
+                bool(registry_allowed) if registry_allowed is not None else None
+            ),
             authority_result=str(safe.get("authority_result") or ""),
             dedup_result=str(safe.get("dedup_result") or ""),
             abstention_reasons=tuple(
@@ -4221,12 +4343,25 @@ class MiniSweAdapter(GroundtruthController):
             request_id
             or (self._latest_delivery.request_id if self._latest_delivery else "")
         )
+        # InterruptAgentFlow subclasses (FormatError, Submitted, ...) call
+        # Exception.__init__ with no args: str(error) is "". The reason rides
+        # in ``messages`` or, for GT's own format errors, ``gt_error_detail``.
+        detail = str(getattr(error, "gt_error_detail", "") or "")
+        if not detail:
+            detail = str(error)
+        if not detail:
+            messages = getattr(error, "messages", ())
+            if messages and isinstance(messages[0], Mapping):
+                extra = messages[0].get("extra") or {}
+                detail = str(messages[0].get("content") or "") or str(
+                    extra.get("interrupt_type") or ""
+                )
         self.store.append(
             "provider_failure",
             iteration=self.iteration,
             request_id=resolved_request_id,
             error_type=type(error).__name__,
-            error=redact_secret_text(str(error))[:500],
+            error=redact_secret_text(detail)[:500],
         )
         if resolved_request_id:
             self._terminal_request_ids.add(resolved_request_id)
@@ -4485,15 +4620,35 @@ class MiniSweAdapter(GroundtruthController):
         rendered = ""
         metadata: dict[str, str] = {}
         artifact_reference: dict[str, Any] | None = None
+        self._recipe_empty_reason = ""
         if kind == "cochange":
-            from .cochange_evidence import cochange_prior_dose
+            from .cochange_evidence import cochange_prior_dose, cochange_row_count
 
             files = tuple(
                 str(path) for path in params.get("files") or () if path
             )
             if not files:
+                self._recipe_empty_reason = "no_files"
+                return None
+            # The cochanges table is derived from repository history at index
+            # time and cannot appear mid-run: a depth-1 benchmark checkout has
+            # none, so the lane is dead for the whole run. Probe it once, say
+            # so once, and stop re-rendering per edit (run 34766499875 logged
+            # 56 empty_render rows for one lane that could never produce).
+            dead = getattr(self, "_cochange_history_dead", None)
+            snapshot = self.graph_query_snapshot()
+            graph_path = str(getattr(snapshot, "graph_path", "") or "")
+            if dead is None and graph_path:
+                dead = cochange_row_count(graph_path) == 0
+                self._cochange_history_dead = dead
+            if dead or not graph_path:
+                self._recipe_empty_reason = (
+                    "cochange_history_unavailable" if dead else "graph_unavailable"
+                )
                 return None
             rendered = cochange_prior_dose(self, files) or ""
+            if not rendered:
+                self._recipe_empty_reason = "no_cochange_partners"
             metadata = dict(self.consume_model_visible_delivery_metadata() or {})
         elif kind == "verification_plan":
             rendered = self._render_verification_plan_now(params)
@@ -4505,8 +4660,11 @@ class MiniSweAdapter(GroundtruthController):
                 self, "_localization_artifact_reference", None
             )
         else:
+            self._recipe_empty_reason = "unknown_recipe_kind"
             return None
         if not rendered:
+            if not self._recipe_empty_reason:
+                self._recipe_empty_reason = "empty_render"
             return None
         return (
             rendered,
@@ -5569,7 +5727,25 @@ class MiniSweAdapter(GroundtruthController):
             # T2.2: an accepted submission with UNKNOWN obligations is NOT
             # verified. Only report verified when every obligation has positive
             # evidence (GREEN). UNKNOWN -> unverified (never silently success).
-            state["verified"] = bool(self.predicates) and not self.unmet_predicates and not self.unmet_plan_rows()
+            #
+            # The row ledger must agree. unmet_plan_rows treats a row whose
+            # mapped predicates are all GREEN as met, but plan_row_state can
+            # still read UNVERIFIED when the bound-check observation predates
+            # the last workspace change -- gate-one submitted with all 28 rows
+            # UNVERIFIED while this flag read True. Stale-revision evidence
+            # does not verify the submitted tree.
+            plan = getattr(self, "persistent_plan", None)
+            unverified_rows = [
+                row.row_id for row in getattr(plan, "rows", ())
+                if self.plan_row_state(row.row_id) not in {"CHECK_PASSED", "PROVEN"}
+            ]
+            state["unverified_plan_rows"] = unverified_rows
+            state["verified"] = (
+                bool(self.predicates)
+                and not self.unmet_predicates
+                and not self.unmet_plan_rows()
+                and not unverified_rows
+            )
             state["unverified_predicates"] = [
                 pid for pid, st in self._status.items()
                 if st is PredicateStatus.UNKNOWN

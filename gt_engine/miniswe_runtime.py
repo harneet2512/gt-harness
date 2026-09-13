@@ -767,7 +767,10 @@ def _run_evidence(
             (*changed_files, *_viewed_files(command, adapter.repo_root or ""))
         )
     )
-    if cochange_files:
+    # A confirmed-dead cochange lane (no history table in the graph - the
+    # depth-1 benchmark checkout case) stops queuing recipes entirely; the
+    # first resolve already journaled the lane's verdict.
+    if cochange_files and not getattr(adapter, "_cochange_history_dead", False):
         candidates.append(_EvidenceCandidate(
             10, "cochange_partner", "",
             {"kind": "cochange_partner", "dedup_key": "cochange-unbound",

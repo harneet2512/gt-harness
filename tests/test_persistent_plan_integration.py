@@ -412,6 +412,58 @@ def test_final_state_declares_the_plan(tmp_path, graph):
     assert state["unmet_plan_rows"]
 
 
+def test_green_predicates_with_unverified_rows_are_not_verified(tmp_path, graph):
+    """The gate-one aiomonitor defect, replayed on the real objects.
+
+    Every mapped predicate was GREEN from bound-check evidence, so
+    ``unmet_plan_rows`` was empty and ``verified`` minted True -- while the
+    row ledger read all-UNVERIFIED at the submission's revision and the gate
+    recorded ``completion_proven: false``. The submitted tree was never
+    re-checked, so ``verified`` was a stale-evidence claim.
+    """
+    adapter, inputs, _contract, _merged, _repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+    adapter.start_task()
+    for predicate_id in adapter.predicates:
+        adapter.record_receipt(
+            predicate_id, "assertion fixture", 0, "ok",
+            epoch=adapter.workspace_epoch, status="GREEN", semantic=True,
+        )
+    adapter.begin_verify()
+    adapter.begin_submit()
+    adapter.submit_decision()
+
+    state = adapter.final_state()
+    assert state["phase"] == "FINISHED"
+    assert state["unmet_predicates"] == []
+    assert state["verified"] is False
+    assert state["unverified_plan_rows"] == [
+        row.row_id for row in plan.rows]
+
+
+def test_current_revision_proven_rows_permit_verified(tmp_path, graph):
+    """verified is still reachable -- when the row ledger agrees."""
+    adapter, inputs, _contract, _merged, _repo = _built(tmp_path, graph)
+    plan = _plan_for(inputs, adapter)
+    adapter.start_task()
+    adapter._process_row_observations = {
+        row.row_id: {"state": "PROVEN", "source_revision": adapter.repository_revision}
+        for row in plan.rows
+    }
+    for predicate_id in adapter.predicates:
+        adapter.record_receipt(
+            predicate_id, "assertion fixture", 0, "ok",
+            epoch=adapter.workspace_epoch, status="GREEN", semantic=True,
+        )
+    adapter.begin_verify()
+    adapter.begin_submit()
+    adapter.submit_decision()
+
+    state = adapter.final_state()
+    assert state["verified"] is True
+    assert state["unverified_plan_rows"] == []
+
+
 def test_the_gate_is_consulted_before_the_command_runs(tmp_path, graph):
     """A refusal after execution would journal a decision and change nothing.
 

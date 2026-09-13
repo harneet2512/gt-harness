@@ -2525,6 +2525,45 @@ def test_miniswe_journals_producer_invocations_with_feature_identity(tmp_path):
     assert verify_event_journal(adapter.store.path).valid
 
 
+def test_dispatch_skip_rows_carry_reason_and_no_fabricated_registry_verdict(
+    tmp_path,
+):
+    """F5 (run 34766499875): 40 ``not_entered`` dispatch rows journaled
+    ``registry_allowed: false`` because the recorder mapped an absent key to
+    False. A dispatch skip never evaluated the registry - the verdict is
+    unknown, and ``skip_reason`` (kill_switch_off / not_file_creation) is the
+    field that says why."""
+    import json
+
+    adapter = MiniSweAdapter(
+        task_id="dispatch-skip", state_dir=tmp_path, predicates=[],
+        contract=extract_task_contract("Fix a caller."))
+    adapter.start_task()
+    recorder = adapter.gateway_state().producer_recorder
+
+    recorder({
+        "schema": "gt.producer_invocation.v1",
+        "layer": "producer.dispatch",
+        "outcome": "not_entered",
+        "producer": "change_surface",
+        "evidence_types": ["newfile_precedent", "change_surface"],
+        "invocation_site": "gateway.edit.change_surface",
+        "event_type": "edit_result",
+        "action_index": 23,
+        "observation_id": "dispatch-skip:0",
+        "skip_reason": "not_file_creation",
+    })
+
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+    ]
+    row = [r for r in rows if r.get("event") == "producer_invocation"][-1]
+    assert row["registry_allowed"] is None
+    assert row["skip_reason"] == "not_file_creation"
+    assert row["layer"] == "producer.dispatch"
+
+
 def test_wire_tool_set_matches_the_recorded_request_envelope(tmp_path, monkeypatch):
     """F1: the admitted tool set must reach the wire, not only the envelope.
 

@@ -1153,11 +1153,19 @@ def main() -> int:
             parser.error("--gt-capability-mode requires NAME=MODE with a valid MODE")
         capability_modes[name] = mode
     try:
-        if args.patch_output:
-            # Baseline capture is setup work. A missing/non-Git workspace must
-            # still emit the typed setup result instead of escaping before the
-            # runner's failure-conservation path is installed.
+        # Baseline capture is setup work, and it is unconditional: the terminal
+        # submission_patch_observed journal row and the report's
+        # submission_patch_state need it even when --patch-output was not
+        # requested -- gate-one's report shipped all three patch fields absent
+        # because capture was gated on the export flag. A missing/non-Git
+        # workspace is not a setup failure: it degrades to an empty baseline,
+        # which submission_patch_state reports honestly as "unavailable".
+        # --patch-output still fails closed downstream at export
+        # (baseline_unavailable) rather than minting a patch.
+        try:
             patch_baseline = _repository_head(Path(args.cwd))
+        except (OSError, subprocess.SubprocessError):
+            patch_baseline = ""
         from gt_engine.engine_state import RuntimeLayout
 
         agent, adapter, session = build_agent(
@@ -1262,14 +1270,13 @@ def main() -> int:
     # becomes distinguishable from one whose work was wrong. Across runs it
     # measures the thing worth knowing - how often the step count costs the
     # commit.
-    if patch_baseline:
-        from scripts.miniswe_supervisor import submission_patch_state
+    from scripts.miniswe_supervisor import submission_patch_state
 
-        patch_state = submission_patch_state(Path(args.cwd), patch_baseline)
-        report["submission_patch_state"] = patch_state
-        report["collected_patch_will_be_empty"] = patch_state.get("committed_patch_empty")
-        report["repository_head_moved"] = (
-            patch_state["head"] != patch_baseline if patch_state["status"] == "observed" else None)
+    patch_state = submission_patch_state(Path(args.cwd), patch_baseline)
+    report["submission_patch_state"] = patch_state
+    report["collected_patch_will_be_empty"] = patch_state.get("committed_patch_empty")
+    report["repository_head_moved"] = (
+        patch_state["head"] != patch_baseline if patch_state["status"] == "observed" else None)
     # Treatment identity is the requested mode, not effective engine health.
     # A kill switch may preserve native execution but cannot relabel ON as OFF.
     gt_active = not args.gt_off and args.gt_mode != "off"

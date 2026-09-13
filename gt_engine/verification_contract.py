@@ -300,6 +300,76 @@ def dependency_footprint_affected(
     return False
 
 
+# Extensions and basenames that cannot reach an executed check through the
+# import/graph channel. This is an allowlist on purpose: unknown, extensionless,
+# or ambiguous names stay non-inert so unrecognized shapes keep invalidating.
+_INERT_EDIT_SUFFIXES = frozenset({
+    ".md", ".markdown", ".rst", ".adoc",
+    ".enhancement", ".bugfix", ".feature", ".doc", ".removal", ".misc",
+    ".towncrier",
+})
+_INERT_EDIT_BASENAMES = frozenset({
+    "license", "licence", "authors", "notice", "changelog", "changes",
+    "history", "contributors", "contributing", "codeowners",
+    ".mailmap", ".gitignore", ".gitattributes", ".dockerignore",
+    ".editorconfig",
+})
+
+
+def _declared_scope_root(identity_value: str) -> str:
+    """The top-level workspace directory a declared path identity occupies.
+
+    A root-level declared file makes the whole workspace its scope root (""),
+    which disables the inert narrowing for that footprint: nothing can be
+    shown disjoint from a root-scoped proof.
+    """
+
+    path = normalize_dependency_path(identity_value)
+    if "/" not in path:
+        return ""
+    return path.split("/", 1)[0]
+
+
+def edited_paths_provably_inert(
+    footprint: DependencyFootprint,
+    edited_paths: Iterable[str],
+) -> bool:
+    """Whether every edit is provably disjoint from a declared path scope.
+
+    This is the single narrowing of conservative workspace-wide invalidation.
+    It applies only when the receipt carries explicit ``path`` identities and
+    every edited path is (a) a non-code, non-config name with no import
+    channel and (b) outside every declared scope root. A ``changes/``
+    towncrier fragment qualifies against a ``tests/``-scoped bound check; any
+    source, config, dependency-manifest, template, or in-scope path still
+    invalidates. Footprints without declared ``path`` identities keep the
+    conservative behavior: every edit affects them.
+    """
+
+    roots = {
+        _declared_scope_root(identity.value)
+        for identity in footprint.identities
+        if identity.kind == "path" and identity.value
+    }
+    if not roots or "" in roots:
+        return False
+    edited = tuple(
+        path
+        for raw in edited_paths
+        if (path := normalize_dependency_path(raw))
+    )
+    if not edited:
+        return False
+    for path in edited:
+        name = path.rsplit("/", 1)[-1].lower()
+        suffix = name[name.rfind("."):] if "." in name else ""
+        if suffix not in _INERT_EDIT_SUFFIXES and name not in _INERT_EDIT_BASENAMES:
+            return False
+        if any(path == root or path.startswith(root + "/") for root in roots):
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class _NumericBound:
     value: Decimal

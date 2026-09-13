@@ -72,7 +72,10 @@ def test_gate_receipt_keeps_mapping_and_check_evidence_distinct():
     assert evidence["check_passed_rows"] == ["req-a"]
     assert evidence["unmapped_rows"] == ["req-b"]
     assert evidence["unverified_rows"] == ["req-b"]
-    assert evidence["completion_assessment"] == "not_established"
+    # The row ledger was assessed and says req-b is unverified; claiming
+    # "not_established" here is how gate-one read 28 unverified rows beside a
+    # submitted_verified terminal.
+    assert evidence["completion_assessment"] == "rows_unverified"
     assert evidence["baseline_assessment"] == "unknown"
     assert not decision.accepted
 
@@ -81,6 +84,39 @@ def test_gate_legacy_call_does_not_invent_mapping_evidence():
     decision = decide(plan=_plan(), unmet_rows=(), regressions=(), refusals=0, **AMPLE)
     assert decision.as_row()["evidence"]["mapping_assessment"] == "unavailable"
     assert decision.as_row()["evidence"]["completion_assessment"] == "not_established"
+    # With no row ledger supplied, completion is genuinely unassessed and can
+    # never be claimed proven.
+    assert decision.as_row()["completion_proven"] is False
+
+
+def test_every_row_verified_proves_completion():
+    """completion_proven was hardcoded False, so a fully-verified plan and an
+    unverified one journaled identically."""
+    decision = decide(
+        plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+        row_states={"req-a": "CHECK_PASSED", "req-b": "PROVEN"}, **AMPLE)
+    assert decision.accepted
+    row = decision.as_row()
+    assert row["completion_proven"] is True
+    assert row["evidence"]["completion_assessment"] == "all_rows_verified"
+    assert row["evidence"]["proven_rows"] == ["req-b"]
+
+
+def test_unverified_rows_do_not_claim_completion():
+    decision = decide(
+        plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+        row_states={"req-a": "CHECK_PASSED", "req-b": "UNVERIFIED"}, **AMPLE)
+    assert decision.accepted
+    assert decision.as_row()["completion_proven"] is False
+    assert decision.as_row()["evidence"]["completion_assessment"] == "rows_unverified"
+
+
+def test_a_regression_disproves_completion_even_with_verified_rows():
+    decision = decide(
+        plan=_plan(), unmet_rows=(), regressions=("test_widget",), refusals=0,
+        row_states={"req-a": "CHECK_PASSED", "req-b": "CHECK_PASSED"}, **AMPLE)
+    assert not decision.accepted
+    assert decision.as_row()["completion_proven"] is False
 
 
 def test_unmet_rows_refuse_once_when_there_is_room():

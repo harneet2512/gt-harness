@@ -59,6 +59,7 @@ class GateDecision:
     directive: str = ""
     escaped: str = ""
     baseline_status: str = ""
+    completion_proven: bool = False
     details: dict = field(default_factory=dict)
 
     def as_row(self) -> dict:
@@ -72,7 +73,7 @@ class GateDecision:
             "refusals": self.refusals,
             "escaped": self.escaped,
             "baseline_status": self.baseline_status,
-            "completion_proven": False,
+            "completion_proven": self.completion_proven,
             "evidence": self.details,
         }
 
@@ -106,9 +107,20 @@ def decide(
     """
     row_ids = {row.row_id for row in getattr(plan, "rows", ())}
     states = row_states or {}
+    verified_states = {"CHECK_PASSED", "PROVEN"}
+    if not row_ids:
+        completion_assessment = "no_plan_rows"
+    elif row_states is None:
+        # The caller supplied no row ledger, so completion is genuinely
+        # unassessed -- the only honest reading here.
+        completion_assessment = "not_established"
+    elif all(states.get(key) in verified_states for key in row_ids):
+        completion_assessment = "all_rows_verified"
+    else:
+        completion_assessment = "rows_unverified"
     details = {
         "layout_schema": "gt.plan_gate_evidence.v1",
-        "completion_assessment": "not_established",
+        "completion_assessment": completion_assessment,
         "baseline_assessment": baseline_status or "unavailable",
         "mapping_assessment": "available" if predicate_mapped_rows is not None else "unavailable",
         "predicate_mapped_rows": sorted(row_ids & set(predicate_mapped_rows or ())),
@@ -116,13 +128,25 @@ def decide(
         "check_passed_rows": sorted(key for key in row_ids if states.get(key) == "CHECK_PASSED"),
         "check_failed_rows": sorted(key for key in row_ids if states.get(key) == "CHECK_FAILED"),
         "deferred_rows": sorted(key for key in row_ids if states.get(key) == "DEFERRED"),
+        "proven_rows": sorted(key for key in row_ids if states.get(key) == "PROVEN"),
         "unverified_rows": sorted(key for key in row_ids if states.get(key, "UNVERIFIED") == "UNVERIFIED"),
     }
+    # completion_proven was hardcoded False: gate-one journaled
+    # submitted_verified beside 28 UNVERIFIED rows and this field could not
+    # contradict it because it never said anything else either. It is proven
+    # only when the row ledger says every row verified -- and a regression is
+    # evidence against completion even when every plan row passed.
+    completion_proven = (
+        bool(row_ids)
+        and all(states.get(key) in verified_states for key in row_ids)
+        and not regressions
+    )
     common = {
         "remaining_seconds": remaining_seconds,
         "remaining_steps": remaining_steps,
         "refusals": refusals,
         "baseline_status": baseline_status,
+        "completion_proven": completion_proven,
         "details": details,
     }
     if plan is None or not getattr(plan, "rows", ()):  # nothing to gate on

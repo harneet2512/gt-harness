@@ -11,6 +11,7 @@ from .verification_contract import (
     DependencyFootprint,
     conservative_execution_footprint,
     dependency_footprint_affected,
+    edited_paths_provably_inert,
 )
 
 
@@ -187,15 +188,15 @@ class GroundtruthController:
         if edited_paths:
             self.workspace_epoch += 1
             affected = set(invalidate) if invalidate is not None else set(self._status)
-            affected.update(
-                key
-                for key, receipt in self._receipts.items()
-                if dependency_footprint_affected(
+            for key, receipt in self._receipts.items():
+                footprint = (
                     receipt.dependency_footprint
-                    or conservative_execution_footprint(basis="unrecorded"),
-                    edited_paths,
+                    or conservative_execution_footprint(basis="unrecorded")
                 )
-            )
+                if dependency_footprint_affected(footprint, edited_paths) and not (
+                    edited_paths_provably_inert(footprint, edited_paths)
+                ):
+                    affected.add(key)
             for key in affected:
                 if key in self._status:
                     self._status[key] = PredicateStatus.UNKNOWN

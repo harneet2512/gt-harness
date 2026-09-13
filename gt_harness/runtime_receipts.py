@@ -860,6 +860,7 @@ def issue_runtime_receipts(
         "verified": bool(gt.get("verified")),
         "unmet_predicates": list(gt.get("unmet_predicates") or []),
         "unverified_predicates": list(gt.get("unverified_predicates") or []),
+        "unverified_plan_rows": list(gt.get("unverified_plan_rows") or []),
         "delivery_count": len(deliveries),
         "prompt_delivery_count": len(prompt_events),
         "sealed_delivery_count": len(evidence_events),

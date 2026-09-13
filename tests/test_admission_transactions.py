@@ -15,6 +15,83 @@ def adapter_for(tmp_path):
     return MiniSweAdapter(task_id="admission", state_dir=tmp_path, predicates=[])
 
 
+def _graph_adapter(tmp_path, *, cochange_rows=()):
+    """Adapter bound to a real on-disk graph with a controllable cochanges
+    table - the F4 lane-death probe reads the table, not a flag."""
+    import sqlite3
+
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    graph = tmp_path / "graph.db"
+    con = sqlite3.connect(graph)
+    con.execute("CREATE TABLE cochanges (file_a TEXT, file_b TEXT, count INTEGER)")
+    con.execute("CREATE TABLE resolution_symbols (stable_id TEXT, path TEXT)")
+    for a, b in cochange_rows:
+        con.execute("INSERT INTO cochanges VALUES (?,?,1)", (a, b))
+    con.commit()
+    con.close()
+    (tmp_path / "graph.manifest.json").write_text(
+        json.dumps({"graph_revision": "r1"}), encoding="utf-8")
+    adapter = MiniSweAdapter(
+        task_id="admission", state_dir=tmp_path / "state", predicates=[],
+        graph_db=str(graph))
+    adapter.repo_root = str(repo)
+    return adapter
+
+
+def _cochange_candidate(files=("src/a.py",)):
+    return GTDecisionCandidate(
+        rendered="", kind="cochange_partner", dedup_key="cochange-unbound",
+        supersession_key="cochange_partner:cochange-unbound",
+        recipe={"kind": "cochange", "params": {"files": list(files)}},
+    )
+
+
+def _unresolved_rows(adapter):
+    return [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+        if '"delivery_recipe_unresolved"' in line
+    ]
+
+
+def test_dead_cochange_lane_abstains_once_and_stops_queuing(tmp_path):
+    """F4 (run 34766499875): a depth-1 checkout has no cochanges table, so the
+    lane can never render - 56 identical empty_render rows were the symptom.
+    The lane verdict is journaled once, then repeats drop silently and the
+    runtime stops queuing the recipe at all."""
+    adapter = _graph_adapter(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+
+    for files in (("src/a.py",), ("src/b.py",), ("src/c.py",)):
+        assert session._resolve_delivery_recipe(
+            _cochange_candidate(files)) is None
+
+    rows = _unresolved_rows(adapter)
+    assert len(rows) == 1
+    assert rows[0]["reason"] == "cochange_history_unavailable"
+    assert adapter._cochange_history_dead is True
+
+
+def test_live_cochange_lane_dedups_empty_renders_per_file_set(tmp_path):
+    """A live history table with no partners for these files is a per-query
+    answer, not a dead lane: distinct file sets still get their own row."""
+    adapter = _graph_adapter(tmp_path, cochange_rows=(("src/x.py", "src/y.py"),))
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+
+    assert session._resolve_delivery_recipe(
+        _cochange_candidate(("src/a.py",))) is None
+    assert session._resolve_delivery_recipe(
+        _cochange_candidate(("src/a.py",))) is None
+    assert session._resolve_delivery_recipe(
+        _cochange_candidate(("src/other.py",))) is None
+
+    rows = _unresolved_rows(adapter)
+    assert len(rows) == 2
+    assert {row["reason"] for row in rows} == {"no_cochange_partners"}
+    assert adapter._cochange_history_dead is False
+
+
 def admit(adapter, iteration, text):
     return adapter.admit_model_visible_delivery(lane="sealed", kind="syntax_result",
         rendered=text, action_index=0, iteration=iteration, dedup_key=text)

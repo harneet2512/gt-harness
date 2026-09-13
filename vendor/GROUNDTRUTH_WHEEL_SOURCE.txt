@@ -1,18 +1,23 @@
 artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
-source_commit=6b4c923dad7657609ec86a05771e0aefd0ce84c7
-source_tree=d5f6ebc4516ae08601530b3dd73f7c2122d2e246
-sha256=dd02fcb19c04f5c20e172a8f46b9a6a9e7a97886b35d45aa5c32ae813037c337
+source_commit=3f5ff8e18195951ffb91f431a14475ff1fdae842
+source_tree=1abb13f6c80c23211c04d8e93fbb94c76c611095
+sha256=53ae59ef15af1670e4af68273f0cde63e9d4a4b64340ab2d4b93530fafc4683f
 build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
 
-upstream_fix=6b4c923 on branch wheel-patch-lsp-inventory (parent e85b9d75):
+upstream_fix=3f5ff8e on branch wheel-patch-lsp-inventory (parent 6b4c923):
   groundtruth/resolve.py — LSP type-enrichment now evicts each mutated
   node row from parser_node_inventory in the same transaction as its
   UPDATE nodes SET signature/return_type, restoring batch-amend parse
-  equality (producer DeepEqual on parser-owned rows). Verified: rebuilt
-  wheel differs from pre-patch artifact only in resolve.py + RECORD.
+  equality (producer DeepEqual on parser-owned rows); 3f5ff8e folds the
+  patch's one over-long line so the pinned source passes ruff format.
+  Verified: rebuilt wheel differs from pre-patch artifact only in
+  resolve.py + RECORD.
   Pre-patch artifact sha256:
   b1b8b2ba5b5b83c186f020a76354ede1ac98ec8791e69b91afe51e91631daf98
+  6b4c923 artifact sha256 (superseded by format fix, source-identical
+  modulo whitespace):
+  dd02fcb19c04f5c20e172a8f46b9a6a9e7a97886bb35d45aa5c32ae813037c337
 
 Recorded source tree carries 2456 committed files.
 This pin records the vendored artifact's identity only. It does not certify installed

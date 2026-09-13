@@ -567,6 +567,40 @@ def test_bootstrap_response_binds_its_own_request_not_the_prior_agents(tmp_path)
     assert failure["request_id"] == bootstrap_id
 
 
+def test_provider_failure_journals_the_format_error_reason(tmp_path):
+    """F8 (run 34766499875): ``InterruptAgentFlow`` exceptions call
+    ``Exception.__init__`` with no args, so ``str(exc)`` is "" and the
+    provider_failure row carried an empty error. GT's own format errors keep
+    the raw reason in ``gt_error_detail``; foreign ones fall back to their
+    message payload."""
+    from gt_engine.miniswe_typed_actions import _format_error
+
+    a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    a.start_task()
+    a.bind_provider_failure(
+        _format_error("{{ error }}", "Unknown tool 'wrench'."),
+        request_id="req-1",
+    )
+    rows = [json.loads(x) for x in a.store.path.read_text().splitlines()]
+    failure = next(row for row in rows if row["event"] == "provider_failure")
+    assert failure["error_type"] == "FormatError"
+    assert "Unknown tool 'wrench'" in failure["error"]
+
+    from minisweagent.exceptions import InterruptAgentFlow
+
+    class Foreign(InterruptAgentFlow):
+        pass
+
+    a.bind_provider_failure(
+        Foreign({"role": "user", "content": "foreign template body",
+                 "extra": {"interrupt_type": "Foreign"}}),
+        request_id="req-2",
+    )
+    rows = [json.loads(x) for x in a.store.path.read_text().splitlines()]
+    failure = [row for row in rows if row["event"] == "provider_failure"][-1]
+    assert failure["error"] == "foreign template body"
+
+
 def test_recovery_steer_scheduled_on_recurring_failure_after_edit(tmp_path):
     a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
     a.start_task()

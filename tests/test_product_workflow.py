@@ -66,12 +66,16 @@ def test_only_closed_supported_workflow_set_is_active() -> None:
     # that rehearsal previously had exactly ONE reproducer -- a single
     # workstation whose Docker Desktop 9p mount deadlocked two runs in
     # `p9_client_rpc` -- and evidence nobody else can reproduce is weak
-    # evidence for a release gate.
+    # evidence for a release gate. `swelive_gt_harness_paid.yaml` is the
+    # reviewed paid smoke path: workflow_dispatch-only, approval-gated by its
+    # own input, and bound to the manifest pins -- admitted by name, not by
+    # loosening the rule.
     assert active == [
         "deepswe_cache_images.yml",
         "deepswe_gt_harness_product.yml",
         "deepswe_gt_harness_product_p0731.yaml",
         "installed_rehearsal.yml",
+        "swelive_gt_harness_paid.yaml",
         "tb2_cache_images.yml",
     ]
 
