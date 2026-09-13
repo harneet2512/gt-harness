@@ -1163,14 +1163,18 @@ def install_runtime_hooks(
             if callable(original_parser):
                 model._parse_actions = MethodType(parse_selection, model)
             bootstrap_preparing = True
-            message = native_query(
-                list(offer.messages),
-                _gt_provider_tools=[dict(offer.tool)],
-                _gt_select_catalog=True,
-                temperature=0.0,
-                max_tokens=256,
-                num_retries=0,
-            )
+            adapter.provider_wait_begin()
+            try:
+                message = native_query(
+                    list(offer.messages),
+                    _gt_provider_tools=[dict(offer.tool)],
+                    _gt_select_catalog=True,
+                    temperature=0.0,
+                    max_tokens=256,
+                    num_retries=0,
+                )
+            finally:
+                adapter.provider_wait_end()
             # The call is spent and already counted at the transport the moment
             # native_query returns. Counting it after bind_provider_response and
             # accept_select_catalog made the count a proxy for "the bootstrap
@@ -1244,18 +1248,22 @@ def install_runtime_hooks(
                 if callable(original_parser):
                     model._parse_actions = MethodType(parse_nothing, model)
                 plan_preparing = True
-                message = native_query(
-                    list(build_planning_messages(inputs, adapter.issue_text)),
-                    _gt_provider_tools=[plan_tool_schema(inputs)],
-                    _gt_persistent_plan=True,
-                    temperature=0.0,
-                    # The reservation may raise the planning floor, never lower it.
-                    max_tokens=max(
-                        PLAN_MAX_OUTPUT_TOKENS,
-                        int(os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS") or 0),
-                    ),
-                    num_retries=0,
-                )
+                adapter.provider_wait_begin()
+                try:
+                    message = native_query(
+                        list(build_planning_messages(inputs, adapter.issue_text)),
+                        _gt_provider_tools=[plan_tool_schema(inputs)],
+                        _gt_persistent_plan=True,
+                        temperature=0.0,
+                        # The reservation may raise the planning floor, never lower it.
+                        max_tokens=max(
+                            PLAN_MAX_OUTPUT_TOKENS,
+                            int(os.environ.get("GT_PROVIDER_RESERVED_OUTPUT_TOKENS") or 0),
+                        ),
+                        num_retries=0,
+                    )
+                finally:
+                    adapter.provider_wait_end()
                 adapter.note_persistent_plan_bootstrap()
                 extra = dict(message.get("extra") or {})
                 response = extra.get("response")
@@ -1358,7 +1366,13 @@ def install_runtime_hooks(
             adapter._poll_startup_index()
             bootstrap_select_catalog()
             bootstrap_persistent_plan()
-            message = original_query(messages, **kwargs)
+            # The provider wait is the scheduling window for whole-graph
+            # work; begin/end are fail-open and never reach the call.
+            adapter.provider_wait_begin()
+            try:
+                message = original_query(messages, **kwargs)
+            finally:
+                adapter.provider_wait_end()
         except Exception as exc:
             if not session.disabled:
                 try:

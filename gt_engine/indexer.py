@@ -78,6 +78,14 @@ GRAPH_SCHEMA_VERSION = "gt.graph_certification.v1"
 INDEX_RESOURCE_SCHEMA = "gt.index_resource.v1"
 LSP_TERMINAL_SCHEMA = "gt.lsp_promotion_task.v1"
 LSP_DERIVATION_SCHEMA = "gt.graph_derivation.v1"
+SCOPED_MERGE_RECEIPT_SCHEMA = "gt.scoped_merge_receipt.v1"
+# Derivation phases a certified base may carry and still be derived from
+# again. `lsp` is the promotion's own phase; `lsp_scoped_merge` is the
+# salvage merge's. A serving graph adopted out of enrichments/ keeps its
+# derivation, so every later derivation bases on a derived graph - the
+# chain is the normal case, not the exception.
+LSP_DERIVATION_PHASES = frozenset({"lsp", "lsp_scoped_merge"})
+_DERIVATION_BASE_LOCATIONS = frozenset({"revisions", "enrichments"})
 _INDEX_GOMEMLIMIT_BYTES = 3 * 1024**3
 _INDEX_RSS_LIMIT_BYTES = 4 * 1024**3
 
@@ -2250,7 +2258,7 @@ def certify_lsp_candidate(
         or not re.fullmatch(r"[0-9a-f]{64}", expected_repository_snapshot_sha256)
         or base == candidate
         or not base_relative.parts
-        or base_relative.parts[0] != "revisions"
+        or base_relative.parts[0] not in _DERIVATION_BASE_LOCATIONS
         or len(candidate_relative.parts) != 3
         or candidate_relative.parts[0] != "enrichments"
         or not base.is_file()
@@ -2277,7 +2285,11 @@ def certify_lsp_candidate(
         base_manifest = json.loads(base_manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return _lsp_failure("lsp_base_manifest_unreadable")
-    if base_manifest.get("derivation") is not None:
+    base_derivation = base_manifest.get("derivation")
+    if base_derivation is not None and (
+        not isinstance(base_derivation, dict)
+        or base_derivation.get("phase") not in LSP_DERIVATION_PHASES
+    ):
         return _lsp_failure("lsp_nested_derivation_forbidden")
     base_sha = hashlib.sha256(base.read_bytes()).hexdigest()
     candidate_sha = hashlib.sha256(candidate.read_bytes()).hexdigest()
@@ -2342,6 +2354,11 @@ def certify_lsp_candidate(
         },
     })
     _atomic_write(manifest_path, _canonical_json(manifest))
+    # A derived graph that gets adopted becomes the base of the next
+    # derivation; the sibling resource makes that link self-contained.
+    base_resource = base.with_name("index-resource.json")
+    if base_resource.is_file():
+        shutil.copyfile(base_resource, candidate.with_name("index-resource.json"))
     valid, reason = certify_graph_artifact(
         candidate,
         manifest_path,
@@ -2356,6 +2373,169 @@ def certify_lsp_candidate(
         receipt_path.unlink(missing_ok=True)
         return _lsp_failure(f"lsp_candidate_invalid:{reason}")
     return GraphBuildArtifact(True, str(candidate), candidate_sha)
+
+
+def certify_scoped_merge(
+    live_graph: str | Path,
+    merged_graph: str | Path,
+    merge_payload: Mapping[str, object],
+    *,
+    expected_source_revision: str,
+    expected_repository_root_sha256: str,
+    layout: RuntimeLayout,
+    expected_root_sha256: str,
+    expected_binary_sha256: str = "",
+    expected_task_id: str = "",
+    expected_product_source_sha: str = "",
+) -> GraphBuildArtifact:
+    """Publish a scoped-merge derivative with independently checked lineage.
+
+    The merge's "base" is the LIVE graph it was applied onto; the
+    promotion candidate it salvaged is named only by sha256 - the file
+    itself is reclaimed after the merge and never serves again. The
+    sealed receipt pins all four graphs, so lineage resolves without the
+    candidate remaining on disk.
+    """
+    live_input = Path(live_graph)
+    merged_input = Path(merged_graph)
+    if live_input.is_symlink() or merged_input.is_symlink():
+        return _lsp_failure("merge_layout_symlink_forbidden")
+    live = live_input.resolve()
+    merged = merged_input.resolve()
+    graph_root = layout.graph_root.resolve()
+    try:
+        live_relative = live.relative_to(graph_root)
+        merged_relative = merged.relative_to(graph_root)
+    except ValueError:
+        return _lsp_failure("merge_layout_invalid")
+    if (
+        not expected_source_revision
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_repository_root_sha256)
+        or live == merged
+        or not live_relative.parts
+        or live_relative.parts[0] not in _DERIVATION_BASE_LOCATIONS
+        or len(merged_relative.parts) != 3
+        or merged_relative.parts[0] != "enrichments"
+        or not live.is_file()
+        or not merged.is_file()
+    ):
+        return _lsp_failure("merge_layout_invalid")
+    live_manifest_path = live.with_suffix(".manifest.json")
+    manifest_path = merged.with_suffix(".manifest.json")
+    receipt_path = merged.with_suffix(".lsp-scoped-merge.json")
+    if manifest_path.exists() or receipt_path.exists():
+        return _lsp_failure("merge_certification_already_exists")
+    valid, reason = certify_graph_artifact(
+        live,
+        live_manifest_path,
+        expected_root_sha256=expected_root_sha256,
+        expected_source_revision="",
+        expected_binary_sha256=expected_binary_sha256,
+        expected_task_id=expected_task_id,
+        expected_product_source_sha=expected_product_source_sha,
+    )
+    if not valid:
+        return _lsp_failure(f"merge_live_base_invalid:{reason}")
+    try:
+        live_manifest = json.loads(live_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _lsp_failure("merge_live_manifest_unreadable")
+    live_derivation = live_manifest.get("derivation")
+    if live_derivation is not None and (
+        not isinstance(live_derivation, dict)
+        or live_derivation.get("phase") not in LSP_DERIVATION_PHASES
+    ):
+        return _lsp_failure("merge_nested_derivation_forbidden")
+    live_sha = hashlib.sha256(live.read_bytes()).hexdigest()
+    merged_sha = hashlib.sha256(merged.read_bytes()).hexdigest()
+    live_revision = str(
+        live_manifest.get("graph_revision") or live_manifest.get("graph_sha256") or ""
+    )
+    receipt = dict(merge_payload)
+    receipt["repository_root_sha256"] = expected_repository_root_sha256
+    if (
+        receipt.get("schema") != SCOPED_MERGE_RECEIPT_SCHEMA
+        or receipt.get("terminal") is not True
+        or receipt.get("status") != "succeeded"
+        or receipt.get("closure_rebuilt") is not True
+        or receipt.get("source_revision") != expected_source_revision
+        or receipt.get("input_live_graph_sha256") != live_sha
+        or receipt.get("output_graph_sha256") != merged_sha
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(receipt.get("input_base_graph_sha256") or "")
+        )
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(receipt.get("input_candidate_graph_sha256") or "")
+        )
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(receipt.get("stale_paths_sha256") or "")
+        )
+        or type(receipt.get("applied")) is not int
+        or int(receipt.get("applied") or 0) <= 0
+    ):
+        return _lsp_failure("merge_receipt_identity_mismatch")
+    try:
+        schema_valid, schema_reason = _graph_schema_receipt(merged)
+    except (OSError, ValueError):
+        return _lsp_failure("merge_output_unreadable")
+    if not schema_valid:
+        return _lsp_failure(f"merge_output_schema_invalid:{schema_reason}")
+
+    receipt_seal = _sealed_json(receipt_path, receipt, "receipt_sha256")
+    receipt_file_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    manifest = dict(live_manifest)
+    manifest.update({
+        "source_revision": expected_source_revision,
+        "graph_revision": merged_sha,
+        "graph_sha256": merged_sha,
+        "graph_bytes": merged.stat().st_size,
+        "indexed_file_count": _graph_scale(merged)[0],
+        "indexed_node_count": _graph_scale(merged)[1],
+        **_graph_phase_metadata(merged),
+        "derivation": {
+            "schema": LSP_DERIVATION_SCHEMA,
+            "phase": "lsp_scoped_merge",
+            "graph_root": "../..",
+            "base_graph": _portable_lineage_reference(
+                graph_root, merged.parent, live
+            ),
+            "base_manifest": _portable_lineage_reference(
+                graph_root, merged.parent, live_manifest_path
+            ),
+            "base_resource": _portable_lineage_reference(
+                graph_root, merged.parent, live.with_name("index-resource.json")
+            ),
+            "base_graph_sha256": live_sha,
+            "base_graph_revision": live_revision,
+            "repository_snapshot_root_sha256": expected_repository_root_sha256,
+            "merge_candidate_sha256": receipt["input_candidate_graph_sha256"],
+            "merge_base_graph_sha256": receipt["input_base_graph_sha256"],
+            "merge_receipt": receipt_path.name,
+            "merge_receipt_sha256": receipt_file_sha,
+            "merge_receipt_seal": receipt_seal,
+        },
+    })
+    _atomic_write(manifest_path, _canonical_json(manifest))
+    # Same chain rule as the promotion: an adopted merge becomes the next
+    # derivation's base, and its lineage resolves through the sibling
+    # resource it carries forward.
+    live_resource = live.with_name("index-resource.json")
+    if live_resource.is_file():
+        shutil.copyfile(live_resource, merged.with_name("index-resource.json"))
+    valid, reason = certify_graph_artifact(
+        merged,
+        manifest_path,
+        expected_root_sha256=expected_root_sha256,
+        expected_source_revision=expected_source_revision,
+        expected_binary_sha256=expected_binary_sha256,
+        expected_task_id=expected_task_id,
+        expected_product_source_sha=expected_product_source_sha,
+    )
+    if not valid:
+        manifest_path.unlink(missing_ok=True)
+        receipt_path.unlink(missing_ok=True)
+        return _lsp_failure(f"merge_output_invalid:{reason}")
+    return GraphBuildArtifact(True, str(merged), merged_sha)
 
 
 def certify_graph_artifact(
@@ -2394,11 +2574,15 @@ def certify_graph_artifact(
     if derivation is not None:
         if not isinstance(derivation, dict):
             return False, "derivation_invalid"
+        phase = str(derivation.get("phase") or "")
         if (
             derivation.get("schema") != LSP_DERIVATION_SCHEMA
-            or derivation.get("phase") != "lsp"
+            or phase not in LSP_DERIVATION_PHASES
         ):
             return False, "derivation_unknown"
+        receipt_field = (
+            "terminal_receipt" if phase == "lsp" else "merge_receipt"
+        )
         parent = manifest_path.resolve().parent
         if derivation.get("graph_root") != "../..":
             return False, "derivation_root_invalid"
@@ -2422,7 +2606,7 @@ def certify_graph_artifact(
             lineage_root, parent, derivation.get("base_resource")
         )
         receipt_path = _lineage_file(
-            lineage_root, parent, derivation.get("terminal_receipt")
+            lineage_root, parent, derivation.get(receipt_field)
         )
         if None in {base_graph, base_manifest_path, base_resource, receipt_path}:
             return False, "derivation_reference_invalid"
@@ -2435,7 +2619,10 @@ def certify_graph_artifact(
         if base_manifest_path != base_graph.with_suffix(".manifest.json"):
             return False, "derivation_base_manifest_path_mismatch"
         try:
-            if base_graph.relative_to(lineage_root).parts[0] != "revisions":
+            if (
+                base_graph.relative_to(lineage_root).parts[0]
+                not in _DERIVATION_BASE_LOCATIONS
+            ):
                 return False, "derivation_base_location_invalid"
         except (IndexError, ValueError):
             return False, "derivation_base_location_invalid"
@@ -2443,7 +2630,11 @@ def certify_graph_artifact(
             base_manifest = json.loads(base_manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return False, "derivation_base_manifest_unreadable"
-        if base_manifest.get("derivation") is not None:
+        base_derivation = base_manifest.get("derivation")
+        if base_derivation is not None and (
+            not isinstance(base_derivation, dict)
+            or base_derivation.get("phase") not in LSP_DERIVATION_PHASES
+        ):
             return False, "derivation_nested"
         base_valid, base_reason = certify_graph_artifact(
             base_graph,
@@ -2472,33 +2663,59 @@ def certify_graph_artifact(
             return False, "derivation_base_identity_mismatch"
         if (
             not receipt_path.is_file()
-            or derivation.get("terminal_receipt_sha256")
+            or derivation.get(f"{receipt_field}_sha256")
             != hashlib.sha256(receipt_path.read_bytes()).hexdigest()
         ):
             return False, "derivation_terminal_receipt_mismatch"
         receipt = _read_sealed_json(receipt_path, "receipt_sha256")
         if (
             receipt is None
-            or derivation.get("terminal_receipt_seal")
+            or derivation.get(f"{receipt_field}_seal")
             != hashlib.sha256(_canonical_json(receipt)).hexdigest()
         ):
             return False, "derivation_terminal_receipt_seal_invalid"
-        if (
-            receipt.get("schema") != LSP_TERMINAL_SCHEMA
-            or receipt.get("terminal") is not True
-            or receipt.get("status") != "succeeded"
-            or receipt.get("publishable") is not True
-            or receipt.get("source_revision") != manifest.get("source_revision")
-            or receipt.get("repository_root_sha256")
-            != derivation.get("repository_snapshot_root_sha256")
-            or not re.fullmatch(
-                r"[0-9a-f]{64}",
-                str(receipt.get("repository_snapshot_sha256") or ""),
+        if phase == "lsp":
+            receipt_ok = (
+                receipt.get("schema") == LSP_TERMINAL_SCHEMA
+                and receipt.get("terminal") is True
+                and receipt.get("status") == "succeeded"
+                and receipt.get("publishable") is True
+                and receipt.get("source_revision") == manifest.get("source_revision")
+                and receipt.get("repository_root_sha256")
+                == derivation.get("repository_snapshot_root_sha256")
+                and re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(receipt.get("repository_snapshot_sha256") or ""),
+                )
+                and receipt.get("input_graph_revision") == base_revision
+                and receipt.get("input_graph_sha256") == base_sha
+                and receipt.get("output_graph_sha256") == manifest.get("graph_sha256")
             )
-            or receipt.get("input_graph_revision") != base_revision
-            or receipt.get("input_graph_sha256") != base_sha
-            or receipt.get("output_graph_sha256") != manifest.get("graph_sha256")
-        ):
+        else:
+            # lsp_scoped_merge: the receipt binds four graphs - the
+            # promotion's original base, the promotion candidate it
+            # salvaged, the live graph it merged onto, and this output.
+            receipt_ok = (
+                receipt.get("schema") == SCOPED_MERGE_RECEIPT_SCHEMA
+                and receipt.get("terminal") is True
+                and receipt.get("status") == "succeeded"
+                and receipt.get("closure_rebuilt") is True
+                and receipt.get("source_revision") == manifest.get("source_revision")
+                and receipt.get("repository_root_sha256")
+                == derivation.get("repository_snapshot_root_sha256")
+                and receipt.get("input_live_graph_sha256") == base_sha
+                and receipt.get("output_graph_sha256") == manifest.get("graph_sha256")
+                and receipt.get("input_candidate_graph_sha256")
+                == derivation.get("merge_candidate_sha256")
+                and receipt.get("input_base_graph_sha256")
+                == derivation.get("merge_base_graph_sha256")
+                and re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(receipt.get("stale_paths_sha256") or ""),
+                )
+                and type(receipt.get("applied")) is int
+            )
+        if not receipt_ok:
             return False, "derivation_terminal_receipt_identity_mismatch"
         inherited = (
             "identity_scope", "task_id", "product_source_sha",

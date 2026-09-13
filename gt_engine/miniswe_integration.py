@@ -35,6 +35,7 @@ from .event_journal import (
 )
 from .graph_coordinator import FrozenBuildInput, GraphBuildArtifact, GraphBuildCoordinator
 from .miniswe_controller import GroundtruthController, Predicate, PredicateStatus
+from .provider_wait import ProviderWaitScheduler
 from .persistent_plan.provenance import cleared_check_provenance
 from .request_history import store_provider_request
 from .run_diagnostics import DiagnosticCode, DiagnosticEvent, DiagnosticJournal
@@ -455,6 +456,20 @@ class MiniSweAdapter(GroundtruthController):
         self._startup_index: Any | None = None
         self._startup_finalize: Any | None = None
         self._unadopted_graph: tuple[str, str] = ("", "")
+        # Provider-wait scheduler: whole-graph products (dense contract
+        # store today) are launched while the agent is blocked on the
+        # network and drained by the owner thread at the next boundary.
+        self._wait_scheduler: ProviderWaitScheduler | None = None
+        self._dense_warmed_revision = ""
+        self._dense_wait_failures: dict[str, int] = {}
+        # Per-edit epoch map: which paths changed, and after which edit.
+        # A superseded enrichment salvages only its mutations on paths
+        # untouched since it was scheduled; an unenumerated change makes
+        # that set unknowable and the salvage must refuse.
+        self._edit_epoch = 0
+        self._path_edit_epochs: dict[str, int] = {}
+        self._incomplete_edit_epoch = 0
+        self._lsp_epochs: dict[str, int] = {}
         self.store.append(
             "runtime_layout", layout_schema="gt.runtime_layout.v1",
             evidence_root=str(layout.evidence_root.resolve()),
@@ -619,6 +634,180 @@ class MiniSweAdapter(GroundtruthController):
                 "provider_boundary_unavailable", error_type=type(exc).__name__
             )
         return self.provider_boundary
+
+    # -- provider-wait window ---------------------------------------------
+    #
+    # The agent blocks on the provider every turn. That block is the one
+    # moment in the loop where a CPU-bound GT job is guaranteed not to
+    # contend with the host, so whole-graph products are launched there
+    # rather than inside the agent's own bookkeeping path. The window is a
+    # launch gate: the job keeps running on its worker past window end
+    # (an ONNX batch cannot be suspended), and the owner thread collects
+    # results at the next boundary. Both entry points are fail-open -
+    # a scheduler fault must never reach the provider call it wraps.
+
+    def provider_wait_begin(self) -> None:
+        """Launch pending whole-graph work as the agent goes out on the wire."""
+        try:
+            if self._wait_scheduler is None:
+                self._wait_scheduler = ProviderWaitScheduler()
+            finished = self._drain_wait_work()
+            enqueued = self._enqueue_wait_work()
+            launched = self._wait_scheduler.begin_window()
+            if launched or enqueued or finished:
+                self.store.append(
+                    "provider_wait_begin",
+                    launched=launched,
+                    enqueued=enqueued,
+                    drained=finished,
+                )
+        except Exception as exc:  # noqa: BLE001 - scheduling never blocks a call
+            self._append_observation(
+                "provider_wait_begin_fault", error_type=type(exc).__name__
+            )
+
+    def provider_wait_end(self) -> None:
+        """Boundary after the provider call; collect whatever landed."""
+        try:
+            if self._wait_scheduler is None:
+                return
+            self._drain_wait_work()
+        except Exception as exc:  # noqa: BLE001
+            self._append_observation(
+                "provider_wait_end_fault", error_type=type(exc).__name__
+            )
+
+    DENSE_WAIT_MAX_FAILURES = 3
+
+    def _contract_store_path(self, graph_path: str) -> Path:
+        """The contract-embedding store for this run's layout.
+
+        Same resolution order ``_receipt_for_published_graph`` uses, so the
+        wait-window refresh writes the store the query path actually reads.
+        """
+        from .contract_embeddings import default_store_path
+
+        layout = self.engine_state.layout
+        return Path(
+            getattr(layout, "contract_store_path", None)
+            or os.environ.get("GT_CONTRACT_EMBEDDING_INDEX")
+            or default_store_path(graph_path)
+        )
+
+    def _enqueue_wait_work(self) -> list[str]:
+        """Decide which whole-graph products are due; enqueue each by name."""
+        assert self._wait_scheduler is not None
+        enqueued: list[str] = []
+        model_dir = os.environ.get("GT_DENSE_MODEL_DIR", "").strip()
+        graph_path = str(getattr(self.engine_state, "graph_path", "") or "")
+        revision = str(getattr(self.engine_state, "graph_revision", "") or "")
+        if (
+            model_dir
+            and graph_path
+            and revision
+            and self._dense_warmed_revision != revision
+            and self._dense_wait_failures.get(revision, 0) < self.DENSE_WAIT_MAX_FAILURES
+        ):
+            name = f"dense_refresh:{revision}"
+            store_path = self._contract_store_path(graph_path)
+
+            def work() -> Mapping[str, Any]:
+                from .contract_embeddings import (
+                    ContractEmbeddingStore,
+                    onnx_embedder,
+                    onnx_token_lengths,
+                )
+
+                # No deadline: the worker's clock is the provider wait, not
+                # the agent's budget. The store is content-keyed, so vectors
+                # produced against this graph stay valid wherever the same
+                # contracts survive later amendments.
+                store = ContractEmbeddingStore(store_path)
+                try:
+                    return dict(
+                        store.refresh(
+                            graph_path,
+                            embed_fn=onnx_embedder(model_dir),
+                            length_fn=onnx_token_lengths(model_dir),
+                        )
+                    )
+                finally:
+                    store.close()
+
+            if self._wait_scheduler.enqueue(name, work) in {"queued", "replaced"}:
+                enqueued.append(name)
+        return enqueued
+
+    def _drain_wait_work(self) -> list[str]:
+        """Journal each finished job's outcome on the owner thread."""
+        assert self._wait_scheduler is not None
+        drained: list[str] = []
+        for name, status, payload in self._wait_scheduler.drain():
+            drained.append(name)
+            kind, _, key = name.partition(":")
+            if kind == "dense_refresh":
+                if status == "ok" and isinstance(payload, Mapping):
+                    self._dense_warmed_revision = key
+                    self.store.append(
+                        "dense_wait_refresh",
+                        outcome="refreshed",
+                        graph_revision=key,
+                        embedded=int(payload.get("embedded") or 0),
+                        unchanged=int(payload.get("unchanged") or 0),
+                        deleted=int(payload.get("deleted") or 0),
+                        documents_after=int(payload.get("documents_after") or 0),
+                    )
+                else:
+                    self._dense_wait_failures[key] = (
+                        self._dense_wait_failures.get(key, 0) + 1
+                    )
+                    self.store.append(
+                        "dense_wait_refresh",
+                        outcome="failed",
+                        graph_revision=key,
+                        error=str(payload)[:200],
+                    )
+            elif kind == "lsp_salvage":
+                outcome = (
+                    str(payload.get("outcome") or "")
+                    if isinstance(payload, Mapping) else ""
+                )
+                fields: dict[str, Any] = {"task_id": key}
+                if isinstance(payload, Mapping):
+                    for field_name in (
+                        "applied", "inserted", "updated", "deleted",
+                        "skipped_stale", "skipped_diverged", "error",
+                    ):
+                        if field_name in payload:
+                            fields[field_name] = payload[field_name]
+                published = False
+                if status == "ok" and outcome == "merged":
+                    published = (
+                        self.engine_state.graph_current
+                        and self.engine_state.graph_path
+                        == str(payload.get("live_graph_path") or "")
+                        and self.engine_state.publish_graph(
+                            graph_path=str(payload.get("graph_path") or ""),
+                            graph_revision=str(payload.get("graph_revision") or ""),
+                            source_revision=str(payload.get("source_revision") or ""),
+                        )
+                    )
+                self.store.append(
+                    "lsp_salvage",
+                    outcome=(
+                        "published" if published
+                        else "superseded" if outcome == "merged"
+                        else outcome if outcome
+                        else f"failed:{str(payload)[:120]}"
+                    ),
+                    **fields,
+                )
+            else:
+                self.store.append(
+                    "wait_work_terminal", name=name, status=status,
+                    detail=str(payload)[:200],
+                )
+        return drained
 
     def record_episode_failure(
         self,
@@ -1559,6 +1748,14 @@ class MiniSweAdapter(GroundtruthController):
         self.store.put_blob("edit_transactions", digest, encoded)
         self.repository_revision = str(transaction.post_revision)
         self.engine_state.apply_transaction(transaction)
+        self._edit_epoch += 1
+        for path in transaction.changed_paths:
+            self._path_edit_epochs[str(path)] = self._edit_epoch
+        if not transaction.complete or transaction.omissions:
+            # An unenumerated change poisons the stale-set computation for
+            # every enrichment scheduled before it: what moved is not
+            # known, so "untouched since" cannot be answered.
+            self._incomplete_edit_epoch = self._edit_epoch
         self._latest_transaction_sha256 = str(transaction.transaction_sha256)
         self.store.append(
             "edit_transaction",
@@ -2526,6 +2723,7 @@ class MiniSweAdapter(GroundtruthController):
         )
         handle = self._lsp_scheduler.schedule(promotion_request)
         self._lsp_requests[handle.task_id] = promotion_request
+        self._lsp_epochs[handle.task_id] = self._edit_epoch
         self.store.append(
             "lsp_promotion_scheduled", task_id=handle.task_id,
             source_revision=request.source_revision, graph_revision=base.graph_revision,
@@ -2569,7 +2767,217 @@ class MiniSweAdapter(GroundtruthController):
             source_revision=request.source_revision, input_graph_revision=base.graph_revision,
             status=terminal.get("status"),
         )
-        self._lsp_requests.pop(str(terminal.get("task_id") or ""), None)
+        task_id = str(terminal.get("task_id") or "")
+        try:
+            self._maybe_salvage_lsp(request, base, terminal, disposition, task_id)
+        except Exception as exc:  # noqa: BLE001 - salvage never fails a run
+            self._append_observation(
+                "lsp_salvage_fault", error_type=type(exc).__name__
+            )
+        self._lsp_requests.pop(task_id, None)
+        self._lsp_epochs.pop(task_id, None)
+
+    _SALVAGEABLE_DISPOSITIONS = frozenset({
+        "obsolete", "obsolete_after_certification",
+    })
+
+    def _maybe_salvage_lsp(
+        self,
+        request: FrozenBuildInput,
+        base: GraphBuildArtifact,
+        terminal: Mapping[str, Any],
+        disposition: str,
+        task_id: str,
+    ) -> None:
+        """Stage a superseded candidate for the scoped-merge salvage.
+
+        The candidate's mutations remain valid wherever the source did
+        not move since the promotion was scheduled. The stale set is the
+        epoch-tracked edit paths; an unenumerated edit after scheduling
+        makes that set unknowable and the salvage refuses rather than
+        merge on faith. Staging renames the file so the coordinator's
+        post-observer discard no-ops on the claimed path.
+        """
+        if disposition not in self._SALVAGEABLE_DISPOSITIONS:
+            return
+        if (
+            terminal.get("status") != "succeeded"
+            or terminal.get("publishable") is not True
+            or not sum(
+                int(terminal.get(key) or 0)
+                for key in ("verified", "corrected", "selected", "deleted")
+            )
+        ):
+            return
+        schedule_epoch = self._lsp_epochs.get(task_id)
+        if schedule_epoch is None:
+            self.store.append(
+                "lsp_salvage_refused", task_id=task_id, reason="epoch_unknown"
+            )
+            return
+        if self._incomplete_edit_epoch > schedule_epoch:
+            self.store.append(
+                "lsp_salvage_refused", task_id=task_id,
+                reason="unenumerated_edit",
+            )
+            return
+        if not self.engine_state.graph_current:
+            self.store.append(
+                "lsp_salvage_refused", task_id=task_id,
+                reason="live_not_current",
+            )
+            return
+        candidate = str(terminal.get("candidate_path") or "")
+        candidate_path = Path(candidate)
+        if not candidate or not candidate_path.is_file():
+            return
+        scheduled = self._lsp_requests.get(task_id)
+        if scheduled is None:
+            self.store.append(
+                "lsp_salvage_refused", task_id=task_id,
+                reason="scheduled_request_missing",
+            )
+            return
+        stale = frozenset(
+            path for path, epoch in self._path_edit_epochs.items()
+            if epoch > schedule_epoch
+        )
+        staged = candidate_path.with_name(candidate_path.name + ".salvage")
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            piece = candidate_path.with_name(candidate_path.name + suffix)
+            if piece.is_file():
+                os.replace(piece, staged.with_name(staged.name + suffix))
+        try:
+            # Fold any WAL content into the staged file: the merge attaches
+            # the candidate read-only, and uncheckpointed mutations would
+            # otherwise be invisible - or the open refused outright. The
+            # connection is closed explicitly: a context manager commits
+            # but does not close, and the staged file must be unlinkable.
+            checkpoint = sqlite3.connect(staged)
+            try:
+                checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                checkpoint.close()
+        except sqlite3.Error:
+            self.store.append(
+                "lsp_salvage_refused", task_id=task_id,
+                reason="candidate_unreadable",
+            )
+            return
+        if self._wait_scheduler is None:
+            self._wait_scheduler = ProviderWaitScheduler()
+        name = f"lsp_salvage:{task_id}"
+        if self._wait_scheduler.enqueue(
+            name,
+            self._salvage_work(
+                base_graph_path=str(base.graph_path or ""),
+                staged_candidate=staged,
+                stale_paths=stale,
+                scheduled=scheduled,
+            ),
+        ) in {"queued", "replaced"}:
+            self.store.append(
+                "lsp_salvage_scheduled", task_id=task_id,
+                stale_path_count=len(stale),
+                source_revision=request.source_revision,
+            )
+
+    def _salvage_work(
+        self,
+        *,
+        base_graph_path: str,
+        staged_candidate: Path,
+        stale_paths: frozenset[str],
+        scheduled: Any,
+    ) -> Any:
+        """Build the worker closure for one scoped merge.
+
+        The worker reads engine state only to choose merge inputs; the
+        drain-side CAS on the owner thread is what makes adoption safe.
+        """
+        layout = self.engine_state.layout
+        repo_root_sha = hashlib.sha256(
+            str(Path(self.repo_root).resolve()).encode("utf-8", "surrogatepass")
+        ).hexdigest()
+        repository_root_sha = hashlib.sha256(
+            str(Path(scheduled.repository_root).resolve()).encode(
+                "utf-8", "surrogatepass"
+            )
+        ).hexdigest()
+        enrichments = layout.graph_root / "enrichments"
+
+        def work() -> Mapping[str, Any]:
+            from groundtruth.resolve import _rebuild_closure
+
+            from .indexer import certify_scoped_merge
+            from .scoped_merge import merge_lsp_candidate, merge_receipt
+
+            if not staged_candidate.is_file():
+                return {"outcome": "candidate_missing"}
+            live_path = str(self.engine_state.graph_path or "")
+            if (
+                not live_path
+                or not Path(live_path).is_file()
+                or not Path(base_graph_path).is_file()
+            ):
+                return {"outcome": "input_missing"}
+            if not self.engine_state.graph_current:
+                return {"outcome": "live_not_current"}
+            live_source = str(self.engine_state.source_revision or "")
+            enrichments.mkdir(parents=True, exist_ok=True)
+            out_dir = Path(tempfile.mkdtemp(prefix="merge-", dir=enrichments))
+            out = out_dir / "graph.db"
+            result = merge_lsp_candidate(
+                base_graph=base_graph_path,
+                candidate_graph=staged_candidate,
+                live_graph=live_path,
+                out_path=out,
+                stale_paths=stale_paths,
+            )
+            if not result.applied:
+                return {"outcome": "no_clean_mutations", **result.detail}
+            if not _rebuild_closure(str(out)):
+                return {"outcome": "closure_rebuild_failed", **result.detail}
+            payload = merge_receipt(
+                base_graph=base_graph_path,
+                candidate_graph=staged_candidate,
+                live_graph=live_path,
+                out_path=out,
+                source_revision=live_source,
+                stale_paths=stale_paths,
+                result=result,
+                closure_rebuilt=True,
+            )
+            artifact = certify_scoped_merge(
+                live_path,
+                out,
+                payload,
+                expected_source_revision=live_source,
+                expected_repository_root_sha256=repository_root_sha,
+                layout=layout,
+                expected_root_sha256=repo_root_sha,
+                expected_task_id=os.environ.get("GT_TASK_ID", ""),
+                expected_product_source_sha=os.environ.get(
+                    "GT_PRODUCT_SOURCE_SHA", ""
+                ),
+            )
+            if not artifact.success:
+                return {
+                    "outcome": "certification_failed",
+                    "error": artifact.error,
+                    **result.detail,
+                }
+            staged_candidate.unlink(missing_ok=True)
+            return {
+                "outcome": "merged",
+                "graph_path": artifact.graph_path,
+                "graph_revision": artifact.graph_revision,
+                "live_graph_path": live_path,
+                "source_revision": live_source,
+                **result.detail,
+            }
+
+        return work
 
     # How long to let a cancelled promotion actually stop before giving up on
     # it. close(wait=False) cancels queued work but a RUNNING _execute keeps
@@ -2671,6 +3079,12 @@ class MiniSweAdapter(GroundtruthController):
         if self._lsp_scheduler is not None:
             self._lsp_scheduler.close(wait=False)
             self._drain_promotions()
+        if self._wait_scheduler is not None:
+            # Same rule as the coordinator close: queued work is dropped,
+            # a running job is not joined. The dense store is written by
+            # the worker's own SQLite commits, so an interrupted refresh
+            # leaves a valid earlier state, not a torn one.
+            self._wait_scheduler.close(wait=False)
 
     def _drain_promotions(self) -> None:
         handles = list(getattr(self._lsp_scheduler, "_handles", ()) or ())

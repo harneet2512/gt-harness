@@ -455,14 +455,18 @@ class GraphBuildCoordinator:
         receipt: Mapping[str, Any],
         disposition: str,
     ) -> None:
+        # The observer runs BEFORE the discard: a superseded candidate is
+        # still the producer's resolution work, and the observer may stage
+        # it for scoped salvage. Staging renames the file, so the discard
+        # that follows no-ops on the claimed path and still cleans every
+        # candidate nobody claimed.
+        if self._enrichment_observer is not None:
+            try:
+                self._enrichment_observer(request, base, receipt, disposition)
+            except Exception as exc:
+                self.last_error = f"enrichment_observer_exception:{type(exc).__name__}"
         if disposition != "published":
             self._discard_candidate(receipt)
-        if self._enrichment_observer is None:
-            return
-        try:
-            self._enrichment_observer(request, base, receipt, disposition)
-        except Exception as exc:
-            self.last_error = f"enrichment_observer_exception:{type(exc).__name__}"
 
     def _poll_draining_enrichment(
         self,
