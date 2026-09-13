@@ -440,3 +440,29 @@ def test_absent_classifier_does_not_mask_a_guarded_outcome(
 ):
     """The returncode guard answers before the classifier is consulted."""
     assert classify_execution_outcome("pytest -q", "", 124) == "timeout"
+
+
+def test_snapshot_records_gitlink_as_typed_identity_not_unreadable(tmp_path):
+    """git ls-files lists submodule entries (mode 160000) but they are
+    directories: read_bytes raises and the omission poisons complete=False
+    forever, which uncertified every semantic localization on smoke-20
+    adaptix (unreadable:release_data). The gitlink's pinned commit is the
+    honest identity."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "source.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "release_data").mkdir()
+    pinned = "1" * 40
+    subprocess.run(
+        ["git", "update-index", "--add", "--cacheinfo",
+         f"160000,{pinned},release_data"],
+        cwd=tmp_path, check=True,
+    )
+    subprocess.run(["git", "add", "source.py"], cwd=tmp_path, check=True)
+
+    snapshot = capture_workspace(tmp_path)
+
+    assert snapshot.complete is True
+    assert "unreadable:release_data" not in snapshot.omissions
+    entry = next(item for item in snapshot.files if item.path == "release_data")
+    assert entry.kind == "gitlink"
+    assert entry.sha256 == hashlib.sha256(pinned.encode("ascii")).hexdigest()

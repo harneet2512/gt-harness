@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -325,6 +326,27 @@ def capture_workspace(
                 if path.is_symlink():
                     payload = os.readlink(path).encode("utf-8", "surrogatepass")
                     kind = "symlink"
+                elif path.is_dir():
+                    # git ls-files lists submodule entries (mode 160000) as
+                    # paths, but they are directories: read_bytes raises and
+                    # the whole snapshot goes incomplete forever on an entry
+                    # that has a perfectly good typed identity -- the gitlink's
+                    # pinned commit. Read it from the index that enumerated the
+                    # path, not HEAD, so unborn-HEAD and staged states work.
+                    staged = subprocess.run(
+                        ["git", "-C", str(resolved), "ls-files", "-s", "--",
+                         relative],
+                        check=True, capture_output=True, timeout=8,
+                    ).stdout.decode("utf-8", "surrogateescape").split()
+                    if len(staged) < 2 or staged[0] != "160000":
+                        raise OSError(f"not_a_gitlink:{relative}")
+                    payload = staged[1].encode("ascii")
+                    kind = "gitlink"
+                elif not path.is_file():
+                    # Fifos, sockets and device nodes have no readable bytes;
+                    # their identity is their file type.
+                    payload = f"mode:{stat.S_IFMT(path.stat().st_mode):o}".encode()
+                    kind = "special"
                 else:
                     payload = path.read_bytes()
                     kind = "file"
@@ -340,7 +362,7 @@ def capture_workspace(
                     size=len(identity_payload),
                     captured=payload if len(payload) <= _MAX_CAPTURE_BYTES else None,
                 ))
-            except OSError:
+            except (OSError, subprocess.SubprocessError):
                 # The relative path (not just the name) lets downstream
                 # producer-input checks apply the same dir-pruning the
                 # indexer's walk does; a basename hides the tree it sat in.

@@ -178,3 +178,120 @@ suite.
   positive (P2).
 - All now have provider-free reproduction paths via the fault-injection /
   soak / matrix suites added in `e3cd9475`.
+
+## Postmortem resolution (post-smoke fixes, all provider-free verified)
+
+Every defect above now has a root-cause fix in-tree. Smoke-20 artifacts
+remain historical evidence of the defects; they are not re-attested.
+
+1. **Boa pre-admission starvation (P0) — FIXED.** Root cause was NOT the
+   startup embed budget: boa had a prebuilt graph, so no build ran, the
+   contract-embedding store was empty, and the first dense call fell
+   through `_rank_from_store` (`store_misses_pool`) into the **uncapped**
+   `rank_documents` fallback in `retrieval.py` — ONNX inference over the
+   whole node pool on the agent thread, ~96 min before the first provider
+   call, then SIGKILL. The `MAX_RUNTIME_EMBED_DOCUMENTS` cap (68ee367e)
+   only guarded the partially-populated-store path. Fix: the fallback
+   pool is now capped (`_RUNTIME_FALLBACK_POOL_CAP`), so the first call
+   abstains instead of starving; the provider-wait refresh populates the
+   store in the background from the first provider window.
+
+2. **Predicate-observation channel (P0) — root cause refined + fixed.**
+   The channel was not dead: arktype logged 211 `plan_check_observed`
+   events, 40 CHECK_FAILED, 171 UNVERIFIED, **zero CHECK_PASSED**, and
+   `predicate_receipt_recorded`/`obligation_reverified` did fire. Two
+   real defects: (a) the DeepSWE submission boilerplate
+   ("work on this in a new branch from main and commit everything when
+   you are done") was scraped into a plan row on every task — normative
+   (a run that never commits grades against pristine base, so it must be
+   tracked) but unprovable by any bound test, keeping `verified`
+   unreachable by construction; (b) check→row binding quality (the
+   boilerplate row bound to `intersections.test.ts`). Fix: process
+   directives get `verification_kind="process"`, are excluded from
+   test-check binding, and are verified by a real workspace git-state
+   probe (`_observe_process_rows`: branch-not-main + HEAD moved) at
+   drain time. Rows stay tracked; evidence is real.
+
+3. **Receipt-write failures (P1) — FIXED, single root cause.** The
+   `delivery_receipt_evidence_join_failed` raise on abs-module/csstree:
+   `caller_contract_view` was legitimately delivered twice in one
+   iteration (action 7→8, distinct payloads) and the join matched only
+   `dedup_key`+`iteration` → ambiguity. The receipt already carries its
+   delivery's unique `payload_hash`; the join now matches on it. The
+   cascade — `product_event_journal_digest_mismatch`, conservation
+   errors — came from the fallback path hitting the same join inside
+   `_journal_derived_treatment_receipt`. Verified against the real
+   abs-module (104 receipts) and csstree (68) journals.
+
+4. **adaptix `semantic_localization_source_revision_mismatch` — FIXED.**
+   The witness snapshot was `complete: False` all run because
+   `git ls-files` lists the `release_data` submodule (mode 160000) as a
+   path but it is a directory — `read_bytes()` raised `IsADirectoryError`
+   → `unreadable:` forever. Fix: gitlinks are captured as typed entries
+   whose identity is the pinned commit read from the index
+   (`git ls-files -s`, works on unborn HEAD); other non-regular nodes
+   become `kind="special"` keyed on mode. Snapshot is complete again;
+   the certification check stays strict.
+
+5. **awilix `semantic_localization_certified_graph_missing` — already
+   fixed in-tree.** The localization named graph `42a52a41…`, pruned by
+   superseded-revision reclamation before attestation. `_pin_graph_revision`
+   writes `pinned.json` at localization delivery and `_pinned_revisions`
+   protects them during pruning ("reclaim only what the authority does
+   not name"). The pin commit postdates the smoke SHA — the historical
+   artifact stays inconsistent; the defect is closed.
+
+6. **katex/testem `treatment_dense_index_not_ready` (P1) — FIXED.**
+   Two-layer fix. (a) The provider-wait refresh (post-smoke) populated
+   the store but journaled only `dense_wait_refresh` — the receipt reads
+   `dense_index_ready`, so a completed refresh was invisible. Drain now
+   emits `dense_index_ready` with a measured probe (`PRAGMA quick_check`
+   + `documents_after` from the refresh payload), `query_ready` true only
+   when both hold. (b) The wait scheduler coalesced only same-name jobs;
+   under katex churn (133 revisions) stale-revision refreshes queued
+   serially on the single worker — pure spend ahead of the live job.
+   `drop_pending_family` now keeps newest pending refresh per enqueue;
+   running jobs finish (content-keyed vectors stay valid). Dense
+   abstention paths also emit a measured `dense_index_receipt` instead of
+   silence, so not-ready is recorded with a reason.
+
+7. **Boa `effective_model_mismatch` false positive (P2) — FIXED.**
+   `effective_model: null` is now valid iff no provider call was ever
+   admitted or served; it is still an error when the journal proves
+   provider activity. Applied at `verify_runtime_receipt`, the
+   adapter-level attestation row, and the product-level row.
+
+8. **aiomonitor bootstrap accounting (P2) — FIXED.** GT-internal
+   bootstrap calls (`native_query`) bypass the admission/delivery
+   boundary, so they were missing from `provider_admission`,
+   `provider_delivery`, and terminal-request censuses, and their
+   `bind_provider_response` attached the previous agent request's
+   identity. Fix: namespaced request ids
+   (`{task}-gt-internal-select-catalog`, `-persistent-plan`) bound
+   explicitly on success AND failure, `delivery_ids=[]`, terminal marked;
+   receipt equations now read
+   `provider_calls = agent_turn + catalog_bootstrap + plan_bootstrap` and
+   `provider_attempts = admissions + bootstrap` (num_retries=0 → one wire
+   attempt each). Fixtures were rewritten to the real journal shape
+   (lifecycle rows, not fake admissions). Real aiomonitor journal now
+   conserves: 19 attempts = 16 responses + 3 failed = manifest 19.
+
+### Phase-5 proof record (branch `codex/phase5-harness-proof`)
+
+- Invariant suite + arktype incident replay (`4c5f5eee`),
+  producer-schema scoped merge (`7abb9a7d`), deferred-catalog boundary
+  stamping (`5246205f`), bootstrap queue isolation (`5716205f`),
+  audit prose-line binding (`fbff833b`) — green on both
+  `codex/phase5-harness-proof` and `codex/context-plan-integrity`
+  (installed rehearsal `34745605772` SUCCESS on `2cad281e`; the interim
+  failure `34745603139` captured the tree mid-cherry-pick).
+
+### Benchmark readiness after this batch
+
+- The 90-minute task envelope is intact; no graph-build or embed caps
+  weaken the benchmark (the fallback cap converts silent starvation into
+  an honest abstention + async refresh, it does not truncate indexing).
+- Remaining pre-benchmark work: Phase-4 sidecar deletion, C3 GT-block
+  supersession at prepare, provider-free acceptance on final state,
+  installed rehearsal, then 1-task paid smoke (`deepseek-v4-flash`,
+  OpenRouter/relace, 90-min) before the 20-task cohort.

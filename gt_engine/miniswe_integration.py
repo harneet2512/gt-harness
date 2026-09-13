@@ -736,8 +736,63 @@ class MiniSweAdapter(GroundtruthController):
                     store.close()
 
             if self._wait_scheduler.enqueue(name, work) in {"queued", "replaced"}:
+                # Newest revision wins the pending queue: a stale revision's
+                # refresh writes a store keyed to that revision's graph file,
+                # so it can never serve the adopted graph's queries. Running
+                # jobs are untouched -- their content-keyed vectors stay valid.
+                self._wait_scheduler.drop_pending_family("dense_refresh:", name)
                 enqueued.append(name)
         return enqueued
+
+    def _journal_dense_refresh_readiness(
+        self, revision: str, payload: Mapping[str, Any]
+    ) -> None:
+        """Emit ``dense_index_ready`` for a completed wait-window refresh.
+
+        The query-side receipt fires only when a dense query runs; a store
+        populated between localizations would stay invisible to the receipt
+        even though the capability is real. The refresh proves coverage for
+        its graph; the probe here proves the store file is integral and
+        populated -- the two together are the honest readiness evidence, and
+        ``vector_source`` says the receipt came from refresh, not ranking.
+        """
+        import sqlite3
+
+        from .dense_runtime import model_identity
+
+        graph_path = str(getattr(self.engine_state, "graph_path", "") or "")
+        store_path = Path(self._contract_store_path(graph_path))
+        quick_check = "missing"
+        try:
+            connection = sqlite3.connect(
+                f"{store_path.resolve().as_uri()}?mode=ro", uri=True
+            )
+            try:
+                quick_check = str(
+                    connection.execute("PRAGMA quick_check").fetchone()[0]
+                )
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error):
+            quick_check = "unreadable"
+        documents_after = int(payload.get("documents_after") or 0)
+        query_ready = quick_check == "ok" and documents_after > 0
+        self.store.append(
+            "dense_index_ready",
+            query_ready=query_ready,
+            **model_identity(),
+            source_revision=str(payload.get("source_revision") or ""),
+            graph_revision=revision,
+            document_count=documents_after,
+            query_result_count=documents_after if query_ready else 0,
+            embedded_documents=int(payload.get("embedded") or 0),
+            cached_documents=int(payload.get("unchanged") or 0),
+            index_sha256=str(payload.get("index_sha256") or ""),
+            sqlite_quick_check=quick_check,
+            exact_rescore=True,
+            vector_source="dense_wait_refresh",
+            reason=None if query_ready else "dense_refresh_incomplete",
+        )
 
     def _drain_wait_work(self) -> list[str]:
         """Journal each finished job's outcome on the owner thread."""
@@ -758,6 +813,13 @@ class MiniSweAdapter(GroundtruthController):
                         deleted=int(payload.get("deleted") or 0),
                         documents_after=int(payload.get("documents_after") or 0),
                     )
+                    # A completed refresh populated the whole contract store
+                    # for this revision: every later query pool is a subset of
+                    # it, so readiness is derivable -- but only measured, never
+                    # assumed. Probe integrity + population on the owner thread
+                    # and emit the same receipt a dense query would, stamped
+                    # with the revision the refresh actually covered.
+                    self._journal_dense_refresh_readiness(key, payload)
                 else:
                     self._dense_wait_failures[key] = (
                         self._dense_wait_failures.get(key, 0) + 1

@@ -53,6 +53,22 @@ class ProviderWaitScheduler:
             self._pending[name] = work
             return disposition
 
+    def drop_pending_family(self, prefix: str, keep: str) -> list[str]:
+        """Drop pending ``prefix:*`` jobs except ``keep``; running jobs finish.
+
+        A refresh job's name carries its revision and its output is keyed to
+        that revision's graph file, so under churn a queue of stale-revision
+        refreshes is pure spend that also delays the live revision's job
+        behind them on the single worker (smoke-20 katex scheduled 133)."""
+        with self._lock:
+            dropped = [
+                name for name in self._pending
+                if name.startswith(prefix) and name != keep
+            ]
+            for name in dropped:
+                self._pending.pop(name)
+            return dropped
+
     def begin_window(self) -> list[str]:
         """Launch everything pending. Called only from the owner thread."""
         with self._lock:

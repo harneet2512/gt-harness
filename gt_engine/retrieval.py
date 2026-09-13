@@ -893,6 +893,42 @@ def _dense_pool(
     return documents
 
 
+def _dense_abstain_receipt(
+    reason: str,
+    source_revision: str,
+    graph_identity: str,
+    store_path: Path,
+    **extra: Any,
+) -> dict[str, Any]:
+    """A measured ``dense_index_receipt`` for a path that never ranked.
+
+    ``dense_index_ready`` is journaled from ``detail["execution_receipt"]``;
+    an abstention that returns no receipt leaves the treatment receipt
+    missing rather than honestly not-ready (smoke-20: katex, testem-bail,
+    testem-per-launcher all read ``dense_index_receipt_missing``).
+    """
+    from .dense_runtime import model_identity
+
+    receipt: dict[str, Any] = {
+        "schema": "gt.dense_index_receipt.v1",
+        **model_identity(),
+        "query_ready": False,
+        "source_revision": source_revision,
+        "graph_revision": graph_identity,
+        "query_result_count": 0,
+        "sqlite_quick_check": "",
+        "index_sha256": (
+            hashlib.sha256(store_path.read_bytes()).hexdigest()
+            if store_path.exists() else ""
+        ),
+        "exact_rescore": True,
+        "vector_source": "contract_embedding_store",
+        "reason": reason,
+    }
+    receipt.update(extra)
+    return receipt
+
+
 def _rank_from_store(
     *,
     query: str,
@@ -947,6 +983,15 @@ def _rank_from_store(
                     "runtime_embed_limit": MAX_RUNTIME_EMBED_DOCUMENTS,
                     "pool_size": len(documents),
                     "store_hits": lookup.hits,
+                    "execution_receipt": _dense_abstain_receipt(
+                        "dense_index_not_ready",
+                        source_revision,
+                        graph_identity,
+                        store_path,
+                        runtime_embed_missing=len(missing),
+                        runtime_embed_limit=MAX_RUNTIME_EMBED_DOCUMENTS,
+                        document_count=len(vectors),
+                    ),
                 },
             )
         embedded: dict[int, tuple[float, ...]] = {}
@@ -974,6 +1019,14 @@ def _rank_from_store(
             (),
             available=False,
             reason=f"dense_runtime_failed:{type(exc).__name__}:{str(exc)[:120]}",
+            detail={
+                "execution_receipt": _dense_abstain_receipt(
+                    f"dense_runtime_failed:{type(exc).__name__}",
+                    source_revision,
+                    graph_identity,
+                    store_path,
+                ),
+            },
         )
     if len(query_vector) != lookup.dimension:
         return SourceRanking(
@@ -984,6 +1037,14 @@ def _rank_from_store(
             detail={
                 "query_dimension": len(query_vector),
                 "store_dimension": lookup.dimension,
+                "execution_receipt": _dense_abstain_receipt(
+                    "dense_store_dimension_mismatch",
+                    source_revision,
+                    graph_identity,
+                    store_path,
+                    query_dimension=len(query_vector),
+                    store_dimension=lookup.dimension,
+                ),
             },
         )
     scored = sorted(contract_embeddings.score_pool(query_vector, vectors),
@@ -1210,6 +1271,14 @@ def dense_rank(
                 (),
                 available=False,
                 reason=f"dense_runtime_failed:{type(exc).__name__}:{str(exc)[:120]}",
+                detail={
+                    "execution_receipt": _dense_abstain_receipt(
+                        f"dense_runtime_failed:{type(exc).__name__}",
+                        source_revision,
+                        revision or "unknown-graph-revision",
+                        resolved_store or target,
+                    ),
+                },
             )
 
     ranking = tuple(
