@@ -1110,7 +1110,12 @@ def install_runtime_hooks(
                 delivery_ids=delivery.delivery_ids,
             )
         else:
-            session.provider_request_admitted(delivery.delivery_ids)
+            # A persistent-plan bootstrap is a GT-internal call, not an agent
+            # decision: it cannot carry queued action evidence, so it must not
+            # drain that queue any more than the catalog offer may.
+            session.provider_request_admitted(
+                delivery.delivery_ids, drain_action_queue=not plan_request
+            )
         return response
 
     def bootstrap_select_catalog() -> None:

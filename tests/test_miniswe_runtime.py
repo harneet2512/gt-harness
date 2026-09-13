@@ -2313,6 +2313,21 @@ def test_select_catalog_deferred_offer_stamps_current_iteration(
     agent.model.query([{"role": "user", "content": adapter.issue_text}])
     assert adapter.iteration == 1
 
+    # Action evidence queued for the next decision must survive GT-internal
+    # bootstrap calls. The catalog offer and persistent-plan call are not
+    # agent decisions: they cannot carry queued evidence, so draining the
+    # queue on their commit silently drops it (rehearsal 34743962908).
+    from gt_engine.gt_session import GTDecisionCandidate
+
+    queued = GTDecisionCandidate(
+        rendered="[GT_EXECUTION_EVIDENCE]\nqueued-action-fact",
+        kind="execution_evidence",
+        dedup_key="execution:test-fact",
+        lane="sealed",
+        target="test_calculator.py",
+    )
+    session.queue_decision_candidates([queued])
+
     # Graph lands before the second request: the deferred offer must stamp
     # the boundary it actually joins, not the bootstrap boundary.
     adapter.graph_fresh = True
@@ -2329,6 +2344,17 @@ def test_select_catalog_deferred_offer_stamps_current_iteration(
         and catalog_delivery["delivery_identity"] in (row.get("delivery_ids") or [])
     )
     assert request["iteration"] == catalog_delivery["iteration"] + 1
+    action_delivery = next(
+        row for row in rows
+        if row.get("event") == "evidence_delivery"
+        and row.get("dedup_key") == "execution:test-fact"
+    )
+    action_request = next(
+        row for row in rows
+        if row.get("event") == "provider_delivery"
+        and action_delivery["delivery_identity"] in (row.get("delivery_ids") or [])
+    )
+    assert action_request["iteration"] == action_delivery["iteration"] + 1
 
 
 def test_edit_turn_hands_the_producers_the_pre_edit_graph(monkeypatch, tmp_path):
