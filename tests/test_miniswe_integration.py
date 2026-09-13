@@ -1518,6 +1518,53 @@ def test_note_edit_journals_invalidation_when_graph_is_stale(tmp_path):
     assert adapter.graph_stale_since_revision == "rev1"
 
 
+def test_note_edit_invalidation_for_paths_outside_the_adopted_transaction(
+    monkeypatch, tmp_path
+):
+    """The adopted skip must be keyed to the transaction's own paths.
+
+    When the workspace diff cannot enumerate changes the runtime falls back
+    to _capture_edit_after's shell-intent paths -- a transaction with no
+    enumerated changes never reaches record_edit_transaction, so its
+    heuristic paths were never amended into anything. Skipping the
+    invalidation there would leave the graph claiming currency over an
+    unenumerated edit.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db="graph.db",
+    )
+    adapter.start_task()
+    adapter.begin_implement()
+    before = capture_workspace(repo)
+    adapter.record_repository_snapshot(before, boundary="task_start")
+    (repo / "a.py").write_text("a = 2\n", encoding="utf-8")
+    transaction = diff_workspace(
+        before, capture_workspace(repo), action_id=1, command="edit a.py"
+    )
+    monkeypatch.setattr(
+        adapter, "_sync_amend_graph",
+        lambda tx: adapter.engine_state.publish_graph(
+            graph_path="graph.db", graph_revision="g2",
+            source_revision=str(tx.post_revision),
+        ),
+    )
+    adapter.record_edit_transaction(transaction)
+    assert adapter.engine_state.graph_current
+
+    # Same epoch, but a superset of what the adopted transaction amended:
+    # the heuristic tail must still invalidate.
+    adapter.note_edit(["a.py", "heuristic-extra.py"])
+
+    rows = _journal_rows(adapter)
+    invalidated = [row for row in rows if row.get("event") == "graph_invalidated"]
+    assert len(invalidated) == 1
+    assert set(invalidated[0]["paths"]) == {"a.py", "heuristic-extra.py"}
+
+
 def test_poll_startup_index_adopts_a_landed_graph(tmp_path):
     adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
     adapter.engine_state.bind_initial_source("rev0")

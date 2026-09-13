@@ -478,6 +478,7 @@ class MiniSweAdapter(GroundtruthController):
         # graph_current; note_edit consults it so an adopted transaction does
         # not journal a second, post-publication invalidation.
         self._adopted_edit_epoch = -1
+        self._adopted_edit_paths: set[str] = set()
         self._path_edit_epochs: dict[str, int] = {}
         self._incomplete_edit_epoch = 0
         self._lsp_epochs: dict[str, int] = {}
@@ -1870,10 +1871,16 @@ class MiniSweAdapter(GroundtruthController):
             # that closed it and force a deduplicated second amend. A current
             # engine reached any other way - a snapshot bind, a re-badge, an
             # adopted startup index - has no transaction saying these paths
-            # are in the graph, and a bare note_edit still means stale.
+            # are in the graph, and a bare note_edit still means stale. The
+            # path set is part of the proof: note_edit can also run on
+            # heuristic paths when the diff could not enumerate changes (an
+            # incomplete or empty-changes transaction skips
+            # record_edit_transaction entirely), and those were never amended
+            # into anything.
             adopted = (
                 self.engine_state.graph_current
                 and self._edit_epoch == self._adopted_edit_epoch
+                and set(normalized_paths) <= self._adopted_edit_paths
             )
             if not adopted:
                 if not self.engine_state.query_snapshot().overlay:
@@ -2023,6 +2030,9 @@ class MiniSweAdapter(GroundtruthController):
         self._sync_amend_graph(transaction)
         if self.engine_state.graph_current:
             self._adopted_edit_epoch = self._edit_epoch
+            self._adopted_edit_paths = {
+                str(path) for path in transaction.changed_paths
+            }
 
     #: Caps for the synchronous amend at the transaction boundary. The amend
     #: copies the certified parent, reruns the producer over the dirty paths,
