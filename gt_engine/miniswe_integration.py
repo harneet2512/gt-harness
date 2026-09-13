@@ -462,6 +462,11 @@ class MiniSweAdapter(GroundtruthController):
         self._startup_index: Any | None = None
         self._startup_finalize: Any | None = None
         self._unadopted_graph: tuple[str, str] = ("", "")
+        # Consecutive amend_failed:* refusals, keyed on the parent path they
+        # failed against. Only the serving-boundary amend escalates them; the
+        # transaction-boundary amend journals its refusal and defers here by
+        # contract, so it never feeds this counter.
+        self._amend_failure_streak: dict[str, int] = {}
         # Provider-wait scheduler: whole-graph products (dense contract
         # store today) are launched while the agent is blocked on the
         # network and drained by the owner thread at the next boundary.
@@ -2537,6 +2542,18 @@ class MiniSweAdapter(GroundtruthController):
         self._maybe_schedule_lsp_promotion()
         return True
 
+    #: Consecutive ``amend_failed:*`` refusals on the same parent that
+    #: escalate to a recovery build. The parent's bytes are immutable, so a
+    #: producer failure against them is deterministic -- the same amend on
+    #: the same bytes can only fail the same way again, and journaling it
+    #: forever is exactly how one run accumulated 601 refusal rows while the
+    #: adopted graph stayed ~95% stale. Two bounds it: a lone failure can
+    #: still indict the dirty set rather than the chain's base, and the
+    #: second failure on identical parent bytes is the proof no amend can
+    #: land, so the boundary buys the fresh parent a recovery build
+    #: publishes.
+    AMEND_FAILURE_ESCALATION_STREAK = 2
+
     def _amend_graph_inline(self, *, phase: str) -> None:
         """Catch the adopted graph up to the overlay, at a serving boundary.
 
@@ -2610,7 +2627,28 @@ class MiniSweAdapter(GroundtruthController):
             self._record_graph_refresh_failure(
                 f"amend_refused:{reason[:80]}", phase=phase,
             )
+            if (reason or "").startswith("amend_failed:"):
+                # Structural only: a producer nonzero-exit on a certified,
+                # immutable parent is deterministic whatever the error code,
+                # so a bounded streak on the SAME parent escalates to the
+                # build that publishes a fresh base. Transient refusals a
+                # rebuild cannot fix (capability, path scope) stay
+                # journaled-only, as does every refusal on a different
+                # parent - consecutive is per parent bytes, so the streak
+                # holds this parent alone.
+                key = str(parent)
+                streak = self._amend_failure_streak.get(key, 0) + 1
+                self._amend_failure_streak = {key: streak}
+                if streak >= self.AMEND_FAILURE_ESCALATION_STREAK:
+                    self._amend_failure_streak.pop(key, None)
+                    self.store.append(
+                        "graph_amend_escalated", phase=phase,
+                        parent_graph=key, streak=streak,
+                        reason=reason[:200],
+                    )
+                    self._recovery_build_inline(phase=phase)
             return
+        self._amend_failure_streak.clear()
         receipt = indexer._receipt_for_published_graph(
             published, source_revision=self.engine_state.source_revision,
             embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,

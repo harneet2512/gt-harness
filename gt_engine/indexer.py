@@ -1773,6 +1773,25 @@ def _copy_graph_for_amend(parent: Path, candidate: Path) -> None:
         shutil.copyfile(log, candidate.with_name(candidate.name + "-wal"))
 
 
+def _amend_failure_reason(process_result: IndexProcessResult) -> str:
+    """Name a failed amend with the diagnostic the process reported.
+
+    ``amend_failed:GT_INDEX_PROCESS_FAILED`` alone is a blind receipt: one
+    paid run journaled 601 of them while the Go error that named the cause --
+    "batch parent parser row differs from its inventory" -- sat unread in
+    ``stderr_tail``. The exit code and a bounded single-line stderr tail
+    travel with the reason so the journal carries the evidence; callers
+    already truncate reasons at [:200].
+    """
+    reason = f"amend_failed:{process_result.error_code or process_result.status}"
+    if process_result.exit_code is not None:
+        reason += f":exit={process_result.exit_code}"
+    stderr = " ".join(process_result.stderr_tail.split())[:120]
+    if stderr:
+        reason += f":stderr={stderr}"
+    return reason
+
+
 def _ensure_index_incremental_unlocked(
     root: str, *, layout: RuntimeLayout, parent_graph: Path,
     changed_paths: tuple[str, ...], excluded_roots: tuple[Path, ...] = (),
@@ -1896,7 +1915,7 @@ def _ensure_index_incremental_unlocked(
             )
             if not process_result.success:
                 results = tuple(collected)
-                return None, f"amend_failed:{process_result.error_code or process_result.status}", results
+                return None, _amend_failure_reason(process_result), results
         results = tuple(collected)
         assert process_result is not None
         published = _publish_candidate(

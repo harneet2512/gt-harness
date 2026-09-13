@@ -483,6 +483,78 @@ def test_failed_amend_falls_back_to_a_full_rebuild_and_names_why(tmp_path, monke
     assert not receipt.success
 
 
+def test_a_failed_amend_names_the_producers_own_error(tmp_path, monkeypatch):
+    """``amend_failed:GT_INDEX_PROCESS_FAILED`` alone was a blind receipt.
+
+    One paid run journaled 601 of them while the Go error that named the
+    cause -- "batch parent parser row differs from its inventory:
+    aiomonitor/types.py" -- sat unread in stderr_tail. The reason now
+    carries the exit code and a bounded, single-line stderr tail so the
+    refusal receipt names what actually failed.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(indexer, "_producer_supports_incremental_amend", lambda: True)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability", lambda capability: False)
+    monkeypatch.setattr(
+        indexer, "_run_index_bounded",
+        lambda *args, **kwargs: indexer.IndexProcessResult(
+            success=False, status="nonzero_exit",
+            error_code="GT_INDEX_PROCESS_FAILED", exit_code=1, elapsed_ms=37,
+            stderr_tail=(
+                "panic: batch parent parser row differs from its inventory: "
+                "aiomonitor/types.py\n  goroutine 1 [running]:\n"),
+        ),
+    )
+
+    result, reason, rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert result is None
+    assert reason.startswith("amend_failed:GT_INDEX_PROCESS_FAILED")
+    assert "exit=1" in reason
+    assert "batch parent parser row differs from its inventory" in reason
+    # The journal is one row per event: the tail is folded to a single line.
+    assert "\n" not in reason
+    assert len(reason) <= 200
+    assert rows and rows[0]["status"] == "nonzero_exit"
+
+
+def test_a_failed_amend_without_stderr_still_names_exit(tmp_path, monkeypatch):
+    """The diagnostic degrades, it does not pad: no stderr, no stderr key."""
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    # The edit moves the reuse key, or the existing revision short-circuits
+    # as reusable before the producer is ever asked to amend.
+    (root / "app.py").write_text("def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(indexer, "_producer_supports_incremental_amend", lambda: True)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability", lambda capability: False)
+    monkeypatch.setattr(
+        indexer, "_run_index_bounded",
+        lambda *args, **kwargs: indexer.IndexProcessResult(
+            success=False, status="timeout", error_code="GT_INDEX_TIMEOUT",
+            exit_code=-9, elapsed_ms=60000,
+        ),
+    )
+
+    result, reason, _rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert result is None
+    assert reason == "amend_failed:GT_INDEX_TIMEOUT:exit=-9"
+
+
 def test_amend_is_refused_when_the_producer_does_not_declare_the_capability(
     tmp_path, monkeypatch
 ):
@@ -850,3 +922,213 @@ def test_sync_amend_refusal_is_journaled_and_parent_kept(tmp_path, monkeypatch):
     rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
     refused = [row for row in rows if row.get("event") == "graph_sync_amend_refused"]
     assert refused and "disk_full" in refused[0].get("reason", "")
+
+
+# ------------------------------------------- deterministic-failure escalation
+#
+# A producer nonzero-exit (``amend_failed:*``) against a certified parent is
+# deterministic: the parent's bytes are immutable, so the same amend on them
+# can only fail the same way again. The serving boundary therefore escalates
+# a bounded streak on the SAME parent to the recovery build that publishes a
+# fresh base -- the failure mode this removes is the run that journaled 601
+# refusal rows while its adopted graph stayed ~95% stale.
+
+
+def _journal_rows(adapter) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in adapter.store.path.read_text().splitlines()
+    ]
+
+
+def test_repeated_amend_failure_on_one_parent_escalates_to_a_recovery_build(
+    tmp_path, monkeypatch
+):
+    """The second amend_failed on identical parent bytes buys a fresh base.
+
+    The first refusal stays journaled-only -- it could still indict the
+    dirty set rather than the chain's base. The second on the same immutable
+    parent is the proof no amend can land, so the boundary journals the
+    escalation and runs the one build that publishes a parent the chain can
+    amend from again.
+    """
+    adapter = _adapter(tmp_path)
+    parent = _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("a.py",), revision="rev1")
+
+    amends: list[str] = []
+
+    def failed(root, *, layout, parent_graph, changed_paths, **kwargs):
+        amends.append(str(parent_graph))
+        return None, ("amend_failed:GT_INDEX_PROCESS_FAILED:exit=1:"
+                      "stderr=batch parent parser row differs"), ()
+    monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", failed)
+
+    rebuilt = tmp_path / "rebuilt.db"
+    rebuilt.write_bytes(b"new")
+    builds: list[str] = []
+
+    def fake_build(root, **kwargs):
+        builds.append(str(root))
+        return indexer.IndexBuildReceipt(
+            indexer.IndexBuildStatus.BUILT, graph_db=str(rebuilt),
+            graph_revision="g-recovery", source_revision="rev1",
+        )
+    monkeypatch.setattr(indexer, "ensure_index_with_receipt", fake_build)
+
+    # First refusal on these parent bytes: journaled, not escalated.
+    assert adapter.refresh_graph() is False
+    assert builds == []
+
+    # Second consecutive failure on the same parent: the chain cannot heal
+    # itself, so the recovery build runs inline and publishes a new parent.
+    assert adapter.refresh_graph() is True
+    assert builds == [adapter.repo_root]
+    assert amends == [str(parent), str(parent)]
+    assert adapter.engine_state.graph_current
+    assert adapter.engine_state.graph_path == str(rebuilt)
+
+    rows = _journal_rows(adapter)
+    events = [row.get("event") for row in rows]
+    refused = [row for row in rows if row.get("event") == "graph_boundary_amend_refused"]
+    escalated = [row for row in rows if row.get("event") == "graph_amend_escalated"]
+    recovery = [row for row in rows if row.get("event") == "graph_recovery"]
+    assert len(refused) == 2 and len(escalated) == 1
+    # The refusal is still journaled; the escalation row lands after the
+    # last refusal and before the recovery row it bought.
+    last_refusal = max(
+        index for index, event in enumerate(events)
+        if event == "graph_boundary_amend_refused"
+    )
+    assert events.index("graph_amend_escalated") == last_refusal + 1
+    assert events.index("graph_recovery") > events.index("graph_amend_escalated")
+    assert escalated[0]["parent_graph"] == str(parent)
+    assert escalated[0]["streak"] == MiniSweAdapter.AMEND_FAILURE_ESCALATION_STREAK
+    assert "GT_INDEX_PROCESS_FAILED" in escalated[0]["reason"]
+    assert recovery[0]["adopted"] is True
+
+
+def test_a_first_amend_failure_never_escalates(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("a.py",), revision="rev1")
+
+    monkeypatch.setattr(
+        indexer, "_ensure_index_incremental_unlocked",
+        lambda *a, **k: (None, "amend_failed:GT_INDEX_PROCESS_FAILED:exit=1", ()))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a first amend_failed refusal ran a recovery build")
+    monkeypatch.setattr(indexer, "ensure_index_with_receipt", forbidden)
+
+    assert adapter.refresh_graph() is False
+    rows = _journal_rows(adapter)
+    assert any(row.get("event") == "graph_boundary_amend_refused" for row in rows)
+    assert not any(row.get("event") == "graph_amend_escalated" for row in rows)
+
+
+@pytest.mark.parametrize("reason", [
+    "producer_lacks_amend_capability",
+    "no_amendable_paths",
+    "changed_path_outside_repository",
+    "incremental_publication_failed",
+])
+def test_refusals_a_rebuild_cannot_fix_never_escalate(
+    tmp_path, monkeypatch, reason
+):
+    """A rebuild grants no capability and moves no path into the repository.
+
+    These refusals stay journaled-only forever: escalating them would
+    journal a recovery that fixes nothing at the price of a full build.
+    """
+    adapter = _adapter(tmp_path)
+    _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("a.py",), revision="rev1")
+
+    monkeypatch.setattr(
+        indexer, "_ensure_index_incremental_unlocked",
+        lambda *a, **k: (None, reason, ()))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail(f"{reason} escalated to a recovery build")
+    monkeypatch.setattr(indexer, "ensure_index_with_receipt", forbidden)
+
+    for _ in range(MiniSweAdapter.AMEND_FAILURE_ESCALATION_STREAK + 1):
+        assert adapter.refresh_graph() is False
+
+    rows = _journal_rows(adapter)
+    refused = [row for row in rows if row.get("event") == "graph_boundary_amend_refused"]
+    assert len(refused) == MiniSweAdapter.AMEND_FAILURE_ESCALATION_STREAK + 1
+    assert not any(row.get("event") == "graph_amend_escalated" for row in rows)
+
+
+def test_the_streak_does_not_follow_the_graph_to_a_new_parent(
+    tmp_path, monkeypatch
+):
+    """Consecutive is per parent bytes, not per adapter.
+
+    A refusal against a different parent belongs to a different chain: the
+    streak the old parent earned cannot carry onto the graph that replaced
+    it.
+    """
+    adapter = _adapter(tmp_path)
+    first = _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("a.py",), revision="rev1")
+
+    monkeypatch.setattr(
+        indexer, "_ensure_index_incremental_unlocked",
+        lambda *a, **k: (None, "amend_failed:GT_INDEX_PROCESS_FAILED:exit=1", ()))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a first refusal on a NEW parent escalated an old streak")
+    monkeypatch.setattr(indexer, "ensure_index_with_receipt", forbidden)
+
+    assert adapter.refresh_graph() is False  # streak {old parent: 1}
+
+    # A new parent lands by other means -- anything the authority names.
+    other = tmp_path / "other.db"
+    other.write_bytes(b"other")
+    adapter.engine_state.publish_graph(
+        graph_path=str(other), graph_revision="g1", source_revision="rev1")
+    adapter.engine_state.mark_paths_dirty(("b.py",), revision="rev2")
+
+    # A first refusal on the new parent is streak 1, not the old parent's 2.
+    assert adapter.refresh_graph() is False
+    rows = _journal_rows(adapter)
+    assert not any(row.get("event") == "graph_amend_escalated" for row in rows)
+    refused = [row for row in rows if row.get("event") == "graph_boundary_amend_refused"]
+    assert [row["parent_graph"] for row in refused] == [str(first), str(other)]
+
+
+def test_a_successful_amend_resets_the_streak(tmp_path, monkeypatch):
+    """An amend that lands proves the chain still heals: the count restarts."""
+    adapter = _adapter(tmp_path)
+    _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("a.py",), revision="rev1")
+
+    published = tmp_path / "published.db"
+    published.write_bytes(b"amended")
+    state = {"fail": True}
+
+    def flaky(root, *, layout, parent_graph, changed_paths, **kwargs):
+        if state["fail"]:
+            return None, "amend_failed:GT_INDEX_PROCESS_FAILED:exit=1", ()
+        return str(published), "", ({"path": "a.py", "status": "completed"},)
+    monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", flaky)
+    monkeypatch.setattr(indexer, "_receipt_for_published_graph", _fake_receipt)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a post-success first refusal escalated an old streak")
+    monkeypatch.setattr(indexer, "ensure_index_with_receipt", forbidden)
+
+    assert adapter.refresh_graph() is False   # streak 1 on the old parent
+    state["fail"] = False
+    # The overlay is still dirty from the refusal; the same boundary amends.
+    assert adapter.refresh_graph() is True    # landed: streak cleared
+    assert adapter.engine_state.graph_current
+
+    state["fail"] = True
+    adapter.engine_state.mark_paths_dirty(("b.py",), revision="rev2")
+    assert adapter.refresh_graph() is False   # streak 1 again -- not 2
+    rows = _journal_rows(adapter)
+    assert not any(row.get("event") == "graph_amend_escalated" for row in rows)
