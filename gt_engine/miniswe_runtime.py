@@ -681,7 +681,7 @@ def _run_evidence(
             artifact_reference=dose.artifact_reference,
         ))
     verification, verification_metadata = adapter.verification_candidate()
-    if verification:
+    if verification or verification_metadata.get("recipe"):
         candidates.append(
             _EvidenceCandidate(
                 70,
@@ -705,37 +705,66 @@ def _run_evidence(
                  "dedup_key": f"newfile-{adapter._latest_transaction_sha256}",
                  "target": created_files[0], "semantics": "advisory"},
             ))
-    cochange = _cochange_prior(adapter, command, changed_files)
-    cochange_metadata = adapter.consume_model_visible_delivery_metadata()
-    if cochange:
+    # The co-change dose rides the queue as a delivery query: it re-runs at
+    # admission against the current graph rather than carrying bytes rendered
+    # here. Any metadata an earlier producer staged is stale by then, so the
+    # resolver re-stages at delivery; consume-and-drop keeps the slot clean.
+    adapter.consume_model_visible_delivery_metadata()
+    cochange_files = tuple(
+        dict.fromkeys(
+            (*changed_files, *_viewed_files(command, adapter.repo_root or ""))
+        )
+    )
+    if cochange_files:
         candidates.append(_EvidenceCandidate(
-            10, cochange_metadata.get("kind", "cochange_partner"), cochange,
-            cochange_metadata or {"kind": "cochange_partner",
-                                  "dedup_key": "cochange-unbound"},
+            10, "cochange_partner", "",
+            {"kind": "cochange_partner", "dedup_key": "cochange-unbound",
+             "recipe": {"kind": "cochange",
+                        "params": {"files": list(cochange_files)}}},
         ))
     packet = [*additional_candidates]
     for ordinal, candidate in enumerate(candidates):
         metadata = dict(candidate.metadata)
         producer_artifact = metadata.pop("artifact_sha256", "")
-        reference = candidate.artifact_reference or store_history_evidence(
-            evidence_store, candidate.rendered.encode(), kind="decision_evidence",
-        )
-        packet.append(GTDecisionCandidate(
-            rendered=candidate.rendered, **metadata,
-            artifact_sha256=producer_artifact or reference["sha256"], artifact_reference=reference,
-            unit_id=reference["sha256"],
-            supersession_key=f"{candidate.kind}:{candidate.metadata.get('target') or candidate.metadata.get('dedup_key')}",
-            source_revision=adapter.repository_revision,
-            previous_chain_head=candidate.previous_chain_head,
-            next_chain_head=candidate.chain_head,
-            verification_candidate=(candidate.rendered
-                                    if candidate.kind == "verification_plan" else ""),
-            source_ordinal=ordinal,
-            action_index=action_index,
-            current_failure=(candidate.kind == "syntax_result"
-                             or (candidate.priority == 100
-                                 and event.test_outcome in {"fail", "env_fail"})),
-        ))
+        try:
+            if candidate.artifact_reference:
+                reference = candidate.artifact_reference
+            elif candidate.rendered:
+                reference = store_history_evidence(
+                    evidence_store, candidate.rendered.encode(),
+                    kind="decision_evidence",
+                )
+            else:
+                # Recipe candidates have no bytes until admission; the CAS
+                # reference and unit identity bind to the resolved render there.
+                reference = {}
+            packet.append(GTDecisionCandidate(
+                rendered=candidate.rendered, **metadata,
+                artifact_sha256=producer_artifact or reference.get("sha256", ""),
+                artifact_reference=reference or None,
+                unit_id=reference.get("sha256", ""),
+                supersession_key=f"{candidate.kind}:{candidate.metadata.get('target') or candidate.metadata.get('dedup_key')}",
+                source_revision=adapter.repository_revision,
+                previous_chain_head=candidate.previous_chain_head,
+                next_chain_head=candidate.chain_head,
+                verification_candidate=(candidate.rendered
+                                        if candidate.kind == "verification_plan" else ""),
+                source_ordinal=ordinal,
+                action_index=action_index,
+                current_failure=(candidate.kind == "syntax_result"
+                                 or (candidate.priority == 100
+                                     and event.test_outcome in {"fail", "env_fail"})),
+            ))
+        except Exception as exc:  # noqa: BLE001 - one malformed fact skips itself
+            # A fault inside a single producer's metadata must not amputate
+            # the session: the rest of the packet is still honest evidence.
+            adapter.store.append(
+                "decision_candidate_fault",
+                kind=str(candidate.kind),
+                ordinal=ordinal,
+                error_type=type(exc).__name__,
+                error=str(exc)[:200],
+            )
     if decision_session is not None:
         session.queue_decision_candidates(packet)
         return ""
@@ -902,8 +931,24 @@ def install_runtime_hooks(
                 last = dict(prepared[-1])
                 content = last.get("content", "")
                 if isinstance(content, str):
-                    last["content"] = f"{content}\n\n" + "\n\n".join(parts)
-                    prepared = [*prepared[:-1], last]
+                    joined = "\n\n".join(parts)
+                    if joined not in content:
+                        last["content"] = f"{content}\n\n" + joined
+                        prepared = [*prepared[:-1], last]
+                        # Persist into the agent's own history. Deliveries
+                        # used to ride only the outgoing copy, so the model
+                        # saw evidence for exactly one request and then had
+                        # to re-discover it - the smoke-20 retrieval loop.
+                        # `messages` is the live agent.messages list; the
+                        # identity check makes transport retries (same
+                        # pending batch re-prepared) idempotent.
+                        if messages and isinstance(messages[-1], dict):
+                            hist_content = messages[-1].get("content", "")
+                            if isinstance(hist_content, str) and joined not in hist_content:
+                                messages[-1] = {
+                                    **messages[-1],
+                                    "content": f"{hist_content}\n\n" + joined,
+                                }
         except Exception as exc:  # noqa: BLE001 - prompt augmentation is fail-open
             adapter.discard_pending_provider_deliveries(
                 reason="prepare_messages_error"
@@ -1074,10 +1119,14 @@ def install_runtime_hooks(
         nonlocal bootstrap_started, bootstrap_preparing
         if bootstrap_started:
             return
-        bootstrap_started = True
         offer = session.prepare_select_catalog()
         if offer is None:
+            # Nothing offered this call. When the graph is not ready yet the
+            # catalog may exist later, so the latch stays unset and the next
+            # request retries; a decision the session actually made has already
+            # latched inside prepare_select_catalog and returns None forever.
             return
+        bootstrap_started = True
         captured: dict[str, Any] = {"arguments": None}
         original_parser = getattr(model, "_parse_actions", None)
 
@@ -1163,10 +1212,13 @@ def install_runtime_hooks(
         nonlocal plan_started, plan_preparing
         if plan_started:
             return
-        plan_started = True
         inputs = getattr(adapter, "plan_inputs", None)
         if inputs is None:
+            # Plan inputs arrive after the index lands, and the index can be
+            # still building when the first request goes out. Latching here
+            # would mean the plan never exists; leave it unset and retry.
             return
+        plan_started = True
         from .persistent_plan import STATUS_ABSTAINED
         from .persistent_plan.bootstrap import (
             build_plan,
@@ -1300,6 +1352,10 @@ def install_runtime_hooks(
         if session.disabled:
             return native_query(messages, **kwargs)
         try:
+            # The initial index may have landed while the provider was
+            # thinking. Poll here - not only at tool actions - so adoption
+            # is not stranded until the next command runs.
+            adapter._poll_startup_index()
             bootstrap_select_catalog()
             bootstrap_persistent_plan()
             message = original_query(messages, **kwargs)
@@ -1716,19 +1772,15 @@ def install_runtime_hooks(
                 execution_candidates = []
                 if pre_snapshot is not None:
                     adapter.observe_plan_checks(command, result, pre_snapshot, post_snapshot, environment)
+                adapter.note_search_drift(command)
                 churn_signal = adapter.churn_governor.observe(
                     command, productive=bool(changed_files)
                 )
                 if churn_signal == "steer":
-                    stall = adapter.churn_governor.stall_turns
                     adapter.queue_churn_steer(
-                        "GT_CHURN_STEER: you have spent "
-                        f"{stall} consecutive actions without a workspace edit "
-                        "or check run, and most recent commands read GT state "
-                        "or artifact stores instead of the task. Those bytes "
-                        "cannot contain the solution. Return to the task now: "
-                        "make the code change and run the project's checks. "
-                        "Continued churn terminates this run."
+                        adapter.build_churn_steer(
+                            adapter.churn_governor.stall_turns
+                        )
                     )
                 elif churn_signal == "abort":
                     adapter.signal_churn_abort()
@@ -1751,7 +1803,9 @@ def install_runtime_hooks(
                     execution is not None
                     and session.capability_active("execution_evidence")
                 ):
-                    structured = adapter.record_execution_evidence(execution)
+                    structured = adapter.record_execution_evidence(
+                        execution, command=command
+                    )
                     if session.capability_model_visible("execution_evidence"):
                         from .output_evidence import EvidenceStore
                         from .request_history import store_history_evidence

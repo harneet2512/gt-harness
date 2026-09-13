@@ -215,7 +215,11 @@ def test_a_plan_whose_workspace_moved_says_its_anchors_were_not_revalidated(grap
     assert not plan.inputs.anchors_are_current
     block = render_plan_block(plan)
     assert "STALE ANCHORS" in block
-    assert "src2" in block and "src1" in block
+    # Revision literals stay out of model-facing bytes: the agent fed the
+    # digest straight to `git` as if it were a commit it could inspect. The
+    # warning names the fact (anchors describe a moved tree), not the ids.
+    assert "src2" not in block and "src1" not in block
+    assert "not re-validated" in block
     assert plan.counts()["anchors_are_current"] is False
 
 

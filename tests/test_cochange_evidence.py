@@ -455,12 +455,15 @@ def test_the_seam_collects_the_prior_but_ranks_it_below_current_evidence(
 
     source = inspect.getsource(miniswe_runtime._run_evidence)
     pipeline_at = source.index("result = run_evidence_pipeline(")
-    prior_at = source.index("_cochange_prior(adapter")
+    # The prior is queued as a delivery recipe (rendered at admission against
+    # the current graph), not produced bytes - the seam is the recipe
+    # registration, ranked below current evidence at priority 10.
+    prior_at = source.index('10, "cochange_partner", "",')
     packet_at = source.index("packet.append(GTDecisionCandidate(")
     queue_at = source.index("session.queue_decision_candidates(packet)")
 
     assert pipeline_at < prior_at < packet_at < queue_at
-    assert '10, cochange_metadata.get("kind", "cochange_partner")' in source
+    assert '"recipe": {"kind": "cochange"' in source
     assert "current_failure=" in source
 
 

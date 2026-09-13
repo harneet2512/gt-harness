@@ -82,7 +82,9 @@ def _fixture(tmp_path, mutation=None):
     if mutation:
         mutation(artifact)
     artifact_id = blob("localization_advisory", artifact)
-    rendered = "[GT_EVIDENCE:localization]\ncalculator.py:1 score=0.50000000 reasons=retrieval:dense"
+    from gt_engine.retrieval import render_semantic_localization
+
+    rendered = render_semantic_localization([item])
     reference = store_history_evidence(
         EvidenceStore(task / "output_evidence"), rendered.encode(),
         kind="decision_evidence",

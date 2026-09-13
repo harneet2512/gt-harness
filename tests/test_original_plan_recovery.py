@@ -39,6 +39,20 @@ def test_checkpoint_roundtrip_preserves_complete_inputs_and_original_baseline(tm
     assert restored.inputs.anchors.callers[1][0].node_id == 2
 
 
+def _drain_startup(adapter, timeout: float = 120.0) -> None:
+    """Drive the async-startup contract to its landed state.
+
+    `build_agent` returns before the initial index finishes; the owner-thread
+    poll is what adopts the receipt and runs the startup finalize that builds
+    `plan_inputs`. Tests that assert on the post-startup state must drain it.
+    """
+    future = adapter._startup_index
+    if future is None:
+        return
+    assert future._event.wait(timeout=timeout), "startup index never landed"
+    adapter._poll_startup_index()
+
+
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_real_runner_restart_does_not_recapture_the_post_edit_baseline(tmp_path, monkeypatch, corrupt):
     from scripts.miniswe_gt_run import build_agent
@@ -51,6 +65,7 @@ def test_real_runner_restart_does_not_recapture_the_post_edit_baseline(tmp_path,
                      cwd=str(repo), state_dir=str(tmp_path / "state"), output=None,
                      temperature=1.0, gt_off=False, wall_time_limit_seconds=1000)
     _, first, _ = build_agent(**arguments)
+    _drain_startup(first)
     plan = build_plan(None, first.plan_inputs)
     plan.inputs.baseline = BaselineResult(status="captured", passed=1, passing_names=("original-test",))
     checkpoint_plan(first.store, plan, arguments["task"])
@@ -64,6 +79,7 @@ def test_real_runner_restart_does_not_recapture_the_post_edit_baseline(tmp_path,
     monkeypatch.setattr("gt_engine.persistent_plan.run_baseline", baseline)
     _, resumed, _ = build_agent(**arguments)
     assert captures == [], "restart replaced the initial baseline with post-edit tests"
+    _drain_startup(resumed)
     if corrupt:
         assert not resumed.plan_inputs.baseline.captured
     else:
@@ -100,6 +116,7 @@ def test_initial_baseline_runs_before_the_single_initial_graph_build(tmp_path, m
     _, adapter, _ = build_agent(task="The widget must preserve compatibility.", model="deepseek-v4-flash",
                 cwd=str(repo), state_dir=str(tmp_path / "state"), output=None,
                 temperature=1.0, gt_off=False, wall_time_limit_seconds=1000)
+    _drain_startup(adapter)
     assert calls == ["baseline", "index"]
     assert adapter.plan_inputs is not None
     assert adapter.plan_inputs.baseline.status == ("probe_failed" if probe_failure else "no_tests_observed")

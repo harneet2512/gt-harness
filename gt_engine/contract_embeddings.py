@@ -346,36 +346,53 @@ def embedding_inputs(
     so two runs over one graph produce the same sequence and a diff of a whole
     repository's inputs is readable.
 
-    Stable ids are identity, not a grouping hint. Conflicting rows are rejected
-    because choosing the first would bind one vector to an arbitrary symbol.
+    Stable ids are identity, not a grouping hint. Two rows minted one
+    identity fall into exactly two cases, handled deterministically: exact
+    duplicates collapse to a single input - one vector serves identical
+    spans honestly - while conflicting rows are quarantined as a group.
+    Binding a vector to one arbitrarily chosen symbol would be a lie;
+    failing the whole projection over one colliding pair abandons every
+    other symbol's enrichment. The quarantined set simply has no vector.
     """
     by_node = fingerprints(db_path)
-    seen: set[str] = set()
-    inputs: list[SymbolEmbeddingInput] = []
+    grouped: dict[str, list[SymbolEmbeddingInput]] = {}
+    order: list[str] = []
     for node_id, symbol_contract in contract.contracts_with_node_ids(db_path):
         symbol = symbol_contract["symbol"]
         stable_id = str(symbol["stable_id"])
-        if stable_id in seen:
-            raise ValueError(f"ambiguous_stable_identity:{stable_id}")
-        seen.add(stable_id)
         text = contract_text(symbol_contract)
         fingerprint = by_node.get(node_id, "")
-        inputs.append(
-            SymbolEmbeddingInput(
-                stable_id=stable_id,
-                node_id=node_id,
-                kind=str(symbol["kind"]),
-                file_path=str(symbol["file_path"]),
-                qualified_name=str(symbol["qualified_name"]),
-                start_line=symbol["start_line"],
-                end_line=symbol["end_line"],
-                fingerprint=fingerprint,
-                text=text,
-                text_sha256=text_digest(text),
-                contract_digest=contract.contract_digest(symbol_contract),
-                invalidation_key=invalidation_key(fingerprint, text),
-            )
+        item = SymbolEmbeddingInput(
+            stable_id=stable_id,
+            node_id=node_id,
+            kind=str(symbol["kind"]),
+            file_path=str(symbol["file_path"]),
+            qualified_name=str(symbol["qualified_name"]),
+            start_line=symbol["start_line"],
+            end_line=symbol["end_line"],
+            fingerprint=fingerprint,
+            text=text,
+            text_sha256=text_digest(text),
+            contract_digest=contract.contract_digest(symbol_contract),
+            invalidation_key=invalidation_key(fingerprint, text),
         )
+        if stable_id not in grouped:
+            grouped[stable_id] = []
+            order.append(stable_id)
+        grouped[stable_id].append(item)
+    inputs: list[SymbolEmbeddingInput] = []
+    for stable_id in order:
+        members = grouped[stable_id]
+        if len(members) == 1:
+            inputs.append(members[0])
+            continue
+        distinct = {
+            (m.kind, m.file_path, m.qualified_name, m.start_line, m.end_line,
+             m.text_sha256)
+            for m in members
+        }
+        if len(distinct) == 1:
+            inputs.append(members[0])
     return tuple(inputs)
 
 

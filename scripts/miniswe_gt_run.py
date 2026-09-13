@@ -23,6 +23,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -633,7 +634,7 @@ def build_agent(
 
     from gt_engine.bridge import apply_profile_env
     from gt_engine.gt_session import GTMode, GTSession, GTSessionConfig
-    from gt_engine.indexer import BenchmarkGraphRequired, ensure_index_with_receipt
+    from gt_engine.indexer import ensure_index_with_receipt
     from gt_engine.miniswe_controller import Predicate
     from gt_engine.miniswe_integration import MiniSweAdapter
     from gt_engine.miniswe_runtime import install_runtime_hooks
@@ -686,8 +687,11 @@ def build_agent(
         for contract_obligation in contract.obligations
         for item in (compiled[contract_obligation.obligation_id],)
     )
-    # Repository suites can write source. Capture once before indexing so the
-    # initial graph and anchors describe the workspace the model will receive.
+    # Repository suites can write source. The baseline probe stays synchronous:
+    # it is bounded, and its writes must complete before the task-start
+    # snapshot binds the source revision. The INDEX is a different matter -
+    # it and the contract-embedding refresh inside it may not hold the host,
+    # so it runs on a worker and lands through the adapter's revision gate.
     plan_inputs = None
     restored_initial_plan = None
     initial_baseline = None
@@ -715,119 +719,25 @@ def build_agent(
                     initial_baseline = persistent_plan.BaselineResult(status="probe_failed", detail=type(exc).__name__)
         except Exception as exc:  # optional planning must not prevent native execution
             _plan_setup_error = f"{type(exc).__name__}: {str(exc)[:200]}"
-    graph_db = None
-    index_error: Exception | None = None
-    try:
-        # The contract-embedding refresh inside this call is CPU-bound ONNX
-        # inference over every moved symbol and it runs HERE -- inside agent
-        # construction, before MiniSweAdapter builds the journal and before the
-        # first provider call.  Unbounded it took ~24 minutes of a 1,500s budget
-        # on arktype (run 34062325608) and the run was SIGTERMed having written
-        # no journal row, no delivery and no verdict.  A cache may cost a tenth
-        # of the run; it may not cost the run.
-        index_receipt = ensure_index_with_receipt(
-            cwd, layout=layout, excluded_roots=layout.excluded_roots,
-            # PIN THE CONTRACT STORE TO THE TASK, NOT TO A GRAPH REVISION.
-            # default_store_path derives it from the graph path, and the graph
-            # lives at revisions/<reuse_key>/graph.db - so every republication
-            # names a store that does not exist yet. Run 34077224456 shows it:
-            # ten rebuild refreshes, every one reporting planned=3809..3821, the
-            # FULL corpus, never a delta, because each new revision started
-            # cold. The 60s rebuild budget was sized for an edit-scoped delta it
-            # was never given.
-            #
-            # The store's LOCATION was graph-keyed; its CONTENT never was -
-            # entries key on (producer fingerprint, contract text digest). One
-            # store per task is correct by construction.
-            #
-            # Passed explicitly rather than through GT_CONTRACT_EMBEDDING_INDEX:
-            # an os.environ.setdefault here is process-global, and retrieval.py
-            # reads the same variable, so it leaked out of the run and into
-            # everything sharing the interpreter. The gate caught that as five
-            # failures in test_hybrid_retrieval that pass in isolation.
-            contract_store_path=layout.contract_store_path,
-            embedding_budget_seconds=(
-                # The INITIAL build must be allowed to finish, not merely be
-                # bounded. Run 34077224456 proved why: at min(300s, 10%) the
-                # refresh skipped, the contract store came out empty, and dense
-                # retrieval - which falls back to that store (retrieval.py
-                # :1016-1021) - embedded the whole corpus itself with no bound,
-                # for 3,583s. Skipping did not avoid the cost; it moved it
-                # somewhere unguarded and made it worse.
-                #
-                # After length-bucketing the pass projects to ~1,120s, so give
-                # it room to complete and let both consumers read the result.
-                # No flat cap on top of the proportional bound: a repository
-                # whose embed legitimately needs more than a fixed constant
-                # gets the share of the task envelope the fraction allows,
-                # not a silent dense-retrieval skip. The per-REBUILD budget
-                # stays at 60s (MiniSweAdapter): a rebuild's plan is
-                # incremental and a full re-embed there is never the right
-                # answer.
-                0.35 * wall_time_limit_seconds
-                if wall_time_limit_seconds and wall_time_limit_seconds > 0
-                else None
-            ),
-        )
-        graph_db = index_receipt.graph_db if index_receipt.success else None
-        if not index_receipt.success and index_receipt.error_type:
-            index_error = RuntimeError(
-                f"{index_receipt.error_type}: {index_receipt.error_diagnostic}"
-            )
-    except BenchmarkGraphRequired:
-        # Indexing is an optional observer everywhere except here. On a
-        # benchmark-bound run the graph is the product under measurement, so a
-        # missing one is not an observation to record and continue past -- it
-        # stops the run before a single provider call is billed.
-        raise
-    except Exception as exc:  # noqa: BLE001 - indexing is an optional observer
-        index_error = exc
-    # PHASE 0 of the persistent plan: everything derivable with no provider
-    # call, while the graph is at full strength. This is deliberately BEFORE
-    # the adapter and before the task_start snapshot below. Baseline capture
-    # has already run before indexing above; a suite that writes a
-    # tracked file would otherwise be snapshotted as the agent's first edit,
-    # bumping the workspace epoch before any work exists to invalidate.
+    # PHASE 0 of the persistent plan. A RESTORED plan already carries its
+    # inputs and needs nothing from the index, so its contract merge and
+    # journal entry stay eager. A FRESH plan is built inside
+    # _finalize_startup when the asynchronous initial index lands -
+    # build_plan_inputs reads graph anchors and cannot run before the
+    # graph exists.
     #
-    # The ledger-only rows are folded into the predicate set HERE because the
-    # controller freezes its predicates at construction: a requirement written
-    # verbatim in the prompt but merged away by the sentence-level extractor
-    # otherwise reaches submission with nothing tracking it.
-    if persistent_plan_enabled() and not _plan_setup_error:
+    # The ledger-only rows are MERGED INTO the contract rather than
+    # appended beside it. evaluate_passing_observation iterates
+    # contract.obligations, so an obligation outside the contract can
+    # never be proven -- it would block the completion predicate
+    # forever while being unprovable, which is worse than not tracking
+    # it at all.
+    if (
+        persistent_plan_enabled()
+        and not _plan_setup_error
+        and plan_inputs is not None
+    ):
         try:
-            if restored_initial_plan is not None:
-                plan_inputs = restored_initial_plan.inputs
-                # The restored inputs describe the tree the plan was built
-                # from. This run has just indexed the tree it will actually
-                # edit. Recording the second one is what lets the rendering
-                # say the anchors are stale rather than present them as
-                # current: after a restart the agent's own earlier edits are
-                # already in the workspace, so every line number below may
-                # have moved.
-                plan_inputs.observed_source_revision = (
-                    index_receipt.source_revision if graph_db else ""
-                )
-            else:
-                plan_inputs = build_plan_inputs(
-                    task,
-                    contract=contract,
-                    graph_db=graph_db,
-                    repo_root=str(cwd),
-                    source_revision=index_receipt.source_revision if graph_db else "",
-                    graph_revision=index_receipt.graph_revision if graph_db else "",
-                    # A lost checkpoint cannot turn the post-edit workspace
-                    # into a new pre-edit regression baseline.
-                    capture_baseline=False,
-                    baseline_result=initial_baseline,
-                    wall_time_limit_seconds=wall_time_limit_seconds,
-                    execution_env=env_obj.execution_env(),
-                )
-            # The ledger-only rows are MERGED INTO the contract rather than
-            # appended beside it. evaluate_passing_observation iterates
-            # contract.obligations, so an obligation outside the contract can
-            # never be proven -- it would block the completion predicate
-            # forever while being unprovable, which is worse than not tracking
-            # it at all.
             merged = merged_plan_contract(contract, plan_inputs.ledger, task)
             if merged is not contract:
                 contract = merged
@@ -848,7 +758,11 @@ def build_agent(
         predicates=predicates,
         contract=contract,
         repo_root=cwd,
-        graph_db=graph_db,
+        # The initial index is still building. The adapter starts graphless;
+        # _poll_startup_index publishes the graph through the engine-state
+        # revision gate when it lands, and keeps a graph that lost the race
+        # to early edits as the amend parent for the next build.
+        graph_db=None,
         issue_text=task,
         requested_model=model,
         resolved_model=model_name,
@@ -882,10 +796,142 @@ def build_agent(
     if _plan_setup_error:
         adapter.store.append("persistent_plan_unavailable", error=_plan_setup_error[:300])
 
+    # The task-start snapshot binds the source revision the initial index is
+    # measured against. It must precede the index submission AND the agent's
+    # first edit: a later bind would misdate the snapshot, and a graph built
+    # against an unrecorded revision could never be adopted.
     adapter.record_repository_snapshot(
         capture_workspace(layout.workspace, excluded_roots=layout.excluded_roots),
         boundary="task_start",
     )
+
+    class _StartupIndex:
+        """A one-shot future on a daemon thread.
+
+        ThreadPoolExecutor workers are non-daemon: an index still building at
+        process exit would hang the interpreter on the executor's atexit join,
+        which defeats the supervisor's SIGTERM semantics. A daemon thread is
+        reaped with the process.
+        """
+
+        def __init__(self, fn):
+            self._event = threading.Event()
+            self._result = None
+            self._exc = None
+
+            def _run() -> None:
+                try:
+                    self._result = fn()
+                except BaseException as exc:  # noqa: BLE001 - carried to the owner thread
+                    self._exc = exc
+                finally:
+                    self._event.set()
+
+            threading.Thread(target=_run, name="gt-initial-index", daemon=True).start()
+
+        def done(self) -> bool:
+            return self._event.is_set()
+
+        def result(self):
+            if self._exc is not None:
+                raise self._exc
+            return self._result
+
+    def _initial_index():
+        # The contract-embedding refresh inside this call is CPU-bound ONNX
+        # inference over every moved symbol. Synchronously it ran inside agent
+        # construction and starved large repositories (boa: ~96 minutes, zero
+        # provider calls). On the worker it gets the same budget bound, but the
+        # host is already reasoning while it runs.
+        return ensure_index_with_receipt(
+            cwd, layout=layout, excluded_roots=layout.excluded_roots,
+            # PIN THE CONTRACT STORE TO THE TASK, NOT TO A GRAPH REVISION.
+            # default_store_path derives it from the graph path, and the graph
+            # lives at revisions/<reuse_key>/graph.db - so every republication
+            # names a store that does not exist yet. Run 34077224456 shows it:
+            # ten rebuild refreshes, every one reporting planned=3809..3821, the
+            # FULL corpus, never a delta, because each new revision started
+            # cold.
+            contract_store_path=layout.contract_store_path,
+            # Bind the index to the revision the task-start snapshot recorded.
+            # If the agent edits before the build lands, publish_graph refuses
+            # the stale graph - which is correct: it becomes the certified
+            # amend parent instead of being adopted as current.
+            source_revision=adapter.repository_revision,
+            embedding_budget_seconds=(
+                0.35 * wall_time_limit_seconds
+                if wall_time_limit_seconds and wall_time_limit_seconds > 0
+                else None
+            ),
+        )
+
+    def _finalize_startup(receipt) -> None:
+        """Runs on the owner thread via _poll_startup_index once the initial
+        index lands. Builds fresh plan inputs against the adopted graph,
+        merges the ledger into the contract, registers the new predicates,
+        and journals the same persistent_plan_inputs receipt the synchronous
+        path wrote."""
+        if persistent_plan_enabled() and not _plan_setup_error:
+            try:
+                if restored_initial_plan is not None:
+                    # Inputs already adopted. The restored inputs describe the
+                    # tree the plan was built from; this run has now indexed
+                    # the tree it will edit. Recording the second revision is
+                    # what lets the rendering say the anchors are stale rather
+                    # than present them as current.
+                    adapter.plan_inputs.observed_source_revision = (
+                        getattr(receipt, "source_revision", "") or ""
+                    )
+                    return
+                inputs = build_plan_inputs(
+                    task,
+                    contract=contract,
+                    graph_db=getattr(receipt, "graph_db", None),
+                    repo_root=str(cwd),
+                    source_revision=getattr(receipt, "source_revision", "") or "",
+                    graph_revision=getattr(receipt, "graph_revision", "") or "",
+                    # A lost checkpoint cannot turn the post-edit workspace
+                    # into a new pre-edit regression baseline.
+                    capture_baseline=False,
+                    baseline_result=initial_baseline,
+                    wall_time_limit_seconds=wall_time_limit_seconds,
+                    execution_env=env_obj.execution_env(),
+                )
+                merged = merged_plan_contract(contract, inputs.ledger, task)
+                merged_compiled = (
+                    compile_obligation_predicates(merged)
+                    if merged is not contract
+                    else compiled
+                )
+                merged_predicates = tuple(
+                    Predicate(merged_compiled[obligation.obligation_id].predicate_id,
+                              obligation.text)
+                    for obligation in merged.obligations
+                    if obligation.obligation_id in merged_compiled
+                )
+                adapter.adopt_startup_plan(inputs, merged, merged_predicates)
+                payload = inputs.as_dict()
+                digest = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                adapter.store.put_blob(
+                    "persistent_plans", digest,
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+                )
+                adapter.store.append(
+                    "persistent_plan_inputs",
+                    inputs_blob=f"persistent_plans/{digest}.json",
+                    inputs_sha256=digest,
+                    **inputs.counts(),
+                )
+            except Exception as exc:  # noqa: BLE001 - the plan is advisory throughout
+                adapter.store.append(
+                    "persistent_plan_unavailable",
+                    error=f"{type(exc).__name__}: {str(exc)[:250]}",
+                )
+
+    adapter._startup_index = _StartupIndex(_initial_index)
+    adapter._startup_finalize = _finalize_startup
     adapter.store.append("execution_transport", synthetic_transport=synthetic_transport)
     delivery_path = (
         "legacy" if os.environ.get("GT_LEGACY_MODEL_VISIBLE", "").strip() == "1"
@@ -896,7 +942,7 @@ def build_agent(
             task_id=adapter.task_id,
             repo_root=cwd,
             state_dir=state_dir,
-            graph_db=graph_db,
+            graph_db="",
             capabilities=(
                 "exact_provider_payload",
                 "provider_response_ids",
@@ -915,12 +961,6 @@ def build_agent(
         ),
         engine=adapter,
     )
-    if index_error is not None:
-        adapter.store.append(
-            "index_unavailable",
-            error_type=type(index_error).__name__,
-            error=str(index_error)[:300],
-        )
 
     # Advisory evidence is persistent so it need not be repeated per turn. In
     # SHADOW mode it is computed/logged but never enters model-visible bytes.

@@ -65,19 +65,42 @@ def _handlers_guarding(call_name: str, source: str) -> list[str]:
     return []
 
 
-def test_the_benchmark_runner_lets_the_refusal_through():
+def test_the_benchmark_runner_carries_the_refusal_to_the_owner_thread():
     """`scripts/miniswe_gt_run.py` is the path a paid run actually takes.
 
-    Structural rather than behavioural: constructing the real agent needs the
-    full task environment. This asserts the ordering that matters — the refusal
-    is handled before the broad `Exception` that records and continues.
+    The initial index builds on a daemon worker so large repositories do not
+    starve the host. A refusal must therefore NOT be handled at the call site:
+    the bare call raises into the startup future, whose `BaseException` carry
+    transports it to the owner-thread poll for classification. Swallowing it
+    here - the failure REV-245 found - would make the run look index-healthy.
     """
 
     source = (REPO / "scripts" / "miniswe_gt_run.py").read_text(encoding="utf-8")
-    handlers = _handlers_guarding("ensure_index_with_receipt", source)
 
-    assert "BenchmarkGraphRequired" in handlers
-    assert handlers.index("BenchmarkGraphRequired") < handlers.index("Exception")
+    # The index call is bare inside the worker fn: it must propagate.
+    assert _handlers_guarding("ensure_index_with_receipt", source) == []
+    # The future catches BaseException into `_exc`: carried, never swallowed.
+    assert "BaseException" in _handlers_guarding("fn", source)
+
+
+def test_the_refusal_reaches_the_startup_abort_flag():
+    """The poll on the owner thread is where the carried refusal lands.
+
+    `BenchmarkGraphRequired` is a benchmark-admission refusal, not an index
+    gap the run can absorb: the poll must route it to `signal_startup_abort`
+    so the supervisor seals the run as a typed setup failure.
+    """
+
+    source = (REPO / "gt_engine" / "miniswe_integration.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    poll = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_poll_startup_index"
+    )
+    text = ast.get_source_segment(source, poll) or ""
+    assert "BenchmarkGraphRequired" in text
+    assert "signal_startup_abort" in text
+    assert text.index("BenchmarkGraphRequired") < text.index("signal_startup_abort")
 
 
 def test_the_bridge_path_lets_the_refusal_through():
@@ -88,7 +111,13 @@ def test_the_bridge_path_lets_the_refusal_through():
     assert handlers.index("_must_propagate") < handlers.index("Exception")
 
 
-def test_real_build_agent_refuses_index_failure_before_provider(monkeypatch, tmp_path):
+def test_real_build_agent_surfaces_refusal_as_startup_abort(monkeypatch, tmp_path):
+    """The async-startup contract: `build_agent` returns a live agent while the
+    index builds on the worker, so a benchmark-admission refusal cannot raise
+    here. What it must do instead is surface - through the owner-thread poll -
+    as the `startup_abort` flag the supervisor maps to a typed setup failure."""
+    import json
+
     from gt_engine import bridge
     from gt_engine.miniswe_typed_actions import GroundTruthLitellmModel
     from scripts import miniswe_gt_run as runner
@@ -107,8 +136,28 @@ def test_real_build_agent_refuses_index_failure_before_provider(monkeypatch, tmp
 
     monkeypatch.setattr(indexer, "ensure_index_with_receipt", refuse)
     monkeypatch.setattr(GroundTruthLitellmModel, "query", provider)
-    with pytest.raises(BenchmarkGraphRequired, match="regression refusal"):
-        runner.build_agent(task="Repair the parser", model="test", cwd=str(tmp_path),
-                           state_dir=str(tmp_path / "state"), output=None,
-                           temperature=0, gt_off=False)
-    assert calls == ["index"]
+    agent, adapter, _session = runner.build_agent(
+        task="Repair the parser", model="test", cwd=str(tmp_path),
+        state_dir=str(tmp_path / "state"), output=None,
+        temperature=0, gt_off=False)
+    assert agent is not None and calls == ["index"]
+
+    future = adapter._startup_index
+    assert future is not None
+    assert future._event.wait(timeout=10)
+    adapter._poll_startup_index()
+
+    flag = adapter.engine_state.layout.state_root / "startup_abort.json"
+    assert flag.is_file()
+    payload = json.loads(flag.read_text(encoding="utf-8"))
+    assert payload["reason"] == "initial_index_failed:benchmark_graph_required"
+    rows = [
+        json.loads(line)
+        for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(
+        row.get("event") == "index_unavailable"
+        and row.get("error_type") == "BenchmarkGraphRequired"
+        for row in rows
+    )

@@ -51,18 +51,20 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
     head = [
         f"[{PLAN_TAG}]",
         "Requirement index: " + ", ".join(row.row_id for row in plan.rows),
-        "Each requirement's design and acceptance check are inlined below. "
+        "Each requirement's anchors and acceptance check are inlined below. "
         "`gt-plan show <row-id>` shows a row's full record and "
-        "`gt-plan show --source` the retained source/examples; revise "
-        "a design with `gt-plan revise <row-id> --file <json>` or bind an argv "
-        "check with `gt-plan bind-check <row-id> --file <json>`. "
+        "`gt-plan show --source` the retained source/examples; record your "
+        "own intended change with `gt-plan revise <row-id> --file <json>` or "
+        "bind an argv check with `gt-plan bind-check <row-id> --file <json>`. "
         "These requests cannot grant evidence.",
-        "Design produced before implementation began, from the change request "
-        "and a verified code graph. It is advisory: inspect anything, disagree "
-        "with anything, and follow your own evidence. It is not a boundary.",
-        f"Context captured at source revision {plan.inputs.source_revision or 'unrecorded'}; "
-        f"graph revision {plan.inputs.graph_revision or 'unrecorded'}. "
-        "Anchors describe that capture, not proof of the current workspace after edits or restart.",
+        "Built before implementation began, from the change request and a "
+        "verified code graph. Every anchor and check below was validated "
+        "against that capture; nothing here is an unverified claim about the "
+        "code. It is advisory: inspect anything, disagree with anything, and "
+        "follow your own evidence. It is not a boundary.",
+        "Context captured before implementation began. Anchors describe "
+        "that capture, not proof of the current workspace after edits or "
+        "restart.",
     ]
     if not plan.inputs.anchors_are_current:
         # A restart re-indexes the workspace, and the revision it finds is the
@@ -71,12 +73,10 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         # no longer there. Saying so is the difference between a stale map and
         # a map presented as current.
         head.append(
-            f"STALE ANCHORS: the workspace is now at {plan.inputs.observed_source_revision}, "
-            f"not the {plan.inputs.source_revision} this design was built from. Line numbers, "
-            "file paths and signatures below were not re-validated; confirm each before relying on it."
+            "STALE ANCHORS: the workspace has changed since this plan was "
+            "captured. Line numbers, file paths and signatures below were "
+            "not re-validated; confirm each before relying on it."
         )
-    if plan.understanding:
-        head.extend(["", "DESIGN INTENT:", f"  {plan.understanding}"])
     head.extend(
         ["", "REQUIREMENTS - each needs acceptance evidence before this is done:"]
     )
@@ -91,8 +91,6 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         rendered.add(row_id)
         start = len(body)
         body.append(f"  {row.row_id}: {row.text}")
-        if row.approach:
-            body.append(f"      design: {row.approach}")
         anchors = _anchor_labels(plan, row.anchors) if row.anchors else ""
         if anchors:
             body.append(f"      touches: {anchors}")
@@ -116,8 +114,6 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
         start = len(body)
         origin = f" [from {row.derived_from} under {row.mode_symbol}.{row.mode_member}]" if row.is_derived else ""
         body.append(f"  {row.row_id}: {row.text}{origin}")
-        if row.approach:
-            body.append(f"      design: {row.approach}")
         acceptance = _acceptance_line(row)
         if acceptance:
             body.append(acceptance)
@@ -135,9 +131,8 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
             "be correct under:"
         )
         for cell in applying[:24]:
-            reason = f" ({cell.reason})" if cell.reason else ""
             body.append(
-                f"  {cell.row_id} under {cell.mode_symbol}.{cell.member}{reason}"
+                f"  {cell.row_id} under {cell.mode_symbol}.{cell.member}"
             )
 
     blast = _blast_radius_lines(plan)
@@ -167,9 +162,9 @@ def render_plan_block(plan: PersistentPlan, *, limit: int = MAX_BLOCK_CHARS,
 
     if plan.abstentions:
         body.append("")
-        body.append("OPEN ITEMS - this design could not settle these:")
-        for target, reason in plan.abstentions[:12]:
-            body.append(f"  {target}: {reason}")
+        body.append("OPEN ITEMS - this plan could not settle these:")
+        for target, _reason in plan.abstentions[:12]:
+            body.append(f"  {target}")
 
     body.append("")
     body.append(

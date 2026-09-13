@@ -70,10 +70,19 @@ def test_the_cursor_is_small():
     assert len(text) < 700, len(text)
 
 
-def test_missing_design_is_explicit_pending_work():
+def test_the_cursor_never_nags_for_design_prose():
+    """The "design pending" nag is gone on purpose.
+
+    Design/approach fields were unverifiable prose the model invented to
+    satisfy the nag; a channel the agent is powered by cannot reward writing
+    claims into the plan. The cursor now names only the row and its check.
+    """
     text = render_cursor(_plan(), ("req-1",))
-    assert "design pending" in text
-    assert "gt-plan revise req-1" in text
+    lowered = text.lower()
+    assert "design pending" not in lowered
+    assert "gt-plan revise" not in lowered
+    assert "req-1" in text
+    assert "pytest tests/test_1.py" in text
 
 
 def test_the_cursor_moves_on_without_announcing_the_row_it_left():

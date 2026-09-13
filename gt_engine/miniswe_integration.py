@@ -19,6 +19,7 @@ from typing import Any
 
 from .delivery_budget import (
     MAX_BOUNDARY_CLAIMS,
+    MAX_LOCALIZATION_DELIVERIES,
     TOTAL_DELIVERY_BYTE_LIMIT,
     compact_localization,
     delivery_byte_limit,
@@ -40,7 +41,7 @@ from .run_diagnostics import DiagnosticCode, DiagnosticEvent, DiagnosticJournal
 from .task_contract import (
     TaskContract,
     matching_obligation_ids,
-    render_obligation_delta,
+    render_obligation_transitions,
     render_task_contract,
 )
 from .verification_contract import (
@@ -377,14 +378,25 @@ class MiniSweAdapter(GroundtruthController):
         self._admission_iteration: int | None = None
         self._boundary_delivery_count = 0
         self._boundary_delivery_bytes = 0
-        self._localization_cache_key: tuple | None = None
         self._localization_candidate = ""
         self._localization_metadata: dict[str, str] = {}
         self._localization_chain: set[str] = set()
         self._localization_head = ""
         self._localization_delivered = False
+        self._delivered_localization_identities: set[str] = set()
         self._pending_verification_candidate = ""
         self._pending_verification_metadata: dict[str, str] = {}
+        self._pending_verification_recipe: dict[str, Any] = {}
+        # Agent search actions are the freshest statement of its information
+        # need. They feed the localization query at admission so re-delivered
+        # localization tracks where attention actually moved.
+        self._search_drift: tuple[str, ...] = ()
+        self._localization_drift_at_render: tuple[str, ...] = ()
+        # Revision key of the last localization resolution attempt, including
+        # empty ones: None means never resolved; an empty result at the
+        # current (revision, drift) state suppresses re-queueing until one
+        # side moves.
+        self._localization_render_revision: str | None = None
         self._model_visible_delivery_identities: set[str] = set()
         self._decision_delivery_identities: set[str] = set()
         self._accepted_sealed_delivery_count = 0
@@ -436,10 +448,41 @@ class MiniSweAdapter(GroundtruthController):
         self._graph_coordinator: GraphBuildCoordinator | None = None
         self._lsp_scheduler: Any | None = None
         self._lsp_requests: dict[str, Any] = {}
+        # Async initial index: the runner starts ensure_index on a worker and
+        # hands the future here. The host loop runs immediately; the graph
+        # publishes through engine_state when the build lands, or becomes the
+        # amend parent when agent edits beat it to the revision.
+        self._startup_index: Any | None = None
+        self._startup_finalize: Any | None = None
+        self._unadopted_graph: tuple[str, str] = ("", "")
         self.store.append(
             "runtime_layout", layout_schema="gt.runtime_layout.v1",
             evidence_root=str(layout.evidence_root.resolve()),
         )
+        self._journal_compiled_predicates("task_start")
+
+    def _journal_compiled_predicates(
+        self, phase: str, predicate_ids: Iterable[str] | None = None
+    ) -> None:
+        """Record the compiled obligation predicates the contract produced.
+
+        The bridge path journaled one ``contract.predicate_compiled`` row per
+        predicate; the Mini-SWE path compiled the same predicates in memory
+        but never journaled them, so audit showed ``predicate_compiled_count=0``
+        on tasks where the channel was actually armed.
+        """
+        wanted = set(predicate_ids) if predicate_ids is not None else None
+        for predicate in self._compiled_predicates.values():
+            if wanted is not None and predicate.predicate_id not in wanted:
+                continue
+            self.store.append(
+                "contract.predicate_compiled",
+                phase=phase,
+                predicate_id=predicate.predicate_id,
+                obligation_id=predicate.obligation_id,
+                kind=predicate.kind,
+                scope=list(predicate.scope),
+            )
 
     @property
     def graph_fresh(self) -> bool:
@@ -1065,6 +1108,45 @@ class MiniSweAdapter(GroundtruthController):
         self._plan_requests_seen = seen
         self.publish_plan_state()
 
+    def _rebind_check_source(self, spec: Any, digest: str) -> Any:
+        """Rebind a check spec to the workspace's current test-source identity.
+
+        The spec's meaning lives in argv+cwd+requirement bindings; the digest
+        names the test source it must run against. When the workspace's test
+        surface changed after binding (the agent edited tests, or the spec
+        bound before the surface fallback existed), the honest update is to
+        rebind to the source the check will actually run against - keeping the
+        same requirement rows. The old identity is removed so state lookups
+        cannot observe a spec that can no longer execute.
+        """
+        from dataclasses import replace
+
+        from .persistent_plan.checks import CheckSpec
+
+        data = spec.as_dict()
+        data.pop("check_id")
+        rebound = CheckSpec.from_dict(
+            {**data, "test_source_digest": digest}, self.repo_root
+        )
+        specs = getattr(self, "_check_specs", {})
+        specs.pop(spec.check_id, None)
+        if rebound.check_id in specs:
+            rebound = replace(rebound, requirement_ids=tuple(sorted(
+                set(rebound.requirement_ids)
+                | set(specs[rebound.check_id].requirement_ids))))
+        specs[rebound.check_id] = rebound
+        self._check_specs = specs
+        pending = getattr(self, "_pending_check_ids", set())
+        if spec.check_id in pending:
+            pending.discard(spec.check_id)
+            pending.add(rebound.check_id)
+            self._pending_check_ids = pending
+        self.store.append(
+            "plan_check_rebound", previous_check_id=spec.check_id,
+            **rebound.as_dict(),
+        )
+        return rebound
+
     def drain_plan_checks(self, environment: Any, *, budget_seconds: float = 30) -> None:
         """Execute coalesced argv checks through the task's isolation boundary."""
         if os.environ.get("GT_VERIFY_EXECUTE", "").strip() != "1":
@@ -1084,16 +1166,41 @@ class MiniSweAdapter(GroundtruthController):
             if remaining < 1:
                 break
             spec = self._check_specs[check_id]
-            if not spec.test_source_digest:
-                pending.discard(check_id)
-                self.store.append("plan_check_binding_pending", check_id=check_id,
-                                  reason="test_source_not_bound")
-                continue
             # A native environment lacking explicit isolation is not an
             # authorized automatic executor. The normal agent remains usable.
             if not callable(getattr(environment, "execution_env", None)):
                 break
+            # A spec that failed to bind at this exact workspace revision
+            # retries deterministically-identically: same content, same
+            # empty digest. Skip the workspace capture entirely - only a
+            # new revision can change the outcome. When the record lags the
+            # workspace the comparison misses and the spec retries, which is
+            # the safe direction.
+            unbound = getattr(self, "_unbound_check_revisions", {})
+            if unbound.get(check_id) == self.repository_revision:
+                continue
             before = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+            current_digest = validation_source_digest(spec, before)
+            if not current_digest:
+                # The spec cannot bind yet - most often the test file it
+                # names does not exist. Discarding here meant a check bound
+                # before its test existed could never run, which is how the
+                # smoke cohort lost every bound check. It stays pending and
+                # retries on the next revision; the journal row fires once
+                # per binding identity rather than once per drain cycle.
+                if check_id not in unbound:
+                    self.store.append("plan_check_binding_pending",
+                                      check_id=check_id,
+                                      reason="test_source_not_bound")
+                unbound[check_id] = before.revision
+                self._unbound_check_revisions = unbound
+                continue
+            if check_id in unbound:
+                unbound.pop(check_id, None)
+                self._unbound_check_revisions = unbound
+            if current_digest != spec.test_source_digest:
+                spec = self._rebind_check_source(spec, current_digest)
+                check_id = spec.check_id
             self.record_repository_snapshot(before, boundary="before_auto_check")
             remaining = deadline - time.monotonic()
             if remaining < 1:
@@ -1146,9 +1253,44 @@ class MiniSweAdapter(GroundtruthController):
             observations = getattr(self, "_plan_check_observations", {})
             observations[check_id] = observation
             self._plan_check_observations = observations
+            if observation.state == "CHECK_PASSED":
+                self._record_check_pass_receipts(
+                    spec, result.get("returncode"), output
+                )
             pending.discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
         self.publish_plan_state()
+
+    def _record_check_pass_receipts(
+        self, spec: Any, returncode: Any, output: str
+    ) -> None:
+        """A bound check passing is evidence for the rows it is bound to.
+
+        Without this the check stayed a row-level fact while the obligation
+        predicates behind the row kept their UNKNOWN status - the contract
+        delta could never tick and the submit gate kept seeing unmet work.
+        Only GREEN is recorded: a failed automatic check (including
+        env_fail) is not evidence the obligation is unmet.
+        """
+        for row_id in spec.requirement_ids:
+            for predicate_id in getattr(self, "plan_row_predicates", {}).get(
+                row_id, ()
+            ):
+                if predicate_id not in self.predicates:
+                    continue
+                self.record_receipt(
+                    predicate_id,
+                    spec.command,
+                    returncode if isinstance(returncode, int) else 0,
+                    output,
+                    epoch=self.workspace_epoch,
+                    status="GREEN",
+                    semantic=True,
+                    evidence_kind="bound_check",
+                    coverage_basis="plan_check_observation",
+                    source_revision_at_observation=self.repository_revision,
+                    action_index=self.global_action,
+                )
 
     def plan_row_state(self, row_id: str) -> str:
         observations = getattr(self, "_plan_check_observations", {})
@@ -1205,7 +1347,7 @@ class MiniSweAdapter(GroundtruthController):
         if not segments:
             observed_commands.setdefault((command, base_cwd), command)
         observed = False
-        for check_id, spec in getattr(self, "_check_specs", {}).items():
+        for check_id, spec in tuple(getattr(self, "_check_specs", {}).items()):
             matched = observed_commands.get(
                 (spec.command, str((Path(self.repo_root) / spec.cwd).resolve()))
             )
@@ -1221,15 +1363,27 @@ class MiniSweAdapter(GroundtruthController):
                 environment_sha256=str(extra.get("environment_sha256", "")),
             )
             _, passing, _ = _parse(output, spec.argv)
+            after_digest = validation_source_digest(spec, after)
+            if after_digest and after_digest != spec.test_source_digest:
+                # The test surface moved since binding (or the spec bound
+                # before its source could be identified): rebind to the
+                # source the agent's command actually ran against, then
+                # classify - the observation is keyed to the rebound id.
+                spec = self._rebind_check_source(spec, after_digest)
+                check_id = spec.check_id
             observation = classify_bound_check(
                 spec, execution, before_revision=before.revision, after_revision=after.revision,
                 capture_complete=(extra.get("capture_complete") is True and before.complete and after.complete),
                 test_ids=tuple(passing),
-                test_source_digest=validation_source_digest(spec, after),
+                test_source_digest=after_digest,
             )
             observations = getattr(self, "_plan_check_observations", {})
             observations[check_id] = observation
             self._plan_check_observations = observations
+            if observation.state == "CHECK_PASSED":
+                self._record_check_pass_receipts(
+                    spec, result.get("returncode"), output
+                )
             if observation.state in {"CHECK_PASSED", "CHECK_FAILED"}:
                 getattr(self, "_pending_check_ids", set()).discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
@@ -1417,6 +1571,114 @@ class MiniSweAdapter(GroundtruthController):
             complete=bool(transaction.complete),
             omissions=list(transaction.omissions),
         )
+        self._sync_amend_graph(transaction)
+
+    #: Caps for the synchronous amend at the transaction boundary. The amend
+    #: copies the certified parent, reruns the producer over the dirty paths,
+    #: recomputes the source-manifest key, and certifies - seconds for a small
+    #: edit on a small graph, far longer for a mass rewrite on a multi-GB
+    #: graph. Past either cap the edit still amends, on the coordinator's
+    #: clock: the chain is never broken, only its synchrony varies.
+    SYNC_AMEND_MAX_PATHS = 12
+    SYNC_AMEND_MAX_GRAPH_BYTES = 512 * 1024 * 1024
+    SYNC_AMEND_EMBEDDING_BUDGET_SECONDS = 8.0
+
+    def _sync_amend_graph(self, transaction: Any) -> None:
+        """Patch the adopted graph with every path dirtied since its revision.
+
+        The engine property: after an edit lands, the graph IS the new
+        workspace state rather than a rebuild queued behind it. A bounded
+        dirty set amends inside the transaction boundary and publish_graph
+        clears the overlay apply_transaction just wrote - graph_current stays
+        true THROUGH the edit instead of false until a worker lands.
+
+        The dirty set is the engine's overlay, not just this transaction's
+        paths: publishing a graph that covers only the latest edit would
+        clear the overlay on top of changes that never reached any graph,
+        which is silent staleness - the failure this path exists to remove.
+        """
+        if (not bool(transaction.complete) or not self.repo_root
+                or self._startup_index is not None):
+            return
+        snapshot = self.engine_state.query_snapshot()
+        if snapshot.omissions:
+            # The overlay is not the whole dirty state: an earlier incomplete
+            # transaction recorded unenumerated changes into omissions, and
+            # publish_graph would clear them on top of a graph that never
+            # covered them. The async path fails closed on the same data.
+            return
+        dirty = tuple(sorted(snapshot.masked_paths))
+        if not dirty or len(dirty) > self.SYNC_AMEND_MAX_PATHS:
+            return
+        # The parent is the adopted graph, or the superseded startup build
+        # held as its certified fallback - same rule _frozen_graph_input
+        # uses. The dirty set is complete either way: every change since the
+        # parent's revision is transaction-captured into the overlay, and an
+        # over-inclusive dirty set only re-parses unchanged bytes.
+        parent = self.engine_state.graph_path or self._unadopted_graph[0]
+        if not parent:
+            return
+        try:
+            if Path(parent).stat().st_size > self.SYNC_AMEND_MAX_GRAPH_BYTES:
+                return
+        except OSError:
+            return
+        from . import indexer
+        from .indexer import _graph_publication_lock
+
+        layout = self.engine_state.layout
+        started = time.monotonic()
+        try:
+            with _graph_publication_lock(layout.graph_root / ".graph.lock"):
+                published, reason, results = indexer._ensure_index_incremental_unlocked(
+                    str(self.repo_root), layout=layout,
+                    parent_graph=Path(parent), changed_paths=dirty,
+                    excluded_roots=tuple(layout.excluded_roots),
+                )
+        except Exception as exc:  # noqa: BLE001 - a refused amend degrades, never raises
+            published, reason, results = None, f"{type(exc).__name__}: {exc}"[:200], ()
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        if not published:
+            # Not a rebuild trigger. The coordinator amends this same dirty
+            # set on its own clock; the refusal is journaled so a path that
+            # never syncs is visible instead of silently slow.
+            self.store.append(
+                "graph_sync_amend_refused", reason=reason[:200],
+                dirty_paths=list(dirty), parent_graph=str(parent),
+                post_revision=str(transaction.post_revision),
+            )
+            return
+        receipt = indexer._receipt_for_published_graph(
+            published, source_revision=str(transaction.post_revision),
+            embedding_budget_seconds=self.SYNC_AMEND_EMBEDDING_BUDGET_SECONDS,
+            layout=layout, build_mode="incremental", incremental_results=results,
+        )
+        adopted = bool(receipt.success) and self.engine_state.publish_graph(
+            graph_path=receipt.graph_db, graph_revision=receipt.graph_revision,
+            source_revision=receipt.source_revision,
+        )
+        self.store.append(
+            "graph_sync_amend",
+            adopted=adopted, dirty_paths=list(dirty),
+            parent_graph=str(parent),
+            graph_revision=str(receipt.graph_revision or ""),
+            source_revision=str(receipt.source_revision or ""),
+            amended=[dict(row) for row in results],
+            embedding_state=str(receipt.embedding_state or ""),
+            elapsed_ms=elapsed_ms,
+        )
+        if adopted:
+            self.graph_db = self.engine_state.graph_path
+            self._gateway_state = None
+            self.graph_stale_since_revision = ""
+            self._record_graph_publication()
+        elif receipt.success:
+            # publish_graph refuses only on a revision race, and this thread
+            # owns the boundary - a refusal here is itself the anomaly worth
+            # journaling rather than silently dropping the certified graph.
+            self._unadopted_graph = (
+                str(receipt.graph_db or ""), str(receipt.graph_revision or "")
+            )
 
     def record_transaction_artifacts(self, artifacts: Mapping[str, Any]) -> str:
         encoded = json.dumps(
@@ -1440,27 +1702,64 @@ class MiniSweAdapter(GroundtruthController):
     def prepare_verification_candidate(
         self, transaction: Any, graph_snapshot: GraphQuerySnapshot
     ) -> str:
-        """Prepare revision-bound check advice from the usable pre-edit graph.
+        """Register the post-edit check query for admission-time render.
 
-        The planner is pure and the result remains advisory.  The pre-edit
-        graph may identify changed entities and covering tests, but it cannot
-        establish facts about edited bytes or execute a check on Mini-SWE's
-        behalf.
+        The plan used to render here, at transaction time, pinned to the
+        pre-edit graph because the post-edit graph did not exist yet. With the
+        synchronous amend chain the graph IS current at delivery, so the
+        recipe is queued and ``_render_verification_plan_now`` computes the
+        blast radius against the graph as it stands when the model reads it.
+        ``graph_snapshot`` is accepted for signature stability; admission-time
+        state decides resolvability.
         """
         self._pending_verification_candidate = ""
         self._pending_verification_metadata = {}
-        if (
-            not self.repo_root
-            or not graph_snapshot.graph_current
-            or not graph_snapshot.graph_path
-        ):
+        self._pending_verification_recipe = {}
+        if not self.repo_root:
             return ""
         paths = tuple(sorted({str(path) for path in transaction.changed_paths if path}))
         if not paths:
             return ""
+        self._pending_verification_recipe = {
+            "kind": "verification_plan",
+            "params": {
+                "paths": list(paths),
+                "transaction_sha256": str(transaction.transaction_sha256),
+                "post_revision": str(transaction.post_revision),
+            },
+        }
+        self._pending_verification_metadata = {
+            "kind": "verification_plan",
+            "dedup_key": f"verification:{transaction.transaction_sha256}",
+            "target": paths[0],
+            "semantics": "advisory_dependency_graph",
+        }
+        return ""
+
+    def _render_verification_plan_now(self, params: Mapping[str, Any]) -> str:
+        """Render the pending check advice against the CURRENT graph.
+
+        Runs at the admission choke point: entities re-resolve and the plan
+        rebuilds from the graph the delivery will actually be bound to, so the
+        advice can never describe a superseded dependency shape.
+        """
+        snapshot = self.graph_query_snapshot()
+        if (
+            not self.repo_root
+            or not snapshot.graph_current
+            or not snapshot.graph_path
+        ):
+            return ""
+        paths = tuple(sorted({str(path) for path in params.get("paths") or () if path}))
+        if not paths:
+            return ""
+        transaction_sha256 = str(params.get("transaction_sha256") or "")
+        patch_revision = str(
+            self.repository_revision or params.get("post_revision") or ""
+        )
         try:
             placeholders = ",".join("?" for _ in paths)
-            uri = Path(graph_snapshot.graph_path).resolve().as_uri() + "?mode=ro"
+            uri = Path(snapshot.graph_path).resolve().as_uri() + "?mode=ro"
             with sqlite3.connect(uri, uri=True) as connection:
                 entities = tuple(
                     row[0]
@@ -1483,12 +1782,12 @@ class MiniSweAdapter(GroundtruthController):
                 )
             )
             plan = build_verification_plan(
-                graph_snapshot.graph_path,
+                snapshot.graph_path,
                 self.repo_root,
                 entities,
                 obligations,
-                patch_revision=str(transaction.post_revision),
-                graph_revision=graph_snapshot.graph_revision,
+                patch_revision=patch_revision,
+                graph_revision=snapshot.graph_revision,
             )
             encoded = plan.canonical_json().encode("utf-8")
             digest = hashlib.sha256(encoded).hexdigest()
@@ -1514,51 +1813,61 @@ class MiniSweAdapter(GroundtruthController):
             if not lines:
                 return ""
             rendered = "[GT_EVIDENCE:verification_plan]\n" + "\n".join(lines)
-            dedup_key = f"verification:{transaction.transaction_sha256}:{digest}"
+            dedup_key = f"verification:{transaction_sha256}:{digest}"
             self._pending_verification_candidate = rendered
             self._pending_verification_metadata = {
                 "kind": "verification_plan",
                 "dedup_key": dedup_key,
                 "target": paths[0],
-                "semantics": "advisory_pre_edit_dependency_graph",
+                "semantics": "advisory_dependency_graph",
                 "artifact_sha256": digest,
             }
             self.store.append(
                 "verification_plan_prepared",
                 artifact_sha256=digest,
                 artifact_blob=f"verification_plans/{digest}.json",
-                transaction_sha256=str(transaction.transaction_sha256),
-                source_revision=str(transaction.post_revision),
-                dependency_source_revision=graph_snapshot.source_revision,
-                graph_revision=graph_snapshot.graph_revision,
+                transaction_sha256=transaction_sha256,
+                source_revision=patch_revision,
+                dependency_source_revision=snapshot.source_revision,
+                graph_revision=snapshot.graph_revision,
                 changed_paths=list(paths),
                 changed_entities=list(entities),
                 check_count=len(plan.checks),
-                semantics="advisory_pre_edit_dependency_graph",
+                semantics="advisory_dependency_graph",
+                rendered_at="admission",
             )
             return rendered
         except Exception as exc:  # noqa: BLE001 - selection is correct-or-quiet
             self.store.append(
                 "verification_plan_unavailable",
-                transaction_sha256=str(transaction.transaction_sha256),
+                transaction_sha256=transaction_sha256,
                 error_type=type(exc).__name__,
             )
             return ""
 
     def verification_candidate(self) -> tuple[str, dict[str, str]]:
+        metadata = dict(self._pending_verification_metadata)
+        if self._pending_verification_recipe:
+            metadata["recipe"] = self._pending_verification_recipe
         return (
             self._pending_verification_candidate,
-            dict(self._pending_verification_metadata),
+            metadata,
         )
 
     def consume_verification_candidate(self) -> tuple[str, dict[str, str]]:
         candidate = self.verification_candidate()
         self._pending_verification_candidate = ""
         self._pending_verification_metadata = {}
+        self._pending_verification_recipe = {}
         return candidate
 
-    def record_execution_evidence(self, artifact: Any) -> str:
-        """Store exact raw diagnostics and return a structured augmentation."""
+    def record_execution_evidence(self, artifact: Any, command: str = "") -> str:
+        """Store exact raw diagnostics and return a structured augmentation.
+
+        The journal row and blob keep the full digests; the model-facing line
+        restates the typed outcome in words. Shipping the canonical JSON to the
+        model gave it sha256s it could not act on - 77/690 consumed on smoke-20.
+        """
         raw_digest = artifact.raw_output_sha256
         raw_blob = f"raw_execution_output/{raw_digest}.json"
         captured_path = str(getattr(artifact, "output_artifact_path", "") or "")
@@ -1605,12 +1914,172 @@ class MiniSweAdapter(GroundtruthController):
             raw_blob=raw_blob,
             **payload,
         )
-        return "[GT_EXECUTION_EVIDENCE]\n" + json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        outcome_word = {
+            "pass": "passed", "fail": "failed", "timeout": "timed out",
+            "interrupted": "interrupted", "env_fail": "could not run (environment)",
+            "unknown": "result unclear",
+        }.get(artifact.outcome, artifact.outcome)
+        kind_word = {"test": "test run", "build": "build"}.get(
+            artifact.kind, artifact.kind or "run"
         )
+        line = (
+            f"{command or 'command'} — {kind_word} {outcome_word}"
+            + (f" (exit {artifact.returncode})"
+               if artifact.returncode is not None else "")
+        )
+        if artifact.observed_test_outcome:
+            line += f"; tests: {artifact.observed_test_outcome}"
+        return "[GT_EXECUTION_EVIDENCE]\n" + line
+
+    def _poll_startup_index(self) -> None:
+        """Adopt the asynchronously-built initial index once it lands.
+
+        The host loop runs before this finishes; every graph consumer already
+        degrades honestly on a missing or stale graph, so the wait costs
+        abstentions rather than the run. When the build lands it publishes
+        through the same revision gate as any other graph - edits that raced
+        it supersede it, and the landed graph then serves as the amend parent
+        the next frozen input builds on instead of being orphaned.
+        """
+        future = self._startup_index
+        if future is None or not future.done():
+            return
+        self._startup_index = None
+        receipt = None
+        try:
+            receipt = future.result()
+        except Exception as exc:  # noqa: BLE001 - the runner path raises these
+            self.store.append(
+                "index_unavailable",
+                error_type=type(exc).__name__,
+                error=str(exc)[:300],
+                phase="initial_index",
+            )
+            if type(exc).__name__ == "BenchmarkGraphRequired":
+                self.signal_startup_abort(
+                    "initial_index_failed:benchmark_graph_required"
+                )
+        else:
+            if not getattr(receipt, "success", False):
+                self.store.append(
+                    "index_unavailable",
+                    error_type=getattr(receipt, "error_type", "") or "unsuccessful",
+                    error=str(getattr(receipt, "error_diagnostic", "") or "")[:300],
+                    phase="initial_index",
+                )
+            else:
+                adopted = self.engine_state.publish_graph(
+                    graph_path=receipt.graph_db,
+                    graph_revision=receipt.graph_revision,
+                    source_revision=receipt.source_revision,
+                )
+                if adopted:
+                    self.graph_db = self.engine_state.graph_path
+                    self._unadopted_graph = ("", "")
+                    self._record_graph_publication()
+                else:
+                    # Superseded by edits: not publishable as current, but
+                    # exactly the certified parent the next amend builds on.
+                    self._unadopted_graph = (
+                        str(receipt.graph_db or ""),
+                        str(receipt.graph_revision or ""),
+                    )
+                self.store.append(
+                    "initial_index_ready",
+                    adopted=adopted,
+                    graph_revision=str(receipt.graph_revision or ""),
+                    source_revision=str(receipt.source_revision or ""),
+                    elapsed_ms=int(getattr(receipt, "elapsed_ms", 0) or 0),
+                    analysis_state=str(getattr(receipt, "analysis_state", "") or ""),
+                    embedding_state=str(getattr(receipt, "embedding_state", "") or ""),
+                )
+        # The plan channel is not the graph channel: the ledger binds verbatim
+        # task obligations and the baseline probe, neither of which needs the
+        # index. A failed build must not take the plan down with it - the
+        # finalize still runs, anchors simply stay unbound. `receipt` may be
+        # None on the exception path; the runner's finalize guards its fields.
+        self._run_startup_finalize(receipt)
+
+    def _run_startup_finalize(self, receipt) -> None:
+        finalize = self._startup_finalize
+        self._startup_finalize = None
+        if finalize is not None:
+            try:
+                finalize(receipt)
+            except Exception as exc:  # noqa: BLE001 - plan setup is advisory
+                self.store.append(
+                    "persistent_plan_unavailable",
+                    error=f"{type(exc).__name__}: {str(exc)[:200]}",
+                )
+
+    def signal_startup_abort(self, reason: str) -> None:
+        """Drop the supervisor flag for a startup failure the run cannot survive.
+
+        Same contract as ``signal_churn_abort``: the journal row is the durable
+        record, the flag file is the cheap cross-process kill signal.
+        """
+        self.store.append("startup_abort", reason=reason)
+        flag = {
+            "schema": "gt.startup_abort.v1",
+            "task_id": self.task_id,
+            "reason": reason,
+        }
+        flag_path = self.engine_state.layout.state_root / "startup_abort.json"
+        try:
+            from gt_harness.canonical_io import atomic_write
+
+            atomic_write(flag_path, json.dumps(flag).encode("utf-8"))
+        except (OSError, ImportError):
+            pass
+
+    def adopt_startup_plan(
+        self,
+        plan_inputs: Any,
+        contract: Any,
+        predicates: tuple[Any, ...],
+    ) -> None:
+        """Late-bind the plan contract that the async index was still building.
+
+        The merged obligations are verbatim requirement lines - always owed -
+        so registering them at a nonzero epoch is honest in a way an inferred
+        row would not be: they start UNKNOWN and only evidence recorded after
+        this point can prove them.
+        """
+        if plan_inputs is None:
+            return
+        self.plan_inputs = plan_inputs
+        if contract is not None and contract is not self.contract:
+            self.contract = contract
+            self._compiled_predicates = compile_obligation_predicates(contract)
+            self._predicate_by_obligation = {
+                item.obligation_id: item.predicate_id
+                for item in self._compiled_predicates.values()
+            }
+            self._obligation_by_predicate = {
+                value: key for key, value in self._predicate_by_obligation.items()
+            }
+            added = [
+                item.predicate_id
+                for item in predicates
+                if item.predicate_id not in self.predicates
+            ]
+            for item in predicates:
+                if item.predicate_id not in self.predicates:
+                    self.predicates[item.predicate_id] = item
+                    self._status[item.predicate_id] = PredicateStatus.UNKNOWN
+            if added:
+                self._journal_compiled_predicates("plan", added)
 
     def refresh_graph(self, *, phase: str = "graph_query") -> bool:
         """Poll or schedule a frozen-input rebuild without blocking Mini-SWE."""
+        self._poll_startup_index()
+        if self._startup_index is not None:
+            # The startup build IS the scheduled build for the bound revision.
+            # Scheduling a second one through the coordinator would run two
+            # concurrent indexes of identical input and halve the CPU each
+            # gets - on the repositories this path exists for, that is the
+            # difference between landing and starving.
+            return False
         if self._graph_coordinator is not None:
             self._graph_coordinator.poll()
             if self.engine_state.graph_current:
@@ -1688,7 +2157,8 @@ class MiniSweAdapter(GroundtruthController):
         return "/".join(parts) if parts else None
 
     def _frozen_graph_input(self, snapshot: Any) -> FrozenBuildInput:
-        from .indexer import is_producer_input
+        from .indexer import _SKIP_DIRS, is_producer_input
+        from .runtime_observation import canonical_repository_bytes
 
         files: list[tuple[str, bytes]] = []
         missing: list[str] = []
@@ -1696,7 +2166,42 @@ class MiniSweAdapter(GroundtruthController):
             str(item.path): bytes(item.captured) for item in snapshot.files
             if item.kind == "file" and item.captured is not None
         }
+        sha_by_path = {
+            str(item.path): item.sha256 for item in snapshot.files
+            if item.kind == "file"
+        }
+
+        def witness_bytes(relative: str) -> bytes | None:
+            payload = captured_bytes.get(relative)
+            if payload is not None:
+                return payload
+            # Files above the capture cap are hash-only witnesses; the
+            # snapshot's sha256 IS the byte contract. A live read that still
+            # hashes identically satisfies the freeze exactly -- a mismatch
+            # means the content genuinely moved, which is a real miss. The
+            # smoke-20 abs tasks lost every rebuild (942 events) to a >1MiB
+            # bundle whose bytes this rule recovers.
+            digest = sha_by_path.get(relative)
+            if not digest:
+                return None
+            try:
+                raw = (Path(snapshot.root) / relative).read_bytes()
+            except OSError:
+                return None
+            if hashlib.sha256(canonical_repository_bytes(raw)).hexdigest() != digest:
+                return None
+            return raw
+
         for item in snapshot.files:
+            relative = str(item.path)
+            # The producer's own walk prunes _SKIP_DIRS trees by name at any
+            # depth. A git-tracked file under one (e.g. a committed
+            # .vuepress/dist bundle) still lands in the snapshot -- the git
+            # path in capture_workspace applies no dir filter -- but it is
+            # never producer input, and demanding its bytes froze the abs
+            # graphs at task start for the whole run.
+            if any(part in _SKIP_DIRS for part in Path(relative).parts):
+                continue
             if not is_producer_input(item.path):
                 continue
             if item.kind == "symlink":
@@ -1718,21 +2223,29 @@ class MiniSweAdapter(GroundtruthController):
                 # start had 495, and the rebuilt graph would silently differ
                 # from the one every task-start claim was made against.
                 target = self._symlink_alias_target(item)
-                payload = captured_bytes.get(target) if target else None
+                payload = witness_bytes(target) if target else None
                 if payload is None:
-                    missing.append(str(item.path))
+                    missing.append(relative)
                 else:
-                    files.append((str(item.path), payload))
+                    files.append((relative, payload))
                 continue
-            if item.kind != "file" or item.captured is None:
-                missing.append(str(item.path))
+            if item.kind != "file":
+                missing.append(relative)
+                continue
+            payload = witness_bytes(relative)
+            if payload is None:
+                missing.append(relative)
             else:
-                files.append((str(item.path), bytes(item.captured)))
+                files.append((relative, payload))
         source_omissions = []
         for omission in snapshot.omissions:
             kind, separator, value = str(omission).partition(":")
             if kind == "unreadable" and separator:
-                if is_producer_input(value):
+                if (is_producer_input(value)
+                        and not any(
+                            part in _SKIP_DIRS
+                            for part in Path(value).parts
+                        )):
                     source_omissions.append(str(omission))
             else:
                 # Unknown omission types remain conservative until their
@@ -1749,14 +2262,22 @@ class MiniSweAdapter(GroundtruthController):
         # query_snapshot() blanks graph_path for anything short of complete, so
         # the parent is read from the engine state directly: the graph is stale
         # by construction here (an edit is what scheduled this build) and it is
-        # exactly that stale-but-certified graph the amend starts from.
+        # exactly that stale-but-certified graph the amend starts from. The
+        # unadopted pair covers the async initial build that landed behind an
+        # edit - not publishable as current, but still the certified parent.
+        parent_path = str(
+            self.engine_state.graph_path or self._unadopted_graph[0] or ""
+        )
+        parent_revision = str(
+            self.engine_state.graph_revision or self._unadopted_graph[1] or ""
+        )
         return FrozenBuildInput(
             str(snapshot.revision),
             self.engine_state.query_snapshot().masked_paths,
             tuple(sorted(files)),
             snapshot.history,
-            str(self.engine_state.graph_path or ""),
-            str(self.engine_state.graph_revision or ""),
+            parent_path,
+            parent_revision,
         )
 
     # A REBUILD's embedding plan is incremental by construction: the agent
@@ -1824,11 +2345,12 @@ class MiniSweAdapter(GroundtruthController):
             # signature does not accept the argument, and stub signatures
             # lagging a new parameter has already cost two red commits here.
             started = time.monotonic()
-            if request.parent_graph_path and request.dirty_paths:
-                # The amend path. Same arguments, same layout, same budget as
-                # the full build below -- refresh_index_files falls back to it
-                # by name whenever the amend refuses, so this branch can only
-                # ever be faster or identical, never a different contract.
+            if request.parent_graph_path:
+                # The amend path. refresh_index_files never rebuilds on a
+                # refusal: a transient refusal stays stale-marked for the
+                # next trigger to retry, and only a parent that can never
+                # serve again earns a build - named "recovery", not a
+                # fallback, because the amend chain's base is what is gone.
                 receipt = refresh_index_files(
                     root, request.parent_graph_path, request.dirty_paths,
                     layout=self.engine_state.layout,
@@ -1836,6 +2358,23 @@ class MiniSweAdapter(GroundtruthController):
                     embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
                     reclaim=False,
                 )
+                if receipt.build_mode == "amend_refused" and (
+                    receipt.build_mode_reason
+                    in {"parent_graph_missing", "parent_manifest_missing",
+                        "immutable_graph_artifact_invalid"}
+                    or receipt.build_mode_reason.startswith(
+                        "incremental_parent_uncertifiable")
+                ):
+                    recovery_reason = receipt.build_mode_reason
+                    receipt = ensure_index_with_receipt(
+                        root, layout=self.engine_state.layout,
+                        source_revision=request.source_revision,
+                        embedding_budget_seconds=self.REBUILD_EMBEDDING_BUDGET_SECONDS,
+                        reclaim=False,
+                    )
+                    receipt = replace(
+                        receipt, build_mode="recovery",
+                        build_mode_reason=recovery_reason)
             else:
                 # Name it. `mode=full` with an empty reason is the silent
                 # fallback this row exists to prevent, and it is exactly what
@@ -2323,6 +2862,7 @@ class MiniSweAdapter(GroundtruthController):
             self._decision_delivery_identities.add(item.identity)
             if item.kind == "localization":
                 self._localization_delivered = True
+                self._delivered_localization_identities.add(item.identity)
             if (item.kind == "recovery" and self._pending_recovery is not None
                     and item.rendered == self.pending_transient):
                 fingerprint, epoch = self._pending_recovery
@@ -2829,13 +3369,20 @@ class MiniSweAdapter(GroundtruthController):
         if delivery_identity in seen_identities:
             reason = "duplicate_delivery_identity"
         elif kind == "localization" and (
-            self._localization_delivered
+            delivery_identity in self._delivered_localization_identities
             or any(
                 item.kind == "localization"
                 for item in self._pending_provider_deliveries
             )
         ):
             reason = "localization_fire_once"
+        elif kind == "localization" and len(
+            self._delivered_localization_identities
+        ) >= MAX_LOCALIZATION_DELIVERIES:
+            # Re-localization is allowed when the ranked content changed (the
+            # agent's own searches reveal a shifted information need) but is
+            # still capped per task so a drifting ranking cannot spam.
+            reason = "localization_task_ceiling"
         elif candidate_ordinal > MAX_BOUNDARY_CLAIMS:
             reason = "boundary_claim_ceiling"
         elif kind == "cochange_partner" and self._cochange_delivery_count >= 2:
@@ -2962,17 +3509,176 @@ class MiniSweAdapter(GroundtruthController):
             out.append(text if text else predicate_id)
         return tuple(dict.fromkeys(out))
 
+    def resolve_delivery_recipe(
+        self, recipe: Mapping[str, Any]
+    ) -> tuple[str, str, dict[str, str]] | None:
+        """Evaluate one delivery query against current state.
+
+        Returns ``(rendered, source_revision_at_render, metadata)`` or ``None``
+        when the query cannot produce current bytes - the caller then issues
+        the typed skip. Graph/state-derived kinds only; execution facts are
+        facts at a revision and never take this path.
+        """
+        kind = str(recipe.get("kind") or "")
+        params = recipe.get("params") or {}
+        rendered = ""
+        metadata: dict[str, str] = {}
+        artifact_reference: dict[str, Any] | None = None
+        if kind == "cochange":
+            from .cochange_evidence import cochange_prior_dose
+
+            files = tuple(
+                str(path) for path in params.get("files") or () if path
+            )
+            if not files:
+                return None
+            rendered = cochange_prior_dose(self, files) or ""
+            metadata = dict(self.consume_model_visible_delivery_metadata() or {})
+        elif kind == "verification_plan":
+            rendered = self._render_verification_plan_now(params)
+            metadata = dict(self._pending_verification_metadata or {})
+        elif kind == "localization":
+            rendered = self._render_localization_now(params)
+            metadata = self.localization_delivery_metadata()
+            artifact_reference = getattr(
+                self, "_localization_artifact_reference", None
+            )
+        else:
+            return None
+        if not rendered:
+            return None
+        return (
+            rendered,
+            str(self.repository_revision or ""),
+            metadata,
+            artifact_reference,
+        )
+
+    def _render_localization_now(self, params: Mapping[str, Any]) -> str:
+        """Rank the localization query at delivery time.
+
+        The agent's own search commands extend the issue text: they are the
+        freshest statement of its information need, and folding them in is
+        what makes a re-rank at admission worth the bytes (drift
+        re-localization). Consuming the drift here - not at delivery-commit -
+        keeps an identical re-rank from re-queueing the recipe every request.
+        """
+        query = str(self.issue_text or "")
+        if not query:
+            return ""
+        drift = tuple(getattr(self, "_search_drift", ()))
+        terms = self._drift_query_terms(drift)
+        if terms:
+            query = f"{query}\n{terms}"
+        # The attempt itself consumes the drift and binds the revision: an
+        # empty render at this (revision, drift) key must not re-queue the
+        # scan on every request - it re-fires only when either side moves.
+        self._localization_drift_at_render = drift
+        self._localization_render_revision = str(self.repository_revision or "")
+        self._localization_metadata = {}
+        self._localization_chain = set(self._dedup_chain)
+        self._localization_head = self._chain_head
+        rendered = self._prepare_task_start_localization(query)
+        if not rendered:
+            return ""
+        # The complete ranked render is evidence: it goes to the CAS before
+        # compaction so the model-visible unit can reference full bytes while
+        # only whole-line selections ever reach the provider.
+        self._localization_artifact_reference = self._cas_reference(
+            rendered, kind="localization"
+        )
+        compacted = compact_localization(rendered)
+        if not compacted:
+            return ""
+        original_bytes = len(rendered.encode("utf-8"))
+        compacted_bytes = len(compacted.encode("utf-8"))
+        if compacted_bytes < original_bytes:
+            self.store.append(
+                "localization_compressed",
+                original_bytes=original_bytes,
+                delivered_bytes=compacted_bytes,
+                lane_cap_bytes=1_400,
+            )
+        self._localization_candidate = compacted
+        return compacted
+
+    def _cas_reference(self, payload: str, *, kind: str) -> dict[str, Any]:
+        """Content-address the payload into this task's evidence CAS."""
+        try:
+            from .output_evidence import EvidenceStore
+            from .request_history import store_history_evidence
+
+            return store_history_evidence(
+                EvidenceStore(self.engine_state.layout.evidence_root),
+                payload.encode("utf-8"),
+                kind=kind,
+            )
+        except Exception:  # noqa: BLE001 - reference absence degrades to inline
+            return {}
+
+    @staticmethod
+    def _drift_query_terms(commands: tuple[str, ...]) -> str:
+        """The searchable payload of the agent's own search commands.
+
+        Shell tokens only: the tool head and its flags are mechanics, not
+        information need; everything else - patterns, path scopings - is
+        attention signal.
+        """
+        terms: list[str] = []
+        for command in commands:
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                tokens = command.split()
+            for token in tokens[1:]:
+                if token.startswith("-") or len(token) < 3:
+                    continue
+                terms.append(token)
+        return " ".join(terms)
+
+    def note_search_drift(self, command: str) -> None:
+        """Record an agent search action as a localization drift signal.
+
+        Bounded and deduped - this is a signal for the next admission-time
+        re-rank, not a transcript of the agent's searches.
+        """
+        from .miniswe_evidence import _SEARCH_HEAD_RE
+
+        command = (command or "").strip()
+        if not command or not _SEARCH_HEAD_RE.search(command):
+            return
+        drift = tuple(getattr(self, "_search_drift", ()))
+        if command in drift:
+            return
+        self._search_drift = (*drift, command)[-3:]
+
+    def localization_drift_pending(self) -> bool:
+        """True when unconsumed search drift exists since the last render."""
+        drift = tuple(getattr(self, "_search_drift", ()))
+        return bool(drift) and drift != self._localization_drift_at_render
+
+    def localization_resolution_pending(self) -> bool:
+        """True when no resolution attempt covers the current state.
+
+        A resolved-empty localization is an answer, not an absence of one:
+        it stays the answer until the workspace revision or the agent's
+        search drift moves. ``None`` (never attempted) is always pending.
+        """
+        if self._localization_render_revision is None:
+            return True
+        if self._localization_render_revision != str(
+            self.repository_revision or ""
+        ):
+            return True
+        drift = tuple(getattr(self, "_search_drift", ()))
+        return drift != self._localization_drift_at_render
+
     def task_start_localization(self, *, commit: bool = True) -> str:
-        """Prepare once per source state; legacy callers may admit immediately."""
-        key = (self.issue_text, self.workspace_epoch, self.repository_revision,
-               self.graph_db, self.graph_fresh)
-        if key != self._localization_cache_key:
-            self._localization_metadata = {}
-            self._localization_chain = set(self._dedup_chain)
-            self._localization_head = self._chain_head
-            self._localization_candidate = self._prepare_task_start_localization()
-            self._localization_cache_key = key
-        rendered = compact_localization(self._localization_candidate)
+        """Resolve the localization query now; legacy callers may admit."""
+        resolved = self.resolve_delivery_recipe(
+            {"kind": "localization", "params": {"origin": "task_start"}}
+        )
+        rendered = resolved[0] if resolved else ""
         if commit and rendered:
             if not self.admit_model_visible_delivery(
                 lane="sealed", rendered=rendered, action_index=0,
@@ -2995,17 +3701,18 @@ class MiniSweAdapter(GroundtruthController):
             self._dedup_chain.update(self._localization_chain)
             self._chain_head = self._localization_head
 
-    def _prepare_task_start_localization(self) -> str:
-        """Ranked issue-keyed localization for the iteration-1 request.
+    def _prepare_task_start_localization(self, query: str) -> str:
+        """Ranked localization for the current information need.
 
-        Reframed trigger: the ranked files are delivered at TASK START, not
-        after the model happens to search. Sealed into the episode dedup chain
-        so the reactive search path never re-delivers (fire-once preserved).
+        ``query`` is the issue text plus any unconsumed search-drift terms,
+        evaluated at the admission choke point. Sealed into the episode dedup
+        chain so the reactive search path never re-delivers (fire-once
+        preserved).
         """
-        if not self.issue_text:
+        if not query:
             return ""
         if self.graph_db and self.graph_fresh:
-            semantic = self._semantic_task_start_localization()
+            semantic = self._semantic_task_start_localization(query)
             if semantic:
                 return semantic
             try:
@@ -3014,7 +3721,7 @@ class MiniSweAdapter(GroundtruthController):
                 from .miniswe_evidence import run_evidence_pipeline
 
                 event = normalize_event(
-                    self.issue_text,
+                    query,
                     "",
                     0,
                     0,
@@ -3044,9 +3751,9 @@ class MiniSweAdapter(GroundtruthController):
                     return result.rendered
             except Exception:  # noqa: BLE001 - deterministic lexical fallback follows
                 pass
-        return self._lexical_task_localization()
+        return self._lexical_task_localization(query)
 
-    def _semantic_task_start_localization(self) -> str:
+    def _semantic_task_start_localization(self, query: str) -> str:
         """Use the independent dense corpus when verified assets are configured."""
         model_dir = os.environ.get("GT_DENSE_MODEL_DIR", "").strip()
         snapshot = self.graph_query_snapshot()
@@ -3057,7 +3764,7 @@ class MiniSweAdapter(GroundtruthController):
 
             ranking = hybrid_rank(
                 snapshot.graph_path,
-                self.issue_text,
+                query,
                 k=8,
                 use_dense=True,
                 model_dir=model_dir,
@@ -3108,6 +3815,12 @@ class MiniSweAdapter(GroundtruthController):
                     "score": fused.score,
                     "reasons": [f"retrieval:{source}" for source in sources],
                     "stable_id": fused.stable_id,
+                    "qualified_name": str(
+                        getattr(provenance, "qualified_name", "")
+                        or getattr(provenance, "name", "")
+                    ),
+                    "label": str(getattr(provenance, "label", "") or ""),
+                    "snippet": str(getattr(fused, "snippet", "") or ""),
                 })
                 if len(items) == 4:
                     break
@@ -3152,7 +3865,7 @@ class MiniSweAdapter(GroundtruthController):
             )
             return ""
 
-    def _lexical_task_localization(self) -> str:
+    def _lexical_task_localization(self, query: str) -> str:
         """Bounded advisory fallback with stable anchors and score reasons."""
         if not self.repo_root or not os.path.isdir(self.repo_root):
             return ""
@@ -3162,7 +3875,7 @@ class MiniSweAdapter(GroundtruthController):
         }
         terms = tuple(sorted({
             token.lower()
-            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", self.issue_text)
+            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", query)
             if token.lower() not in stop
         }))
         if not terms:
@@ -3201,12 +3914,20 @@ class MiniSweAdapter(GroundtruthController):
                 )
                 reasons = [f"path_token:{term}" for term in path_terms]
                 reasons += [f"content_token:{term}" for term in content_terms]
+                text_lines = text.splitlines()
+                snippet = (
+                    text_lines[line - 1].strip() if 0 < line <= len(text_lines) else ""
+                )
                 rows.append({
                     "path": relative,
                     "line": line,
                     "anchor": f"{relative}:{line}",
                     "score": score,
                     "reasons": reasons,
+                    "snippet": snippet,
+                    "why": "matched " + ", ".join(
+                        sorted(set(path_terms) | set(content_terms))
+                    ),
                     "text": text[:4_000],
                 })
             if scanned > 5_000:
@@ -3225,7 +3946,7 @@ class MiniSweAdapter(GroundtruthController):
                 if not snapshot.graph_current:
                     raise RuntimeError("graph_snapshot_not_current")
                 dense_order, dense_receipt = rank_documents(
-                    query_text=self.issue_text,
+                    query_text=query,
                     documents={str(row["path"]): str(row["text"]) for row in candidates},
                     lexical_scores={
                         str(row["path"]): float(row["score"]) for row in candidates
@@ -3248,10 +3969,24 @@ class MiniSweAdapter(GroundtruthController):
                     query_ready=False,
                     reason=f"{type(exc).__name__}:{str(exc)[:200]}",
                 )
+        notes = []
+        if scanned > 5_000:
+            notes.append("repository scan capped at 5,000 files")
+        if len(candidates) > len(ranked):
+            notes.append(
+                f"+{len(candidates) - len(ranked)} further candidate(s) not shown"
+            )
+        if notes and ranked:
+            # Partial coverage must ride inside the certified item format -
+            # a standalone note line would fail compact_localization's check
+            # and take the whole delivery down with it.
+            first = dict(ranked[0])
+            first["why"] = f"{first.get('why') or 'matched'}; " + "; ".join(notes)
+            ranked = [first, *ranked[1:]]
         artifact = {
             "schema": "gt.localization_advisory.v1",
             "issue_sha256": hashlib.sha256(
-                self.issue_text.encode("utf-8", "surrogatepass")
+                query.encode("utf-8", "surrogatepass")
             ).hexdigest(),
             "scope": ".",
             "coverage": {
@@ -3272,11 +4007,9 @@ class MiniSweAdapter(GroundtruthController):
         ).encode("utf-8")
         digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("localization_advisory", digest, encoded)
-        rendered = "\n".join(
-            f"{row['anchor']} score={row['score']} reasons={','.join(row['reasons'])}"
-            for row in ranked
-        )
-        rendered = "[GT_EVIDENCE:localization]\n" + rendered
+        from .retrieval import render_semantic_localization
+
+        rendered = render_semantic_localization(ranked)
         self._localization_metadata = {
             "kind": "localization", "dedup_key": f"lexical-localization:{digest}",
             "target": str(ranked[0]["path"]), "semantics": "advisory",
@@ -3301,12 +4034,30 @@ class MiniSweAdapter(GroundtruthController):
         else:
             if signature == self._last_delta_signature:
                 return ""
-            shipped = tuple(
-                obligation_id
-                for obligation_id, predicate_id in self._predicate_by_obligation.items()
-                if self.predicate_status(predicate_id) is PredicateStatus.GREEN
+            # Only what changed since the last delivered delta. The full
+            # unmet list already shipped with the contract (and persists in
+            # the agent's history), so re-listing it on every invalidation
+            # cycle re-sent identical bytes - 22 full lists on oxvg alone.
+            previous = dict(self._last_delta_signature)
+            transitions: list[tuple[str, str]] = []
+            for obligation_id, predicate_id in self._predicate_by_obligation.items():
+                current = self.predicate_status(predicate_id)
+                before = previous.get(predicate_id)
+                if before == current.value:
+                    continue
+                if current is PredicateStatus.GREEN:
+                    transitions.append((obligation_id, "satisfied"))
+                elif current is PredicateStatus.RED:
+                    transitions.append((obligation_id, "failing check observed"))
+                elif before == PredicateStatus.GREEN.value:
+                    transitions.append((obligation_id, "re-opened by workspace change"))
+                elif before is None:
+                    transitions.append((obligation_id, "new obligation"))
+                else:
+                    transitions.append((obligation_id, "verification state reset"))
+            text, _ = render_obligation_transitions(
+                self.contract, transitions, max_chars=max_chars
             )
-            text, _ = render_obligation_delta(self.contract, shipped, max_chars=max_chars)
         self._prepared_contract_delta = (text, signature)
         if commit:
             self.acknowledge_contract_delta(text)
@@ -3411,6 +4162,55 @@ class MiniSweAdapter(GroundtruthController):
     def queue_churn_steer(self, rendered: str) -> None:
         """Hold the churn governor's steering text for the next request."""
         self._pending_churn_steer = rendered
+
+    def build_churn_steer(self, stall_turns: int) -> str:
+        """Render a corrective steer that names the next concrete step.
+
+        A generic "stop churning" scold cannot re-power a stalled trajectory.
+        The steer carries the strongest pending evidence instead: a bound
+        check the agent can run to prove existing work, else the next unmet
+        plan row, else a plain redirect. No internal ids or digests - only
+        text the model can act on.
+        """
+        lines = [
+            "GT_CHURN_STEER: you have spent "
+            f"{stall_turns} consecutive actions without a workspace edit "
+            "or check run."
+        ]
+        pending_ids = getattr(self, "_pending_check_ids", set())
+        pending = [
+            spec.command
+            for check_id, spec in getattr(self, "_check_specs", {}).items()
+            if check_id in pending_ids and spec.command
+        ]
+        if pending:
+            lines.append(
+                "A bound check is waiting to prove work you already did: "
+                f"`{pending[0]}` - run it."
+            )
+        else:
+            unmet = self.unmet_plan_rows()
+            row = None
+            plan = self.persistent_plan
+            if plan is not None and unmet:
+                row = next(
+                    (item for item in plan.rows if item.row_id in unmet), None
+                )
+            if row is not None:
+                lines.append(
+                    f"Next unverified requirement: {row.text.strip()[:180]}"
+                )
+                if row.verification_command:
+                    lines.append(
+                        f"Prove it with: `{row.verification_command}`"
+                    )
+            else:
+                lines.append(
+                    "Return to the task now: make the code change and run "
+                    "the project's checks."
+                )
+        lines.append("Continued churn terminates this run.")
+        return "\n".join(lines)
 
     def prepare_churn_steer_delivery(self) -> str:
         """Admit a queued churn steer on the same transient-delivery contract
@@ -3693,6 +4493,7 @@ class MiniSweAdapter(GroundtruthController):
             self._obligation_by_predicate = {
                 value: key for key, value in self._predicate_by_obligation.items()
             }
+            added_predicate_ids = []
             for obligation in additions:
                 predicate_id = self._predicate_by_obligation.get(
                     obligation.obligation_id
@@ -3702,6 +4503,9 @@ class MiniSweAdapter(GroundtruthController):
                         predicate_id, obligation.text
                     )
                     self._status[predicate_id] = PredicateStatus.UNKNOWN
+                if predicate_id:
+                    added_predicate_ids.append(predicate_id)
+            self._journal_compiled_predicates("plan", added_predicate_ids)
 
         # Map every plan row to the predicates that can satisfy it: its own
         # derived obligation, the merged ledger obligation minted for a line the

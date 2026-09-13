@@ -85,6 +85,7 @@ def task_metrics(task_dir: Path) -> dict[str, Any]:
     last_response_ts: float | None = None
     admitted_ts: float | None = None
     delivered_bytes = 0
+    prepared_bytes = 0
     refused_bytes = 0
     per_call_in = []
     for e in events:
@@ -101,9 +102,13 @@ def task_metrics(task_dir: Path) -> dict[str, Any]:
             tin, tout, tcache = _usage_tokens(e.get("usage") or {})
             if tin or tout:
                 per_call_in.append(tin)
-        elif ev in ("delivery_prepared", "evidence_delivery",
-                    "context_addition_delivery"):
+        elif ev in ("evidence_delivery", "context_addition_delivery"):
+            # Delivery is the event of record. delivery_prepared carries the
+            # same rendered_bytes at staging time - counting it here charged
+            # every delivered byte twice.
             delivered_bytes += int(e.get("rendered_bytes") or 0)
+        elif ev == "delivery_prepared":
+            prepared_bytes += int(e.get("rendered_bytes") or 0)
         elif ev == "delivery_refused":
             refused_bytes += int(e.get("rendered_bytes") or 0)
 
@@ -114,6 +119,7 @@ def task_metrics(task_dir: Path) -> dict[str, Any]:
         if e.get("event") == "graph_build_mode"
     )
     row["gt_delivered_bytes"] = delivered_bytes
+    row["gt_prepared_bytes"] = prepared_bytes
     row["gt_refused_bytes"] = refused_bytes
     row["deliveries_consumed"] = counts.get("delivery_consumed", "unknown")
     row["churn_events"] = sum(
@@ -128,6 +134,83 @@ def task_metrics(task_dir: Path) -> dict[str, Any]:
     return row
 
 
+def _task_identity(task_dir: Path) -> str:
+    """Canonical task identity for dedupe.
+
+    ``agent/gt-run.json`` carries the real ``task_id`` (the ``<task>__XXXXX``
+    dir name is truncated - ``claude-code-by-agents-recursive-delegation``
+    loses ``-delegation``).  ``result.json`` ``task_name`` (namespace-
+    stripped) is the fallback, then the dir-name prefix.
+    """
+    run_path = task_dir / "agent" / "gt-run.json"
+    if run_path.is_file():
+        try:
+            value = json.loads(run_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, dict):
+            task_id = value.get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                return task_id.strip().rsplit("/", 1)[-1]
+    result_path = task_dir / "result.json"
+    if result_path.is_file():
+        try:
+            value = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, dict):
+            name = value.get("task_name")
+            if isinstance(name, str) and name.strip():
+                return name.strip().rsplit("/", 1)[-1]
+    return task_dir.name.split("__", 1)[0]
+
+
+def _row_completeness(row: dict[str, Any]) -> int:
+    """Count of fields carrying real data (not unknown/missing/None)."""
+    return sum(
+        1
+        for key, value in row.items()
+        if key != "task"
+        and value is not None
+        and value != ""
+        and value != "unknown"
+        and value != "missing"
+    )
+
+
+def collect_task_rows(tasks_root: Path) -> list[dict[str, Any]]:
+    """One metrics row per task identity.
+
+    Artifact trees can carry the same task in several wrapper dirs (merged
+    downloads, side-copied task dirs - run 34715686102 produced 22 agent/
+    dirs for 20 tasks).  Rows are keyed by task identity; duplicates keep
+    the most complete row, ties break to the lexically first source dir.
+    Output is sorted by task identity.
+    """
+    task_dirs = sorted(
+        p.parent for p in tasks_root.rglob("agent") if p.is_dir()
+    )
+    best: dict[str, dict[str, Any]] = {}
+    best_score: dict[str, int] = {}
+    best_dir: dict[str, str] = {}
+    for task_dir in task_dirs:
+        identity = _task_identity(task_dir)
+        row = task_metrics(task_dir)
+        row["task"] = identity
+        score = _row_completeness(row)
+        path_key = task_dir.as_posix()
+        if (
+            identity not in best
+            or score > best_score[identity]
+            or (score == best_score[identity]
+                and path_key < best_dir[identity])
+        ):
+            best[identity] = row
+            best_score[identity] = score
+            best_dir[identity] = path_key
+    return [best[key] for key in sorted(best)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path,
@@ -138,10 +221,7 @@ def main() -> int:
     tasks_root = args.root / "tasks"
     if not tasks_root.is_dir():
         tasks_root = args.root
-    task_dirs = sorted(
-        p for p in tasks_root.rglob("agent") if p.is_dir()
-    )
-    rows = [task_metrics(d.parent) for d in task_dirs]
+    rows = collect_task_rows(tasks_root)
     out = json.dumps(rows, indent=2, sort_keys=True)
     if args.json:
         args.json.write_text(out + "\n", encoding="utf-8")

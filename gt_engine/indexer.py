@@ -2880,7 +2880,7 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
                         contract_store_path: Path | None = None,
                         layout: RuntimeLayout | None = None,
                         reclaim: bool = True) -> IndexBuildReceipt:
-    """Amend ``changed_paths`` into a copy of ``graph``, or rebuild in full.
+    """Amend ``changed_paths`` into a copy of ``graph``. Never rebuilds.
 
     This is the seam blocker 7c named. The producer has had a per-file amend
     boundary since 25a37a5f and nothing called it, so every edit paid for a
@@ -2889,11 +2889,12 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
     agent edited continuously, and every read after the first edit reported
     caller_coverage unavailable.
 
-    A refusal is not an error here. Every reason the amend declines -- an
-    uncertifiable parent, a deleted path, a producer that does not declare the
-    capability -- falls back to the full rebuild that was the only behaviour
-    before, and the reason is carried on the receipt so a permanent silent
-    fallback is visible on the first edit rather than at the end of a run.
+    A refusal is an answer, not a trigger: when the parent exists the graph
+    returns ``amend_refused`` with the reason and the caller keeps the
+    stale-marked parent for the next trigger to retry. The only from-scratch
+    builds left are the explicit initial build and a named recovery a caller
+    chooses when the parent can never serve again -- never a silent fallback
+    on this path.
     """
 
     root_path = Path(root)
@@ -2925,6 +2926,29 @@ def refresh_index_files(root: str | Path, graph: str | Path, changed_paths: tupl
             embedding_budget_seconds=embedding_budget_seconds,
             contract_store_path=contract_store_path, layout=layout,
             build_mode="incremental", incremental_results=results,
+        )
+    if graph and not changed_paths:
+        # Nothing is dirty: the certified parent already IS the answer, and
+        # rebuilding it from scratch would only rename reuse as build.
+        return _receipt_for_published_graph(
+            str(graph), source_revision=source_revision,
+            embedding_budget_seconds=embedding_budget_seconds,
+            contract_store_path=contract_store_path, layout=layout,
+            build_mode="reuse", build_mode_reason=reason,
+        )
+    if graph:
+        # An amend that refuses is an answer, not a trigger for a
+        # from-scratch rebuild. The certified parent still exists; the graph
+        # that would replace it is exactly the rebuild that never converged
+        # in production (arktype: each rebuild outlasted the edit interval,
+        # none ever landed). The caller keeps the stale-marked parent and
+        # retries the amend - the only from-scratch builds left are the
+        # explicit initial build and a named recovery, never a fallback.
+        return IndexBuildReceipt(
+            IndexBuildStatus.BUILD_FAILED, graph_db=str(graph),
+            source_revision=source_revision, build_mode="amend_refused",
+            build_mode_reason=reason,
+            error_type="amend_refused", error_diagnostic=reason[:200],
         )
     # Module-level lookup on purpose: the existing test doubles replace this
     # name, and a fallback they cannot intercept is a fallback nobody notices.

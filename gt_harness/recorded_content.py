@@ -276,7 +276,10 @@ def _trace_body(trajectory: dict[str, Any], message_index: int, target: str) -> 
 def _claim(kind: str, target: str, body: str) -> str:
     lines = body.splitlines()
     if kind == "localization":
-        anchors = [line.split(" score=", 1)[0] for line in lines]
+        # Both payload formats keep `path:line` as the first token: legacy
+        # `anchor score=... reasons=...` and enriched `anchor symbol (kind)
+        # ~ snippet | why`. The claim stays the anchor either way.
+        anchors = [line.split(None, 1)[0] for line in lines]
         return "ranked_repository_targets:" + ",".join(anchors)
     if kind == "caller_contract_view":
         subject = lines[0].split("() has ", 1)[0]

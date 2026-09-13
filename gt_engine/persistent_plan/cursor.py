@@ -115,11 +115,6 @@ def render_cursor(
             f"{symbol}.{member}" for symbol, member in pending_cells))
     if row.approach:
         lines.append(f"    design: {_clip(row.approach, MAX_TEXT_CHARS)}")
-    else:
-        lines.append(
-            f"    design pending: record the intended change with `gt-plan revise {row_id} --file <json>`; "
-            "a proposed check alone is not an implementation design."
-        )
     if row.verification_command:
         lines.append(
             "    when you believe it is done, demonstrate it with: "
@@ -132,7 +127,11 @@ def render_cursor(
         )
     remaining = [r for r in outstanding if r != row_id]
     if remaining:
-        lines.append(f"    still to satisfy: {', '.join(remaining[:6])}")
+        more = len(remaining) - 6
+        suffix = f" (+{more} more)" if more > 0 else ""
+        lines.append(
+            f"    still to satisfy: {', '.join(remaining[:6])}{suffix}"
+        )
     return "\n".join(lines)
 
 

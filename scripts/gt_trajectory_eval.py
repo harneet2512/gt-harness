@@ -81,8 +81,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 # Word-boundary delivery-token policy is owned by scripts/gt_audit.py
 # (the SENT/VISIBLE/SERVED/CONSUMED join); reuse it, never re-derive it.
+from gt_engine.request_history import load_provider_request  # noqa: E402
 from scripts.gt_audit import (  # noqa: E402
-    delivery_content_tokens,
+    delivery_distinctive_terms,
+    distinctive_term_hit,
+    is_distinctive_delivery_term,
     token_word_hit,
 )
 
@@ -1345,9 +1348,38 @@ def _response_action_map(traj: dict) -> dict[str, int]:
 
 def _request_blob_messages(state_dirs: list[Path], row: dict | None,
                            cache: dict) -> list | None:
-    """Model-visible ``messages`` of one provider request blob."""
+    """Model-visible ``messages`` of one provider request.
+
+    A ``request_manifest`` reference is authoritative: it is the
+    content-addressed record of what was actually sent (envelope + ordered
+    message CAS refs, sha256-verified by ``load_provider_request``), so it
+    is consumed verbatim rather than re-derived.  Older runs carry only a
+    monolithic ``request_blob``; absent both, the request is unreadable and
+    the funnel reports it as such instead of guessing.
+    """
     if not row:
         return None
+    manifest_key = row.get("request_manifest")
+    if manifest_key:
+        key = f"manifest:{manifest_key}"
+        if key not in cache:
+            msgs = None
+            for sd in state_dirs:
+                try:
+                    request = load_provider_request(sd, row)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+                cand = (request.get("messages")
+                        if isinstance(request, dict) else None)
+                if isinstance(cand, list):
+                    msgs = [m for m in cand if isinstance(m, dict)]
+                    break
+            cache[key] = msgs
+        if cache[key] is not None:
+            return cache[key]
+        # manifest referenced but unreadable here - a legacy request_blob
+        # on the same row is still evidence; fall through rather than
+        # reporting the request unrecoverable.
     key = row.get("request_blob")
     if not key:
         return None
@@ -1669,9 +1701,9 @@ def _delivery_funnel(d: dict, anchor: int | None, actions: list,
     eff_anchor = act_idx if act_idx is not None else anchor
     f["effective_anchor"] = eff_anchor
 
-    tokens = delivery_content_tokens(
+    terms, snippets = delivery_distinctive_terms(
         str(d.get("delivery_id") or ""), target, d.get("rendered"))
-    tokens |= {t for t in target_tokens if len(t) >= 4}
+    terms |= {t for t in target_tokens if is_distinctive_delivery_term(t)}
     touch_tokens = set()
     if target and not prompt_lane:
         touch_tokens = {target, target.rsplit("/", 1)[-1]}
@@ -1686,7 +1718,7 @@ def _delivery_funnel(d: dict, anchor: int | None, actions: list,
     matched = ""
     for a in actions:
         if eff_anchor <= a.index < eff_anchor + CONSUME_TURNS:
-            hit = token_word_hit(a.command, tokens)
+            hit = distinctive_term_hit(a.command, terms, snippets)
             if hit:
                 matched = hit
                 f["consumed_at"] = a.index

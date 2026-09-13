@@ -36,6 +36,34 @@ def test_reads_alone_do_not_abort_indefinitely_but_eventually_stall():
     assert g.aborted
 
 
+def test_source_exploration_stall_steers_before_abort():
+    """The delegation-task pattern: 50 consecutive reads/searches of source
+    files - not GT archaeology - stalled to an abort with zero steers. Any
+    sustained unproductive stall earns a steer; an abort may only fire after
+    a steer had its grace turns to work."""
+    g = ChurnGovernor()
+    commands = ["cat src/file%d.py" % i for i in range(60)]
+    signals = _feed(g, commands)
+    assert "steer" in signals
+    assert signals.index("steer") < signals.index("abort")
+    assert g.steers_issued >= 1
+
+
+def test_stall_abort_requires_prior_steer():
+    """An abort with steers_issued == 0 is a policy bug, not a tuning issue:
+    the governor may only kill a stall it already tried to correct. With
+    steering disabled by configuration the plain limit is the only guard."""
+    g = ChurnGovernor()
+    _feed(g, ["cat src/f%d.py" % i for i in range(55)])
+    assert g.aborted
+    assert g.steers_issued >= 1
+
+    unsteered = ChurnGovernor(max_steers=0)
+    signals = _feed(unsteered, ["cat src/f%d.py" % i for i in range(55)])
+    assert signals[-1] == "abort"
+    assert unsteered.steers_issued == 0
+
+
 def test_archaeology_steer_then_abort_mirrors_the_paid_run():
     """The paid-run pattern: exploration, then gt-state/trajectory mining
     with no edits. Steer first, abort when the loop survives the steer."""

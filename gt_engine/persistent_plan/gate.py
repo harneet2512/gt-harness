@@ -186,4 +186,7 @@ def render_directive(
         )
         for name in regressions[:MAX_LISTED_ROWS]:
             lines.append(f"- {name}")
+        extra = len(regressions) - MAX_LISTED_ROWS
+        if extra > 0:
+            lines.append(f"- ... and {extra} more")
     return "\n".join(lines)

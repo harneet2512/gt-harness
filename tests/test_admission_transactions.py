@@ -50,9 +50,14 @@ def test_localization_receipt_matches_final_structurally_compacted_bytes(tmp_pat
     from gt_engine.request_history import load_history_evidence
 
     adapter = adapter_for(tmp_path)
+    adapter.issue_text = "compute"
     lines = [f"source{i}.py:1 score=1 reasons=content_token:compute" for i in range(50)]
     candidate = "[GT_EVIDENCE:localization]\n" + "\n".join(lines)
-    monkeypatch.setattr(adapter, "task_start_localization", lambda **_: candidate)
+    # The localization recipe resolves through _prepare_task_start_localization
+    # at admission; compact_localization still owns the byte bound.
+    monkeypatch.setattr(
+        adapter, "_prepare_task_start_localization", lambda *_: candidate
+    )
     session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
     rendered = session.before_model([], iteration=0).context_additions[0]
     assert len(rendered.encode()) <= 1400
@@ -85,11 +90,51 @@ def test_no_match_localization_does_not_rescan_unchanged_workspace(tmp_path, mon
     adapter = adapter_for(tmp_path)
     adapter.issue_text = "compute"
     calls = []
-    monkeypatch.setattr(adapter, "_lexical_task_localization", lambda: calls.append(1) or "")
+    monkeypatch.setattr(
+        adapter, "_lexical_task_localization", lambda *_: calls.append(1) or ""
+    )
     session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
     session.before_model([], iteration=0)
     session.before_model([], iteration=1)
     assert calls == [1]
+
+
+def test_search_drift_refires_shipped_localization_with_drift_terms(
+    tmp_path, monkeypatch
+):
+    adapter = adapter_for(tmp_path)
+    adapter.issue_text = "compute"
+    queries = []
+
+    def fake_prepare(query):
+        queries.append(query)
+        hit = "src/batch.py:7" if "compute_batch" in query else "src/mod.py:1"
+        return f"[GT_EVIDENCE:localization]\n{hit} score=1"
+
+    monkeypatch.setattr(adapter, "_prepare_task_start_localization", fake_prepare)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+
+    batch = session.before_model([], iteration=0)
+    assert queries == ["compute"]
+    adapter.bind_provider_payload(
+        {"messages": [{"role": "user", "content": "\n".join(batch.context_additions)}]}
+    )
+    ids = tuple(
+        hashlib.sha256(item.encode()).hexdigest()
+        for item in batch.context_additions
+    )
+    session.provider_request_admitted(ids)
+    assert session._task_start_shipped
+
+    # Unchanged revision and no drift: a shipped localization stays shipped.
+    session.before_model([], iteration=1)
+    assert len(queries) == 1
+
+    adapter.note_search_drift("grep -rn compute_batch src/")
+    batch = session.before_model([], iteration=2)
+    assert len(queries) == 2
+    assert "compute_batch" in queries[1]
+    assert batch.context_additions
 
 
 def test_localization_preview_does_not_seal_or_admit(tmp_path):
@@ -168,12 +213,11 @@ def test_identical_current_fact_can_recur_on_a_later_decision(tmp_path):
     assert admit(adapter, 1, rendered)
 
 
-def test_localization_delivery_is_fire_once_per_episode(tmp_path):
-    """The ranked-localization contract is one delivery per episode. The
-    compiled task-start path admits with commit=False, so the delivered
-    dedup key is not stamped into the episode chain at production time —
-    a later reactive ``ranked_localization`` fire (the scripted grep after
-    task start) reproduces the fact and must be refused at admission."""
+def test_localization_delivery_dedups_by_content_per_episode(tmp_path):
+    """Ranked localization is refused when the same content re-fires, but new
+    ranked content may re-deliver (capped) because the agent's own searches
+    can move the information need. One localization per DECISION still holds
+    so two never queue in parallel."""
     adapter = adapter_for(tmp_path)
 
     def offer(iteration, text, key):
@@ -189,9 +233,10 @@ def test_localization_delivery_is_fire_once_per_episode(tmp_path):
     adapter.bind_provider_payload({
         "messages": [{"role": "tool", "content": "ranked rows v1"}]
     })
-    # After the first delivery is visibility-committed, a reactive re-fire
-    # on a later decision is refused outright.
-    assert not offer(1, "ranked rows v2", "loc-b")
+    # The identical bytes re-firing on a later decision is refused.
+    assert not offer(1, "ranked rows v1", "loc-a")
+    # New ranked content is a new delivery, not a re-fire.
+    assert offer(1, "ranked rows v2", "loc-b")
 
     rows = [
         json.loads(line)

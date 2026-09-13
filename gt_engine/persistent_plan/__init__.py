@@ -185,7 +185,7 @@ class InteractionCell:
     mode_symbol: str
     member: str
     applies: bool
-    reason: str
+    reason: str = ""
 
     def as_dict(self) -> dict:
         return {

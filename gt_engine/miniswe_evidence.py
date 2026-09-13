@@ -78,13 +78,6 @@ def _decision_group(envelope: EvidenceEnvelope) -> int:
     return 3
 
 
-def cap_evidence(text: str, max_chars: int = 1200) -> str:
-    """B1: hard char cap on any evidence splice (large facts never linger big)."""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars].rstrip() + "\n...(truncated by GT)"
-
-
 @dataclass(frozen=True)
 class EvidenceDose:
     """One independently attributable candidate in a decision packet."""

@@ -527,6 +527,181 @@ def test_funnel_marker_any_and_not_visible(tmp_path):
     assert by_id["dB"]["funnel"]["visible"] is False
 
 
+def _write_delivery_blob(trial: Path, unit: str, body: str) -> None:
+    ddir = trial / "agent" / "gt-state" / "statedir" / "deliveries"
+    ddir.mkdir(exist_ok=True)
+    (ddir / f"{unit}.json").write_text(body, encoding="utf-8")
+
+
+def test_consumption_common_identifiers_do_not_count(tmp_path):
+    """Common code words shared between payload and command must not credit
+    consumption - the structural rule requires an anchor, a qualified name,
+    or a verbatim snippet (finding 7: consumption was overstated on bare
+    identifiers like ``handlers``/``backend``/``service``)."""
+    tasks = make_tasks_root(tmp_path)
+    commands = [
+        ("cat a.py", 0),
+        ("grep -rn handlers backend service .", 0),
+        ("cat c.py", 0),
+    ]
+    events = [
+        {"event": "evidence_delivery", "delivery_identity": "d1",
+         "kind": "caller_contract_view", "target": "src/zzz.py",
+         "action_index": 1, "iteration": 1, "delivery_ordinal": 1,
+         "delivery_blob": "deliveries/d1.json"},
+    ]
+    requests = {
+        1: _req_msgs(1),
+        2: _req_msgs(2, "[GT_EVIDENCE:caller_contract_view]\n"
+                        "handlers backend service manager"),
+        3: _req_msgs(3),
+    }
+    trial = make_trial_with_provider(tmp_path, commands, events=events,
+                                     requests=requests)
+    _write_delivery_blob(trial, "d1", delivery_blob(
+        "d1", 1, "caller_contract_view",
+        "handlers backend service manager"))
+    res = gte.evaluate_trial(trial, tasks)
+    by_id = {d["delivery_id"]: d
+             for d in res["gt_utilization"]["deliveries"]}
+    f1 = by_id["d1"]["funnel"]
+    # the chain reaches the agent, but nothing distinctive is acted on
+    assert f1["served"] and f1["agent_did"]
+    assert f1["consumed"] is False
+    assert f1["verdict"] == "seen_no_action_on_content"
+
+
+def test_consumption_verbatim_payload_snippet_credits(tmp_path):
+    """A >=24-char verbatim payload substring in the command is distinctive
+    evidence even when every individual word in it is generic."""
+    tasks = make_tasks_root(tmp_path)
+    commands = [
+        ("cat a.py", 0),
+        ('grep -rn "must update their call sites" .', 0),
+        ("cat c.py", 0),
+    ]
+    events = [
+        {"event": "evidence_delivery", "delivery_identity": "d1",
+         "kind": "caller_contract_view", "target": "src/zzz.py",
+         "action_index": 1, "iteration": 1, "delivery_ordinal": 1,
+         "delivery_blob": "deliveries/d1.json"},
+    ]
+    requests = {
+        1: _req_msgs(1),
+        2: _req_msgs(2, "[GT_EVIDENCE:caller_contract_view]\n"
+                        "callers must update their call sites"),
+        3: _req_msgs(3),
+    }
+    trial = make_trial_with_provider(tmp_path, commands, events=events,
+                                     requests=requests)
+    _write_delivery_blob(trial, "d1", delivery_blob(
+        "d1", 1, "caller_contract_view",
+        "callers must update their call sites"))
+    res = gte.evaluate_trial(trial, tasks)
+    by_id = {d["delivery_id"]: d
+             for d in res["gt_utilization"]["deliveries"]}
+    f1 = by_id["d1"]["funnel"]
+    assert f1["consumed"] is True
+    assert "must update their call sites" in f1["match"]
+
+
+# --------------------------------------------------------------------------
+# request_manifest: authoritative provider request record
+# --------------------------------------------------------------------------
+class _BlobStore:
+    """Minimal BlobStore for request_history.store_provider_request."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+
+    def put_blob(self, namespace: str, digest: str, payload: bytes) -> Path:
+        directory = self.root / namespace
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{digest}.json"
+        target.write_bytes(payload)
+        return target
+
+    def blob_exists(self, namespace: str, digest: str) -> bool:
+        return (self.root / namespace / f"{digest}.json").is_file()
+
+
+def _append_manifest_request(trial: Path, iteration: int,
+                             messages: list) -> None:
+    """Journal a provider_delivery/provider_response pair whose request is
+    stored ONLY as a CAS manifest (no request_blob) - the shape newer
+    producers emit."""
+    from gt_engine.request_history import store_provider_request
+
+    state = trial / "agent" / "gt-state" / "statedir"
+    payload = {"model": "fixture/model", "messages": messages}
+    req_sha, manifest_path, manifest_sha, _storage = store_provider_request(
+        _BlobStore(state), payload)
+    events_path = state / "events.jsonl"
+    rows = [json.loads(line)
+            for line in events_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+    rows.append({
+        "event": "provider_delivery", "iteration": iteration,
+        "request_id": f"req-{iteration}", "payload_sha256": req_sha,
+        "request_manifest": manifest_path,
+        "request_manifest_sha256": manifest_sha,
+        "request_storage": "message_cas",
+    })
+    rows.append({
+        "event": "provider_response", "request_id": f"req-{iteration}",
+        "provider_response_id": f"gen-{iteration}", "iteration": iteration,
+    })
+    events_path.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8")
+
+
+def test_request_manifest_is_the_authoritative_request_record(tmp_path):
+    """With only request_manifest present the funnel still resolves VISIBLE
+    from the content-addressed record; the old blob-only reader reported
+    ``request_blob_unreadable`` and lost the serving request entirely."""
+    tasks = make_tasks_root(tmp_path)
+    commands = [
+        ("cat src/core.py", 0),
+        ("cat src/fresh.py", 0),   # action 2 - produced by serving request 2
+    ]
+    events = [
+        {"event": "evidence_delivery", "delivery_identity": "d1",
+         "kind": "caller_contract_view", "target": "src/fresh.py",
+         "action_index": 1, "iteration": 1, "delivery_ordinal": 1},
+    ]
+    trial = make_trial_with_provider(tmp_path, commands, events=events,
+                                     requests={})
+    _append_manifest_request(trial, 1, _req_msgs(1))
+    _append_manifest_request(trial, 2, _req_msgs(
+        2, "[GT_EVIDENCE:caller_contract_view]\nsrc/fresh.py:9: note"))
+    res = gte.evaluate_trial(trial, tasks)
+    by_id = {d["delivery_id"]: d
+             for d in res["gt_utilization"]["deliveries"]}
+    f1 = by_id["d1"]["funnel"]
+    assert f1["sent"] and f1["visible"]
+    assert f1["visible_evidence"] in ("marker", "marker_new")
+    assert f1["served"] and f1["agent_did"]
+    assert f1["consumed"] is True      # cat src/fresh.py is a path anchor
+
+
+def test_request_manifest_absent_falls_back_to_request_blob(tmp_path):
+    """No manifest + no readable blob stays unreadable instead of guessing."""
+    trial = make_trial(tmp_path, [("cat src/core.py", 0)])
+    state = trial / "agent" / "gt-state" / "statedir"
+    row = {"event": "provider_delivery", "iteration": 1,
+           "request_id": "req-1",
+           "request_manifest": "provider_request_manifests/" + "0" * 64
+           + ".json",
+           "request_manifest_sha256": "0" * 64}
+    assert gte._request_blob_messages([state], row, {}) is None
+    # a present-but-corrupt manifest must not fabricate messages either
+    bad = state / "provider_request_manifests"
+    bad.mkdir(parents=True)
+    (bad / ("0" * 64 + ".json")).write_bytes(b"not json")
+    assert gte._request_blob_messages([state], row, {}) is None
+
+
 # --------------------------------------------------------------------------
 # symbol-anchored gold closure
 # --------------------------------------------------------------------------

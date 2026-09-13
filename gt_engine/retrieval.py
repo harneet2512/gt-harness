@@ -493,11 +493,45 @@ def source_symbol(db: sqlite3.Connection, node_id: int) -> tuple[SymbolProvenanc
     return _provenance_from_row(row), str(row[9] or "")
 
 
+_SOURCE_WORDS = {
+    "lexical": "name/text match",
+    "property": "behavior match",
+    "dense": "semantic match",
+}
+
+
 def render_semantic_localization(items: Sequence[Mapping[str, Any]]) -> str:
-    return "[GT_EVIDENCE:localization]\n" + "\n".join(
-        f"{item['anchor']} score={item['score']:.8f} "
-        f"reasons={','.join(item['reasons'])}" for item in items
-    )
+    """Model-facing localization: payload lines, never bare anchors.
+
+    Every item line keeps the ``path:line`` prefix so
+    ``delivery_budget.compact_localization`` can drop whole items under the
+    lane cap. What follows the anchor is what makes the delivery actionable:
+    the qualified symbol, its kind, the producer-observed snippet that earned
+    the rank, and plain-language match reasons - not opaque RRF scores.
+    """
+    lines = ["[GT_EVIDENCE:localization]"]
+    for item in items:
+        parts = [str(item["anchor"])]
+        symbol = str(item.get("qualified_name") or item.get("name") or "")
+        label = str(item.get("label") or "")
+        if symbol:
+            parts.append(f"{symbol} ({label})" if label else symbol)
+        snippet = " ".join(str(item.get("snippet") or "").split())[:140]
+        if snippet:
+            parts.append(f"~ {snippet}")
+        why = str(item.get("why") or "")
+        if not why:
+            reasons = [str(reason) for reason in item.get("reasons") or ()]
+            sources = [
+                _SOURCE_WORDS.get(str(reason).split(":", 1)[-1], str(reason))
+                if str(reason).startswith("retrieval:") else str(reason)
+                for reason in reasons
+            ]
+            why = ", ".join(sources)
+        if why:
+            parts.append(f"| {why}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
 
 
 def _collapse(
@@ -793,6 +827,11 @@ def property_rank(
 # 3. dense
 # ---------------------------------------------------------------------------
 
+# Synchronous embedding is bounded because it runs on the agent's query path:
+# an unprepared corpus must degrade to a typed miss, never starve the agent.
+# The producer-side index build has no such cap - it publishes asynchronously.
+MAX_RUNTIME_EMBED_DOCUMENTS = 512
+
 
 def _symbol_document_text(
     prov: SymbolProvenance, facts: Sequence[tuple[str, str]]
@@ -890,6 +929,26 @@ def _rank_from_store(
         )
         vectors.update(document_lookup.vectors)
         missing = [node_id for node_id in store_missing if node_id not in vectors]
+        if len(missing) > MAX_RUNTIME_EMBED_DOCUMENTS:
+            # Runtime embedding is the fallback for what the producer-side
+            # index build did not publish yet. On a large repository with a
+            # cold store that fallback is a corpus-scale ONNX job on the
+            # agent's own query path - measured, it consumed boa's entire
+            # task envelope before the first provider admission. Advisory
+            # retrieval may not starve the agent: abstain with the typed
+            # reason instead, and let lexical/property rank alone.
+            return SourceRanking(
+                RetrievalSource.DENSE,
+                (),
+                available=False,
+                reason="dense_index_not_ready",
+                detail={
+                    "runtime_embed_missing": len(missing),
+                    "runtime_embed_limit": MAX_RUNTIME_EMBED_DOCUMENTS,
+                    "pool_size": len(documents),
+                    "store_hits": lookup.hits,
+                },
+            )
         embedded: dict[int, tuple[float, ...]] = {}
         for start in range(0, len(missing), 32):
             batch = missing[start:start + 32]

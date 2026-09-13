@@ -275,13 +275,15 @@ def build_select_catalog_messages(
     """Render a bounded ID-only selection request without changing item facts."""
 
     items = [item.as_dict() for item in catalog.items]
+    task_text = str(task)
     payload = json.dumps(
         {
             "schema": catalog.schema,
             "source_revision": catalog.source_revision,
             "workspace_revision": catalog.workspace_revision,
             "graph_revision": catalog.graph_revision,
-            "task": str(task)[:2_000],
+            "task": task_text[:2_000],
+            "task_truncated_chars": max(0, len(task_text) - 2_000),
             "items": items,
         },
         ensure_ascii=False,

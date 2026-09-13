@@ -310,7 +310,10 @@ def capture_workspace(
                     captured=payload if len(payload) <= _MAX_CAPTURE_BYTES else None,
                 ))
             except OSError:
-                omissions.append(f"unreadable:{path.name}")
+                # The relative path (not just the name) lets downstream
+                # producer-input checks apply the same dir-pruning the
+                # indexer's walk does; a basename hides the tree it sat in.
+                omissions.append(f"unreadable:{relative}")
     if repository_history(resolved) != history:
         omissions.append("history_changed_during_snapshot")
     identity = _canonical({"files": [item.mapping() for item in files],

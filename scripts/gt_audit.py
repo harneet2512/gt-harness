@@ -1067,20 +1067,68 @@ def _native_feature_projection(rows: list[dict], *, plan_projection: list[dict] 
 # reuses the identical word-boundary policy; the per-task join below keeps
 # thin closures that delegate here)
 # --------------------------------------------------------------------------- #
+# Common code words: a bare identifier from this set is never evidence that
+# the agent consumed a delivery - ``handlers``, ``backend`` and ``service``
+# appear in every codebase, so word-boundary hits on them inflated the
+# consumption stats (finding 7).  The set is deliberately conservative:
+# language/runtime words plus common identifier nouns, singular and plural.
 GENERIC_DELIVERY_TOKENS = frozenset({
     "python", "return", "import", "class", "function", "assert",
     "pytest", "unittest", "self", "none", "true", "false", "result",
+    "handler", "handlers", "backend", "backends", "service", "services",
+    "manager", "managers", "util", "utils", "config", "configs",
+    "helper", "helpers", "wrapper", "wrappers", "factory", "factories",
+    "provider", "providers", "context", "contexts", "buffer", "buffers",
+    "parser", "parsers", "node", "nodes", "edge", "edges", "index",
+    "indexes", "query", "queries", "response", "responses", "request",
+    "requests", "error", "errors", "value", "values", "item", "items",
+    "entry", "entries", "field", "fields", "table", "tables", "file",
+    "files", "path", "paths", "name", "names", "type", "types", "data",
+    "test", "tests",
 })
+
+# A distinctive term is structural, not lexical: a path/path:line anchor, a
+# qualified dotted name, or a long verbatim payload snippet - never a bare
+# identifier.  File extensions recognized for the anchor rule; a dotted
+# token whose tail is NOT an extension is a qualified name (ClassName.method
+# is distinctive either way - the extension check only exists to spot the
+# generic-stem basename exception).
+_ANCHOR_LINE_RE = re.compile(r":\d+(?::\d+)?$")
+_ANCHOR_TOKEN_RE = re.compile(r"[\w./@-]+\.[A-Za-z]{1,6}\b(?::\d+){0,2}")
+_QUALIFIED_NAME_RE = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b")
+_KNOWN_FILE_EXT_RE = re.compile(
+    r"\.(?:py|pyi|go|rs|js|jsx|ts|tsx|mjs|cjs|java|kt|kts|scala|c|h|cc|cpp|"
+    r"cxx|hh|hpp|rb|php|swift|sh|bash|zsh|fish|lua|pl|pm|ex|exs|erl|hrl|"
+    r"clj|cljs|hs|ml|mli|fs|fsx|cs|dart|r|jl|groovy|gradle|groovy|md|rst|"
+    r"txt|json|jsonl|toml|yaml|yml|cfg|ini|xml|html|css|scss|sql|proto|"
+    r"thrift|vue|svelte|patch|diff|lock|mod|sum|work|csv|tsv|cmake|mk|tf|"
+    r"hcl|nix|env|properties|plist|storyboard|dockerfile|gitignore|"
+    r"gitattributes|editorconfig)$",
+    re.IGNORECASE)
+
+# Snippet rule: a verbatim payload substring long enough to be non-generic.
+# Whole stripped lines and 4-8 word shingles >= 24 chars both qualify; an
+# agent quoting payload text verbatim is consumption a token set cannot see.
+_SNIPPET_MIN_CHARS = 24
+_SNIPPET_MIN_WORDS = 4
+_SNIPPET_SHINGLE_WORDS = (4, 5, 6, 7, 8)
+_SNIPPET_MAX = 200
+_WS_RE = re.compile(r"\s+")
 
 
 def delivery_content_tokens(identity: str, target: str,
                             rendered: str | None = None) -> set[str]:
-    """Word-boundary match tokens identifying a delivery's content.
+    """Word-boundary candidate tokens identifying a delivery's content.
 
     ``target`` plus its basename are always candidates; when the sealed
     rendered text is available, path-shaped and long identifier tokens are
     drawn from it.  Tokens shorter than 4 chars are dropped so a bare
     ``monitor`` can never credit ``aiomonitor``.
+
+    This is the CANDIDATE set.  Consumption credit requires the stricter
+    ``delivery_distinctive_terms`` - a bare common identifier from this set
+    is not distinctive even when it word-matches an agent command.
     """
     tokens: set[str] = set()
     if target:
@@ -1102,11 +1150,89 @@ def delivery_content_tokens(identity: str, target: str,
     return {t for t in tokens if len(t) >= 4}
 
 
+def is_distinctive_delivery_term(tok: str) -> bool:
+    """Structural distinctiveness for one consumption-match term.
+
+    Distinctive = (a) a path or ``path:line`` anchor, (b) a qualified/dotted
+    name, or (c) handled separately as a payload snippet.  A bare identifier
+    is never distinctive, and a bare basename with a generic stem
+    (``utils.py``, ``config.yaml``, ``index.js``) is a common code word in
+    disguise - also excluded.
+    """
+    if not tok or len(tok) < 4:
+        return False
+    if "/" in tok or "\\" in tok:
+        return True
+    if _ANCHOR_LINE_RE.search(tok):
+        return True
+    if "." not in tok:
+        return False
+    if _KNOWN_FILE_EXT_RE.search(tok):
+        stem = tok.rsplit(".", 1)[0].rsplit("/", 1)[-1].lower()
+        return stem not in GENERIC_DELIVERY_TOKENS
+    return bool(_QUALIFIED_NAME_RE.fullmatch(tok))
+
+
+def _payload_snippets(rendered: str | None) -> set[str]:
+    """Verbatim substrings of the payload long enough to be non-generic."""
+    out: set[str] = set()
+    if not rendered:
+        return out
+    for raw in rendered.splitlines():
+        line = _WS_RE.sub(" ", raw).strip()
+        words = line.split()
+        if len(line) >= _SNIPPET_MIN_CHARS and len(words) >= _SNIPPET_MIN_WORDS:
+            out.add(line)
+        for width in _SNIPPET_SHINGLE_WORDS:
+            for i in range(len(words) - width + 1):
+                shingle = " ".join(words[i:i + width])
+                if len(shingle) >= _SNIPPET_MIN_CHARS:
+                    out.add(shingle)
+    if len(out) > _SNIPPET_MAX:
+        out = set(sorted(out)[:_SNIPPET_MAX])
+    return out
+
+
+def delivery_distinctive_terms(identity: str, target: str,
+                               rendered: str | None = None,
+                               ) -> tuple[set[str], set[str]]:
+    """(distinctive_tokens, payload_snippets) for consumption credit.
+
+    The candidate set of ``delivery_content_tokens`` filtered by the
+    structural rule, plus qualified/dotted names and ``path:line`` anchors
+    the candidate extractor never produced, plus verbatim payload snippets.
+    Consumption credit requires a hit in one of the two returned sets.
+    """
+    candidates = delivery_content_tokens(identity, target, rendered)
+    if rendered:
+        candidates.update(_ANCHOR_TOKEN_RE.findall(rendered))
+        candidates.update(_QUALIFIED_NAME_RE.findall(rendered))
+    terms = {tok for tok in candidates if is_distinctive_delivery_term(tok)}
+    return terms, _payload_snippets(rendered)
+
+
 def token_word_hit(command: str, tokens) -> str:
     """First token found inside ``command`` on word boundaries, else ""."""
-    for tok in tokens:
+    for tok in sorted(tokens, key=lambda t: (-len(t), t)):
         if re.search(r"(?<![\w])" + re.escape(tok) + r"(?![\w])", command):
             return tok
+    return ""
+
+
+def distinctive_term_hit(command: str, terms, snippets) -> str:
+    """First distinctive term found in ``command``, else "".
+
+    Anchors and qualified names match on word boundaries; payload snippets
+    match as verbatim substrings after whitespace normalization (longest
+    first, so the reported match is the strongest evidence).
+    """
+    hit = token_word_hit(command, terms)
+    if hit:
+        return hit
+    norm = _WS_RE.sub(" ", command or "")
+    for snip in sorted(snippets, key=lambda s: (-len(s), s)):
+        if snip and snip in norm:
+            return snip
     return ""
 
 
@@ -1233,6 +1359,21 @@ def _audit_native_miniswe_task(
     counts = Counter(str(row.get("event") or "") for row in rows)
     a.graph_refresh_count = counts["graph_refreshed"]
     a.graph_refresh_failure_count = counts["graph_refresh_failed"]
+    # The native journal records the same contract lifecycle the bridge
+    # attribution stream does, under its own event names. Counting only the
+    # bridge file left predicate_compiled_count/observed_count at 0 for every
+    # Mini-SWE trial even when the channel was armed and producing receipts.
+    a.predicate_compiled_count += counts["contract.predicate_compiled"]
+    for row in rows:
+        if row.get("event") != "predicate_receipt_recorded":
+            continue
+        a.predicate_observed_count += 1
+        kind = str(row.get("evidence_kind") or "unknown")
+        a.predicate_observed_kinds[kind] = (
+            a.predicate_observed_kinds.get(kind, 0) + 1
+        )
+        if not row.get("semantic") or str(row.get("status")) != "GREEN":
+            a.predicate_invalid_receipt_count += 1
     # The miniswe path records graph availability as `graph_publication` rows in
     # the event journal — there is no bridge-path surface/projection receipt in
     # a Mini-SWE trial, so attribution-file absence must not read as "no graph".
@@ -1611,14 +1752,21 @@ def _audit_native_miniswe_task(
             out.append(content)
         return out
 
-    def _delivery_tokens(identity: str, target: str) -> set[str]:
+    def _delivery_terms(identity: str, target: str,
+                        ) -> tuple[set[str], set[str]]:
         material = delivery_material.get(identity)
         rendered = material[0] if material is not None else None
-        return delivery_content_tokens(identity, target, rendered)
+        return delivery_distinctive_terms(identity, target, rendered)
 
     def _token_hit(command: str, tokens: frozenset[str] | set[str]) -> str:
         # Word-boundary match: a bare "monitor" must not credit "aiomonitor".
         return token_word_hit(command, tokens)
+
+    def _distinctive_hit(command: str, terms: set[str],
+                         snippets: set[str]) -> str:
+        # Consumption credit needs an anchor/qualified term or a verbatim
+        # payload snippet - never a bare common identifier.
+        return distinctive_term_hit(command, terms, snippets)
 
     for row in rows:
         if row.get("event") not in {
@@ -1654,7 +1802,7 @@ def _audit_native_miniswe_task(
                 delivery_id in audited_request_ids.get(request_id, set())
             )
         response_row = provider_responses.get(request_id)
-        tokens = _delivery_tokens(delivery_id, target)
+        terms, snippets = _delivery_terms(delivery_id, target)
         if response_row is not None:
             verdict["served"] = True
             pid = str(response_row.get("provider_response_id") or "")
@@ -1673,7 +1821,7 @@ def _audit_native_miniswe_task(
                 matched = ""
                 for wi in window:
                     for cmd in _action_commands(messages[wi]):
-                        hit = _token_hit(cmd, tokens)
+                        hit = _distinctive_hit(cmd, terms, snippets)
                         if hit:
                             matched = hit
                             break
@@ -1917,11 +2065,14 @@ def audit_task(task_dir: Path) -> TaskAudit:
                     a.task_start_localization_response_iteration = int(
                         response.get("payload", {}).get("iteration") or 0
                     )
-        a.task_start_localization_eligible = any(
-            row.get("event_type") == "graph.evidence_need"
-            and row.get("boundary") == "task_start"
-            and int(row.get("payload", {}).get("ranked_count") or 0) > 0
-            for row in attribution_rows
+        a.task_start_localization_eligible = (
+            task_start_localization is not None
+            or any(
+                row.get("event_type") == "graph.evidence_need"
+                and row.get("boundary") == "task_start"
+                and int(row.get("payload", {}).get("ranked_count") or 0) > 0
+                for row in attribution_rows
+            )
         )
         replay = build_iteration_replay(attribution_rows)
         a.replay_iteration_count = int(replay["iteration_count"])

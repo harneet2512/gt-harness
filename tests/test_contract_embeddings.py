@@ -414,14 +414,39 @@ def test_binding_publication_failure_rolls_back_vectors(tmp_path, monkeypatch):
         store.close()
 
 
-def test_ambiguous_stable_identity_does_not_choose_first_contract(base_graph, monkeypatch):
+def test_conflicting_stable_identity_quarantines_the_pair(base_graph, monkeypatch):
+    """Two different symbols minted one identity: binding the vector to either
+    would be a lie, so the pair is excluded - but the failure scope is the
+    colliding set, not the whole projection."""
     rows = list(contract.contracts_with_node_ids(base_graph))
     first = rows[0][1]
     conflicting = json.loads(json.dumps(first))
     conflicting["symbol"]["qualified_name"] = "different_symbol"
-    monkeypatch.setattr(contract, "contracts_with_node_ids", lambda _: [(1, first), (2, conflicting)])
-    with pytest.raises(ValueError, match="ambiguous_stable_identity"):
-        contract_embeddings.embedding_inputs(base_graph)
+    third = rows[1][1]
+    monkeypatch.setattr(
+        contract, "contracts_with_node_ids",
+        lambda _: [(1, first), (2, conflicting), (3, third)],
+    )
+    inputs = contract_embeddings.embedding_inputs(base_graph)
+    collided = str(first["symbol"]["stable_id"])
+    assert collided == str(conflicting["symbol"]["stable_id"])
+    assert [item.stable_id for item in inputs] == [str(third["symbol"]["stable_id"])]
+
+
+def test_identical_stable_identity_rows_collapse_to_one_input(base_graph, monkeypatch):
+    """Duplicate rows of one symbol - same span, same contract - share a
+    vector honestly; the projection emits a single input."""
+    rows = list(contract.contracts_with_node_ids(base_graph))
+    first = rows[0][1]
+    duplicate = json.loads(json.dumps(first))
+    third = rows[1][1]
+    monkeypatch.setattr(
+        contract, "contracts_with_node_ids",
+        lambda _: [(1, first), (2, duplicate), (3, third)],
+    )
+    inputs = contract_embeddings.embedding_inputs(base_graph)
+    assert len(inputs) == 2
+    assert inputs[0].node_id == 1
 
 
 def test_a_semantic_change_re_embeds_exactly_the_changed_symbol(

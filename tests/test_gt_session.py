@@ -79,11 +79,19 @@ def test_rejected_contract_is_available_on_later_request(tmp_path, monkeypatch):
 
 def test_unadmitted_localization_can_retry_after_initial_boundary(tmp_path, monkeypatch):
     adapter = _adapter(tmp_path)
+    adapter.issue_text = "compute"
     results = iter(["", "[GT_EVIDENCE:localization]\nsource.py:1"])
-    monkeypatch.setattr(adapter, "task_start_localization", lambda **_: next(results))
+    monkeypatch.setattr(
+        adapter, "_prepare_task_start_localization", lambda *_: next(results)
+    )
     session = GTSession(GTSessionConfig(task_id="retry"), engine=adapter)
     assert not session.before_model([], iteration=0).context_additions
-    assert session.before_model([], iteration=1).context_additions
+    # Resolved-empty is an answer for the unchanged (revision, drift) key -
+    # no rescan while nothing moved.
+    assert not session.before_model([], iteration=1).context_additions
+    # A moved workspace revision re-opens the query.
+    adapter.repository_revision = "r2"
+    assert session.before_model([], iteration=2).context_additions
 
 
 def test_session_completion_state_reports_unverified_when_unknown(tmp_path):
@@ -109,7 +117,10 @@ def test_degraded_session_cannot_inherit_verified_engine_state(tmp_path, monkeyp
 
 def test_opaque_oversized_localization_is_not_sliced_into_a_claim(tmp_path, monkeypatch):
     a = _adapter(tmp_path)
-    monkeypatch.setattr(a, "task_start_localization", lambda **_: "header\n" + "x" * 5000)
+    a.issue_text = "compute"
+    monkeypatch.setattr(
+        a, "_prepare_task_start_localization", lambda *_: "header\n" + "x" * 5000
+    )
     s = GTSession(GTSessionConfig(task_id="t", delivery_path="compiled"), engine=a)
 
     assert not s.before_model([], iteration=0).context_additions
@@ -183,13 +194,14 @@ def test_compiled_delivery_places_task_start_evidence_in_first_request_once(
     tmp_path, monkeypatch
 ):
     a = _adapter(tmp_path)
+    a.issue_text = "compute"
     calls = []
 
-    def localization(**_):
+    def localization(*_):
         calls.append(True)
         return "[GT_EVIDENCE:localization]\nsrc/mod.py"
 
-    monkeypatch.setattr(a, "task_start_localization", localization)
+    monkeypatch.setattr(a, "_prepare_task_start_localization", localization)
     s = GTSession(
         GTSessionConfig(task_id="t", delivery_path="compiled"), engine=a
     )
@@ -221,11 +233,12 @@ def test_wrapped_contract_and_localization_latches_bind_actual_request_bytes(
             for item in contract.obligations
         ],
     )
+    a.issue_text = "compute"
     localization_calls = []
     monkeypatch.setattr(
         a,
-        "task_start_localization",
-        lambda **_: localization_calls.append(1)
+        "_prepare_task_start_localization",
+        lambda *_: localization_calls.append(1)
         or "[GT_EVIDENCE:localization]\nsrc/mod.py:1",
     )
     s = GTSession(GTSessionConfig(task_id="wrapped"), engine=a)
@@ -266,7 +279,8 @@ def test_prompt_context_addition_is_bounded_and_receipt_visible(
     from gt_engine.request_history import load_history_evidence
 
     a = _adapter(tmp_path)
-    monkeypatch.setattr(a, "next_contract_delta", lambda **_kwargs: "x" * 2_400)
+    delta_body = "\n".join(f"requirement-row-{index:03d} " + "x" * 40 for index in range(60))
+    monkeypatch.setattr(a, "next_contract_delta", lambda **_kwargs: delta_body)
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)
 
     batch = s.before_model([{"role": "user", "content": "x"}], iteration=0)
@@ -287,7 +301,13 @@ def test_prompt_context_addition_is_bounded_and_receipt_visible(
     original = load_history_evidence(
         a.engine_state.layout.evidence_root, prepared_unit["artifact_reference"]
     ).decode()
-    assert original == "[GT_TASK_CONTRACT]\n" + "x" * 2_400
+    assert original == "[GT_TASK_CONTRACT]\n" + delta_body
+    # Line-boundary elision: every delivered row is a complete fact.
+    body_lines = [
+        line for line in rendered.splitlines()
+        if line.startswith("requirement-row-")
+    ]
+    assert body_lines and all(line in delta_body.splitlines() for line in body_lines)
     a.bind_provider_payload({"messages": [{"role": "user", "content": rendered}]})
     rows = [
         json.loads(line)
@@ -305,10 +325,13 @@ def test_localization_reference_preserves_complete_precompaction_unit(
     tmp_path, monkeypatch,
 ):
     a = _adapter(tmp_path)
+    a.issue_text = "compute"
     original = "[GT_EVIDENCE:localization]\n" + "\n".join(
         f"src/module_{index}.py:{index} symbol_{index}" for index in range(120)
     )
-    monkeypatch.setattr(a, "task_start_localization", lambda **_: original)
+    monkeypatch.setattr(
+        a, "_prepare_task_start_localization", lambda *_: original
+    )
     s = GTSession(GTSessionConfig(task_id="t"), engine=a)
 
     batch = s.before_model([], iteration=0)

@@ -169,9 +169,16 @@ def test_applying_interactions_are_listed():
 
 
 def test_gaps_are_rendered_rather_than_dropped():
+    """The unsettled target renders; the free-text reason does not.
+
+    `reason` is model-authored or checkpoint-restored prose - a claim channel,
+    not evidence. The flag itself (this item could not be settled) is the
+    verifiable part and it stays.
+    """
     block = render_plan_block(_plan(abstentions=(("req-x", "no_anchor"),)))
     assert "OPEN ITEMS" in block
-    assert "no_anchor" in block
+    assert "req-x" in block
+    assert "no_anchor" not in block
 
 
 def test_an_abstained_plan_renders_nothing():
@@ -292,8 +299,15 @@ def test_the_plan_summary_never_raises_on_a_broken_plan(capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_the_block_carries_the_understanding_and_the_per_row_change():
-    """A plan says what is meant and what changes, not only where to look."""
+def test_the_block_never_renders_understanding_or_approach_prose():
+    """Fabrication canary: populated prose fields must not reach the model.
+
+    `understanding` and `approach` are unverifiable model-authored claims; the
+    old renderer shipped them as DESIGN INTENT/design: lines and the agent
+    treated invented narrative as evidence. The fields may still exist on the
+    dataclass (older checkpoints deserialize through them), but the rendered
+    block must carry only verifiable content.
+    """
     from dataclasses import replace as _replace
 
     plan = _plan()
@@ -306,9 +320,10 @@ def test_the_block_carries_the_understanding_and_the_per_row_change():
         plan.rows[1],
     )
     block = render_plan_block(plan)
-    assert "DESIGN INTENT:" in block
-    assert "async initialisation pass" in block
-    assert "design: Add an initializer hook to the resolver." in block
+    assert "DESIGN INTENT" not in block
+    assert "async initialisation pass" not in block
+    assert "design:" not in block
+    assert "initializer hook" not in block
 
 
 def test_a_plan_without_understanding_omits_the_section():

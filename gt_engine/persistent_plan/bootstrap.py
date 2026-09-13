@@ -93,14 +93,12 @@ PLANNING_SYSTEM_PROMPT = (
     "* Regression baseline: the repository's test result before any change.\n"
     "\n"
     "WHAT YOU OWE BACK\n"
-    "1. DESIGN INTENT. Two to five sentences: what this change request means "
-    "for this codebase -- which components already exist, what is missing, and "
-    "how the missing part must fit the shape of what is there. Not a "
-    "restatement of the request.\n"
-    "2. DESIGN PER REQUIREMENT. For each requirement, one or two sentences on "
-    "the change that satisfies it, naming the definitions it touches. This is "
-    "the design; the anchors and the check only locate and prove it.\n"
-    "3. ACCEPTANCE CRITERIA. For each requirement, a CONCRETE command that "
+    "This tool records structure and checks, not narrative. Do not write "
+    "design prose, architectural claims, or summaries of what the code does "
+    "-- a claim about code that nothing verifies is worse than no claim, and "
+    "every field that could carry one was removed from the schema. What you "
+    "owe is only what can be checked:\n"
+    "1. ACCEPTANCE CRITERIA. For each requirement, a CONCRETE command that "
     "exercises it the way a caller would, through the real entry point, and "
     "observes the result the request describes. Acceptance is behaviour a "
     "human can verify, not an internal attribute: assert that the behaviour "
@@ -114,48 +112,23 @@ PLANNING_SYSTEM_PROMPT = (
     "only where the suite actually covers the requirement. A requirement that "
     "genuinely cannot be verified must carry no_check_reason instead of an "
     "invented command: unverifiable scope has to be visible as unverifiable.\n"
-    "4. CONFIGURATION INTERACTIONS, only if pairs are listed below. On a large "
-    "change request they are deliberately not offered, because design and "
-    "acceptance for every requirement matters more than this section and the "
-    "budget is finite; in that case skip straight to 4b. When they ARE listed: "
-    "each is one requirement crossed with one mode its own definitions already "
-    "reach. Decide those pairs only, and do not enumerate the full product -- "
-    "the listed pairs are the ones the code can actually reach. REPORT ONLY "
-    "THE CELLS THAT APPLY, and give considered_count so the pass stays "
-    "auditable. Do not emit a row per non-applying cell: on a real task that "
-    "was 73 emitted cells of which none applied, which spent output budget and "
-    "said nothing. The applying cells are the requirements no reading of the "
-    "request alone would enumerate, and they are the point of this section.\n"
-    "4b. CONFLICT PASS. Two requirements, each sensible on its own, may not "
-    "both hold at once; so may a new requirement and a rule the existing code "
-    "already enforces. For each requirement ask: which demand of the path it "
-    "touches could this violate, and what does the system do when it does? "
-    "Anything added to an existing component inherits that component's "
-    "contract, and that contract is not in the change request -- what it "
-    "demands before it will run the new behaviour at all, and where in its "
-    "existing sequence that behaviour takes effect. State which demands the "
-    "new behaviour satisfies and which it must relax. A requirement can be "
-    "fully implemented and still fail because the call was refused or the new "
-    "code was never reached.\n"
-    "5. DERIVED REQUIREMENTS. Where an interaction applies and needs its own "
-    "acceptance, raise it as a derived requirement stating the behaviour under "
-    "that specific member.\n"
-    "6. TRACEABILITY AND COVERAGE. Cite only ids present in the input; never "
+    "2. ANCHOR REFINEMENT. Each requirement already carries the anchors the "
+    "graph resolved for it. Where a row should attach to different offered "
+    "node ids, supply them; otherwise omit the field.\n"
+    "3. CONFIGURATION INTERACTIONS, only if pairs are listed below. Each is "
+    "one requirement crossed with one mode its own definitions already reach. "
+    "Decide those pairs only, and do not enumerate the full product -- the "
+    "listed pairs are the ones the code can actually reach. REPORT ONLY THE "
+    "CELLS THAT APPLY: the requirements whose behaviour must differ under "
+    "that member. Do not emit a row per non-applying cell.\n"
+    "4. TRACEABILITY AND COVERAGE. Cite only ids present in the input; never "
     "invent a node id, a requirement id, a mode symbol or a member name. Every "
     "requirement given to you must appear exactly once, carrying either an "
-    "acceptance criterion or a no_check_reason. Coverage is at the clause you "
-    "were handed, not at the level of the request as a whole. Anything the "
-    "input does not settle belongs in abstentions, which is the open-items "
-    "register for this design.\n"
-    "7. SCOPE. Do not write implementation code. Do not restate the request or "
-    "the context above -- the reader already has both, and a design that "
-    "repeats them buries the part only you can supply. Give your recommended "
-    "approach, not a menu of alternatives. Where a change repeats across many "
-    "places, describe the pattern once rather than enumerating every site. "
-    "Specify only what must be true when the work is complete.\n"
+    "acceptance criterion or a no_check_reason. Anything the input does not "
+    "settle belongs in abstentions, which is the open-items register.\n"
     "\n"
-    "Record the design by calling the write_persistent_plan tool exactly once. "
-    "You have one call and a finite output budget, and a design that is never "
+    "Record the plan by calling the write_persistent_plan tool exactly once. "
+    "You have one call and a finite output budget, and a plan that is never "
     "written down is worth nothing: reach the tool call. Deliberate briefly, "
     "then write. If the budget is tight, cover every requirement shallowly "
     "rather than a few of them exhaustively -- an unlisted requirement reads "
@@ -172,19 +145,12 @@ def plan_tool_schema(inputs: PlanInputs) -> dict:
             "name": PLAN_TOOL_NAME,
             "description": (
                 "Record the implementation plan. Cite only ids given in the "
-                "message; anything else is dropped."
+                "message; anything else is dropped. Structure and checks "
+                "only - this tool carries no prose fields."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "understanding": {
-                        "type": "string",
-                        "description": (
-                            "Two to five sentences: what this task asks for in "
-                            "terms of the code above, what already exists, and "
-                            "what is missing."
-                        ),
-                    },
                     "rows": {
                         "type": "array",
                         "description": "One entry per requirement row you can anchor.",
@@ -192,14 +158,6 @@ def plan_tool_schema(inputs: PlanInputs) -> dict:
                             "type": "object",
                             "properties": {
                                 "row_id": {"type": "string", "enum": row_ids},
-                                "approach": {
-                                    "type": "string",
-                                    "description": (
-                                        "One or two sentences: what must change "
-                                        "for this requirement to hold, naming "
-                                        "the definitions it touches."
-                                    ),
-                                },
                                 "anchors": {
                                     "type": "array",
                                     "items": {"type": "integer"},
@@ -227,21 +185,14 @@ def plan_tool_schema(inputs: PlanInputs) -> dict:
                                     ),
                                 },
                             },
-                            "required": ["row_id", "approach"],
+                            "required": ["row_id"],
                         },
-                    },
-                    "considered_count": {
-                        "type": "integer",
-                        "description": (
-                            "How many requirement x mode cells you swept, so "
-                            "the matrix stays auditable without listing them."
-                        ),
                     },
                     "interactions": {
                         "type": "array",
                         "description": (
                             "ONLY the cells where applies is true. Non-applying "
-                            "cells are counted in considered_count, not listed."
+                            "cells are simply not listed."
                         ),
                         "items": {
                             "type": "object",
@@ -250,33 +201,9 @@ def plan_tool_schema(inputs: PlanInputs) -> dict:
                                 "mode_symbol": {"type": "string"},
                                 "member": {"type": "string"},
                                 "applies": {"type": "boolean"},
-                                "reason": {"type": "string"},
                             },
                             "required": ["row_id", "mode_symbol", "member", "applies"],
                         },
-                    },
-                    "derived_rows": {
-                        "type": "array",
-                        "description": (
-                            "Behaviours implied by an applying interaction that "
-                            "need their own proof."
-                        ),
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "text": {"type": "string"},
-                                "from_row_id": {"type": "string"},
-                                "mode_symbol": {"type": "string"},
-                                "member": {"type": "string"},
-                                "verification_command": {"type": "string"},
-                            },
-                            "required": ["text", "from_row_id"],
-                        },
-                    },
-                    "edit_order": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "row_id values, the order you would edit in.",
                     },
                     "abstentions": {
                         "type": "array",
@@ -291,7 +218,7 @@ def plan_tool_schema(inputs: PlanInputs) -> dict:
                         },
                     },
                 },
-                "required": ["understanding", "rows"],
+                "required": ["rows"],
             },
         },
     }
@@ -351,7 +278,10 @@ def _render_inputs(inputs: PlanInputs) -> str:
         section = f" [{row.section}]" if row.section else ""
         lines.append(f"{row.row_id}{section} {row.text}")
         for anchor in anchors_by_row.get(row.row_id, ())[:4]:
-            signature = anchor.signature.replace("\n", " ")[:160]
+            signature_full = anchor.signature.replace("\n", " ")
+            signature = signature_full[:160]
+            if len(signature_full) > 160:
+                signature += "…"
             lines.append(
                 f"    anchor node_id={anchor.node_id} {anchor.label} {anchor.name} "
                 f"@ {anchor.file_path}:{anchor.start_line} ({anchor.basis})"
@@ -369,6 +299,15 @@ def _render_inputs(inputs: PlanInputs) -> str:
                 lines.append(f"      callers: {shown}{suffix}")
         if not anchors_by_row.get(row.row_id):
             lines.append("    anchor: NONE - the graph resolved nothing for this row")
+    withheld = len(inputs.ledger.rows) - MAX_ROWS_OFFERED
+    if withheld > 0:
+        # Honest selection bound: the planner must know the requirement set
+        # is partial, never read 60 rows as the complete contract.
+        lines.append(
+            f"REQUIREMENTS WITHHELD: {withheld} further ledger row(s) exist "
+            "beyond the offered surface; plan steps may cite row_ids "
+            "not shown here."
+        )
 
     pairs = (
         mode_pairs(inputs)
@@ -387,7 +326,9 @@ def _render_inputs(inputs: PlanInputs) -> str:
             "do not construct pairs that are not listed."
         )
         for row_id, mode in pairs[:MAX_PAIRS_OFFERED]:
+            extra = len(mode.members) - 12
             members = ", ".join(mode.members[:12])
+            members += f" (+{extra} more)" if extra > 0 else ""
             lines.append(
                 f"  {row_id} x {mode.symbol} ({mode.kind}) "
                 f"@ {mode.file_path}: {members}"
@@ -413,10 +354,15 @@ def _render_inputs(inputs: PlanInputs) -> str:
             "requirement. Treat them as context, not as a sweep:"
         )
         for mode in unpaired[:MAX_MODES_OFFERED]:
+            extra = len(mode.members) - 12
             members = ", ".join(mode.members[:12])
+            members += f" (+{extra} more)" if extra > 0 else ""
             lines.append(
                 f"  {mode.symbol} ({mode.kind}) @ {mode.file_path}: {members}"
             )
+        extra_modes = len(unpaired) - MAX_MODES_OFFERED
+        if extra_modes > 0:
+            lines.append(f"  ... {extra_modes} further modes not listed")
     elif not pairs:
         lines.append("")
         lines.append("EXISTING MODES: none reachable from these anchors.")
@@ -424,19 +370,25 @@ def _render_inputs(inputs: PlanInputs) -> str:
     lines.append("")
     lines.append(f"REPOSITORY TEST BASELINE: {inputs.baseline.summary()}")
     if inputs.baseline.captured and inputs.baseline.failing_names:
+        extra_fail = len(inputs.baseline.failing_names) - 8
+        suffix = f" (+{extra_fail} more)" if extra_fail > 0 else ""
         lines.append(
             "  already failing before any edit: "
             + ", ".join(inputs.baseline.failing_names[:8])
+            + suffix
         )
         lines.append(
             "  those are pre-existing; every OTHER test passing now must still pass."
         )
 
     if inputs.anchors.edit_order:
+        extra_order = len(inputs.anchors.edit_order) - 20
+        suffix = f" (+{extra_order} more)" if extra_order > 0 else ""
         lines.append("")
         lines.append(
             "SUGGESTED EDIT ORDER (callee before caller): "
             + " -> ".join(inputs.anchors.edit_order[:20])
+            + suffix
         )
 
     if inputs.abstentions:
@@ -444,6 +396,9 @@ def _render_inputs(inputs: PlanInputs) -> str:
         lines.append("KNOWN GAPS in this input:")
         for target, reason in inputs.abstentions[:20]:
             lines.append(f"  {target}: {reason}")
+        extra_gaps = len(inputs.abstentions) - 20
+        if extra_gaps > 0:
+            lines.append(f"  ... {extra_gaps} further gap(s) not listed")
     return "\n".join(lines)
 
 
@@ -531,7 +486,6 @@ def validate_plan(
             PlanRow(
                 row_id=row_id,
                 text=ledger_row.text,
-                approach=str(item.get("approach") or "").strip()[:400],
                 anchors=tuple(dict.fromkeys(anchors)),
                 verification_kind=kind,
                 verification_command=command,
@@ -564,64 +518,18 @@ def validate_plan(
                 mode_symbol=symbol,
                 member=member,
                 applies=item["applies"],
-                reason=str(item.get("reason") or "")[:200],
             )
         )
 
-    applying = {
-        (cell.row_id, cell.mode_symbol, cell.member)
-        for cell in interactions
-        if cell.applies
-    }
-    for item in (payload.get("derived_rows") or ())[:MAX_DERIVED_ROWS]:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()[:500]
-        parent = str(item.get("from_row_id") or "")
-        symbol = str(item.get("mode_symbol") or "")
-        member = str(item.get("member") or "")
-        if not text or parent not in known_rows:
-            abstentions.append((parent or "?", "phantom_derived_parent"))
-            continue
-        if symbol and (parent, symbol, member) not in applying:
-            # A derived row must come from a cell the plan itself marked as
-            # applying. Otherwise it is a new requirement with no provenance.
-            abstentions.append((parent, "derived_row_without_applying_cell"))
-            continue
-        command = str(item.get("verification_command") or "").strip()
-        if command:
-            admissible, reason = command_is_admissible(command)
-            if not admissible:
-                abstentions.append((parent, f"verification_command_{reason}"))
-                command = ""
-        digest = hashlib.sha256(
-            f"{parent}|{symbol}|{member}|{text}".encode("utf-8", "surrogatepass")
-        ).hexdigest()[:12]
-        rows.append(
-            PlanRow(
-                row_id=f"drv-{digest}",
-                text=text,
-                approach=str(item.get("approach") or "").strip()[:400],
-                anchors=(),
-                verification_kind=str(item.get("verification_kind") or "") or "new_test",
-                verification_command=command,
-                derived_from=parent,
-                mode_symbol=symbol,
-                mode_member=member,
-            )
-        )
-
-    order = tuple(
-        row_id
-        for row_id in (payload.get("edit_order") or ())
-        if isinstance(row_id, str) and row_id in seen_rows
-    )
     for item in payload.get("abstentions") or ():
         if isinstance(item, dict) and item.get("reason"):
             abstentions.append(
                 (str(item.get("row_id") or "*"), str(item["reason"])[:120])
             )
-    return tuple(rows), tuple(interactions), order, tuple(abstentions)
+    # No edit_order is read from the payload: the graph already computes a
+    # callee-before-caller order deterministically, and a self-reported order
+    # is one more unverifiable claim.
+    return tuple(rows), tuple(interactions), (), tuple(abstentions)
 
 
 def build_plan(payload: Any, inputs: PlanInputs, note: str = "",
@@ -673,11 +581,6 @@ def build_plan(payload: Any, inputs: PlanInputs, note: str = "",
         edit_order=order,
         abstentions=combined,
         origin="enriched",
-        understanding=(
-            str((payload or {}).get("understanding") or "").strip()[:1200]
-            if isinstance(payload, dict)
-            else ""
-        ),
     )
     annotate_plan(plan, repo_root)
     plan.process_id = hashlib.sha256(

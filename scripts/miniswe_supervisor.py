@@ -417,6 +417,9 @@ def conserve_failure(args: argparse.Namespace, result: SupervisedResult, baselin
     if result.reason == "churn_abort":
         terminal = "churn_abort"
         exit_code = 7
+    if result.reason and result.reason.startswith("initial_index_failed"):
+        terminal = "setup_error"
+        exit_code = 6
     if result.reason == "exited" and result.returncode in {3, 4, 5, 6, 7}:
         terminal = {3: "timeout", 4: "provider_failed", 5: "internal_error", 6: "setup_error", 7: "churn_abort"}[result.returncode]
         exit_code = result.returncode
@@ -618,6 +621,16 @@ def main() -> int:
             try:
                 if path.is_file() and path.stat().st_mtime >= _wall_start:
                     return "churn_abort"
+            except OSError:
+                continue
+        for path in Path(args.state_dir).rglob("startup_abort.json"):
+            try:
+                if path.is_file() and path.stat().st_mtime >= _wall_start:
+                    try:
+                        reason = json.loads(path.read_text(encoding="utf-8")).get("reason")
+                    except (OSError, ValueError):
+                        reason = None
+                    return str(reason or "initial_index_failed")
             except OSError:
                 continue
         return None

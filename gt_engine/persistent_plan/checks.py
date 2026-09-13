@@ -151,6 +151,63 @@ def decompose_check_command(command: str):
     return segments, tuple(separators), last_raw_is_check, None
 
 
+def _looks_like_test_source(path: str) -> bool:
+    """Workspace-relative path that is plausibly test source or test data."""
+    parts = [part.lower() for part in Path(path).parts]
+    name = parts[-1] if parts else ""
+    if any(part in {"test", "tests", "testing", "__tests__", "spec", "specs",
+                    "testdata", "fixtures", "conftest"} for part in parts[:-1]):
+        return True
+    return (
+        name.startswith("test_") or name.startswith("conftest")
+        or "_test." in name or name.endswith((".test.ts", ".test.tsx",
+                    ".test.js", ".test.jsx", ".spec.ts", ".spec.js",
+                    "_spec.rb", "_test.go", "tests.rs", "_tests.rs"))
+    )
+
+
+def _cargo_package_scopes(spec: CheckSpec, snapshot) -> list[str]:
+    """Map ``cargo test -p <name>`` package arguments to workspace member dirs.
+
+    A cargo package name is a manifest identity, not a path: ``cargo -p
+    boa_engine`` selects whichever Cargo.toml declares ``package.name =
+    "boa_engine"``, and that manifest may live at ``core/engine/``. Resolving
+    the flag value as a filesystem path misses the package entirely and falls
+    through to the whole-test-surface binding - an over-broad digest that
+    invalidates the check on unrelated test edits.
+    """
+    executable = Path(spec.argv[0]).name.lower().removesuffix(".exe")
+    if executable != "cargo" or not any(
+        arg in {"test", "nextest"} for arg in spec.argv[1:]
+    ):
+        return []
+    names: list[str] = []
+    args = list(spec.argv[1:])
+    for index, arg in enumerate(args):
+        if arg in {"-p", "--package"} and index + 1 < len(args):
+            names.append(args[index + 1])
+        elif arg.startswith(("-p=", "--package=")):
+            names.append(arg.split("=", 1)[1])
+    if not names:
+        return []
+    import tomllib
+
+    wanted = set(names)
+    scopes = []
+    for item in snapshot.files:
+        captured = getattr(item, "captured", None)
+        if Path(item.path).name != "Cargo.toml" or captured is None:
+            continue
+        try:
+            doc = tomllib.loads(captured.decode("utf-8", "replace"))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+            continue
+        package = doc.get("package", {})
+        if isinstance(package, dict) and package.get("name") in wanted:
+            scopes.append(str(Path(item.path).parent).replace("\\", "/") or ".")
+    return scopes
+
+
 def validation_source_digest(spec: CheckSpec, snapshot) -> str:
     """Bind declared test source/configuration; result dependencies remain workspace-wide."""
     if not snapshot.complete:
@@ -158,12 +215,24 @@ def validation_source_digest(spec: CheckSpec, snapshot) -> str:
     root = Path(snapshot.root)
     scopes = list(spec.test_source_paths)
     if not scopes:
+        scopes.extend(_cargo_package_scopes(spec, snapshot))
+    if not scopes:
         for arg in spec.argv[1:]:
             candidate = (root / spec.cwd / arg.split("::", 1)[0]).resolve()
             if root in candidate.parents:
                 relative = candidate.relative_to(root).as_posix()
                 if any(f.path == relative or f.path.startswith(relative + "/") for f in snapshot.files):
                     scopes.append(relative)
+    if not scopes:
+        # A suite invocation (``cargo test``, ``npm test``, bare ``pytest``)
+        # names no path: its honest source identity is the repository's whole
+        # test surface, plus the runner configuration the digest always adds.
+        # Without this fallback the spec binds with an empty digest and the
+        # drain loop discards it as ``test_source_not_bound`` - which is why
+        # every plan check in the smoke cohort went pending and no predicate
+        # ever proved.
+        scopes = [f.path for f in snapshot.files
+                  if f.kind == "file" and _looks_like_test_source(f.path)]
     if not scopes:
         return ""
     selected = []
@@ -198,7 +267,11 @@ def classify_bound_check(spec: CheckSpec, execution, *, before_revision: str,
         if execution.outcome in {"fail", "env_fail"}:
             state = "CHECK_FAILED"
         elif (execution.outcome == "pass" and execution.returncode == 0
-              and test_ids and set(spec.selected_test_ids).issubset(test_ids)):
+              and (not spec.selected_test_ids
+                   or (test_ids and set(spec.selected_test_ids).issubset(test_ids)))):
+            # A bound check that ran and passed is CHECK_PASSED. When specific
+            # test ids were selected they must all appear in the run; a suite
+            # invocation with no selection proves itself by its exit status.
             state = "CHECK_PASSED"
     return CheckObservation(spec.check_id, state, after_revision, environment,
                             capture_complete, test_ids, test_source_digest=test_source_digest)

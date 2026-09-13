@@ -371,7 +371,7 @@ def extract_task_contract(issue_text: str) -> TaskContract:
         obligations.append(
             Obligation(
                 obligation_id=f"obl-{digest}",
-                text=text[:500],
+                text=text,
                 source=source,
                 subjects=_subjects(text),
             )
@@ -402,9 +402,17 @@ def render_task_contract(
             break
         lines.append(row)
         shipped.append(item.obligation_id)
-    if not shipped:
-        return "", ()
     remaining = len(contract.obligations) - len(shipped)
+    if not shipped:
+        # Even a contract whose rows all exceed the surface is a fact the
+        # model should see: requirements exist and gate submit.
+        note = (
+            f"- GT retained {remaining} requirement(s) for submit "
+            "verification; none fit the byte surface."
+        )
+        if remaining and len("\n".join([*lines, note])) <= max_chars:
+            return "\n".join([*lines, note]), ()
+        return "", ()
     if remaining:
         note = f"- GT retained {remaining} additional requirement(s) for submit verification."
         if len("\n".join([*lines, note])) <= max_chars:
@@ -439,6 +447,39 @@ def render_obligation_delta(
     if not selected:
         return "", ()
     lines.append("Check these obligations before submit; do not assume omitted rows are satisfied.")
+    return "\n".join(lines)[:max_chars], tuple(selected)
+
+
+def render_obligation_transitions(
+    contract: TaskContract,
+    transitions: Iterable[tuple[str, str]],
+    *,
+    max_chars: int,
+) -> tuple[str, tuple[str, ...]]:
+    """Render only obligation status changes since the last delivered delta.
+
+    The full unmet checklist is delivered with the contract itself; a delta
+    that re-lists every unmet row on each invalidation cycle re-sends the
+    identical bytes the model already has. `transitions` is an iterable of
+    ``(obligation_id, annotation)`` pairs in the order they should surface.
+    """
+    by_id = {item.obligation_id: item for item in contract.obligations}
+    lines = ["GT contract obligation changes:"]
+    selected: list[str] = []
+    for obligation_id, annotation in transitions:
+        item = by_id.get(obligation_id)
+        if item is None:
+            continue
+        box = "[x]" if annotation == "satisfied" else "[ ]"
+        row = f"- {box} {item.text} ({annotation})"
+        candidate = "\n".join([*lines, row])
+        if len(candidate) > max_chars:
+            break
+        lines.append(row)
+        selected.append(obligation_id)
+    if not selected:
+        return "", ()
+    lines.append("Unchanged obligations keep their last reported state.")
     return "\n".join(lines)[:max_chars], tuple(selected)
 
 

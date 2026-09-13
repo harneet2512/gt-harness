@@ -361,6 +361,90 @@ def test_delivery_consumption_word_boundary_not_substring(tmp_path):
     assert verdict["consumed"] is False
 
 
+def test_delivery_consumption_common_identifiers_do_not_count(tmp_path):
+    """Bare common code words are never distinctive consumption evidence.
+
+    The payload and the command share ``handlers``/``backend``/``service``/
+    ``manager`` verbatim - the old token rule credited that as consumption,
+    which is what inflated the smoke-20 consumption stats (finding 7).
+    """
+    task = make_native_miniswe_task(
+        tmp_path,
+        delivery_text="note: handlers route through the backend service manager",
+    )
+    _wire_consumption_fixture(
+        task, "grep -rn handlers src/ && ls backend service"
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["consumed"] is False
+    assert verdict["verdict"] == "seen_no_action_on_content"
+
+
+def test_delivery_consumption_generic_stem_basename_is_not_distinctive(tmp_path):
+    """``utils.py`` is a common code word with an extension, not an anchor."""
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="note: regenerate utils.py helpers"
+    )
+    _wire_consumption_fixture(task, "ls utils.py")
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["consumed"] is False
+
+
+def test_delivery_consumption_path_anchor_still_credits(tmp_path):
+    """A ``path`` or ``path:line`` anchor from the payload stays distinctive."""
+    task = make_native_miniswe_task(
+        tmp_path,
+        delivery_text="src/auth/tokens.py:42: note: verify refresh path",
+    )
+    _wire_consumption_fixture(task, "sed -n '40,50p' src/auth/tokens.py")
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["consumed"] is True
+    assert verdict["verdict"] == "consumed"
+
+
+def test_delivery_consumption_qualified_name_credits(tmp_path):
+    """A qualified/dotted name (ClassName.method) is distinctive."""
+    task = make_native_miniswe_task(
+        tmp_path, delivery_text="note: AuthService.validate_token rejects"
+    )
+    _wire_consumption_fixture(
+        task, "grep -rn AuthService.validate_token src/"
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["consumed"] is True
+    assert verdict["match"] == "AuthService.validate_token"
+
+
+def test_delivery_consumption_verbatim_snippet_credits(tmp_path):
+    """A long verbatim payload substring is distinctive even when no single
+    token inside it would be."""
+    task = make_native_miniswe_task(
+        tmp_path,
+        delivery_text="error: signature changed: must update the call sites",
+    )
+    _wire_consumption_fixture(
+        task, 'grep -rn "must update the call sites" .'
+    )
+
+    audit = gt_audit.audit_task(task)
+
+    verdict = audit.delivery_consumption[0]
+    assert verdict["consumed"] is True
+    assert "must update the call sites" in verdict["match"]
+
+
 @pytest.mark.parametrize("expose", [True, False])
 @pytest.mark.parametrize("feature", ["persistent_plan", "plan_gate"])
 def test_native_plan_requires_exact_immediate_provider_bytes(tmp_path, expose, feature):

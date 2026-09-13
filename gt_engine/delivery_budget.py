@@ -38,6 +38,10 @@ TOTAL_DELIVERY_BYTE_LIMIT = 9_600
 MAX_TASK_DELIVERIES = 24
 # The legacy constant above is retained for historical receipt readers only.
 MAX_BOUNDARY_CLAIMS = 4
+# Re-localization is permitted when the ranked content changed (the agent's
+# searches move the information need), but distinct localizations stay capped
+# per task so a drifting ranking cannot become a delivery loop.
+MAX_LOCALIZATION_DELIVERIES = 3
 
 # Every reason the runtime can write to a delivery_refused row. The authority
 # is here, beside the ceilings the reasons name, and the harness imports it
@@ -73,6 +77,7 @@ DELIVERY_REFUSAL_REASONS = frozenset({
     "delivery_byte_ceiling",
     "duplicate_delivery_identity",
     "localization_fire_once",
+    "localization_task_ceiling",
     "request_delivery_byte_ceiling",
 })
 
@@ -95,6 +100,25 @@ def compact_localization(value: str, limit: int = 1_400) -> str:
         if len(candidate.encode("utf-8")) > limit:
             break
         selected.append(line)
+    if len(selected) <= 1:
+        return ""
+    dropped = len(lines) - len(selected)
+    if dropped:
+        # Honest selection bound: the withheld count is model-visible, and is
+        # worth more than the lowest-ranked item it may displace.
+        note = f"- {dropped} further ranked location(s) withheld by byte budget"
+        while len(selected) > 1 and len(
+            "\n".join([*selected, note]).encode("utf-8")
+        ) > limit:
+            selected.pop()
+            dropped += 1
+            note = (
+                f"- {dropped} further ranked location(s) withheld by byte budget"
+            )
+        if len(selected) > 1 and len(
+            "\n".join([*selected, note]).encode("utf-8")
+        ) <= limit:
+            selected.append(note)
     return "\n".join(selected) if len(selected) > 1 else ""
 
 
@@ -108,20 +132,10 @@ def delivery_byte_limit(*, lane: str, kind: str) -> int:
     raise ValueError(f"unsupported delivery budget lane/kind: {lane}/{kind}")
 
 
-def truncate_utf8(value: str, limit: int) -> str:
-    """Return a deterministic valid-UTF-8 prefix no larger than ``limit`` bytes."""
-
-    encoded = value.encode("utf-8")
-    if len(encoded) <= limit:
-        return value
-    return encoded[:limit].decode("utf-8", errors="ignore")
-
-
 __all__ = [
     "DELIVERY_BYTE_LIMITS",
     "MAX_TASK_DELIVERIES",
     "PROMPT_CONTEXT_BYTE_LIMIT",
     "TOTAL_DELIVERY_BYTE_LIMIT",
     "delivery_byte_limit",
-    "truncate_utf8",
 ]

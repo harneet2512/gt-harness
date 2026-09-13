@@ -157,18 +157,8 @@ def test_a_well_formed_plan_is_ready(inputs):
                 "mode_symbol": "DebugMode",
                 "member": "ALL",
                 "applies": True,
-                "reason": "error reporting differs",
             }
         ],
-        "derived_rows": [
-            {
-                "text": "build_container reports every error under DebugMode.ALL",
-                "from_row_id": row_id,
-                "mode_symbol": "DebugMode",
-                "member": "ALL",
-            }
-        ],
-        "edit_order": [row_id],
     }
     plan = build_plan(payload, inputs)
     # PARTIAL, not READY: one prompt line resolves to no graph symbol and the
@@ -179,7 +169,6 @@ def test_a_well_formed_plan_is_ready(inputs):
         "no_anchor", "baseline_not_attempted",
     }
     assert plan.process_id
-    assert len(plan.derived_rows) == 1
     assert plan.applicable_cells
     assert plan.planning_receipt["schema"] == "gt.planning_process.v1"
     assert plan.planning_receipt["citations"][0]["node_id"] == 1
@@ -218,25 +207,61 @@ def test_a_mode_member_that_was_never_offered_is_dropped(inputs):
     assert "phantom_mode_symbol" in reasons
 
 
-def test_a_derived_row_needs_an_applying_cell(inputs):
-    """A derived requirement with no provenance is a new requirement."""
+def test_prose_and_invented_fields_are_not_admitted(inputs):
+    """The tool carries structure and checks only. Design prose, invented
+    requirement text, self-reported edit order and interaction rationale were
+    the channels a fabricated architecture entered through - the plan must
+    store none of them, however well-formed the payload."""
     row_id = _row_id(inputs, "build_container")
     payload = {
-        "rows": [{"row_id": row_id, "anchors": [1]}],
+        "understanding": "The chat flow already runs a tool loop in chat.ts",
+        "rows": [
+            {
+                "row_id": row_id,
+                "anchors": [1],
+                "approach": "reuse the three agent implementations",
+                "verification_command": "pytest tests/test_container.py",
+            }
+        ],
         "interactions": [
-            {"row_id": row_id, "mode_symbol": "DebugMode", "member": "OFF",
-             "applies": False, "reason": "no difference"}
+            {"row_id": row_id, "mode_symbol": "DebugMode", "member": "ALL",
+             "applies": True, "reason": "error reporting differs"}
         ],
         "derived_rows": [
             {"text": "invented behaviour", "from_row_id": row_id,
-             "mode_symbol": "DebugMode", "member": "OFF"}
+             "mode_symbol": "DebugMode", "member": "ALL"}
         ],
+        "edit_order": [row_id],
+        "considered_count": 7,
     }
-    rows, _cells, _order, abstentions = validate_plan(payload, inputs)
-    assert all(not row.is_derived for row in rows)
-    assert any(
-        reason == "derived_row_without_applying_cell" for _row, reason in abstentions
-    )
+    plan = build_plan(payload, inputs)
+    assert not plan.understanding
+    assert all(not row.approach for row in plan.rows)
+    assert all(not row.is_derived for row in plan.rows)
+    assert all(not cell.reason for cell in plan.interactions)
+    # Edit order comes from the graph's deterministic computation, not the
+    # self-reported list.
+    deterministic = {row_id for row_id in inputs.anchors.edit_order}
+    assert plan.edit_order
+    assert set(plan.edit_order) <= {row.row_id for row in plan.rows}
+    if deterministic:
+        assert list(plan.edit_order) == [
+            row for row in inputs.anchors.edit_order
+            if row in set(plan.edit_order)
+        ]
+
+
+def test_the_schema_has_no_prose_fields(inputs):
+    schema = plan_tool_schema(inputs)
+    props = schema["function"]["parameters"]["properties"]
+    assert "understanding" not in props
+    assert "derived_rows" not in props
+    assert "edit_order" not in props
+    assert "considered_count" not in props
+    row_props = props["rows"]["items"]["properties"]
+    assert "approach" not in row_props
+    assert "reason" not in props["interactions"]["items"]["properties"]
+    assert schema["function"]["parameters"]["required"] == ["rows"]
 
 
 @pytest.mark.parametrize(
@@ -520,18 +545,22 @@ def test_the_prompt_demands_a_concrete_check():
     assert "DIFFERENTIAL" in PLANNING_SYSTEM_PROMPT
     assert "fail on the repository as it stands" in PLANNING_SYSTEM_PROMPT
     assert "no_check_reason" in PLANNING_SYSTEM_PROMPT
-    # and it is written in SDLC stages, so the artifact says what it is
+    # and it asks only for what can be checked - narrative demands were the
+    # channel a fabricated architecture entered through
     for stage in (
-        "DESIGN INTENT",
-        "DESIGN PER REQUIREMENT",
         "ACCEPTANCE CRITERIA",
         "CONFIGURATION INTERACTIONS",
-        "DERIVED REQUIREMENTS",
         "TRACEABILITY AND COVERAGE",
-        "SCOPE",
-        "CONFLICT PASS",
     ):
         assert stage in PLANNING_SYSTEM_PROMPT, stage
+    for banned in (
+        "DESIGN INTENT",
+        "DESIGN PER REQUIREMENT",
+        "DERIVED REQUIREMENTS",
+        "CONFLICT PASS",
+        "considered_count",
+    ):
+        assert banned not in PLANNING_SYSTEM_PROMPT, banned
 
 
 def test_the_sweep_offers_only_pairs_the_graph_connects(inputs):

@@ -146,15 +146,15 @@ def test_runtime_collects_every_candidate_before_current_syntax_wins(
         calls.append("gateway")
         return EvidenceResult(rendered="", sealed=False)
 
-    def cochange(owner, command, changed_files):
-        calls.append("cochange")
-        owner.stage_model_visible_delivery(
-            kind="cochange_partner", dedup_key="weak-prior"
-        )
-        return "weak prior"
+    recipes = []
+    resolve = adapter.resolve_delivery_recipe
+
+    def capture(recipe):
+        recipes.append(recipe)
+        return resolve(recipe)
 
     monkeypatch.setattr(rt, "run_evidence_pipeline", gateway)
-    monkeypatch.setattr(rt, "_cochange_prior", cochange)
+    monkeypatch.setattr(adapter, "resolve_delivery_recipe", capture)
     original_chain = adapter._chain_head
     rendered = rt._run_evidence(
         adapter,
@@ -168,13 +168,18 @@ def test_runtime_collects_every_candidate_before_current_syntax_wins(
         allow_live_probes=True,
     )
 
-    assert calls == ["covering", "syntax", "gateway", "newfile", "cochange"]
+    assert calls == ["covering", "syntax", "gateway", "newfile"]
+    # The co-change producer no longer renders here: it registers a delivery
+    # query for the admission choke point, which is where its bytes exist.
+    assert recipes == [
+        {"kind": "cochange", "params": {"files": ["new.py"]}},
+    ]
     assert "syntax error" in rendered
+    # No graph bound -> the recipe cannot produce current bytes -> typed skip.
     assert [item.kind for item in adapter._pending_provider_deliveries] == [
-        "syntax_result", "new_file_destination", "cochange_partner",
+        "syntax_result", "new_file_destination",
     ]
     assert rendered.index("syntax error") < rendered.index("nearby example")
-    assert rendered.index("nearby example") < rendered.index("weak prior")
     assert "weak-prior" not in adapter._dedup_chain
     assert adapter._chain_head == original_chain
 
@@ -205,13 +210,14 @@ def test_verification_candidate_outranks_weak_priors(tmp_path, monkeypatch):
         lambda *args, **kwargs: EvidenceResult(rendered="", sealed=False),
     )
 
-    def cochange(owner, command, changed_files):
-        owner.stage_model_visible_delivery(
-            kind="cochange_partner", dedup_key="weak"
-        )
-        return "weak prior"
+    recipes = []
+    resolve = adapter.resolve_delivery_recipe
 
-    monkeypatch.setattr(rt, "_cochange_prior", cochange)
+    def capture(recipe):
+        recipes.append(recipe)
+        return resolve(recipe)
+
+    monkeypatch.setattr(adapter, "resolve_delivery_recipe", capture)
     rendered = rt._run_evidence(
         adapter,
         "edit",
@@ -225,7 +231,9 @@ def test_verification_candidate_outranks_weak_priors(tmp_path, monkeypatch):
     assert "verification_plan" in rendered
     assert adapter.verification_candidate()[0] == verification
     assert rendered.index("verification_plan") < rendered.index("example")
-    assert rendered.index("example") < rendered.index("weak prior")
+    assert recipes == [
+        {"kind": "cochange", "params": {"files": ["src/parser.py"]}},
+    ]
     assert "verification:tx-1" not in adapter._dedup_chain
     adapter.discard_pending_provider_deliveries(reason="fixture_provider_refusal")
     assert adapter.verification_candidate()[0] == verification
@@ -1812,7 +1820,12 @@ def test_runtime_augments_test_result_but_keeps_raw_output_byte_for_byte(
     assert content.count(raw) == 1
     prepared = agent.model._prepare_messages_for_api(messages)
     assert "[GT_EXECUTION_EVIDENCE]" in prepared[-1]["content"]
-    assert '"observed_test_outcome":"fail"' in prepared[-1]["content"]
+    # The model-facing line restates the typed outcome in words; the digests
+    # stay in the journal event and blob verified below. A piped command can't
+    # be attributed a pass/fail, so it reads "result unclear".
+    expected = "test run result unclear" if pipeline else "test run failed"
+    assert expected in prepared[-1]["content"]
+    assert "tests: fail" in prepared[-1]["content"]
     assert raw in prepared[-1]["content"]
     rows = [
         __import__("json").loads(line)

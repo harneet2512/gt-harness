@@ -475,10 +475,12 @@ def test_failed_amend_falls_back_to_a_full_rebuild_and_names_why(tmp_path, monke
         root, parent, ("app.py",), layout=layout, source_revision="rev-2",
     )
 
-    assert calls == ["full"], "a failed amend must fall back to the full rebuild"
-    assert receipt.build_mode == "full"
+    # A failed amend is a named refusal, not a from-scratch rebuild: the
+    # certified parent still exists and the next trigger retries the amend.
+    assert calls == [], "a refused amend must never fall back to a full rebuild"
+    assert receipt.build_mode == "amend_refused"
     assert receipt.build_mode_reason.startswith("amend_failed:")
-    assert receipt.success, receipt.error_type
+    assert not receipt.success
 
 
 def test_amend_is_refused_when_the_producer_does_not_declare_the_capability(
@@ -502,7 +504,7 @@ def test_amend_is_refused_when_the_producer_does_not_declare_the_capability(
         root, parent, ("app.py",), layout=layout, source_revision="rev-2",
     )
 
-    assert receipt.build_mode == "full"
+    assert receipt.build_mode == "amend_refused"
     assert receipt.build_mode_reason == "producer_lacks_amend_capability"
 
 
@@ -529,7 +531,7 @@ def test_amend_is_refused_when_the_parent_cannot_be_certified(tmp_path, monkeypa
         root, parent, ("app.py",), layout=layout, source_revision="rev-2",
     )
 
-    assert receipt.build_mode == "full"
+    assert receipt.build_mode == "amend_refused"
     assert receipt.build_mode_reason == (
         "incremental_parent_uncertifiable:graph_sha256_mismatch"
     )
@@ -699,3 +701,128 @@ def test_real_producer_amend_reminds_the_edited_files_symbols(tmp_path):
     assert after >= before
     assert reminted > 0, "the amended file lost its symbol identity"
     assert elsewhere > 0, "an amend cleared symbols for files it never touched"
+
+
+# ---------------------------------------------------------------- write path
+
+
+from types import SimpleNamespace
+
+
+def _txn(post: str, paths: tuple[str, ...], complete: bool = True):
+    return SimpleNamespace(
+        post_revision=post, pre_revision="rev0",
+        changed_paths=tuple(paths), complete=complete, omissions=(),
+        transaction_sha256=f"txn-{post}", action_id=1,
+        canonical_bytes=lambda: b"txn",
+        changes=[
+            SimpleNamespace(path=p, operation="modify", before_sha256="",
+                            after_sha256="", after=b"x")
+            for p in paths
+        ],
+    )
+
+
+def _adopted_parent(adapter, tmp_path) -> Path:
+    adapter.engine_state.bind_initial_source("rev0")
+    parent = tmp_path / "graph.db"
+    parent.write_bytes(b"parent-bytes")
+    adapter.engine_state.publish_graph(
+        graph_path=str(parent), graph_revision="g0", source_revision="rev0")
+    adapter.graph_db = str(parent)
+    return parent
+
+
+def _fake_receipt(graph, **kwargs):
+    return SimpleNamespace(
+        success=True, graph_db=graph, graph_revision="g-next",
+        source_revision=kwargs.get("source_revision", ""),
+        embedding_state="skipped", error_type="", error_diagnostic="")
+
+
+def test_edit_transaction_sync_amends_and_graph_stays_current(tmp_path, monkeypatch):
+    """The invariant the whole phase exists for: graph_current is true THROUGH
+    the edit, not stale until a worker lands a rebuild behind it."""
+    adapter = _adapter(tmp_path)
+    parent = _adopted_parent(adapter, tmp_path)
+    assert adapter.engine_state.graph_current
+
+    calls = {}
+    def fake_amend(root, *, layout, parent_graph, changed_paths,
+                   excluded_roots, diagnostics=None):
+        calls["paths"] = changed_paths
+        calls["parent"] = str(parent_graph)
+        return str(parent), "", ({"path": "a.py", "status": "ok"},)
+    monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", fake_amend)
+    monkeypatch.setattr(indexer, "_receipt_for_published_graph", _fake_receipt)
+
+    adapter.record_edit_transaction(_txn("rev1", ("a.py",)))
+
+    assert calls["paths"] == ("a.py",)
+    assert calls["parent"] == str(parent)
+    assert adapter.engine_state.graph_current
+    assert adapter.graph_db == str(parent)
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    assert any(row.get("event") == "graph_sync_amend" and row.get("adopted")
+               for row in rows)
+
+
+def test_sync_amend_dirty_set_covers_earlier_unpatched_edits(tmp_path, monkeypatch):
+    """A refused amend leaves its paths dirty; the next publish must cover
+    them or the overlay clears over changes no graph ever saw."""
+    adapter = _adapter(tmp_path)
+    parent = _adopted_parent(adapter, tmp_path)
+    state = {"fail": True}
+    calls = {}
+
+    def flaky(root, *, layout, parent_graph, changed_paths,
+              excluded_roots, diagnostics=None):
+        calls["paths"] = changed_paths
+        if state["fail"]:
+            return None, "amend_failed:boom", ()
+        return str(parent), "", ()
+    monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", flaky)
+    monkeypatch.setattr(indexer, "_receipt_for_published_graph", _fake_receipt)
+
+    adapter.record_edit_transaction(_txn("rev0.5", ("b.py",)))
+    assert calls["paths"] == ("b.py",)
+    assert not adapter.engine_state.graph_current
+    state["fail"] = False
+
+    adapter.record_edit_transaction(_txn("rev1", ("a.py",)))
+    assert calls["paths"] == ("a.py", "b.py")
+    assert adapter.engine_state.graph_current
+
+
+def test_sync_amend_skips_when_unaccounted_changes_exist(tmp_path, monkeypatch):
+    """Omissions mean changes nobody enumerated; publishing would clear them
+    on top of a graph that never covered them."""
+    adapter = _adapter(tmp_path)
+    _adopted_parent(adapter, tmp_path)
+    adapter.engine_state.mark_paths_dirty(("b.py",), revision="rev0.5")
+
+    calls = {}
+    def forbidden(root, *, layout, parent_graph, changed_paths,
+                  excluded_roots, diagnostics=None):
+        calls["paths"] = changed_paths
+        return None, "", ()
+    monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", forbidden)
+
+    adapter.record_edit_transaction(_txn("rev1", ("a.py",)))
+    assert "paths" not in calls
+
+
+def test_sync_amend_refusal_is_journaled_and_parent_kept(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    parent = _adopted_parent(adapter, tmp_path)
+
+    monkeypatch.setattr(
+        indexer, "_ensure_index_incremental_unlocked",
+        lambda *a, **k: (None, "amend_failed:disk_full", ()))
+
+    adapter.record_edit_transaction(_txn("rev1", ("a.py",)))
+    assert adapter.engine_state.graph_path == str(parent)
+    assert not adapter.engine_state.graph_current
+    rows = [json.loads(line) for line in adapter.store.path.read_text().splitlines()]
+    refused = [row for row in rows if row.get("event") == "graph_sync_amend_refused"]
+    assert refused and "disk_full" in refused[0].get("reason", "")

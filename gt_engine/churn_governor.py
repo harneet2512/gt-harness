@@ -150,8 +150,15 @@ class ChurnGovernor:
         # next provider request, so the churn-specific abort waits ~10 actions
         # for the agent to react before concluding the steer failed.
         steer_grace_elapsed = self._turns - self._last_steer_turn >= 10
+        # A stall abort is only honest after steering had its chance: a run
+        # that was never steered gets steered, not killed. ``max_steers == 0``
+        # is the operator's explicit no-steering choice, where the plain stall
+        # limit is the only protection left.
+        stall_abort_ready = self.max_steers == 0 or (
+            self._steers > 0 and steer_grace_elapsed
+        )
         if (
-            self._stall_turns >= self.abort_stall
+            (self._stall_turns >= self.abort_stall and stall_abort_ready)
             or repeat >= self.repeat_abort
             or (
                 steered_recently
@@ -162,11 +169,15 @@ class ChurnGovernor:
         ):
             self.aborted = True
             return "abort"
+        # Any sustained unproductive stall earns a steer - not only GT-state
+        # archaeology. An agent reading source files for steer_stall actions
+        # without an edit or check is exactly the case a corrective delivery
+        # exists for.
         if (
             self._steers < self.max_steers
             and self._turns - self._last_steer_turn >= 15
             and (
-                (self._stall_turns >= self.steer_stall and churn >= self.churn_ratio)
+                self._stall_turns >= self.steer_stall
                 or repeat >= self.repeat_abort - 5
             )
         ):

@@ -19,7 +19,7 @@ import os
 import shlex
 import sqlite3
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -146,7 +146,15 @@ class GTDecisionBatch:
 
 @dataclass(frozen=True)
 class GTDecisionCandidate:
-    """One producer-owned fact proposed for the current provider decision."""
+    """One producer-owned fact proposed for the current provider decision.
+
+    ``recipe`` is a delivery query (``{"kind", "params", "budget"}``) instead
+    of pre-rendered bytes: the payload is computed at the admission choke
+    point against the state the model is about to see, so a recipe candidate
+    can never be stale -- it does not exist until it is delivered. Producers
+    whose bytes ARE the fact at a revision (executed command output, test
+    failures) keep ``rendered``; graph/state-derived kinds carry recipes.
+    """
 
     rendered: str
     kind: str
@@ -167,6 +175,7 @@ class GTDecisionCandidate:
     supersedes: tuple[str, ...] = ()
     source_revision: str = ""
     artifact_reference: Mapping[str, Any] | None = None
+    recipe: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -211,7 +220,14 @@ def _decision_candidate_order(candidate: GTDecisionCandidate) -> tuple[int, int,
         # Edit consequences and verification evidence share the actionable
         # middle lane. Their stable kind/hash order makes replay byte-identical.
         priority = 3
-    identity = hashlib.sha256(candidate.rendered.encode("utf-8")).hexdigest()
+    identity_bytes = candidate.rendered.encode("utf-8")
+    if not identity_bytes and candidate.recipe is not None:
+        # Recipe candidates have no bytes until admission resolves them; the
+        # canonical query keeps ordering deterministic for replay.
+        identity_bytes = json.dumps(
+            candidate.recipe, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+    identity = hashlib.sha256(identity_bytes).hexdigest()
     return priority, candidate.source_ordinal, kind, identity
 
 
@@ -222,6 +238,10 @@ def _bounded_unit_view(header: str, body: str, limit: int) -> str | None:
     refusal in that case. The complete unit bytes remain in the evidence CAS
     through the delivery's artifact_sha256 - the model-visible view is honest
     about what was elided without printing a retrieval affordance.
+
+    Elision happens at line boundaries only: a body cut mid-line leaves a
+    partial row that reads as a complete fact. Dropping back to whole lines
+    shrinks the kept region slightly but never corrupts a fact.
     """
     encoded_header = (header + "\n").encode("utf-8")
     room = limit - len(encoded_header) - 96
@@ -230,11 +250,23 @@ def _bounded_unit_view(header: str, body: str, limit: int) -> str | None:
     body_bytes = body.encode("utf-8")
     if len(body_bytes) <= room:
         return f"{header}\n{body}"
-    head_len = room * 2 // 3
-    tail_len = room - head_len
-    head = body_bytes[:head_len].decode("utf-8", "ignore")
-    tail = body_bytes[-tail_len:].decode("utf-8", "ignore") if tail_len else ""
-    omitted = len(body_bytes) - len(head.encode("utf-8")) - len(tail.encode("utf-8"))
+    head_budget = room * 2 // 3
+    tail_budget = room - head_budget
+    if body_bytes.count(b"\n") < 2:
+        # A lineless or single-line blob has no boundary to elide to - ship
+        # nothing rather than a partial opaque fragment.
+        return None
+    head_bytes = body_bytes[:head_budget]
+    newline = head_bytes.rfind(b"\n")
+    head_bytes = head_bytes[: newline + 1] if newline > 0 else b""
+    tail_bytes = body_bytes[len(body_bytes) - tail_budget :]
+    newline = tail_bytes.find(b"\n")
+    tail_bytes = tail_bytes[newline + 1 :] if newline >= 0 else b""
+    if not head_bytes and not tail_bytes:
+        return None
+    head = head_bytes.decode("utf-8", "ignore").rstrip("\n")
+    tail = tail_bytes.decode("utf-8", "ignore").lstrip("\n")
+    omitted = len(body_bytes) - len(head_bytes) - len(tail_bytes)
     return f"{header}\n{head}\n[{omitted} utf8 bytes of this context unit elided]\n{tail}"
 
 
@@ -279,6 +311,7 @@ class GTSession:
         self._execution_sequence = 0
         self._open_executions: set[str] = set()
         self._select_catalog_attempted = False
+        self._select_catalog_abstained = False
         self._plan_gate_refusals = 0
         # Refusals since a plan row last turned green, and the unmet set as it
         # stood at the last refusal. Progress resets the first; the second is
@@ -323,7 +356,6 @@ class GTSession:
 
         if self._select_catalog_attempted:
             return None
-        self._select_catalog_attempted = True
         if (
             self._engine is None
             or self.disabled
@@ -333,10 +365,16 @@ class GTSession:
         snapshot = self._engine.graph_query_snapshot()
         source_revision = str(snapshot.source_revision or "")
         if not snapshot.graph_current or not source_revision or not snapshot.graph_revision:
-            self._engine.store.append(
-                "select_catalog_abstained", reason="stale_or_incomplete_graph"
-            )
+            # Readiness abstention is not the attempt: an index still building
+            # when the first request lands must not consume the one catalog a
+            # run ever offers. Journal it once; retry on the next call.
+            if not self._select_catalog_abstained:
+                self._select_catalog_abstained = True
+                self._engine.store.append(
+                    "select_catalog_abstained", reason="stale_or_incomplete_graph"
+                )
             return None
+        self._select_catalog_attempted = True
         localization = self._engine.task_start_localization(commit=False)
         metadata = self._engine.localization_delivery_metadata()
         target = str(metadata.get("target") or "").replace("\\", "/").lstrip("./")
@@ -347,11 +385,22 @@ class GTSession:
             return None
         content_sha256 = hashlib.sha256(localization.encode("utf-8")).hexdigest()
         item_id = f"focus-{hashlib.sha256((target + content_sha256).encode()).hexdigest()[:20]}"
+        # The label is the only model-legible field the catalog carries: give
+        # it the localization payload line (symbol, kind, snippet) rather than
+        # repeating the bare path, which carried nothing to act on.
+        label = next(
+            (
+                line.strip()
+                for line in localization.splitlines()
+                if line.strip() and not line.startswith("[GT_EVIDENCE")
+            ),
+            target,
+        )
         catalog = build_feature18_catalog(
             source_revision=source_revision,
             workspace_revision=str(getattr(self._engine, "repository_revision", "") or source_revision),
             graph_revision=str(snapshot.graph_revision),
-            items=(CatalogItem(item_id, "focus", target, content_sha256, target),),
+            items=(CatalogItem(item_id, "focus", label, content_sha256, target),),
         )
         self._select_catalog_lifecycle = Feature18Lifecycle.from_catalog(
             catalog, event_id=f"{self.config.task_id}:select_catalog"
@@ -768,74 +817,52 @@ class GTSession:
         cursor = self._plan_cursor_candidate()
         if cursor is not None:
             candidates.append(cursor)
-        if (
-            not self._task_start_shipped
-            and self.config.delivery_path == "compiled"
-        ):
-            localization = self._engine.task_start_localization(commit=False)
-            if localization:
-                original_localization = localization
-                original_bytes = len(original_localization.encode("utf-8"))
-                localization = _compress_context(original_localization, 1_400)
-                delivered_bytes = len(localization.encode("utf-8"))
-                if delivered_bytes < original_bytes:
-                    self._engine.store.append(
-                        "localization_compressed",
-                        original_bytes=original_bytes,
-                        delivered_bytes=delivered_bytes,
-                        lane_cap_bytes=1_400,
-                    )
-                    diagnostics = getattr(self._engine, "diagnostics", None)
-                    if diagnostics is not None:
-                        diagnostics.record(
-                            DiagnosticEvent.create(
-                                code=DiagnosticCode.GT_LOCALIZATION_OVERSIZED,
-                                severity="WARNING",
-                                phase="task_start",
-                                subsystem="delivery",
-                                capability="localization",
-                                task_id=self._engine.task_id,
-                                classification="consequential",
-                                cause="localization_exceeded_lane_cap",
-                                impact="localization_compressed",
-                                recovery="retain_ranked_evidence_within_1400_bytes",
-                                retryable=False,
-                                event_sequence=int(
-                                    self._engine.store.receipt()["event_count"]
-                                ),
-                            )
-                        )
+        localization_recipe_queued = False
+        if self.config.delivery_path == "compiled":
+            drift_trigger = (
+                self._task_start_shipped
+                and callable(getattr(self._engine, "localization_drift_pending", None))
+                and self._engine.localization_drift_pending()
+            )
+            # A resolved-empty localization is an answer for the current
+            # (revision, drift) key - re-queue only when the engine reports
+            # the state moved. Engines without the predicate keep the
+            # always-resolve legacy behavior.
+            pending_fn = getattr(
+                self._engine, "localization_resolution_pending", None
+            )
+            resolution_pending = pending_fn() if callable(pending_fn) else True
+            if (not self._task_start_shipped and resolution_pending) or drift_trigger:
                 if not self.model_visible:
-                    self._engine.store.append(
-                        "shadow_task_start_localization",
-                        rendered_bytes=len(localization.encode("utf-8")),
-                    )
-                elif localization:
-                    metadata = self._engine.localization_delivery_metadata()
-                    payload_hash = hashlib.sha256(localization.encode("utf-8")).hexdigest()
+                    localization = self._engine.task_start_localization(commit=False)
+                    if localization:
+                        self._engine.store.append(
+                            "shadow_task_start_localization",
+                            rendered_bytes=len(localization.encode("utf-8")),
+                        )
+                else:
+                    # The localization query rides the queue, not its bytes:
+                    # the rank runs at admission against the current graph,
+                    # with the agent's search-drift terms folded in.
                     supersession_key = "localization:task"
                     active = self._active_context_units.get(supersession_key)
-                    # The compact localization remains useful inline, while its
-                    # reference always identifies the producer's complete unit.
-                    reference = self._store_context_unit(original_localization)
-                    localization_unit_id = reference.get("sha256", payload_hash)
                     candidates.append(GTDecisionCandidate(
-                        rendered=localization,
-                        kind=metadata["kind"],
-                        dedup_key=metadata["dedup_key"],
-                        target=metadata.get("target", ""),
-                        semantics=metadata.get("semantics", "advisory"),
-                        artifact_sha256=metadata.get("artifact_sha256", ""),
-                        next_chain_head=metadata.get("next_chain_head", ""),
-                        unit_id=localization_unit_id,
+                        rendered="",
+                        kind="localization",
+                        lane="sealed",
+                        dedup_key="",
+                        recipe={
+                            "kind": "localization",
+                            "params": {
+                                "origin": (
+                                    "drift" if drift_trigger else "task_start"
+                                ),
+                            },
+                        },
                         supersession_key=supersession_key,
                         supersedes=((active["unit_id"],) if active else ()),
-                        source_revision=str(
-                            getattr(self._engine, "repository_revision", "") or ""
-                        ),
-                        artifact_reference=reference or None,
                     ))
-                    localization_candidate = localization
+                    localization_recipe_queued = True
         batch = self.admit_decision_packet(
             candidates, iteration=iteration, action_index=0
         )
@@ -852,19 +879,26 @@ class GTSession:
             if delivered:
                 self._pending_contract_delta, self._pending_contract_rendered = contract_candidate
                 self._pending_contract_identity = hashlib.sha256(delivered.encode()).hexdigest()
-        if localization_candidate in batch.context_additions:
-            self._pending_localization = localization_candidate
-        elif localization_candidate:
-            delivered = next(
-                (
-                    item for item in batch.context_additions
-                    if f'"unit_id":"{localization_unit_id}"' in item
-                ),
-                "",
+        if localization_recipe_queued:
+            # The resolver stashes the admission-rendered localization bytes;
+            # the latch binds them only when the unit actually shipped.
+            local_rendered = str(
+                getattr(self._engine, "_localization_candidate", "") or ""
             )
-            if delivered:
-                self._pending_localization = localization_candidate
-                self._pending_localization_identity = hashlib.sha256(delivered.encode()).hexdigest()
+            if local_rendered:
+                delivered = next(
+                    (
+                        item for item in batch.context_additions
+                        if '"supersession_key":"localization:task"' in item
+                        or item == local_rendered
+                    ),
+                    "",
+                )
+                if delivered:
+                    self._pending_localization = local_rendered
+                    self._pending_localization_identity = hashlib.sha256(
+                        delivered.encode()
+                    ).hexdigest()
         return batch
 
     def _store_context_unit(self, rendered: str) -> dict[str, Any]:
@@ -956,7 +990,89 @@ class GTSession:
         if self._engine is None or self.disabled or not self.model_visible:
             return
         self._queued_decision_candidates.extend(
-            candidate for candidate in candidates if candidate.rendered
+            candidate
+            for candidate in candidates
+            if candidate.rendered or candidate.recipe is not None
+        )
+
+    def _resolve_delivery_recipe(
+        self, candidate: GTDecisionCandidate
+    ) -> GTDecisionCandidate | None:
+        """Evaluate a delivery query against the state the model will see.
+
+        The engine owns derivation: it renders the recipe's bytes now, at the
+        admission choke point, and returns the revision it rendered against.
+        Stamping that revision on the candidate means a recipe can never be
+        historical -- its bytes did not exist before this decision. An
+        unresolvable recipe is a typed skip with a journal row, never a silent
+        drop and never a stale fallback.
+        """
+        recipe = candidate.recipe or {}
+        kind = str(recipe.get("kind") or candidate.kind or "")
+        resolver = getattr(self._engine, "resolve_delivery_recipe", None)
+        resolved: Any = None
+        if callable(resolver):
+            try:
+                resolved = resolver(recipe)
+            except Exception as exc:  # noqa: BLE001 - recipes are correct-or-quiet
+                self._engine.store.append(
+                    "delivery_recipe_unresolved",
+                    kind=kind,
+                    reason=f"{type(exc).__name__}:{str(exc)[:120]}",
+                    supersession_key=candidate.supersession_key,
+                )
+                return None
+        else:
+            self._engine.store.append(
+                "delivery_recipe_unresolved",
+                kind=kind,
+                reason="resolver_unavailable",
+                supersession_key=candidate.supersession_key,
+            )
+            return None
+        if not resolved or not resolved[0]:
+            self._engine.store.append(
+                "delivery_recipe_unresolved",
+                kind=kind,
+                reason="empty_render",
+                supersession_key=candidate.supersession_key,
+            )
+            return None
+        rendered = str(resolved[0])
+        render_revision = str(resolved[1]) if len(resolved) > 1 else ""
+        metadata = dict(resolved[2]) if len(resolved) > 2 and resolved[2] else {}
+        artifact_reference = (
+            dict(resolved[3])
+            if len(resolved) > 3 and isinstance(resolved[3], Mapping)
+            else None
+        )
+        self._engine.store.append(
+            "delivery_recipe_resolved",
+            kind=kind,
+            rendered_bytes=len(rendered.encode("utf-8")),
+            render_revision=render_revision,
+            supersession_key=candidate.supersession_key,
+        )
+        return replace(
+            candidate,
+            rendered=rendered,
+            kind=str(metadata.get("kind") or candidate.kind),
+            source_revision=render_revision or candidate.source_revision,
+            artifact_reference=artifact_reference or candidate.artifact_reference,
+            dedup_key=str(metadata.get("dedup_key") or candidate.dedup_key),
+            target=str(metadata.get("target") or candidate.target),
+            semantics=str(metadata.get("semantics") or candidate.semantics),
+            artifact_sha256=str(
+                metadata.get("artifact_sha256") or candidate.artifact_sha256
+            ),
+            next_chain_head=str(
+                metadata.get("next_chain_head") or candidate.next_chain_head
+            ),
+            verification_candidate=(
+                rendered
+                if candidate.kind == "verification_plan"
+                else candidate.verification_candidate
+            ),
         )
 
     def admit_decision_packet(
@@ -990,6 +1106,10 @@ class GTSession:
         )
 
         def is_historical(candidate: GTDecisionCandidate) -> bool:
+            if candidate.recipe is not None:
+                # Recipes render at admission against current state and get
+                # stamped then; a producer-side revision can never make one stale.
+                return False
             return bool(
                 current_revision
                 and candidate.source_revision
@@ -1004,6 +1124,11 @@ class GTSession:
             ),
         )
         for candidate in ordered:
+            if candidate.recipe is not None:
+                resolved = self._resolve_delivery_recipe(candidate)
+                if resolved is None:
+                    continue
+                candidate = resolved
             if not candidate.rendered:
                 continue
             original_sha256 = hashlib.sha256(
@@ -1077,7 +1202,21 @@ class GTSession:
                     metadata, ensure_ascii=True, sort_keys=True, separators=(",", ":")
                 )
                 full = f"{header}\n{candidate.rendered}"
-                limit = delivery_byte_limit(lane=candidate.lane, kind=candidate.kind)
+                try:
+                    limit = delivery_byte_limit(
+                        lane=candidate.lane, kind=candidate.kind
+                    )
+                except ValueError as exc:
+                    # An unmapped lane/kind is a producer defect on ONE fact;
+                    # skip it rather than taking down the packet.
+                    self._engine.store.append(
+                        "decision_candidate_fault",
+                        kind=candidate.kind,
+                        lane=candidate.lane,
+                        error_type=type(exc).__name__,
+                        error=str(exc)[:200],
+                    )
+                    continue
                 # Stale-revision units still carry context, but only a tight
                 # inline view: the complete bytes stay in the evidence CAS and
                 # the model never gets a fetch chore (run 34656860834).
@@ -1099,17 +1238,26 @@ class GTSession:
                         )
                         continue
             payload_sha256 = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
-            admitted = self._engine.admit_model_visible_delivery(
-                lane=candidate.lane,
-                kind=candidate.kind,
-                rendered=rendered,
-                action_index=candidate.action_index or action_index,
-                iteration=iteration,
-                dedup_key=candidate.dedup_key,
-                target=candidate.target,
-                semantics=candidate.semantics,
-                artifact_sha256=candidate.artifact_sha256,
-            )
+            try:
+                admitted = self._engine.admit_model_visible_delivery(
+                    lane=candidate.lane,
+                    kind=candidate.kind,
+                    rendered=rendered,
+                    action_index=candidate.action_index or action_index,
+                    iteration=iteration,
+                    dedup_key=candidate.dedup_key,
+                    target=candidate.target,
+                    semantics=candidate.semantics,
+                    artifact_sha256=candidate.artifact_sha256,
+                )
+            except Exception as exc:  # noqa: BLE001 - engine fault on one fact
+                self._engine.store.append(
+                    "decision_candidate_fault",
+                    kind=candidate.kind,
+                    error_type=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
+                continue
             if not admitted:
                 continue
             if candidate.supersession_key:
@@ -1155,13 +1303,22 @@ class GTSession:
                         admission_chain_head or _MINISWE_CHAIN_GENESIS,
                         rendered.encode("utf-8"),
                     )
-                self._engine.stage_exposure(
-                    rendered=rendered,
-                    dedup_key=candidate.dedup_key,
-                    previous_chain_head=previous_chain_head,
-                    next_chain_head=next_chain_head,
-                    verification_candidate=candidate.verification_candidate,
-                )
+                try:
+                    self._engine.stage_exposure(
+                        rendered=rendered,
+                        dedup_key=candidate.dedup_key,
+                        previous_chain_head=previous_chain_head,
+                        next_chain_head=next_chain_head,
+                        verification_candidate=candidate.verification_candidate,
+                    )
+                except Exception as exc:  # noqa: BLE001 - skip, don't amputate
+                    self._engine.store.append(
+                        "decision_candidate_fault",
+                        kind=candidate.kind,
+                        error_type=type(exc).__name__,
+                        error=str(exc)[:200],
+                    )
+                    continue
                 if candidate.next_chain_head:
                     admission_chain_head = next_chain_head
             additions.append(rendered)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -19,7 +20,9 @@ from gt_engine.task_contract import Obligation, TaskContract, extract_task_contr
 from gt_engine.verification_contract import compile_obligation_predicates
 
 
-def test_verification_candidate_is_bound_to_pre_edit_graph(tmp_path, monkeypatch):
+def test_verification_recipe_renders_against_the_graph_at_admission(
+    tmp_path, monkeypatch
+):
     graph = tmp_path / "graph.db"
     with sqlite3.connect(graph) as db:
         db.execute("CREATE TABLE resolution_symbols (stable_id TEXT, path TEXT)")
@@ -83,8 +86,18 @@ def test_verification_candidate_is_bound_to_pre_edit_graph(tmp_path, monkeypatch
         },
     )()
 
-    rendered = adapter.prepare_verification_candidate(transaction, snapshot)
+    # Transaction time now registers the query only - the bytes do not exist
+    # until the admission choke point renders them against the current graph.
+    assert adapter.prepare_verification_candidate(transaction, snapshot) == ""
+    recipe = adapter._pending_verification_recipe
+    assert recipe["kind"] == "verification_plan"
+    assert recipe["params"]["paths"] == ["src/parser.py"]
+    assert captured == {}
 
+    resolved = adapter.resolve_delivery_recipe(recipe)
+
+    assert resolved is not None
+    rendered, _render_revision, _metadata, _reference = resolved
     assert captured == {
         "graph_db": str(graph),
         "repo_root": str(repo),
@@ -119,7 +132,11 @@ def test_lexical_localization_is_stable_advisory_and_includes_dirty_files(tmp_pa
     assert outputs[0] == outputs[1]
     assert outputs[0].startswith("[GT_EVIDENCE:localization]")
     assert outputs[0].index("alpha.py:1") < outputs[0].index("beta.py:1")
-    assert "score=1 reasons=content_token:needle" in outputs[0]
+    # Payload render: the matched line content and matched terms, not an
+    # opaque score - the smoke-20 finding was that pointer-only localization
+    # was ignored by the model (7/19 deliveries consumed).
+    assert "alpha.py:1 ~ needle = 2 | matched needle" in outputs[0]
+    assert "score=" not in outputs[0]
     blobs = list((tmp_path / "state" / "first" / "localization_advisory").rglob("*"))
     artifact_file = next(path for path in blobs if path.is_file())
     artifact = json.loads(artifact_file.read_text(encoding="utf-8"))
@@ -165,7 +182,8 @@ def test_task_start_uses_independent_dense_graph_retrieval(
         sources=(dense,),
         fused=(RankedSymbol(stable_id, 0.5, "semantic"),),
         provenance={stable_id: SimpleNamespace(
-            file_path="src/semantic.py", start_line=17
+            file_path="src/semantic.py", start_line=17,
+            qualified_name="semantic.handle", name="handle", label="Function",
         )},
         contributing_sources=lambda _stable_id: ("dense",),
         attribution_record=lambda: {
@@ -186,7 +204,9 @@ def test_task_start_uses_independent_dense_graph_retrieval(
     rendered = adapter.task_start_localization(commit=False)
 
     assert "src/semantic.py:17" in rendered
-    assert "retrieval:dense" in rendered
+    assert "semantic.handle" in rendered
+    assert "Function" in rendered
+    assert "semantic match" in rendered
     assert adapter.localization_delivery_metadata()["dedup_key"].startswith(
         "semantic-localization:"
     )
@@ -224,7 +244,7 @@ def test_stale_or_unreadable_graph_localization_falls_back_to_lexical(tmp_path):
     )
     rendered = adapter.task_start_localization()
     assert rendered.startswith("[GT_EVIDENCE:localization]")
-    assert "target.py:1 score=1 reasons=content_token:quasar" in rendered
+    assert "target.py:1 ~ quasar = True | matched quasar" in rendered
 
 
 def test_existing_stale_graph_is_never_used_for_localization(tmp_path, monkeypatch):
@@ -250,7 +270,7 @@ def test_existing_stale_graph_is_never_used_for_localization(tmp_path, monkeypat
 
     monkeypatch.setattr(evidence, "run_evidence_pipeline", reject_stale_graph)
     rendered = adapter.task_start_localization()
-    assert "target.py:1 score=1 reasons=content_token:quasar" in rendered
+    assert "target.py:1 ~ quasar = True | matched quasar" in rendered
     blobs = list((tmp_path / "state" / "task" / "localization_advisory").rglob("*"))
     artifact_file = next(path for path in blobs if path.is_file())
     artifact = json.loads(artifact_file.read_text(encoding="utf-8"))
@@ -841,37 +861,33 @@ def test_an_edit_takes_the_amend_path_and_the_journal_says_which(monkeypatch, tm
     assert isinstance(row["elapsed_ms"], int)
 
 
-def test_a_full_rebuild_names_the_reason_the_amend_was_refused(monkeypatch, tmp_path):
+def test_an_amend_refusal_is_named_and_never_rebuilds(monkeypatch, tmp_path):
     """A permanent silent fallback is how the amend path stayed dead.
 
     The real refresh_index_files runs here, refuses because no producer
-    declares the amend capability, and falls back -- which is the correct
-    behaviour on a certified binary, and must be visible as a reason rather
-    than as an ordinary rebuild.
+    declares the amend capability, and must NOT fall back: a rebuild cannot
+    restore amend capability, so the honest outcome is the named refusal with
+    the stale-marked parent kept. ensure_index_with_receipt is forbidden to
+    prove the full path is unreachable from a refusal.
     """
     adapter, _repo, _graph = _edited_adapter(tmp_path)
-    # Exercise the capability refusal specifically; missing parent artifacts
-    # now short-circuit before any producer discovery. Certification is not
-    # reached because the producer declares no amend capability in this fixture.
     _graph.with_suffix(".manifest.json").write_text("{}", encoding="utf-8")
-    rebuilt = tmp_path / "rebuilt.db"
-    rebuilt.write_bytes(b"new")
     monkeypatch.setattr(
         "gt_engine.indexer._producer_supports_amend_capability", lambda capability: False)
-    monkeypatch.setattr(
-        "gt_engine.indexer.ensure_index_with_receipt",
-        lambda root, **_kwargs: IndexBuildReceipt(
-            IndexBuildStatus.BUILT, graph_db=str(rebuilt),
-            graph_revision="b" * 64, analysis_state="complete",
-        ),
-    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a refused amend fell back to a full rebuild")
+
+    monkeypatch.setattr("gt_engine.indexer.ensure_index_with_receipt", forbidden)
 
     assert adapter.refresh_graph() is False
     assert adapter._graph_coordinator.wait_idle(timeout=10)
-    assert adapter.refresh_graph() is True
+    # Stays stale-marked: the refusal is an answer, and the next trigger
+    # retries the amend - the graph is never silently rebuilt behind it.
+    assert adapter.refresh_graph() is False
 
     row = _build_mode_rows(adapter)[-1]
-    assert row["mode"] == "full"
+    assert row["mode"] == "amend_refused"
     assert row["reason"] == "producer_lacks_amend_capability"
     assert row["amended"] == []
 
@@ -1049,6 +1065,60 @@ def test_frozen_graph_input_ignores_only_known_non_source_omissions(tmp_path):
         adapter._frozen_graph_input(source_missing)
 
 
+def test_frozen_graph_input_skips_producer_pruned_trees(tmp_path):
+    """Smoke-20: a git-tracked .vuepress/dist bundle entered the snapshot via
+    the unfiltered git path and froze every abs-repo rebuild (942 events).
+    The producer's walk prunes _SKIP_DIRS by name at any depth, so a path
+    under one is never producer input."""
+    from gt_engine.runtime_observation import FileState, capture_workspace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    snapshot = capture_workspace(repo)
+    bundle = FileState(
+        path="docs/src/.vuepress/dist/assets/js/12.5188bbc0.js",
+        kind="file", sha256="0" * 64, size=2_000_000, captured=None,
+    )
+    snapshot = replace(snapshot, files=(*snapshot.files, bundle), complete=False)
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state",
+        predicates=[], repo_root=str(repo),
+    )
+    request = adapter._frozen_graph_input(snapshot)
+    assert request.files == (("mod.py", (repo / "mod.py").read_bytes()),)
+
+
+def test_frozen_graph_input_verifies_hash_only_witness_bytes(tmp_path):
+    """A producer-input file above the capture cap is a hash-only witness;
+    a live read that still hashes to the snapshot digest satisfies the freeze."""
+    from gt_engine.runtime_observation import FileState, capture_workspace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    big = repo / "big.js"
+    big.write_text("const x = 1;\n", encoding="utf-8")
+    snapshot = capture_workspace(repo)
+    original = next(f for f in snapshot.files if f.path == "big.js")
+    uncaptured = replace(original, captured=None)
+    snapshot = replace(
+        snapshot,
+        files=tuple(uncaptured if f.path == "big.js" else f
+                    for f in snapshot.files),
+    )
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state",
+        predicates=[], repo_root=str(repo),
+    )
+    request = adapter._frozen_graph_input(snapshot)
+    assert ("big.js", big.read_bytes()) in request.files
+
+    # Same file, different live content -> digest mismatch -> honest miss.
+    big.write_text("const x = 2;\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="frozen_source_incomplete"):
+        adapter._frozen_graph_input(snapshot)
+
+
 def test_graph_rebuild_failure_keeps_graph_stale(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1153,3 +1223,258 @@ def test_provider_receipt_binds_exact_response_and_immediate_next_action(tmp_pat
     assert (a.store.root / row["response_blob"]).read_bytes() == encoded
     assert row["provider_response_id"] == "resp-1"
     assert row["immediate_next_actions"][0]["tool_name"] == "bash"
+
+
+def test_churn_steer_names_pending_check_command(tmp_path):
+    from gt_engine.persistent_plan.checks import CheckSpec
+
+    a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    a._check_specs = {
+        "check-1": CheckSpec(
+            check_id="check-1",
+            argv=("pytest", "-q", "tests/test_parser.py"),
+            cwd=".",
+            protocol="pytest",
+            requirement_ids=("row-1",),
+        )
+    }
+    a._pending_check_ids = {"check-1"}
+    text = a.build_churn_steer(25)
+    assert "pytest -q tests/test_parser.py" in text
+    assert "GT_CHURN_STEER" in text
+    assert "check-1" not in text
+
+
+def test_churn_steer_names_unmet_requirement_without_internal_ids(tmp_path):
+    from gt_engine.persistent_plan import PlanRow
+
+    a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    a._check_specs = {}
+    a._pending_check_ids = set()
+    a.persistent_plan = SimpleNamespace(
+        rows=[
+            PlanRow(
+                row_id="row-7",
+                text="Preserve multi-column array spans in the renderer.",
+                verification_command="npm test -- --grep spans",
+            )
+        ]
+    )
+    a.unmet_plan_rows = lambda: ("row-7",)
+    text = a.build_churn_steer(30)
+    assert "Preserve multi-column array spans" in text
+    assert "npm test -- --grep spans" in text
+    assert "row-7" not in text
+
+
+def test_churn_steer_falls_back_to_plain_redirect(tmp_path):
+    a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    a._check_specs = {}
+    a._pending_check_ids = set()
+    text = a.build_churn_steer(25)
+    assert "Return to the task now" in text
+    assert "terminates this run" in text
+
+
+class _FakeStartupFuture:
+    def __init__(self, receipt=None, exc=None):
+        self._receipt = receipt
+        self._exc = exc
+
+    def done(self):
+        return True
+
+    def result(self):
+        if self._exc is not None:
+            raise self._exc
+        return self._receipt
+
+
+def _receipt(**kwargs):
+    defaults = dict(
+        success=True, graph_db="graph.db", graph_revision="g1",
+        source_revision="rev0", elapsed_ms=5,
+        analysis_state="complete", embedding_state="ready",
+    )
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def _journal_rows(adapter):
+    return [
+        json.loads(line)
+        for line in adapter.store.path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def test_poll_startup_index_adopts_a_landed_graph(tmp_path):
+    adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    adapter.engine_state.bind_initial_source("rev0")
+    finalized = []
+    adapter._startup_index = _FakeStartupFuture(_receipt())
+    adapter._startup_finalize = lambda receipt: finalized.append(receipt.graph_db)
+
+    adapter._poll_startup_index()
+
+    assert adapter.graph_db == "graph.db"
+    assert adapter.engine_state.graph_current
+    assert adapter._startup_index is None
+    assert finalized == ["graph.db"]
+    events = [row.get("event") for row in _journal_rows(adapter)]
+    assert "initial_index_ready" in events
+
+
+def test_poll_startup_index_keeps_a_superseded_graph_as_amend_parent(tmp_path):
+    adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    adapter.engine_state.bind_initial_source("rev0")
+    adapter.engine_state.mark_paths_dirty(("src/a.py",), revision="rev1")
+    adapter._startup_index = _FakeStartupFuture(
+        _receipt(source_revision="rev0")
+    )
+
+    adapter._poll_startup_index()
+
+    assert adapter.graph_db is None
+    assert not adapter.engine_state.graph_current
+    assert adapter._unadopted_graph == ("graph.db", "g1")
+    ready = [row for row in _journal_rows(adapter)
+             if row.get("event") == "initial_index_ready"]
+    assert ready and ready[0].get("adopted") is False
+
+
+def test_poll_startup_index_journals_failure_without_abort(tmp_path):
+    adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    adapter.engine_state.bind_initial_source("rev0")
+    adapter._startup_index = _FakeStartupFuture(exc=RuntimeError("boom"))
+
+    adapter._poll_startup_index()
+
+    rows = _journal_rows(adapter)
+    events = [row.get("event") for row in rows]
+    assert "index_unavailable" in events
+    assert "startup_abort" not in events
+
+
+def test_poll_startup_index_signals_abort_on_required_graph(tmp_path):
+    class BenchmarkGraphRequired(Exception):
+        pass
+
+    adapter = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    adapter.engine_state.bind_initial_source("rev0")
+    adapter._startup_index = _FakeStartupFuture(
+        exc=BenchmarkGraphRequired("graph required")
+    )
+
+    adapter._poll_startup_index()
+
+    rows = _journal_rows(adapter)
+    abort = [row for row in rows if row.get("event") == "startup_abort"]
+    assert abort and "benchmark_graph_required" in abort[0].get("reason", "")
+    flag = adapter.engine_state.layout.state_root / "startup_abort.json"
+    assert flag.exists()
+    assert "benchmark_graph_required" in json.loads(flag.read_text())["reason"]
+
+
+def test_adopt_startup_plan_registers_new_predicates_as_unknown(tmp_path):
+    contract = extract_task_contract("Fix the parser.")
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path, predicates=[], contract=contract,
+    )
+    from gt_engine.miniswe_controller import Predicate
+    from gt_engine.persistent_plan import PlanInputs
+
+    inputs = SimpleNamespace(ledger=(), as_dict=lambda: {}, counts=lambda: {})
+    merged_predicates = (Predicate("pred-new", "new row"),)
+    merged_contract = SimpleNamespace(obligations=())
+
+    class FakeCompiled:
+        predicate_id = "pred-new"
+        obligation_id = "ob-1"
+        kind = "k"
+        scope = ()
+
+    import gt_engine.miniswe_integration as mi
+    original = mi.compile_obligation_predicates
+    mi.compile_obligation_predicates = lambda c: {"ob-1": FakeCompiled()}
+    try:
+        adapter.adopt_startup_plan(inputs, merged_contract, merged_predicates)
+    finally:
+        mi.compile_obligation_predicates = original
+
+    assert adapter.plan_inputs is inputs
+    assert "pred-new" in adapter.predicates
+    assert adapter._status["pred-new"].value == "UNKNOWN"
+    rows = _journal_rows(adapter)
+    assert any(row.get("event") == "contract.predicate_compiled"
+               and row.get("predicate_id") == "pred-new" for row in rows)
+
+
+def test_unbound_check_stays_pending_and_retries_on_new_revision(tmp_path):
+    """A check bound before its test file exists must not be discarded.
+
+    The drain used to drop specs whose test source did not resolve - so a
+    bound check whose test the agent had not written yet could never run.
+    It now stays pending, journals once, skips cheaply while the revision is
+    unchanged, and retries (then executes) once the workspace moves.
+    """
+    os.environ["GT_VERIFY_EXECUTE"] = "1"
+    try:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "src").mkdir()
+        (repo / "src" / "lib.py").write_text("x = 1\n", encoding="utf-8")
+        adapter = MiniSweAdapter(
+            task_id="task", state_dir=tmp_path / "state",
+            repo_root=str(repo), predicates=[],
+        )
+        adapter.engine_state.bind_initial_source("rev0")
+        adapter.repository_revision = "rev0"
+        from gt_engine.persistent_plan.checks import CheckSpec
+
+        spec = CheckSpec.from_dict(
+            {"argv": ["pytest", "tests/test_new.py"], "cwd": ".",
+             "requirement_ids": ["r1"]},
+            str(repo),
+        )
+        adapter._check_specs = {spec.check_id: spec}
+        adapter._pending_check_ids = {spec.check_id}
+        calls = []
+
+        class Env:
+            def execution_env(self):
+                return lambda *a, **k: None
+
+            def execute(self, payload, **kwargs):
+                calls.append(payload)
+                return {"returncode": 0, "output": "1 passed",
+                        "extra": {"capture_complete": True}}
+
+        adapter.drain_plan_checks(Env())
+        # Unbound: still pending, journaled once, nothing executed.
+        assert spec.check_id in adapter._pending_check_ids
+        assert not calls
+        rows = _journal_rows(adapter)
+        assert sum(
+            1 for row in rows
+            if row.get("event") == "plan_check_binding_pending"
+            and row.get("reason") == "test_source_not_bound"
+        ) == 1
+        # Same revision: deterministic-identical outcome -> skip, no re-journal.
+        adapter.drain_plan_checks(Env())
+        assert sum(
+            1 for row in _journal_rows(adapter)
+            if row.get("event") == "plan_check_binding_pending"
+        ) == 1
+        # The test file arrives: new revision, the spec retries and executes.
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_new.py").write_text(
+            "def test_x():\n    assert True\n", encoding="utf-8"
+        )
+        adapter.engine_state.mark_paths_dirty(("tests/test_new.py",), revision="rev1")
+        adapter.repository_revision = "rev1"
+        adapter.drain_plan_checks(Env())
+        assert calls, "the rebound spec never executed"
+        assert spec.check_id not in adapter._pending_check_ids
+    finally:
+        os.environ.pop("GT_VERIFY_EXECUTE", None)
