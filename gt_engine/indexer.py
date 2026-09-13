@@ -34,7 +34,12 @@ from pathlib import Path
 
 from .engine_state import RuntimeLayout
 from .graph_coordinator import GraphBuildArtifact
-from .repository_identity import RepositoryHistory, repository_history
+from .repository_identity import (
+    RUNTIME_GENERATED_DIRS,
+    RepositoryHistory,
+    git_visible_paths,
+    repository_history,
+)
 
 # Extensions gt-index parses (tree-sitter structural coverage). A root with at
 # least one of these is a code repository worth indexing.
@@ -199,11 +204,38 @@ def _source_paths(root: Path, excluded_roots: tuple[Path, ...] = (),
         resolved = path.resolve()
         return any(resolved == target or target in resolved.parents for target in excluded_roots)
 
+    # The manifest's file domain is the workspace snapshot's: the paths Git
+    # reports. A plain walk additionally picks up gitignored and
+    # runtime-artifact paths (.pytest_cache/README.md, .pytest_cache/.gitignore)
+    # that the frozen build input can never reproduce -- run 34760986248
+    # failed all 23 LSP schedules on exactly that asymmetry. Roots that are
+    # not work-tree toplevels keep the walk.
+    root_path = Path(root).resolve()
+    git_paths = git_visible_paths(root_path)
+    if git_paths is not None:
+        seen = 0
+        for path in sorted(git_paths):
+            if excluded(path):
+                continue
+            if any(part in _SKIP_DIRS for part in path.relative_to(root_path).parts):
+                continue
+            seen += 1
+            if scan_limit is not None and seen > scan_limit:
+                raise SourceDiscoveryIncomplete("source_discovery_limit_exceeded")
+            if path.is_file() and is_producer_input(path):
+                yield path
+        return
+
+    # The non-git walk's prune set is the union of both contracts: the
+    # snapshot's walk skips RUNTIME_GENERATED_DIRS and .gt-state, then the
+    # freeze applies _SKIP_DIRS to what survives -- so the manifest sees a
+    # file only when neither set names it.
+    walk_skip = _SKIP_DIRS | RUNTIME_GENERATED_DIRS | frozenset({".gt-state"})
     seen = 0
-    for directory, dirnames, filenames in os.walk(root):
+    for directory, dirnames, filenames in os.walk(root_path):
         base = Path(directory)
         dirnames[:] = sorted(d for d in dirnames
-                             if d not in _SKIP_DIRS and not excluded(base / d))
+                             if d not in walk_skip and not excluded(base / d))
         seen += len(dirnames)
         if scan_limit is not None and seen > scan_limit:
             raise SourceDiscoveryIncomplete("source_discovery_limit_exceeded")
@@ -220,7 +252,7 @@ def _source_paths(root: Path, excluded_roots: tuple[Path, ...] = (),
 
 def source_manifest_digest(root: str | Path, *, excluded_roots: tuple[Path, ...] = ()) -> str:
     """Hash sorted, length-delimited source path and file-byte identities."""
-    root_path = Path(root)
+    root_path = Path(root).resolve()
     records: list[tuple[str, int, str]] = []
     for path in _source_paths(root_path, excluded_roots):
         relative = path.relative_to(root_path).as_posix()
@@ -1608,7 +1640,7 @@ def _ensure_index_unlocked(root: str, *, state_dir: str | None = None,
                 frozen = Path(staging)
                 _freeze_history(Path(root), frozen, reuse_key.history)
                 for source in _source_paths(Path(root), excluded_roots):
-                    target = frozen / source.relative_to(root)
+                    target = frozen / source.relative_to(Path(root).resolve())
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source, target)
                 if source_manifest_digest(frozen) != reuse_key.source_manifest_sha256:

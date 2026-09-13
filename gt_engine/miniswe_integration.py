@@ -2779,7 +2779,7 @@ class MiniSweAdapter(GroundtruthController):
         except Exception as exc:  # noqa: BLE001 - a failed schedule is data
             receipt = {
                 "terminal": True, "status": "failed",
-                "reason": f"schedule_exception:{type(exc).__name__}",
+                "reason": f"schedule_exception:{type(exc).__name__}:{str(exc)[:160]}",
                 "publishable": False,
                 "source_revision": request.source_revision,
                 "input_graph_revision": base.graph_revision,
@@ -3127,7 +3127,11 @@ class MiniSweAdapter(GroundtruthController):
             repository_snapshot_sha256,
         )
 
-        from .indexer import _certify_published_graph, source_manifest_digest
+        from .indexer import (
+            _certify_published_graph,
+            _source_paths,
+            source_manifest_digest,
+        )
 
         base_path = Path(base.graph_path).resolve()
         valid, reason = _certify_published_graph(
@@ -3151,7 +3155,26 @@ class MiniSweAdapter(GroundtruthController):
             target.write_bytes(payload)
         base_manifest = json.loads(base_path.with_suffix(".manifest.json").read_text(encoding="utf-8"))
         if source_manifest_digest(source) != base_manifest.get("source_manifest_sha256"):
-            raise ValueError("lsp_source_input_mismatch")
+            # The manifest stores only the digest, so re-walk the live root to
+            # name the disagreement. Twenty-three bare ValueError rows cost
+            # run 34760986248 its diagnosis.
+            have = {
+                path.relative_to(source).as_posix()
+                for path in _source_paths(source)
+            }
+            live_root = Path(self.repo_root).resolve()
+            want = {
+                path.relative_to(live_root).as_posix()
+                for path in _source_paths(
+                    live_root,
+                    tuple(self.engine_state.layout.excluded_roots),
+                )
+            }
+            raise ValueError(
+                f"lsp_source_input_mismatch:"
+                f"expected_only={sorted(want - have)[:8]}:"
+                f"materialized_only={sorted(have - want)[:8]}"
+            )
         if self._lsp_scheduler is None:
             self._lsp_scheduler = LSPPromotionScheduler()
         promotion_request = LSPPromotionRequest(

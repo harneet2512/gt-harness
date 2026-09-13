@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,65 @@ def is_untracked_runtime_artifact(path: str) -> bool:
     """
     return any(part in RUNTIME_GENERATED_DIRS
                for part in path.replace("\\", "/").split("/")[:-1])
+
+
+def git_visible_paths(root: Path) -> tuple[Path, ...] | None:
+    """Files Git reports under ``root``: tracked plus untracked-but-visible.
+
+    Untracked runtime artifacts are not source identity and are dropped here,
+    mirroring the snapshot contract exactly. ``None`` when ``root`` is not a
+    work-tree toplevel or Git cannot answer; callers fall back to a
+    filesystem walk.
+    """
+    resolved = Path(root).resolve()
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(resolved), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+        )
+        if Path(top.stdout.strip()).resolve() != resolved:
+            return None
+        tracked = subprocess.run(
+            [
+                "git", "-C", str(resolved), "ls-files", "-z", "--cached",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=8,
+        )
+        untracked = subprocess.run(
+            [
+                "git", "-C", str(resolved), "ls-files", "-z",
+                "--others", "--exclude-standard",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=8,
+        )
+        tracked_values = tracked.stdout.decode(
+            "utf-8", "surrogateescape"
+        ).split("\0")
+        untracked_values = untracked.stdout.decode(
+            "utf-8", "surrogateescape"
+        ).split("\0")
+        visible_untracked = (
+            value
+            for value in untracked_values
+            if value
+            and not is_untracked_runtime_artifact(value)
+        )
+        return tuple(
+            resolved / value
+            for value in (*tracked_values, *visible_untracked)
+            if value and os.path.lexists(resolved / value)
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 @dataclass(frozen=True, slots=True)

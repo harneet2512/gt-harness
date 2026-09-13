@@ -1,8 +1,10 @@
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from gt_engine.indexer import _SKIP_DIRS, _source_paths, is_producer_input
 from gt_engine.miniswe_integration import MiniSweAdapter
 from gt_engine.runtime_observation import capture_workspace
 
@@ -122,3 +124,54 @@ def test_producer_retains_real_cochange_history(tmp_path):
     with sqlite3.connect(result.graph_db) as connection:
         rows = connection.execute("SELECT * FROM cochanges").fetchall()
     assert rows, "the build discarded eligible Git co-change history"
+
+
+def test_source_manifest_domain_matches_workspace_snapshot(tmp_path):
+    """_source_paths enumerates exactly the files the freeze can reproduce.
+
+    The manifest digest and the frozen build input must name the same file
+    set: paths Git reports. .pytest_cache/{README.md,.gitignore} are
+    producer-input names on disk but runtime artifacts; a gitignored
+    local_settings.py is producer-input but invisible to the snapshot. When
+    the domains diverged, every LSP schedule failed
+    lsp_source_input_mismatch (run 34760986248, 23/23 attempts).
+    """
+    root, git = repository(tmp_path)
+    cache = root / ".pytest_cache"
+    cache.mkdir()
+    (cache / "README.md").write_text("# pytest cache\n")
+    (cache / ".gitignore").write_text("# Created by pytest automatically.\n*\n")
+    (root / "local_settings.py").write_text("SECRET = 1\n")
+    (root / ".gitignore").write_text("local_settings.py\n")
+    (root / "scratch.py").write_text("# untracked but visible\n")
+
+    snapshot = capture_workspace(root)
+    want = {
+        item.path for item in snapshot.files
+        if item.kind == "file" and is_producer_input(item.path)
+        and not any(part in _SKIP_DIRS for part in Path(item.path).parts)
+    }
+    have = {
+        path.relative_to(root).as_posix()
+        for path in _source_paths(root)
+    }
+    assert have == want
+    assert "scratch.py" in have
+    assert ".gitignore" in have
+    assert not any(".pytest_cache" in p or p == "local_settings.py" for p in have)
+
+
+def test_source_manifest_falls_back_to_walk_outside_git(tmp_path):
+    """A non-git root keeps the filesystem walk, with the snapshot's
+    runtime-artifact pruning so the freeze domain still matches."""
+    root = tmp_path / "plain"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.py").write_text("def a(): return 1\n")
+    cache = root / ".pytest_cache"
+    cache.mkdir()
+    (cache / "README.md").write_text("# pytest cache\n")
+    have = {
+        path.relative_to(root).as_posix()
+        for path in _source_paths(root)
+    }
+    assert have == {"src/a.py"}

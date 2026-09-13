@@ -223,3 +223,44 @@ def test_schedule_exception_is_terminal_journaled_data(
         assert adapter.engine_state.graph_current
     finally:
         adapter.close_graph_lifecycle()
+
+
+def test_schedule_exception_terminal_preserves_the_reason(
+    tmp_path, monkeypatch
+) -> None:
+    """The receipt must carry the exception's message, not only its type.
+
+    Run 34760986248 journaled 23 rows of ``schedule_exception:ValueError``
+    with the message discarded -- an undiagnosable paid failure.
+    """
+    import json
+
+    adapter, live = _adapter_with_live(tmp_path)
+    monkeypatch.setattr(
+        adapter, "_frozen_graph_input",
+        lambda snapshot: _request(adapter.engine_state.source_revision),
+    )
+
+    def mismatch(request, base):
+        raise ValueError(
+            "lsp_source_input_mismatch:"
+            "expected_only=['.pytest_cache/README.md']:materialized_only=[]"
+        )
+
+    monkeypatch.setattr(adapter, "_schedule_lsp_candidate", mismatch)
+    adapter._latest_workspace_snapshot = SimpleNamespace()
+    try:
+        adapter._maybe_schedule_lsp_promotion()
+        terminal = [
+            row for row in _journal_events(adapter)
+            if row["event"] == "lsp_promotion_terminal"
+        ]
+        receipt = json.loads(
+            (adapter.store.root / "lsp_receipts"
+             / f"{terminal[-1]['artifact_sha256']}.json").read_text()
+        )
+        assert receipt["reason"].startswith("schedule_exception:ValueError:")
+        assert "lsp_source_input_mismatch" in receipt["reason"]
+        assert ".pytest_cache/README.md" in receipt["reason"]
+    finally:
+        adapter.close_graph_lifecycle()

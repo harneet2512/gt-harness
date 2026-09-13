@@ -24,7 +24,7 @@ from pathlib import Path
 from .repository_identity import (
     RepositoryHistory,
     canonical_repository_bytes,
-    is_untracked_runtime_artifact,
+    git_visible_paths,
     repository_history,
 )
 
@@ -248,56 +248,8 @@ def capture_workspace(
     if not resolved.is_dir():
         omissions.append("repository_root_missing")
     else:
-        git_paths: tuple[Path, ...] | None = None
-        try:
-            top = subprocess.run(
-                ["git", "-C", str(resolved), "rev-parse", "--show-toplevel"],
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=8,
-            )
-            if Path(top.stdout.strip()).resolve() == resolved:
-                tracked = subprocess.run(
-                    [
-                        "git", "-C", str(resolved), "ls-files", "-z", "--cached",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    timeout=8,
-                )
-                untracked = subprocess.run(
-                    [
-                        "git", "-C", str(resolved), "ls-files", "-z",
-                        "--others", "--exclude-standard",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    timeout=8,
-                )
-                tracked_values = tracked.stdout.decode(
-                    "utf-8", "surrogateescape"
-                ).split("\0")
-                untracked_values = untracked.stdout.decode(
-                    "utf-8", "surrogateescape"
-                ).split("\0")
-                visible_untracked = (
-                    value
-                    for value in untracked_values
-                    if value
-                    and not is_untracked_runtime_artifact(value)
-                )
-                git_paths = tuple(
-                    resolved / value
-                    for value in (*tracked_values, *visible_untracked)
-                    if value and os.path.lexists(resolved / value)
-                )
-        except (OSError, subprocess.SubprocessError):
-            git_paths = None
-
-        if git_paths is None:
+        paths = git_visible_paths(resolved)
+        if paths is None:
             candidates: list[Path] = []
             for dirpath, dirnames, filenames in os.walk(
                 resolved, followlinks=False
@@ -314,8 +266,6 @@ def capture_workspace(
                 )
                 candidates.extend(base / name for name in sorted(filenames))
             paths = tuple(candidates)
-        else:
-            paths = git_paths
 
         for path in paths:
             if any(path.resolve() == target or target in path.resolve().parents
