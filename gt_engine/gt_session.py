@@ -419,7 +419,11 @@ class GTSession:
                 unit_id=catalog.content_sha256,
                 supersession_key="select_catalog:task_start",
             )],
-            iteration=0,
+            # The offer can be deferred past the first request when the graph
+            # is not ready at bootstrap; the delivery must carry the CURRENT
+            # boundary iteration or the auditor sees it join a request it was
+            # not admitted for (treatment_delivery_late on every deferred run).
+            iteration=int(getattr(self._engine, "iteration", 0)),
             action_index=0,
         )
         if not batch.context_additions:
