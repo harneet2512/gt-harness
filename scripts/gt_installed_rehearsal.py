@@ -15,6 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from gt_engine.runtime_observation import execution_evidence_model_line
+
 REHEARSAL_CHECK = "python3 -B -m unittest -v test_calculator.py"
 
 
@@ -687,12 +689,22 @@ async def run(args) -> dict:
                 blob = (state / "execution_evidence" / f"{row['artifact_sha256']}.json").read_bytes()
                 payload = json.loads(blob)
                 raw = (state / row["raw_blob"]).read_bytes()
-                admitted = []
-                for message in handler.requests[request_index].get("messages", []):
-                    content = str(message.get("content") or "")
-                    if "[GT_EXECUTION_EVIDENCE]\n" in content:
-                        suffix = content.split("[GT_EXECUTION_EVIDENCE]\n", 1)[1]
-                        admitted.append(json.JSONDecoder().raw_decode(suffix)[0])
+                # The model-facing delivery carries the prose line rendered
+                # from the same payload fields - not the canonical JSON, which
+                # the model could not act on. Rebuild the exact line through
+                # the shared renderer and bind it into the request.
+                expected_line = execution_evidence_model_line(
+                    command=command,
+                    kind=str(payload.get("kind") or ""),
+                    outcome=str(payload.get("outcome") or ""),
+                    returncode=payload.get("returncode"),
+                    observed_test_outcome=str(payload.get("observed_test_outcome") or ""),
+                )
+                expected_block = "[GT_EXECUTION_EVIDENCE]\n" + expected_line
+                admitted = any(
+                    expected_block in str(message.get("content") or "")
+                    for message in handler.requests[request_index].get("messages", [])
+                )
                 chain_valid &= (
                     hashlib.sha256(blob).hexdigest() == row["artifact_sha256"]
                     and payload["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()
@@ -700,7 +712,7 @@ async def run(args) -> dict:
                     and payload["protocol"] == "unittest"
                     and payload["raw_output_sha256"] == hashlib.sha256(raw).hexdigest()
                     and payload["raw_output_bytes"] == len(raw)
-                    and payload in admitted
+                    and admitted
                 )
             receipt["execution_evidence_verified"] = bool(
                 chain_valid and checks[0]["repository_revision"] != checks[1]["repository_revision"]

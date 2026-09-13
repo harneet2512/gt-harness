@@ -199,6 +199,37 @@ def _is_utf8(payload: bytes) -> bool:
         return False
 
 
+def execution_evidence_model_line(
+    *,
+    command: str,
+    kind: str,
+    outcome: str,
+    returncode: int | None,
+    observed_test_outcome: str = "",
+) -> str:
+    """The model-facing execution-evidence line - the only supported render.
+
+    Shipping the canonical JSON gave the model sha256s it could not act on
+    (77/690 consumed on smoke-20), so the delivery carries this prose line
+    while the journal and blob keep the canonical artifact. Auditors rebuild
+    the line from the stored payload rather than decoding JSON from the
+    request; both sides must render through this one function.
+    """
+    outcome_word = {
+        "pass": "passed", "fail": "failed", "timeout": "timed out",
+        "interrupted": "interrupted", "env_fail": "could not run (environment)",
+        "unknown": "result unclear",
+    }.get(outcome, outcome)
+    kind_word = {"test": "test run", "build": "build"}.get(kind, kind or "run")
+    line = (
+        f"{command or 'command'} — {kind_word} {outcome_word}"
+        + (f" (exit {returncode})" if returncode is not None else "")
+    )
+    if observed_test_outcome:
+        line += f"; tests: {observed_test_outcome}"
+    return line
+
+
 def capture_workspace(
     root: str | Path, *, excluded_roots: tuple[str | Path, ...] = ()
 ) -> WorkspaceSnapshot:
