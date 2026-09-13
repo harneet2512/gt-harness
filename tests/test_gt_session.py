@@ -1211,6 +1211,226 @@ def test_promoted_edges_and_tombstones_are_both_reported(tmp_path):
     )
 
 
+_DENSE_REFUSAL = {
+    "event": "dense_index_ready", "query_ready": False,
+    "reason": "RuntimeError:graph_snapshot_not_current",
+}
+
+
+def test_query_refusals_never_downgrade_a_measured_index(tmp_path):
+    """The paid-run defect: a healthy index misread from its last row.
+
+    The journal held dense_index_ready query_ready=true receipts from a
+    515-document index serving real results, then query_ready=false rows
+    stamped RuntimeError:graph_snapshot_not_current - the hybrid query path
+    refusing to answer while the graph was mid-rebuild, which is fail-closed
+    query behaviour and says nothing about the index. Last-row-wins read
+    those refusals as the verdict and reported DEGRADED.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "dense_index_ready", "query_ready": True,
+         "document_count": 515, "query_result_count": 4},
+        _DENSE_REFUSAL, dict(_DENSE_REFUSAL), dict(_DENSE_REFUSAL),
+    ])
+
+    assert rows["dense_retrieval"] == (
+        "WORKING", "dense_index_ready_query_ready"
+    )
+
+
+def test_a_measurement_after_refusals_is_the_verdict(tmp_path):
+    """Refusals never count as measurements in either direction."""
+    rows = _capability_rows(tmp_path, [
+        dict(_DENSE_REFUSAL), _DENSE_READY,
+    ])
+
+    assert rows["dense_retrieval"] == (
+        "WORKING", "dense_index_ready_query_ready"
+    )
+
+
+def test_a_journal_of_only_refusals_is_never_queryable_not_working(tmp_path):
+    """Asked every time, measured never: the honest middle, with its own string."""
+    rows = _capability_rows(tmp_path, [
+        dict(_DENSE_REFUSAL), dict(_DENSE_REFUSAL),
+    ])
+
+    assert rows["dense_retrieval"] == (
+        "DEGRADED", "dense_index_never_queryable"
+    )
+
+
+def test_a_measured_not_ready_is_not_undone_by_later_refusals(tmp_path):
+    """A real measurement stays the verdict; refusals add nothing to it."""
+    rows = _capability_rows(tmp_path, [
+        {"event": "dense_index_ready", "query_ready": False,
+         "reason": "dense_query_not_ready"},
+        dict(_DENSE_REFUSAL),
+    ])
+
+    assert rows["dense_retrieval"] == (
+        "DEGRADED", "dense_index_ready_not_query_ready"
+    )
+
+
+def test_an_exception_reason_that_is_not_the_refusal_is_a_measurement(tmp_path):
+    """Exception-formatted reasons are measurements unless they are the refusal.
+
+    KeyError:'GT_DENSE_MODEL_DIR' is the exception path reporting a real
+    capability failure (run 33708231670) - the model never loaded. Only the
+    deliberate graph_snapshot_not_current refusal is not a measurement.
+    """
+    rows = _capability_rows(tmp_path, [
+        {"event": "dense_index_ready", "query_ready": False,
+         "reason": "KeyError:'GT_DENSE_MODEL_DIR'"},
+        dict(_DENSE_REFUSAL),
+    ])
+
+    assert rows["dense_retrieval"] == (
+        "DEGRADED", "dense_index_ready_not_query_ready"
+    )
+
+
+def test_a_no_mutation_pass_over_the_enriched_graph_is_not_the_verdict(tmp_path):
+    """The paid-run defect: newest-scheduled is not newest-adopted.
+
+    Promotion 1 enriched cb98d86cc07b and published 3190f8458641; promotion 2
+    then ran ON 3190f8458641, found zero new mutations (Python already
+    promoted, the JS server env-blocked), and correctly refused a pointless
+    republication. Ranking terminals by scheduled-revision order evaluated
+    that refusal - the newest scheduled terminal - and reported DEGRADED
+    while the adopted graph's lsp tier was populated. The terminal that
+    answers the tier question is the one whose receipt produced the adopted
+    graph: output_graph_sha256, the field the certifier binds.
+    """
+    published, refused = "1" * 64, "2" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "graph_publication", "graph_sha256": "cb98d86cc07b"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "cb98d86cc07b"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "cb98d86cc07b",
+         "artifact_blob": f"lsp_receipts/{published}.json"},
+        {"event": "graph_publication", "graph_sha256": "3190f8458641"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "3190f8458641"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "no_edge_mutations",
+         "input_graph_revision": "3190f8458641",
+         "artifact_blob": f"lsp_receipts/{refused}.json"},
+    ], {
+        published: {
+            "verified": 1, "corrected": 1, "selected": 5, "deleted": 0,
+            "output_graph_sha256": "3190f8458641",
+            "language_receipts": {"python": {"selection_complete": True}},
+        },
+        refused: {
+            "verified": 0, "corrected": 0, "selected": 0, "deleted": 0,
+            "output_graph_sha256": "3" * 64,
+        },
+    })
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:7_edges"
+    )
+
+
+def test_a_failed_promotion_on_the_adopted_base_is_still_failed(tmp_path):
+    """Selecting by adopted graph must not launder a failure into a pass."""
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "graph_publication", "graph_sha256": "g0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+        {"event": "lsp_promotion_terminal", "status": "failed",
+         "disposition": "certification_failed", "input_graph_revision": "g0"},
+    ])
+
+    assert rows["lsp_promotion"] == (
+        "FAILED", "terminal_failed:certification_failed"
+    )
+
+
+def test_a_fresh_rebuild_with_nothing_to_promote_is_honestly_degraded(tmp_path):
+    """Newest adopted is a non-lsp build and its promotion found no work.
+
+    No published receipt claims the newest adopted graph, so the honest
+    witness is the terminal that ran ON it: no_edge_mutations says the tier
+    is genuinely empty on that base, exactly as it did before the
+    adopted-graph read existed.
+    """
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "graph_publication", "graph_sha256": "g0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "obsolete", "input_graph_revision": "g0"},
+        {"event": "graph_publication", "graph_sha256": "g1"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "g1"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "no_edge_mutations", "input_graph_revision": "g1"},
+    ])
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:no_edge_mutations:1_of_2_obsolete"
+    )
+
+
+def test_a_receipt_without_an_output_sha_cannot_claim_the_graph(tmp_path):
+    """A published terminal proves it produced the graph or it does not.
+
+    Crediting the adopted graph to a receipt that cannot name its output is
+    the optimistic-on-unknown reading this reporter exists to refuse, so the
+    evaluation falls to the terminal that ran on the newest base.
+    """
+    published = "4" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "graph_publication", "graph_sha256": "g0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "g0",
+         "artifact_blob": f"lsp_receipts/{published}.json"},
+        {"event": "graph_publication", "graph_sha256": "g1"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "no_edge_mutations", "input_graph_revision": "g1"},
+    ], {
+        # An old receipt shape: yield counts present, no output_graph_sha256.
+        published: {
+            "verified": 5, "corrected": 0, "deleted": 0,
+            "language_receipts": {"python": {"selection_complete": True}},
+        },
+    })
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:no_edge_mutations"
+    )
+
+
+def test_no_terminal_for_the_adopted_graph_falls_back_to_schedule_order(tmp_path):
+    """Nothing produced or targeted the newest adopted graph: stay conservative."""
+    digest = "5" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "graph_publication", "graph_sha256": "g0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "g0",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+        # A later adoption no promotion ever produced or ran against.
+        {"event": "graph_publication", "graph_sha256": "g2"},
+    ], {
+        digest: {
+            "verified": 3, "corrected": 0, "deleted": 0,
+            "output_graph_sha256": "g1",
+            "language_receipts": {"python": {"selection_complete": True}},
+        },
+    })
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:published:3_edges"
+    )
+
+
 def test_a_stage_this_build_does_not_define_is_not_echoed(tmp_path):
     """The journal is inside the task container and the agent can write to it.
 

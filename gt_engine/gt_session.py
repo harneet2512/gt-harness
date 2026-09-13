@@ -1721,17 +1721,51 @@ class GTSession:
         store = getattr(self._engine, "store", None)
         journal = getattr(store, "path", None)
 
+        receipt_cache: dict[str, dict[str, object] | None] = {}
+
+        def _terminal_receipt(
+            row: dict[str, object],
+        ) -> dict[str, object] | None:
+            """The receipt blob a terminal row points at, or None.
+
+            The journal row carries only status and disposition; everything
+            that says what the promotion actually did - the yield counts, and
+            which graph revision it produced - lives in the receipt blob
+            _record_lsp_terminal writes beside the journal. None means
+            unreadable, which must not be reported as success: "we could not
+            tell" and "it worked" do not look alike anywhere in this function.
+
+            The blob directory comes from the journal's own parent rather than
+            store.root, because root is not in the EvidenceStore protocol
+            (request_history.py declares put_blob/blob_exists and no root) and
+            a conforming store without it would make every published run
+            report yield_unknown, failing closed but invisibly.
+
+            Reads are cached on the blob path: terminal selection reads the
+            same receipt the yield check does, and an unreadable blob should
+            cost one disk miss, not two.
+            """
+            relative = str(row.get("artifact_blob") or "")
+            if not relative or journal is None:
+                return None
+            if relative not in receipt_cache:
+                try:
+                    payload = _json.loads(
+                        (_Path(journal).parent / relative).read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - unreadable is unknown
+                    payload = None
+                receipt_cache[relative] = (
+                    payload if isinstance(payload, dict) else None
+                )
+            return receipt_cache[relative]
+
         def _promotion_yield(
             row: dict[str, object],
         ) -> tuple[int, int, bool | None, str] | None:
             """(promoted, tombstoned, selection_complete, limitation), or None.
-
-            The journal row carries only status and disposition; the counts
-            that say whether the tier was populated live in the terminal
-            receipt blob _record_lsp_terminal writes beside the journal. None
-            means unreadable, which must not be reported as success - the whole
-            point of this helper is that "we could not tell" and "it worked"
-            do not look alike.
 
             `verified`, `corrected`, and `selected` are the tier. The first two
             stamp resolution_method='lsp' at confidence 1.0 on a legacy CALLS
@@ -1749,23 +1783,9 @@ class GTSession:
             whose edges had just been demoted out of traversal - the same
             defect this yield check was added to prevent. It is real work and
             it is reported, but never in the number that decides WORKING.
-
-            The blob directory comes from the journal's own parent rather than
-            store.root, because root is not in the EvidenceStore protocol
-            (request_history.py declares put_blob/blob_exists and no root) and
-            a conforming store without it would make every published run
-            report yield_unknown, failing closed but invisibly.
             """
-            relative = str(row.get("artifact_blob") or "")
-            if not relative or journal is None:
-                return None
-            try:
-                receipt = _json.loads(
-                    (_Path(journal).parent / relative).read_text(encoding="utf-8")
-                )
-            except Exception:  # noqa: BLE001 - an unreadable receipt is unknown
-                return None
-            if not isinstance(receipt, dict):
+            receipt = _terminal_receipt(row)
+            if receipt is None:
                 return None
             promoted = sum(
                 int(receipt.get(key) or 0)
@@ -1821,12 +1841,35 @@ class GTSession:
 
         dense_state = CapabilityState.FAILED
         dense_evidence = "dense_index_receipt_absent"
+        # dense_index_ready rows are of two kinds and only one of them is a
+        # measurement of the index. A measurement row carries the receipt's
+        # own readiness verdict: query_ready true, or false with a named
+        # reason from a path that actually checked something -
+        # dense_query_not_ready and dense_index_not_ready from rank_documents,
+        # dense_refresh_incomplete from the wait-window refresh probe, and the
+        # {ExcType}:{msg} reasons the exception path stamps for real failures
+        # (KeyError:'GT_DENSE_MODEL_DIR', a model that will not load - all of
+        # which ARE capability failures). The exception path at
+        # miniswe_integration.py:4890 also journals the deliberate
+        # RuntimeError("graph_snapshot_not_current") refusal: the hybrid query
+        # path declining to answer while the graph is mid-rebuild. That row
+        # says the query was refused, nothing about the index, so it is not a
+        # measurement and must never overwrite one. It still happened, though:
+        # a journal of nothing but refusals is DEGRADED never-queryable, not
+        # WORKING-on-silence and not absent-receipt.
+        dense_measured = False
+        dense_refused = False
         lsp_state = CapabilityState.FAILED
         lsp_evidence = "promotion_never_scheduled"
         fail_open: dict[str, object] | None = None
         scheduled = False
         terminals: list[dict[str, object]] = []
         schedule_order: list[str] = []
+        # Every adopted graph, in journal order. The newest is the graph the
+        # tier question is about; a terminal is matched to it below either by
+        # what it produced (a published receipt's output_graph_sha256) or by
+        # what it ran on (input_graph_revision).
+        publications: list[dict[str, object]] = []
         try:
             for position, line in enumerate(
                 _Path(journal).read_text(encoding="utf-8").splitlines()
@@ -1852,11 +1895,29 @@ class GTSession:
                     fail_open = fail_open or row
                 elif event == "dense_index_ready":
                     if row.get("query_ready") is True:
+                        dense_measured = True
                         dense_state = CapabilityState.WORKING
                         dense_evidence = "dense_index_ready_query_ready"
+                    elif str(row.get("reason") or "").endswith(
+                        "graph_snapshot_not_current"
+                    ):
+                        # A query-time refusal: the hybrid path declined to
+                        # answer while the graph was mid-rebuild
+                        # (miniswe_integration.py:4870 raises it deliberately,
+                        # fail-closed). endswith rather than equality because
+                        # the stamped reason is {ExcType}:{msg} - the type is
+                        # incidental, the refusal is the message. It is not a
+                        # measurement of the index, so it never overwrites a
+                        # measured verdict - which is exactly what the
+                        # last-row-wins read did, reporting DEGRADED for a
+                        # 515-document index that had answered real queries.
+                        dense_refused = True
                     else:
+                        dense_measured = True
                         dense_state = CapabilityState.DEGRADED
                         dense_evidence = "dense_index_ready_not_query_ready"
+                elif event == "graph_publication":
+                    publications.append(row)
                 elif event == "lsp_promotion_scheduled":
                     scheduled = True
                     revision = str(row.get("graph_revision") or "")
@@ -1903,18 +1964,84 @@ class GTSession:
             lsp_evidence = "promotion_journal_unreadable"
             terminals = []
         else:
+            if not dense_measured and dense_refused:
+                # Every observation was the query path refusing while the
+                # graph was mid-rebuild: the index was asked and never once
+                # measured. That is neither absent-receipt FAILED nor
+                # WORKING-on-silence - it is the honest middle, and it gets
+                # its own string so a run that only ever refused cannot be
+                # mistaken for one that measured not-ready.
+                dense_state = CapabilityState.DEGRADED
+                dense_evidence = "dense_index_never_queryable"
             if terminals:
-                # The newest graph the run scheduled an enrichment for is the
-                # one whose fate the report is about; a terminal for an older
-                # revision describes a graph that has already been replaced.
-                newest = max(row["_rank"] for row in terminals)
-                current = [row for row in terminals if row["_rank"] == newest]
-                # Direct indexing, not .get(... or 0): every appended row is
-                # stamped one line earlier, so a missing stamp is a defect and
-                # should raise here rather than silently tie with the first
-                # revision. This is a function whose entire history is silent
-                # wrong answers.
-                terminal = max(current, key=lambda row: row["_position"])
+                terminal = None
+                adopted = (
+                    str(publications[-1].get("graph_sha256") or "")
+                    if publications else ""
+                )
+                if adopted:
+                    # The question this row answers is whether the lsp tier is
+                    # populated on the graph the run LAST adopted. Ranking
+                    # terminals by scheduled-revision order answers a
+                    # different question - which enrichment was scheduled
+                    # most recently - and a paid run showed the two diverge:
+                    # promotion 1 published the enriched graph (cb98d86cc07b
+                    # in, 3190f8458641 out), promotion 2 then ran against
+                    # 3190f8458641, found zero new mutations, and correctly
+                    # refused a pointless republication. Newest-scheduled
+                    # named that refusal the verdict and reported DEGRADED on
+                    # a graph whose lsp tier was populated. So the terminal
+                    # evaluated is the one that PRODUCED the newest adopted
+                    # graph when a published receipt says so
+                    # (output_graph_sha256, written by the producer beside
+                    # input_graph_sha256 and bound by the certifier at
+                    # indexer.py:2345) - its own yield decides. If no
+                    # published output matches, the newest graph is a
+                    # non-lsp build and the honest witness is the terminal
+                    # that ran ON it: its disposition says why the tier is
+                    # empty on that base (no_edge_mutations, obsolete,
+                    # not_publishable, failed) exactly as it does today.
+                    produced = [
+                        row for row in terminals
+                        if str(row.get("disposition") or "") == "published"
+                        and str(
+                            (_terminal_receipt(row) or {}).get(
+                                "output_graph_sha256"
+                            ) or ""
+                        ) == adopted
+                    ]
+                    if produced:
+                        terminal = max(
+                            produced, key=lambda row: row["_position"]
+                        )
+                    else:
+                        targeted = [
+                            row for row in terminals
+                            if str(row.get("input_graph_revision") or "")
+                            == adopted
+                        ]
+                        if targeted:
+                            terminal = max(
+                                targeted, key=lambda row: row["_position"]
+                            )
+                if terminal is None:
+                    # Fallbacks, each fail-closed. No graph_publication rows
+                    # at all, or no terminal targets the newest adopted one:
+                    # the tier's fate on that base was never attempted, so
+                    # keep the scheduled-order reading - the newest graph the
+                    # run scheduled an enrichment for is the one whose fate
+                    # the report is about; a terminal for an older revision
+                    # describes a graph that has already been replaced.
+                    newest = max(row["_rank"] for row in terminals)
+                    current = [
+                        row for row in terminals if row["_rank"] == newest
+                    ]
+                    # Direct indexing, not .get(... or 0): every appended row
+                    # is stamped one line earlier, so a missing stamp is a
+                    # defect and should raise here rather than silently tie
+                    # with the first revision. This is a function whose entire
+                    # history is silent wrong answers.
+                    terminal = max(current, key=lambda row: row["_position"])
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
                 if status == "no_op":
