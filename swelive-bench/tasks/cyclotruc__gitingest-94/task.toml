@@ -1,0 +1,54 @@
+schema_version = "1.3"
+artifacts = ["/logs/artifacts/model.patch"]
+[task]
+name = "swelive/cyclotruc__gitingest-94"
+description = "SWE-bench-Live Lite task cyclotruc__gitingest-94 (cyclotruc/gitingest PR 94): _parse_url rejects http:// repository URLs"
+authors = []
+keywords = ["swe-bench-live", "lite", "python"]
+[metadata]
+task_id = "cyclotruc__gitingest-94"
+display_title = "gitingest: accept http:// repository URLs in _parse_url"
+category = "bug_fix"
+language = "python"
+repository_url = "https://github.com/cyclotruc/gitingest"
+base_commit_hash = "2125765025c65fdd2aec89856bdc095dfb0fc826"
+pull_number = 94
+commit_url = "https://github.com/cyclotruc/gitingest/tree/2125765025c65fdd2aec89856bdc095dfb0fc826"
+dataset = "SWE-bench-Live/SWE-bench-Live"
+dataset_split = "lite"
+log_parser = "pytest"
+difficulty = { files = 1, hunks = 1, lines = 2 }
+[verifier]
+network_mode = "public"
+environment_mode = "separate"
+timeout_sec = 900.0
+
+[verifier.env]
+
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+workdir = "/testbed"
+
+[[verifier.collect]]
+command = "cd /testbed && mkdir -p /logs/artifacts && git config --global --add safe.directory '*' && { [ -d .git ] || { g=$(find . -maxdepth 2 -mindepth 2 -type d -name .git -print -quit); [ -n \"$g\" ] && cd \"${g%/.git}\"; }; } && { git add -N -A 2>/dev/null || true; git diff --binary 2125765025c65fdd2aec89856bdc095dfb0fc826 > /logs/artifacts/model.patch; }"
+timeout_sec = 300.0
+
+[agent]
+network_mode = "no-network"
+timeout_sec = 1800.0
+[environment]
+build_timeout_sec = 1800.0
+docker_image = "starryzhang/sweb.eval.x86_64.cyclotruc_1776_gitingest-94@sha256:0698979e10aee6ee1b46607d7c86e857218d03df3e62524abb00ea8bffeba394"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+mcp_servers = []
+workdir = "/testbed"
+
+[environment.env]
+[solution.env]

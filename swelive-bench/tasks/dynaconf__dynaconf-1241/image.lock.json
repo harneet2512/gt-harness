@@ -1,0 +1,15 @@
+{
+  "schema": "swelive-bench.image-lock/v1",
+  "instance_id": "dynaconf__dynaconf-1241",
+  "container_image": "starryzhang/sweb.eval.x86_64.dynaconf_1776_dynaconf-1241",
+  "tags": {
+    "latest": "sha256:c5930010f69611e20ec838903de6d76a8bd61284ffdfb6237fbbc36d881bfed8",
+    "0430": "sha256:c5930010f69611e20ec838903de6d76a8bd61284ffdfb6237fbbc36d881bfed8"
+  },
+  "container_digest": "sha256:c5930010f69611e20ec838903de6d76a8bd61284ffdfb6237fbbc36d881bfed8",
+  "docker_image_ref_used_in_task_toml": "starryzhang/sweb.eval.x86_64.dynaconf_1776_dynaconf-1241@sha256:c5930010f69611e20ec838903de6d76a8bd61284ffdfb6237fbbc36d881bfed8",
+  "compressed_size_bytes": 623555318,
+  "registry": "docker.io",
+  "verified_via": "https://hub.docker.com/v2/repositories/{ns}/{repo}/tags (HTTP 200, digest+full_size)",
+  "verified_at": "2025-tags-listing (last_updated 2025-05-01)"
+}

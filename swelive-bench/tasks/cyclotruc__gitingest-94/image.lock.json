@@ -1,0 +1,15 @@
+{
+  "schema": "swelive-bench.image-lock/v1",
+  "instance_id": "cyclotruc__gitingest-94",
+  "container_image": "starryzhang/sweb.eval.x86_64.cyclotruc_1776_gitingest-94",
+  "tags": {
+    "latest": "sha256:0698979e10aee6ee1b46607d7c86e857218d03df3e62524abb00ea8bffeba394",
+    "0430": "sha256:0698979e10aee6ee1b46607d7c86e857218d03df3e62524abb00ea8bffeba394"
+  },
+  "container_digest": "sha256:0698979e10aee6ee1b46607d7c86e857218d03df3e62524abb00ea8bffeba394",
+  "docker_image_ref_used_in_task_toml": "starryzhang/sweb.eval.x86_64.cyclotruc_1776_gitingest-94@sha256:0698979e10aee6ee1b46607d7c86e857218d03df3e62524abb00ea8bffeba394",
+  "compressed_size_bytes": 454302608,
+  "registry": "docker.io",
+  "verified_via": "https://hub.docker.com/v2/repositories/{ns}/{repo}/tags (HTTP 200, digest+full_size)",
+  "verified_at": "2025-tags-listing (last_updated 2025-05-01)"
+}

@@ -1,0 +1,54 @@
+schema_version = "1.3"
+artifacts = ["/logs/artifacts/model.patch"]
+[task]
+name = "swelive/dynaconf__dynaconf-1241"
+description = "SWE-bench-Live Lite task dynaconf__dynaconf-1241 (dynaconf/dynaconf PR 1241): @merge with comma separated values does not infer type"
+authors = []
+keywords = ["swe-bench-live", "lite", "python"]
+[metadata]
+task_id = "dynaconf__dynaconf-1241"
+display_title = "dynaconf: infer types for @merge comma-separated values"
+category = "bug_fix"
+language = "python"
+repository_url = "https://github.com/dynaconf/dynaconf"
+base_commit_hash = "105e6312f8ce3414ba0bebf88ad6e35b3953df38"
+pull_number = 1241
+commit_url = "https://github.com/dynaconf/dynaconf/tree/105e6312f8ce3414ba0bebf88ad6e35b3953df38"
+dataset = "SWE-bench-Live/SWE-bench-Live"
+dataset_split = "lite"
+log_parser = "pytest"
+difficulty = { files = 1, hunks = 1, lines = 7 }
+[verifier]
+network_mode = "no-network"
+environment_mode = "separate"
+timeout_sec = 900.0
+
+[verifier.env]
+
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+workdir = "/testbed"
+
+[[verifier.collect]]
+command = "cd /testbed && mkdir -p /logs/artifacts && git config --global --add safe.directory '*' && { [ -d .git ] || { g=$(find . -maxdepth 2 -mindepth 2 -type d -name .git -print -quit); [ -n \"$g\" ] && cd \"${g%/.git}\"; }; } && { git add -N -A 2>/dev/null || true; git diff --binary 105e6312f8ce3414ba0bebf88ad6e35b3953df38 > /logs/artifacts/model.patch; }"
+timeout_sec = 300.0
+
+[agent]
+network_mode = "no-network"
+timeout_sec = 1800.0
+[environment]
+build_timeout_sec = 1800.0
+docker_image = "starryzhang/sweb.eval.x86_64.dynaconf_1776_dynaconf-1241@sha256:c5930010f69611e20ec838903de6d76a8bd61284ffdfb6237fbbc36d881bfed8"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+mcp_servers = []
+workdir = "/testbed"
+
+[environment.env]
+[solution.env]
