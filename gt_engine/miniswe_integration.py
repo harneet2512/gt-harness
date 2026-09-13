@@ -2111,21 +2111,13 @@ class MiniSweAdapter(GroundtruthController):
             raw_blob=raw_blob,
             **payload,
         )
-        outcome_word = {
-            "pass": "passed", "fail": "failed", "timeout": "timed out",
-            "interrupted": "interrupted", "env_fail": "could not run (environment)",
-            "unknown": "result unclear",
-        }.get(artifact.outcome, artifact.outcome)
-        kind_word = {"test": "test run", "build": "build"}.get(
-            artifact.kind, artifact.kind or "run"
+        from .runtime_observation import execution_evidence_model_line
+
+        line = execution_evidence_model_line(
+            command=command, kind=artifact.kind, outcome=artifact.outcome,
+            returncode=artifact.returncode,
+            observed_test_outcome=artifact.observed_test_outcome,
         )
-        line = (
-            f"{command or 'command'} — {kind_word} {outcome_word}"
-            + (f" (exit {artifact.returncode})"
-               if artifact.returncode is not None else "")
-        )
-        if artifact.observed_test_outcome:
-            line += f"; tests: {artifact.observed_test_outcome}"
         return "[GT_EXECUTION_EVIDENCE]\n" + line
 
     def _poll_startup_index(self) -> None:
