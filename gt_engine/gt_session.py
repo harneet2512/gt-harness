@@ -467,7 +467,9 @@ class GTSession:
         )
         if lifecycle.stage is SelectCatalogStage.CERTIFIED:
             lifecycle.deliver(delivery_id=provider_request_id)
-            self.provider_request_admitted(delivery_ids)
+            self.provider_request_admitted(
+                delivery_ids, drain_action_queue=False
+            )
         self._record_select_catalog("provider_request_admitted")
 
     def accept_select_catalog(self, arguments: Any) -> tuple[str, ...]:
@@ -937,7 +939,9 @@ class GTSession:
         except (AttributeError, KeyError, OSError, TypeError, ValueError):
             return False
 
-    def provider_request_admitted(self, delivery_ids: tuple[str, ...]) -> None:
+    def provider_request_admitted(
+        self, delivery_ids: tuple[str, ...], *, drain_action_queue: bool = True
+    ) -> None:
         """Commit shipped latches only for bytes in an admitted final request."""
         identities = set(delivery_ids)
         contract_identity = self._pending_contract_identity or (
@@ -984,7 +988,12 @@ class GTSession:
         # Queued action evidence belongs to this exact decision. A provider
         # refusal never calls this method, so the same candidates remain
         # available for the request retry without being promoted to history.
-        self._queued_decision_candidates.clear()
+        # A bootstrap call (select_catalog offer) is NOT an agent decision:
+        # its request cannot carry queued action evidence, so draining here
+        # would silently drop evidence queued for the NEXT decision (the
+        # deferred-catalog rehearsal failure, run 34743962908).
+        if drain_action_queue:
+            self._queued_decision_candidates.clear()
 
     def queue_decision_candidates(
         self, candidates: list[GTDecisionCandidate] | tuple[GTDecisionCandidate, ...]
