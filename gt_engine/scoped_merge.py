@@ -54,13 +54,60 @@ _MERGEABLE_TABLES = (
 )
 
 # Columns holding rowids into ``nodes``; resolved through the merge's
-# node map when a row is inserted.
+# node map when a row is inserted. Verified against the v15.2-trust-tier
+# producer schema: edges.source_id/target_id, nodes.parent_id,
+# properties.node_id, assertions.test_node_id and
+# resolution_candidates.target_id are declared foreign keys;
+# resolution_callsites.source_id and assertions.target_node_id carry
+# node rowids without a declared constraint (12972/12972 join).
 _NODE_ROWID_REFS = {
     "edges": ("source_id", "target_id"),
     "properties": ("node_id",),
     "assertions": ("test_node_id", "target_node_id"),
     "nodes": ("parent_id",),
+    "resolution_callsites": ("source_id",),
+    "resolution_candidates": ("target_id",),
 }
+
+# Stable-string references into other mergeable tables. They are not
+# remapped (the identity is content-stable across revisions) but the
+# referenced row must exist in the merged graph - an insert or update
+# that would dangle is counted as divergence, never written. Declared on
+# the real schema: resolution_candidates.target_stable_id and
+# callsite_id are foreign keys; resolution_callsites.source_stable_id is
+# an undeclared reference into resolution_symbols.
+_CROSS_TABLE_REFS = {
+    "resolution_callsites": (
+        ("source_stable_id", "resolution_symbols", "stable_id"),
+        ("selected_target_stable_id", "resolution_symbols", "stable_id"),
+    ),
+    "resolution_candidates": (
+        ("callsite_id", "resolution_callsites", "callsite_id"),
+        ("target_stable_id", "resolution_symbols", "stable_id"),
+    ),
+}
+
+
+def _cross_refs_ok(
+    con: sqlite3.Connection,
+    table: str,
+    columns: list[str],
+    values: list[Any],
+) -> bool:
+    """Every stable-string reference must name a row the merge holds."""
+    for column, ref_table, ref_column in _CROSS_TABLE_REFS.get(table, ()):
+        if column not in columns:
+            continue
+        value = values[columns.index(column)]
+        if value is None:
+            continue
+        exists = con.execute(
+            f"SELECT 1 FROM {ref_table} WHERE {ref_column}=? LIMIT 1",
+            (value,),
+        ).fetchone()
+        if exists is None:
+            return False
+    return True
 
 
 @dataclass(slots=True)
@@ -78,15 +125,28 @@ class MergeResult:
 
 def _columns(con: sqlite3.Connection, schema: str, table: str) -> list[str]:
     return [
-        str(row[1]) for row in con.execute(f"PRAGMA {schema}.table_info({table})")
+        str(_decode(row[1])) for row in con.execute(f"PRAGMA {schema}.table_info({table})")
     ]
+
+
+def _decode(value: Any) -> Any:
+    """TEXT values arrive as bytes under ``text_factory=bytes``: restore
+    the str for any value that is valid UTF-8, keep the raw bytes for
+    content the producer stored that UTF-8 cannot represent. Used for
+    diffing only - writes copy attach-side and never decode at all."""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value
+    return value
 
 
 def _rows(
     con: sqlite3.Connection, schema: str, table: str
 ) -> dict[int, tuple[Any, ...]]:
     return {
-        int(row[0]): tuple(row[1:])
+        int(row[0]): tuple(_decode(value) for value in row[1:])
         for row in con.execute(f"SELECT rowid,* FROM {schema}.{table}")
     }
 
@@ -109,7 +169,7 @@ def _node_file_map(con: sqlite3.Connection, schema: str) -> dict[int, str]:
     if not _table_exists(con, schema, "nodes"):
         return {}
     return {
-        int(rowid): str(file_path or "")
+        int(rowid): str(_decode(file_path) or "")
         for rowid, file_path in con.execute(
             f"SELECT rowid, file_path FROM {schema}.nodes"
         )
@@ -195,6 +255,12 @@ def merge_lsp_candidate(
     merged = sqlite3.connect(
         f"file:{out.resolve().as_posix()}?mode=rwc", uri=True
     )
+    # Producer graphs store binary payloads in TEXT-affinity columns
+    # (properties.value is not always UTF-8). Reading with the default
+    # factory explodes on decode; bytes lets the diff normalize what it
+    # can and keep what it cannot - and writes go attach-side, so the
+    # merged file carries the producer's exact storage classes either way.
+    merged.text_factory = bytes
     try:
         merged.execute(f"ATTACH DATABASE '{base_uri}' AS base")
         merged.execute(f"ATTACH DATABASE '{candidate_uri}' AS cand")
@@ -204,7 +270,7 @@ def merge_lsp_candidate(
         nodes = _NodeSpace(merged)
 
         present = {
-            str(row[0])
+            str(_decode(row[0]))
             for row in merged.execute(
                 "SELECT name FROM cand.sqlite_master WHERE type='table'"
             )
@@ -251,7 +317,7 @@ def merge_lsp_candidate(
                     continue
                 if base_row is None:
                     new_id = _insert_remapped(
-                        merged, table, columns, cand_row, nodes,
+                        merged, table, columns, cand_row, rowid, nodes,
                         nodes.merged if table == "nodes" else merged_rows,
                         result,
                     )
@@ -267,10 +333,18 @@ def merge_lsp_candidate(
                 if merged_rows.get(rowid) != base_row:
                     result.skipped_diverged += 1
                     continue
-                assignments = ",".join(f"{col}=?" for col in columns)
+                if not _cross_refs_ok(
+                    merged, table, columns, list(cand_row)
+                ):
+                    result.skipped_diverged += 1
+                    continue
+                # Copy attach-side: the candidate's exact bytes and storage
+                # classes land verbatim, so binary payloads survive.
                 merged.execute(
-                    f"UPDATE {table} SET {assignments} WHERE rowid=?",
-                    (*cand_row, rowid),
+                    f"UPDATE {table} SET ({','.join(columns)}) = "
+                    f"(SELECT {','.join(columns)} FROM cand.{table} "
+                    f"WHERE rowid=?) WHERE rowid=?",
+                    (rowid, rowid),
                 )
                 if table == "nodes":
                     nodes.merged[rowid] = cand_row
@@ -312,10 +386,12 @@ def _rebuild_derived_fts(
     if not touched_tables:
         return 0
     rebuilt = 0
-    for name, sql in con.execute(
+    for raw_name, raw_sql in con.execute(
         "SELECT name, sql FROM sqlite_master WHERE sql LIKE '%fts5%'"
     ):
-        match = re.search(r"content\s*=\s*'?\"?(\w+)'?\"?", sql or "")
+        name = str(_decode(raw_name))
+        sql = str(_decode(raw_sql) or "")
+        match = re.search(r"content\s*=\s*'?\"?(\w+)'?\"?", sql)
         if match and match.group(1) in touched_tables:
             con.execute(f"INSERT INTO {name}({name}) VALUES('rebuild')")
             rebuilt += 1
@@ -327,6 +403,7 @@ def _insert_remapped(
     table: str,
     columns: list[str],
     cand_row: tuple[Any, ...],
+    cand_rowid: int,
     nodes: _NodeSpace,
     merged_rows: dict[int, tuple[Any, ...]],
     result: MergeResult,
@@ -340,8 +417,13 @@ def _insert_remapped(
     rowid names a renumbered stale row and the insert refuses. Returns
     the existing merged rowid when a ``stable_id`` match shows the node
     already exists, or None when the insert is refused.
+
+    When nothing needs remapping the row is copied attach-side, so the
+    producer's exact bytes and storage classes land verbatim; only a row
+    that actually had to be rewritten goes through parameter binding.
     """
     values = list(cand_row)
+    remapped = False
     if "id" in columns:
         id_idx = columns.index("id")
         explicit = values[id_idx]
@@ -355,6 +437,7 @@ def _insert_remapped(
             # keeps its content and takes a fresh rowid; the insert map
             # records the remap for anything referencing it.
             values[id_idx] = None
+            remapped = True
     for column in _NODE_ROWID_REFS.get(table, ()):
         if column not in columns:
             continue
@@ -364,6 +447,7 @@ def _insert_remapped(
             continue
         if ref in nodes.insert_map:
             values[idx] = nodes.insert_map[ref]
+            remapped = True
             continue
         if ref in nodes.cand and ref not in nodes.base:
             # The reference names a node the candidate itself inserted; if
@@ -374,6 +458,9 @@ def _insert_remapped(
         if not nodes.ref_ok(ref):
             result.skipped_diverged += 1
             return None
+    if not _cross_refs_ok(con, table, columns, values):
+        result.skipped_diverged += 1
+        return None
     if table == "nodes" and "stable_id" in columns:
         stable = values[columns.index("stable_id")]
         if stable:
@@ -381,11 +468,17 @@ def _insert_remapped(
             for merged_id, merged_row in nodes.merged.items():
                 if merged_row[stable_idx] == stable:
                     return merged_id
-    placeholders = ",".join("?" for _ in columns)
-    cursor = con.execute(
-        f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
-        values,
-    )
+    if not remapped:
+        cursor = con.execute(
+            f"INSERT INTO {table} SELECT * FROM cand.{table} WHERE rowid=?",
+            (cand_rowid,),
+        )
+    else:
+        placeholders = ",".join("?" for _ in columns)
+        cursor = con.execute(
+            f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
+            values,
+        )
     return int(cursor.lastrowid)
 
 
