@@ -122,7 +122,10 @@ jobs:
           expected = manifest["groundtruth"]
           assert info["schema"] == "gt-index.build.v1"
           assert info["complete"] is True
-          assert info["git_commit"] == os.environ["SOURCE_COMMIT"]
+          # The producer binary is bound to producer_build.source_commit, not
+          # to groundtruth.source_commit: a Python-only wheel patch can move
+          # the source pin without requiring a (non-reproducible) Go rebuild.
+          assert info["git_commit"] == expected["producer_build"]["source_commit"]
           assert info["go_toolchain"] == "go1.22.5"
           assert info["build_tags"] == expected["producer_build"]["build_tags"]
           assert info["graph_schema_version"] == "v15.2-trust-tier"
