@@ -1785,7 +1785,13 @@ def test_runtime_captures_one_multifile_transaction_and_invalidates_graph(
         index for index, row in enumerate(rows) if row["event"] == "graph_invalidated"
     )
     assert adapter.workspace_epoch == 1
-    assert adapter.graph_fresh is False
+    # The invalidation is the assertion; freshness depends on whether the
+    # transaction-boundary amend could run. With the real producer (Linux CI)
+    # the amend lands inside record_edit_transaction and the graph is already
+    # current again; without it the dirty paths stay masked for the next
+    # boundary. A stale marking with nothing masked is the only wrong state.
+    snapshot = adapter.engine_state.query_snapshot()
+    assert adapter.graph_fresh or snapshot.masked_paths or snapshot.omissions
     assert any(row["event"] == "graph_invalidated" for row in rows)
 
 
@@ -2235,6 +2241,14 @@ def test_runtime_hook_select_catalog_uses_admitted_transport_and_matching_action
     assert sum(row.get("event") == "provider_response" for row in rows) == 2
     assert adapter._usage["prompt_tokens"] == 6
     assert adapter._usage["completion_tokens"] == 2
+    # The bootstrap is an admitted wire attempt like any other: it commits a
+    # delivery, and the namespaced response id it binds must terminally
+    # confirm that delivery - not orphan it under a digest id.
+    bootstrap = [
+        d for d in adapter.deliveries if "-gt-internal-" in d.request_id
+    ]
+    assert len(bootstrap) == 1
+    assert all(adapter.terminal_confirmed(d.request_id) for d in adapter.deliveries)
 
 
 def test_select_catalog_deferred_offer_stamps_current_iteration(

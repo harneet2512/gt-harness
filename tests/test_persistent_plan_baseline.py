@@ -318,6 +318,13 @@ def test_real_agent_baseline_uses_its_task_environment(repo, tmp_path, monkeypat
         cwd=str(repo), state_dir=str(tmp_path / "state"), output=None,
         temperature=1.0, gt_off=False, wall_time_limit_seconds=1000,
     )
+    # build_agent returns while the initial index is still building on the
+    # worker; fresh plan inputs land through the owner-thread poll, exactly as
+    # they do on the first provider request in a real run.
+    future = adapter._startup_index
+    assert future is not None
+    assert future._event.wait(timeout=300)
+    adapter._poll_startup_index()
     baseline = adapter.plan_inputs.baseline
     assert baseline.captured
     assert agent.env.config.env["GT_PLAN_ROOT"] == str(adapter.store.root / "plan")

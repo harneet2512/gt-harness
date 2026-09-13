@@ -1540,6 +1540,12 @@ class MiniSweAdapter(GroundtruthController):
             ):
                 if predicate_id not in self.predicates:
                     continue
+                if self.predicate_status(predicate_id) is PredicateStatus.RED:
+                    # The channels are independent: a passing check discharges
+                    # the row's check obligation but cannot rewrite a live RED
+                    # semantic receipt -- a current failure hidden by a later
+                    # GREEN is exactly the precedence unmet_plan_rows enforces.
+                    continue
                 self.record_receipt(
                     predicate_id,
                     spec.command,
@@ -1628,6 +1634,8 @@ class MiniSweAdapter(GroundtruthController):
             row_id, ()
         ):
             if predicate_id not in self.predicates:
+                continue
+            if self.predicate_status(predicate_id) is PredicateStatus.RED:
                 continue
             self.record_receipt(
                 predicate_id,
@@ -3538,7 +3546,8 @@ class MiniSweAdapter(GroundtruthController):
         return tuple(sorted(set(affected)))
 
     def bind_provider_payload(
-        self, payload: Mapping[str, Any], *, commit: bool = True
+        self, payload: Mapping[str, Any], *, commit: bool = True,
+        request_id: str = "",
     ) -> ProviderDelivery | None:
         """Validate the exact provider-bound payload; commit it when asked.
 
@@ -3611,7 +3620,7 @@ class MiniSweAdapter(GroundtruthController):
         if request_sha256 != digest:
             raise RuntimeError("provider request CAS identity mismatch")
         self.iteration += 1
-        request_id = f"{self.task_id}-{self.iteration}-{digest[:16]}"
+        request_id = request_id or f"{self.task_id}-{self.iteration}-{digest[:16]}"
         suffix = self.provider_suffix()
         delivery = ProviderDelivery(
             request_id,
@@ -3974,11 +3983,11 @@ class MiniSweAdapter(GroundtruthController):
         provider responded; this join is the difference between attribution and
         a transcript substring guess.
 
-        ``request_id`` names the request this response answers when the call
-        never went through :meth:`bind_provider_payload` (GT-internal bootstrap
-        calls). Without it the row borrows ``_latest_delivery`` — the previous
-        agent request — and attributes this spend to a request that did not
-        carry it.
+        ``request_id`` names the request this response answers. GT-internal
+        bootstrap calls commit their delivery under the same task-scoped tag,
+        so passing it joins this row to *this* request; without it the row
+        borrows ``_latest_delivery`` — the previous agent request — and
+        attributes this spend to a request that did not carry it.
         """
         digest = ""
         response_blob = ""
@@ -4064,9 +4073,10 @@ class MiniSweAdapter(GroundtruthController):
     ) -> None:
         """Record a provider terminal failure symmetrically with a response.
 
-        ``request_id`` names the failed request when it never went through
-        :meth:`bind_provider_payload` (GT-internal bootstrap calls); without it
-        the failure would borrow the previous agent request's identity.
+        ``request_id`` names the failed request. GT-internal bootstrap calls
+        commit their delivery under the same task-scoped tag; a failure before
+        the commit has no delivery to join, and without the tag the row would
+        borrow the previous agent request's identity.
         """
         from .run_diagnostics import redact_secret_text
 

@@ -93,6 +93,16 @@ class ScriptedModel:
         return [{k: v for k, v in item.items() if k != "extra"} for item in messages]
 
     def _query(self, messages, **kwargs):
+        # GT-internal provider calls (catalog offer, persistent plan) hit the
+        # same wire as agent turns but are not agent actions: answer them from
+        # the request markers instead of consuming a scripted turn.
+        if kwargs.get("_gt_select_catalog") or kwargs.get("_gt_persistent_plan"):
+            return {"role": "assistant", "content": "",
+                    "extra": {"select_catalog_args": {},
+                              "response": {"model": "deepseek-v4-flash",
+                                           "usage": {"prompt_tokens": 5,
+                                                     "completion_tokens": 2}},
+                              "cost": 0.0}}
         self.index += 1
         return self.outputs[self.index]
 
@@ -225,8 +235,13 @@ def test_miniswe_gt_smoke_runs_to_submitted(tmp_path, monkeypatch):
     assert adapter.unmet_predicates, "an unbound suite must not certify the task"
     assert adapter.final_state()["verified"] is False
     assert adapter.contract_shipped is True
-    assert adapter.iteration == 6
-    assert len(adapter.deliveries) == 6
+    # Six scripted agent turns; a graph-present run may add GT-internal
+    # bootstrap deliveries (catalog offer), which commit on the same wire.
+    internal = [
+        d for d in adapter.deliveries if "-gt-internal-" in d.request_id
+    ]
+    assert len(adapter.deliveries) == 6 + len(internal)
+    assert adapter.iteration == len(adapter.deliveries)
     assert all(adapter.terminal_confirmed(d.request_id) for d in adapter.deliveries)
     # the edit bumped the workspace epoch -> stale receipts were invalidated
     assert adapter.workspace_epoch == 1
@@ -279,7 +294,11 @@ def test_task_start_localization_delivered_with_graph(tmp_path, monkeypatch):
     assert rendered.count("GT_TASK_CONTRACT") == 1
     loc_rows = [r for r in rows if r.get("event") == "evidence_delivery"
                 and r.get("evidence_type") == "localization"]
-    assert len(loc_rows) <= 1
+    # One task-start delivery, plus at most one drift re-rank: the scripted
+    # grep is an agent search, and the information need it expresses legitimately
+    # re-fires localization once under a certified graph (fire-once per
+    # (revision, drift) key, task ceiling MAX_LOCALIZATION_DELIVERIES).
+    assert len(loc_rows) <= 2
 
 
 def test_miniswe_gt_smoke_localization_requires_graph(tmp_path, monkeypatch):

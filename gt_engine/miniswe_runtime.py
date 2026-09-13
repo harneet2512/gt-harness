@@ -81,6 +81,14 @@ PROVIDER_VIEW_TOOL_OUTPUT_CHARS = 65_536
 
 _SUBMIT_REFUSED_OUTPUT = "submission withheld by the Groundtruth contract gate"
 
+# GT-internal provider calls (catalog offer, persistent plan) are real wire
+# attempts: they flow through the admitted transport and commit a delivery like
+# any other request. Their request identity is a stable task-scoped tag rather
+# than the payload digest, so the response/failure row, the delivery row and
+# the terminal census all join on the same readable id.
+_SELECT_CATALOG_REQUEST_TAG = "gt-internal-select-catalog"
+_PERSISTENT_PLAN_REQUEST_TAG = "gt-internal-persistent-plan"
+
 _VIEW_COMMANDS = frozenset({"cat", "sed", "less", "head", "tail", "nl", "bat"})
 
 # These typed queries require a certified graph. Native action snapshots
@@ -1141,7 +1149,20 @@ def install_runtime_hooks(
             **({"_gt_persistent_plan": True} if plan_request else {}),
         )
         try:
-            delivery = adapter.bind_provider_payload(payload)
+            # Internal calls bind one stable request identity end to end: the
+            # response/failure row carries the same tag, so the delivery's own
+            # id reaches the terminal census instead of being orphaned by a
+            # namespaced row it could never match.
+            internal_request_id = (
+                f"{adapter.task_id}-{_SELECT_CATALOG_REQUEST_TAG}"
+                if bootstrap_request
+                else f"{adapter.task_id}-{_PERSISTENT_PLAN_REQUEST_TAG}"
+                if plan_request
+                else ""
+            )
+            delivery = adapter.bind_provider_payload(
+                payload, request_id=internal_request_id
+            )
         except Exception:
             adapter.discard_pending_provider_deliveries(reason="request_receipt_error")
             raise
@@ -1244,13 +1265,13 @@ def install_runtime_hooks(
             model_id = response.get("model", "") if isinstance(response, dict) else ""
             adapter.bind_provider_response(
                 response, usage=usage, model=model_id, next_actions=(),
-                request_id=f"{adapter.task_id}-gt-internal-select-catalog",
+                request_id=f"{adapter.task_id}-{_SELECT_CATALOG_REQUEST_TAG}",
             )
             session.accept_select_catalog(captured["arguments"])
         except Exception as exc:  # noqa: BLE001 - selection is advisory
             adapter.bind_provider_failure(
                 exc,
-                request_id=f"{adapter.task_id}-gt-internal-select-catalog",
+                request_id=f"{adapter.task_id}-{_SELECT_CATALOG_REQUEST_TAG}",
             )
             session.fail_select_catalog(f"provider_error:{type(exc).__name__}")
         finally:
@@ -1329,7 +1350,7 @@ def install_runtime_hooks(
                 model_id = response.get("model", "") if isinstance(response, dict) else ""
                 adapter.bind_provider_response(
                     response, usage=usage, model=model_id, next_actions=(),
-                    request_id=f"{adapter.task_id}-gt-internal-persistent-plan",
+                    request_id=f"{adapter.task_id}-{_PERSISTENT_PLAN_REQUEST_TAG}",
                 )
                 finish_reason = response_finish_reason(response)
                 payload = parse_tool_arguments(response)
@@ -1346,7 +1367,7 @@ def install_runtime_hooks(
             try:
                 adapter.bind_provider_failure(
                     exc,
-                    request_id=f"{adapter.task_id}-gt-internal-persistent-plan",
+                    request_id=f"{adapter.task_id}-{_PERSISTENT_PLAN_REQUEST_TAG}",
                 )
             except Exception:  # noqa: BLE001
                 pass
