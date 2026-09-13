@@ -2237,6 +2237,100 @@ def test_runtime_hook_select_catalog_uses_admitted_transport_and_matching_action
     assert adapter._usage["completion_tokens"] == 2
 
 
+def test_select_catalog_deferred_offer_stamps_current_iteration(
+    tmp_path, monkeypatch
+):
+    """A catalog offer deferred past request-1 must join its own request.
+
+    prepare_select_catalog abstains while the graph is not ready and retries
+    on a later request. The admission used to stamp iteration=0 regardless,
+    so a deferred delivery joined request N carrying the stamp of request 1:
+    the auditor flagged treatment_delivery_late on every deferred run
+    (rehearsal 34738739640).
+    """
+    import sqlite3
+    from types import SimpleNamespace
+
+    from minisweagent.models.litellm_model import LitellmModel
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "service.py").write_text("def compute():\n    return 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    with sqlite3.connect(graph) as connection:
+        connection.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, file_path TEXT)")
+        connection.execute("INSERT INTO nodes(file_path) VALUES ('service.py')")
+    agent = FakeAgent()
+    agent.model = LitellmModel(
+        model_name="fixture/model", model_kwargs={}, cost_tracking="ignore_errors"
+    )
+    agent.env.execute = lambda action: {
+        "output": "ok", "returncode": 0, "exception_info": None}
+
+    class Message:
+        def __init__(self, tool_calls):
+            self.content, self.tool_calls = "", tool_calls
+        def model_dump(self):
+            return {"role": "assistant", "content": "", "tool_calls": self.tool_calls}
+
+    class Response:
+        def __init__(self, message, identity):
+            self.id, self.model = identity, "fixture/model"
+            self.usage = {"prompt_tokens": 3, "completion_tokens": 1}
+            self.choices = [SimpleNamespace(message=message, finish_reason="tool_calls")]
+        def model_dump(self, mode=None):
+            return {"id": self.id, "model": self.model, "usage": self.usage,
+                    "choices": [{"message": self.choices[0].message.model_dump()}]}
+
+    def completion(*, model, messages, tools, **kwargs):
+        tool_name = tools[0]["function"]["name"]
+        if tool_name == "select_catalog":
+            request = json.loads(messages[-1]["content"].splitlines()[0])
+            function = SimpleNamespace(name="select_catalog", arguments=json.dumps(
+                {"ids": [request["items"][0]["item_id"]]}
+            ))
+            return Response(Message([SimpleNamespace(id="catalog-call", function=function)]), "bootstrap")
+        function = SimpleNamespace(name="bash", arguments='{"command":"cat service.py"}')
+        return Response(Message([SimpleNamespace(id="bash-call", function=function)]), "executor")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr(agent.model, "_calculate_cost", lambda _: {"cost": 0.0})
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_TOKENS", "10000")
+    monkeypatch.setenv("GT_PROVIDER_RESERVED_OUTPUT_TOKENS", "100")
+    monkeypatch.setenv("GT_PROVIDER_CONTEXT_WINDOW_SOURCE", "fixture")
+    adapter = MiniSweAdapter(
+        task_id="select-deferred", state_dir=tmp_path / "state", predicates=[],
+        repo_root=repo, graph_db=str(graph), issue_text="Inspect service.py compute.",
+        requested_model="fixture/model", resolved_model="fixture/model",
+    )
+    adapter.record_repository_snapshot(rt.capture_workspace(repo), boundary="task_start")
+    session = _session(adapter)
+    install_runtime_hooks(agent, session)
+
+    # Graph not ready at the first request: the catalog abstains and the run
+    # ships request-1 without it.
+    adapter.graph_fresh = False
+    agent.model.query([{"role": "user", "content": adapter.issue_text}])
+    assert adapter.iteration == 1
+
+    # Graph lands before the second request: the deferred offer must stamp
+    # the boundary it actually joins, not the bootstrap boundary.
+    adapter.graph_fresh = True
+    agent.model.query([{"role": "user", "content": "next"}])
+
+    rows = [json.loads(line) for line in adapter.store.path.read_text(encoding="utf-8").splitlines()]
+    catalog_delivery = next(
+        row for row in rows
+        if row.get("event") == "evidence_delivery" and row.get("kind") == "select_catalog"
+    )
+    request = next(
+        row for row in rows
+        if row.get("event") == "provider_delivery"
+        and catalog_delivery["delivery_identity"] in (row.get("delivery_ids") or [])
+    )
+    assert request["iteration"] == catalog_delivery["iteration"] + 1
+
+
 def test_edit_turn_hands_the_producers_the_pre_edit_graph(monkeypatch, tmp_path):
     """The edit producers were handed no graph on the only turn they can fire.
 
