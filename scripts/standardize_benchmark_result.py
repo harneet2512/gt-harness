@@ -266,7 +266,7 @@ def _target_agent_dir(
 def standardize_result(
     *, root: Path, suite: str, task_id: str, source_sha: str
 ) -> dict[str, object]:
-    if suite not in {"terminal-bench-2", "deepswe"}:
+    if suite not in {"terminal-bench-2", "deepswe", "swelive"}:
         raise ValueError(f"unsupported runner suite: {suite}")
     if not task_id.strip():
         raise ValueError("task ID must be nonempty")
@@ -355,7 +355,11 @@ def standardize_result(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--suite", choices=("terminal-bench-2", "deepswe"), required=True)
+    parser.add_argument(
+        "--suite",
+        choices=("terminal-bench-2", "deepswe", "swelive"),
+        required=True,
+    )
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--source-sha", required=True)
     return parser

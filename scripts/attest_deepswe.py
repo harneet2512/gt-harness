@@ -7,20 +7,22 @@ import hashlib
 import json
 import math
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from gt_engine.feature_matrix import verify_matrix
 from gt_harness.runtime_receipts import verify_runtime_receipt
+from scripts.benchmark_suites import (
+    BenchmarkSuite,
+    load_suite,
+    select_stage_tasks,
+)
 from scripts.gt_audit import artifact_corpus_sha256, audit_digest_sha256
 from scripts.provider_preflight import load_route
 from scripts.smoke_stage import (
-    ALL_STAGE,
     GATE_STAGE,
-    GATE_TASK_ID,
-    REMAINDER_STAGE,
     named_task_ids,
-    select_stage_tasks,
 )
 from scripts.standardize_benchmark_result import (
     _failure_class,
@@ -29,11 +31,14 @@ from scripts.standardize_benchmark_result import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-CANONICAL_TASK_IDS = tuple(
-    json.loads(
-        (ROOT / "eval" / "deepswe_smoke20_v1.json").read_text(encoding="utf-8")
-    )["task_ids"]
-)
+# The default-suite canonical inventory, resolved through this module constant
+# so tests can narrow the cohort without rewriting the pinned manifest.
+CANONICAL_TASK_IDS = load_suite("deepswe").canonical_task_ids
+
+
+def _default_suite() -> BenchmarkSuite:
+    suite = load_suite("deepswe")
+    return replace(suite, canonical_task_ids=tuple(CANONICAL_TASK_IDS))
 
 
 def _object(path: Path) -> dict[str, Any]:
@@ -43,8 +48,20 @@ def _object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _task_name(value: object) -> str:
-    return str(value).split("__", 1)[0].rsplit("/", 1)[-1]
+def _task_name(value: object, canonical: set[str]) -> str:
+    # Pier records the task.toml [task].name ("org/task") in result.json and
+    # the trial dir as "<task>__<uuid>". Suite task ids may themselves
+    # contain "__" (swelive/cyclotruc__gitingest-94), so an unconditional
+    # split at the first "__" mangles them: resolve against the canonical
+    # inventory first, then strip one trailing "__<suffix>" only when the
+    # remainder is a canonical task.
+    name = str(value).rsplit("/", 1)[-1]
+    if name in canonical:
+        return name
+    base, sep, _ = name.rpartition("__")
+    if sep and base in canonical:
+        return base
+    return name
 
 
 def _integer(
@@ -137,11 +154,18 @@ def _total_cost(rows: list[dict[str, Any]], errors: list[str]) -> float:
 
 
 def attest_deepswe(
-    root: Path, *, source_sha: str, task_job_result: str, workflow_run_id: str
+    root: Path,
+    *,
+    source_sha: str,
+    task_job_result: str,
+    workflow_run_id: str,
+    suite: BenchmarkSuite | None = None,
 ) -> dict[str, Any]:
     """Conservatively bind every planned task to runtime and grader evidence."""
 
-    plan = _object(root / "deepswe20-plan.json")
+    if suite is None:
+        suite = _default_suite()
+    plan = _object(root / suite.plan_filename)
     provider_gate = _object(root / "provider-gate.json")
     errors: list[str] = []
     task_ids = plan.get("task_ids")
@@ -151,36 +175,38 @@ def attest_deepswe(
     expected_set = set(expected)
     cohort_stage = plan.get("cohort_stage")
     if cohort_stage is None:
-        expected_cohort = list(CANONICAL_TASK_IDS)
+        expected_cohort = list(suite.canonical_task_ids)
     else:
         try:
-            expected_cohort = select_stage_tasks(list(CANONICAL_TASK_IDS), cohort_stage)
+            expected_cohort = select_stage_tasks(
+                suite, suite.canonical_task_ids, cohort_stage
+            )
         except ValueError:
             expected_cohort = []
             errors.append("planned_cohort_stage_invalid")
-        if plan.get("gate_task_id") != GATE_TASK_ID:
+        if plan.get("gate_task_id") != suite.gate_task_id:
             errors.append("planned_gate_task_mismatch")
-        if plan.get("full_task_count") != len(CANONICAL_TASK_IDS):
+        if plan.get("full_task_count") != len(suite.canonical_task_ids):
             errors.append("planned_full_task_count_mismatch")
         full_order_hash = hashlib.sha256(
-            ("\n".join(CANONICAL_TASK_IDS) + "\n").encode("utf-8")
+            ("\n".join(suite.canonical_task_ids) + "\n").encode("utf-8")
         ).hexdigest()
         if plan.get("full_task_order_sha256") != full_order_hash:
             errors.append("planned_full_task_order_digest_mismatch")
         if (
-            cohort_stage in (GATE_STAGE, ALL_STAGE)
+            cohort_stage in (GATE_STAGE, suite.all_stage)
             or named_task_ids(str(cohort_stage or ""))
         ) and plan.get("prior_gate") is not None:
             # Only the remainder stage may carry a gate binding. A binding on a
             # self-contained stage would be evidence of a plan built for a
             # different dispatch than the one that ran.
             errors.append("gate_one_prior_gate_unexpected")
-        if cohort_stage == REMAINDER_STAGE:
+        if cohort_stage == suite.remainder_stage:
             binding = plan.get("prior_gate")
             if (
                 not isinstance(binding, dict)
                 or binding.get("schema") != "gt.prior_gate_binding.v1"
-                or binding.get("task_id") != GATE_TASK_ID
+                or binding.get("task_id") != suite.gate_task_id
                 or binding.get("source_sha") != source_sha
                 or type(binding.get("workflow_run_id")) is not int
                 or not all(
@@ -193,7 +219,7 @@ def attest_deepswe(
                 errors.append("prior_gate_binding_invalid")
     if expected != expected_cohort:
         errors.append("planned_canonical_cohort_mismatch")
-    if plan.get("schema") != "gt.deepswe_gt_harness_plan.v1":
+    if plan.get("schema") != suite.plan_schema:
         errors.append("plan_schema_mismatch")
     if not all(isinstance(task, str) and task for task in expected):
         errors.append("planned_task_identity_invalid")
@@ -215,19 +241,11 @@ def attest_deepswe(
         or len(matrix) != len(expected)
     ):
         errors.append("planned_task_matrix_mismatch")
-    trusted_bundle = _object(ROOT / "config" / "deepswe_product_bundle_v1.json")
-    trusted_manifest = _object(ROOT / "eval" / "deepswe_smoke20_v1.json")
-    trusted_tasks = {
-        row.get("task_id"): row
-        for row in trusted_bundle.get("tasks", [])
-        if isinstance(row, dict)
-    }
+    trusted_tasks = suite.trusted_tasks
     if (
-        plan.get("benchmark_sha") != trusted_manifest.get("benchmark_sha")
-        or plan.get("benchmark_sha") != trusted_bundle.get("dataset", {}).get("commit")
-        or plan.get("task_config_identity")
-        != trusted_bundle.get("dataset", {}).get("task_config_identity")
-        or not expected_set.issubset(set(trusted_manifest.get("task_ids", [])))
+        plan.get("benchmark_sha") != suite.benchmark_sha
+        or plan.get("task_config_identity") != suite.task_config_identity
+        or not expected_set.issubset(set(suite.canonical_task_ids))
     ):
         errors.append("planned_benchmark_identity_mismatch")
     expected_budgets: dict[str, str] = {}
@@ -366,13 +384,16 @@ def attest_deepswe(
         result_rows.append((path, row))
         if row.get("task_name") and row.get("trial_name"):
             trial_rows.append((path, row))
-    observed_trials = [_task_name(row["task_name"]) for _, row in trial_rows]
+    observed_trials = [
+        _task_name(row["task_name"], expected_set) for _, row in trial_rows
+    ]
     if len(observed_trials) != len(expected) or set(observed_trials) != expected_set:
         errors.append("trial_task_set_mismatch")
     if len(observed_trials) != len(set(observed_trials)):
         errors.append("duplicate_trial_task")
     trial_evidence = {
-        _task_name(row["task_name"]): (path, row) for path, row in trial_rows
+        _task_name(row["task_name"], expected_set): (path, row)
+        for path, row in trial_rows
     }
 
     adapters: dict[str, dict[str, Any]] = {}
@@ -524,7 +545,7 @@ def attest_deepswe(
         row_errors: list[str] = []
         if row.get("schema") != "gt.official_verifier_result.v1":
             row_errors.append(f"official_verifier_schema_mismatch:{task}")
-        if row.get("benchmark_suite") != "deepswe":
+        if row.get("benchmark_suite") != suite.suite_id:
             row_errors.append(f"official_verifier_suite_mismatch:{task}")
         status = row.get("status")
         product_receipt_present = row.get("product_receipt_present")
@@ -745,7 +766,7 @@ def attest_deepswe(
     }
     totals["total_cost"] = _total_cost(product_rows, errors)
     return {
-        "schema": "gt.deepswe_gt_harness_attestation.v1",
+        "schema": suite.attestation_schema,
         "status": "PASS" if not errors else "FAIL",
         "workflow_run_id": workflow_run_id,
         "source_sha": source_sha,
@@ -783,7 +804,9 @@ def attest_deepswe(
             }.items()
         },
         "paid_run_approval": plan["paid_run_approval"],
-        "baseline": plan["baseline"],
+        "baseline": (
+            plan["baseline"] if suite.baseline_required else plan.get("baseline")
+        ),
         "graded": sum(1 for row in outcomes.values() if row["graded"]),
         "solved": sum(1 for row in outcomes.values() if row["solved"]),
         "outcomes": outcomes,
@@ -803,14 +826,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--task-job-result", required=True)
     parser.add_argument("--workflow-run-id", default=os.environ.get("GITHUB_RUN_ID", "offline"))
+    parser.add_argument(
+        "--suite",
+        choices=("deepswe", "swelive"),
+        default="deepswe",
+        help="Benchmark cohort descriptor the plan and receipts attest against.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    suite: BenchmarkSuite | None = None
     try:
+        suite = (
+            _default_suite()
+            if args.suite == "deepswe"
+            else load_suite(args.suite)
+        )
         receipt = attest_deepswe(
             args.root,
             source_sha=args.source_sha,
             task_job_result=args.task_job_result,
             workflow_run_id=args.workflow_run_id,
+            suite=suite,
         )
     except Exception as exc:  # noqa: BLE001 - the attestation must always be durable
         cause = {
@@ -829,9 +865,15 @@ def main(argv: list[str] | None = None) -> int:
                 ).as_posix()
             except ValueError:
                 evidence_ref = Path(filename).name
-        fallback_tasks = list(CANONICAL_TASK_IDS)
+        fallback_tasks = (
+            list(suite.canonical_task_ids) if suite is not None else []
+        )
         receipt = {
-            "schema": "gt.deepswe_gt_harness_attestation_error.v1",
+            "schema": (
+                suite.attestation_error_schema
+                if suite is not None
+                else "gt.benchmark_attestation_error.v1"
+            ),
             "status": "FAIL",
             "workflow_run_id": args.workflow_run_id,
             "source_sha": args.source_sha,
