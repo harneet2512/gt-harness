@@ -286,7 +286,11 @@ def test_task_start_localization_delivered_with_graph(tmp_path, monkeypatch):
         for line in adapter.store.path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    first = next(row for row in rows if row.get("event") == "provider_delivery")
+    first = next(
+        row for row in rows
+        if row.get("event") == "provider_delivery"
+        and "-gt-internal-" not in str(row.get("request_id") or "")
+    )
     from gt_engine.request_history import load_provider_request
 
     request = load_provider_request(adapter.store.root, first)

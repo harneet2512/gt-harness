@@ -1020,6 +1020,15 @@ def install_runtime_hooks(
         bootstrap_request = bool(kwargs.pop("_gt_select_catalog", False))
         plan_request = bool(kwargs.pop("_gt_persistent_plan", False))
         internal_request = bootstrap_request or plan_request
+        # Internal calls evaluate only the kind they carry: the catalog
+        # bootstrap's own offer is model-visible inside ITS payload, so the
+        # catalog call binds it — leaving it queued would orphan it until the
+        # next agent request faults it as unmatched. The plan call carries no
+        # GT delivery of its own; every other queued delivery stays for the
+        # agent turn either way.
+        pending_kinds = (
+            ("select_catalog",) if bootstrap_request else ()
+        ) if internal_request else None
         if session.disabled:
             adapter.discard_pending_provider_deliveries(
                 reason="gt_disabled_before_transport"
@@ -1148,7 +1157,8 @@ def install_runtime_hooks(
         # retry instead of claiming a delivery that was never sent.
         try:
             adapter.bind_provider_payload(
-                payload, commit=False, carry_pending=not internal_request
+                payload, commit=False, carry_pending=not internal_request,
+                pending_kinds=pending_kinds,
             )
         except Exception:
             if not internal_request:
@@ -1160,9 +1170,10 @@ def install_runtime_hooks(
         # response/failure row carries the same tag, so the delivery's own id
         # reaches the terminal census instead of being orphaned by a
         # namespaced row it could never match. Their request row may commit
-        # before the wire — carry_pending=False means no agent queue rides on
-        # the commit — so a transport failure closes as a typed request+failure
-        # pair rather than a namespaced failure with no request.
+        # before the wire — pending_kinds confines the commit to the kind the
+        # call itself carries — so a transport failure closes as a typed
+        # request+failure pair rather than a namespaced failure with no
+        # request.
         internal_request_id = (
             f"{adapter.task_id}-{_SELECT_CATALOG_REQUEST_TAG}"
             if bootstrap_request
@@ -1174,6 +1185,7 @@ def install_runtime_hooks(
         if internal_request:
             delivery = adapter.bind_provider_payload(
                 payload, request_id=internal_request_id, carry_pending=False,
+                pending_kinds=pending_kinds,
             )
             # The call is spent the moment it is bound to the wire: counting
             # here keeps a transport failure reconciled against the namespaced

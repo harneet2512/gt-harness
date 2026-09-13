@@ -3570,6 +3570,7 @@ class MiniSweAdapter(GroundtruthController):
     def bind_provider_payload(
         self, payload: Mapping[str, Any], *, commit: bool = True,
         request_id: str = "", carry_pending: bool = True,
+        pending_kinds: tuple[str, ...] | None = None,
     ) -> ProviderDelivery | None:
         """Validate the exact provider-bound payload; commit it when asked.
 
@@ -3584,6 +3585,12 @@ class MiniSweAdapter(GroundtruthController):
         the agent conversation, so an internal request must neither match them
         into its payload nor fault them as unmatched - it leaves every queue
         intact for the next agent turn.
+
+        ``pending_kinds`` narrows the evaluated queue to one kind: the
+        select-catalog offer is delivered BY its internal request, so that
+        call evaluates only ``select_catalog`` items - every other queued
+        delivery stays intact for the agent. Evaluated items leave the queue
+        whether they matched or not, exactly as a full agent bind drops them.
         """
         messages = payload.get("messages")
         if not isinstance(messages, list):
@@ -3608,7 +3615,12 @@ class MiniSweAdapter(GroundtruthController):
             return False
 
         pending = (
-            tuple(self._pending_provider_deliveries) if carry_pending else ()
+            tuple(
+                item for item in self._pending_provider_deliveries
+                if item.kind in pending_kinds
+            )
+            if pending_kinds is not None
+            else tuple(self._pending_provider_deliveries) if carry_pending else ()
         )
         matched = tuple(
             item.identity for item in pending
@@ -3743,7 +3755,21 @@ class MiniSweAdapter(GroundtruthController):
             ],
             unmatched_delivery_ids=list(unmatched),
         )
-        if carry_pending:
+        if pending_kinds is not None:
+            evaluated = {item.identity for item in pending}
+            self._pending_provider_deliveries = [
+                item for item in self._pending_provider_deliveries
+                if item.identity not in evaluated
+            ]
+            evaluated_dedup_keys = {
+                item.dedup_key for item in pending if item.dedup_key
+            }
+            self._pending_exposures = {
+                key: exposure
+                for key, exposure in self._pending_exposures.items()
+                if exposure.dedup_key not in evaluated_dedup_keys
+            }
+        elif carry_pending:
             self._pending_provider_deliveries.clear()
             self._pending_exposures.clear()
             for typed in self._pending_typed_observations:
@@ -4055,6 +4081,16 @@ class MiniSweAdapter(GroundtruthController):
             request_id
             or (self._latest_delivery.request_id if self._latest_delivery else "")
         )
+        # The response echoes the delivery ids carried by the request it
+        # closes — an internal catalog call's response must echo the catalog
+        # delivery its request row bound, or the request/response identity
+        # audit flags a mismatch.
+        resolved_delivery = (
+            self._latest_delivery
+            if self._latest_delivery is not None
+            and self._latest_delivery.request_id == resolved_request_id
+            else None
+        )
         self.store.append(
             "provider_response",
             iteration=self.iteration,
@@ -4072,8 +4108,7 @@ class MiniSweAdapter(GroundtruthController):
             fallback_model=self.fallback_model,
             model_mismatch=mismatch,
             delivery_ids=list(
-                self._latest_delivery.delivery_ids
-                if self._latest_delivery and not request_id else ()
+                resolved_delivery.delivery_ids if resolved_delivery else ()
             ),
         )
         if resolved_request_id:

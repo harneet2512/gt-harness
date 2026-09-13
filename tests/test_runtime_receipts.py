@@ -739,7 +739,9 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
     turns -- native_query dispatches through the wrapped model._query --
     so they emit provider_admission rows like every other wire attempt,
     plus their lifecycle events and a provider_response bound to a
-    namespaced GT-internal request id.
+    namespaced GT-internal request id. The catalog bootstrap also binds
+    its own offer: the internal request carries the select_catalog
+    delivery under the namespaced request id and the response echoes it.
     """
     state = tmp_path / "gt-state"
     task_state = state / "task-hash"
@@ -796,44 +798,60 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
         }
 
     events = [
-        {   # 1: task contract ships prompt-lane before the first call
-            "event": "context_addition_delivery",
+        {   # 1: the catalog offer is delivered BY its own internal request --
+            #    kind-scoped pending evaluation binds it under the namespaced
+            #    request id (carry_pending=False orphaned it into the next
+            #    agent request's unmatched_delivery_ids, rehearsal 34756335688)
+            "event": "evidence_delivery",
             "event_hash": "1" * 64,
             "sequence": 1,
-            "lane": "prompt",
-            "kind": "context_contract",
-            "evidence_type": "context_contract",
-            "dedup_key": "prompt-contract-1",
-            "target": "provider_prompt",
-            "payload_sha256": "a" * 64,
+            "lane": "sealed",
+            "kind": "select_catalog",
+            "evidence_type": "select_catalog",
+            "dedup_key": "select_catalog:catalog-1",
+            "target": "service.py",
+            "payload_sha256": "c" * 64,
+            "delivery_identity": "c" * 64,
+            "request_id": "task-a-gt-internal-select-catalog",
             "action_index": 0,
             "iteration": 0,
-            "rendered_bytes": 100,
+            "rendered_bytes": 120,
         },
-        {   # 2: sealed receipt for the contract delivery
+        {   # 2: sealed receipt for the catalog delivery
             "event": "receipt",
             "event_hash": "2" * 64,
             "sequence": 2,
             "transition": "delivered",
-            "dedup_key": "prompt-contract-1",
-            "evidence_type": "context_contract",
+            "dedup_key": "select_catalog:catalog-1",
+            "evidence_type": "select_catalog",
             "iteration": 0,
-            "payload_hash": "a" * 64,
+            "payload_hash": "c" * 64,
         },
         admitted(3, 100),  # 3: the catalog bootstrap is admitted on the wire
-        {   # 4: select-catalog bootstrap spends its provider call; the
-            #    lifecycle row is its admission-side classification
-            "event": "select_catalog_lifecycle",
+        {   # 4: the catalog bootstrap's own request row, bound to its
+            #    namespaced request id and carrying its own delivery
+            "event": "provider_delivery",
             "event_hash": "4" * 64,
             "sequence": 4,
-            "reason": "provider_request_admitted",
+            "iteration": 1,
+            "request_id": "task-a-gt-internal-select-catalog",
+            "delivery_ids": ["c" * 64],
+            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
         },
-        {   # 5: the catalog bootstrap response binds to its own namespaced
-            #    request id -- it never carried a provider_delivery
-            "event": "provider_response",
+        {   # 5: select-catalog bootstrap spends its provider call; the
+            #    lifecycle row is its admission-side classification
+            "event": "select_catalog_lifecycle",
             "event_hash": "5" * 64,
             "sequence": 5,
+            "reason": "provider_request_admitted",
+        },
+        {   # 6: the catalog bootstrap response binds to its own namespaced
+            #    request id and echoes the request's delivery ids
+            "event": "provider_response",
+            "event_hash": "6" * 64,
+            "sequence": 6,
             "request_id": "task-a-gt-internal-select-catalog",
+            "delivery_ids": ["c" * 64],
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 1,
@@ -841,18 +859,29 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.01,
             },
         },
-        admitted(6, 100),  # 6: the plan bootstrap is admitted on the wire
-        {   # 7: persistent-plan bootstrap also spends a provider call
-            "event": "persistent_plan_built",
-            "event_hash": "7" * 64,
-            "sequence": 7,
-            "finish_reason": "tool_calls",
-        },
-        {   # 8
-            "event": "provider_response",
+        admitted(7, 100),  # 7: the plan bootstrap is admitted on the wire
+        {   # 8: persistent-plan bootstrap also spends a provider call; its
+            #    request carries no GT delivery of its own
+            "event": "provider_delivery",
             "event_hash": "8" * 64,
             "sequence": 8,
+            "iteration": 2,
             "request_id": "task-a-gt-internal-persistent-plan",
+            "delivery_ids": [],
+            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
+        },
+        {   # 9
+            "event": "persistent_plan_built",
+            "event_hash": "9" * 64,
+            "sequence": 9,
+            "finish_reason": "tool_calls",
+        },
+        {   # 10
+            "event": "provider_response",
+            "event_hash": "0a" * 32,
+            "sequence": 10,
+            "request_id": "task-a-gt-internal-persistent-plan",
+            "delivery_ids": [],
             "usage": {
                 "prompt_tokens": 12,
                 "completion_tokens": 1,
@@ -860,20 +889,46 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.01,
             },
         },
-        {   # 9: agent turn 1 carries the contract delivery
+        {   # 11: task contract ships prompt-lane on the agent's first turn
+            "event": "context_addition_delivery",
+            "event_hash": "0b" * 32,
+            "sequence": 11,
+            "lane": "prompt",
+            "kind": "context_contract",
+            "evidence_type": "context_contract",
+            "dedup_key": "prompt-contract-1",
+            "target": "provider_prompt",
+            "payload_sha256": "a" * 64,
+            "delivery_identity": "a" * 64,
+            "request_id": "request-1",
+            "action_index": 0,
+            "iteration": 2,
+            "rendered_bytes": 100,
+        },
+        {   # 12: sealed receipt for the contract delivery
+            "event": "receipt",
+            "event_hash": "0c" * 32,
+            "sequence": 12,
+            "transition": "delivered",
+            "dedup_key": "prompt-contract-1",
+            "evidence_type": "context_contract",
+            "iteration": 2,
+            "payload_hash": "a" * 64,
+        },
+        {   # 13: agent turn 1 carries the contract delivery
             "event": "provider_delivery",
-            "event_hash": "9" * 64,
-            "sequence": 9,
-            "iteration": 1,
+            "event_hash": "0d" * 32,
+            "sequence": 13,
+            "iteration": 3,
             "request_id": "request-1",
             "delivery_ids": ["a" * 64],
             "resolved_model": "openai/meta/muse-spark-1.2-contributor",
         },
-        admitted(10, 300),
-        {   # 11
+        admitted(14, 300),
+        {   # 15
             "event": "provider_response",
-            "event_hash": "0b" * 32,
-            "sequence": 11,
+            "event_hash": "0e" * 32,
+            "sequence": 15,
             "request_id": "request-1",
             "usage": {
                 "prompt_tokens": 18,
@@ -882,51 +937,53 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.02,
             },
         },
-        {   # 12: a sealed localization lands before agent turn 2
+        {   # 16: a sealed localization lands before agent turn 2
             "event": "evidence_delivery",
-            "event_hash": "0c" * 32,
-            "sequence": 12,
+            "event_hash": "10" * 32,
+            "sequence": 16,
             "lane": "sealed",
             "kind": "localization",
             "evidence_type": "localization",
             "dedup_key": "localization-1",
             "payload_sha256": "9" * 64,
+            "delivery_identity": "9" * 64,
+            "request_id": "request-2",
             "action_index": 0,
-            "iteration": 1,
+            "iteration": 3,
             "rendered_bytes": 123,
         },
-        {   # 13
+        {   # 17
             "event": "receipt",
-            "event_hash": "0d" * 32,
-            "sequence": 13,
+            "event_hash": "11" * 32,
+            "sequence": 17,
             "transition": "delivered",
             "dedup_key": "localization-1",
             "evidence_type": "localization",
-            "iteration": 1,
+            "iteration": 3,
             "payload_hash": "9" * 64,
         },
-        {   # 14: agent turn 2 carries the localization
+        {   # 18: agent turn 2 carries the localization
             "event": "provider_delivery",
-            "event_hash": "0e" * 32,
-            "sequence": 14,
-            "iteration": 2,
+            "event_hash": "12" * 32,
+            "sequence": 18,
+            "iteration": 4,
             "request_id": "request-2",
             "delivery_ids": ["9" * 64],
             "resolved_model": "openai/meta/muse-spark-1.2-contributor",
         },
-        admitted(15, 400),
-        {   # 16: typed failure closes request-2's first attempt
+        admitted(19, 400),
+        {   # 20: typed failure closes request-2's first attempt
             "event": "provider_failure",
-            "event_hash": "10" * 16,
-            "sequence": 16,
+            "event_hash": "14" * 32,
+            "sequence": 20,
             "request_id": "request-2",
             "error_type": "FormatError",
         },
-        admitted(17, 400),  # 17: the transport retries inside the same call
-        {   # 18
+        admitted(21, 400),  # 21: the transport retries inside the same call
+        {   # 22
             "event": "provider_response",
-            "event_hash": "12" * 32,
-            "sequence": 18,
+            "event_hash": "16" * 32,
+            "sequence": 22,
             "request_id": "request-2",
             "usage": {
                 "prompt_tokens": 0,
@@ -935,7 +992,7 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.0,
             },
         },
-        admitted(19, 500),  # 19: admitted, killed in flight by the supervisor
+        admitted(23, 500),  # 23: admitted, killed in flight by the supervisor
     ]
     task_state.mkdir(parents=True)
     (task_state / "events.jsonl").write_text(
@@ -987,13 +1044,13 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
     assert treatment["reconstructed_from_journal"] is True
     assert treatment["verified"] is False
     assert treatment["contract_shipped"] is True
-    assert treatment["delivery_count"] == 2
+    assert treatment["delivery_count"] == 3
     assert treatment["prompt_delivery_count"] == 1
-    assert treatment["sealed_delivery_count"] == 1
+    assert treatment["sealed_delivery_count"] == 2
     assert treatment["event_journal"]["event_count"] == len(events)
     assert treatment["event_journal"]["event_head"] == events[-1]["event_hash"]
     # Every wire attempt emits an admission -- the two bootstrap calls are
-    # rows 3 and 6 alongside the four agent-boundary attempts.
+    # rows 3 and 7 alongside the four agent-boundary attempts.
     assert [row["request_tokens"] for row in treatment["provider_admissions"]] == [
         100, 100, 300, 400, 400, 500,
     ]
