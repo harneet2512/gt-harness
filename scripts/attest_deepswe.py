@@ -393,7 +393,10 @@ def attest_deepswe(
             errors.append(f"adapter_treatment_mismatch:{task}")
         if row.get("requested_model") != plan.get("requested_model"):
             errors.append(f"requested_model_mismatch:{task}")
-        if row.get("effective_model") != plan.get("effective_model"):
+        # null means nothing served (killed before first admission); the
+        # product receipt's own call census decides whether that is honest.
+        if (row.get("effective_model") is not None
+                and row.get("effective_model") != plan.get("effective_model")):
             errors.append(f"effective_model_mismatch:{task}")
         if row.get("agent_scaffold_version") != "2.4.6":
             errors.append(f"scaffold_version_mismatch:{task}")
@@ -428,6 +431,16 @@ def attest_deepswe(
             ("requested_model", plan.get("requested_model")),
             ("effective_model", plan.get("effective_model")),
         ):
+            if field == "effective_model" and row.get(field) is None:
+                # Nothing served is honest only when no provider call exists.
+                calls_seen = int(
+                    row.get("provider_attempts")
+                    or row.get("provider_calls")
+                    or row.get("agent_turn_calls")
+                    or 0
+                )
+                if not calls_seen:
+                    continue
             if row.get(field) != expected_value:
                 errors.append(f"product_{field}_mismatch:{task}")
         if str(row.get("time_budget_seconds")) != expected_budgets.get(task):

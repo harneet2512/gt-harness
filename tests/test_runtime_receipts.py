@@ -733,8 +733,12 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
     conservation fields the sealed journal already contained. The failure
     path now rebuilds them journal-side. This fixture mirrors the real
     census shape: 2 agent turns + 1 catalog bootstrap + 1 plan bootstrap =
-    4 logical calls; 6 admissions = 4 delivered + 1 retry + 1 attempt
-    killed in flight; 4 responses + 1 typed failure.
+    4 logical calls; 6 attempts = 4 agent admissions (2 turns + 1 retry +
+    1 killed in flight) + 2 bootstrap wire requests; 4 responses + 1
+    typed failure. Bootstrap calls bypass the admission gate and emit no
+    provider_delivery/provider_admission rows -- they journal their
+    lifecycle events plus a provider_response bound to a namespaced
+    GT-internal request id.
     """
     state = tmp_path / "gt-state"
     task_state = state / "task-hash"
@@ -815,27 +819,19 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
             "iteration": 0,
             "payload_hash": "a" * 64,
         },
-        {   # 3: select-catalog bootstrap admits its provider request
+        {   # 3: select-catalog bootstrap spends its provider call; the
+            #    lifecycle row is its only admission-side evidence
             "event": "select_catalog_lifecycle",
             "event_hash": "3" * 64,
             "sequence": 3,
             "reason": "provider_request_admitted",
         },
-        {   # 4: the catalog bootstrap call itself is a provider delivery
-            "event": "provider_delivery",
+        {   # 4: the catalog bootstrap response binds to its own namespaced
+            #    request id -- it never carried a provider_delivery
+            "event": "provider_response",
             "event_hash": "4" * 64,
             "sequence": 4,
-            "iteration": 1,
-            "request_id": "request-1",
-            "delivery_ids": ["a" * 64],
-            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
-        },
-        admitted(5, 100),
-        {   # 6
-            "event": "provider_response",
-            "event_hash": "6" * 64,
-            "sequence": 6,
-            "request_id": "request-1",
+            "request_id": "task-a-gt-internal-select-catalog",
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 1,
@@ -843,27 +839,17 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.01,
             },
         },
-        {   # 7: persistent-plan bootstrap also spends a provider call
+        {   # 5: persistent-plan bootstrap also spends a provider call
             "event": "persistent_plan_built",
-            "event_hash": "7" * 64,
-            "sequence": 7,
+            "event_hash": "5" * 64,
+            "sequence": 5,
             "finish_reason": "tool_calls",
         },
-        {   # 8
-            "event": "provider_delivery",
-            "event_hash": "8" * 64,
-            "sequence": 8,
-            "iteration": 2,
-            "request_id": "request-2",
-            "delivery_ids": [],
-            "resolved_model": "openai/meta/muse-spark-1.2-contributor",
-        },
-        admitted(9, 200),
-        {   # 10
+        {   # 6
             "event": "provider_response",
-            "event_hash": "0a" * 32,
-            "sequence": 10,
-            "request_id": "request-2",
+            "event_hash": "6" * 64,
+            "sequence": 6,
+            "request_id": "task-a-gt-internal-persistent-plan",
             "usage": {
                 "prompt_tokens": 12,
                 "completion_tokens": 1,
@@ -871,44 +857,21 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.01,
             },
         },
-        {   # 11: a sealed localization lands before agent turn 1
-            "event": "evidence_delivery",
-            "event_hash": "0b" * 32,
-            "sequence": 11,
-            "lane": "sealed",
-            "kind": "localization",
-            "evidence_type": "localization",
-            "dedup_key": "localization-1",
-            "payload_sha256": "9" * 64,
-            "action_index": 0,
-            "iteration": 2,
-            "rendered_bytes": 123,
-        },
-        {   # 12
-            "event": "receipt",
-            "event_hash": "0c" * 32,
-            "sequence": 12,
-            "transition": "delivered",
-            "dedup_key": "localization-1",
-            "evidence_type": "localization",
-            "iteration": 2,
-            "payload_hash": "9" * 64,
-        },
-        {   # 13: agent turn 1 carries the localization
+        {   # 7: agent turn 1 carries the contract delivery
             "event": "provider_delivery",
-            "event_hash": "0d" * 32,
-            "sequence": 13,
-            "iteration": 3,
-            "request_id": "request-3",
-            "delivery_ids": ["9" * 64],
+            "event_hash": "7" * 64,
+            "sequence": 7,
+            "iteration": 1,
+            "request_id": "request-1",
+            "delivery_ids": ["a" * 64],
             "resolved_model": "openai/meta/muse-spark-1.2-contributor",
         },
-        admitted(14, 300),
-        {   # 15
+        admitted(8, 300),
+        {   # 9
             "event": "provider_response",
-            "event_hash": "0e" * 32,
-            "sequence": 15,
-            "request_id": "request-3",
+            "event_hash": "9" * 64,
+            "sequence": 9,
+            "request_id": "request-1",
             "usage": {
                 "prompt_tokens": 18,
                 "completion_tokens": 3,
@@ -916,29 +879,52 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.02,
             },
         },
-        {   # 16: agent turn 2 is delivered, then fails with FormatError
+        {   # 10: a sealed localization lands before agent turn 2
+            "event": "evidence_delivery",
+            "event_hash": "0a" * 32,
+            "sequence": 10,
+            "lane": "sealed",
+            "kind": "localization",
+            "evidence_type": "localization",
+            "dedup_key": "localization-1",
+            "payload_sha256": "9" * 64,
+            "action_index": 0,
+            "iteration": 1,
+            "rendered_bytes": 123,
+        },
+        {   # 11
+            "event": "receipt",
+            "event_hash": "0b" * 32,
+            "sequence": 11,
+            "transition": "delivered",
+            "dedup_key": "localization-1",
+            "evidence_type": "localization",
+            "iteration": 1,
+            "payload_hash": "9" * 64,
+        },
+        {   # 12: agent turn 2 carries the localization
             "event": "provider_delivery",
-            "event_hash": "0f" * 32,
-            "sequence": 16,
-            "iteration": 4,
-            "request_id": "request-4",
-            "delivery_ids": [],
+            "event_hash": "0c" * 32,
+            "sequence": 12,
+            "iteration": 2,
+            "request_id": "request-2",
+            "delivery_ids": ["9" * 64],
             "resolved_model": "openai/meta/muse-spark-1.2-contributor",
         },
-        admitted(17, 400),
-        {   # 18: typed failure closes request-4's first attempt
+        admitted(13, 400),
+        {   # 14: typed failure closes request-2's first attempt
             "event": "provider_failure",
-            "event_hash": "10" * 32,
-            "sequence": 18,
-            "request_id": "request-4",
+            "event_hash": "0d" * 32,
+            "sequence": 14,
+            "request_id": "request-2",
             "error_type": "FormatError",
         },
-        admitted(19, 400),  # 19: the transport retries inside the same call
-        {   # 20
+        admitted(15, 400),  # 15: the transport retries inside the same call
+        {   # 16
             "event": "provider_response",
-            "event_hash": "11" * 32,
-            "sequence": 20,
-            "request_id": "request-4",
+            "event_hash": "0e" * 32,
+            "sequence": 16,
+            "request_id": "request-2",
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -946,7 +932,7 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
                 "cost": 0.0,
             },
         },
-        admitted(21, 500),  # 21: admitted, killed in flight by the supervisor
+        admitted(17, 500),  # 17: admitted, killed in flight by the supervisor
     ]
     task_state.mkdir(parents=True)
     (task_state / "events.jsonl").write_text(
@@ -1003,8 +989,10 @@ def test_killed_run_receipt_reconstructs_accounting_from_sealed_journal(
     assert treatment["sealed_delivery_count"] == 1
     assert treatment["event_journal"]["event_count"] == len(events)
     assert treatment["event_journal"]["event_head"] == events[-1]["event_hash"]
+    # Only agent-boundary requests emit admissions; the two bootstrap calls
+    # are counted separately and join the census at provider_attempts (6).
     assert [row["request_tokens"] for row in treatment["provider_admissions"]] == [
-        100, 200, 300, 400, 400, 500,
+        300, 400, 400, 500,
     ]
 
     # Attestation of a killed run must surface only honest terminal errors —
@@ -1234,3 +1222,69 @@ def test_churn_events_flow_into_treatment_receipt(tmp_path):
         "turns_observed": 49, "stall_turns": 50, "steers_issued": 1,
     }
     assert receipt["terminal"] == "churn_abort"
+
+
+def test_redelivered_dedup_key_pairs_by_delivery_identity():
+    """Smoke-20 join crash: refreshed evidence in one iteration is legitimate.
+
+    abs-module shipped caller_contract_view for evaluator/functions.go at
+    action 7, refreshed it at action 8, and joined both to the same request --
+    two evidence_delivery rows sharing dedup_key and iteration, each followed
+    by its own receipt. Joining on dedup_key alone saw two candidates and
+    raised delivery_receipt_evidence_join_failed, which then cascaded through
+    the fallback path into every product_* conservation error on the task.
+    The pair key is the rendered payload's own identity.
+    """
+    from gt_harness.runtime_receipts import _provider_delivery_receipts
+
+    def delivery(seq, identity):
+        return {
+            "event": "evidence_delivery", "event_hash": f"{seq:064x}",
+            "sequence": seq, "dedup_key": "caller-x", "iteration": 6,
+            "kind": "caller_contract_view", "evidence_type": "caller_contract_view",
+            "lane": "sealed", "delivery_identity": identity,
+            "payload_sha256": identity, "rendered_bytes": 50, "action_index": seq,
+        }
+
+    def receipt(seq, identity):
+        return {
+            "event": "receipt", "event_hash": f"{seq:064x}", "sequence": seq,
+            "transition": "delivered", "dedup_key": "caller-x", "iteration": 6,
+            "payload_hash": identity,
+        }
+
+    first, second = "a" * 64, "b" * 64
+    rows = [
+        delivery(10, first), receipt(11, first),
+        delivery(12, second), receipt(13, second),
+        {
+            "event": "provider_delivery", "event_hash": "9" * 64, "sequence": 20,
+            "iteration": 7, "delivery_ids": [first, second],
+        },
+    ]
+    receipts = _provider_delivery_receipts(rows)
+    assert [row["delivery_identity"] for row in receipts] == [first, second]
+
+
+def test_ambiguous_delivery_identity_still_raises():
+    """Two byte-identical deliveries in one iteration is a real journal defect."""
+    import pytest
+
+    from gt_harness.runtime_receipts import _provider_delivery_receipts
+
+    same = "a" * 64
+    rows = [
+        {"event": "evidence_delivery", "event_hash": "1" * 64, "sequence": 1,
+         "dedup_key": "k", "iteration": 0, "kind": "x", "lane": "sealed",
+         "delivery_identity": same, "payload_sha256": same, "rendered_bytes": 5},
+        {"event": "evidence_delivery", "event_hash": "2" * 64, "sequence": 2,
+         "dedup_key": "k", "iteration": 0, "kind": "x", "lane": "sealed",
+         "delivery_identity": same, "payload_sha256": same, "rendered_bytes": 5},
+        {"event": "receipt", "event_hash": "3" * 64, "sequence": 3,
+         "transition": "delivered", "dedup_key": "k", "iteration": 0,
+         "payload_hash": same},
+        {"event": "provider_delivery", "event_hash": "4" * 64, "sequence": 4,
+         "iteration": 1, "delivery_ids": [same]},
+    ]
+    with pytest.raises(ValueError, match="delivery_receipt_identity_join_failed"):
+        _provider_delivery_receipts(rows)

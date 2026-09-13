@@ -202,3 +202,61 @@ def test_linking_preserves_every_row_field():
         assert before.shape == after.shape
         assert before.subjects == after.subjects
         assert before.tokens == after.tokens
+
+
+def test_submission_boilerplate_is_a_process_row_not_a_test_check():
+    """The benchmark's submission suffix is normative but not test-provable.
+
+    Smoke-20 bound it to a test file ("npm test ...intersections.test.ts"),
+    where it could never pass for the right reason - an unprovable row that
+    held `verified` unreachable on every task. It stays a ledger row, but the
+    deterministic plan must classify it as a workspace-envelope check, not a
+    bound test.
+    """
+    from gt_engine.persistent_plan import PlanInputs, BaselineResult, AnchorResult
+    from gt_engine.persistent_plan.deterministic import build_deterministic_plan
+
+    issue = (
+        "## Required behavior\n"
+        "1. Parent cancellation must cascade to all descendant handles.\n"
+        "2. Child cancellation must not cancel its parent.\n"
+        "\n"
+        "IMPORTANT: Please work on this in a new branch from main and "
+        "commit everything when you are done.\n"
+    )
+    ledger = build_requirement_ledger(issue)
+    boiler = [row for row in ledger.rows
+              if "new branch" in row.text or "when you are done" in row.text]
+    assert boiler, "the submission directive is normative and must stay a row"
+
+    inputs = PlanInputs(
+        ledger=ledger,
+        anchors=AnchorResult(anchors={}, edit_order=()),
+        baseline=BaselineResult(status="captured", command=("npm", "test")),
+        source_revision="rev", graph_revision="g",
+        observed_source_revision="rev",
+        covering={row.row_id: ("tests/cancel.test.ts",) for row in ledger.rows},
+    )
+    plan = build_deterministic_plan(inputs)
+    for row in plan.rows:
+        if row.row_id == boiler[0].row_id:
+            assert row.verification_kind == "process"
+            assert row.verification_command == ""
+        else:
+            assert row.verification_command
+
+
+def test_process_directive_needs_two_markers():
+    """A single workflow phrase inside a real requirement must not drop it."""
+    from gt_engine.task_contract import _is_process_directive
+
+    assert _is_process_directive(
+        "IMPORTANT: Please work on this in a new branch from main "
+        "and commit everything when you are done."
+    )
+    assert _is_process_directive("work on this in a new branch")
+    assert not _is_process_directive("the CLI must open a pull request when tests pass")
+    assert not _is_process_directive("commit everything when tests pass")
+    assert not _is_process_directive(
+        "Module::evaluate_with_evaluation must reject with the same reason"
+    )

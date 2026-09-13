@@ -20,6 +20,7 @@ of graph facts delivered none of them.
 """
 from __future__ import annotations
 
+from ..task_contract import _is_process_directive
 from . import STATUS_PARTIAL, STATUS_READY, PersistentPlan, PlanInputs, PlanRow
 
 # A check is only useful if the agent can run it. More than a handful of test
@@ -96,6 +97,14 @@ def build_deterministic_plan(inputs: PlanInputs) -> PersistentPlan:
         anchors = inputs.anchors.anchors.get(row.row_id, ())
         covering = inputs.covering.get(row.row_id, ())
         kind, command = default_check(test_command, covering)
+        if _is_process_directive(row.text):
+            # A workflow/submission directive ("work on a new branch and commit
+            # everything when you are done") is normative -- a run that never
+            # commits grades against a pristine base -- but no test invocation
+            # can evidence it. Binding the suite to it produced a check that
+            # could never pass for the right reason; its honest channel is the
+            # workspace envelope probe at the submit boundary.
+            kind, command = "process", ""
         rows.append(
             PlanRow(
                 row_id=row.row_id,

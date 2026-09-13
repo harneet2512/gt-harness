@@ -1194,11 +1194,15 @@ def install_runtime_hooks(
             usage = response.get("usage") if isinstance(response, dict) else None
             model_id = response.get("model", "") if isinstance(response, dict) else ""
             adapter.bind_provider_response(
-                response, usage=usage, model=model_id, next_actions=()
+                response, usage=usage, model=model_id, next_actions=(),
+                request_id=f"{adapter.task_id}-gt-internal-select-catalog",
             )
             session.accept_select_catalog(captured["arguments"])
         except Exception as exc:  # noqa: BLE001 - selection is advisory
-            adapter.bind_provider_failure(exc)
+            adapter.bind_provider_failure(
+                exc,
+                request_id=f"{adapter.task_id}-gt-internal-select-catalog",
+            )
             session.fail_select_catalog(f"provider_error:{type(exc).__name__}")
         finally:
             bootstrap_preparing = False
@@ -1275,7 +1279,8 @@ def install_runtime_hooks(
                 usage = response.get("usage") if isinstance(response, dict) else None
                 model_id = response.get("model", "") if isinstance(response, dict) else ""
                 adapter.bind_provider_response(
-                    response, usage=usage, model=model_id, next_actions=()
+                    response, usage=usage, model=model_id, next_actions=(),
+                    request_id=f"{adapter.task_id}-gt-internal-persistent-plan",
                 )
                 finish_reason = response_finish_reason(response)
                 payload = parse_tool_arguments(response)
@@ -1290,7 +1295,10 @@ def install_runtime_hooks(
                                   repo_root=getattr(adapter, "repo_root", ""))
         except Exception as exc:  # noqa: BLE001 - planning is advisory
             try:
-                adapter.bind_provider_failure(exc)
+                adapter.bind_provider_failure(
+                    exc,
+                    request_id=f"{adapter.task_id}-gt-internal-persistent-plan",
+                )
             except Exception:  # noqa: BLE001
                 pass
             adapter.store.append(

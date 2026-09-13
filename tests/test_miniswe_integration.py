@@ -535,6 +535,38 @@ def test_provider_failure_has_terminal_receipt(tmp_path):
     assert any(row["event"] == "provider_failure" for row in rows)
 
 
+def test_bootstrap_response_binds_its_own_request_not_the_prior_agents(tmp_path):
+    """GT-internal calls never bind_provider_payload, so _latest_delivery is
+    the previous agent request. Without an explicit request_id the bootstrap
+    response borrows that identity: it claims the agent's deliveries and marks
+    the wrong request terminal, collapsing the terminal census (smoke-20
+    task-7: terminal_requests 17 vs provider_calls 19)."""
+    a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
+    a.start_task()
+    delivery = a.bind_provider_payload({
+        "messages": [{"role": "user", "content": "task"}],
+    })
+    bootstrap_id = "task-gt-internal-select-catalog"
+    a.bind_provider_response(
+        {"model": "m", "choices": []},
+        usage={"prompt_tokens": 4, "completion_tokens": 1},
+        request_id=bootstrap_id,
+    )
+    assert a.terminal_confirmed(bootstrap_id)
+    assert not a.terminal_confirmed(delivery.request_id)
+    rows = [json.loads(x) for x in a.store.path.read_text().splitlines()]
+    response = next(row for row in rows if row["event"] == "provider_response")
+    assert response["request_id"] == bootstrap_id
+    assert response["delivery_ids"] == []
+
+    a.bind_provider_failure(
+        TimeoutError("provider deadline"), request_id=bootstrap_id
+    )
+    rows = [json.loads(x) for x in a.store.path.read_text().splitlines()]
+    failure = next(row for row in rows if row["event"] == "provider_failure")
+    assert failure["request_id"] == bootstrap_id
+
+
 def test_recovery_steer_scheduled_on_recurring_failure_after_edit(tmp_path):
     a = MiniSweAdapter(task_id="task", state_dir=tmp_path, predicates=[])
     a.start_task()

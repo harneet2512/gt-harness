@@ -295,6 +295,7 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
         if row.get("event") != "receipt" or row.get("transition") != "delivered":
             continue
         iteration = int(row.get("iteration") or 0)
+        delivery_identity = str(row.get("payload_hash") or "")
         matching = [
             candidate for candidate in evidence
             if str(candidate.get("dedup_key") or "")
@@ -302,14 +303,23 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
             and int(candidate.get("iteration") or 0) == iteration
             and int(candidate.get("sequence") or 0) < int(row.get("sequence") or 0)
         ]
-        if len(matching) != 1:
+        if not matching:
             raise ValueError("delivery_receipt_evidence_join_failed")
-        match = matching[0]
-        delivery_identity = str(row.get("payload_hash") or "")
-        if delivery_identity != str(
-            match.get("delivery_identity") or match.get("payload_sha256") or ""
-        ):
+        # The same dedup key legitimately delivers twice in one iteration when
+        # the evidence is refreshed between decisions (measured: abs-module
+        # shipped caller_contract_view for evaluator/functions.go at action 7
+        # and again at action 8, both joined to the same request). dedup+iter
+        # alone leaves the receipt ambiguous; the delivery identity -- the
+        # rendered payload's own sha -- is the unique pair key.
+        identified = [
+            candidate for candidate in matching
+            if str(candidate.get("delivery_identity")
+                   or candidate.get("payload_sha256") or "")
+            == delivery_identity
+        ]
+        if len(identified) != 1:
             raise ValueError("delivery_receipt_identity_join_failed")
+        match = identified[0]
         provider = next(
             (
                 candidate
@@ -779,7 +789,12 @@ def issue_runtime_receipts(
     # reason a run that submitted and scored f2p 24/25 came back status ERROR.
     # Admissions agree with the manifest on both the fixture (3 + bootstrap)
     # and the live run (296), because both are written at that boundary.
-    provider_attempts = len(provider_admissions) or provider_calls
+    # GT-internal bootstrap calls never reach the admission gate -- they are
+    # journaled as spent calls (num_retries=0 -> exactly one wire request
+    # each), so the attempt census is admissions + the two bootstrap counters.
+    provider_attempts = (
+        len(provider_admissions) + bootstrap_calls + plan_calls
+    ) or provider_calls
     provider_usage = _provider_usage(event_rows, attempted_calls=provider_attempts)
     repro_path, reproduction = _single_optional(state_dir, "reproducibility_manifest.json")
     graph_path, graph = _published_graph(state_dir, event_rows)
@@ -804,9 +819,10 @@ def issue_runtime_receipts(
     terminal = str(report.get("terminal") or "internal_error")
     status = "COMPLETED" if exit_code == 0 else "ERROR"
     # Every terminal turn must have been admitted; retried attempts mean there
-    # can be MORE admissions than turns, never fewer.
+    # can be MORE admissions than turns, never fewer. GT-internal bootstrap
+    # calls bypass the gate by design, so the floor is the agent's own calls.
     if status == "COMPLETED" and (
-        len(provider_admissions) < provider_calls
+        len(provider_admissions) < agent_turn_calls
         or any(row["status"] != "admitted" for row in provider_admissions)
     ):
         raise ValueError("provider_admission_count_mismatch")
@@ -964,8 +980,6 @@ def _journal_derived_accounting(
     if events_path is None or not event_rows:
         return events_path, event_rows, accounting
     provider_admissions = _provider_admissions(event_rows)
-    provider_attempts = len(provider_admissions)
-    provider_usage = _provider_usage(event_rows, attempted_calls=provider_attempts)
     catalog_calls = sum(
         1
         for row in event_rows
@@ -982,6 +996,10 @@ def _journal_derived_accounting(
         if row.get("event") == "persistent_plan_built"
         and str(row.get("finish_reason") or "") not in {"", "restored"}
     )
+    # Admissions cover agent-boundary requests only; each bootstrap call is
+    # num_retries=0, so it contributes exactly one transport attempt.
+    provider_attempts = len(provider_admissions) + catalog_calls + plan_calls
+    provider_usage = _provider_usage(event_rows, attempted_calls=provider_attempts)
     accounting.update(
         provider_attempts=provider_attempts,
         provider_completed_calls=provider_usage["provider_completed_calls"],
@@ -1477,16 +1495,31 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
         errors.append("product_input_token_conservation_failed")
     if int(report_usage.get("completion_tokens") or 0) != int(receipt.get("output_tokens") or 0):
         errors.append("product_output_token_conservation_failed")
-    if str(gt_report.get("resolved_model") or receipt.get("requested_model")) != receipt.get(
-        "effective_model"
-    ):
-        errors.append("product_effective_model_report_mismatch")
     state_dir = receipt_path.parent / "gt-state"
     try:
         events_path, runtime_events = _events(state_dir)
     except ValueError as exc:
         errors.append(str(exc))
         events_path, runtime_events = None, []
+    # effective_model is the identity of the model that actually served. On a
+    # run killed before its first admission nothing served, so null is the
+    # honest value -- not a wrong-model claim. It becomes a defect only when
+    # the journal or the receipt's own census says provider calls existed
+    # (measured: boa starved pre-admission and every mismatch check fired on
+    # the empty history).
+    provider_calls_seen = attempted_calls > 0 or any(
+        row.get("event") in {"provider_admission", "provider_response",
+                             "provider_delivery"}
+        for row in runtime_events
+    )
+    expected_effective = str(
+        gt_report.get("resolved_model") or receipt.get("requested_model"))
+    effective_model = receipt.get("effective_model")
+    if effective_model is None:
+        if provider_calls_seen:
+            errors.append("product_effective_model_report_mismatch")
+    elif str(effective_model) != expected_effective:
+        errors.append("product_effective_model_report_mismatch")
     if events_path is None:
         errors.append("product_event_journal_missing")
     else:
@@ -1523,7 +1556,12 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             admitted_calls = sum(
                 row["status"] == "admitted" for row in observed_admissions
             )
-            if admitted_calls != attempted_calls or any(
+            # Admissions only cover the agent boundary; provider_attempts also
+            # carries the GT-internal bootstrap calls, which bypass the gate.
+            bootstrap_calls = int(
+                receipt.get("select_catalog_bootstrap_calls") or 0
+            ) + int(receipt.get("persistent_plan_bootstrap_calls") or 0)
+            if admitted_calls != attempted_calls - bootstrap_calls or any(
                 row["status"] != "admitted" for row in observed_admissions
             ):
                 errors.append("treatment_provider_admission_count_mismatch")

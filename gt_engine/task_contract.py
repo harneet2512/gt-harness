@@ -152,6 +152,33 @@ _WORKFLOW_STEP_RE = re.compile(
     r"^\s*\d+[.)]\s*(?:read|learn|recall|identify|fix|create|run|verify|"
     r"check|learn or recall|find|locate|search|use|install|setup)\b"
 )
+# Markers of an agent-process directive: instructions about the working and
+# submission workflow (where to work, when to commit, what to open) rather than
+# behaviour the code must have. One marker inside a longer technical sentence is
+# not enough -- "the CLI must open a pull request" is a real requirement -- but
+# a line built from two or more of them is never normative content. Measured:
+# every DeepSWE task text ends with "IMPORTANT: Please work on this in a new
+# branch from main and commit everything when you are done." (4 markers), which
+# landed as an unprovable plan row and made `verified` unreachable on all 20.
+_PROCESS_MARKERS = (
+    r"\bwork on this\b",
+    r"\bnew branch\b",
+    r"\bwhen you are done\b",
+    r"\bcommit everything\b",
+    r"\bopen a pull request\b",
+    r"\bsubmit (?:your|the)\s+(?:work|changes|patch|solution|assignment)\b",
+    r"\bpush (?:your|the)\s+(?:work|changes|branch|commits?)\b",
+)
+
+
+def _is_process_directive(text: str) -> bool:
+    low = text or ""
+    markers = sum(
+        1 for pattern in _PROCESS_MARKERS if re.search(pattern, low, re.IGNORECASE)
+    )
+    return markers >= 2 or bool(
+        re.search(r"\bwork on this in a\b", low, re.IGNORECASE)
+    )
 
 
 def _is_workflow_noise(text: str) -> bool:

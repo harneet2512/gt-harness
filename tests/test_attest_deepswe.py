@@ -162,13 +162,12 @@ def _fixture(
         },
     )
     state = agent / "gt-state" / "task-state"
-    bootstrap_admissions = [
+    # Bootstrap calls bypass the admission gate: the journal records their
+    # spend as lifecycle rows, never as provider_admission events.
+    bootstrap_rows = [
         {
-            "event": "provider_admission", "event_hash": "f" * 64,
-            "status": "admitted", "reason": "within_provider_window",
-            "request_tokens": 300, "request_bytes": 1200,
-            "context_window_tokens": 131072, "reserved_output_tokens": 16384,
-            "input_budget_tokens": 114688, "metadata_source": "openrouter:/models",
+            "event": "select_catalog_lifecycle", "event_hash": "f" * 64,
+            "reason": "provider_request_admitted",
         }
     ] * bootstrap_calls
     events = [
@@ -226,7 +225,7 @@ def _fixture(
         {"event": "session_closed", "event_hash": "b" * 64, "sequence": 7},
     ]
     # session_closed must stay last: the journal head is pinned to the final row.
-    events = events[:-1] + bootstrap_admissions + events[-1:]
+    events = events[:-1] + bootstrap_rows + events[-1:]
     state.mkdir(parents=True, exist_ok=True)
     (state / "events.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in events), encoding="utf-8"

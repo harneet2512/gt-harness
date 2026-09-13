@@ -60,6 +60,54 @@ def test_warm_corpus_and_unchanged_document_survive_graph_revisions(tmp_path, mo
     assert receipt["cached_documents"] == 1
 
 
+def test_runtime_embed_bound_refuses_corpus_scale_missing(tmp_path, monkeypatch):
+    """A cold scratch index on a large pool must abstain, not starve the agent.
+
+    The boa smoke-20 failure was exactly this: an empty contract store fell
+    through to the unbounded document embed, which burned the whole task
+    envelope before the first provider call. The bound converts that path
+    into the same typed abstention the store side already reports.
+    """
+    calls = []
+    monkeypatch.setattr(dense_runtime, "_DIMENSION", 2)
+    monkeypatch.setattr(dense_runtime, "_verified_assets", lambda *_: (tmp_path, tmp_path))
+    monkeypatch.setattr(
+        dense_runtime,
+        "_embed",
+        lambda _m, _t, texts: calls.append(list(texts)) or [(1.0, 0.0) for _ in texts],
+    )
+    documents = {f"doc{i}": f"text {i}" for i in range(5)}
+    kwargs = dict(
+        query_text="alpha", documents=documents, lexical_scores={},
+        model_dir=tmp_path, index_path=tmp_path / "dense.sqlite",
+        source_revision="s1", graph_revision="g1",
+    )
+
+    order, receipt = dense_runtime.rank_documents(**kwargs, max_runtime_embed=3)
+
+    assert order == []
+    assert calls == []
+    assert receipt["query_ready"] is False
+    assert receipt["reason"] == "dense_index_not_ready"
+    assert receipt["runtime_embed_missing"] == 5
+    assert receipt["runtime_embed_limit"] == 3
+    assert receipt["embedded_documents"] == 0
+    assert receipt["sqlite_quick_check"] == "ok"
+
+    # Exactly at the bound the embed runs; only the over-bound case abstains.
+    order, receipt = dense_runtime.rank_documents(**kwargs, max_runtime_embed=5)
+    assert calls
+    assert receipt["query_ready"] is True
+    assert receipt["embedded_documents"] == 5
+
+    # A warm index answers later calls without re-embedding and without
+    # tripping the bound - the refusal keys on missing, not pool size.
+    calls.clear()
+    order, receipt = dense_runtime.rank_documents(**kwargs, max_runtime_embed=3)
+    assert receipt["query_ready"] is True
+    assert "runtime_embed_missing" not in receipt
+
+
 def test_dense_runtime_publishes_query_ready_exact_rescore_receipt(
     tmp_path: Path, monkeypatch
 ) -> None:

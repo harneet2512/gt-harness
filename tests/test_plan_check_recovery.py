@@ -154,3 +154,68 @@ def test_recovered_check_executes_in_real_isolated_environment(tmp_path, monkeyp
     assert resumed.plan_row_state(row_id) == "CHECK_PASSED"
     assert not resumed._pending_check_ids
     assert verify_event_journal(resumed.store.path).valid
+
+
+class _EnvelopeEnv:
+    """Workspace-envelope probe stub: canned git outputs, isolated boundary."""
+
+    def __init__(self, branch="feature/fix", porcelain=""):
+        self.branch = branch
+        self.porcelain = porcelain
+
+    def execution_env(self):
+        return {}
+
+    def execute(self, action, cwd="", timeout=None):
+        argv = action.get("argv") or []
+        if "--show-current" in argv:
+            return {"returncode": 0, "output": self.branch + "\n", "extra": {}}
+        return {"returncode": 0, "output": self.porcelain, "extra": {}}
+
+
+def _process_adapter(tmp_path):
+    prompt = (
+        "The widget must preserve compatibility.\n\n"
+        "IMPORTANT: Please work on this in a new branch from main and "
+        "commit everything when you are done.\n"
+    )
+    adapter = adapter_at(tmp_path, prompt=prompt)
+    process = [row for row in adapter.persistent_plan.rows
+               if "new branch" in row.text]
+    assert process, "submission directive must remain a plan row"
+    return adapter, process[0].row_id
+
+
+def test_process_row_proven_by_workspace_envelope(tmp_path, monkeypatch):
+    adapter, row_id = _process_adapter(tmp_path)
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    adapter.drain_plan_checks(_EnvelopeEnv())
+    assert adapter.plan_row_state(row_id) == "PROVEN"
+    journal = adapter.store.path.read_text(encoding="utf-8")
+    assert '"plan_process_row_observed"' in journal
+    assert row_id not in adapter.unmet_plan_rows()
+
+
+def test_process_row_stays_open_on_main_or_dirty_tree(tmp_path, monkeypatch):
+    adapter, row_id = _process_adapter(tmp_path)
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+    adapter.drain_plan_checks(_EnvelopeEnv(branch="main"))
+    assert adapter.plan_row_state(row_id) == "UNVERIFIED"
+    adapter.drain_plan_checks(
+        _EnvelopeEnv(branch="feature/fix", porcelain=" M src/widget.py\n"))
+    assert adapter.plan_row_state(row_id) == "UNVERIFIED"
+    assert row_id in adapter.unmet_plan_rows()
+
+
+def test_process_row_probe_failure_is_honest_abstention(tmp_path, monkeypatch):
+    adapter, row_id = _process_adapter(tmp_path)
+    monkeypatch.setenv("GT_VERIFY_EXECUTE", "1")
+
+    class FailingEnv(_EnvelopeEnv):
+        def execute(self, action, cwd="", timeout=None):
+            raise RuntimeError("no isolation boundary")
+
+    adapter.drain_plan_checks(FailingEnv())
+    assert adapter.plan_row_state(row_id) == "UNVERIFIED"
+    assert '"plan_process_row_probe_failed"' in adapter.store.path.read_text(
+        encoding="utf-8")

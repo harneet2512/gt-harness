@@ -41,6 +41,7 @@ from .request_history import store_provider_request
 from .run_diagnostics import DiagnosticCode, DiagnosticEvent, DiagnosticJournal
 from .task_contract import (
     TaskContract,
+    _is_process_directive,
     matching_obligation_ids,
     render_obligation_transitions,
     render_task_contract,
@@ -1001,6 +1002,10 @@ class MiniSweAdapter(GroundtruthController):
         for row in getattr(self.persistent_plan, "rows", ()):
             if not row.verification_command or row.row_id in recovered_rows:
                 continue
+            if _is_process_directive(getattr(row, "text", "")):
+                # A test run cannot evidence a workflow directive; its channel
+                # is the workspace envelope probe in ``drain_plan_checks``.
+                continue
             segments, _seps, _last_check, reason = decompose_check_command(
                 row.verification_command
             )
@@ -1348,6 +1353,7 @@ class MiniSweAdapter(GroundtruthController):
             diff_workspace,
         )
 
+        self._observe_process_rows(environment)
         deadline = time.monotonic() + min(budget_seconds, self.REVERIFY_PASS_BUDGET_SECONDS)
         pending = getattr(self, "_pending_check_ids", set())
         for check_id in sorted(tuple(pending)):
@@ -1481,7 +1487,100 @@ class MiniSweAdapter(GroundtruthController):
                     action_index=self.global_action,
                 )
 
+    def _observe_process_rows(self, environment: Any) -> None:
+        """Discharge workflow-directive rows from workspace git state.
+
+        A directive such as "work on a new branch ... and commit everything
+        when you are done" is normative -- a submission that never commits
+        grades against a pristine base -- but no test invocation can evidence
+        it. Its honest channel is the submission envelope itself: a clean
+        working tree on a named non-main branch, probed at each verification
+        boundary so work edited after the last commit re-opens the row.
+        """
+        rows = [row for row in getattr(self.persistent_plan, "rows", ())
+                if _is_process_directive(getattr(row, "text", ""))]
+        if not rows or not callable(getattr(environment, "execution_env", None)):
+            return
+        captured: dict[str, tuple[str, str]] = {}
+        for name, argv in (("branch", ["git", "branch", "--show-current"]),
+                           ("porcelain", ["git", "status", "--porcelain"])):
+            try:
+                result = environment.execute(
+                    {"command": shlex.join(argv), "argv": argv},
+                    cwd=self.repo_root, timeout=15)
+            except Exception as exc:  # the probe must never block the decision
+                self.store.append("plan_process_row_probe_failed",
+                                  error_type=type(exc).__name__)
+                return
+            extra = result.get("extra") or {}
+            reference = extra.get("output_artifact")
+            output = (environment.evidence_store.bytes(
+                reference["sha256"]).decode("utf-8", "replace")
+                if reference else str(result.get("output", "")))
+            if result.get("returncode") != 0:
+                self.store.append("plan_process_row_probe_failed",
+                                  error_type="nonzero_returncode",
+                                  returncode=result.get("returncode"))
+                return
+            captured[name] = (output, str(extra.get("environment_sha256", "")))
+        branch = captured["branch"][0].strip().lower()
+        clean = not captured["porcelain"][0].strip()
+        on_named_branch = branch not in {"", "main", "master"}
+        observations = getattr(self, "_process_row_observations", {})
+        for row in rows:
+            text = getattr(row, "text", "").lower()
+            needs_branch = "branch" in text
+            needs_commit = any(
+                marker in text for marker in ("commit", "submit", "push"))
+            # A pull-request instruction is discharged outside the workspace;
+            # git state cannot evidence it and the row stays honestly open.
+            unprovable_claim = "pull request" in text
+            state = ("PROVEN"
+                     if not unprovable_claim
+                     and (not needs_branch or on_named_branch)
+                     and (not needs_commit or clean)
+                     else "UNVERIFIED")
+            observations[row.row_id] = {
+                "state": state, "source_revision": self.repository_revision,
+            }
+            self.store.append(
+                "plan_process_row_observed", row_id=row.row_id, state=state,
+                branch=branch, clean_tree=clean, needs_branch=needs_branch,
+                needs_commit=needs_commit, unprovable_claim=unprovable_claim,
+                source_revision=self.repository_revision,
+                environment_sha256=captured["porcelain"][1],
+            )
+            if state == "PROVEN":
+                self._record_process_pass_receipts(
+                    row.row_id, captured["porcelain"][0])
+        self._process_row_observations = observations
+
+    def _record_process_pass_receipts(self, row_id: str, output: str) -> None:
+        """A proven workflow directive is evidence for its mapped predicates."""
+        for predicate_id in getattr(self, "plan_row_predicates", {}).get(
+            row_id, ()
+        ):
+            if predicate_id not in self.predicates:
+                continue
+            self.record_receipt(
+                predicate_id,
+                "git status --porcelain && git branch --show-current",
+                0,
+                output,
+                epoch=self.workspace_epoch,
+                status="GREEN",
+                semantic=True,
+                evidence_kind="process_observation",
+                coverage_basis="plan_process_row_observed",
+                source_revision_at_observation=self.repository_revision,
+                action_index=self.global_action,
+            )
+
     def plan_row_state(self, row_id: str) -> str:
+        process = getattr(self, "_process_row_observations", {}).get(row_id)
+        if (process is not None
+                and process["source_revision"] == self.repository_revision):
+            return process["state"]
         observations = getattr(self, "_plan_check_observations", {})
         bound = [key for key, spec in getattr(self, "_check_specs", {}).items()
                  if row_id in spec.requirement_ids]
@@ -3580,12 +3679,19 @@ class MiniSweAdapter(GroundtruthController):
         usage: Mapping[str, Any] | None = None,
         model: str = "",
         next_actions: Iterable[Mapping[str, Any]] = (),
+        request_id: str = "",
     ) -> None:
         """Record the terminal provider response and bind it to the latest delivery.
 
         A delivery is only ``DELIVERED`` (not merely ``EXECUTED``) once the
         provider responded; this join is the difference between attribution and
         a transcript substring guess.
+
+        ``request_id`` names the request this response answers when the call
+        never went through :meth:`bind_provider_payload` (GT-internal bootstrap
+        calls). Without it the row borrows ``_latest_delivery`` — the previous
+        agent request — and attributes this spend to a request that did not
+        carry it.
         """
         digest = ""
         response_blob = ""
@@ -3618,10 +3724,14 @@ class MiniSweAdapter(GroundtruthController):
                     or ("groundtruth" if action.get("gt_action") else "bash")
                 ),
             })
+        resolved_request_id = (
+            request_id
+            or (self._latest_delivery.request_id if self._latest_delivery else "")
+        )
         self.store.append(
             "provider_response",
             iteration=self.iteration,
-            request_id=self._latest_delivery.request_id if self._latest_delivery else "",
+            request_id=resolved_request_id,
             response_sha256=digest,
             response_blob=response_blob,
             provider_response_id=(
@@ -3636,11 +3746,11 @@ class MiniSweAdapter(GroundtruthController):
             model_mismatch=mismatch,
             delivery_ids=list(
                 self._latest_delivery.delivery_ids
-                if self._latest_delivery else ()
+                if self._latest_delivery and not request_id else ()
             ),
         )
-        if self._latest_delivery is not None:
-            self._terminal_request_ids.add(self._latest_delivery.request_id)
+        if resolved_request_id:
+            self._terminal_request_ids.add(resolved_request_id)
         if mismatch:
             raise ProviderModelMismatch(
                 "provider model mismatch: requested="
@@ -3662,19 +3772,30 @@ class MiniSweAdapter(GroundtruthController):
         }
         return self._normalized_model_id(reported_model) not in expected
 
-    def bind_provider_failure(self, error: BaseException) -> None:
-        """Record a provider terminal failure symmetrically with a response."""
+    def bind_provider_failure(
+        self, error: BaseException, *, request_id: str = ""
+    ) -> None:
+        """Record a provider terminal failure symmetrically with a response.
+
+        ``request_id`` names the failed request when it never went through
+        :meth:`bind_provider_payload` (GT-internal bootstrap calls); without it
+        the failure would borrow the previous agent request's identity.
+        """
         from .run_diagnostics import redact_secret_text
 
+        resolved_request_id = (
+            request_id
+            or (self._latest_delivery.request_id if self._latest_delivery else "")
+        )
         self.store.append(
             "provider_failure",
             iteration=self.iteration,
-            request_id=self._latest_delivery.request_id if self._latest_delivery else "",
+            request_id=resolved_request_id,
             error_type=type(error).__name__,
             error=redact_secret_text(str(error))[:500],
         )
-        if self._latest_delivery is not None:
-            self._terminal_request_ids.add(self._latest_delivery.request_id)
+        if resolved_request_id:
+            self._terminal_request_ids.add(resolved_request_id)
 
     def terminal_confirmed(self, request_id: str) -> bool:
         return request_id in self._terminal_request_ids

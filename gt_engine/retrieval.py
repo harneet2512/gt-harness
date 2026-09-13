@@ -1198,6 +1198,11 @@ def dense_rank(
                 source_revision=source_revision,
                 graph_revision=revision or "unknown-graph-revision",
                 limit=min(max(1, int(k)), len(documents)),
+                # Same bound the store path applies: a store that cannot
+                # answer does not license a corpus-scale embed on the agent's
+                # query path. This is the refusal that keeps an absent or
+                # still-warming store from starving the first provider call.
+                max_runtime_embed=MAX_RUNTIME_EMBED_DOCUMENTS,
             )
         except Exception as exc:  # noqa: BLE001 - dense fails closed, never loudly
             return SourceRanking(

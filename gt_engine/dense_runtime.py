@@ -141,6 +141,7 @@ def rank_documents(
     source_revision: str,
     graph_revision: str,
     limit: int = 4,
+    max_runtime_embed: int | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Embed, publish, query, and independently health-check a local corpus."""
 
@@ -191,6 +192,45 @@ def rank_documents(
             if valid:
                 cached.add(doc_id)
         missing = [doc_id for doc_id in document_ids if doc_id not in cached]
+        if max_runtime_embed is not None and len(missing) > int(max_runtime_embed):
+            # The caller's bound is on embed work, not pool size. A cold
+            # scratch index on a large repository is a corpus-scale ONNX job
+            # on the agent's own query path - measured, it consumed boa's
+            # entire task envelope before the first provider admission. The
+            # store-side cap abstains the same way; a refused embed leaves
+            # lexical/property rank to answer alone.
+            connection = sqlite3.connect(index_path)
+            try:
+                quick_check = str(
+                    connection.execute("PRAGMA quick_check").fetchone()[0]
+                )
+                count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM gt_vector_documents"
+                    ).fetchone()[0]
+                )
+            finally:
+                connection.close()
+            return [], {
+                "schema": "gt.dense_index_receipt.v1",
+                "query_ready": False,
+                "model_sha256": _MODEL_SHA256,
+                "tokenizer_sha256": _TOKENIZER_SHA256,
+                "dimension": _DIMENSION,
+                "recipe_id": _RECIPE_ID,
+                "source_revision": source_revision,
+                "graph_revision": graph_revision,
+                "embedded_documents": 0,
+                "cached_documents": len(cached),
+                "document_count": count,
+                "query_result_count": 0,
+                "index_sha256": _sha256(index_path) if index_path.exists() else "",
+                "sqlite_quick_check": quick_check,
+                "exact_rescore": True,
+                "runtime_embed_missing": len(missing),
+                "runtime_embed_limit": int(max_runtime_embed),
+                "reason": "dense_index_not_ready",
+            }
         records = []
         for start in range(0, len(missing), 32):
             batch = missing[start:start + 32]
