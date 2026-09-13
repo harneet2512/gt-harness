@@ -1,0 +1,40 @@
+{
+  "basis": "exact_ci_static_build_lsp_inventory_eviction",
+  "detail": {
+    "build_conclusion": "success",
+    "build_info_sha256": "c5339b1500bb198030631aaf8cf1974d9d762a6ebe353c2f1cce3b4412c9477f",
+    "build_tags": "netgo,osusergo,sqlite_fts5",
+    "build_workflow_run_id": 34787896206,
+    "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "changes": [
+      "6b4c923 resolve: evict LSP-enriched nodes from parser_node_inventory in the same transaction as UPDATE nodes, restoring producer DeepEqual between native and LSP-enriched parses",
+      "3f5ff8e style: ruff-format resolve.py enrichment line (format-only; fixes the lint failure that red CI on 6b4c923)"
+    ],
+    "full_producer_ci_conclusion": "success",
+    "full_producer_ci_run_id": 34787216508,
+    "go_toolchain": "go1.22.5",
+    "measured": {
+      "binding": "producer_build VERIFIED: producer_sha256==2acc26d6, source_commit==3f5ff8e, source_tree==1abb13f6 (root tree), build_info_sha256==c5339b15, source_fingerprint==30536060 (identical to e85b9d75 - Go subtree unchanged, Python-only diff)",
+      "edges": "LSP inventory eviction verified on 6b4c923 producer CI run 34785086984; unchanged Go subtree on 3f5ff8e (fingerprint 30536060 identical)",
+      "go_tests": "CI go-build green on 3f5ff8e (run 34787216508); producer build 34787896206 success",
+      "python_tests": "CI test matrix green ubuntu/windows/macos 3.11+3.12 + lint + benchmark on 3f5ff8e (run 34787216508)",
+      "wheel": "groundtruth_mcp-1.0.0-py3-none-any.whl sha256=53ae59ef built from git archive 3f5ff8e; verify_wheel_source correspondence PASS vs src/ (323 files)"
+    },
+    "producer_sha256": "2acc26d6623dd11e36fa1a1910df92a4fa557ccb947f683f3066910ace26ecbd",
+    "remaining": [
+      "canonical provider-free acceptance on final bundle SHA",
+      "installed full-flow rehearsal on new wheel+binary",
+      "paid smoke approval gate"
+    ],
+    "repository": "harneet2512/groundtruth",
+    "scope": "LSP type-enrichment correctness: mutated node rows evicted from parser_node_inventory transactionally with UPDATE nodes; resolve.py format conformance",
+    "source_tree": "1abb13f6c80c23211c04d8e93fbb94c76c611095"
+  },
+  "head_sha": "3f5ff8e18195951ffb91f431a14475ff1fdae842",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "0e81acf6bcfc8faad6a655d54cb6ef343b10bddf46e12e90c4ed62d61637caf9",
+  "packet_id": "har83-context-plan-producer-3f5ff8e-ci",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-83"
+}
