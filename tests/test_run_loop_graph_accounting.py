@@ -190,3 +190,60 @@ def test_either_invalidation_signal_opens_the_window(event):
         _row("session_closed", 10),
     ]
     assert account_run_loop(rows)["graph_dark_seconds"] == 6.0
+
+
+def test_a_verified_no_change_transaction_is_not_an_invalidation():
+    """Automatic checks post `edit_transaction` even when they changed nothing.
+
+    drain_plan_checks and _plan_baseline_check journal the row unconditionally
+    in a finally block. A complete empty diff attests the tree did not move --
+    the adopted graph still describes it -- so treating the row as an
+    invalidation opens a dark interval no publication can ever close (the
+    emitter dedupes on unchanged manifest+revision). That was the
+    `ended_graph_dark` tail in run 34754150319.
+    """
+    rows = [
+        _row("graph_publication", 0),
+        _row("edit_transaction", 3, changed_paths=[], complete=True,
+             omissions=[], pre_revision="rev0", post_revision="rev0"),
+        _row("edit_transaction", 5, changed_paths=["service.py"],
+             complete=True, omissions=[], pre_revision="rev0",
+             post_revision="rev1"),
+        _row("graph_publication", 9),
+        _row("session_closed", 10),
+    ]
+    result = account_run_loop(rows)
+    assert result["invalidations"] == 1
+    assert result["graph_dark_seconds"] == 4.0
+    assert result["graph_dark_intervals"] == [
+        {"start": 5.0, "end": 9.0, "closed": True}]
+    assert result["ended_graph_dark"] is False
+
+
+def test_an_incomplete_transaction_still_invalidates_without_changed_paths():
+    """Unenumerated change is a real invalidation even with zero named paths."""
+    rows = [
+        _row("graph_publication", 0),
+        _row("edit_transaction", 3, changed_paths=[], complete=False,
+             omissions=["capture_incomplete"]),
+        _row("graph_publication", 9),
+        _row("session_closed", 10),
+    ]
+    result = account_run_loop(rows)
+    assert result["invalidations"] == 1
+    assert result["graph_dark_seconds"] == 6.0
+
+
+def test_a_revision_advance_without_enumerated_paths_still_invalidates():
+    """An empty diff whose revision still moved is unenumerated change, not a
+    verified no-change boundary -- e.g. git state the file diff cannot see."""
+    rows = [
+        _row("graph_publication", 0),
+        _row("edit_transaction", 3, changed_paths=[], complete=True,
+             omissions=[], pre_revision="rev0", post_revision="rev1"),
+        _row("graph_publication", 9),
+        _row("session_closed", 10),
+    ]
+    result = account_run_loop(rows)
+    assert result["invalidations"] == 1
+    assert result["graph_dark_seconds"] == 6.0

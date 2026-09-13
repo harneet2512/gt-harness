@@ -15,7 +15,7 @@ from gt_engine.miniswe_controller import Predicate
 from gt_engine.miniswe_integration import MiniSweAdapter, ProviderModelMismatch
 from gt_engine.request_history import load_provider_request
 from gt_engine.run_diagnostics import DiagnosticCode
-from gt_engine.runtime_observation import capture_workspace
+from gt_engine.runtime_observation import capture_workspace, diff_workspace
 from gt_engine.task_contract import Obligation, TaskContract, extract_task_contract
 from gt_engine.verification_contract import compile_obligation_predicates
 
@@ -1450,6 +1450,72 @@ def _journal_rows(adapter):
         for line in adapter.store.path.read_text().splitlines()
         if line.strip()
     ]
+
+
+def test_note_edit_skips_invalidation_when_the_edit_is_already_adopted(
+    monkeypatch, tmp_path
+):
+    """A synchronous amend publishes before note_edit runs; re-dirtying the
+    just-adopted engine would journal an invalidation after the publication
+    that closed it and force a deduplicated second amend -- the
+    `ended_graph_dark` tail in run 34754150319."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db="graph.db",
+    )
+    adapter.start_task()
+    adapter.begin_implement()
+    before = capture_workspace(repo)
+    adapter.record_repository_snapshot(before, boundary="task_start")
+    (repo / "a.py").write_text("a = 2\n", encoding="utf-8")
+    transaction = diff_workspace(
+        before, capture_workspace(repo), action_id=1, command="edit a.py"
+    )
+    # The producer stands in for the boundary amend: adopting the
+    # transaction's revision is what publish_graph does after a real amend.
+    monkeypatch.setattr(
+        adapter, "_sync_amend_graph",
+        lambda tx: adapter.engine_state.publish_graph(
+            graph_path="graph.db", graph_revision="g2",
+            source_revision=str(tx.post_revision),
+        ),
+    )
+    adapter.record_edit_transaction(transaction)
+    assert adapter.engine_state.graph_current
+
+    adapter.note_edit(["a.py"])
+
+    rows = _journal_rows(adapter)
+    assert not any(row.get("event") == "graph_invalidated" for row in rows)
+    assert adapter.engine_state.graph_current
+    assert adapter.graph_stale_since_revision == ""
+
+
+def test_note_edit_journals_invalidation_when_graph_is_stale(tmp_path):
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path, predicates=[], graph_db="graph.db"
+    )
+    adapter.start_task()
+    adapter.begin_implement()
+    adapter.engine_state.bind_initial_source("rev0")
+    adapter.engine_state.publish_graph(
+        graph_path="graph.db", graph_revision="g1", source_revision="rev0"
+    )
+    adapter.engine_state.source_revision = "rev1"
+    adapter.repository_revision = "rev1"
+    assert not adapter.engine_state.graph_current
+
+    adapter.note_edit(["a.py"])
+
+    rows = _journal_rows(adapter)
+    invalidated = [row for row in rows if row.get("event") == "graph_invalidated"]
+    assert len(invalidated) == 1
+    assert invalidated[0]["paths"] == ["a.py"]
+    assert invalidated[0]["repository_revision"] == "rev1"
+    assert adapter.graph_stale_since_revision == "rev1"
 
 
 def test_poll_startup_index_adopts_a_landed_graph(tmp_path):

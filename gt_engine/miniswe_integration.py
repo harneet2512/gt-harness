@@ -473,6 +473,11 @@ class MiniSweAdapter(GroundtruthController):
         # untouched since it was scheduled; an unenumerated change makes
         # that set unknowable and the salvage must refuse.
         self._edit_epoch = 0
+        # The edit epoch whose synchronous amend the engine adopted. Set in
+        # record_edit_transaction when publish_graph leaves the engine
+        # graph_current; note_edit consults it so an adopted transaction does
+        # not journal a second, post-publication invalidation.
+        self._adopted_edit_epoch = -1
         self._path_edit_epochs: dict[str, int] = {}
         self._incomplete_edit_epoch = 0
         self._lsp_epochs: dict[str, int] = {}
@@ -1856,25 +1861,40 @@ class MiniSweAdapter(GroundtruthController):
             )
         self._edited_files.update(normalized_paths)
         if normalized_paths and self.graph_db:
-            if not self.engine_state.query_snapshot().overlay:
-                self.engine_state.mark_paths_dirty(
-                    normalized_paths,
-                    revision=self.repository_revision or f"epoch:{self.workspace_epoch}",
+            # The synchronous amend inside record_edit_transaction can already
+            # have adopted this exact edit: apply_transaction filled the
+            # overlay, the amend consumed it, and publish_graph cleared it
+            # before note_edit ran. An engine that is current BECAUSE the
+            # transaction epoch was adopted holds these paths in the graph, so
+            # re-dirtying would journal an invalidation after the publication
+            # that closed it and force a deduplicated second amend. A current
+            # engine reached any other way - a snapshot bind, a re-badge, an
+            # adopted startup index - has no transaction saying these paths
+            # are in the graph, and a bare note_edit still means stale.
+            adopted = (
+                self.engine_state.graph_current
+                and self._edit_epoch == self._adopted_edit_epoch
+            )
+            if not adopted:
+                if not self.engine_state.query_snapshot().overlay:
+                    self.engine_state.mark_paths_dirty(
+                        normalized_paths,
+                        revision=self.repository_revision or f"epoch:{self.workspace_epoch}",
+                    )
+                self.graph_stale_since_revision = self.repository_revision
+                self.store.append(
+                    "graph_invalidated",
+                    paths=list(normalized_paths),
+                    repository_revision=self.repository_revision,
+                    graph_db_sha256=hashlib.sha256(
+                        str(self.graph_db).encode("utf-8")
+                    ).hexdigest(),
                 )
             # GatewayState captures graph_db at construction. Drop the cached
             # wrapper immediately so automatic evidence cannot keep reading a
             # pre-edit graph while the adapter correctly reports it stale.
             # The persistent EpisodeState is retained and reattached lazily.
             self._gateway_state = None
-            self.graph_stale_since_revision = self.repository_revision
-            self.store.append(
-                "graph_invalidated",
-                paths=list(normalized_paths),
-                repository_revision=self.repository_revision,
-                graph_db_sha256=hashlib.sha256(
-                    str(self.graph_db).encode("utf-8")
-                ).hexdigest(),
-            )
         self._record_state()
 
     def record_repository_snapshot(self, snapshot: Any, *, boundary: str) -> None:
@@ -2001,6 +2021,8 @@ class MiniSweAdapter(GroundtruthController):
             omissions=list(transaction.omissions),
         )
         self._sync_amend_graph(transaction)
+        if self.engine_state.graph_current:
+            self._adopted_edit_epoch = self._edit_epoch
 
     #: Caps for the synchronous amend at the transaction boundary. The amend
     #: copies the certified parent, reruns the producer over the dirty paths,

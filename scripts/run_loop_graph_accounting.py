@@ -42,6 +42,36 @@ from typing import Any, Mapping, Sequence
 # before it existed, since the instrument has to read runs already on disk.
 INVALIDATION_EVENTS = ("graph_invalidated", "edit_transaction")
 
+
+def _is_invalidation(row: Mapping[str, Any]) -> bool:
+    """Whether the row marks the adopted graph stale.
+
+    `graph_invalidated` is unconditional. `edit_transaction` is journaled for
+    every boundary diff -- including the zero-change ones automatic checks and
+    baseline rechecks post unconditionally -- so the fallback needs the row's
+    own evidence: a complete empty diff at the same revision is a verified
+    no-change boundary, and the adopted graph provably still describes that
+    tree. Counting it as an invalidation holds a dark interval open that no
+    publication can ever close (the publication emitter dedupes on an
+    unchanged manifest+revision, and the amend path correctly has nothing to
+    do). A revision that moves without enumerated paths is the opposite case:
+    unenumerated source movement, counted conservatively. Rows missing the
+    fields -- the legacy journals the fallback exists for -- still count.
+    """
+    event = str(row.get("event") or "")
+    if event == "graph_invalidated":
+        return True
+    if event != "edit_transaction":
+        return False
+    pre = str(row.get("pre_revision") or "")
+    post = str(row.get("post_revision") or "")
+    return bool(
+        row.get("changed_paths")
+        or row.get("omissions")
+        or not row.get("complete")
+        or (pre and post and pre != post)
+    )
+
 BLOCKED_BASIS = (
     "measured: synchronous amends and boundary resyncs carry elapsed_ms on "
     "graph_sync_amend / graph_boundary_amend / graph_recovery rows; no worker "
@@ -102,7 +132,7 @@ def account_run_loop(rows: Sequence[Mapping[str, Any]]) -> dict:
 
     for row, when in stamped:
         event = str(row.get("event") or "")
-        if event in INVALIDATION_EVENTS:
+        if event in INVALIDATION_EVENTS and _is_invalidation(row):
             invalidations += 1
             # Repeated invalidations inside one window are one window: the agent
             # editing continuously invalidates many times before one publish.
