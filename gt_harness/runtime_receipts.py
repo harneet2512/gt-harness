@@ -789,11 +789,15 @@ def issue_runtime_receipts(
     # reason a run that submitted and scored f2p 24/25 came back status ERROR.
     # Admissions agree with the manifest on both the fixture (3 + bootstrap)
     # and the live run (296), because both are written at that boundary.
-    # GT-internal bootstrap calls never reach the admission gate -- they are
-    # journaled as spent calls (num_retries=0 -> exactly one wire request
-    # each), so the attempt census is admissions + the two bootstrap counters.
+    # GT-internal bootstrap calls DO pass the admission gate: native_query
+    # dispatches through the wrapped model._query transport, so every wire
+    # attempt -- agent turn, bootstrap, or retry -- emits exactly one
+    # admission row. Counting the bootstrap counters on top double-counts
+    # them (the installed rehearsal showed 10 admissions for 8 agent + 2
+    # bootstrap wires). Attempts are the admitted rows only; a refused row
+    # never reached the wire.
     provider_attempts = (
-        len(provider_admissions) + bootstrap_calls + plan_calls
+        sum(1 for row in provider_admissions if row["status"] == "admitted")
     ) or provider_calls
     provider_usage = _provider_usage(event_rows, attempted_calls=provider_attempts)
     repro_path, reproduction = _single_optional(state_dir, "reproducibility_manifest.json")
@@ -818,11 +822,12 @@ def issue_runtime_receipts(
     exit_code = int(report.get("exit_code") or 0)
     terminal = str(report.get("terminal") or "internal_error")
     status = "COMPLETED" if exit_code == 0 else "ERROR"
-    # Every terminal turn must have been admitted; retried attempts mean there
-    # can be MORE admissions than turns, never fewer. GT-internal bootstrap
-    # calls bypass the gate by design, so the floor is the agent's own calls.
+    # Every terminal call must have been admitted; retried attempts mean there
+    # can be MORE admissions than calls, never fewer. Bootstrap calls are
+    # admitted through the same transport wrapper, so the floor is the whole
+    # logical-call census.
     if status == "COMPLETED" and (
-        len(provider_admissions) < agent_turn_calls
+        len(provider_admissions) < provider_calls
         or any(row["status"] != "admitted" for row in provider_admissions)
     ):
         raise ValueError("provider_admission_count_mismatch")
@@ -996,9 +1001,13 @@ def _journal_derived_accounting(
         if row.get("event") == "persistent_plan_built"
         and str(row.get("finish_reason") or "") not in {"", "restored"}
     )
-    # Admissions cover agent-boundary requests only; each bootstrap call is
-    # num_retries=0, so it contributes exactly one transport attempt.
-    provider_attempts = len(provider_admissions) + catalog_calls + plan_calls
+    # Every wire attempt -- agent turn, bootstrap, retry -- emits one
+    # admission row through the shared transport wrapper, so the attempt
+    # census is the admitted rows. The bootstrap counters stay as call
+    # classification, not an additive term.
+    provider_attempts = sum(
+        1 for row in provider_admissions if row["status"] == "admitted"
+    )
     provider_usage = _provider_usage(event_rows, attempted_calls=provider_attempts)
     accounting.update(
         provider_attempts=provider_attempts,
@@ -1556,12 +1565,10 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             admitted_calls = sum(
                 row["status"] == "admitted" for row in observed_admissions
             )
-            # Admissions only cover the agent boundary; provider_attempts also
-            # carries the GT-internal bootstrap calls, which bypass the gate.
-            bootstrap_calls = int(
-                receipt.get("select_catalog_bootstrap_calls") or 0
-            ) + int(receipt.get("persistent_plan_bootstrap_calls") or 0)
-            if admitted_calls != attempted_calls - bootstrap_calls or any(
+            # provider_attempts IS the admitted-row census: every wire
+            # attempt -- agent turn, bootstrap, retry -- emits exactly one
+            # admission through the shared transport wrapper.
+            if admitted_calls != attempted_calls or any(
                 row["status"] != "admitted" for row in observed_admissions
             ):
                 errors.append("treatment_provider_admission_count_mismatch")

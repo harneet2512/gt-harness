@@ -163,6 +163,11 @@ class EngineState:
         if unrecorded:
             self._omissions.add("transaction_bytes_unavailable")
 
+    def mark_source_unenumerated(self, *, revision: str, reason: str) -> None:
+        """The source advanced but no witness enumerates what changed."""
+        self.source_revision = revision
+        self._omissions.add(reason)
+
     def apply_transaction(self, transaction: Any) -> None:
         revision = str(transaction.post_revision)
         self.source_revision = revision

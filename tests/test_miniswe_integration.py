@@ -822,6 +822,110 @@ def test_graph_full_rebuild_fallback_restores_freshness(monkeypatch, tmp_path):
     assert a.gateway_state().graph_db == str(rebuilt)
 
 
+def test_a_snapshot_delta_is_the_dirty_enumeration_the_overlay_needs(tmp_path):
+    """A snapshot advances the source revision without writing overlay
+    entries, so without the diff the graph goes stale with an empty dirty
+    set and the boundary amend reads it as a stale marking and returns.
+    Rehearsal 34750641705: a side-effect file changed between snapshots,
+    the revision moved 59bbfbc0 -> b16d33e6, and nothing ever resynced.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+    a.start_task()
+    a.record_repository_snapshot(capture_workspace(repo), boundary="task_start")
+    assert a.graph_fresh is True
+
+    # The side effect lands outside any transaction: only the next witness
+    # sees it, and its diff against the previous witness is the enumeration.
+    (repo / "side.py").write_text("x = 2\n", encoding="utf-8")
+    a.record_repository_snapshot(capture_workspace(repo), boundary="after_action")
+
+    assert a.graph_fresh is False
+    assert a.engine_state.query_snapshot().masked_paths == ("side.py",)
+
+
+def test_identical_tree_with_same_basis_rebadges_instead_of_rebuilding(tmp_path):
+    """Only git history moved: the file tree is provably identical to the
+    adopted graph's basis tree, so the certified graph carries the new
+    revision directly. Rebuilding identical input is pure waste; leaving
+    it stale is a lie.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+    a.start_task()
+    first = capture_workspace(repo)
+    a.record_repository_snapshot(first, boundary="task_start")
+
+    moved = replace(first, revision="f" * 40)
+    a.record_repository_snapshot(moved, boundary="after_action")
+
+    assert a.graph_fresh is True
+    assert a.engine_state.graph_source_revision == "f" * 40
+    lines = Path(a.store.path).read_text(encoding="utf-8").splitlines()
+    assert any(
+        json.loads(line).get("event") == "graph_rebadged" for line in lines
+    )
+
+
+def test_identical_tree_with_unwitnessed_basis_recovers_not_rebadges(
+    monkeypatch, tmp_path,
+):
+    """The same empty diff against a graph whose basis is a tree no witness
+    proves identical is an unenumerated advance: the dirty set is
+    unknowable, so the only honest resync is the whole-tree recovery build.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+    a.start_task()
+    first = capture_workspace(repo)
+    a.record_repository_snapshot(first, boundary="task_start")
+
+    # A graph adopted on a basis no recorded snapshot witnessed.
+    a.engine_state.graph_source_revision = "0" * 40
+    moved = replace(first, revision="f" * 40)
+    a.record_repository_snapshot(moved, boundary="after_action")
+
+    assert a.graph_fresh is False
+    assert "source_advance_unenumerated" in (
+        a.engine_state.query_snapshot().omissions
+    )
+
+    rebuilt = tmp_path / "rebuilt.db"
+    rebuilt.write_bytes(b"new")
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt",
+        lambda root, **_kwargs: IndexBuildReceipt(
+            IndexBuildStatus.BUILT,
+            graph_db=str(rebuilt),
+            graph_revision="b" * 64,
+            analysis_state="complete",
+        ),
+    )
+    assert a.refresh_graph() is True
+    assert a.graph_fresh is True
+
+
 def _build_mode_rows(adapter) -> list[dict]:
     lines = Path(adapter.store.path).read_text(encoding="utf-8").splitlines()
     return [

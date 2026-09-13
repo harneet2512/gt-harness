@@ -1874,9 +1874,67 @@ class MiniSweAdapter(GroundtruthController):
         encoded = snapshot.canonical_bytes()
         digest = hashlib.sha256(encoded).hexdigest()
         self.store.put_blob("repository_snapshots", digest, encoded)
+        previous = self._latest_workspace_snapshot
         self.repository_revision = str(snapshot.revision)
         self._latest_workspace_snapshot = snapshot
         self.engine_state.bind_initial_source(self.repository_revision)
+        if previous is not None and not self.engine_state.graph_current:
+            # A snapshot is not a transaction: bind_initial_source advanced
+            # the source revision without writing overlay entries, so the
+            # graph went stale with an empty dirty set -- and the boundary
+            # amend reads "nothing masked" as a stale marking and never
+            # resyncs. The delta between two certified witnesses IS the
+            # enumeration the overlay needs; a path already covered by an
+            # intervening transaction simply re-reads identically.
+            prior = {
+                str(item.path): (str(item.kind), str(item.sha256 or ""))
+                for item in previous.files
+            }
+            current = {
+                str(item.path): (str(item.kind), str(item.sha256 or ""))
+                for item in snapshot.files
+            }
+            changed = tuple(sorted(
+                path for path in set(prior) | set(current)
+                if prior.get(path) != current.get(path)
+            ))
+            if changed:
+                self.engine_state.mark_paths_dirty(
+                    changed, revision=self.repository_revision
+                )
+            else:
+                state = self.engine_state.query_snapshot()
+                if not state.masked_paths:
+                    basis = self.engine_state.graph_source_revision
+                    if (
+                        basis
+                        and basis == str(previous.revision)
+                        and not state.omissions
+                    ):
+                        # The file tree is provably identical to the adopted
+                        # graph's basis tree -- only git history moved. The
+                        # certified graph still describes exactly these
+                        # files, so it carries the new revision directly
+                        # rather than rebuild identical input.
+                        if self.engine_state.publish_graph(
+                            graph_path=self.engine_state.graph_path,
+                            graph_revision=self.engine_state.graph_revision,
+                            source_revision=self.repository_revision,
+                        ):
+                            self.store.append(
+                                "graph_rebadged",
+                                repository_revision=self.repository_revision,
+                                graph_revision=self.engine_state.graph_revision,
+                            )
+                    else:
+                        # Files are identical to the previous witness but the
+                        # adopted graph's basis is an unreconstructable tree
+                        # -- the advance cannot be enumerated against what
+                        # the graph covers.
+                        self.engine_state.mark_source_unenumerated(
+                            revision=self.repository_revision,
+                            reason="source_advance_unenumerated",
+                        )
         self.store.append(
             "repository_snapshot",
             boundary=boundary,

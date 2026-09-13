@@ -174,9 +174,15 @@ except through the intercepted tool call. That makes synchronous indexing
   when the file lands.
 - **Context growth (finding 6)**: full-history replay is cheap in dollars
   (95.4% cache-read) but persists detours in model attention. Prefix
-  truncation would destroy the cache and cost MORE. Sidecar-feasible fix:
-  collapse superseded `[GT_EVIDENCE:*]` blocks to one-line pointers at
-  prepare time — tag-addressed, deterministic, agent turns untouched.
+  truncation would destroy the cache and cost MORE. LANDED (ccbbbf28):
+  superseded `[GT_CONTEXT_UNIT]` blocks collapse to one-line pointers at
+  prepare time — the admission seam registers each admitted unit's exact
+  injected bytes and archive reference, `supersedes` queues the loser, and
+  `collapse_superseded_context_units` rewrites only those exact strings
+  before `prepare()` builds the outgoing view. Deterministic tagged
+  pointers carry unit_id/artifact_sha256/superseded_by, agent turns are
+  untouched, the drain is one-shot so retries cannot re-collapse, and the
+  archived full unit stays in the evidence CAS.
 - **Metrics (finding 7)**: dedupe task dirs in metrics.json (22 rows/20
   tasks); fix GT-byte double-count (prep+delivery); teach evaluator
   `request_manifest`; consumption matching requires distinctive payload

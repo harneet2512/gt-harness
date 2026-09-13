@@ -162,14 +162,27 @@ def _fixture(
         },
     )
     state = agent / "gt-state" / "task-state"
-    # Bootstrap calls bypass the admission gate: the journal records their
-    # spend as lifecycle rows, never as provider_admission events.
+    # Bootstrap calls pass the same admission gate as agent turns:
+    # native_query dispatches through the wrapped model._query transport,
+    # so each one journals a provider_admission plus its lifecycle row.
     bootstrap_rows = [
-        {
-            "event": "select_catalog_lifecycle", "event_hash": "f" * 64,
-            "reason": "provider_request_admitted",
-        }
-    ] * bootstrap_calls
+        row
+        for _ in range(bootstrap_calls)
+        for row in (
+            {
+                "event": "provider_admission", "event_hash": "f" * 64,
+                "status": "admitted", "reason": "within_provider_window",
+                "request_tokens": 50, "request_bytes": 200,
+                "context_window_tokens": 131072, "reserved_output_tokens": 16384,
+                "input_budget_tokens": 114688,
+                "metadata_source": "openrouter:/models",
+            },
+            {
+                "event": "select_catalog_lifecycle", "event_hash": "f" * 64,
+                "reason": "provider_request_admitted",
+            },
+        )
+    ]
     events = [
         {
             "event": "provider_response", "event_hash": "1" * 64,
@@ -239,7 +252,7 @@ def _fixture(
                                  "mode": "advisory", "issues": [], "disabled_stage": ""},
             "provider_receipts": {"request_count": 3 + bootstrap_calls, "valid": True},
             "event_journal": {
-                "event_count": 10 + bootstrap_calls, "event_head": "b" * 64, "valid": True, "issues": [],
+                "event_count": 10 + 2 * bootstrap_calls, "event_head": "b" * 64, "valid": True, "issues": [],
             },
         },
     )
