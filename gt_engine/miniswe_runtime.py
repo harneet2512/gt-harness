@@ -476,6 +476,50 @@ def _refresh_native_graph(adapter: MiniSweAdapter, session: GTSession) -> None:
         adapter.refresh_graph(phase="native_action")
 
 
+def collapse_superseded_context_units(
+    session: GTSession, adapter: MiniSweAdapter, messages: list[dict]
+) -> None:
+    """Rewrite superseded [GT_CONTEXT_UNIT] blocks to one-line pointers.
+
+    Admission already decided which unit owns each supersession lane; this
+    only replaces the loser's delivered bytes with a tagged pointer carrying
+    the archived-unit identity. The rewrite is confined to the exact strings
+    GT itself injected -- no agent turn is touched, and a unit that never
+    declared supersession can never be collapsed.
+    """
+    take = getattr(session, "take_superseded_context_units", None)
+    if not callable(take):
+        return
+    for unit in take():
+        rendered = unit.get("rendered") or ""
+        if not rendered:
+            continue
+        artifact = unit.get("artifact_reference") or {}
+        pointer = "[GT_CONTEXT_UNIT] " + json.dumps(
+            {
+                "unit_id": unit.get("unit_id", ""),
+                "superseded": True,
+                "superseded_by": unit.get("superseded_by", ""),
+                "supersession_key": unit.get("supersession_key", ""),
+                "artifact_sha256": str(artifact.get("sha256") or ""),
+            },
+            ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+        )
+        collapsed = False
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str) and rendered in content:
+                message["content"] = content.replace(rendered, pointer)
+                collapsed = True
+        if collapsed:
+            adapter.store.append(
+                "context_unit_collapsed",
+                unit_id=str(unit.get("unit_id") or ""),
+                superseded_by=str(unit.get("superseded_by") or ""),
+                supersession_key=str(unit.get("supersession_key") or ""),
+            )
+
+
 def _state_exclusions(adapter: MiniSweAdapter) -> tuple[Path, ...]:
     return adapter.engine_state.layout.excluded_roots
 
@@ -916,6 +960,11 @@ def install_runtime_hooks(
             if native_add_messages is not None:
                 agent.add_messages = native_add_messages
             return native_prepare(messages)
+        if not bootstrap_preparing and not plan_preparing:
+            try:
+                collapse_superseded_context_units(session, adapter, messages)
+            except Exception:  # noqa: BLE001 - a collapse failure keeps full bytes
+                pass
         prepared = prepare(messages)
         if bootstrap_preparing or plan_preparing:
             return prepared
@@ -923,8 +972,8 @@ def install_runtime_hooks(
         try:
             # Edits invalidate graph-derived claims, but an ordinary provider
             # turn does not consume the graph and must not synchronously rebuild
-            # the whole repository. Native action boundaries schedule and poll
-            # the existing asynchronous coordinator independently of queries.
+            # the whole repository. Native action boundaries keep the graph
+            # current through the adapter's synchronous amend/recovery path.
             batch = session.before_model(messages, iteration=adapter.iteration)
             parts = batch.context_additions
             if parts and prepared and isinstance(prepared[-1], dict):

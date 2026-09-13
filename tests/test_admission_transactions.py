@@ -402,3 +402,57 @@ def test_cochange_ceiling_is_reachable_within_one_decision(tmp_path):
 
     # A new decision clears it, which is the ruled behaviour.
     assert offer(1, "p4")
+
+
+def test_superseded_context_units_collapse_to_pointers(tmp_path):
+    from gt_engine.miniswe_runtime import collapse_superseded_context_units
+
+    adapter = adapter_for(tmp_path)
+    session = GTSession(GTSessionConfig(task_id="admission"), engine=adapter)
+
+    def ship(candidate):
+        batch = session.admit_decision_packet([candidate], iteration=0,
+                                            action_index=0)
+        session.provider_request_admitted(tuple(
+            hashlib.sha256(item.encode()).hexdigest()
+            for item in batch.context_additions
+        ))
+        return batch
+
+    first = ship(GTDecisionCandidate(
+        rendered="contract v1 obligations body", kind="context_delta",
+        dedup_key="prompt:v1", lane="prompt",
+        unit_id="unit-1", supersession_key="obligations:task",
+    ))
+    assert first.context_additions
+    messages = [
+        {"role": "assistant", "content": "I noted contract v1 obligations body"},
+        {"role": "user", "content": "turn\n\n" + first.context_additions[0]},
+    ]
+
+    second = ship(GTDecisionCandidate(
+        rendered="contract v2 obligations body", kind="context_delta",
+        dedup_key="prompt:v2", lane="prompt",
+        unit_id="unit-2", supersession_key="obligations:task",
+        supersedes=("unit-1",),
+    ))
+    assert second.context_additions
+
+    collapse_superseded_context_units(session, adapter, messages)
+    agent_text, history_text = messages[0]["content"], messages[1]["content"]
+    # Agent-authored text that merely mentions the same words is untouched.
+    assert "contract v1 obligations body" in agent_text
+    # The injected GT block is replaced by a tagged pointer.
+    assert "contract v1 obligations body" not in history_text
+    assert '[GT_CONTEXT_UNIT] {' in history_text
+    pointer = json.loads(history_text.split("[GT_CONTEXT_UNIT] ", 1)[1])
+    assert pointer["unit_id"] == "unit-1"
+    assert pointer["superseded"] is True
+    assert pointer["superseded_by"] == "unit-2"
+    rows = [json.loads(line)
+            for line in adapter.store.path.read_text().splitlines()]
+    assert any(row["event"] == "context_unit_collapsed"
+               and row["unit_id"] == "unit-1" for row in rows)
+    # The drain is one-shot: a second collapse is a no-op.
+    collapse_superseded_context_units(session, adapter, messages)
+    assert history_text == messages[1]["content"]

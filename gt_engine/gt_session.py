@@ -308,6 +308,12 @@ class GTSession:
         # proven) and must not be confused with "never looked".
         self._last_plan_unmet: tuple[str, ...] | None = None
         self._pending_context_units: dict[str, dict[str, Any]] = {}
+        # unit_id -> {rendered, artifact_reference}: the exact bytes injected
+        # into history plus their archive pointer, so a later unit that names
+        # it in `supersedes` can have its block collapsed. Only units that
+        # declared supersession ever collapse.
+        self._context_unit_rendered: dict[str, dict[str, Any]] = {}
+        self._superseded_context_units: list[dict[str, Any]] = []
         self._execution_sequence = 0
         self._open_executions: set[str] = set()
         self._select_catalog_attempted = False
@@ -939,6 +945,17 @@ class GTSession:
         except (AttributeError, KeyError, OSError, TypeError, ValueError):
             return False
 
+    def take_superseded_context_units(self) -> list[dict[str, Any]]:
+        """Drain units whose supersedes fired since the last drain.
+
+        Each entry carries the exact bytes injected into history plus the
+        identity needed for a one-line pointer. The prepare seam rewrites
+        those bytes in place -- only GT-emitted text, never an agent turn.
+        """
+        drained = self._superseded_context_units
+        self._superseded_context_units = []
+        return drained
+
     def provider_request_admitted(
         self, delivery_ids: tuple[str, ...], *, drain_action_queue: bool = True
     ) -> None:
@@ -972,6 +989,29 @@ class GTSession:
                     "source_revision": unit["source_revision"],
                     "action_index": unit["action_index"],
                 }
+            if unit.get("rendered"):
+                self._context_unit_rendered[unit["unit_id"]] = {
+                    "rendered": unit["rendered"],
+                    "artifact_reference": dict(
+                        unit.get("artifact_reference") or {}
+                    ),
+                }
+            for superseded_id in unit["supersedes"]:
+                superseded_unit = self._context_unit_rendered.pop(
+                    superseded_id, None
+                )
+                if superseded_unit is not None:
+                    self._superseded_context_units.append(
+                        {
+                            "unit_id": superseded_id,
+                            "rendered": superseded_unit["rendered"],
+                            "supersession_key": key,
+                            "superseded_by": unit["unit_id"],
+                            "artifact_reference": dict(
+                                superseded_unit.get("artifact_reference") or {}
+                            ),
+                        }
+                    )
             self._engine.store.append(
                 "decision_context_unit_admitted",
                 delivery_identity=identity,
@@ -1283,6 +1323,7 @@ class GTSession:
                     "artifact_reference": artifact_reference,
                     "historical": historical,
                     "action_index": candidate.action_index,
+                    "rendered": rendered,
                 }
                 self._pending_context_units[payload_sha256] = unit
                 if not historical:
