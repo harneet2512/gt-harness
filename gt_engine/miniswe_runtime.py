@@ -1019,12 +1019,22 @@ def install_runtime_hooks(
         provider_tools = kwargs.pop("_gt_provider_tools", None)
         bootstrap_request = bool(kwargs.pop("_gt_select_catalog", False))
         plan_request = bool(kwargs.pop("_gt_persistent_plan", False))
+        internal_request = bootstrap_request or plan_request
         if session.disabled:
             adapter.discard_pending_provider_deliveries(
                 reason="gt_disabled_before_transport"
             )
             return native_transport(messages, **kwargs)
-        if session.capability_model_visible("evidence_delivery"):
+        # Agent-facing recovery and churn steers belong only on agent turns.
+        # A GT-internal call (catalog offer, persistent plan) is not the agent
+        # conversation: admitting them here would append agent text to an
+        # internal request and leave the carried delivery unanswerable — the
+        # internal response binds by its task-scoped tag, never by the
+        # delivery ids an agent response would echo.
+        if (
+            not internal_request
+            and session.capability_model_visible("evidence_delivery")
+        ):
             recovery = adapter.prepare_recovery_delivery()
             if recovery:
                 messages = [*messages, {"role": "user", "content": recovery}]
@@ -1116,10 +1126,14 @@ def install_runtime_hooks(
                 reason=exc.code,
                 **details,
             )
-            adapter.discard_pending_provider_deliveries(reason=exc.code)
+            if not internal_request:
+                adapter.discard_pending_provider_deliveries(reason=exc.code)
             raise
         except Exception:
-            adapter.discard_pending_provider_deliveries(reason="provider_admission_error")
+            if not internal_request:
+                adapter.discard_pending_provider_deliveries(
+                    reason="provider_admission_error"
+                )
             raise
         adapter.store.append(
             "provider_admission",
@@ -1133,10 +1147,42 @@ def install_runtime_hooks(
         # delivery, exposure and queued candidate intact for the tenacity
         # retry instead of claiming a delivery that was never sent.
         try:
-            adapter.bind_provider_payload(payload, commit=False)
+            adapter.bind_provider_payload(
+                payload, commit=False, carry_pending=not internal_request
+            )
         except Exception:
-            adapter.discard_pending_provider_deliveries(reason="request_receipt_error")
+            if not internal_request:
+                adapter.discard_pending_provider_deliveries(
+                    reason="request_receipt_error"
+                )
             raise
+        # Internal calls bind one stable request identity end to end: the
+        # response/failure row carries the same tag, so the delivery's own id
+        # reaches the terminal census instead of being orphaned by a
+        # namespaced row it could never match. Their request row may commit
+        # before the wire — carry_pending=False means no agent queue rides on
+        # the commit — so a transport failure closes as a typed request+failure
+        # pair rather than a namespaced failure with no request.
+        internal_request_id = (
+            f"{adapter.task_id}-{_SELECT_CATALOG_REQUEST_TAG}"
+            if bootstrap_request
+            else f"{adapter.task_id}-{_PERSISTENT_PLAN_REQUEST_TAG}"
+            if plan_request
+            else ""
+        )
+        delivery = None
+        if internal_request:
+            delivery = adapter.bind_provider_payload(
+                payload, request_id=internal_request_id, carry_pending=False,
+            )
+            # The call is spent the moment it is bound to the wire: counting
+            # here keeps a transport failure reconciled against the namespaced
+            # failure's terminal row, where counting after the return would
+            # lose the attempt entirely.
+            if bootstrap_request:
+                adapter.note_select_catalog_bootstrap()
+            else:
+                adapter.note_persistent_plan_bootstrap()
         response = transport(
             messages,
             **kwargs,
@@ -1148,24 +1194,14 @@ def install_runtime_hooks(
             **({"_gt_select_catalog": True} if bootstrap_request else {}),
             **({"_gt_persistent_plan": True} if plan_request else {}),
         )
-        try:
-            # Internal calls bind one stable request identity end to end: the
-            # response/failure row carries the same tag, so the delivery's own
-            # id reaches the terminal census instead of being orphaned by a
-            # namespaced row it could never match.
-            internal_request_id = (
-                f"{adapter.task_id}-{_SELECT_CATALOG_REQUEST_TAG}"
-                if bootstrap_request
-                else f"{adapter.task_id}-{_PERSISTENT_PLAN_REQUEST_TAG}"
-                if plan_request
-                else ""
-            )
-            delivery = adapter.bind_provider_payload(
-                payload, request_id=internal_request_id
-            )
-        except Exception:
-            adapter.discard_pending_provider_deliveries(reason="request_receipt_error")
-            raise
+        if delivery is None:
+            try:
+                delivery = adapter.bind_provider_payload(payload)
+            except Exception:
+                adapter.discard_pending_provider_deliveries(
+                    reason="request_receipt_error"
+                )
+                raise
         if bootstrap_request:
             session.certify_select_catalog_offer(
                 request_bytes=json.dumps(
@@ -1250,13 +1286,9 @@ def install_runtime_hooks(
                 )
             finally:
                 adapter.provider_wait_end()
-            # The call is spent and already counted at the transport the moment
-            # native_query returns. Counting it after bind_provider_response and
-            # accept_select_catalog made the count a proxy for "the bootstrap
-            # succeeded" rather than "the bootstrap called the provider", so any
-            # failure below silently lost one call and the receipt failed closed
-            # with provider_call_count_mismatch against terminal_requests.
-            adapter.note_select_catalog_bootstrap()
+            # The call was counted inside query_transport at the wire boundary,
+            # so success AND transport failure both reconcile: anything still
+            # failing below degrades the catalog, never the call census.
             extra = dict(message.get("extra") or {})
             if captured["arguments"] is None:
                 captured["arguments"] = extra.get("select_catalog_args")
@@ -1343,7 +1375,8 @@ def install_runtime_hooks(
                     )
                 finally:
                     adapter.provider_wait_end()
-                adapter.note_persistent_plan_bootstrap()
+                # Counted inside query_transport at the wire boundary, same as
+                # the catalog offer — success and transport failure reconcile.
                 extra = dict(message.get("extra") or {})
                 response = extra.get("response")
                 usage = response.get("usage") if isinstance(response, dict) else None

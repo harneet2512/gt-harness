@@ -3547,7 +3547,7 @@ class MiniSweAdapter(GroundtruthController):
 
     def bind_provider_payload(
         self, payload: Mapping[str, Any], *, commit: bool = True,
-        request_id: str = "",
+        request_id: str = "", carry_pending: bool = True,
     ) -> ProviderDelivery | None:
         """Validate the exact provider-bound payload; commit it when asked.
 
@@ -3556,6 +3556,12 @@ class MiniSweAdapter(GroundtruthController):
         the caller runs it before the wire so a conflicted request never
         spends provider budget, then commits after the transport returns so a
         failed attempt cannot claim a delivery it never carried.
+
+        ``carry_pending=False`` is for GT-internal calls (catalog offer,
+        persistent plan): queued deliveries and typed observations belong to
+        the agent conversation, so an internal request must neither match them
+        into its payload nor fault them as unmatched - it leaves every queue
+        intact for the next agent turn.
         """
         messages = payload.get("messages")
         if not isinstance(messages, list):
@@ -3579,7 +3585,9 @@ class MiniSweAdapter(GroundtruthController):
                 return any(contains_text(item, needle) for item in value)
             return False
 
-        pending = tuple(self._pending_provider_deliveries)
+        pending = (
+            tuple(self._pending_provider_deliveries) if carry_pending else ()
+        )
         matched = tuple(
             item.identity for item in pending
             if contains_text(messages, item.rendered)
@@ -3713,17 +3721,18 @@ class MiniSweAdapter(GroundtruthController):
             ],
             unmatched_delivery_ids=list(unmatched),
         )
-        self._pending_provider_deliveries.clear()
-        self._pending_exposures.clear()
-        for typed in self._pending_typed_observations:
-            self.store.append(
-                "typed_observation_provider_join",
-                request_id=request_id,
-                provider_payload_sha256=digest,
-                model_visible_sha256=model_visible_digest,
-                **typed,
-            )
-        self._pending_typed_observations.clear()
+        if carry_pending:
+            self._pending_provider_deliveries.clear()
+            self._pending_exposures.clear()
+            for typed in self._pending_typed_observations:
+                self.store.append(
+                    "typed_observation_provider_join",
+                    request_id=request_id,
+                    provider_payload_sha256=digest,
+                    model_visible_sha256=model_visible_digest,
+                    **typed,
+                )
+            self._pending_typed_observations.clear()
         return delivery
 
     def discard_pending_provider_deliveries(self, *, reason: str) -> None:

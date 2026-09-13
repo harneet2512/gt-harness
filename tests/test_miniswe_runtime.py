@@ -2369,6 +2369,26 @@ def test_select_catalog_deferred_offer_stamps_current_iteration(
         and action_delivery["delivery_identity"] in (row.get("delivery_ids") or [])
     )
     assert action_request["iteration"] == action_delivery["iteration"] + 1
+    # The bootstrap request itself is GT-internal: it must carry no
+    # agent-facing deliveries, record no unmatched ids, and still close
+    # terminally under its own namespaced identity (rehearsal audit:
+    # "provider response ...-gt-internal-select-catalog: delivery identity
+    # mismatch").
+    bootstrap_request = next(
+        row for row in rows
+        if row.get("event") == "provider_delivery"
+        and str(row.get("request_id") or "").endswith("-gt-internal-select-catalog")
+    )
+    assert bootstrap_request["delivery_ids"] == []
+    assert bootstrap_request["matches"] == []
+    assert bootstrap_request["unmatched_delivery_ids"] == []
+    assert "-gt-internal-" not in str(action_request["request_id"])
+    bootstrap_response = next(
+        row for row in rows
+        if row.get("event") == "provider_response"
+        and row.get("request_id") == bootstrap_request["request_id"]
+    )
+    assert bootstrap_response["delivery_ids"] == []
 
 
 def test_edit_turn_hands_the_producers_the_pre_edit_graph(monkeypatch, tmp_path):
