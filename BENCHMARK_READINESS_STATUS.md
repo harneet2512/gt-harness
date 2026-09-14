@@ -733,6 +733,39 @@ readiness_binding, image_digest_gate, provider_gate); task leg ~10.5 min.
   + new dispatch tag on the committed tip citing
   `readiness_run_id=34901944460`.
 
+### Healed-producer gate-one — run `34904339448` (2026-09-15): attestation **FAIL**
+
+- Pre-flight all green on tag `dispatch-swelive-e11185f9`
+  (`readiness_run_id=34903557141`, provider-free acceptance on the tagged
+  SHA — the first attempt, `34903342891`, was correctly refused by
+  `readiness_binding` for citing `34901944460` whose head_sha predated the
+  tag; fail-closed binding worked).
+- `cyclotruc__gitingest-94`: task leg completed; diagnostics **HEALTHY** —
+  zero graph-refresh events, zero amend failures. The producer heal +
+  merge inventory maintenance held under live churn: the exact signature
+  that killed `34888711134` is gone.
+- The gate rejected on `lsp_promotion` **DEGRADED**:
+  `terminal_succeeded:obsolete:salvage_partial:13_applied:10_skipped:1_of_3_obsolete:last_of_3`.
+  A raced leg salvaged through the real merge (`applied 13`, `updated 9`,
+  `inserted 4`) but `skipped_diverged=10` — live rows had moved under the
+  stale-base candidate, and the merge correctly kept live's newer truth.
+  The reporter's "provably partial coverage" reading is honest: the
+  adopted graph `3c7dcda0`'s LSP tier is thinner than a fresh leg's.
+- **Structural defect found and fixed (`b1367f85`):** the `lsp_salvage`
+  drain published the merged graph without calling
+  `_maybe_schedule_lsp_promotion` — every other adoption point schedules a
+  fresh enrichment leg; the salvage channel did not. The merged graph then
+  served ~90 more events (dense refreshes ran *on* `3c7dcda0`) with no leg
+  ever scheduled before seal — partial coverage froze as the terminal
+  state. Salvage adoption now records the publication and schedules a
+  convergence leg on the merged revision; regression test drives a real
+  published salvage through the workload simulator and asserts the merged
+  revision is offered to the scheduler (churn-backoff window honored).
+- The `skipped_diverged` count itself is correct conservation, not a bug:
+  overwriting live rows with stale-base candidate rows would be the
+  defect. The gate stays strict — convergence scheduling is the fix, not
+  a softer verdict.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
