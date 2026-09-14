@@ -1,0 +1,40 @@
+{
+  "basis": "exact_ci_static_build_runtime_language_matrix_and_runner_proof_consolidation",
+  "detail": {
+    "build_conclusion": "success",
+    "build_info_sha256": "fa5e0b6023e1f1684bda01c960b612b364b301f1671294725874ede1754bea95",
+    "build_tags": "netgo,osusergo,sqlite_fts5",
+    "build_workflow_run_id": 34833870450,
+    "builder_image": "golang:1.22.5-bookworm@sha256:af9b40f2b1851be993763b85288f8434af87b5678af04355b1e33ff530b5765f",
+    "changes": [
+      "e65febd3 runtime language-matrix wave: canonical TEST_RUNNER_RE/TEST_PASS_RE/TEST_FAIL_RE coverage across go/rust/java-mvn-gradle/dotnet/node-jest-vitest-bun-deno/ruby-bundler/php/swift/elixir/sbt/bazel; shared wrapper-prefix constant; path-prefixed runner binaries; obligations subject_bound_test_runner proof consolidated onto canonical patterns; test_runner per-language count/name/identity resolution; repo_adapters JS npm-test placeholder fix + subpackage manifest reach; resolve.py pyright 150s readiness budget",
+      "4f19c80a style: ruff-format the same files (format-only; fixes the lint failure that red CI on e65febd3)"
+    ],
+    "full_producer_ci_conclusion": "success",
+    "full_producer_ci_run_id": 34833873538,
+    "go_toolchain": "go1.22.5",
+    "measured": {
+      "binding": "producer_build VERIFIED: producer_sha256==6dad9e31, source_commit==4f19c80a, source_tree==357e8d2e (root tree), build_info_sha256==fa5e0b60, source_fingerprint==30536060 (identical to e65febd3/3f5ff8e - Go subtree unchanged, Python-only diff)",
+      "edges": "go-build green on 4f19c80a (run 34833873538); producer build 34833870450 success; fingerprint 30536060 identical - graph semantics unchanged",
+      "go_tests": "CI go-build green on 4f19c80a (run 34833873538); producer build 34833870450 success",
+      "python_tests": "CI test matrix green ubuntu/windows/macos 3.11+3.12 + lint + benchmark on 4f19c80a (run 34833873538)",
+      "wheel": "groundtruth_mcp-1.0.0-py3-none-any.whl sha256=0d3c72c5 built from committed tree 4f19c80a; verify_wheel_source correspondence PASS vs src/"
+    },
+    "producer_sha256": "6dad9e3104981a54a734623835232f9b499f5e2d3674be016bc4a0ea4dfe852f",
+    "remaining": [
+      "canonical provider-free acceptance on final bundle SHA",
+      "installed full-flow rehearsal on new wheel+binary",
+      "paid smoke approval gate"
+    ],
+    "repository": "harneet2512/groundtruth",
+    "scope": "Runtime language-matrix hardening: per-language test-runner recognition, pass/fail count and name extraction, static/compiler/environment failure attribution, adapter-emitted command admissibility, LSP readiness budget for cold pyright; obligations proof channel consolidated onto canonical patterns (three-copy drift eliminated)",
+    "source_tree": "357e8d2e49ac34d4bff01e9485782d3c15915261"
+  },
+  "head_sha": "4f19c80a6263cc0f45539ad329f4d3a200941231",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "d5439dfbe924fbd35d6b804ac7a350e76b2376d806da01690c73b2a4d956d9be",
+  "packet_id": "har83-context-plan-producer-4f19c80a-ci",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-83"
+}
