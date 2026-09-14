@@ -228,8 +228,10 @@ unrestricted benchmark. Where this paragraph and HAR-81 disagree, HAR-81 is
 correct and this paragraph is a defect.
 
 The one-task stage is `gate-one`, task
-`arktype-json-schema-refs-dependencies`, with the existing 1,800-second agent
-cap. The route remains defined solely by `config/provider_route.v1.json`.
+`aiomonitor-task-snapshots-diff` (small Python repository; the canary moved off
+arktype because it was the cohort's largest workspace in a language the
+producer abstains on). The route remains defined solely by
+`config/provider_route.v1.json`.
 No credential value belongs in this document or any receipt.
 
 The conditional continuation requires a successful gate-one task and valid
@@ -452,10 +454,11 @@ now stubs the `provider_pacing._sleep` seam autouse so no test burns
 real provider delays (pacing tests still stub the seam explicitly to
 assert decisions).
 
-Remaining open items before any next paid run: model-route alignment for
-the apples-to-apples comparison (native `deepseek-v4-flash` vs the
-`-0731` relace route — needs an owner credential decision); gate-one +
-smoke only after that decision and a separate approval receipt.
+Remaining open items before any next paid run: **resolved** — the owner
+kept the `-0731` relace route and authorized "1 smoke then 20" (verbatim
+record on HAR-81, 2026-09-15). Gate-one dispatches on `aeff21be` with
+readiness `34847423642`; `remaining-19` follows only after the gate-one
+result passes `validate_prior_gate`.
 
 ## Outcome claims
 
