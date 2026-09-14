@@ -460,6 +460,89 @@ record on HAR-81, 2026-09-15). Gate-one dispatches on `aeff21be` with
 readiness `34847423642`; `remaining-19` follows only after the gate-one
 result passes `validate_prior_gate`.
 
+## Paid gate-one `34849119441` — task SOLVED, attestation rejected (2026-09-15)
+
+The paid gate-one ran on `aeff21be` against
+`aiomonitor-task-snapshots-diff`. The task itself **solved** (GRADED,
+official verifier resolved; 107 provider calls completed). The pacing
+wave proved under real load: a live 429 was journaled
+`provider_retry_paced`, the retry recovered inside the provider budget,
+and the run continued to a solve.
+
+Attestation correctly rejected the run (`exit_code` 1,
+`validate_prior_gate` fails, `remaining-19` stayed halted — no dispatch
+was attempted or authorized). Three defects, all load-dependent shapes
+the provider-free pyramid did not reproduce:
+
+1. **`lsp_promotion` DEGRADED (required)** — reporter blind spot, not an
+   engine failure. 26 terminals: 9 published, 9 no-edge-mutations, 8
+   obsolete. The last candidate raced edits to `obsolete`, the scoped
+   merge salvaged its 284 mutations (`merge-b0bptwou`, zero stale or
+   diverged skips), and the merged graph was the run's final publication.
+   The reporter only joined `lsp_promotion_terminal` rows and never saw
+   the salvage channel — it graded the tier the engine had actually
+   landed.
+2. **`GT_GRAPH_REFRESH_FAILED` ×5 (primary ERROR)** — 19 amend refusals,
+   8× `GT_INDEX_MEMORY_GUARD_TRIGGERED` exit -9 plus 4×
+   `GT_INDEX_PROCESS_FAILED` exit 1, all dying in Pass 1 file discovery
+   while resident LSP legs held the cgroup. Both amend paths journaled
+   the refusal and returned without feeding `_index_memory_defer_until`,
+   so every serving boundary spawned back into the same pressure (five
+   dead spawns inside ~60 events) and the escalation ladder could aim a
+   heavier full rebuild at measured pressure.
+3. **Verdict counted a handled WARNING as fatal** —
+   `diagnose_artifact_root` failed any run with any event row, so the
+   recovered paced-429 WARNING alone would have failed the gate even
+   with every capability WORKING.
+
+## Defect fix wave — `6d19b195` (2026-09-15)
+
+All three fixed on one commit with deterministic coverage:
+
+- **Salvage-aware promotion reporting**: `lsp_salvage` drains now journal
+  `graph_revision`/`source_revision`; the reporter joins the salvage
+  row whose revision matches the adopted publication to its source
+  promotion receipt and grades the tier from that receipt's yield
+  (promoted edges, per-language `selection_complete`). Superseded,
+  partial, and unreceipted salvage all fail closed.
+- **Unified spawn backoff**: `_note_amend_failure` feeds a 60s
+  amend-spawn window for any dead producer and the 120s cgroup window
+  (`index_memory_backoff`, renamed from `lsp_memory_backoff` since it
+  now gates every index-family spawn) for the memory family. Both the
+  transaction-boundary and serving-boundary amends consult the window
+  before spawning (`graph_amend_deferred`, one row per window);
+  `_recovery_build_inline` defers while the cgroup window is open
+  (`graph_recovery_deferred`). Memory-family refusals report as
+  WARNING/consequential/retryable and stay off the escalation ladder;
+  non-memory `amend_failed:*` keeps the primary-ERROR streak, one
+  window apart per attempt.
+- **Severity-based verdict**: ERROR events and required capabilities
+  below WORKING still fail the run; consequential WARNINGs remain the
+  task's noteworthy event without forcing a verdict.
+
+Coverage added: 5 salvage reporter cases (adopted, lost-race,
+superseded, partial, unreceipted) in `test_gt_session.py`; 6 memory
+cases (killed-amend defer, consequential typing, deterministic
+escalation preserved, recovery defer, transaction feed, and a
+40-boundary sustained-churn storm replay asserting ≤5 spawns, zero
+escalations, all-WARNING typing, clean recovery) in
+`test_miniswe_integration.py`; 2 verdict cases in
+`test_run_diagnostics.py`. 4 pre-existing tests in
+`test_index_incremental.py` were updated to drain the spawn window
+between attempts — their old timing was the defect shape.
+
+Full affected surface green: `test_miniswe_integration`,
+`test_gt_session`, `test_run_diagnostics`, `test_admission_transactions`,
+`test_agent_loop_soak`, `test_index_incremental`,
+`test_index_resource_guard`, `test_scoped_merge`,
+`test_lsp_graph_publication`, `test_lsp_promotion_wiring`,
+`test_capability_matrix`, `test_index_reuse`.
+
+**Paid state**: gate-one's verdict stands rejected — the fix is not
+evidence the live run passed. A new paid smoke requires provider-free
+acceptance + installed rehearsal green on `6d19b195` (or later), then a
+fresh owner approval receipt.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
