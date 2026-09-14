@@ -17,5 +17,11 @@
     "models_path": "/models",
     "inference_path": "/chat/completions",
     "require_positive_key_limit_when_present": true
+  },
+  "retry_pacing": {
+    "dispatch_stagger_seconds": 20,
+    "retry_jitter_max_seconds": 45,
+    "retry_after_cap_seconds": 120,
+    "model_retry_attempts": 15
   }
 }

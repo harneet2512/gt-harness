@@ -78,6 +78,10 @@ jobs:
       model: ${{ steps.cohort.outputs.model }}
       provider_base_url: ${{ steps.cohort.outputs.provider_base_url }}
       provider_routing_json: ${{ steps.cohort.outputs.provider_routing_json }}
+      dispatch_stagger_seconds: ${{ steps.cohort.outputs.dispatch_stagger_seconds }}
+      retry_jitter_max_seconds: ${{ steps.cohort.outputs.retry_jitter_max_seconds }}
+      retry_after_cap_seconds: ${{ steps.cohort.outputs.retry_after_cap_seconds }}
+      model_retry_attempts: ${{ steps.cohort.outputs.model_retry_attempts }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -250,6 +254,33 @@ jobs:
           provider_route, provider_route_sha256 = load_route(
               Path("config/provider_route.v1.json")
           )
+          # Same declared cohort pacing as the DeepSWE workflow: smaller
+          # matrix, identical jitterless-retry exposure inside each leg.
+          pacing = dict(provider_route.get("retry_pacing") or {})
+          try:
+              cohort_pacing = {
+                  "dispatch_stagger_seconds": int(
+                      pacing.get("dispatch_stagger_seconds", 20)
+                  ),
+                  "retry_jitter_max_seconds": float(
+                      pacing.get("retry_jitter_max_seconds", 45)
+                  ),
+                  "retry_after_cap_seconds": float(
+                      pacing.get("retry_after_cap_seconds", 120)
+                  ),
+                  "model_retry_attempts": int(
+                      pacing.get("model_retry_attempts", 10)
+                  ),
+              }
+          except (TypeError, ValueError) as exc:
+              raise SystemExit(f"retry_pacing manifest invalid: {exc}")
+          if (
+              cohort_pacing["dispatch_stagger_seconds"] < 0
+              or cohort_pacing["retry_jitter_max_seconds"] < 0
+              or cohort_pacing["retry_after_cap_seconds"] <= 0
+              or not 1 <= cohort_pacing["model_retry_attempts"] <= 30
+          ):
+              raise SystemExit("retry_pacing manifest out of bounds")
 
           receipt = {
               "schema": "gt.swelive_gt_harness_plan.v1",
@@ -268,6 +299,7 @@ jobs:
               "language_counts": language_counts,
               "attempts_per_task": 1,
               "max_parallel": min(20, len(selected_tasks)),
+              "cohort_pacing": cohort_pacing,
               "agent": "eval.pier_gt_harness_adapter:PierGtHarnessMiniSwe246Agent",
               "agent_scaffold": "mini-swe-agent",
               "agent_scaffold_version": "2.4.6",
@@ -303,6 +335,18 @@ jobs:
               output.write(f"task_order_sha256={receipt['task_order_sha256']}\n")
               output.write(f"model={provider_route['model']}\n")
               output.write(f"provider_base_url={provider_route['base_url']}\n")
+              output.write(
+                  f"dispatch_stagger_seconds={cohort_pacing['dispatch_stagger_seconds']}\n"
+              )
+              output.write(
+                  f"retry_jitter_max_seconds={cohort_pacing['retry_jitter_max_seconds']}\n"
+              )
+              output.write(
+                  f"retry_after_cap_seconds={cohort_pacing['retry_after_cap_seconds']}\n"
+              )
+              output.write(
+                  f"model_retry_attempts={cohort_pacing['model_retry_attempts']}\n"
+              )
               output.write(
                   "provider_routing_json="
                   + json.dumps(provider_route["provider_routing"], separators=(",", ":"))
@@ -777,6 +821,18 @@ jobs:
               output.write(f"GT_RESOURCE_ATTESTATION_KEY={key}\n")
           PY
 
+      - name: Stagger provider dispatch within the parallel cohort
+        env:
+          STAGGER_SECONDS: ${{ needs.plan.outputs.dispatch_stagger_seconds }}
+        run: |
+          set -euo pipefail
+          # Declared cohort pacing from the immutable plan: the ordinal
+          # stagger spreads the initial request burst across legs sharing one
+          # provider account ceiling.
+          delay=$(( (ORDINAL - 1) * STAGGER_SECONDS ))
+          echo "cohort pacing: ordinal=${ORDINAL} stagger=${STAGGER_SECONDS}s delay=${delay}s"
+          sleep "$delay"
+
       - name: Run SWE-bench-Live through the released gt-harness run boundary
         env:
           OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -785,6 +841,9 @@ jobs:
           GT_PROVIDER_RESERVED_OUTPUT_TOKENS: ${{ needs.provider_gate.outputs.reserved_output_tokens }}
           GT_PROVIDER_CONTEXT_WINDOW_SOURCE: ${{ needs.provider_gate.outputs.context_window_source }}
           GT_PROVIDER_ROUTING_JSON: ${{ needs.plan.outputs.provider_routing_json }}
+          GT_PROVIDER_RETRY_JITTER_MAX_SECONDS: ${{ needs.plan.outputs.retry_jitter_max_seconds }}
+          GT_PROVIDER_RETRY_AFTER_CAP_SECONDS: ${{ needs.plan.outputs.retry_after_cap_seconds }}
+          MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT: ${{ needs.plan.outputs.model_retry_attempts }}
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
         run: |

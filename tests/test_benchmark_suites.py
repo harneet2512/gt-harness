@@ -131,6 +131,7 @@ def _swelive_fixture(root: Path, source_sha: str = "f" * 40) -> Path:
         "provider": route["provider"],
         "provider_base_url": route["base_url"],
         "provider_routing": route["provider_routing"],
+        "cohort_pacing": dict(route["retry_pacing"]),
         "paid_run_approval": {"approved": True, "input": "approve_paid_run"},
         "baseline": {
             "schema": "gt.baseline_ref.v1",

@@ -25,6 +25,16 @@ _ALLOWED_KEYS = {
     "credential_env",
     "credential_source_id",
     "availability",
+    # Declared cohort pacing for the parallel dispatch: ordinal dispatch
+    # stagger, per-attempt jitter bound, Retry-After cap, and the retry
+    # attempt budget Mini-SWE's loop enforces. Attested in the run plan.
+    "retry_pacing",
+}
+_PACING_KEYS = {
+    "dispatch_stagger_seconds",
+    "retry_jitter_max_seconds",
+    "retry_after_cap_seconds",
+    "model_retry_attempts",
 }
 
 
@@ -73,6 +83,24 @@ def load_route(path: Path) -> tuple[dict[str, Any], str]:
         "require_positive_key_limit_when_present": True,
     }:
         raise ValueError("provider_availability_contract_invalid")
+    pacing = route["retry_pacing"]
+    if not isinstance(pacing, dict) or set(pacing) != _PACING_KEYS:
+        raise ValueError("provider_retry_pacing_invalid")
+    if (
+        isinstance(pacing["dispatch_stagger_seconds"], bool)
+        or not isinstance(pacing["dispatch_stagger_seconds"], int)
+        or pacing["dispatch_stagger_seconds"] < 0
+        or isinstance(pacing["retry_jitter_max_seconds"], bool)
+        or not isinstance(pacing["retry_jitter_max_seconds"], (int, float))
+        or pacing["retry_jitter_max_seconds"] < 0
+        or isinstance(pacing["retry_after_cap_seconds"], bool)
+        or not isinstance(pacing["retry_after_cap_seconds"], (int, float))
+        or pacing["retry_after_cap_seconds"] <= 0
+        or isinstance(pacing["model_retry_attempts"], bool)
+        or not isinstance(pacing["model_retry_attempts"], int)
+        or not 1 <= pacing["model_retry_attempts"] <= 30
+    ):
+        raise ValueError("provider_retry_pacing_invalid")
     return route, hashlib.sha256(raw).hexdigest()
 
 

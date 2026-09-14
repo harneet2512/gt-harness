@@ -48,7 +48,13 @@ from .provider_limits import (
     provider_request_tokens,
     render_and_admit_provider_request,
 )
-from .run_diagnostics import DiagnosticCode, DiagnosticEvent, classify_provider_failure
+from .provider_pacing import PacingPolicy
+from .run_diagnostics import (
+    DiagnosticCode,
+    DiagnosticEvent,
+    classify_provider_failure,
+    redact_secret_text,
+)
 from .runtime_observation import (
     EditTransaction,
     capture_workspace,
@@ -857,6 +863,60 @@ def _coerce_session(owner: GTSession | MiniSweAdapter) -> GTSession:
     )
 
 
+def _pace_provider_retry(
+    adapter: MiniSweAdapter,
+    exc: BaseException,
+    pacing: PacingPolicy,
+) -> None:
+    """Pace one retryable provider attempt before the retry loop sees it.
+
+    The cohort's jobs share one account ceiling and one exponential schedule;
+    without pacing, twenty trials retry in lockstep and keep colliding with
+    the limit until the budget ends the trial. The delay is applied here —
+    inside the per-attempt transport — so every attempt failure decorrelates
+    the next retry phase. The attempt is journaled and diagnosed as
+    consequential evidence, then the ORIGINAL exception re-raises unchanged:
+    pacing delays a retry, it never converts one. A pacing fault is journaled
+    on the non-disabling channel rather than masking the provider failure
+    beneath it.
+    """
+    try:
+        decision = pacing.decide(exc)
+        if not decision.retryable:
+            return
+        adapter.store.append(
+            "provider_retry_paced",
+            iteration=adapter.iteration,
+            error_type=type(exc).__name__,
+            error=redact_secret_text(str(exc))[:500],
+            code=decision.code.value,
+            delay_seconds=round(decision.delay_seconds, 3),
+            basis=decision.basis,
+        )
+        adapter.diagnostics.record(
+            DiagnosticEvent.create(
+                code=decision.code, severity="WARNING",
+                phase="provider_retry_pacing", subsystem="provider",
+                capability="provider_transport", task_id=adapter.task_id,
+                classification="consequential",
+                cause=type(exc).__name__,
+                impact="provider_attempt_deferred",
+                recovery="paced_retry_within_provider_budget",
+                retryable=True,
+                event_sequence=int(adapter.store.receipt()["event_count"]),
+            )
+        )
+        pacing.sleep(decision.delay_seconds)
+    except Exception as pacing_exc:  # noqa: BLE001 - pacing never masks the raise
+        # Pacing is scheduling, not observation: a bookkeeping fault here
+        # takes the same non-disabling fault channel as provider_wait, never
+        # session.degrade — a pacing fault must not silence the terminal
+        # provider_failure receipt the outer wrapper still owes.
+        adapter._append_observation(
+            "provider_retry_pacing_fault", error_type=type(pacing_exc).__name__
+        )
+
+
 def install_runtime_hooks(
     agent: Any, owner: GTSession | MiniSweAdapter
 ) -> RuntimeHookHandle:
@@ -936,6 +996,9 @@ def install_runtime_hooks(
     environment = getattr(agent, "env", None)
     if not callable(prepare) or not callable(execute) or environment is None:
         raise TypeError("Mini-SWE agent must expose model normalization and execute_actions")
+    # Resolved once at install: a malformed pacing env fails the run before
+    # any provider spend, not at the first rate-limit mid-trial.
+    pacing = PacingPolicy.from_env()
 
     if adapter.phase == "ORIENT" and not session.disabled:
         try:
@@ -1198,17 +1261,25 @@ def install_runtime_hooks(
                 adapter.note_select_catalog_bootstrap()
             else:
                 adapter.note_persistent_plan_bootstrap()
-        response = transport(
-            messages,
-            **kwargs,
-            # The wire must carry the exact tool set the admitted envelope
-            # recorded. Forwarding only a caller-supplied override left
-            # ordinary turns shipping [BASH_TOOL] while the request manifest
-            # claimed the model's whole advertised set.
-            _gt_provider_tools=list(tools) if tools is not None else None,
-            **({"_gt_select_catalog": True} if bootstrap_request else {}),
-            **({"_gt_persistent_plan": True} if plan_request else {}),
-        )
+        try:
+            response = transport(
+                messages,
+                **kwargs,
+                # The wire must carry the exact tool set the admitted envelope
+                # recorded. Forwarding only a caller-supplied override left
+                # ordinary turns shipping [BASH_TOOL] while the request manifest
+                # claimed the model's whole advertised set.
+                _gt_provider_tools=list(tools) if tools is not None else None,
+                **({"_gt_select_catalog": True} if bootstrap_request else {}),
+                **({"_gt_persistent_plan": True} if plan_request else {}),
+            )
+        except Exception as exc:
+            # This runs inside Mini-SWE's retry loop, per attempt. A retryable
+            # failure is paced here - journaled, diagnosed as consequential,
+            # delayed by the provider's own Retry-After or a jittered draw -
+            # then re-raised unchanged so the loop keeps its attempt budget.
+            _pace_provider_retry(adapter, exc, pacing)
+            raise
         if delivery is None:
             try:
                 delivery = adapter.bind_provider_payload(payload)

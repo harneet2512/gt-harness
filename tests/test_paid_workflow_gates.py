@@ -73,3 +73,21 @@ def test_paid_workflow_masks_attestation_key_and_archives_container_evidence() -
     assert source.index("Normalize task evidence ownership for archival") < source.index(
         "Upload DeepSWE verifier and GT Harness product evidence"
     )
+
+
+def test_paid_workflow_declares_and_wires_cohort_pacing() -> None:
+    """The 20-way cohort must not hit one account ceiling in lockstep: the
+    plan attests the manifest's pacing block, the matrix legs stagger their
+    dispatch by ordinal, and the run step exports the jitter, Retry-After
+    cap, and attempt budget the in-loop pacing enforces."""
+    source = WORKFLOW.read_text(encoding="utf-8")
+    route = json.loads((ROOT / "config" / "provider_route.v1.json").read_text())
+
+    assert route["retry_pacing"]["dispatch_stagger_seconds"] >= 0
+    assert '"cohort_pacing": cohort_pacing' in source
+    assert "dispatch_stagger_seconds: ${{ steps.cohort.outputs.dispatch_stagger_seconds }}" in source
+    assert "Stagger provider dispatch within the parallel cohort" in source
+    assert "sleep \"$delay\"" in source
+    assert "GT_PROVIDER_RETRY_JITTER_MAX_SECONDS" in source
+    assert "GT_PROVIDER_RETRY_AFTER_CAP_SECONDS" in source
+    assert "MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT" in source

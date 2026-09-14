@@ -76,6 +76,7 @@ def _fixture(
         "provider": route["provider"],
         "provider_base_url": route["base_url"],
         "provider_routing": route["provider_routing"],
+        "cohort_pacing": dict(route["retry_pacing"]),
         "paid_run_approval": {"approved": True, "input": "approve_paid_run"},
         "baseline": None,
     }

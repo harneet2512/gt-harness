@@ -303,6 +303,13 @@ def attest_deepswe(
         or plan.get("effective_model") != f"openai/{trusted_route.get('model')}"
     ):
         errors.append("planned_provider_route_mismatch")
+    declared_pacing = plan.get("cohort_pacing") or {}
+    manifest_pacing = trusted_route.get("retry_pacing") or {}
+    if any(
+        declared_pacing.get(key) != manifest_pacing.get(key)
+        for key in manifest_pacing
+    ) or set(declared_pacing) != set(manifest_pacing):
+        errors.append("planned_cohort_pacing_mismatch")
     approval = plan.get("paid_run_approval")
     if not isinstance(approval, dict) or (
         approval.get("approved") is not True
