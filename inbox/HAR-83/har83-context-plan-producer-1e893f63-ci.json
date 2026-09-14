@@ -1,0 +1,39 @@
+{
+  "basis": "exact_ci_static_build_inventory_divergence_heal",
+  "detail": {
+    "build_conclusion": "success",
+    "build_info_sha256": "9aad2927b9361e913ad4c444300670cdde3f8e0c9a8253627360cbe96e6a6a9e",
+    "build_tags": "netgo,osusergo,sqlite_fts5",
+    "build_workflow_run_id": 34900591114,
+    "builder_image": "musl-static@sha256:3600cb0c805e6a3bd8bb595012d6f20d4f7022b745e8bef133715552928b829a",
+    "changes": [
+      "1e893f63 fix(store): heal diverged parser inventory instead of aborting the amend - ReplaceParsedStructure/ReconcileParsed{Edges,Properties,Assertions} treat inventory entries whose stored row diverges from fresh parse as missing: stale row swept by existing non-inventoried DELETE, fresh row minted under new rowid, diverged count surfaced as inventory_diverged in result JSON + batch-structure stderr line; missing-inventory and foreign-producer-identity checks remain fail-closed"
+    ],
+    "full_producer_ci_conclusion": "not_run_separately",
+    "go_toolchain": "go1.22.5",
+    "measured": {
+      "binding": "producer_build VERIFIED: producer_sha256==b3572fb0, source_commit==1e893f63, source_tree==b50f748f (root tree), build_info_sha256==9aad2927, source_fingerprint==14ab4de9 (vendored mirror reproduces exactly - 0 blob diffs over 198 fingerprinted files)",
+      "e2e": "real failing artifact lsp-b62_t634/graph.db + frozen source snapshot: amend heals '909 retained, 441 inserted, 339 inventory-diverged' instead of exit=1 fatal",
+      "edges": "post_certification_changed_paths unchanged (749) - commit touches only gt-index/{cmd/gt-index/main.go,internal/store/{batch_structure,batch_structure_test,parsed_facts,parsed_facts_test}.go}; Python wheel src/ identical to certified lineage",
+      "go_tests": "internal/store focused suite green on 1e893f63 (tampered/dangling inventory heal, missing-inventory and foreign-identity refusals preserved); FTS5-dependent tests skip locally without the module",
+      "python_tests": "gt-context-plan scoped_merge + index_incremental suites green (merge-side inventory maintenance, amend-failure tail diagnostics, failed-amend evidence receipts)"
+    },
+    "producer_sha256": "b3572fb08819616f44a20d62e2a89ac6b1b57951b053b5da1ff53b01f3da8fd0",
+    "remaining": [
+      "canonical provider-free acceptance on final bundle SHA",
+      "installed full-flow rehearsal on new wheel+binary",
+      "2-task SWE-Live smoke re-run on healed producer, then 20-task DeepSWE matched cohort",
+      "paid smoke approval gate"
+    ],
+    "repository": "harneet2512/groundtruth",
+    "scope": "Batch-amend inventory self-healing: diverged parser_*_inventory entries (stale identity->rowid aliases manufactured by the pre-fix scoped merge) are treated as missing and re-minted rather than fatal; bounded, counted, fail-closed elsewhere",
+    "source_tree": "b50f748f1f295fe90851e6ae21b457f208162ebb"
+  },
+  "head_sha": "1e893f63dad16b5b473ce2335791cc9b70ad4d44",
+  "kind": "check_outcome",
+  "packet_digest_sha256": "8c9d4d4f84e363f14353dec05609325095d8cf0b823ecdd82423bf3b2644a31f",
+  "packet_id": "har83-context-plan-producer-1e893f63-ci",
+  "schema": "gt.review_packet.v1",
+  "status": "PASS",
+  "ticket": "HAR-83"
+}
