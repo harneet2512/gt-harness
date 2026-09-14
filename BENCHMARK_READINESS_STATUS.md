@@ -701,6 +701,38 @@ readiness_binding, image_digest_gate, provider_gate); task leg ~10.5 min.
   readiness still requires a clean two-task SWE-Live smoke on the healed
   producer, then the 20-task DeepSWE matched cohort. No readiness claim yet.
 
+### Producer re-certification + provider-free re-acceptance (2026-09-15, `af0865aa`)
+
+- Producer fix certified: upstream `harneet2512/groundtruth` `1e893f63`
+  (`fix/inventory-divergence-heal`), built by `producer_build.yml` run
+  `34900591114` → executable `b3572fb0`, build-info `9aad2927`,
+  `source_fingerprint=14ab4de9`, builder image `3600cb0c`.
+- Vendored mirror `vendor/gt-index-src` is blob-identical to `1e893f63`
+  (`gt-index` subtree `7991d444`; 0 diffs over 198 fingerprinted files);
+  `SOURCE-COMMIT` repinned; the earlier `45df11dc` mismatch was a stale
+  `69642c8e` build that predated the stderr-label line — rebuilt, resolved.
+- Bundle `config/deepswe_product_bundle_v1.json` repinned:
+  `source_commit=1e893f63`, `source_tree=b50f748f` (root tree),
+  `producer_sha256=b3572fb0`, `producer_build.*` all updated,
+  `ancestry_path` extended (137 entries), review packet
+  `har83-context-plan-producer-1e893f63-ci` minted on
+  `gt-review-inbox-1e893f63` (`baf73a42`), `attestation_digest_sha256`
+  recomputed. `verify_groundtruth_lineage` **PASS** (20 packets, exact-source
+  review matched); `verify_producer_binding` **VERIFIED**.
+- Windows checkout defect fixed (`189eaa25`): `.gitattributes` pins `-text`
+  on `vendor/gt-index-src/**` and `tests/fixtures/**/smoke20_recorded/**` —
+  autocrlf was corrupting byte-exact trees, breaking the vendored fingerprint
+  binding and recorded-fixture delivery hashes.
+- Canonical provider-free product acceptance on `af0865aa`: run
+  `34901944460` — `VERIFIED_PROVIDER_FREE`, `provider_calls=0`,
+  `benchmark_runs=0`, `release_eligible=true`, `release_blockers=[]`.
+  This is the readiness run ID a next SWE-Live smoke dispatch must cite.
+- Upstream CI on `1e893f63` (full tagged Go suite): run `34901920530`
+  dispatched on `fix/inventory-divergence-heal`.
+- Remaining before any smoke: upstream CI green on `1e893f63`, then a paid
+  dispatch needs a fresh explicit approval + new dispatch tag on `af0865aa`
+  citing `readiness_run_id=34901944460`.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
