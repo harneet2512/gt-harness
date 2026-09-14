@@ -30,3 +30,8 @@ tests/fixtures/har81_attestation/**/*.gz binary
 tests/fixtures/har81_attestation/**/renderer_sources/** -text
 vendor/gt-index-linux-amd64.build-info.json -text
 artifacts/har81_producer_acceptance_cffca1fd2.json text eol=lf
+
+# Byte-exact trees: producer source fingerprint and recorded fixture blobs are
+# content-hashed verbatim; autocrlf checkouts must not rewrite them.
+vendor/gt-index-src/** -text
+tests/fixtures/smoke20_recorded/** -text
