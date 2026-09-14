@@ -18,7 +18,7 @@
       "edges": "go-build green on 4f19c80a (run 34833873538); producer build 34833870450 success; fingerprint 30536060 identical - graph semantics unchanged",
       "go_tests": "CI go-build green on 4f19c80a (run 34833873538); producer build 34833870450 success",
       "python_tests": "CI test matrix green ubuntu/windows/macos 3.11+3.12 + lint + benchmark on 4f19c80a (run 34833873538)",
-      "wheel": "groundtruth_mcp-1.0.0-py3-none-any.whl sha256=0d3c72c5 built from committed tree 4f19c80a; verify_wheel_source correspondence PASS vs src/"
+      "wheel": "groundtruth_mcp-1.0.0-py3-none-any.whl sha256=16012029 built from git archive 4f19c80a (LF blob bytes; an earlier CRLF working-tree build 0d3c72c5 was byte-rejected by Linux correspondence and superseded); verify_wheel_source correspondence PASS vs src/"
     },
     "producer_sha256": "6dad9e3104981a54a734623835232f9b499f5e2d3674be016bc4a0ea4dfe852f",
     "remaining": [
@@ -32,7 +32,7 @@
   },
   "head_sha": "4f19c80a6263cc0f45539ad329f4d3a200941231",
   "kind": "check_outcome",
-  "packet_digest_sha256": "d5439dfbe924fbd35d6b804ac7a350e76b2376d806da01690c73b2a4d956d9be",
+  "packet_digest_sha256": "aee820499d55308f2bd96c6aed8cb2fa9510772369faa7bf0f748f49fcbf3cbd",
   "packet_id": "har83-context-plan-producer-4f19c80a-ci",
   "schema": "gt.review_packet.v1",
   "status": "PASS",
