@@ -66,9 +66,10 @@
      "covering_tests": [
       "tests/test_provider_fault_injection.py",
       "tests/test_miniswe_provider_error_mapping.py",
-      "tests/test_provider_failure_rehearsal.py"
+      "tests/test_provider_failure_rehearsal.py",
+      "tests/test_provider_pacing.py"
      ],
-     "status": "covered-unit; workflow-fix-pending"
+     "status": "fixed"
     },
     {
      "id": "orphaned_provider_request",
@@ -90,9 +91,12 @@
     },
     {
      "id": "cohort_throttle",
-     "observed": "20-way matrix on one relace route",
-     "covering_tests": [],
-     "status": "open - needs pacing decision"
+     "observed": "20-way matrix on one relace route: jitterless tenacity schedule meant synchronized retry waves; now paced per attempt inside the loop plus declared dispatch stagger",
+     "covering_tests": [
+      "tests/test_provider_pacing.py",
+      "tests/test_paid_workflow_gates.py"
+     ],
+     "status": "fixed - in-loop jitter + Retry-After cap + ordinal dispatch stagger (b2b5fc05)"
     },
     {
      "id": "disconnect_billing_badrequest_malformed_rehearsal",
