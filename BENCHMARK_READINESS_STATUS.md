@@ -766,6 +766,37 @@ readiness_binding, image_digest_gate, provider_gate); task leg ~10.5 min.
   defect. The gate stays strict — convergence scheduling is the fix, not
   a softer verdict.
 
+### Converged-tier smoke — run `34907273607` (2026-09-15): attestation **FAIL**
+
+- `cyclotruc__gitingest-94`: officially **solved** (`reward=1`), all five
+  mandatory capability rows **WORKING** — `lsp_promotion` converged
+  (`terminal_succeeded_published_2_edges_1_of_13_obsolete_last_of_13`);
+  the salvage-partial tier converged through later legs plus the new
+  seal-time convergence (`66cf2ecb`). The LSP axis defect is closed.
+- New rejection axis: `product_completion_unverified` — `verified=false`
+  with four `unverified_plan_rows` while `unmet_plan_rows` and
+  `unmet_predicates` were empty. Every bound check had passed mid-run
+  (six revisions of `CHECK_PASSED`), then the last edits moved the
+  repository revision and the lenient submit gate accepted on
+  `no_blocking_evidence`. Stale-revision evidence correctly does not
+  verify the submitted tree.
+- **Fix (`1af406b0`):** `seal_plan_recheck` re-pends bound checks whose
+  evidence is stale, missing, or inconclusive and drains them through the
+  same isolation boundary inside `completion_state` — the last quiescent
+  point with the journal open. Bounded (3 passes / 60s), borrows the
+  IMPLEMENT phase so check side-effects record through the ordinary
+  transaction path, restores FINISHED unconditionally, never retries
+  CHECK_FAILED, and journals `plan_seal_recheck`
+  (`gt.plan_seal_recheck.v1`). Regression coverage: stale→converged→
+  `verified=true`, failed recheck→`verified=false`, phase restoration
+  under check side-effects, bounded perpetual churn, non-FINISHED skip,
+  real-pytest path (Linux CI).
+- Same defect family as the LSP axis — mid-run evidence going stale
+  against the final tree — now closed on both.
+- Remaining before any smoke: provider-free acceptance must re-run green
+  on `1af406b0`; a paid dispatch then needs a fresh explicit approval +
+  dispatch tag on that SHA citing the matching `readiness_run_id`.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
