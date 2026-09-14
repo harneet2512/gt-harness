@@ -2369,10 +2369,18 @@ class MiniSweAdapter(GroundtruthController):
         if identity == self._last_graph_publication:
             return
         payload = json.loads(manifest_bytes)
+        # parent_graph_sha256/build_mode are what let the capability
+        # report walk publication ancestry: an amend's manifest names the
+        # graph it derived from, so a tier minted by an older promotion or
+        # a salvage merge is provably present on every descendant - and a
+        # publication with no recorded parent is a fresh build, which is
+        # where the walk must stop.
         self.store.append(
             "graph_publication", artifact_sha256=manifest_digest,
             graph_sha256=payload["graph_sha256"],
             repository_revision=self.engine_state.source_revision,
+            parent_graph_sha256=payload.get("parent_graph_sha256"),
+            build_mode=payload.get("build_mode"),
         )
         self._last_graph_publication = identity
 

@@ -1049,6 +1049,101 @@ def test_a_partial_salvage_is_degraded_with_the_skipped_count_named(tmp_path):
     )
 
 
+def test_a_salvage_carried_forward_by_later_amends_still_counts(tmp_path):
+    """Amends publish on TOP of the merge output - the tier rides the parent.
+
+    The merge output is the newest graph only until the next amend lands;
+    runs keep editing after a salvage, so the adopted graph at seal is
+    usually an amend whose manifest names the merge output as its parent.
+    Walking publication ancestry from the adopted sha reaches the salvage
+    row - the tier is on the newest graph through the same channel, which
+    is exactly what gate-one's successor runs look like.
+    """
+    terminal, blobs = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "lsp_salvage", "outcome": "published", "task_id": "leg-1",
+         "applied": 284, "inserted": 23, "updated": 261,
+         "skipped_stale": 0, "skipped_diverged": 0,
+         "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "a" * 64},
+        # An amend adopted on top of the merge output: parent named by the
+        # manifest, the merge's edges carried forward.
+        {"event": "graph_publication", "graph_sha256": "e" * 64,
+         "parent_graph_sha256": "a" * 64, "build_mode": "incremental"},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:obsolete:salvage_published:7_edges"
+    )
+
+
+def test_a_rebuild_between_salvage_and_seal_severs_the_tier(tmp_path):
+    """A fresh build has no parent: the ancestry walk ends, tier restarts.
+
+    The same chain that credits a carried-forward merge must not reach
+    THROUGH a rebuild - a full build's lsp tier is empty until a leg
+    enriches it, and walking past it would resurrect the discarded graph's
+    evidence onto its replacement.
+    """
+    terminal, blobs = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "lsp_salvage", "outcome": "published", "task_id": "leg-1",
+         "applied": 284, "inserted": 23, "updated": 261,
+         "skipped_stale": 0, "skipped_diverged": 0,
+         "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "a" * 64},
+        # A full rebuild adopted after the merge: no parent, tier empty.
+        {"event": "graph_publication", "graph_sha256": "d" * 64,
+         "build_mode": "full"},
+        # An amend on the rebuild: the chain stops at d, never reaches a.
+        {"event": "graph_publication", "graph_sha256": "e" * 64,
+         "parent_graph_sha256": "d" * 64, "build_mode": "incremental"},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:obsolete"
+    )
+
+
+def test_a_published_output_replaced_by_a_rebuild_is_not_working(tmp_path):
+    """A published claim proves the tier on ITS output, not on a fresh build.
+
+    The fallback reads the newest-scheduled terminal when nothing speaks
+    for the adopted graph. If that terminal published a graph the run has
+    since replaced, crediting its disposition is the optimistic-on-unknown
+    reading the reporter exists to refuse - the tier's fate on the adopted
+    base is what the row answers, and on a parentless build it is empty.
+    """
+    digest = "7" * 64
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "graph_publication", "graph_sha256": "g0"},
+        {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "published", "input_graph_revision": "g0",
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+        # A fresh full build replaced the enriched graph before seal.
+        {"event": "graph_publication", "graph_sha256": "g2",
+         "build_mode": "full"},
+    ], {
+        digest: {
+            "verified": 3, "corrected": 0, "deleted": 0,
+            "output_graph_sha256": "g1",
+            "language_receipts": {"python": {"selection_complete": True}},
+        },
+    })
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:published"
+    )
+
+
 def test_a_salvage_without_a_readable_receipt_is_not_success(tmp_path):
     """The merge published, but coverage cannot be shown - fail closed.
 
@@ -1548,8 +1643,11 @@ def test_no_terminal_for_the_adopted_graph_falls_back_to_schedule_order(tmp_path
         {"event": "lsp_promotion_terminal", "status": "succeeded",
          "disposition": "published", "input_graph_revision": "g0",
          "artifact_blob": f"lsp_receipts/{digest}.json"},
-        # A later adoption no promotion ever produced or ran against.
-        {"event": "graph_publication", "graph_sha256": "g2"},
+        # A later adoption no promotion ever produced or ran against: an
+        # amend descended from the enriched output, so the tier rode the
+        # parent link onto the newest graph.
+        {"event": "graph_publication", "graph_sha256": "g2",
+         "parent_graph_sha256": "g1", "build_mode": "incremental"},
     ], {
         digest: {
             "verified": 3, "corrected": 0, "deleted": 0,

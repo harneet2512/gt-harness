@@ -547,6 +547,49 @@ evidence the live run passed. A new paid smoke requires a fresh owner
 approval receipt on the green-gate SHA; `remaining-19` stays gated
 behind a clean one-task gate throughout.
 
+## Generalized workload simulator + ancestry fix (2026-09-15, uncommitted)
+
+The standing gap the gate-one postmortem named: the deterministic suite
+proved unit behavior, never sustained load. `tests/test_workload_simulation.py`
+closes it — a `_Sim` harness that drives a real `MiniSweAdapter` through
+scripted ticks (edit transactions, bare dirty-markings, provider waits,
+serving boundaries) with `time.monotonic` stubbed to a script clock and
+producer outcomes stubbed at the process boundary as a function of a
+pressure flag. Scenarios:
+
+- **Sustained churn (gate-one shape)**: 150 ticks at 45s, resident legs
+  pressing the cgroup six ticks in seven, legs losing every publication
+  race — pressured spawns bounded by the windows not by boundary count,
+  every refresh event WARNING/consequential/retryable, zero recovery
+  builds under pressure, ≥2 salvages landed through the real
+  wait-scheduler drain, `lsp_promotion` attested **WORKING** at seal.
+- **Persistent pressure**: honest degraded seal, bounded attempts.
+- **Deterministic failure escalation**: bounded, streak-based.
+- **Calm control**: published leg, zero diagnostics.
+- **Parameterized storm**: three workload shapes (continuous-tight,
+  sparse-slow, front-loaded-clears) asserting the same invariants under
+  different cadence/pressure profiles.
+
+The simulator's first run caught a **real defect** the unit suite missed:
+a salvage merge landing mid-run is only the newest graph until the next
+amend — the capability reporter's join on the *last* publication missed
+it and would have reported `lsp_promotion` DEGRADED on a graph whose
+tier was populated via the merge's descendants. Fixed by journaling
+`parent_graph_sha256`/`build_mode` from the manifest
+(`_record_graph_publication`) and walking publication ancestry in the
+reporter: the nearest chain ancestor minted by a published terminal or a
+published salvage merge decides the tier; a parentless publication is a
+fresh build where the walk stops. This also closed a latent
+false-positive — a fallback terminal claiming `published` can no longer
+credit a tier on a graph the run already replaced with a rebuild; the
+yield gate now requires the output provably on the adopted chain.
+
+New coverage: 4 sim scenarios + 3 parameterized shapes in
+`test_workload_simulation.py`; 3 ancestry cases (carried-forward salvage,
+rebuild-severs-chain, published-output-replaced) plus an honest fixture
+update in `test_gt_session.py`. Lint clean on the new file; only
+pre-existing findings remain elsewhere.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains

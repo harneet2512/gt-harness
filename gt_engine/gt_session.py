@@ -2120,6 +2120,10 @@ class GTSession:
                 # carries. None means the merge published but its source leg
                 # cannot be read back - coverage is then unknown, not free.
                 salvage_terminal: dict[str, object] | None = None
+                # Set when the evaluated terminal produced a graph on the
+                # adopted publication's own ancestry - the only case where
+                # its published disposition proves the tier on THIS graph.
+                produced_on_chain = False
                 if adopted:
                     # The question this row answers is whether the lsp tier is
                     # populated on the graph the run LAST adopted. Ranking
@@ -2142,43 +2146,70 @@ class GTSession:
                     # that ran ON it: its disposition says why the tier is
                     # empty on that base (no_edge_mutations, obsolete,
                     # not_publishable, failed) exactly as it does today.
-                    produced = [
-                        row for row in terminals
-                        if str(row.get("disposition") or "") == "published"
-                        and str(
-                            (_terminal_receipt(row) or {}).get(
-                                "output_graph_sha256"
-                            ) or ""
-                        ) == adopted
-                    ]
-                    if produced:
-                        terminal = max(
-                            produced, key=lambda row: row["_position"]
-                        )
-                    else:
+                    by_sha = {
+                        str(row.get("graph_sha256") or ""): row
+                        for row in publications
+                    }
+                    # Walk publication ancestry from the adopted graph: an
+                    # amend's manifest names the graph it derived from, so
+                    # a tier minted by an older promotion or a salvage
+                    # merge rides the parent link onto every descendant.
+                    # The NEAREST ancestor either channel minted decides;
+                    # a publication with no recorded parent is a fresh
+                    # build - the tier restarts empty there and the walk
+                    # must not reach through it onto the discarded graph's
+                    # evidence.
+                    cursor = adopted
+                    seen: set[str] = set()
+                    while cursor and cursor not in seen:
+                        seen.add(cursor)
+                        produced = [
+                            row for row in terminals
+                            if str(row.get("disposition") or "") == "published"
+                            and str(
+                                (_terminal_receipt(row) or {}).get(
+                                    "output_graph_sha256"
+                                ) or ""
+                            ) == cursor
+                        ]
+                        if produced:
+                            terminal = max(
+                                produced, key=lambda row: row["_position"]
+                            )
+                            produced_on_chain = True
+                            break
                         salvaged = next(
                             (
                                 row for row in reversed(salvage_rows)
                                 if str(row.get("outcome") or "") == "published"
                                 and str(row.get("graph_revision") or "")
-                                == adopted
+                                == cursor
                             ),
                             None,
                         )
                         if salvaged is not None:
-                            salvage_task = str(salvaged.get("task_id") or "")
-                            salvage_terminal = next(
-                                (
-                                    row for row in reversed(terminals)
-                                    if salvage_task
-                                    and str(
-                                        (_terminal_receipt(row) or {}).get(
-                                            "task_id"
-                                        ) or ""
-                                    ) == salvage_task
-                                ),
-                                None,
-                            )
+                            break
+                        parent_row = by_sha.get(cursor)
+                        if parent_row is None:
+                            break
+                        cursor = str(
+                            parent_row.get("parent_graph_sha256") or ""
+                        )
+                    if salvaged is not None:
+                        salvage_task = str(salvaged.get("task_id") or "")
+                        salvage_terminal = next(
+                            (
+                                row for row in reversed(terminals)
+                                if salvage_task
+                                and str(
+                                    (_terminal_receipt(row) or {}).get(
+                                        "task_id"
+                                    ) or ""
+                                ) == salvage_task
+                            ),
+                            None,
+                        )
+                    if terminal is None:
                         targeted = [
                             row for row in terminals
                             if str(row.get("input_graph_revision") or "")
@@ -2245,7 +2276,15 @@ class GTSession:
                     lsp_evidence = (
                         f"terminal_{status or 'unknown'}:{disposition or 'none'}"
                     )
-                if disposition == "published" or salvaged is not None:
+                if (
+                    produced_on_chain
+                    or salvaged is not None
+                    # No publications at all means the chain cannot refute
+                    # the terminal's own claim either - evaluate its
+                    # receipt on its face, where an unreadable blob still
+                    # earns :yield_unknown rather than a pass.
+                    or (disposition == "published" and not publications)
+                ):
                     # Publication is necessary and NOT sufficient. A receipt can
                     # come back succeeded with verified/corrected/deleted all
                     # zero: edge_mutations is then 0, the closure is never
