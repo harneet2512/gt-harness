@@ -698,3 +698,44 @@ def test_a_calm_run_attests_clean_with_zero_diagnostics(
     caps = sim.capabilities()
     assert caps["lsp_promotion"][0] == "WORKING", caps["lsp_promotion"]
     assert caps["gt_engine_enabled"][0] == "WORKING"
+
+
+def test_a_published_salvage_schedules_a_fresh_leg_on_the_merged_graph(
+    monkeypatch, tmp_path
+):
+    """Salvage adoption is still an adoption: schedule the next leg on it.
+
+    The paid gate-one on the healed producer (run 34904339448) salvaged a
+    raced leg onto the live graph (applied 13, skipped_diverged 10) and then
+    sealed without ever scheduling an enrichment on the merged revision -
+    partial coverage froze as the terminal state and the capability read
+    DEGRADED. The drain-side publish now runs the same schedule call every
+    other adoption point runs, so the tier converges while the run lives.
+    """
+    sim = _Sim(monkeypatch, tmp_path)
+
+    sim.boundary()
+    sim.edit("mod.py")
+    sim.finish_legs()
+    # The obsolete drain enqueues the salvage; the next wait launches it and
+    # the drain after that publishes the merge. Boundaries after the publish
+    # are where a post-adoption schedule could otherwise hide.
+    sim.provider_wait()
+    sim.provider_wait()
+    # The obsolete drain arms a 60s churn backoff; the convergence schedule
+    # is owed only once the window expires - advance the sim clock past it.
+    sim.boundary()
+    sim.boundary(advance=61.0)
+
+    salvages = sim.journal("lsp_salvage")
+    assert salvages and salvages[-1].get("outcome") == "published", (
+        f"the scenario must drive a published salvage: {salvages}"
+    )
+    merged_revision = salvages[-1]["graph_revision"]
+    scheduled = sim.journal("lsp_promotion_scheduled")
+    assert any(
+        row.get("graph_revision") == merged_revision for row in scheduled
+    ), (
+        "the salvage-published graph was never offered a convergence leg: "
+        f"scheduled={[row.get('graph_revision') for row in scheduled]}"
+    )

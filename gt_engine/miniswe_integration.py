@@ -910,6 +910,15 @@ class MiniSweAdapter(GroundtruthController):
                     ),
                     **fields,
                 )
+                if published:
+                    # A salvage adoption is still an adoption: the merged
+                    # graph carries only what survived the divergence sweep,
+                    # so the tier converges to full coverage only if a fresh
+                    # leg is scheduled on it. Every other adoption point
+                    # already does this; without it here a salvage near seal
+                    # freezes partial coverage as the terminal state.
+                    self._record_graph_publication()
+                    self._maybe_schedule_lsp_promotion()
             else:
                 self.store.append(
                     "wait_work_terminal", name=name, status=status,
