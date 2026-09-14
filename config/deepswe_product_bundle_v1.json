@@ -26,7 +26,7 @@
     "source_tree": "357e8d2e49ac34d4bff01e9485782d3c15915261",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "wheel_sha256": "0d3c72c549a4eb99149687cc46a5d96ad9287dc63fa51b297a8b98e7a8ba2082",
+    "wheel_sha256": "160120290c2584a2a6e54a61ba9b5e6327de4eabb62656f18c0a8fbce0092180",
     "producer_path": "vendor/gt-index-linux-amd64",
     "producer_sha256": "6dad9e3104981a54a734623835232f9b499f5e2d3674be016bc4a0ea4dfe852f",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
@@ -956,7 +956,7 @@
         "tests/wrapper/test_router_v2_telemetry.py",
         "tools/sweagent/gt_pre_finish_gate/lib/gt_pre_finish_gate.py"
       ],
-      "review_inbox_commit": "9d9b370e77415d6d1bd9e3684feb0611315c668b",
+      "review_inbox_commit": "4cb9ec66cbc0db9cdbb03cfdec909d1c3859a18b",
       "review_packets": [
         {
           "path": "inbox/HAR-83/har83-context-plan-producer-efa70e52.json",
@@ -1111,7 +1111,7 @@
           "kind": "check_outcome",
           "status": "PASS",
           "basis": "exact_ci_static_build_runtime_language_matrix_and_runner_proof_consolidation",
-          "packet_digest_sha256": "d5439dfbe924fbd35d6b804ac7a350e76b2376d806da01690c73b2a4d956d9be"
+          "packet_digest_sha256": "aee820499d55308f2bd96c6aed8cb2fa9510772369faa7bf0f748f49fcbf3cbd"
         }
       ],
       "product_review_packets": [
@@ -1132,7 +1132,7 @@
           ]
         }
       ],
-      "attestation_digest_sha256": "ff61cafdb7dbe13594b1ff689b4f0df7310d4fed18fd23afc811610a04874442"
+      "attestation_digest_sha256": "9976d56b88e93d7bc3b1ffcbdccc8179176b682c81839729a30baf767b2d4003"
     }
   },
   "capabilities": [

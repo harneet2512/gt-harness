@@ -2,8 +2,13 @@ artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
 source_commit=4f19c80a6263cc0f45539ad329f4d3a200941231
 source_tree=357e8d2e49ac34d4bff01e9485782d3c15915261
-sha256=0d3c72c549a4eb99149687cc46a5d96ad9287dc63fa51b297a8b98e7a8ba2082
-build_command=python -m build --wheel (from committed working tree)
+sha256=160120290c2584a2a6e54a61ba9b5e6327de4eabb62656f18c0a8fbce0092180
+build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
+
+NOTE: wheel is built from `git archive` output, never a Windows working
+tree — the archive carries committed blob bytes (LF) while an autocrlf
+checkout materializes CRLF, which byte-fails correspondence on Linux
+(the 0d3c72c5 build hit exactly that: 300+ files "changed" in CI).
 
 upstream_fix=e65febd3 + 4f19c80a on branch wheel-patch-lsp-inventory
 (parent 3f5ff8e):
@@ -31,7 +36,9 @@ upstream_fix=e65febd3 + 4f19c80a on branch wheel-patch-lsp-inventory
   4f19c80a — style: ruff-format conformance on the same files
   (format-only; fixes the lint failure that red CI on e65febd3).
   Verified: verify_wheel_source correspondence PASS vs src/
-  (committed tree, no worktree delta).
+  (git-archive LF export, 323 files byte-identical, no worktree delta).
+  Superseded CRLF-built artifact sha256:
+  0d3c72c549a4eb99149687cc46a5d96ad9287dc63fa51b297a8b98e7a8ba2082
 
 Recorded source tree carries the committed 4f19c80a tree.
 This pin records the vendored artifact's identity only. It does not certify installed
