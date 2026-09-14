@@ -88,6 +88,62 @@ _CROSS_TABLE_REFS = {
 }
 
 
+# The batch-amend path trusts these bookkeeping tables absolutely:
+# parser_node_inventory maps content identity -> node rowid, and the
+# parser_{edge,property,assertion}_inventory tables map fact rowid ->
+# content digest. A merge that rewrites or removes an inventoried row
+# leaves the entry aliased to content it was not minted for, and the next
+# amend aborts inside "batch parent parser row differs from its
+# inventory". Every row the merge deletes or overwrites drops its entry;
+# every applied candidate row adopts the candidate's own entry remapped
+# to the merged rowid. Rows the leg already evicted stay un-inventoried
+# and re-enter fresh on the next amend.
+_PARSER_INVENTORY = {
+    # table: (inventory_table, id_column, value_column, value_first)
+    "nodes": ("parser_node_inventory", "node_id", "identity", False),
+    "edges": ("parser_edge_inventory", "edge_id", "content_sha256", True),
+    "properties": ("parser_property_inventory", "property_id", "content_sha256", True),
+    "assertions": ("parser_assertion_inventory", "assertion_id", "content_sha256", True),
+}
+
+
+def _inventory_drop(
+    con: sqlite3.Connection, table: str, rowid: int
+) -> None:
+    inv = _PARSER_INVENTORY.get(table)
+    if inv is None or not _table_exists(con, "main", inv[0]):
+        return
+    con.execute(f"DELETE FROM {inv[0]} WHERE {inv[1]}=?", (rowid,))
+
+
+def _inventory_adopt(
+    con: sqlite3.Connection, table: str, cand_rowid: int, merged_rowid: int
+) -> None:
+    """Carry the candidate's inventory entry onto the merged rowid so the
+    merged graph's bookkeeping still describes the row's actual content."""
+    inv = _PARSER_INVENTORY.get(table)
+    if inv is None:
+        return
+    inv_name, id_col, value_col, value_first = inv
+    if not (
+        _table_exists(con, "main", inv_name)
+        and _table_exists(con, "cand", inv_name)
+    ):
+        return
+    if value_first:
+        con.execute(
+            f"INSERT OR REPLACE INTO {inv_name}({id_col},{value_col}) "
+            f"SELECT ?, {value_col} FROM cand.{inv_name} WHERE {id_col}=?",
+            (merged_rowid, cand_rowid),
+        )
+    else:
+        con.execute(
+            f"INSERT OR REPLACE INTO {inv_name}({value_col},{id_col}) "
+            f"SELECT {value_col}, ? FROM cand.{inv_name} WHERE {id_col}=?",
+            (merged_rowid, cand_rowid),
+        )
+
+
 def _cross_refs_ok(
     con: sqlite3.Connection,
     table: str,
@@ -301,6 +357,7 @@ def merge_lsp_candidate(
                     result.skipped_diverged += 1
                     continue
                 merged.execute(f"DELETE FROM {table} WHERE rowid=?", (rowid,))
+                _inventory_drop(merged, table, rowid)
                 if table == "nodes":
                     nodes.merged.pop(rowid, None)
                 result.applied += 1
@@ -346,6 +403,8 @@ def merge_lsp_candidate(
                     f"WHERE rowid=?) WHERE rowid=?",
                     (rowid, rowid),
                 )
+                _inventory_drop(merged, table, rowid)
+                _inventory_adopt(merged, table, rowid, rowid)
                 if table == "nodes":
                     nodes.merged[rowid] = cand_row
                 result.applied += 1
@@ -485,6 +544,7 @@ def _insert_remapped(
             values,
         )
     new_id = int(cursor.lastrowid)
+    _inventory_adopt(con, table, cand_rowid, new_id)
     # merged_rows was snapshotted before the merge; record the row just
     # placed so a later candidate row colliding on this id remaps instead
     # of crashing the merge. The stored tuple carries the id it landed

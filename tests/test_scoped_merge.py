@@ -11,6 +11,7 @@ The fixture models the real promotion shape:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -879,3 +880,144 @@ def test_salvage_reports_closure_rebuild_failure(tmp_path, monkeypatch):
     events = [row for row in _journal_events(adapter)
               if row.get("event") == "lsp_salvage"]
     assert events and events[0]["outcome"] == "closure_rebuild_failed"
+
+
+# ------------------------------------------- parser bookkeeping consistency
+#
+# The producer's batch amend trusts parser_*_inventory as the identity->rowid
+# map it minted. A merge that mutates a row without maintaining the inventory
+# manufactures a corrupt parent: run 34888711134's merge-9bdqrbry applied 441
+# in-place node UPDATEs (LSP-enriched signatures), left the un-enriched
+# identities pointing at them, and every later batch amend died on
+# "batch parent parser row differs from its inventory".
+
+
+def _row_digest(db: sqlite3.Connection, table: str, rowid: int) -> str:
+    row = db.execute(f"SELECT * FROM {table} WHERE id=?", (rowid,)).fetchone()
+    return hashlib.sha256(repr(tuple(row)).encode("utf-8")).hexdigest()
+
+
+def _mint_parser_inventory(db: sqlite3.Connection) -> None:
+    """(Re)mint bookkeeping so each entry describes its row's content.
+
+    Identities/digests are row-content digests, matching the producer's own
+    invariant: the stored row must equal the row the entry was minted for.
+    """
+    db.executescript(
+        "CREATE TABLE IF NOT EXISTS parser_node_inventory"
+        " (identity TEXT PRIMARY KEY, node_id INTEGER NOT NULL UNIQUE);"
+        "CREATE TABLE IF NOT EXISTS parser_edge_inventory"
+        " (edge_id INTEGER PRIMARY KEY, content_sha256 TEXT NOT NULL);"
+    )
+    db.execute("DELETE FROM parser_node_inventory")
+    db.execute("DELETE FROM parser_edge_inventory")
+    for (nid,) in db.execute("SELECT id FROM nodes").fetchall():
+        db.execute(
+            "INSERT INTO parser_node_inventory(identity,node_id) VALUES(?,?)",
+            (_row_digest(db, "nodes", nid), nid))
+    for (eid,) in db.execute("SELECT id FROM edges").fetchall():
+        db.execute(
+            "INSERT INTO parser_edge_inventory(edge_id,content_sha256)"
+            " VALUES(?,?)", (eid, _row_digest(db, "edges", eid)))
+
+
+def _inventoried_graphs(tmp_path: Path) -> tuple[Path, Path, Path]:
+    base = tmp_path / "base.db"
+    cand = tmp_path / "cand.db"
+    live = tmp_path / "live.db"
+    _build_base(base)
+    with closing(sqlite3.connect(base)) as db:
+        _mint_parser_inventory(db)
+        db.commit()
+
+    # live = base + a real amend on stale.py; an amend re-mints bookkeeping
+    # for the rows it touched, so the whole inventory is re-minted.
+    _copy(base, live)
+    _mutate_live(live)
+    with closing(sqlite3.connect(live)) as db:
+        _mint_parser_inventory(db)
+        db.commit()
+
+    # cand = base + the promotion: type enrichment of clean and stale rows
+    # (each mutated row is evicted, exactly like groundtruth.resolve does),
+    # a new inventoried node, and deleted inventoried edges.
+    _copy(base, cand)
+    with closing(sqlite3.connect(cand)) as db:
+        db.execute(
+            "UPDATE nodes SET signature='def caller_clean() -> int' WHERE id=1")
+        db.execute("DELETE FROM parser_node_inventory WHERE node_id=1")
+        db.execute(
+            "UPDATE nodes SET signature='def caller_stale() -> int' WHERE id=2")
+        db.execute("DELETE FROM parser_node_inventory WHERE node_id=2")
+        db.execute(
+            "INSERT INTO nodes (id,label,name,qualified_name,file_path,"
+            "start_line,end_line,signature,stable_id,language,node_type,"
+            "candidate_state,callsite_stable_id,selected_target_id) VALUES"
+            " (7,'Function','enriched','clean.py:enriched','clean.py',20,30,"
+            " 'def enriched() -> str','stable:enriched','python','function',"
+            " NULL,NULL,NULL)")
+        db.execute(
+            "INSERT INTO parser_node_inventory(identity,node_id) VALUES(?,?)",
+            (_row_digest(db, "nodes", 7), 7))
+        db.execute("DELETE FROM edges WHERE id=1")
+        db.execute("DELETE FROM parser_edge_inventory WHERE edge_id=1")
+        db.execute("DELETE FROM edges WHERE id=2")
+        db.execute("DELETE FROM parser_edge_inventory WHERE edge_id=2")
+        db.commit()
+    return base, cand, live
+
+
+def _assert_inventory_consistent(path: Path) -> None:
+    """Every surviving entry describes the row it points at (or fails)."""
+    with closing(sqlite3.connect(path)) as db:
+        for identity, nid in db.execute(
+                "SELECT identity,node_id FROM parser_node_inventory"):
+            assert _row_digest(db, "nodes", nid) == identity, (
+                f"node inventory entry aliases row {nid}")
+        for eid, digest in db.execute(
+                "SELECT edge_id,content_sha256 FROM parser_edge_inventory"):
+            assert _row_digest(db, "edges", eid) == digest, (
+                f"edge inventory entry aliases row {eid}")
+
+
+def test_merge_never_manufactures_a_stale_parser_inventory(tmp_path):
+    base, cand, live = _inventoried_graphs(tmp_path)
+    out = tmp_path / "merged.db"
+    merge_lsp_candidate(
+        base_graph=base, candidate_graph=cand, live_graph=live,
+        out_path=out, stale_paths={"stale.py"})
+
+    _assert_inventory_consistent(out)
+
+    with closing(sqlite3.connect(
+            f"file:{out.as_posix()}?mode=ro", uri=True)) as db:
+        # The enriched clean-path row merged and its stale live entry is gone:
+        # a later amend must re-derive it, not alias the old identity.
+        assert db.execute(
+            "SELECT signature FROM nodes WHERE id=1").fetchone() == \
+            ("def caller_clean() -> int",)
+        assert db.execute(
+            "SELECT 1 FROM parser_node_inventory WHERE node_id=1"
+        ).fetchone() is None
+        # The candidate-only inventoried row was adopted under its merged id.
+        adopted = db.execute(
+            "SELECT n.id FROM parser_node_inventory i JOIN nodes n"
+            " ON n.id=i.node_id WHERE n.name='enriched'").fetchall()
+        assert len(adopted) == 1
+        # The stale-path update was skipped: live's row and entry stand.
+        assert db.execute(
+            "SELECT signature FROM nodes WHERE id=2").fetchone() == \
+            ("def caller_stale(v2)",)
+        assert db.execute(
+            "SELECT 1 FROM parser_node_inventory WHERE node_id=2"
+        ).fetchone() is not None
+        # The clean-path deleted edge and its entry are both gone; the
+        # stale-path delete was skipped and live's entry survives.
+        assert db.execute(
+            "SELECT 1 FROM edges WHERE id=1").fetchone() is None
+        assert db.execute(
+            "SELECT 1 FROM parser_edge_inventory WHERE edge_id=1"
+        ).fetchone() is None
+        assert db.execute(
+            "SELECT 1 FROM parser_edge_inventory WHERE edge_id=2"
+        ).fetchone() is not None

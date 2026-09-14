@@ -1786,7 +1786,9 @@ def _amend_failure_reason(process_result: IndexProcessResult) -> str:
     reason = f"amend_failed:{process_result.error_code or process_result.status}"
     if process_result.exit_code is not None:
         reason += f":exit={process_result.exit_code}"
-    stderr = " ".join(process_result.stderr_tail.split())[:120]
+    # Keep the END of the tail: the fatal line is always the last thing the
+    # producer writes, and the head is only ever a phase banner.
+    stderr = " ".join(process_result.stderr_tail.split())[-120:]
     if stderr:
         reason += f":stderr={stderr}"
     return reason
@@ -1915,6 +1917,25 @@ def _ensure_index_incremental_unlocked(
             )
             if not process_result.success:
                 results = tuple(collected)
+                # A failed amend is still index evidence: persist the process
+                # result (stderr tail, exit code, cgroup deltas) the same way
+                # the full-build path does, so the refusal is diagnosable from
+                # the artifact rather than only from the journaled reason.
+                try:
+                    evidence_path = candidate.with_suffix(".resource.json")
+                    _write_index_evidence(
+                        evidence_path, root=root, result=process_result,
+                        reuse_key=reuse_key, identity=identity,
+                        attempts=tuple(attempts),
+                    )
+                    _publish_graph_failure(
+                        gt_dir, root=root, reuse_key=reuse_key,
+                        error_code=process_result.error_code
+                        or process_result.status,
+                        staged_evidence=evidence_path, identity=identity,
+                    )
+                except OSError:
+                    pass
                 return None, _amend_failure_reason(process_result), results
         results = tuple(collected)
         assert process_result is not None

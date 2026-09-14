@@ -526,6 +526,52 @@ def test_a_failed_amend_names_the_producers_own_error(tmp_path, monkeypatch):
     assert rows and rows[0]["status"] == "nonzero_exit"
 
 
+def test_amend_failure_reason_keeps_the_stderr_tail_end(tmp_path, monkeypatch):
+    """The fatal line is the LAST thing the producer writes, never the first.
+
+    stderr_tail is already the final 4 KiB of output; taking its head showed
+    the Pass-1 banner while the actual "batch parent parser row differs from
+    its inventory" sat unread at the end - run 34888711134 died four times on
+    an enriched parent and the journal could only say "Found 609 source
+    files". Keep the tail's end so the refusal names the cause.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text(
+        "def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(indexer, "_producer_supports_incremental_amend", lambda: True)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability", lambda capability: False)
+    monkeypatch.setattr(
+        indexer, "_run_index_bounded",
+        lambda *args, **kwargs: indexer.IndexProcessResult(
+            success=False, status="nonzero_exit",
+            error_code="GT_INDEX_PROCESS_FAILED", exit_code=1, elapsed_ms=37,
+            stderr_tail=(
+                "Pass 1: discovering files in /testbed...\n"
+                "  Found 609 source files\n"
+                "  toml: 100 files\n  yaml: 53 files\n"
+                "Pass 2: parsing 609 files (2 workers)...\n"
+                "2026/09/14 20:21:39 batch insert nodes: batch parent parser "
+                "row differs from its inventory: dynaconf/base.py\n"),
+        ),
+    )
+
+    result, reason, _rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert result is None
+    assert reason.startswith("amend_failed:GT_INDEX_PROCESS_FAILED")
+    assert "exit=1" in reason
+    # The end of the tail carries the cause; the banner it starts with does not.
+    assert "batch parent parser row differs from its inventory" in reason
+    assert "Pass 1" not in reason
+
+
 def test_a_failed_amend_without_stderr_still_names_exit(tmp_path, monkeypatch):
     """The diagnostic degrades, it does not pad: no stderr, no stderr key."""
     adapter = _adapter(tmp_path)
@@ -553,6 +599,71 @@ def test_a_failed_amend_without_stderr_still_names_exit(tmp_path, monkeypatch):
 
     assert result is None
     assert reason == "amend_failed:GT_INDEX_TIMEOUT:exit=-9"
+
+
+def test_a_failed_amend_persists_the_process_evidence(tmp_path, monkeypatch):
+    """A refused amend leaves the same evidence a failed full build does.
+
+    Run 34888711134 journaled four amend refusals whose only diagnostic was a
+    truncated reason; the stderr tail, exit code and cgroup deltas that would
+    have named the defect were dropped. The failed attempt now writes the
+    same ``index-failure-resource.json`` + ``graph.failure.json`` receipts
+    the full-build path writes.
+    """
+    adapter = _adapter(tmp_path)
+    root = Path(adapter.repo_root)
+    (root / "app.py").write_text("def one(): pass\n", encoding="utf-8")
+    layout = adapter.engine_state.layout
+    parent = _publish_parent(root, layout, monkeypatch)
+    (root / "app.py").write_text(
+        "def one(): pass\ndef two(): pass\n", encoding="utf-8")
+
+    stderr_tail = (
+        "Pass 1: discovering files in /testbed...\n"
+        "batch insert nodes: batch parent parser row differs from its "
+        "inventory: dynaconf/base.py\n")
+    monkeypatch.setattr(indexer, "_producer_supports_incremental_amend", lambda: True)
+    monkeypatch.setattr(
+        indexer, "_producer_supports_amend_capability",
+        lambda capability: capability == indexer.BATCH_AMEND_CAPABILITY)
+    monkeypatch.setattr(
+        indexer, "_run_index_bounded",
+        lambda *args, **kwargs: indexer.IndexProcessResult(
+            success=False, status="nonzero_exit",
+            error_code="GT_INDEX_PROCESS_FAILED", exit_code=1, elapsed_ms=37,
+            stderr_tail=stderr_tail,
+            stderr_bytes=len(stderr_tail),
+            stderr_sha256=hashlib.sha256(
+                stderr_tail.encode("utf-8")).hexdigest(),
+            cgroup_memory_current_after=123456,
+            cgroup_oom_delta=0, cgroup_oom_kill_delta=0,
+        ),
+    )
+
+    result, reason, _rows = indexer._ensure_index_incremental_unlocked(
+        str(root), layout=layout, parent_graph=parent, changed_paths=("app.py",))
+
+    assert result is None and reason.startswith("amend_failed:")
+
+    resource = list(tmp_path.rglob("index-failure-resource.json"))
+    failure = list(tmp_path.rglob("graph.failure.json"))
+    assert resource, "failed amend left no index-failure-resource receipt"
+    assert failure, "failed amend left no graph.failure receipt"
+
+    resource_doc = json.loads(resource[0].read_text(encoding="utf-8"))
+    assert resource_doc["exit_code"] == 1
+    assert resource_doc["stderr_tail"] == stderr_tail
+    assert resource_doc["stderr_sha256"] == hashlib.sha256(
+        stderr_tail.encode("utf-8")).hexdigest()
+    assert resource_doc["cgroup_memory_current_after"] == 123456
+    assert resource_doc["build_attempt_count"] == 1
+
+    failure_doc = json.loads(failure[0].read_text(encoding="utf-8"))
+    assert failure_doc["schema"] == "gt.graph_failure.v1"
+    assert failure_doc["error_code"] == "GT_INDEX_PROCESS_FAILED"
+    # The failure receipt binds the resource receipt by content, not by path.
+    assert failure_doc["resource_evidence_sha256"] == hashlib.sha256(
+        resource[0].read_bytes()).hexdigest()
 
 
 def test_amend_is_refused_when_the_producer_does_not_declare_the_capability(
