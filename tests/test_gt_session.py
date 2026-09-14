@@ -1431,6 +1431,116 @@ def test_no_terminal_for_the_adopted_graph_falls_back_to_schedule_order(tmp_path
     )
 
 
+_UNSERVICEABLE_JS = {
+    "server_launched": True,
+    "candidate_unit_count": 2,
+    "probe_requests_issued": 0,
+    "verified": 0,
+    "failed": 2,
+    "install_missing_reason": (
+        "js/ts LSP leg for 'javascript': no workspace TypeScript install "
+        "(node_modules/typescript) and no tsserver.path"
+    ),
+    "selection_complete": True,
+}
+
+
+def test_install_missing_legs_are_degraded_but_not_required(tmp_path):
+    """The exact run-34796061920 shape: a Python repo whose only promotable
+    edges were 2 JS callsites, skipped because the task image ships no
+    TypeScript install. The tier is empty -> DEGRADED stays, but a run is not
+    required to produce edges no leg could have produced, so the strict gate
+    and the prior-gate validator must not read required.
+    """
+    digest = "6" * 64
+    terminal = {
+        "event": "lsp_promotion_terminal", "status": "succeeded",
+        "disposition": "no_edge_mutations", "input_graph_revision": "g0",
+        "artifact_blob": f"lsp_receipts/{digest}.json",
+    }
+    blobs = {digest: {
+        "verified": 0, "corrected": 0, "selected": 0, "deleted": 0,
+        "language_receipts": {"javascript": dict(_UNSERVICEABLE_JS)},
+    }}
+    rows = [_DENSE_READY,
+            {"event": "lsp_promotion_scheduled", "graph_revision": "g0"},
+            terminal]
+
+    assert _capability_rows(tmp_path, rows, blobs)["lsp_promotion"] == (
+        "DEGRADED", "terminal_succeeded:no_edge_mutations:no_serviceable_candidates"
+    )
+    assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is False
+
+
+def test_a_leg_that_served_requests_and_produced_nothing_stays_required(tmp_path):
+    """Serviceable failure is the real gap the gate exists for."""
+    digest = "7" * 64
+    leg = dict(_UNSERVICEABLE_JS)
+    leg["install_missing_reason"] = ""
+    leg["probe_requests_issued"] = 5
+    blobs = {digest: {
+        "verified": 0, "corrected": 0, "selected": 0, "deleted": 0,
+        "language_receipts": {"javascript": leg},
+    }}
+    rows = [_DENSE_READY,
+            {"event": "lsp_promotion_terminal", "status": "succeeded",
+             "disposition": "no_edge_mutations", "input_graph_revision": "g0",
+             "artifact_blob": f"lsp_receipts/{digest}.json"}]
+
+    assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is True
+
+
+def test_one_serviceable_leg_among_unserviceable_ones_stays_required(tmp_path):
+    """Mixed legs: one unserviceable language does not launder another's failure."""
+    digest = "8" * 64
+    serviceable = {
+        "server_launched": True, "candidate_unit_count": 3,
+        "probe_requests_issued": 4, "verified": 0, "failed": 3,
+        "install_missing_reason": "", "selection_complete": True,
+    }
+    blobs = {digest: {
+        "verified": 0, "corrected": 0, "selected": 0, "deleted": 0,
+        "language_receipts": {
+            "javascript": dict(_UNSERVICEABLE_JS), "python": serviceable,
+        },
+    }}
+    rows = [_DENSE_READY,
+            {"event": "lsp_promotion_terminal", "status": "succeeded",
+             "disposition": "no_edge_mutations", "input_graph_revision": "g0",
+             "artifact_blob": f"lsp_receipts/{digest}.json"}]
+
+    assert _capability_required(tmp_path, rows, blobs=blobs)["lsp_promotion"] is True
+
+
+def test_no_receipt_cannot_prove_unserviceable_and_stays_required(tmp_path):
+    """A terminal with no artifact_blob is the unreadable case: fail closed."""
+    rows = _capability_required(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "no_edge_mutations", "input_graph_revision": "g0"},
+    ])
+
+    assert rows["lsp_promotion"] is True
+
+
+def test_nothing_promotable_is_not_required(tmp_path):
+    """no_op means the graph had zero promotable candidates: nothing was owed."""
+    rows = _capability_required(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_terminal", "status": "no_op",
+         "disposition": "d"},
+    ])
+
+    assert rows["lsp_promotion"] is False
+
+
+def test_never_scheduled_stays_required(tmp_path):
+    """No terminal, no receipt, no proof of unserviceability: required holds."""
+    rows = _capability_required(tmp_path, [_DENSE_READY])
+
+    assert rows["lsp_promotion"] is True
+
+
 def test_a_stage_this_build_does_not_define_is_not_echoed(tmp_path):
     """The journal is inside the task container and the agent can write to it.
 
@@ -1462,6 +1572,10 @@ def _capability_required(tmp_path, rows, **kwargs):
     journal.write_text(
         "".join(json.dumps(row) + chr(10) for row in rows), encoding="utf-8"
     )
+    for digest, payload in (kwargs.get("blobs") or {}).items():
+        blob = tmp_path / "lsp_receipts" / f"{digest}.json"
+        blob.parent.mkdir(parents=True, exist_ok=True)
+        blob.write_text(json.dumps(payload), encoding="utf-8")
     stub = SimpleNamespace(
         _engine=SimpleNamespace(
             store=SimpleNamespace(path=str(journal), root=tmp_path)

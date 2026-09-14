@@ -714,7 +714,7 @@ jobs:
           "$node_root/bin/npm" install --prefix "$node_root/servers" --no-fund --no-audit \
             pyright@1.1.413 \
             typescript-language-server@6.0.0 \
-            typescript@7.0.2
+            typescript@5.9.3
 
           # Explicit shims rather than npm bin symlinks: symlinks do not survive
           # the upload into the task environment, and a broken shim would look
@@ -722,8 +722,8 @@ jobs:
           # stays on column zero inside this YAML block.
           printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
             "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "pyright/langserver.index.js" > "$lsp_bin/pyright-langserver"
-          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
-            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" > "$lsp_bin/typescript-language-server"
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" --tsserver-path "%s/servers/node_modules/typescript/lib/tsserver.js" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" "/installed-agent/lsp-bin/node-runtime" > "$lsp_bin/typescript-language-server"
           chmod 755 "$lsp_bin/pyright-langserver" "$lsp_bin/typescript-language-server"
 
           # npm writes node_modules/.bin symlinks regardless of the shims
@@ -738,6 +738,7 @@ jobs:
           test -x "$node_root/bin/node"
           test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
           test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
+          test -f "$node_root/servers/node_modules/typescript/lib/tsserver.js"
 
           # Record the staged tree. verify_lsp_assets opens
           # $lsp_bin/manifest.json unconditionally, so without this the agent

@@ -1883,6 +1883,48 @@ class GTSession:
                 else "",
             )
 
+        def _leg_serviceable(leg: object) -> bool:
+            """True iff this language leg could actually have produced edges.
+
+            Unserviceable means the environment, not the capability, stopped
+            the leg: an install/substrate gap journaled as
+            install_missing_reason (resolve.py's GT_SS_ELIGIBILITY label -
+            e.g. no workspace TypeScript install and no tsserver.path), a
+            server that never launched, zero promotable candidates on the leg
+            (candidate_unit_count == 0), or a launch that never served a
+            single request (probe_requests_issued == 0 - the init-time shape
+            gopls-without-module-cache and jdtls-without-JDK take as well).
+            A leg that served requests is serviceable: producing zero edges
+            there is a real capability failure. An unreadable leg cannot
+            prove unserviceable, so it counts as serviceable - fail closed,
+            the same direction as a missing receipt.
+            """
+            if not isinstance(leg, dict):
+                return True
+            if str(leg.get("install_missing_reason") or ""):
+                return False
+            # Every check below fires only on positive evidence: an absent
+            # field cannot prove the leg was unserviceable, and an unproven
+            # leg stays serviceable - the same fail-closed direction as a
+            # missing receipt.
+            if (
+                "server_launched" in leg
+                and not leg.get("server_launched")
+            ):
+                return False
+            if (
+                "candidate_unit_count" in leg
+                and int(leg.get("candidate_unit_count") or 0) == 0
+            ):
+                return False
+            if (
+                "probe_requests_issued" in leg
+                and int(leg.get("candidate_unit_count") or 0) > 0
+                and int(leg.get("probe_requests_issued") or 0) == 0
+            ):
+                return False
+            return True
+
         dense_state = CapabilityState.FAILED
         dense_evidence = "dense_index_receipt_absent"
         # dense_index_ready rows are of two kinds and only one of them is a
@@ -1905,6 +1947,16 @@ class GTSession:
         dense_refused = False
         lsp_state = CapabilityState.FAILED
         lsp_evidence = "promotion_never_scheduled"
+        # `required` is a different axis from state: it asks whether the run
+        # was obliged to populate the tier at all, not whether the tier is
+        # populated. A graph with zero promotable candidates, or one whose
+        # every language leg was unserviceable on environment grounds, could
+        # not have produced edges - the row still reports DEGRADED, but the
+        # run is not failed for lacking a toolchain the image never shipped.
+        # A leg that could serve requests and still produced nothing is a
+        # real gap and stays required.
+        lsp_required = True
+        no_serviceable = False
         fail_open: dict[str, object] | None = None
         scheduled = False
         terminals: list[dict[str, object]] = []
@@ -2089,6 +2141,30 @@ class GTSession:
                 status = str(terminal.get("status") or "")
                 disposition = str(terminal.get("disposition") or "")
                 if status == "no_op":
+                    # languages_promotable == []: nothing on this graph was
+                    # promotable, so nothing was owed. The tier is still
+                    # reported empty (DEGRADED below), but an empty tier with
+                    # no candidates is not a capability the run must answer
+                    # for - it is the correct outcome for that graph.
+                    lsp_required = False
+                else:
+                    legs = (_terminal_receipt(terminal) or {}).get(
+                        "language_receipts"
+                    )
+                    if (
+                        isinstance(legs, dict)
+                        and legs
+                        and not any(
+                            _leg_serviceable(leg) for leg in legs.values()
+                        )
+                    ):
+                        # Every leg was environment-bound: the toolchain,
+                        # the server, or the request path was absent before
+                        # any work could run. Honest DEGRADED stays, but the
+                        # strict gate cannot require edges no leg could make.
+                        lsp_required = False
+                        no_serviceable = True
+                if status == "no_op":
                     # no_op IS languages_promotable == [] - that is the branch
                     # condition. Its coordinator disposition is the generic
                     # not_publishable bucket, which implies something existed
@@ -2183,11 +2259,16 @@ class GTSession:
                     # five terminals; a bare count would fire on every clean
                     # run and train the reader to ignore the field.
                     lsp_evidence += f":last_of_{len(terminals)}"
+                if no_serviceable and lsp_state is not CapabilityState.WORKING:
+                    # The environment reason is why the tier is empty; naming
+                    # it in evidence keeps the not-required row distinguishable
+                    # from a serviceable failure instead of relying on the flag.
+                    lsp_evidence += ":no_serviceable_candidates"
             elif scheduled:
                 lsp_state = CapabilityState.DEGRADED
                 lsp_evidence = "scheduled_no_terminal"
         rows.append(("dense_retrieval", dense_state, dense_evidence, True))
-        rows.append(("lsp_promotion", lsp_state, lsp_evidence, True))
+        rows.append(("lsp_promotion", lsp_state, lsp_evidence, lsp_required))
 
         # A run in which GT switched itself off partway through is the single
         # case a reader most needs told, and it was the one they were least
