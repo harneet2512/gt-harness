@@ -1989,6 +1989,13 @@ class GTSession:
         # what it produced (a published receipt's output_graph_sha256) or by
         # what it ran on (input_graph_revision).
         publications: list[dict[str, object]] = []
+        # The scoped-merge salvage channel: a doomed promotion's candidate is
+        # merged into the live graph and the merge output adopted as its own
+        # publication - a second way the lsp tier lands on the newest graph,
+        # invisible to the terminal channel. Run 34849119441 attested
+        # DEGRADED on a graph whose tier merge-b0bptwou had populated,
+        # because the reporter only ever looked at terminals.
+        salvage_rows: list[dict[str, object]] = []
         try:
             for position, line in enumerate(
                 _Path(journal).read_text(encoding="utf-8").splitlines()
@@ -2071,6 +2078,8 @@ class GTSession:
                         if revision in schedule_order else len(schedule_order)
                     )
                     terminals.append(row)
+                elif event == "lsp_salvage":
+                    salvage_rows.append(row)
         except Exception:  # noqa: BLE001 - an unreadable journal is a failure
             # Both must fail closed. The journal is parsed line by line, so a
             # truncated final line - the likeliest corruption when a process is
@@ -2098,6 +2107,19 @@ class GTSession:
                     str(publications[-1].get("graph_sha256") or "")
                     if publications else ""
                 )
+                # The scoped-merge salvage that minted the adopted graph, if
+                # any: lsp_salvage outcome=published carries the merge's own
+                # output revision, which publish_graph journaled as the
+                # adopted graph_sha256. A match means the lsp tier is on the
+                # newest graph through the salvage channel even though no
+                # terminal produced it - the doomed leg's candidate is the
+                # merge's input.
+                salvaged: dict[str, object] | None = None
+                # The terminal whose candidate the merge consumed, matched by
+                # task_id: its receipt is the yield the salvaged tier
+                # carries. None means the merge published but its source leg
+                # cannot be read back - coverage is then unknown, not free.
+                salvage_terminal: dict[str, object] | None = None
                 if adopted:
                     # The question this row answers is whether the lsp tier is
                     # populated on the graph the run LAST adopted. Ranking
@@ -2134,6 +2156,29 @@ class GTSession:
                             produced, key=lambda row: row["_position"]
                         )
                     else:
+                        salvaged = next(
+                            (
+                                row for row in reversed(salvage_rows)
+                                if str(row.get("outcome") or "") == "published"
+                                and str(row.get("graph_revision") or "")
+                                == adopted
+                            ),
+                            None,
+                        )
+                        if salvaged is not None:
+                            salvage_task = str(salvaged.get("task_id") or "")
+                            salvage_terminal = next(
+                                (
+                                    row for row in reversed(terminals)
+                                    if salvage_task
+                                    and str(
+                                        (_terminal_receipt(row) or {}).get(
+                                            "task_id"
+                                        ) or ""
+                                    ) == salvage_task
+                                ),
+                                None,
+                            )
                         targeted = [
                             row for row in terminals
                             if str(row.get("input_graph_revision") or "")
@@ -2171,7 +2216,9 @@ class GTSession:
                     # for - it is the correct outcome for that graph.
                     lsp_required = False
                 else:
-                    legs = (_terminal_receipt(terminal) or {}).get(
+                    legs = (
+                        _terminal_receipt(salvage_terminal or terminal) or {}
+                    ).get(
                         "language_receipts"
                     )
                     if (
@@ -2198,7 +2245,7 @@ class GTSession:
                     lsp_evidence = (
                         f"terminal_{status or 'unknown'}:{disposition or 'none'}"
                     )
-                if disposition == "published":
+                if disposition == "published" or salvaged is not None:
                     # Publication is necessary and NOT sufficient. A receipt can
                     # come back succeeded with verified/corrected/deleted all
                     # zero: edge_mutations is then 0, the closure is never
@@ -2206,18 +2253,52 @@ class GTSession:
                     # copy of the base that certifies and publishes cleanly.
                     # Reporting WORKING there would reproduce the original
                     # complaint - an empty highest-precision tier described as
-                    # healthy - inside the reporter built to catch it.
-                    yielded = _promotion_yield(terminal)
+                    # healthy - inside the reporter built to catch it. The
+                    # salvage channel is held to the same standard: the merge
+                    # adopting the doomed candidate's edges is the
+                    # publication fact, and that candidate's own receipt
+                    # still decides the yield.
+                    if salvaged is None:
+                        yield_row = terminal
+                        skipped = 0
+                        applied = 0
+                    else:
+                        yield_row = salvage_terminal
+                        skipped = (
+                            int(salvaged.get("skipped_stale") or 0)
+                            + int(salvaged.get("skipped_diverged") or 0)
+                        )
+                        applied = int(salvaged.get("applied") or 0)
+                    yielded = (
+                        _promotion_yield(yield_row)
+                        if yield_row is not None else None
+                    )
                     if yielded is None:
                         lsp_state = CapabilityState.DEGRADED
-                        lsp_evidence += ":yield_unknown"
+                        lsp_evidence += (
+                            f":salvage_published:{applied}_applied:yield_unknown"
+                            if salvaged is not None else ":yield_unknown"
+                        )
+                    elif skipped:
+                        # The merge refused rows the live graph had moved
+                        # under the candidate: provably partial coverage -
+                        # the salvage analogue of selection_bounded, not of
+                        # a clean publish.
+                        lsp_state = CapabilityState.DEGRADED
+                        lsp_evidence += (
+                            f":salvage_partial:{applied}_applied"
+                            f":{skipped}_skipped"
+                        )
                     else:
                         promoted, tombstoned, complete, limitation = yielded
                         lsp_state = (
                             CapabilityState.WORKING if promoted > 0
                             else CapabilityState.DEGRADED
                         )
-                        lsp_evidence += f":{promoted}_edges"
+                        lsp_evidence += (
+                            f":salvage_published:{promoted}_edges"
+                            if salvaged is not None else f":{promoted}_edges"
+                        )
                         if tombstoned:
                             lsp_evidence += f":{tombstoned}_tombstoned"
                         # A positive edge count says the tier is NON-EMPTY. It

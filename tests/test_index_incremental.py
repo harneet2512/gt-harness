@@ -856,11 +856,19 @@ def test_sync_amend_dirty_set_covers_earlier_unpatched_edits(tmp_path, monkeypat
     monkeypatch.setattr(indexer, "_ensure_index_incremental_unlocked", flaky)
     monkeypatch.setattr(indexer, "_receipt_for_published_graph", _fake_receipt)
 
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
     adapter.record_edit_transaction(_txn("rev0.5", ("b.py",)))
     assert calls["paths"] == ("b.py",)
     assert not adapter.engine_state.graph_current
     state["fail"] = False
 
+    # The refused spawn opened the amend defer window; the retry lands on
+    # the next transaction after it drains, still covering both edits.
+    clock["now"] += 61.0
     adapter.record_edit_transaction(_txn("rev1", ("a.py",)))
     assert calls["paths"] == ("a.py", "b.py")
     assert adapter.engine_state.graph_current
@@ -976,12 +984,19 @@ def test_repeated_amend_failure_on_one_parent_escalates_to_a_recovery_build(
         )
     monkeypatch.setattr(indexer, "ensure_index_with_receipt", fake_build)
 
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
     # First refusal on these parent bytes: journaled, not escalated.
     assert adapter.refresh_graph() is False
     assert builds == []
 
-    # Second consecutive failure on the same parent: the chain cannot heal
+    # Second consecutive failure on the same parent - once the spawn window
+    # the first dead producer opened has drained: the chain cannot heal
     # itself, so the recovery build runs inline and publishes a new parent.
+    clock["now"] += 61.0
     assert adapter.refresh_graph() is True
     assert builds == [adapter.repo_root]
     assert amends == [str(parent), str(parent)]
@@ -1083,6 +1098,11 @@ def test_the_streak_does_not_follow_the_graph_to_a_new_parent(
         pytest.fail("a first refusal on a NEW parent escalated an old streak")
     monkeypatch.setattr(indexer, "ensure_index_with_receipt", forbidden)
 
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
     assert adapter.refresh_graph() is False  # streak {old parent: 1}
 
     # A new parent lands by other means -- anything the authority names.
@@ -1093,6 +1113,7 @@ def test_the_streak_does_not_follow_the_graph_to_a_new_parent(
     adapter.engine_state.mark_paths_dirty(("b.py",), revision="rev2")
 
     # A first refusal on the new parent is streak 1, not the old parent's 2.
+    clock["now"] += 61.0  # past the spawn window the first refusal opened
     assert adapter.refresh_graph() is False
     rows = _journal_rows(adapter)
     assert not any(row.get("event") == "graph_amend_escalated" for row in rows)
@@ -1121,9 +1142,16 @@ def test_a_successful_amend_resets_the_streak(tmp_path, monkeypatch):
         pytest.fail("a post-success first refusal escalated an old streak")
     monkeypatch.setattr(indexer, "ensure_index_with_receipt", forbidden)
 
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
     assert adapter.refresh_graph() is False   # streak 1 on the old parent
     state["fail"] = False
-    # The overlay is still dirty from the refusal; the same boundary amends.
+    # The overlay is still dirty from the refusal; the next boundary past
+    # the spawn window amends it.
+    clock["now"] += 61.0
     assert adapter.refresh_graph() is True    # landed: streak cleared
     assert adapter.engine_state.graph_current
 

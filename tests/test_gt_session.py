@@ -942,6 +942,138 @@ def test_a_certified_candidate_that_lost_the_race_is_degraded_not_working(tmp_pa
     )
 
 
+def _salvaged(edges, *, task_id="leg-1", digest="a" * 64):
+    """An obsolete terminal plus the receipt blob for its doomed candidate.
+
+    The receipt shape is the one run 34849119441 wrote: the candidate the
+    scoped merge later consumed is output_graph_sha256, and task_id is what
+    the lsp_salvage journal row names.
+    """
+    return (
+        {"event": "lsp_promotion_terminal", "status": "succeeded",
+         "disposition": "obsolete", "input_graph_revision": "r0",
+         "artifact_sha256": digest,
+         "artifact_blob": f"lsp_receipts/{digest}.json"},
+        {digest: {"task_id": task_id, "verified": edges, "corrected": 0,
+                  "selected": 0, "deleted": 0,
+                  "output_graph_sha256": "c" * 64,
+                  "language_receipts": {
+                      "python": {"selection_complete": True}}}},
+    )
+
+
+def test_an_obsolete_leg_salvaged_into_the_adopted_graph_is_working(tmp_path):
+    """The scoped merge is a second publication channel, and it must count.
+
+    Run 34849119441 (the paid gate-one): the last adopted graph was minted
+    not by a promotion terminal but by lsp_salvage - a scoped merge that
+    carried the doomed candidate's edges into the live graph and published
+    the result (merge-b0bptwou: applied 284, output ae0f569a, adopted at the
+    run's final graph_publication). The reporter read only the terminal
+    channel, saw succeeded:obsolete, and attested the run DEGRADED on a
+    graph whose lsp tier was populated. The tier landing through salvage is
+    WORKING with the channel named in evidence.
+    """
+    terminal, blobs = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "graph_publication", "graph_sha256": "b" * 64},
+        {"event": "lsp_salvage", "outcome": "published", "task_id": "leg-1",
+         "applied": 284, "inserted": 23, "updated": 261,
+         "skipped_stale": 0, "skipped_diverged": 0,
+         "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "a" * 64},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == (
+        "WORKING", "terminal_succeeded:obsolete:salvage_published:7_edges"
+    )
+
+
+def test_a_salvage_that_lost_its_own_race_does_not_count(tmp_path):
+    """outcome=superseded means the merge was discarded, not adopted."""
+    terminal, blobs = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "graph_publication", "graph_sha256": "b" * 64},
+        {"event": "lsp_salvage", "outcome": "superseded", "task_id": "leg-1",
+         "applied": 284, "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "d" * 64},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == ("DEGRADED", "terminal_succeeded:obsolete")
+
+
+def test_a_salvage_superseded_by_a_later_build_does_not_count(tmp_path):
+    """The join is on the LAST adopted graph, not on any merge that ran."""
+    terminal, blobs = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "lsp_salvage", "outcome": "published", "task_id": "leg-1",
+         "applied": 284, "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "a" * 64},
+        # A plain rebuild adopted afterwards: the merge output is history.
+        {"event": "graph_publication", "graph_sha256": "d" * 64},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == ("DEGRADED", "terminal_succeeded:obsolete")
+
+
+def test_a_partial_salvage_is_degraded_with_the_skipped_count_named(tmp_path):
+    """skipped_stale/skipped_diverged rows did not land on the adopted graph.
+
+    The merge refused to clobber live rows that moved, so the tier's
+    coverage is provably incomplete - the salvage analogue of
+    selection_bounded, not of published.
+    """
+    terminal, blobs = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "lsp_salvage", "outcome": "published", "task_id": "leg-1",
+         "applied": 240, "skipped_stale": 1, "skipped_diverged": 33,
+         "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "a" * 64},
+    ], blobs)
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED",
+        "terminal_succeeded:obsolete:salvage_partial:240_applied:34_skipped",
+    )
+
+
+def test_a_salvage_without_a_readable_receipt_is_not_success(tmp_path):
+    """The merge published, but coverage cannot be shown - fail closed.
+
+    lsp_salvage proves the adopted graph carries merged mutations; only the
+    candidate's terminal receipt says whether selection covered the tier.
+    An unreadable one is "we could not tell", the same as everywhere else
+    this reporter reads a blob.
+    """
+    terminal, _ = _salvaged(7)
+    rows = _capability_rows(tmp_path, [
+        _DENSE_READY,
+        {"event": "lsp_promotion_scheduled", "graph_revision": "r0"},
+        terminal,
+        {"event": "lsp_salvage", "outcome": "published", "task_id": "leg-1",
+         "applied": 284, "skipped_stale": 0, "skipped_diverged": 0,
+         "graph_revision": "a" * 64},
+        {"event": "graph_publication", "graph_sha256": "a" * 64},
+    ])
+
+    assert rows["lsp_promotion"] == (
+        "DEGRADED",
+        "terminal_succeeded:obsolete:salvage_published:284_applied:yield_unknown",
+    )
+
+
 def test_agreeing_terminals_do_not_raise_a_count_alarm(tmp_path):
     """Every published graph gets an enrichment, so N terminals is normal.
 

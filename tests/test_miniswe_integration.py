@@ -1433,18 +1433,320 @@ def test_lsp_promotion_defers_after_index_memory_refusal(monkeypatch, tmp_path):
         capture_workspace(repo), boundary="after_action"
     )
 
-    # The refused build leaves the graph stale; the next boundary recovers.
+    # The refused build leaves the graph stale, and the retry inside the
+    # window defers too: respawning a heavier build into the pressure the
+    # refusal just measured is how the live storm formed.
     a.note_edit(["mod.py"])
     assert a.refresh_graph() is False
     a.note_edit(["mod.py"])
+    assert a.refresh_graph() is False
+
+    clock["now"] += 121.0
+    a.note_edit(["mod.py"])
     assert a.refresh_graph() is True
-    # The adoption is fresh but the memory refusal is fresher: no leg yet.
-    assert offers == []
+    # The window drained with the build, so the landed adoption offers.
+    assert offers == ["a" * 64]
 
     clock["now"] += 301.0
     a.note_edit(["mod.py"])
     assert a.refresh_graph() is True
-    assert offers == ["b" * 64]
+    # One promotion in flight at a time: the fresher adoption waits its turn.
+    assert offers == ["a" * 64]
+
+
+def _memory_killed_amend(spawns: list, code: str = "GT_INDEX_MEMORY_GUARD_TRIGGERED"):
+    """A producer spawn that dies in Pass 1, like the live gate-one run."""
+
+    def killed(root, *, parent_graph, changed_paths, **kwargs):
+        spawns.append(tuple(changed_paths))
+        return None, f"amend_failed:{code}:exit=-9:stderr=Pass 1: discovering files", ()
+
+    return killed
+
+
+def test_a_memory_killed_amend_defers_the_next_spawn(monkeypatch, tmp_path):
+    """A guard-killed amend sets the defer window; boundaries stop spawning.
+
+    Run 34849119441 (the paid gate-one): nineteen amend refusals clustered
+    in bursts - five dead gt-index spawns inside ~60 journal events at one
+    point - every one killed in Pass 1 while resident LSP legs held the
+    cgroup. Each refusal was journaled and nothing consumed it: the memory
+    defer machinery was fed only by build receipts, so the next serving
+    boundary spawned straight back into the same pressure.
+    """
+    adapter, _repo, _graph = _edited_adapter(tmp_path)
+    clock = {"now": 9000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+    spawns: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked",
+        _memory_killed_amend(spawns),
+    )
+
+    assert adapter.refresh_graph() is False
+    assert adapter._index_memory_defer_until > clock["now"]
+
+    adapter.refresh_graph()
+    adapter.refresh_graph()
+    assert len(spawns) == 1, "boundaries inside the window must not respawn"
+
+    clock["now"] += 121.0
+    adapter.refresh_graph()
+    assert len(spawns) == 2
+
+
+def test_a_memory_killed_amend_is_a_consequential_warning(monkeypatch, tmp_path):
+    """A resource-bound attempt failure is retried, not reported terminal.
+
+    The same run carried five GT_GRAPH_REFRESH_FAILED rows typed
+    retryable=False primary ERROR - deterministic-failure classification
+    applied to a guard kill that defer+retry exists for. A memory-family
+    refusal keeps the journal row but moves to the consequential channel:
+    the terminal verdict belongs to the capability row (stale at seal),
+    not to one killed attempt.
+    """
+    adapter, _repo, _graph = _edited_adapter(tmp_path)
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked",
+        _memory_killed_amend([]),
+    )
+
+    assert adapter.refresh_graph() is False
+
+    events = [
+        event for event in adapter.diagnostics._events
+        if event.code is DiagnosticCode.GT_GRAPH_REFRESH_FAILED
+    ]
+    assert len(events) == 1
+    assert events[0].severity == "WARNING"
+    assert events[0].classification == "consequential"
+    assert events[0].retryable is True
+    # A transient resource outcome is not proof an amend can never land:
+    # it must not advance the deterministic-failure escalation streak.
+    assert adapter._amend_failure_streak == {}
+
+
+def test_a_deterministic_amend_failure_still_escalates_to_recovery(
+    monkeypatch, tmp_path
+):
+    """Non-memory amend_failed on the same parent keeps the rebuild ladder.
+
+    PROCESS_FAILED is not a typed memory outcome: it may be a real
+    producer defect on immutable parent bytes, so the streak semantics
+    must survive - two consecutive failures buy the recovery build that
+    publishes a fresh base. The spawn defer window bounds HOW OFTEN the
+    boundary retries; it does not count as a failure itself.
+    """
+    from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
+
+    adapter, _repo, _graph = _edited_adapter(tmp_path)
+    clock = {"now": 4000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked",
+        _memory_killed_amend([], code="GT_INDEX_PROCESS_FAILED"),
+    )
+    recoveries: list[int] = []
+    rebuilt = tmp_path / "rebuilt.db"
+    rebuilt.write_bytes(b"new")
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt",
+        lambda root, **kwargs: recoveries.append(1) or IndexBuildReceipt(
+            IndexBuildStatus.BUILT, graph_db=str(rebuilt),
+            graph_revision="b" * 64, analysis_state="complete",
+        ),
+    )
+
+    adapter.refresh_graph()  # attempt 1: streak 1
+    clock["now"] += 61.0   # past the spawn-defer window
+    adapter.refresh_graph()  # attempt 2: streak 2 -> escalate
+    assert recoveries == [1]
+
+    # The rebuild's failure typing is unchanged: still a primary ERROR.
+    events = [
+        event for event in adapter.diagnostics._events
+        if event.code is DiagnosticCode.GT_GRAPH_REFRESH_FAILED
+    ]
+    assert events and all(
+        event.severity == "ERROR" and event.classification == "primary"
+        for event in events
+    )
+
+
+def test_a_recovery_build_defers_while_the_memory_window_is_open(
+    monkeypatch, tmp_path
+):
+    """Escalating to a heavier build under measured pressure is worse.
+
+    A full recovery build spawns the same bounded producer over the whole
+    tree - strictly more allocation than the amend that just died. While
+    the memory window is open the rebuild defers; the boundary refuses
+    honestly and the trigger survives to the next boundary.
+    """
+    adapter, _repo, _graph = _edited_adapter(tmp_path)
+    clock = {"now": 7000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+    adapter._index_memory_defer_until = clock["now"] + 120.0
+
+    def forbidden(root, **kwargs):
+        pytest.fail("a recovery build spawned inside the memory window")
+
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt", forbidden
+    )
+    adapter._recovery_build_inline(phase="native_action")
+
+    rows = [
+        row for row in _journal_rows(adapter)
+        if row.get("event") == "graph_recovery_deferred"
+    ]
+    assert rows and rows[-1]["reason"] == "index_memory_backoff"
+
+
+def test_the_transaction_amend_also_feeds_and_obeys_the_window(
+    monkeypatch, tmp_path
+):
+    """The transaction-boundary amend is the other spawn site.
+
+    Run 34849119441's graph_sync_amend_refused rows are this path: a
+    memory kill there never reached the defer machinery at all - it
+    journaled and returned. It must feed the same window and skip its own
+    spawn while the window is open.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+    adapter = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(tmp_path / "graph.db"),
+    )
+    (tmp_path / "graph.db").write_bytes(b"old")
+    adapter.start_task()
+    before = capture_workspace(repo)
+    adapter.record_repository_snapshot(before, boundary="task_start")
+
+    clock = {"now": 3000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+    spawns: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked",
+        _memory_killed_amend(spawns),
+    )
+
+    (repo / "a.py").write_text("a = 2\n", encoding="utf-8")
+    tx = diff_workspace(
+        before, capture_workspace(repo), action_id=1, command="edit a.py"
+    )
+    adapter.record_edit_transaction(tx)
+    assert len(spawns) == 1
+    assert adapter._index_memory_defer_until > clock["now"]
+
+    # The next edit's synchronous amend is inside the window: no spawn.
+    before = capture_workspace(repo)
+    (repo / "a.py").write_text("a = 3\n", encoding="utf-8")
+    tx = diff_workspace(
+        before, capture_workspace(repo), action_id=2, command="edit a.py"
+    )
+    adapter.record_edit_transaction(tx)
+    assert len(spawns) == 1
+
+
+def test_sustained_churn_under_memory_pressure_storms_once_per_window(
+    monkeypatch, tmp_path
+):
+    """The live storm, replayed deterministically: boundaries keep coming,
+    the cgroup stays pressured, and spawns stay bounded.
+
+    Run 34849119441 journaled nineteen amend refusals across the run with
+    five dead spawns inside ~60 events - one per serving boundary, because
+    nothing slowed the retry. Here forty boundaries fire inside ~200
+    seconds of measured pressure: the defer machinery must turn that into
+    a handful of attempts, all consequential warnings, zero escalations,
+    and a clean recovery the moment pressure clears.
+    """
+    adapter, _repo, graph = _edited_adapter(tmp_path)
+    clock = {"now": 10000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
+    pressure_until = clock["now"] + 200.0
+    spawns: list[float] = []
+    rebuilt = tmp_path / "rebuilt.db"
+    rebuilt.write_bytes(b"new")
+
+    def pressure_amend(root, *, parent_graph, changed_paths, **kwargs):
+        spawns.append(clock["now"])
+        if clock["now"] < pressure_until:
+            return None, (
+                "amend_failed:GT_INDEX_MEMORY_GUARD_TRIGGERED:exit=-9:"
+                "stderr=Pass 1: discovering files"
+            ), ()
+        return str(rebuilt), "", ({"path": "mod.py", "updated": 1},)
+
+    monkeypatch.setattr(
+        "gt_engine.indexer._ensure_index_incremental_unlocked", pressure_amend
+    )
+    monkeypatch.setattr(
+        "gt_engine.indexer._receipt_for_published_graph",
+        lambda graph_path, **kwargs: IndexBuildReceipt(
+            IndexBuildStatus.BUILT_CORE_ONLY, graph_db=graph_path,
+            graph_revision="d" * 64, analysis_state="not_run",
+            build_mode="incremental",
+            source_revision=str(kwargs.get("source_revision") or ""),
+        ),
+    )
+
+    def forbidden_recovery(root, **kwargs):
+        pytest.fail("a recovery build spawned while the storm was bounded")
+
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt", forbidden_recovery
+    )
+
+    # Forty serving boundaries inside the pressure window, ~5s apart: the
+    # cadence the paid run actually produced.
+    for _ in range(40):
+        adapter.note_edit(["mod.py"])
+        adapter.refresh_graph()
+        clock["now"] += 5.0
+
+    # ~200s of pressure with a 120s memory window re-armed by each kill:
+    # a handful of attempts, not one per boundary. The live run did one
+    # per boundary.
+    assert 1 < len(spawns) <= 5
+    assert adapter._amend_failure_streak == {}, (
+        "resource-bound outcomes must not feed the deterministic ladder"
+    )
+    assert all(
+        event.severity == "WARNING"
+        and event.classification == "consequential"
+        and event.retryable
+        for event in adapter.diagnostics._events
+        if event.code is DiagnosticCode.GT_GRAPH_REFRESH_FAILED
+    )
+
+    # Pressure clears and the last kill's window drains; the next
+    # boundary's amend lands and the graph is current again - the
+    # deferral cost bounded staleness, not an outage.
+    clock["now"] += 60.0
+    adapter.note_edit(["mod.py"])
+    assert adapter.refresh_graph() is True
+    assert adapter.engine_state.graph_current is True
+
+    events = {
+        row.get("event") for row in _journal_rows(adapter)
+    }
+    assert "index_memory_backoff" in events
+    assert "graph_amend_deferred" in events
 
 
 @pytest.mark.parametrize("config_name", ["tsconfig.json", "package.json", "go.mod", "Cargo.toml", ".gitignore"])

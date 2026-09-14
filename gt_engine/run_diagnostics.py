@@ -497,7 +497,11 @@ def diagnose_artifact_root(root: str | Path, *, strict: bool = False) -> Diagnos
     for event in sorted(events, key=precedence):
         if event.task_id not in primary:
             primary[event.task_id] = event
-    unhealthy = bool(events) or any(
+    # Severity is the fatal axis, not event presence: a consequential
+    # WARNING is handled-condition evidence (a paced-and-recovered 429, a
+    # memory-deferred amend that later landed), and counting it made the
+    # channel exist only to fail the run it documented recovering from.
+    unhealthy = any(event.severity == "ERROR" for event in events) or any(
         row.get("required") and row.get("state") != CapabilityState.WORKING
         for row in capabilities
     )

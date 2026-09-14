@@ -475,6 +475,14 @@ class MiniSweAdapter(GroundtruthController):
         # starves the next recovery the same way (bandit-taint's 16
         # consecutive GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT refusals).
         self._index_memory_defer_until = 0.0
+        # Amend-spawn backoff: every amend_failed:* is a producer process
+        # that ran and died, and the next serving boundary is seconds away -
+        # run 34849119441 journaled five dead spawns inside ~60 events while
+        # resident LSP legs held the cgroup. A bounded window turns the
+        # stampede into one spawn per window whatever the error code.
+        self._graph_amend_defer_until = 0.0
+        self._amend_defer_journaled_until = 0.0
+        self._recovery_defer_journaled_until = 0.0
         # Async initial index: the runner starts ensure_index on a worker and
         # hands the future here. The host loop runs immediately; the graph
         # publishes through engine_state when the build lands, or becomes the
@@ -876,6 +884,7 @@ class MiniSweAdapter(GroundtruthController):
                     for field_name in (
                         "applied", "inserted", "updated", "deleted",
                         "skipped_stale", "skipped_diverged", "error",
+                        "graph_revision", "source_revision",
                     ):
                         if field_name in payload:
                             fields[field_name] = payload[field_name]
@@ -2455,6 +2464,10 @@ class MiniSweAdapter(GroundtruthController):
                 return
         except OSError:
             return
+        if self._amend_spawn_deferred():
+            self._journal_amend_deferred(
+                phase="transaction", parent=str(parent), dirty=dirty)
+            return
         from . import indexer
         from .indexer import _graph_publication_lock
 
@@ -2479,6 +2492,7 @@ class MiniSweAdapter(GroundtruthController):
                 dirty_paths=list(dirty), parent_graph=str(parent),
                 post_revision=str(transaction.post_revision),
             )
+            self._note_amend_failure(reason)
             return
         receipt = indexer._receipt_for_published_graph(
             published, source_revision=str(transaction.post_revision),
@@ -2961,6 +2975,10 @@ class MiniSweAdapter(GroundtruthController):
             # Non-current with a bound parent and nothing masked is a stale
             # marking, not a build trigger.
             return
+        if self._amend_spawn_deferred():
+            self._journal_amend_deferred(
+                phase=phase, parent=str(parent), dirty=dirty)
+            return
         from . import indexer
         from .indexer import _graph_publication_lock
 
@@ -2991,10 +3009,26 @@ class MiniSweAdapter(GroundtruthController):
                 "graph_boundary_amend_refused", reason=reason[:200],
                 dirty_paths=list(dirty), parent_graph=str(parent), phase=phase,
             )
-            self._record_graph_refresh_failure(
-                f"amend_refused:{reason[:80]}", phase=phase,
+            self._note_amend_failure(reason)
+            memory_bound = (
+                self._amend_error_code(reason) in self._INDEX_MEMORY_ERRORS
             )
-            if (reason or "").startswith("amend_failed:"):
+            if memory_bound:
+                # A resource-bound attempt: it will be retried when the
+                # window drains, so it is consequential evidence, not the
+                # terminal primary failure an unrecoverable refusal is. The
+                # run-level verdict belongs to the capability row if the
+                # graph is still stale at seal.
+                self._record_graph_refresh_failure(
+                    f"amend_refused:{reason[:80]}", phase=phase,
+                    severity="WARNING", classification="consequential",
+                    retryable=True,
+                )
+            else:
+                self._record_graph_refresh_failure(
+                    f"amend_refused:{reason[:80]}", phase=phase,
+                )
+            if (reason or "").startswith("amend_failed:") and not memory_bound:
                 # Structural only: a producer nonzero-exit on a certified,
                 # immutable parent is deterministic whatever the error code,
                 # so a bounded streak on the SAME parent escalates to the
@@ -3002,7 +3036,9 @@ class MiniSweAdapter(GroundtruthController):
                 # rebuild cannot fix (capability, path scope) stay
                 # journaled-only, as does every refusal on a different
                 # parent - consecutive is per parent bytes, so the streak
-                # holds this parent alone.
+                # holds this parent alone. Memory-family outcomes are
+                # excluded too: the same amend CAN land once the cgroup
+                # drains, so they are deferred, not counted deterministic.
                 key = str(parent)
                 streak = self._amend_failure_streak.get(key, 0) + 1
                 self._amend_failure_streak = {key: streak}
@@ -3030,6 +3066,26 @@ class MiniSweAdapter(GroundtruthController):
     def _recovery_build_inline(self, *, phase: str) -> None:
         """The only from-scratch build outside task start: the amend chain's
         base can never serve again, so the boundary rebuilds inline."""
+        if self._index_memory_defer_until > time.monotonic():
+            # A whole-tree build spawns the same bounded producer over far
+            # more input than the amend that just died of pressure. Buying
+            # a fresh base inside the window only feeds the guard another
+            # process to kill; the trigger survives to the next boundary.
+            if (
+                self._recovery_defer_journaled_until
+                < self._index_memory_defer_until
+            ):
+                self._recovery_defer_journaled_until = (
+                    self._index_memory_defer_until
+                )
+                self.store.append(
+                    "graph_recovery_deferred", phase=phase,
+                    reason="index_memory_backoff",
+                    remaining_seconds=round(
+                        self._index_memory_defer_until - time.monotonic(), 3
+                    ),
+                )
+            return
         from dataclasses import replace
 
         from .indexer import ensure_index_with_receipt
@@ -3349,24 +3405,89 @@ class MiniSweAdapter(GroundtruthController):
         "GT_INDEX_MEMORY_GUARD_TRIGGERED",
         "GT_INDEX_CGROUP_OOM",
     })
+    #: A producer spawn that died is not retried at the very next boundary:
+    #: whatever killed it - cgroup pressure or a deterministic defect - is
+    #: unchanged seconds later. Sixty seconds bounds the retry rate while
+    #: leaving deterministic-failure escalation intact (two attempts on the
+    #: same parent bytes still buy a recovery build, just a window apart).
+    _AMEND_SPAWN_DEFER_S = 60.0
 
     def _note_index_memory_pressure(self, receipt: Any) -> None:
-        """Defer LSP scheduling after a memory-family index outcome.
+        """Defer index-family spawns after a memory-family index outcome.
 
         Successful receipts carry an empty error_type and no-op here; the
         window is set only by a typed memory refusal, never by a generic
         build failure.
         """
-        error_type = str(getattr(receipt, "error_type", "") or "")
+        self._note_index_memory_code(
+            str(getattr(receipt, "error_type", "") or "")
+        )
+
+    def _note_index_memory_code(self, error_type: str) -> None:
+        """Open the cgroup window for a typed memory code from any path.
+
+        Build receipts and amend refusal reasons both carry the same codes;
+        whichever observes the pressure first sets the window every
+        index-family spawn consults - LSP legs, amends, recovery builds.
+        """
         if error_type not in self._INDEX_MEMORY_ERRORS:
             return
         self._index_memory_defer_until = (
             time.monotonic() + self._INDEX_MEMORY_DEFER_S
         )
         self.store.append(
-            "lsp_memory_backoff",
+            "index_memory_backoff",
             error_type=error_type,
             defer_seconds=self._INDEX_MEMORY_DEFER_S,
+        )
+
+    @staticmethod
+    def _amend_error_code(reason: str) -> str:
+        """The typed producer code inside an ``amend_failed:*`` reason."""
+        if not reason.startswith("amend_failed:"):
+            return ""
+        return reason[len("amend_failed:"):].split(":", 1)[0]
+
+    def _note_amend_failure(self, reason: str) -> None:
+        """Feed the defer windows from a refused amend's reason.
+
+        Every ``amend_failed:*`` is a producer process that ran and died -
+        respawning at the very next boundary is the stampede run
+        34849119441 journaled. The spawn window bounds the retry rate
+        whatever the code; the memory family additionally opens the cgroup
+        window so legs and rebuilds stop launching into measured pressure.
+        Pre-spawn refusals (capability, parent, path scope) never ran a
+        producer and open no window.
+        """
+        if not reason.startswith("amend_failed:"):
+            return
+        self._graph_amend_defer_until = (
+            time.monotonic() + self._AMEND_SPAWN_DEFER_S
+        )
+        self._note_index_memory_code(self._amend_error_code(reason))
+
+    def _amend_spawn_deferred(self) -> bool:
+        """Whether a producer spawn sits inside an open defer window."""
+        now = time.monotonic()
+        return (
+            self._index_memory_defer_until > now
+            or self._graph_amend_defer_until > now
+        )
+
+    def _journal_amend_deferred(
+        self, *, phase: str, parent: str, dirty: tuple[str, ...]
+    ) -> None:
+        """One journal row per open window, not one per suppressed spawn."""
+        window = max(
+            self._index_memory_defer_until, self._graph_amend_defer_until
+        )
+        if self._amend_defer_journaled_until >= window:
+            return
+        self._amend_defer_journaled_until = window
+        self.store.append(
+            "graph_amend_deferred", phase=phase, parent_graph=str(parent),
+            dirty_paths=list(dirty),
+            remaining_seconds=round(window - time.monotonic(), 3),
         )
 
     @staticmethod
@@ -4029,21 +4150,28 @@ class MiniSweAdapter(GroundtruthController):
         except Exception:  # noqa: BLE001
             pass
 
-    def _record_graph_refresh_failure(self, cause: str, *, phase: str) -> None:
+    def _record_graph_refresh_failure(
+        self, cause: str, *, phase: str, severity: str = "ERROR",
+        classification: str = "primary", retryable: bool = False,
+    ) -> None:
         self.engine_state.mark_graph_failed()
         self.diagnostics.record(
             DiagnosticEvent.create(
                 code=DiagnosticCode.GT_GRAPH_REFRESH_FAILED,
-                severity="ERROR",
+                severity=severity,
                 phase=phase,
                 subsystem="graph",
                 capability="graph_freshness",
                 task_id=self.task_id,
-                classification="primary",
+                classification=classification,
                 cause=cause,
                 impact="verified_claims_prohibited",
-                recovery="rebuild_graph_for_current_workspace_revision",
-                retryable=False,
+                recovery=(
+                    "rebuild_graph_for_current_workspace_revision"
+                    if not retryable
+                    else "retry_after_index_memory_defer_window"
+                ),
+                retryable=retryable,
                 event_sequence=int(self.store.receipt()["event_count"]),
                 identities={"repository": self.repository_revision},
             )

@@ -185,6 +185,75 @@ def test_strict_diagnosis_discovers_task_ids_plan(tmp_path: Path):
     assert report.exit_code == 0
 
 
+def test_a_recovered_warning_is_evidence_not_a_failed_run(tmp_path: Path):
+    """Severity is the fatal axis: WARNING means handled, not healthy-clean.
+
+    Run 34849119441 recorded one consequential WARNING - a paced 429 that
+    recovered inside the provider's own retry budget - beside the real
+    errors. The unhealthy check counted every event row, so a single
+    handled warning would have failed the gate even with every capability
+    WORKING: the consequential channel existed only to be fatal. ERROR
+    remains fatal, as does any required capability below WORKING.
+    """
+    journal = DiagnosticJournal(tmp_path / "trial", task_id="paced")
+    journal.record(
+        DiagnosticEvent.create(
+            code=DiagnosticCode.GT_PROVIDER_RATE_LIMIT, severity="WARNING",
+            phase="provider_retry_pacing", subsystem="provider",
+            capability="provider_transport", task_id="paced",
+            classification="consequential", cause="RateLimitError",
+            impact="provider_attempt_deferred",
+            recovery="paced_retry_within_provider_budget",
+            retryable=True, event_sequence=1,
+        )
+    )
+    journal.capability("receipt_writer", CapabilityState.WORKING, "verified journal")
+    journal.seal()
+    (tmp_path / "task-plan.json").write_text(
+        json.dumps({"tasks": ["paced"]}), encoding="utf-8"
+    )
+
+    report = diagnose_artifact_root(tmp_path, strict=True)
+    assert report.exit_code == 0
+    # The warning still shows as the task's noteworthy event - evidence,
+    # not silence - while the verdict stays healthy.
+    assert report.primary_by_task["paced"].code == DiagnosticCode.GT_PROVIDER_RATE_LIMIT
+
+
+def test_an_error_or_degraded_capability_still_fails_the_run(tmp_path: Path):
+    journal = DiagnosticJournal(tmp_path / "trial", task_id="paced")
+    journal.record(
+        DiagnosticEvent.create(
+            code=DiagnosticCode.GT_PROVIDER_RATE_LIMIT, severity="WARNING",
+            phase="provider_retry_pacing", subsystem="provider",
+            capability="provider_transport", task_id="paced",
+            classification="consequential", cause="RateLimitError",
+            impact="provider_attempt_deferred",
+            recovery="paced_retry_within_provider_budget",
+            retryable=True, event_sequence=1,
+        )
+    )
+    journal.record(
+        DiagnosticEvent.create(
+            code=DiagnosticCode.GT_GRAPH_REFRESH_FAILED, severity="ERROR",
+            phase="native_action", subsystem="graph",
+            capability="graph_freshness", task_id="paced",
+            classification="primary", cause="amend_refused:amend_failed:x",
+            impact="verified_claims_prohibited",
+            recovery="rebuild_graph_for_current_workspace_revision",
+            retryable=False, event_sequence=2,
+        )
+    )
+    journal.capability("dense_retrieval", CapabilityState.DEGRADED, "stale")
+    journal.seal()
+    (tmp_path / "task-plan.json").write_text(
+        json.dumps({"tasks": ["paced"]}), encoding="utf-8"
+    )
+
+    report = diagnose_artifact_root(tmp_path, strict=True)
+    assert report.exit_code == 1
+
+
 def test_strict_diagnosis_rejects_missing_plan_empty_capabilities_and_replay_tamper(
     tmp_path: Path,
 ):
