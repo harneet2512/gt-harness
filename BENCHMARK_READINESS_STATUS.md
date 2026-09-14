@@ -369,6 +369,49 @@ typed ERROR outcomes with `reward: null`.
 run. The cohort needs its fixes verified provider-free before another
 gate-one + smoke cycle on a new SHA.
 
+## Post-smoke hardening + certification wave — 2026-09-14
+
+The smoke20 defect queue and the capability-hardening sweep landed on
+`codex/phase5-harness-proof` (commits through `b508a4fc`). The Groundtruth
+runtime language-matrix wave was upstreamed to `harneet2512/groundtruth`
+branch `wheel-patch-lsp-inventory`:
+
+- `e65febd3` — runtime patterns/obligations/test-runner/repo-adapters/
+  resolve language-matrix coverage (upstream CI lint red on formatting).
+- `4f19c80a` — format-only fixup; upstream CI `34833873538` all-green
+  (lint, test matrix ubuntu/windows/macos 3.11+3.12, go-build, benchmark).
+
+Certified artifacts at source commit
+`4f19c80a6263cc0f45539ad329f4d3a200941231` (tree `357e8d2e`):
+
+| Artifact | Identity |
+|---|---|
+| Wheel SHA-256 | `160120290c2584a2a6e54a61ba9b5e6327de4eabb62656f18c0a8fbce0092180` (built from `git archive` LF export; an earlier CRLF working-tree build `0d3c72c5` was byte-rejected by Linux correspondence) |
+| Producer SHA-256 | `6dad9e3104981a54a734623835232f9b499f5e2d3674be016bc4a0ea4dfe852f` (upstream run `34833870450`, pinned `golang:1.22.5-bookworm`, `sqlite_fts5`, static) |
+| Build-info SHA-256 | `fa5e0b6023e1f1684bda01c960b612b364b301f1671294725874ede1754bea95` (fingerprint `30536060` unchanged — Go subtree identical) |
+| Review inbox | `gt-review-inbox-4f19c80a` @ `4cb9ec66cbc0db9cdbb03cfdec909d1c3859a18b` |
+| Head packet | `har83-context-plan-producer-4f19c80a-ci`, digest `aee82049` |
+| Local lineage dry-run | PASS — 19 packets, exact-source review, 323-file correspondence, zero failures |
+
+Acceptance run `34835849569` on `ed35e3b5` correctly rejected the CRLF
+wheel (`wheel_source_correspondence_mismatch`) — the gate works as
+designed. Two further latent defects surfaced on the way to green: the
+`smoke20_recorded` verbatim-capture fixtures failed FD-definition
+scanning (`invalid_machine_syntax` — captured `[GT_*]`-tagged bytes are
+not authored documents; the fixture root is now excluded), and three
+serial-suite literals drifted (budget table, prompt-kind producer scan,
+closed workflow set). All fixed; the canonical provider-free acceptance
+is **GREEN on `4f1c106c` — run
+[34839281975](https://github.com/harneet2512/gt-harness/actions/runs/34839281975)**.
+Installed rehearsal re-dispatched on the same SHA as run `34840346061`.
+
+Remaining open items before any next paid run: cohort pacing/provider
+rate-limit decision at 20-way parallelism; model-route alignment for the
+apples-to-apples comparison (native `deepseek-v4-flash` vs the `-0731`
+relace route — needs an owner credential decision); gate-one + smoke only
+after canonical acceptance and installed rehearsal are green on the same
+SHA.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
