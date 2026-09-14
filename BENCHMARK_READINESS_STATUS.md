@@ -443,19 +443,19 @@ redaction, env resolution + invalid-env fail-closed, and the
 fault-channel contract. The broken-recorder fault-injection suite still
 proves the terminal receipt survives.
 
-**Gates:** canonical provider-free acceptance GREEN on `01e5eac1` (run
-`34845687656`); installed full-flow rehearsal GREEN on the same SHA (run
-`34845689986`). During that run the serial suite paid real wall-clock for
-scripted retryable failures — `tests/conftest.py` now stubs the
-`provider_pacing._sleep` seam autouse so no test burns real provider
-delays (pacing tests still stub the seam explicitly to assert decisions).
-That test-infra fix lands on the next tip; gates re-verify on it.
+**Gates:** canonical provider-free acceptance GREEN on `aeff21be` (run
+`34847423642`, serial suite back to ~4m20s); installed full-flow
+rehearsal GREEN on the same SHA (run `34847426452`). An earlier green
+pair on `01e5eac1` (`34845687656`, `34845689986`) exposed that scripted
+retryable failures paid real wall-clock per attempt; `tests/conftest.py`
+now stubs the `provider_pacing._sleep` seam autouse so no test burns
+real provider delays (pacing tests still stub the seam explicitly to
+assert decisions).
 
 Remaining open items before any next paid run: model-route alignment for
 the apples-to-apples comparison (native `deepseek-v4-flash` vs the
-`-0731` relace route — needs an owner credential decision); canonical
-provider-free acceptance + installed rehearsal re-green on the pacing
-SHA; gate-one + smoke only after both gates pass.
+`-0731` relace route — needs an owner credential decision); gate-one +
+smoke only after that decision and a separate approval receipt.
 
 ## Outcome claims
 
