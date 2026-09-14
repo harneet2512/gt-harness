@@ -405,12 +405,49 @@ is **GREEN on `4f1c106c` — run
 [34839281975](https://github.com/harneet2512/gt-harness/actions/runs/34839281975)**.
 Installed rehearsal re-dispatched on the same SHA as run `34840346061`.
 
-Remaining open items before any next paid run: cohort pacing/provider
-rate-limit decision at 20-way parallelism; model-route alignment for the
-apples-to-apples comparison (native `deepseek-v4-flash` vs the `-0731`
-relace route — needs an owner credential decision); gate-one + smoke only
-after canonical acceptance and installed rehearsal are green on the same
-SHA.
+## Provider retry pacing + cohort dispatch stagger — `b2b5fc05` (2026-09-15)
+
+The boa `provider_failure` mechanism is fixed at both layers it had:
+
+- **In-loop pacing** (`gt_engine/provider_pacing.py`): Mini-SWE's tenacity
+  retry used one fixed exponential schedule, so twenty matrix legs retried
+  in lockstep against a shared account ceiling. `query_transport` now wraps
+  the per-attempt transport call: a retryable failure (rate-limit, timeout,
+  disconnect) is journaled as `provider_retry_paced` (secret-redacted),
+  diagnosed as consequential `WARNING` evidence in phase
+  `provider_retry_pacing` (never competing with the terminal primary row),
+  sleeps the provider's own `Retry-After` (capped at 120 s) or a bounded
+  uniform jitter draw (`GT_PROVIDER_RETRY_JITTER_MAX_SECONDS`, default
+  45 s), then re-raises the ORIGINAL exception so the loop keeps its
+  attempt budget. Non-retryable failures (billing, bad-request,
+  context-window, resource-exhausted, malformed) are never paced. A pacing
+  bookkeeping fault takes the non-disabling observation channel — it
+  cannot silence the terminal `provider_failure` receipt.
+- **Dispatch stagger + declared config**: `provider_route.v1.json` gained a
+  closed `retry_pacing` block (`dispatch_stagger_seconds` 20,
+  `retry_jitter_max_seconds` 45, `retry_after_cap_seconds` 120,
+  `model_retry_attempts` 15), validated fail-closed in `load_route` and
+  attested plan↔manifest by `attest_deepswe`
+  (`planned_cohort_pacing_mismatch`). Both paid workflows emit
+  `cohort_pacing` into the immutable plan, sleep `(ORDINAL-1)*stagger`
+  before the run step, and export the jitter cap, Retry-After cap, and
+  `MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT` to the run environment.
+
+Verified provider-free with tests/mocks/stubs through the real wrapped
+transport: 21 tests in `tests/test_provider_pacing.py` — 429/status/name/
+code rate-limit classes, Retry-After honored and capped, retry-then-
+success response binding, exhaustion ordering (paced rows precede the
+terminal `provider_failure` and its primary diagnostic), 20-way delay
+decorrelation, all five non-retryable classes never paced, secret
+redaction, env resolution + invalid-env fail-closed, and the
+fault-channel contract. The broken-recorder fault-injection suite still
+proves the terminal receipt survives.
+
+Remaining open items before any next paid run: model-route alignment for
+the apples-to-apples comparison (native `deepseek-v4-flash` vs the
+`-0731` relace route — needs an owner credential decision); canonical
+provider-free acceptance + installed rehearsal re-green on the pacing
+SHA; gate-one + smoke only after both gates pass.
 
 ## Outcome claims
 
