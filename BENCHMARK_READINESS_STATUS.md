@@ -619,6 +619,88 @@ SWE-Live baseline exists and none may be created). Any further paid scope —
 DeepSWE gate-one re-run, expanded cohorts, a MultiLang suite — requires its
 own fresh approval receipt.
 
+### SWE-Live gate-one — run `34885373005` (2026-09-15): **PASS**
+
+Dispatched on tag `dispatch-swelive-23badbcb` (GitHub dispatch requires a
+branch/tag ref; the tag resolves `source_sha=23badbcb`, matching the
+readiness receipt). `gate-one` + `approve_paid_run=true` +
+`readiness_run_id=34884400879`. All pre-flight stages green (plan,
+readiness_binding, image_digest_gate, provider_gate); task leg ~10.5 min.
+
+- `cyclotruc__gitingest-94`: **SOLVED** by the official verifier — reward 1,
+  graded, `failure_class=graded`, status GRADED.
+- Capability report: all 5 required capabilities **WORKING** and
+  independently verified — including `lsp_promotion`
+  (`terminal_succeeded_published_2_edges_last_of_6`, published-terminal
+  channel; the run was calm, no salvage needed).
+- Diagnostics: **HEALTHY**, zero artifact issues, exit_code 0 — no memory
+  storm, no refusals, no escalation. The severity-based verdict change held:
+  zero events, nothing to misjudge.
+- Live gate `passed=true`: complete census, 7/7 features witnessed and
+  exercised, `source_sha=23badbcb`.
+- Provider: 36/36 calls completed, 0 failed; route exact
+  (`deepseek-v4-flash-0731`, relace-only, `allow_fallbacks=false`,
+  `require_parameters=true`). Tokens: 1,153,356 in / 15,545 out /
+  917,504 cached; 31 deliveries; `unmet_predicate_count=0`; graph CERTIFIED.
+- `validate_prior_gate` conditions verified against the downloaded
+  attestation before dispatching `remaining`.
+
+`remaining` dispatched as run `34888711134` (same tag),
+`prior_gate_run_id=34885373005`, `readiness_run_id=34884400879`.
+
+### SWE-Live remaining — run `34888711134` (2026-09-15): attestation **FAIL**
+
+- `dynaconf__dynaconf-1241`: **SOLVED** by the official verifier (reward 1,
+  graded). All 5 mandatory diagnostic capabilities WORKING at seal; all 21
+  feature-matrix identities WITNESSED. `lsp_promotion` exercised for real:
+  `terminal_succeeded_published_1_edges_3_of_10_obsolete` — the ancestry path
+  salvaged 3-of-10 obsolete legs through the live merge.
+- The gate **correctly rejected** the run: `GT_GRAPH_REFRESH_FAILED` ERROR —
+  `amend_failed_gt_index_process_failed_exit_1`, four identical deaths, all on
+  parent `lsp-b62_t634/graph.db`, prescribed recovery
+  `rebuild_graph_for_current_workspace_revision`. Reproducible across retries =
+  deterministic defect, not pressure. The verdict was right; the smoke gate did
+  its job.
+- **Root cause (proven, reproduced locally on the real artifact):**
+  `merge_lsp_candidate` performs in-place `UPDATE`/`DELETE`/`INSERT` on
+  parser-owned node rows but does not maintain `parser_*_inventory`
+  (not in `_MERGEABLE_TABLES` — the "unlisted table is under-merged (safe)"
+  assumption was wrong). Merge `merge-9bdqrbry` wrote `updated: 441` node rows
+  carrying LSP-enriched `signature`/`return_type` fields; the inventory still
+  mapped un-enriched base identities to those rowids. The leg copies inherited
+  the stale aliases verbatim (339 live aliases in `lsp-b62_t634`). Next batch
+  amend parses the file fresh, hits the inventoried identity, compares against
+  the enriched stored row, `DeepEqual` fails, producer `log.Fatalf` → exit=1.
+- **Fixes landed:**
+  - `gt_engine/scoped_merge.py`: merge now maintains `parser_*_inventory` —
+    evicts identities whose rows it mutates/deletes, re-mints inventory for
+    rows it inserts. Stops manufacturing corrupt parents.
+  - Producer (`harneet2512/groundtruth` `1e893f63`, vendored mirror
+    `vendor/gt-index-src`): diverged inventory entries are treated as missing —
+    stale row swept by the existing non-inventoried DELETE, fresh parse minted
+    under a new rowid, counted and surfaced as `inventory_diverged` in the
+    result JSON and on the batch-structure stderr line. Fail-closed behavior
+    for genuinely missing legacy inventories and foreign producer identity is
+    unchanged. Local E2E on the real `lsp-b62_t634` artifact:
+    `909 retained, 441 inserted, 339 inventory-diverged` — healed, no fatal.
+  - `gt_engine/indexer.py`: `_amend_failure_reason` now reports the **end** of
+    `stderr_tail` (the fatal line), not the head banner; failed amends persist
+    `index-failure-resource.json` + `graph.failure.json` with
+    `exit_code`/`stderr_tail`/`stderr_sha256`/cgroup fields — the evidence gap
+    that hid this defect's true signature is closed.
+- **Capability-surface reconciliation:** the "19 capabilities" census
+  (11 FACT identities + `GT_CERT_DELIVERY`, `GT_CHANGE_SURFACE`,
+  `GT_EDIT_CHECK`, `GT_HYPOTHESIS`, `GT_LOC_RESLOT`, `GT_PATCH_DELTA`,
+  `GT_SS_SUBMIT_RED`, `select_catalog`; plus post-census `persistent_plan`,
+  `plan_gate`) is the `feature-matrix.json` contract — 21 identities, all
+  WITNESSED on both smoke tasks. The 5-row report is a different surface
+  (`_mandatory_capability_rows()` in `gt_session.py`). Proving "capabilities
+  work" = the 21-row matrix + real delivery/attribution evidence, not the
+  5-row diagnostic alone.
+- **Sequencing:** this two-task smoke correctly failed its gate. Benchmark
+  readiness still requires a clean two-task SWE-Live smoke on the healed
+  producer, then the 20-task DeepSWE matched cohort. No readiness claim yet.
+
 ## Outcome claims
 
 The retained Muse baseline contains 452 trials across 113 tasks and remains
