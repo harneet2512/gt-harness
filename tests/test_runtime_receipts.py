@@ -81,6 +81,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "payload_sha256": "a" * 64,
             "action_index": 0,
             "iteration": 0,
+            "delivery_ordinal": 1,
             "rendered_bytes": 100,
         },
         {
@@ -131,6 +132,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "payload_sha256": "9" * 64,
             "action_index": 0,
             "iteration": 1,
+            "delivery_ordinal": 1,
             "rendered_bytes": 123,
         },
         {
@@ -184,9 +186,29 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "admitted_bytes": 223,
         },
         {
+            # The iteration-7 twin shape from run 34790375793: a same-key
+            # sibling is refused by fire-once AFTER the survivor was admitted
+            # (delivery_ordinal 1 < candidate_ordinal 2) but BEFORE its
+            # commit-side evidence_delivery row lands. Journal order is the
+            # wrong axis for this check; admission order is the right one.
+            "event": "delivery_refused",
+            "event_hash": "e" * 63 + "0",
+            "sequence": 10,
+            "lane": "sealed",
+            "kind": "localization",
+            "dedup_key": "localization-1",
+            "reason": "localization_fire_once",
+            "candidate_ordinal": 2,
+            "iteration": 1,
+            "rendered_bytes": 117,
+            "payload_sha256": "7" * 64,
+            "admitted_count": 1,
+            "admitted_bytes": 123,
+        },
+        {
             "event": "dense_index_ready",
             "event_hash": "b" * 64,
-            "sequence": 10,
+            "sequence": 11,
             "query_ready": True,
             "model_sha256": "5" * 64,
             "tokenizer_sha256": "4" * 64,
@@ -196,7 +218,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "index_sha256": "3" * 64,
         },
         {
-            "event": "provider_admission", "event_hash": "f" * 64, "sequence": 11,
+            "event": "provider_admission", "event_hash": "f" * 64, "sequence": 12,
             "status": "admitted", "reason": "within_provider_window",
             "request_tokens": 300, "request_bytes": 1200,
             "context_window_tokens": 131072, "reserved_output_tokens": 16384,
@@ -205,7 +227,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         {
             "event": "session_closed",
             "event_hash": "d" * 64,
-            "sequence": 11,
+            "sequence": 13,
             "terminal": "submitted_unverified",
         },
     ]
@@ -224,7 +246,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             "provider_receipts": {"request_count": 3, "valid": True},
             "model": {"match": True},
             "event_journal": {
-                "event_count": 14,
+                "event_count": 15,
                 "event_head": "d" * 64,
                 "valid": True,
                 "issues": [],
@@ -311,9 +333,14 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     assert treatment["evidence_deliveries"][0]["event_hash"] == "5" * 64
     assert treatment["refused_deliveries"][0]["reason"] == "delivery_byte_ceiling"
     assert treatment["refused_deliveries"][0]["event_sequence"] == 9
+    assert treatment["refused_deliveries"][1]["reason"] == "localization_fire_once"
+    assert treatment["refused_deliveries"][1]["dedup_key"] == "localization-1"
+    assert treatment["refused_deliveries"][1]["candidate_ordinal"] == 2
     assert [row["request_tokens"] for row in treatment["provider_admissions"]] == [100, 200, 300]
     assert treatment["provider_delivery_receipts"][0]["event_sequence"] == 1
+    assert treatment["provider_delivery_receipts"][0]["delivery_ordinal"] == 1
     assert treatment["provider_delivery_receipts"][1]["event_sequence"] == 5
+    assert treatment["provider_delivery_receipts"][1]["delivery_ordinal"] == 1
     assert treatment["delivery_budget"] == {
         "schema": "gt.delivery_budget.v2",
         "scope": "provider_decision",
@@ -327,7 +354,7 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
         "total_observed": 223,
         "task_delivery_limit": None,
         "admitted_count": 2,
-        "refused_count": 1,
+        "refused_count": 2,
     }
     assert product_row["treatment_receipt"]["graph_certification"]["graph_sha256"] == graph_digest
     assert product_row["treatment_receipt"]["graph_utilisation"]["cochange_rows"] == 2
@@ -463,6 +490,50 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     )
     _write_json(product, product_row)
 
+    # Admission-order violations at ISSUANCE: the twin refusal is honest only
+    # because the surviving sibling was admitted first (delivery_ordinal 1 <
+    # candidate_ordinal 2). Rewriting the refusal so its candidate ordinal
+    # reaches the sibling's, or so it claims the delivered payload's identity,
+    # turns the same journal into refused-then-delivered and issuance must
+    # refuse the run - the check the commit-sequence comparison could not
+    # express in either direction.
+    for corrupt in (
+        lambda row: row.update(candidate_ordinal=1),
+        lambda row: row.update(payload_sha256="9" * 64),
+    ):
+        corrupted = deepcopy(events)
+        for row in corrupted:
+            if row.get("event") == "delivery_refused" and row.get(
+                "reason"
+            ) == "localization_fire_once":
+                corrupt(row)
+        (task_state / "events.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in corrupted), encoding="utf-8"
+        )
+        try:
+            issue_runtime_receipts(
+                report_path=report,
+                trajectory_path=trajectory,
+                state_dir=state,
+                product_receipt_path=product,
+                adapter_receipt_path=adapter,
+                task_id="task-a",
+                product_source_sha="f" * 40,
+                treatment="groundtruth",
+                requested_model="meta/muse-spark-1.2-contributor",
+                scaffold_version="2.4.6",
+                time_budget_seconds=3600,
+            )
+        except ValueError as exc:
+            assert str(exc) == "refused_then_delivered"
+        else:
+            raise AssertionError("admission-order violation was accepted")
+
+    (task_state / "events.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in events), encoding="utf-8"
+    )
+    _write_json(product, product_row)
+
     mutations = [
         (
             "treatment_engine_integrity_invalid",
@@ -525,19 +596,34 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
             ),
         ),
         (
+            # Key arm: claiming candidate_ordinal 1 makes the refusal read as
+            # preceding the prompt-contract-1 admission (delivery_ordinal 1),
+            # i.e. the same key was admitted at-or-after the refusal.
             "treatment_delivery_refusal_invalid",
             lambda row: row["treatment_receipt"]["refused_deliveries"][0].update(
-                dedup_key="prompt-contract-1"
+                dedup_key="prompt-contract-1",
+                candidate_ordinal=1,
             ),
         ),
         (
+            # Identity arm: the exact payload the journal claims it refused
+            # shows up delivered in the same iteration. Fires regardless of
+            # ordinals - a refusal of already-pending content is impossible.
             "treatment_refused_then_delivered",
             lambda row: row["treatment_receipt"]["refused_deliveries"][0].update(
-                dedup_key="prompt-contract-1",
                 delivery_identity=row["treatment_receipt"]["provider_delivery_receipts"][0][
                     "delivery_identity"
                 ],
-                event_sequence=9,
+            ),
+        ),
+        (
+            # Ordinal arm: the localization sibling delivered at ordinal 1 is
+            # rewritten to ordinal 2, at-or-after the twin's refusal
+            # (candidate_ordinal 2) - the admission-order violation the
+            # commit-sequence check could not express.
+            "treatment_refused_then_delivered",
+            lambda row: row["treatment_receipt"]["provider_delivery_receipts"][1].update(
+                delivery_ordinal=2
             ),
         ),
         (
@@ -553,8 +639,6 @@ def test_successful_miniswe_run_issues_bound_product_and_adapter_receipts(
     ]
     for expected_error, mutate in mutations:
         changed = deepcopy(product_row)
-        if expected_error == "treatment_refused_then_delivered":
-            changed["treatment_receipt"]["provider_delivery_receipts"][0]["event_sequence"] = 10
         mutate(changed)
         _write_json(product, changed)
         assert expected_error in verify_runtime_receipt(product)

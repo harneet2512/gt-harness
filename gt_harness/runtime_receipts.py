@@ -275,6 +275,14 @@ def _delivery_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "delivery_identity": payload_sha256 or None,
                 "action_index": int(row.get("action_index") or 0),
                 "observed_iteration": int(row.get("iteration") or 0),
+                # Present only when the journal carries it: HAR-81 recorded
+                # runs predate the field, and an always-on key would make
+                # their stored receipts differ from the recompute.
+                **(
+                    {"delivery_ordinal": int(row["delivery_ordinal"])}
+                    if row.get("delivery_ordinal") is not None
+                    else {}
+                ),
                 "rendered_bytes": int(row.get("rendered_bytes") or 0),
                 "semantics": str(row.get("semantics") or ""),
                 "target": str(row.get("target") or ""),
@@ -363,6 +371,11 @@ def _provider_delivery_receipts(events: list[dict[str, Any]]) -> list[dict[str, 
                 "byte_limit": byte_limit,
                 "event_sequence": int(match.get("sequence") or 0),
                 "observed_iteration": iteration,
+                **(
+                    {"delivery_ordinal": int(match["delivery_ordinal"])}
+                    if match.get("delivery_ordinal") is not None
+                    else {}
+                ),
                 "delivered_before_call": delivered_before_call,
                 "same_observation": delivered_before_call == iteration + 1,
                 "provider_request_id": str(provider.get("request_id") or "") if provider else "",
@@ -758,22 +771,47 @@ def issue_runtime_receipts(
     if len(deliveries) != len(delivery_events):
         raise ValueError("delivery_receipt_census_mismatch")
     _validate_delivery_boundaries(deliveries)
+    # A journal that records refusals but omits delivery ordinals cannot prove
+    # admission order on the key arm; accepting it would silently weaken the
+    # invariant. Refusal-free legacy journals (HAR-81) never reach this check.
+    if refused_deliveries and any(
+        int(row.get("delivery_ordinal") or 0) < 1 for row in delivery_events
+    ):
+        raise ValueError("delivery_ordinal_missing")
     delivered_identities = {str(row.get("delivery_identity") or "") for row in delivery_events}
     for refusal in refused_deliveries:
         duplicate = refusal["reason"] == "duplicate_delivery_identity"
+        # Ordering must compare the ADMISSION axis, not the journal sequence:
+        # deliveries are prepared (admitted) during the boundary scan and
+        # committed (evidence_delivery) only when the provider request is
+        # assembled, so a commit always lands after that decision's refusals.
+        # A same-key delivery admitted before the refusal is the sibling whose
+        # occupancy CAUSED the refusal (delivery_ordinal < candidate_ordinal);
+        # one admitted at or after it rescinded the refusal. Run 34790375793:
+        # localization twin refused at ordinal 2, sibling delivered at 1.
         later_delivery = any(
-            int(delivery["event_sequence"]) > int(refusal["event_sequence"])
-            and delivery["observed_iteration"] == refusal["observed_iteration"]
+            delivery["observed_iteration"] == refusal["observed_iteration"]
             and (
                 delivery["delivery_identity"] == refusal["delivery_identity"]
-                or delivery["dedup_key"] == refusal["dedup_key"]
+                or (
+                    delivery["dedup_key"] == refusal["dedup_key"]
+                    and int(delivery.get("delivery_ordinal") or 0)
+                    >= refusal["candidate_ordinal"]
+                )
             )
             for delivery in deliveries
         )
         if later_delivery:
             raise ValueError("refused_then_delivered")
-        if any(row["dedup_key"] == refusal["dedup_key"]
-               and row["observed_iteration"] == refusal["observed_iteration"]
+        if any(row["observed_iteration"] == refusal["observed_iteration"]
+               and (
+                   row["delivery_identity"] == refusal["delivery_identity"]
+                   or (
+                       row["dedup_key"] == refusal["dedup_key"]
+                       and int(row.get("delivery_ordinal") or 0)
+                       >= refusal["candidate_ordinal"]
+                   )
+               )
                for row in delivery_events) and not duplicate:
             raise ValueError("refused_delivery_present")
         if duplicate and refusal["delivery_identity"] not in delivered_identities:
@@ -1684,20 +1722,35 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
     if not decision_scoped and total_bytes > _TOTAL_DELIVERY_BYTE_LIMIT:
         errors.append("treatment_total_context_budget_exceeded")
     allowed_refusals = DELIVERY_REFUSAL_REASONS
+    # Same contract as issuance: a receipt that records refusals but omits
+    # delivery ordinals cannot prove admission order on the key arm.
+    if refused_deliveries and any(
+        isinstance(row, dict) and int(row.get("delivery_ordinal") or 0) < 1
+        for row in deliveries
+    ):
+        errors.append("treatment_delivery_ordinal_missing")
     for refusal in refused_deliveries:
         if not isinstance(refusal, dict):
             errors.append("treatment_delivery_refusal_invalid")
             continue
         duplicate = refusal.get("reason") == "duplicate_delivery_identity"
         refusal_sequence = int(refusal.get("event_sequence") or 0)
+        # Same admission-axis ordering as the issuance path: delivery_ordinal
+        # vs candidate_ordinal decides whether a same-key delivery rescinded
+        # the refusal. Commit-time event_sequence always lands after the
+        # decision's refusals, which made run 34790375793 read as
+        # refused_then_delivered on a legitimate twin-dedup.
         later_delivery = any(
             isinstance(delivery, dict)
-            and int(delivery.get("event_sequence") or 0) > refusal_sequence
             and (not decision_scoped or delivery.get("observed_iteration")
                  == refusal.get("observed_iteration"))
             and (
                 delivery.get("delivery_identity") == refusal.get("delivery_identity")
-                or delivery.get("dedup_key") == refusal.get("dedup_key")
+                or (
+                    delivery.get("dedup_key") == refusal.get("dedup_key")
+                    and int(delivery.get("delivery_ordinal") or 0)
+                    >= int(refusal.get("candidate_ordinal") or 0)
+                )
             )
             for delivery in deliveries
         )
@@ -1709,9 +1762,17 @@ def verify_runtime_receipt(receipt_path: Path) -> list[str]:
             or not _SHA64.fullmatch(str(refusal.get("payload_sha256") or ""))
             or refusal_sequence < 1
             or (not duplicate and any(
-                isinstance(row, dict) and row.get("dedup_key") == refusal.get("dedup_key")
+                isinstance(row, dict)
                 and (not decision_scoped or row.get("observed_iteration")
-                     == refusal.get("observed_iteration")) for row in deliveries))
+                     == refusal.get("observed_iteration"))
+                and (
+                    row.get("delivery_identity") == refusal.get("delivery_identity")
+                    or (
+                        row.get("dedup_key") == refusal.get("dedup_key")
+                        and int(row.get("delivery_ordinal") or 0)
+                        >= int(refusal.get("candidate_ordinal") or 0)
+                    )
+                ) for row in deliveries))
             or (
                 duplicate
                 and str(refusal.get("delivery_identity") or "") not in set(delivery_identities)

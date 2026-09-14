@@ -761,25 +761,35 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           set -euo pipefail
-          # Mid-run observability: emit a compact run-status.md from the live
-          # journal every 2 minutes and upload it as a uniquely-named artifact.
-          # v4 artifacts are downloadable while the job is still running, which
-          # lets us inspect progress without waiting for job completion.
+          # Mid-run observability: emit a compact run-status snapshot from the
+          # live journal every 2 minutes. Snapshots are written INSIDE
+          # results/swelive so they ship in the task artifact even when the
+          # transient upload path fails; the twirp upload is still attempted
+          # for live visibility, with failures captured in upload-errors.log
+          # (run 34790375793 produced zero transient artifacts and no
+          # diagnosable error). Observability must never alter outcomes, so
+          # both steps stay non-fatal.
+          mkdir -p results/swelive/run-status
           (
             STATUS_SEQ=0
             while true; do
               sleep 120
               STATUS_SEQ=$((STATUS_SEQ + 1))
+              STATUS_FILE="results/swelive/run-status/run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}.md"
               python scripts/emit_run_status.py \
                 --root results/swelive \
                 --task "$TASK" \
                 --run-id "$GITHUB_RUN_ID" \
-                --output run-status.md \
+                --output "$STATUS_FILE" \
                 --budget-seconds "${{ matrix.time_budget_seconds }}" \
-                --stdout-log pier-stdout.log || echo "::warning::run-status emit failed (non-fatal)"
+                --stdout-log pier-stdout.log \
+                2>> results/swelive/run-status/emit-errors.log \
+                || echo "emit failed seq=${STATUS_SEQ}" >> results/swelive/run-status/emit-errors.log
               python scripts/upload_transient_artifact.py \
-                --file run-status.md \
-                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" || echo "::warning::transient artifact upload failed (non-fatal)"
+                --file "$STATUS_FILE" \
+                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" \
+                2>> results/swelive/run-status/upload-errors.log \
+                || echo "upload failed seq=${STATUS_SEQ}" >> results/swelive/run-status/upload-errors.log
             done
           ) &
           MONITOR_PID=$!

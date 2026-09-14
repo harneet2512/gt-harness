@@ -56,11 +56,25 @@ def _standardize(root: Path) -> dict[str, object]:
 
 
 def test_standardize_success_binds_only_official_reward(tmp_path: Path) -> None:
+    # The aggregate uses pier's real production shape: metrics carry {"mean"}
+    # aggregates and the per-reward trial distribution lives in
+    # reward_stats.reward. A metrics[{"reward": x}] fixture is a shape pier
+    # never emits - it is what let run 34790375793's real solve read as
+    # missing_verifier.
     agent = _write_case(
         tmp_path,
         aggregate={
             "n_total_trials": 1,
-            "stats": {"evals": {"task": {"metrics": [{"reward": 1.0}]}}},
+            "stats": {
+                "evals": {
+                    "task": {
+                        "metrics": [{"mean": 1.0}],
+                        "reward_stats": {
+                            "reward": {"1.0": ["task-a__trial"]}
+                        },
+                    }
+                }
+            },
         },
         trial={
             "task_name": "datacurve/task-a",
@@ -76,6 +90,77 @@ def test_standardize_success_binds_only_official_reward(tmp_path: Path) -> None:
     assert receipt["failure_class"] == "graded"
     assert receipt["product_receipt_present"] is True
     assert (agent / "official-verifier-result.json").is_file()
+
+
+def test_standardize_reward_stats_disagreement_stays_ungraded(
+    tmp_path: Path,
+) -> None:
+    # The aggregate and the trial disagreeing is contradictory evidence, not
+    # a grade: aggregate says 0.0, trial says 1. The run must stay ungraded
+    # rather than picking a side.
+    _write_case(
+        tmp_path,
+        aggregate={
+            "n_total_trials": 1,
+            "stats": {
+                "evals": {
+                    "task": {
+                        "metrics": [{"mean": 0.0}],
+                        "reward_stats": {
+                            "reward": {"0.0": ["task-a__trial"]}
+                        },
+                    }
+                }
+            },
+        },
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": {"rewards": {"reward": 1}},
+        },
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["reward"] is None
+
+
+def test_standardize_mixed_reward_map_is_not_a_single_reward(
+    tmp_path: Path,
+) -> None:
+    # A multi-key reward_stats.reward map describes trials with DIFFERENT
+    # outcomes; collapsing it to one value would manufacture a grade the
+    # aggregate never stated.
+    _write_case(
+        tmp_path,
+        aggregate={
+            "n_total_trials": 2,
+            "stats": {
+                "evals": {
+                    "task": {
+                        "metrics": [{"mean": 0.5}],
+                        "reward_stats": {
+                            "reward": {
+                                "0.0": ["task-a__t1"],
+                                "1.0": ["task-a__t2"],
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        trial={
+            "task_name": "datacurve/task-a",
+            "trial_name": "task-a__trial",
+            "verifier_result": {"rewards": {"reward": 1}},
+        },
+    )
+
+    receipt = _standardize(tmp_path)
+
+    assert receipt["status"] == "ERROR"
+    assert receipt["reward"] is None
 
 
 def test_standardize_provider_balance_failure_is_not_rate_limit(tmp_path: Path) -> None:

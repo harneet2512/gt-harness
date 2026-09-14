@@ -109,6 +109,23 @@ def _reward(payload: dict[str, Any]) -> int | None:
                     for metric in metrics
                     if isinstance(metric, dict)
                 )
+            # Pier's real aggregate shape puts the reward distribution in
+            # reward_stats.reward as {reward_value: [trial_names]} -- the
+            # metrics list carries {"mean": x} aggregates, not per-trial
+            # rewards. A single-key map is the uniform reward for every
+            # trial in the job; multiple keys mean mixed outcomes, which is
+            # not a single reward and must not collapse to one. Run
+            # 34790375793 solved with reward 1.0 and read as
+            # missing_verifier because only this field carried the grade.
+            reward_stats = evaluation.get("reward_stats") or {}
+            if isinstance(reward_stats, dict):
+                reward_map = reward_stats.get("reward")
+                if isinstance(reward_map, dict) and len(reward_map) == 1:
+                    key = next(iter(reward_map))
+                    try:
+                        candidates.append(float(key))
+                    except (TypeError, ValueError):
+                        continue
     rewards = {
         int(value)
         for value in candidates
