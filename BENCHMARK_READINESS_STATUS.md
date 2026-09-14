@@ -728,10 +728,10 @@ readiness_binding, image_digest_gate, provider_gate); task leg ~10.5 min.
   `benchmark_runs=0`, `release_eligible=true`, `release_blockers=[]`.
   This is the readiness run ID a next SWE-Live smoke dispatch must cite.
 - Upstream CI on `1e893f63` (full tagged Go suite): run `34901920530`
-  dispatched on `fix/inventory-divergence-heal`.
-- Remaining before any smoke: upstream CI green on `1e893f63`, then a paid
-  dispatch needs a fresh explicit approval + new dispatch tag on `af0865aa`
-  citing `readiness_run_id=34901944460`.
+  **success** on `fix/inventory-divergence-heal`.
+- Remaining before any smoke: a paid dispatch needs a fresh explicit approval
+  + new dispatch tag on the committed tip citing
+  `readiness_run_id=34901944460`.
 
 ## Outcome claims
 
