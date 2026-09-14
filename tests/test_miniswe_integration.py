@@ -1196,6 +1196,257 @@ def test_a_repeated_boundary_does_not_re_offer_the_same_graph(monkeypatch, tmp_p
     assert offers == ["b" * 64]
 
 
+class _PendingEnrichmentHandle(_StubEnrichmentHandle):
+    """A promotion still in flight: done only once the next boundary drains it.
+
+    A real leg runs ~30-60s while boundaries keep landing; modelling it done
+    at schedule time lets the same boundary drain it against an unmoved
+    engine, which never reproduces the obsolete race.
+    """
+
+    def __init__(self, task_id: str, receipt: dict) -> None:
+        super().__init__()
+        self.task_id = task_id
+        self._receipt = receipt
+        self._released = False
+
+    def release(self) -> None:
+        self._released = True
+
+    @property
+    def done(self) -> bool:
+        return self._released
+
+    def terminal_receipt(self, *, timeout=None):
+        return dict(self._receipt)
+
+
+def test_lsp_promotion_backs_off_while_revisions_churn(monkeypatch, tmp_path):
+    """A leg that loses the revision race must not respawn instantly.
+
+    smoke20 bandit-taint: the graph revision re-minted every ~35-60s while a
+    cold promotion leg ran ~30-60s, so 15 of 36 legs landed obsolete - each
+    holding an LSP server resident through its doomed run while gt_index
+    starved for headroom. Obsolescence itself is correct (stale evidence
+    must never publish); the defect is scheduling a fresh leg whose expected
+    latency exceeds the observed revision half-life. Consecutive obsolete
+    dispositions must back off scheduling; a leg that keeps up resets it.
+    """
+    import itertools
+
+    from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
+    from gt_engine.runtime_observation import capture_workspace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
+    offers: list[str] = []
+    in_flight: list[_PendingEnrichmentHandle] = []
+    seq = itertools.count(1)
+    scheduler = type("_Scheduler", (), {"_handles": []})()
+    a._lsp_scheduler = scheduler
+
+    def factory(request, base):
+        task_id = f"leg-{next(seq)}"
+        offers.append(base.graph_revision)
+        handle = _PendingEnrichmentHandle(task_id, {
+            "terminal": True, "status": "succeeded", "publishable": True,
+            "verified": 3, "corrected": 0, "selected": 0, "deleted": 0,
+            "source_revision": request.source_revision,
+            "input_graph_revision": base.graph_revision,
+            "candidate_path": "", "task_id": task_id,
+        })
+        scheduler._handles.append(handle)
+        in_flight.append(handle)
+        return handle
+
+    monkeypatch.setattr(a, "_schedule_lsp_candidate", factory)
+
+    revisions = itertools.cycle(["a" * 64, "b" * 64, "c" * 64, "d" * 64])
+
+    def build(root, **_kwargs):
+        revision = next(revisions)
+        path = tmp_path / f"rebuilt-{revision[:1]}.db"
+        path.write_bytes(b"new")
+        return IndexBuildReceipt(
+            IndexBuildStatus.BUILT, graph_db=str(path),
+            graph_revision=revision, analysis_state="complete",
+        )
+
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt", build
+    )
+
+    a.start_task()
+    a.record_repository_snapshot(
+        capture_workspace(repo), boundary="after_action"
+    )
+
+    def churn():
+        """One boundary: finish in-flight legs, then adopt the next revision."""
+        for handle in in_flight:
+            handle.release()
+        a.note_edit(["mod.py"])
+        assert a.refresh_graph() is True
+
+    # Leg-1 schedules on rev A while it is the live graph, then loses the
+    # race when rev B adopts at the next boundary.
+    churn()
+    assert offers == ["a" * 64]
+    churn()  # leg-1 drains obsolete as rev B lands
+    # Without backoff every further boundary re-offers the fresh revision to
+    # another doomed leg (the bandit-taint hamster wheel: 15/36 obsolete).
+    churn()
+    assert offers == ["a" * 64], (
+        "a superseded leg must back off, not respawn on the next revision"
+    )
+
+    # The window expires; the next boundary promotes the then-current graph.
+    clock["now"] += 301.0
+    churn()
+    assert offers[-1] != "a" * 64
+    assert len(offers) == 2
+
+
+def test_lsp_churn_backoff_escalates_and_resets(monkeypatch, tmp_path):
+    """The defer window doubles per lost race and clears when a leg keeps up.
+
+    Producer-side outcomes (failed builds, certifier faults, identity
+    mismatches) are not race evidence - they must leave the window alone so
+    a leg that died for its own reasons neither widens nor clears the
+    workspace's churn signal.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
+    note = a._note_lsp_churn_outcome
+    note("obsolete")
+    assert a._lsp_churn_streak == 1
+    assert a._lsp_churn_defer_until == 5000.0 + 60.0
+    note("obsolete_after_certification")
+    assert a._lsp_churn_streak == 2
+    assert a._lsp_churn_defer_until == 5000.0 + 120.0
+
+    # Producer-side dispositions are not race outcomes: window untouched.
+    for neutral in ("not_publishable", "certification_failed",
+                    "certifier_exception", "identity_mismatch",
+                    "schedule_exception"):
+        note(neutral)
+        assert a._lsp_churn_streak == 2
+        assert a._lsp_churn_defer_until == 5000.0 + 120.0
+
+    # A leg that kept up proves the race is winnable: reset.
+    note("published")
+    assert a._lsp_churn_streak == 0
+    assert a._lsp_churn_defer_until == 0.0
+
+
+def test_lsp_promotion_defers_after_index_memory_refusal(monkeypatch, tmp_path):
+    """A headroom-refused index must not race a fresh LSP leg for memory.
+
+    smoke20 bandit-taint: 16 graph_recovery_failed rows, all
+    GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT, while promotion legs kept
+    resident ~1GB servers alive. Spawning a leg the moment a build lands
+    after a refusal re-pressures the cgroup the guard just protected - the
+    next recovery starves again. A memory refusal must defer LSP
+    scheduling until the pressure has had room to clear.
+    """
+    import itertools
+
+    from gt_engine.indexer import IndexBuildReceipt, IndexBuildStatus
+    from gt_engine.runtime_observation import capture_workspace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.db"
+    graph.write_bytes(b"old")
+    a = MiniSweAdapter(
+        task_id="task", state_dir=tmp_path / "state", predicates=[],
+        repo_root=str(repo), graph_db=str(graph),
+    )
+
+    clock = {"now": 2000.0}
+    monkeypatch.setattr(
+        "gt_engine.miniswe_integration.time.monotonic", lambda: clock["now"]
+    )
+
+    offers: list[str] = []
+    scheduler = type("_Scheduler", (), {"_handles": []})()
+    a._lsp_scheduler = scheduler
+    seq = itertools.count(1)
+
+    def factory(request, base):
+        offers.append(base.graph_revision)
+        handle = _PendingEnrichmentHandle(f"leg-{next(seq)}", {})
+        scheduler._handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(a, "_schedule_lsp_candidate", factory)
+
+    receipts = iter([
+        IndexBuildReceipt(
+            IndexBuildStatus.BUILD_FAILED,
+            error_type="GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
+            error_diagnostic="memory_headroom_refused",
+        ),
+        IndexBuildReceipt(
+            IndexBuildStatus.BUILT, graph_db=str(tmp_path / "r-a.db"),
+            graph_revision="a" * 64, analysis_state="complete",
+        ),
+        IndexBuildReceipt(
+            IndexBuildStatus.BUILT, graph_db=str(tmp_path / "r-b.db"),
+            graph_revision="b" * 64, analysis_state="complete",
+        ),
+    ])
+    (tmp_path / "r-a.db").write_bytes(b"new")
+    (tmp_path / "r-b.db").write_bytes(b"new")
+    monkeypatch.setattr(
+        "gt_engine.indexer.ensure_index_with_receipt",
+        lambda root, **_kwargs: next(receipts),
+    )
+
+    a.start_task()
+    a.record_repository_snapshot(
+        capture_workspace(repo), boundary="after_action"
+    )
+
+    # The refused build leaves the graph stale; the next boundary recovers.
+    a.note_edit(["mod.py"])
+    assert a.refresh_graph() is False
+    a.note_edit(["mod.py"])
+    assert a.refresh_graph() is True
+    # The adoption is fresh but the memory refusal is fresher: no leg yet.
+    assert offers == []
+
+    clock["now"] += 301.0
+    a.note_edit(["mod.py"])
+    assert a.refresh_graph() is True
+    assert offers == ["b" * 64]
+
+
 @pytest.mark.parametrize("config_name", ["tsconfig.json", "package.json", "go.mod", "Cargo.toml", ".gitignore"])
 def test_frozen_input_and_reuse_key_include_resolver_configuration(tmp_path, config_name):
     from gt_engine.indexer import source_manifest_digest

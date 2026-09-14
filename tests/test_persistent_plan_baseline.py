@@ -389,3 +389,137 @@ def test_the_fallback_is_attempted_only_once(tmp_path):
     # pytest runs, finds no tests, so this is a parse result rather than a
     # second spawn failure; either way it must terminate rather than recurse.
     assert result.status in {"no_tests_observed", "spawn_failed", "captured"}
+
+
+def test_spawn_fallback_prefers_repo_python_and_preserves_discovery(
+    repo, monkeypatch
+):
+    """Smoke20 bandit-taint: the retry ran ``sys.executable -m pytest`` -
+    the harness's own dependency-poor venv, which could never observe a
+    test - and overwrote the discovered command so the journal lost what
+    discovery actually found."""
+    calls: list[tuple[str, ...]] = []
+    fake_proc = subprocess.CompletedProcess(
+        [], 0, stdout="2 passed in 0.10s", stderr=""
+    )
+
+    def executor(command, _repo_root, _budget, _child_env):
+        calls.append(tuple(command))
+        if len(calls) == 1:
+            raise FileNotFoundError(command[0])
+        return fake_proc
+
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline._execute_baseline", executor
+    )
+    repo_python = str(repo / ".venv" / "bin" / "python3")
+    monkeypatch.setattr(
+        "gt_engine.persistent_plan.baseline.shutil.which",
+        lambda name, path=None: repo_python if name == "python3" else None,
+    )
+    result = run_baseline(
+        str(repo), budget_seconds=120,
+        command=("tox",), basis="extension_fallback", confidence="low",
+    )
+    assert calls[1] == (repo_python, "-m", "pytest")
+    assert calls[1][0] != sys.executable
+    assert result.basis == "interpreter_fallback"
+    assert result.detail.startswith("superseded:tox")
+
+
+# ---------------------------------------------------------------------------
+# Count-only baselines (smoke20 fd) — names are what make conservation
+# provable; a runner whose names the parser cannot read stays unknown
+# forever. The wheel parsers now cover cargo/go/dotnet/jest/sbt output, and
+# identity_paths_for resolves rust ::-paths and dotnet FQ names.
+# ---------------------------------------------------------------------------
+
+from gt_engine.persistent_plan.baseline import (
+    BaselineResult,
+    compare_results,
+    identity_paths_for,
+)
+
+
+def _baseline(**kw) -> BaselineResult:
+    defaults = dict(
+        status="captured",
+        environment_sha256="env1",
+        command=("cargo", "test"),
+        passed=3, failed=0, errored=0,
+        exit_code=0,
+    )
+    defaults.update(kw)
+    return BaselineResult(**defaults)
+
+
+def test_count_only_baseline_can_never_establish_conservation():
+    """fd's shape: captured counts, zero names -> unknown, forever. This is
+    the honest refusal the name parsers now prevent upstream."""
+    baseline = _baseline(passed=3, passing_names=(), test_file_digests=(("x.rs", "d"),))
+    after = _baseline(passed=3, passing_names=(), test_file_digests=(("x.rs", "d"),))
+    report = compare_results(baseline, after)
+    assert report.status == "unknown"
+
+
+def test_named_baseline_with_unchanged_sources_is_intact():
+    digests = (("tests/sorting_test.rs", "d1"),)
+    names = ("sorting_test", "merge_test", "dedup_test")
+    baseline = _baseline(passed=3, passing_names=names, test_file_digests=digests)
+    after = _baseline(passed=3, passing_names=names, test_file_digests=digests)
+    report = compare_results(baseline, after)
+    assert report.status == "intact", report.detail
+
+
+def test_named_baseline_catches_a_new_regression_by_name():
+    digests = (("tests/sorting_test.rs", "d1"),)
+    baseline = _baseline(
+        passed=3, passing_names=("sorting_test", "merge_test", "dedup_test"),
+        test_file_digests=digests,
+    )
+    after = _baseline(
+        passed=2, failed=1,
+        passing_names=("merge_test", "dedup_test"),
+        failing_names=("sorting_test",),
+        test_file_digests=digests,
+    )
+    report = compare_results(baseline, after)
+    assert report.status == "regressed"
+    assert report.newly_failing == ("sorting_test",)
+
+
+def test_identity_paths_resolve_rust_module_names():
+    """`tests::sorting` and a bare `sorting_test` resolve into the crate tree
+    the snapshot actually carries — and only those paths."""
+    known = ("tests/sorting_test.rs", "src/lib.rs", "src/sort/mod.rs")
+    paths = identity_paths_for(
+        ("sorting_test", "sort::merge_test", "ghost_test"), known
+    )
+    assert "tests/sorting_test.rs" in paths
+    assert "src/sort/mod.rs" in paths
+    # ghost_test resolves no file but the crate-root fallback is a real
+    # snapshot path, not a guess.
+    assert all(p in known for p in paths)
+
+
+def test_identity_paths_never_guess_files_the_snapshot_lacks():
+    paths = identity_paths_for(
+        ("totally_absent_test",), ("README.md", "build.gradle")
+    )
+    assert paths == ()
+
+
+def test_identity_paths_resolve_dotnet_qualified_names():
+    known = ("src/MyApp.Tests/SortingTest.cs", "src/Other.cs")
+    paths = identity_paths_for(("MyApp.Tests.SortingTest.Asc",), known)
+    assert paths == ("src/MyApp.Tests/SortingTest.cs",)
+
+
+def test_pytest_nodeids_never_route_through_rust_resolution():
+    """`tests/test_x.py::test_y` has `::` but its first segment is a .py
+    file — it must take the nodeid branch, not the crate-tree guess."""
+    paths = identity_paths_for(
+        ("tests/test_green.py::test_one",),
+        ("tests/test_green.py", "src/lib.rs"),
+    )
+    assert paths == ("tests/test_green.py",)

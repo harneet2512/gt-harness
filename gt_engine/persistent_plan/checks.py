@@ -80,6 +80,156 @@ class CheckSpec:
         return asdict(self)
 
 
+# Heads whose exit status IS the assertion (match/difference verdicts).
+_ASSERTION_HEADS = {
+    "test", "[", "[[",
+    "diff", "diff3", "sdiff", "zdiff", "cmp", "zcmp", "comm", "vimdiff",
+    "grep", "egrep", "fgrep", "rgrep", "zgrep", "pgrep",
+}
+# Heads that assert only under a flag; without it they print, not verdict.
+_FLAG_GATED_HEADS = {
+    "jq": {"-e", "--exit-status"},
+    "git": {"--exit-code", "--quiet"},
+    "sha1sum": {"-c", "--check"}, "sha224sum": {"-c", "--check"},
+    "sha256sum": {"-c", "--check"}, "sha384sum": {"-c", "--check"},
+    "sha512sum": {"-c", "--check"}, "shasum": {"-c", "--check"},
+    "md5sum": {"-c", "--check"}, "b2sum": {"-c", "--check"},
+    "cksum": {"-c", "--check"},
+}
+# Operators whose rc attribution is ambiguous no matter what follows them.
+_AMBIGUOUS_OPERATORS = {"||", "&"}
+
+
+def _program_last_command(command: str) -> list[str]:
+    """Words of the program's final command - the exit-status owner."""
+    try:
+        lexer = shlex.shlex(
+            _escape_word_parens(command), posix=True, punctuation_chars=True
+        )
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    last: list[str] = []
+    current: list[str] = []
+    saw_ambiguous = False
+    for token in tokens:
+        if token and all(char in ";&|()" for char in token):
+            if token in _AMBIGUOUS_OPERATORS:
+                saw_ambiguous = True
+            if current:
+                last, current = current, []
+            continue
+        current.append(token)
+    if current:
+        last = current
+    if saw_ambiguous:
+        return []
+    while last and "=" in last[0] and not last[0].startswith(("=", "-")) \
+            and last[0].split("=", 1)[0].isidentifier():
+        last = last[1:]
+    return last
+
+
+def program_command_is_verdict(command: str) -> bool:
+    """True when the program's final exit status is an assertion verdict.
+
+    ``test "$(fd --sort)" = "a"`` ends in an assertion head - its rc is the
+    check. ``pytest x | tail -1`` ends in ``tail``: rc 0 regardless of the
+    suite, so binding it would manufacture CHECK_PASSED. The last command's
+    head must be an assertion verb (or flag-gated assertion form), or itself
+    match the canonical test-runner pattern.
+    """
+    words = _program_last_command(command)
+    if not words:
+        return False
+    head = Path(words[0]).name.lower().removesuffix(".exe")
+    if head in _ASSERTION_HEADS:
+        return True
+    gated = _FLAG_GATED_HEADS.get(head)
+    if gated and any(word in gated for word in words[1:]):
+        return True
+    from groundtruth.runtime.patterns import TEST_RUNNER_RE
+
+    return bool(TEST_RUNNER_RE.match(shlex.join(words)))
+
+
+@dataclass(frozen=True)
+class ProgramCheckSpec:
+    """A behavioral check: a shell program whose exit status is the verdict.
+
+    Some plan rows verify behavior no test runner can express - the DeepSWE
+    fd task's 39 acceptance checks were programs like
+    ``tmp=$(mktemp -d); cd "$tmp"; touch a; test "$(fd --sort)" = "a"``.
+    They failed every CheckSpec gate (shell expansion, non-runner argv heads)
+    and sat pending until the gate conceded. The program text is the spec:
+    binding it verbatim and replaying it through the task environment gives
+    the same verdict the official verifier gets, bound to revision and
+    environment. ``test``/``diff -q``/``grep -q``/``cmp`` all encode their
+    assertion in the exit status, which is what this contract binds.
+    """
+
+    check_id: str
+    program: str
+    requirement_ids: tuple[str, ...]
+    environment_sha256: str = ""
+
+    @classmethod
+    def from_command(
+        cls, command: str, requirement_ids, *, environment_sha256: str = ""
+    ) -> ProgramCheckSpec:
+        program = str(command or "").strip()
+        if not program or "\x00" in program:
+            raise ValueError("program check requires nonempty program text")
+        rows = tuple(sorted({str(row) for row in (requirement_ids or ()) if row}))
+        if not rows:
+            raise ValueError("check has no requirement binding")
+        material = {
+            "program": program,
+            "environment_sha256": str(environment_sha256 or ""),
+        }
+        digest = hashlib.sha256(
+            json.dumps(material, sort_keys=True).encode()
+        ).hexdigest()
+        return cls(digest, program, rows, material["environment_sha256"])
+
+    @property
+    def command(self) -> str:
+        return self.program
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+def classify_program_check(
+    spec: ProgramCheckSpec, execution, *, before_revision: str,
+    after_revision: str, capture_complete: bool,
+) -> CheckObservation:
+    """Classify a program execution against its bound spec.
+
+    The verdict is the exit status under the same revision+environment
+    bindings CheckSpec requires; there is no test-source digest because the
+    program text itself is the bound source.
+    """
+    state = "UNVERIFIED"
+    if (execution is not None and capture_complete and before_revision
+            and before_revision == after_revision == execution.repository_revision
+            and execution.command_sha256
+            == hashlib.sha256(spec.program.encode()).hexdigest()
+            and (not spec.environment_sha256
+                 or execution.environment_sha256 == spec.environment_sha256)
+            and not execution.timed_out):
+        if execution.outcome == "fail":
+            state = "CHECK_FAILED"
+        elif execution.outcome == "pass" and execution.returncode == 0:
+            state = "CHECK_PASSED"
+    return CheckObservation(
+        spec.check_id, state, after_revision,
+        getattr(execution, "environment_sha256", "") or "",
+        capture_complete, (), binding_basis="program_spec",
+    )
+
+
 @dataclass(frozen=True)
 class CheckObservation:
     check_id: str
@@ -90,6 +240,73 @@ class CheckObservation:
     test_ids: tuple[str, ...] = ()
     binding_basis: str = "explicit_check_spec"
     test_source_digest: str = ""
+
+
+def _escape_word_parens(command: str) -> str:
+    """Backslash-escape parens that are argument text, not subshell operators.
+
+    Posix shlex with ``punctuation_chars`` splits every unquoted ``(``/``)``
+    into a standalone operator token — including parens glued to a word, like
+    the test ids in ``cargo test -- sorting(asc)`` or ``foo()``. Glued parens
+    are argument content: escaping them keeps them inside the word token. A
+    ``(`` that directly continues a word (the previous raw character is word
+    content, not whitespace or another operator) is literal; a ``)`` is
+    literal whenever no operator paren is open — inside a subshell it stays
+    the closing operator even glued to the last word (``(cargo test)``).
+    Quoting and backslash escapes follow posix shlex rules, so ``"a(b)"`` and
+    ``a\\(b`` pass through untouched.
+    """
+    out: list[str] = []
+    quote: "str | None" = None
+    escaped = False
+    word_char = False
+    open_parens = 0
+    for ch in command:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            word_char = True
+            continue
+        if quote is not None:
+            out.append(ch)
+            if ch == quote:
+                quote = None
+            elif quote == '"' and ch == "\\":
+                escaped = True
+            word_char = True
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escaped = True
+            word_char = True
+            continue
+        if ch in "'\"":
+            out.append(ch)
+            quote = ch
+            word_char = True
+            continue
+        if ch in "();<>|&":
+            if ch == "(":
+                if word_char:
+                    out.append("\\")
+                    word_char = True
+                else:
+                    open_parens += 1
+                    word_char = False
+            elif ch == ")":
+                if open_parens:
+                    open_parens -= 1
+                    word_char = False
+                else:
+                    out.append("\\")
+                    word_char = True
+            else:
+                word_char = False
+            out.append(ch)
+            continue
+        out.append(ch)
+        word_char = ch not in " \t\r\n"
+    return "".join(out)
 
 
 def decompose_check_command(command: str):
@@ -105,17 +322,40 @@ def decompose_check_command(command: str):
     all-``&&`` chain with rc==0 proves every segment passed; a ``;``-chain's
     rc belongs only to the last raw segment.
 
+    Parens glued to word characters (``sorting(asc)``) are argv text, not
+    operators. A subshell wrapping the whole command — ``( cd x && cargo
+    test )`` — runs the inner chain with the chain's own exit status, so it
+    unwraps cleanly and attribution is unchanged.
+
     ``reason`` is set (and segments empty) when the command uses operators
     whose semantics cannot be preserved by independent argv checks: pipes and
-    ``||`` change which exit status matters, ``&``/subshells change the
-    process model, and redirections change the observable.
+    ``||`` change which exit status matters, ``&``/mid-command subshells
+    change the process model, and redirections change the observable.
     """
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(
+            _escape_word_parens(command), posix=True, punctuation_chars=True
+        )
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
         return None, (), False, "unparseable_shell_command"
+    # Unwrap subshells that enclose the entire command. Parens surviving in
+    # any other position stay operator tokens and are rejected below.
+    while len(tokens) > 1 and tokens[0] == "(":
+        depth = 0
+        close = None
+        for index, token in enumerate(tokens):
+            if token == "(":
+                depth += 1
+            elif token == ")":
+                depth -= 1
+                if depth == 0:
+                    close = index
+                    break
+        if close != len(tokens) - 1:
+            break
+        tokens = tokens[1:close]
     raw_segments: list[list[str]] = []
     separators: list[str] = []
     current: list[str] = []

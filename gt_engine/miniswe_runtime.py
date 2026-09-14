@@ -1919,12 +1919,20 @@ def install_runtime_hooks(
                     adapter.observe_plan_checks(command, result, pre_snapshot, post_snapshot, environment)
                 adapter.note_search_drift(command)
                 churn_signal = adapter.churn_governor.observe(
-                    command, productive=bool(changed_files)
+                    command,
+                    productive=bool(changed_files),
+                    returncode=returncode,
                 )
                 if churn_signal == "steer":
                     adapter.queue_churn_steer(
                         adapter.build_churn_steer(
                             adapter.churn_governor.stall_turns
+                        )
+                    )
+                elif churn_signal == "verify_steer":
+                    adapter.queue_churn_steer(
+                        adapter.build_verify_steer(
+                            adapter.churn_governor.verify_fail_streak
                         )
                     )
                 elif churn_signal == "abort":

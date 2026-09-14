@@ -299,6 +299,77 @@ def test_inserted_edge_with_diverged_target_refuses(tmp_path):
     assert result.skipped_diverged >= 1
 
 
+def test_inserted_row_already_live_verbatim_does_not_crash(tmp_path):
+    """Smoke20 bandit-taint: lsp_salvage failed IntegrityError UNIQUE
+    constraint failed: edges.id (x2). A sibling salvage published the same
+    lineage row while this candidate was in flight - live already holds the
+    identical row at the same id. The merge must treat it as already applied,
+    not INSERT it again."""
+    base, cand, live = _three_graphs(tmp_path)
+    with closing(sqlite3.connect(live)) as db:
+        # The sibling salvage landed the identical edge the candidate adds.
+        db.execute(
+            "INSERT INTO edges (id,source_id,target_id,type,source_file,"
+            "source_line,resolution_method,confidence,derivation_kind,"
+            "callsite_stable_id) VALUES (10,4,3,'SELECTED_TARGET','clean.py',"
+            "5,'lsp',0.99,'lsp','cs:4')"
+        )
+        db.commit()
+    out = tmp_path / "merged.db"
+    result = merge_lsp_candidate(
+        base_graph=base, candidate_graph=cand, live_graph=live,
+        out_path=out, stale_paths={"stale.py"},
+    )
+    # The row is live verbatim - one edge total, no duplicate.
+    assert _rows(out, "SELECT source_id,target_id,resolution_method FROM edges"
+                      " WHERE id=10") == [(4, 3, "lsp")]
+    assert _rows(out, "SELECT COUNT(*) FROM edges WHERE id=10") == [(1,)]
+
+
+def test_remapped_insert_id_is_seen_by_later_candidate_rows(tmp_path):
+    """merged_rows is a snapshot taken before the merge. Live holds a
+    different-lineage row at id 13, so the candidate's row 13 remaps to the
+    next free id (14); the candidate's own row 14 then collides with the row
+    the merge itself just placed there."""
+    base, cand, live = _three_graphs(tmp_path)
+    with closing(sqlite3.connect(cand)) as db:
+        db.execute(
+            "INSERT INTO edges (id,source_id,target_id,type,source_file,"
+            "source_line,resolution_method,confidence,derivation_kind,"
+            "callsite_stable_id) VALUES (13,4,3,'SELECTED_TARGET','clean.py',"
+            "5,'lsp',0.99,'lsp','cs:4')"
+        )
+        db.execute(
+            "INSERT INTO edges (id,source_id,target_id,type,source_file,"
+            "source_line,resolution_method,confidence,derivation_kind,"
+            "callsite_stable_id) VALUES (14,4,3,'CALLS','clean.py',"
+            "6,'lsp',0.9,'lsp','cs:4')"
+        )
+        db.commit()
+    with closing(sqlite3.connect(live)) as db:
+        # Same id, different lineage - forces candidate row 13 to remap to 14.
+        db.execute(
+            "INSERT INTO edges (id,source_id,target_id,type,source_file,"
+            "source_line,resolution_method,confidence,derivation_kind,"
+            "callsite_stable_id) VALUES (13,4,3,'CALLS','clean.py',"
+            "6,'import',0.5,'syntax','cs:4')"
+        )
+        db.commit()
+    out = tmp_path / "merged.db"
+    merge_lsp_candidate(
+        base_graph=base, candidate_graph=cand, live_graph=live,
+        out_path=out, stale_paths={"stale.py"},
+    )
+    # The live-lineage row at 13 survives; all candidate rows landed, every
+    # id distinct.
+    assert _rows(out, "SELECT resolution_method FROM edges WHERE id=13") == \
+        [("import",)]
+    assert _rows(out, "SELECT COUNT(*) FROM edges WHERE type='SELECTED_TARGET'"
+                      " AND source_file='clean.py'") == [(2,)]
+    ids = [r[0] for r in _rows(out, "SELECT id FROM edges")]
+    assert len(ids) == len(set(ids))
+
+
 def test_no_mutation_means_no_publish_worthy_delta(tmp_path):
     base = tmp_path / "base.db"
     _build_base(base)

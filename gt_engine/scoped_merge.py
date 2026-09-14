@@ -431,8 +431,13 @@ def _insert_remapped(
             isinstance(explicit, int)
             and not isinstance(explicit, bool)
             and explicit in merged_rows
-            and merged_rows[explicit] != cand_row
         ):
+            if merged_rows[explicit] == cand_row:
+                # Live already holds this exact row - a sibling publish
+                # landed the same lineage while the candidate was in
+                # flight. Inserting it again collides on the id; the
+                # merge's goal (row present) is already met.
+                return int(explicit)
             # The rowid is taken by a row from another lineage. The insert
             # keeps its content and takes a fresh rowid; the insert map
             # records the remap for anything referencing it.
@@ -479,7 +484,16 @@ def _insert_remapped(
             f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
             values,
         )
-    return int(cursor.lastrowid)
+    new_id = int(cursor.lastrowid)
+    # merged_rows was snapshotted before the merge; record the row just
+    # placed so a later candidate row colliding on this id remaps instead
+    # of crashing the merge. The stored tuple carries the id it landed
+    # under, not the candidate's original.
+    stored = list(cand_row)
+    if "id" in columns:
+        stored[columns.index("id")] = new_id
+    merged_rows[new_id] = tuple(stored)
+    return new_id
 
 
 def _mergeable(

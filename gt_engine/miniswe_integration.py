@@ -458,6 +458,23 @@ class MiniSweAdapter(GroundtruthController):
         self._lsp_bases: dict[str, tuple[FrozenBuildInput, GraphBuildArtifact]] = {}
         self._lsp_considered: set[tuple[Any, ...]] = set()
         self._lsp_active: str | None = None
+        # Churn backoff: a leg whose base is superseded before it lands can
+        # never publish (obsolete by construction). When the workspace
+        # re-mints revisions faster than a leg completes, scheduling another
+        # leg just feeds the race - smoke20 bandit-taint burned 15/36 legs
+        # that way while each resident LSP server starved gt_index of
+        # headroom. Consecutive obsolete dispositions defer the next
+        # schedule, doubling to a cap; a leg that keeps up resets it. The
+        # deferral never gates salvage - a finished doomed leg still merges
+        # what it proved.
+        self._lsp_churn_streak = 0
+        self._lsp_churn_defer_until = 0.0
+        # Memory backoff: an index refusal on cgroup headroom means the
+        # container is already pressured - often by a resident LSP server.
+        # Scheduling a fresh ~1GB leg the moment a recovery lands just
+        # starves the next recovery the same way (bandit-taint's 16
+        # consecutive GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT refusals).
+        self._index_memory_defer_until = 0.0
         # Async initial index: the runner starts ensure_index on a worker and
         # hands the future here. The host loop runs immediately; the graph
         # publishes through engine_state when the build lands, or becomes the
@@ -1124,6 +1141,8 @@ class MiniSweAdapter(GroundtruthController):
             else:
                 basis["environment_sha256"] = "unbound"
 
+        if material.get("program"):
+            return self._bind_program_check(material)
         spec = CheckSpec.from_dict(material, self.repo_root)
         known = {row.row_id for row in getattr(self.persistent_plan, "rows", ())}
         if not set(spec.requirement_ids).issubset(known):
@@ -1150,6 +1169,49 @@ class MiniSweAdapter(GroundtruthController):
             "plan_check_bound", test_identity_basis=basis, **spec.as_dict())
         return spec.check_id
 
+    def _bind_program_check(self, material: dict) -> str:
+        """Bind a behavioral-program check: the program text is the spec."""
+        from .persistent_plan.checks import (
+            ProgramCheckSpec,
+            program_command_is_verdict,
+        )
+
+        if not program_command_is_verdict(str(material.get("program") or "")):
+            raise ValueError("program has no assertion verdict")
+        environment = str(material.get("environment_sha256") or getattr(
+            self, "_current_check_environment_sha256", ""))
+        spec = ProgramCheckSpec.from_command(
+            material["program"], material.get("requirement_ids"),
+            environment_sha256=environment,
+        )
+        known = {row.row_id for row in getattr(self.persistent_plan, "rows", ())}
+        if not set(spec.requirement_ids).issubset(known):
+            raise ValueError("check references unknown plan row")
+        specs = getattr(self, "_program_check_specs", {})
+        if spec.check_id in specs:
+            from dataclasses import replace
+
+            spec = replace(spec, requirement_ids=tuple(sorted(
+                set(spec.requirement_ids)
+                | set(specs[spec.check_id].requirement_ids))))
+        specs[spec.check_id] = spec
+        self._program_check_specs = specs
+        pending = getattr(self, "_pending_program_check_ids", set())
+        pending.add(spec.check_id)
+        self._pending_program_check_ids = pending
+        self.store.append(
+            "plan_program_check_bound",
+            test_identity_basis={
+                "program": "verbatim_bound",
+                "environment_sha256": (
+                    "declared" if material.get("environment_sha256")
+                    else "bind_context" if environment else "unbound"
+                ),
+            },
+            **spec.as_dict(),
+        )
+        return spec.check_id
+
     def bind_initial_plan_checks(self) -> None:
         """Bind admissible simple plan checks automatically, without a new tool loop."""
         import shlex
@@ -1161,9 +1223,25 @@ class MiniSweAdapter(GroundtruthController):
         recovered_rows = self._restore_plan_check_definitions()
         if not self.store.startup_journal_valid:
             return
-        from .persistent_plan.checks import CheckSpec, decompose_check_command
+        from .persistent_plan.checks import (
+            CheckSpec,
+            decompose_check_command,
+            program_command_is_verdict,
+        )
 
         grouped: dict[tuple[tuple[str, ...], str], list[str]] = {}
+        programs: dict[str, list[str]] = {}
+
+        def _offer_program(command: str, row_id: str, fallback_reason) -> None:
+            """A shell program binds only when its exit status is a verdict."""
+            if program_command_is_verdict(command):
+                programs.setdefault(command, []).append(row_id)
+            else:
+                self.store.append(
+                    "plan_check_binding_pending", row_id=row_id,
+                    reason=fallback_reason,
+                )
+
         for row in getattr(self.persistent_plan, "rows", ()):
             if not row.verification_command or row.row_id in recovered_rows:
                 continue
@@ -1175,9 +1253,22 @@ class MiniSweAdapter(GroundtruthController):
                 row.verification_command
             )
             if segments is None:
-                self.store.append(
-                    "plan_check_binding_pending", row_id=row.row_id, reason=reason
-                )
+                if reason == "shell_expansion" or (
+                    reason and reason.startswith("unsupported_shell_operator:")
+                    and reason.rsplit(":", 1)[-1] not in {"||", "&"}
+                ):
+                    # The command IS the check - a shell program like fd's
+                    # ``test "$(fd --sort)" = "a.txt"`` whose exit status the
+                    # official verifier reads the same way. ``||``/``&`` make
+                    # that status ambiguous, so they never reach here.
+                    _offer_program(
+                        row.verification_command, row.row_id,
+                        "program_has_no_assertion")
+                else:
+                    self.store.append(
+                        "plan_check_binding_pending", row_id=row.row_id,
+                        reason=reason
+                    )
                 continue
             # Every decomposed segment must be an admissible check on its own —
             # a composite like ``make build && pytest`` cannot drop the build
@@ -1189,15 +1280,17 @@ class MiniSweAdapter(GroundtruthController):
                         {"argv": seg_argv, "requirement_ids": [row.row_id]},
                         self.repo_root,
                     )
-                except ValueError as exc:
-                    self.store.append(
-                        "plan_check_binding_pending",
-                        row_id=row.row_id,
-                        reason=f"non_test_segment:{seg_argv[0]}:{exc}",
-                    )
+                except ValueError:
                     admissible = False
                     break
             if not admissible:
+                # Decomposed cleanly but not test-runner argv (``test``,
+                # ``diff``, ``grep -q`` assertions) - the whole command is a
+                # behavioral program bound verbatim when its exit status is
+                # an assertion; otherwise it honestly stays pending.
+                _offer_program(
+                    row.verification_command, row.row_id,
+                    "program_has_no_assertion")
                 continue
             for seg_argv, seg_cwd in segments:
                 grouped.setdefault((tuple(seg_argv), seg_cwd or "."), []).append(row.row_id)
@@ -1208,6 +1301,14 @@ class MiniSweAdapter(GroundtruthController):
                 )
             except ValueError as exc:
                 self.store.append("plan_check_binding_pending", row_ids=row_ids, reason=str(exc))
+        for program, row_ids in programs.items():
+            try:
+                self._bind_program_check(
+                    {"program": program, "requirement_ids": row_ids}
+                )
+            except ValueError as exc:
+                self.store.append("plan_check_binding_pending", row_ids=row_ids,
+                                  reason=f"program_bind:{exc}")
 
     def _restore_plan_check_definitions(self) -> set[str]:
         """Recover validated definitions once; historical results confer no proof."""
@@ -1222,6 +1323,7 @@ class MiniSweAdapter(GroundtruthController):
         known = {row.row_id for row in getattr(self.persistent_plan, "rows", ())}
         specs = {}
         touched = set()
+        program_specs: dict[str, Any] = {}
         for event in self.store.startup_plan_events:
             if event["event"] == "plan_check_bound":
                 try:
@@ -1231,6 +1333,22 @@ class MiniSweAdapter(GroundtruthController):
                     specs[spec.check_id] = spec
                     touched.update(spec.requirement_ids)
                 except (ValueError, TypeError) as exc:
+                    self.store.append("plan_check_restore_rejected", reason=str(exc))
+            elif event["event"] == "plan_program_check_bound":
+                try:
+                    from .persistent_plan.checks import ProgramCheckSpec
+
+                    spec = ProgramCheckSpec.from_command(
+                        event["program"], event.get("requirement_ids"),
+                        environment_sha256=event.get("environment_sha256", ""),
+                    )
+                    if spec.check_id != event.get("check_id"):
+                        raise ValueError("check identity mismatch")
+                    if not set(spec.requirement_ids).issubset(known):
+                        raise ValueError("unknown_plan_row")
+                    program_specs[spec.check_id] = spec
+                    touched.update(spec.requirement_ids)
+                except (ValueError, TypeError, KeyError) as exc:
                     self.store.append("plan_check_restore_rejected", reason=str(exc))
             else:
                 if event["event"] == "plan_revision_applied" and event.get("operation") == "revise":
@@ -1242,6 +1360,10 @@ class MiniSweAdapter(GroundtruthController):
                     specs = {key: replace(spec, requirement_ids=tuple(
                         identity for identity in spec.requirement_ids if identity != row_id
                     )) for key, spec in specs.items()
+                        if any(identity != row_id for identity in spec.requirement_ids)}
+                    program_specs = {key: replace(spec, requirement_ids=tuple(
+                        identity for identity in spec.requirement_ids if identity != row_id
+                    )) for key, spec in program_specs.items()
                         if any(identity != row_id for identity in spec.requirement_ids)}
         if specs:
             snapshot = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
@@ -1256,6 +1378,20 @@ class MiniSweAdapter(GroundtruthController):
                 self.store.append("plan_check_restored", check_id=key, evidence_state="UNVERIFIED")
             self._check_specs = restored
             self._pending_check_ids = pending
+        if program_specs:
+            # The program text is the identity - no source digest to reverify.
+            # Restored checks go pending so the drain re-executes them under
+            # the current environment rather than trusting a stale verdict.
+            restored = getattr(self, "_program_check_specs", {})
+            pending = getattr(self, "_pending_program_check_ids", set())
+            for key, spec in program_specs.items():
+                restored[key] = spec
+                pending.add(key)
+                self.store.append("plan_check_restored", check_id=key,
+                                  evidence_state="UNVERIFIED",
+                                  binding_basis="program_spec")
+            self._program_check_specs = restored
+            self._pending_program_check_ids = pending
         return touched
 
     @staticmethod
@@ -1619,6 +1755,72 @@ class MiniSweAdapter(GroundtruthController):
                 )
             pending.discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
+        # Behavioral program checks drain verbatim through the same isolation
+        # boundary - the program text is the spec, exit status the verdict.
+        for check_id in sorted(tuple(
+                getattr(self, "_pending_program_check_ids", set()))):
+            remaining = deadline - time.monotonic()
+            if remaining < 1:
+                break
+            spec = self._program_check_specs[check_id]
+            if not callable(getattr(environment, "execution_env", None)):
+                break
+            before = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+            self.record_repository_snapshot(before, boundary="before_auto_check")
+            result = None
+            try:
+                result = environment.execute(
+                    {"command": spec.program},
+                    cwd=self.repo_root,
+                    timeout=max(1, int(min(remaining, self.REVERIFY_COMMAND_TIMEOUT_SECONDS))),
+                )
+            except Exception as exc:  # an automatic check cannot submit the task
+                self.store.append("plan_check_execution_failed", check_id=check_id,
+                                  error_type=type(exc).__name__)
+            finally:
+                after = capture_workspace(self.repo_root, excluded_roots=(self.store.root,))
+                transaction = diff_workspace(before, after, action_id=self.global_action,
+                                             command=spec.program)
+                self.record_repository_snapshot(after, boundary="after_auto_check")
+                self.record_edit_transaction(transaction)
+                if transaction.changes:
+                    if self.phase != "IMPLEMENT":
+                        self.begin_implement()
+                    self.note_edit(transaction.changed_paths)
+                self._automatic_check_generation = getattr(self, "_automatic_check_generation", 0) + 1
+            if result is None:
+                getattr(self, "_pending_program_check_ids", set()).discard(check_id)
+                continue
+            extra = result.get("extra") or {}
+            self._current_check_environment_sha256 = str(extra.get("environment_sha256", ""))
+            reference = extra.get("output_artifact")
+            output = (environment.evidence_store.bytes(reference["sha256"]).decode("utf-8", "replace")
+                      if reference else str(result.get("output", "")))
+            from .persistent_plan.checks import classify_program_check
+            from .runtime_observation import program_execution_evidence
+
+            execution = program_execution_evidence(
+                command=spec.program, output=output,
+                returncode=result.get("returncode"),
+                action_id=self.global_action, repository_revision=after.revision,
+                timed_out=bool(extra.get("timed_out")),
+                environment_sha256=str(extra.get("environment_sha256", "")),
+            )
+            observation = classify_program_check(
+                spec, execution, before_revision=before.revision,
+                after_revision=after.revision,
+                capture_complete=(extra.get("capture_complete") is True
+                                  and before.complete and after.complete),
+            )
+            observations = getattr(self, "_plan_check_observations", {})
+            observations[check_id] = observation
+            self._plan_check_observations = observations
+            if observation.state == "CHECK_PASSED":
+                self._record_check_pass_receipts(
+                    spec, result.get("returncode"), output
+                )
+            getattr(self, "_pending_program_check_ids", set()).discard(check_id)
+            self.store.append("plan_check_observed", **asdict(observation))
         self.publish_plan_state()
 
     def _record_check_pass_receipts(
@@ -1774,8 +1976,12 @@ class MiniSweAdapter(GroundtruthController):
                 and process["source_revision"] == self.repository_revision):
             return process["state"]
         observations = getattr(self, "_plan_check_observations", {})
-        bound = [key for key, spec in getattr(self, "_check_specs", {}).items()
-                 if row_id in spec.requirement_ids]
+        bound = [
+            key
+            for key, spec in list(getattr(self, "_check_specs", {}).items())
+            + list(getattr(self, "_program_check_specs", {}).items())
+            if row_id in spec.requirement_ids
+        ]
         states = [observations[key].state for key in bound if key in observations
                   and observations[key].source_revision == self.repository_revision
                   and observations[key].environment_sha256 == getattr(
@@ -1866,6 +2072,42 @@ class MiniSweAdapter(GroundtruthController):
                 )
             if observation.state in {"CHECK_PASSED", "CHECK_FAILED"}:
                 getattr(self, "_pending_check_ids", set()).discard(check_id)
+            self.store.append("plan_check_observed", **asdict(observation))
+            observed = True
+        # A bound behavioral program discharges when the agent runs its exact
+        # text - verbatim identity, same revision+environment binding.
+        for check_id, spec in tuple(
+                getattr(self, "_program_check_specs", {}).items()):
+            if command.strip() != spec.program:
+                continue
+            reference = extra.get("output_artifact")
+            output = (environment.evidence_store.bytes(reference["sha256"]).decode("utf-8", "replace")
+                      if reference else str(result.get("output", "")))
+            from .persistent_plan.checks import classify_program_check
+            from .runtime_observation import program_execution_evidence
+
+            execution = program_execution_evidence(
+                command=spec.program, output=output,
+                returncode=result.get("returncode"),
+                action_id=self.global_action, repository_revision=after.revision,
+                timed_out=bool(extra.get("timed_out")),
+                environment_sha256=str(extra.get("environment_sha256", "")),
+            )
+            observation = classify_program_check(
+                spec, execution, before_revision=before.revision,
+                after_revision=after.revision,
+                capture_complete=(extra.get("capture_complete") is True
+                                  and before.complete and after.complete),
+            )
+            observations = getattr(self, "_plan_check_observations", {})
+            observations[check_id] = observation
+            self._plan_check_observations = observations
+            if observation.state == "CHECK_PASSED":
+                self._record_check_pass_receipts(
+                    spec, result.get("returncode"), output
+                )
+            if observation.state in {"CHECK_PASSED", "CHECK_FAILED"}:
+                getattr(self, "_pending_program_check_ids", set()).discard(check_id)
             self.store.append("plan_check_observed", **asdict(observation))
             observed = True
         if observed:
@@ -2521,6 +2763,7 @@ class MiniSweAdapter(GroundtruthController):
                     error=str(getattr(receipt, "error_diagnostic", "") or "")[:300],
                     phase="initial_index",
                 )
+                self._note_index_memory_pressure(receipt)
             else:
                 adopted = self.engine_state.publish_graph(
                     graph_path=receipt.graph_db,
@@ -2833,6 +3076,7 @@ class MiniSweAdapter(GroundtruthController):
         if phase:
             row["phase"] = phase
         self.store.append(event, **row)
+        self._note_index_memory_pressure(receipt)
         self._reclaim_produced_graph(
             str(receipt.graph_db or ""), success=bool(receipt.success),
             adopted=adopted,
@@ -2906,6 +3150,8 @@ class MiniSweAdapter(GroundtruthController):
             not self.engine_state.graph_current
             or self._lsp_active is not None
             or self._latest_workspace_snapshot is None
+            or self._lsp_churn_defer_until > time.monotonic()
+            or self._index_memory_defer_until > time.monotonic()
         ):
             return
         try:
@@ -2988,6 +3234,7 @@ class MiniSweAdapter(GroundtruthController):
             if self._lsp_active == task_id:
                 self._lsp_active = None
             disposition = self._lsp_terminal_disposition(request, base, terminal)
+            self._note_lsp_churn_outcome(disposition)
             self._record_lsp_terminal(request, base, terminal, disposition)
             if disposition != "published":
                 self._discard_lsp_candidate(terminal)
@@ -3040,6 +3287,74 @@ class MiniSweAdapter(GroundtruthController):
         ):
             return "obsolete_after_certification"
         return "published"
+
+    #: A leg that outlived its base by these margins cannot win the next one
+    #: either - the defer window starts near observed cold-leg latency and
+    #: doubles while the workspace keeps churning under it.
+    _LSP_CHURN_DEFER_INITIAL_S = 60.0
+    _LSP_CHURN_DEFER_MAX_S = 300.0
+    _LSP_CHURN_OBSOLETE = frozenset({
+        "obsolete", "obsolete_after_certification",
+    })
+    _LSP_CHURN_KEPT_UP = frozenset({"published", "no_edge_mutations"})
+
+    def _note_lsp_churn_outcome(self, disposition: str) -> None:
+        """Adapt the promotion schedule to the observed revision churn rate.
+
+        ``obsolete``/``obsolete_after_certification`` are the two typed
+        proofs the leg's base died mid-flight; each consecutive loss widens
+        the defer window. ``published`` and ``no_edge_mutations`` prove the
+        base survived a whole leg - the race is winnable again, so the
+        streak resets. Every other disposition is producer-side evidence,
+        not a race outcome, and leaves the window alone.
+        """
+        if disposition in self._LSP_CHURN_OBSOLETE:
+            self._lsp_churn_streak += 1
+            defer = min(
+                self._LSP_CHURN_DEFER_INITIAL_S
+                * (2 ** (self._lsp_churn_streak - 1)),
+                self._LSP_CHURN_DEFER_MAX_S,
+            )
+            self._lsp_churn_defer_until = time.monotonic() + defer
+            self.store.append(
+                "lsp_churn_backoff",
+                streak=self._lsp_churn_streak,
+                defer_seconds=defer,
+                disposition=disposition,
+            )
+        elif disposition in self._LSP_CHURN_KEPT_UP:
+            self._lsp_churn_streak = 0
+            self._lsp_churn_defer_until = 0.0
+
+    #: The cgroup memory-pressure family: pre-launch headroom refusal,
+    #: in-flight guard kill, and an OOM-attributed exit. A bounded defer
+    #: window keeps the next promotion leg off the cgroup while whatever
+    #: pressured it drains.
+    _INDEX_MEMORY_DEFER_S = 120.0
+    _INDEX_MEMORY_ERRORS = frozenset({
+        "GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT",
+        "GT_INDEX_MEMORY_GUARD_TRIGGERED",
+        "GT_INDEX_CGROUP_OOM",
+    })
+
+    def _note_index_memory_pressure(self, receipt: Any) -> None:
+        """Defer LSP scheduling after a memory-family index outcome.
+
+        Successful receipts carry an empty error_type and no-op here; the
+        window is set only by a typed memory refusal, never by a generic
+        build failure.
+        """
+        error_type = str(getattr(receipt, "error_type", "") or "")
+        if error_type not in self._INDEX_MEMORY_ERRORS:
+            return
+        self._index_memory_defer_until = (
+            time.monotonic() + self._INDEX_MEMORY_DEFER_S
+        )
+        self.store.append(
+            "lsp_memory_backoff",
+            error_type=error_type,
+            defer_seconds=self._INDEX_MEMORY_DEFER_S,
+        )
 
     @staticmethod
     def _discard_lsp_candidate(terminal: Mapping[str, Any]) -> None:
@@ -5329,6 +5644,45 @@ class MiniSweAdapter(GroundtruthController):
                     "the project's checks."
                 )
         lines.append("Continued churn terminates this run.")
+        return "\n".join(lines)
+
+    def build_verify_steer(self, streak: int) -> str:
+        """Render a convergence steer for a failing-verification streak.
+
+        Smoke20 pest/bandit-taint/testem-pl burned 2-6x tokens in edit->test
+        loops where every check failed and nothing steered. The steer does
+        not threaten termination - the agent is working - it redirects the
+        loop toward the contract the checks keep failing against. Only text
+        the model can act on; no internal ids or digests.
+        """
+        lines = [
+            "GT_VERIFY_STEER: your last "
+            f"{streak} verification runs all failed. The loop is not "
+            "converging - stop iterating on the same approach.",
+            "Re-read the task requirements and confirm you are running the "
+            "checks the task actually grades, not a substitute harness. "
+            "Then change the approach: fix the contract, not just the code.",
+        ]
+        unmet = self.unmet_plan_rows()
+        plan = self.persistent_plan
+        row = None
+        if plan is not None and unmet:
+            row = next(
+                (item for item in plan.rows if item.row_id in unmet), None
+            )
+        if row is not None:
+            lines.append(
+                f"Next unverified requirement: {row.text.strip()[:180]}"
+            )
+            if row.verification_command:
+                lines.append(
+                    f"Prove it with: `{row.verification_command}`"
+                )
+        else:
+            lines.append(
+                "If every project check passes but the task is not done, "
+                "you are verifying the wrong contract - find the graded one."
+            )
         return "\n".join(lines)
 
     def prepare_churn_steer_delivery(self) -> str:

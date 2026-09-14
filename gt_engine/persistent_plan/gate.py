@@ -136,10 +136,22 @@ def decide(
     # contradict it because it never said anything else either. It is proven
     # only when the row ledger says every row verified -- and a regression is
     # evidence against completion even when every plan row passed.
+    # Smoke20 (run 34801009507, bandit-interprocedural-taint-checks) showed the
+    # third leg the receipt needs: the gate refused twice, the agent proved
+    # every row, completion_proven read true -- and the verifier failed the
+    # submission. The baseline was ``no_tests_observed``, so the bound checks
+    # were ambient checks, never the graded fail-to-pass suite. Rows verified
+    # against a baseline that cannot see the grading signal are verification
+    # against a proxy, not proof of the contract -- the receipt must say so.
+    _baseline_blind = baseline_status in {
+        "no_tests_observed", "probe_failed", "spawn_failed",
+        "unavailable", "budget_not_checked", "",
+    }
     completion_proven = (
         bool(row_ids)
         and all(states.get(key) in verified_states for key in row_ids)
         and not regressions
+        and not _baseline_blind
     )
     common = {
         "remaining_seconds": remaining_seconds,

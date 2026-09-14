@@ -722,8 +722,13 @@ jobs:
           # stays on column zero inside this YAML block.
           printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
             "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "pyright/langserver.index.js" > "$lsp_bin/pyright-langserver"
-          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" --tsserver-path "%s/servers/node_modules/typescript/lib/tsserver.js" "$@"\n' \
-            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" "/installed-agent/lsp-bin/node-runtime" > "$lsp_bin/typescript-language-server"
+          # typescript-language-server@6.0.0 rejects --tsserver-path (run
+          # 34801009507's LSP receipt: "error: unknown option
+          # '--tsserver-path'"); it resolves the staged typescript package
+          # itself through node_modules walk-up from its own lib/ directory,
+          # which is exactly the layout the file assertions below pin.
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" > "$lsp_bin/typescript-language-server"
           chmod 755 "$lsp_bin/pyright-langserver" "$lsp_bin/typescript-language-server"
 
           # npm writes node_modules/.bin symlinks regardless of the shims
@@ -738,7 +743,29 @@ jobs:
           test -x "$node_root/bin/node"
           test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
           test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
+          # The tsserver bundle the staged typescript package ships:
+          # typescript@7 packages are the native tsgo/API layout and carry no
+          # lib/tsserver.js - exactly the install-missing failure this staging
+          # exists to prevent. TLS 6.0.0 finds it through node_modules
+          # walk-up; there is no CLI flag to point at it.
           test -f "$node_root/servers/node_modules/typescript/lib/tsserver.js"
+
+          # File existence cannot see a server that launches and dies before
+          # its first message - which is exactly what --tsserver-path did to
+          # every JS/TS leg in run 34801009507 while staging stayed green.
+          # Render the exact staged shim with host paths substituted, launch
+          # it with the real --stdio argument, and require one bounded LSP
+          # initialize handshake per npm-served server before the manifest is
+          # recorded. A server that cannot initialize fails staging here,
+          # before a paid task discovers it.
+          "$node_root/bin/node" scripts/lsp_initialize_probe.mjs \
+            --shim "$lsp_bin/typescript-language-server" \
+            --prefix-map "/installed-agent/lsp-bin=$lsp_bin" \
+            --timeout-ms 30000 --probe-name typescript-language-server -- --stdio
+          "$node_root/bin/node" scripts/lsp_initialize_probe.mjs \
+            --shim "$lsp_bin/pyright-langserver" \
+            --prefix-map "/installed-agent/lsp-bin=$lsp_bin" \
+            --timeout-ms 30000 --probe-name pyright-langserver -- --stdio
 
           # Record the staged tree. verify_lsp_assets opens
           # $lsp_bin/manifest.json unconditionally, so without this the agent
@@ -772,25 +799,34 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           set -euo pipefail
-          # Mid-run observability: emit a compact run-status.md from the live
-          # journal every 2 minutes and upload it as a uniquely-named artifact.
-          # v4 artifacts are downloadable while the job is still running, which
-          # lets us inspect progress without waiting for job completion.
+          # Mid-run observability: emit a compact run-status snapshot from the
+          # live journal every 2 minutes. Snapshots are written INSIDE
+          # results/deepswe so they ship in the task artifact even when the
+          # transient upload path fails; the twirp upload is still attempted
+          # for live visibility, with failures captured in upload-errors.log.
+          # Observability must never alter outcomes, so both steps stay
+          # non-fatal.
+          mkdir -p results/deepswe/run-status
           (
             STATUS_SEQ=0
             while true; do
               sleep 120
               STATUS_SEQ=$((STATUS_SEQ + 1))
+              STATUS_FILE="results/deepswe/run-status/run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}.md"
               python scripts/emit_run_status.py \
                 --root results/deepswe \
                 --task "$TASK" \
                 --run-id "$GITHUB_RUN_ID" \
-                --output run-status.md \
+                --output "$STATUS_FILE" \
                 --budget-seconds "${{ matrix.time_budget_seconds }}" \
-                --stdout-log pier-stdout.log || echo "::warning::run-status emit failed (non-fatal)"
+                --stdout-log pier-stdout.log \
+                2>> results/deepswe/run-status/emit-errors.log \
+                || echo "emit failed seq=${STATUS_SEQ}" >> results/deepswe/run-status/emit-errors.log
               python scripts/upload_transient_artifact.py \
-                --file run-status.md \
-                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" || echo "::warning::transient artifact upload failed (non-fatal)"
+                --file "$STATUS_FILE" \
+                --name "run-status-${GITHUB_RUN_ID}-${TASK}-${STATUS_SEQ}" \
+                2>> results/deepswe/run-status/upload-errors.log \
+                || echo "upload failed seq=${STATUS_SEQ}" >> results/deepswe/run-status/upload-errors.log
             done
           ) &
           MONITOR_PID=$!
@@ -816,16 +852,69 @@ jobs:
           set -e
           kill "$MONITOR_PID" 2>/dev/null || :
           wait "$MONITOR_PID" 2>/dev/null || :
-          exit "$pier_status"
+          # A nonzero pier exit - including the artifact-collection crash that
+          # ended smoke20's boa/fd legs - is a trial outcome, not a job
+          # failure. Recording it inside the evidence root keeps the exit code
+          # as typed input to the bind and diagnostics steps that follow;
+          # failing the step here is what turned a provider failure into a
+          # crashed matrix leg with no receipts. The leg still fails later if
+          # the evidence path itself cannot be produced.
+          mkdir -p results/deepswe
+          printf '{"schema":"gt.pier_run_exit.v1","task_id":"%s","exit_code":%d,"job_name":"deepswe-gt-harness-%s-%s"}\n' \
+            "$TASK" "$pier_status" "$GITHUB_RUN_ID" "$TASK" > results/deepswe/pier-run.json
+          cp pier-stdout.log results/deepswe/pier-stdout.log 2>/dev/null || :
+          if [ "$pier_status" -ne 0 ]; then
+            echo "::warning::pier run exited $pier_status for $TASK; preserving typed ERROR evidence rather than failing the task job"
+          fi
+          exit 0
 
       - name: Bind the Pier reward to the canonical product receipt
         if: always()
         run: |
+          set -uo pipefail
+          # standardize_benchmark_result returns 1 whenever the emitted
+          # receipt is a typed ERROR - provider failure, governor abort,
+          # missing verifier, missing result. That exit code is the typed
+          # outcome, not a construction failure: the receipt file is the
+          # deliverable, and a leg that produced one must not mark the task
+          # job failed (run 34801009507: two typed-error legs turned the
+          # whole matrix job red). Fail only when NO receipt exists at all -
+          # the one state that is genuine evidence loss.
+          bind_status=0
           python -m scripts.standardize_benchmark_result \
             --root results/deepswe \
             --suite deepswe \
             --task-id "$TASK" \
-            --source-sha "${{ needs.plan.outputs.source_sha }}"
+            --source-sha "${{ needs.plan.outputs.source_sha }}" || bind_status=$?
+          if ! find results/deepswe -path '*/agent/official-verifier-result.json' -print -quit | grep -q .; then
+            echo "::error::official-verifier bind produced no receipt for $TASK (status=$bind_status)"
+            exit 1
+          fi
+          if [ "$bind_status" -ne 0 ]; then
+            echo "::notice::bind emitted a typed ERROR receipt for $TASK (status=$bind_status); reward stays null"
+          fi
+          exit 0
+
+      - name: Emit honest task diagnostics for every outcome
+        if: always()
+        run: |
+          set -euo pipefail
+          # The in-container DiagnosticJournal.seal only runs when the agent
+          # session reaches its close path. Provider failures, governor
+          # aborts, and runner crashes die before it, and even a solved task
+          # can lose the trio to a partial export - run 34801009507 shipped 8
+          # of 20 tasks (including solved abs-stepped-slices) with no
+          # diagnostics, which the strict attestation then reports as missing
+          # evidence. This step guarantees diagnostics.json +
+          # diagnostics.txt + incident-replay.json for every outcome: it
+          # repairs missing siblings of a real sealed document
+          # deterministically, or synthesizes an honest document whose
+          # capabilities are all UNEXERCISED and whose events restate only
+          # the typed receipt. It never writes a reward, a patch, or a
+          # capability claim the evidence does not support.
+          python -m scripts.emit_task_diagnostics \
+            --root results/deepswe \
+            --task-id "$TASK"
 
       - name: Normalize task evidence ownership for archival
         if: always()

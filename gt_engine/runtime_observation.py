@@ -433,6 +433,48 @@ def compile_execution_evidence(
     )
 
 
+def program_execution_evidence(
+    *,
+    command: str,
+    output: str,
+    returncode: int | None,
+    action_id: int,
+    repository_revision: str,
+    timed_out: bool = False,
+    environment_sha256: str = "",
+) -> ExecutionEvidence:
+    """Evidence for a bound behavioral-program check.
+
+    ``compile_execution_evidence`` returns None for commands that are neither
+    test nor build kind - which is exactly what a program check is (``test
+    "$(fd --sort)" = "a"``). The exit status is the assertion contract, so the
+    outcome derives from it directly under the same timeout/interruption
+    guards the test path applies.
+    """
+    if timed_out:
+        outcome = "timeout"
+    elif returncode is None:
+        outcome = "unknown"
+    elif returncode < 0:
+        outcome = "interrupted"
+    elif returncode == 0:
+        outcome = "pass"
+    else:
+        outcome = "fail"
+    return ExecutionEvidence(
+        action_id=action_id,
+        kind="program",
+        protocol="shell",
+        outcome=outcome,
+        command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest(),
+        returncode=returncode,
+        repository_revision=repository_revision,
+        raw_output=str(output or "").encode("utf-8"),
+        environment_sha256=environment_sha256,
+        timed_out=bool(timed_out),
+    )
+
+
 def _execution_outcome_guard(command: str, returncode: int | None, *, kind: str) -> str:
     if returncode is None:
         return "unknown"

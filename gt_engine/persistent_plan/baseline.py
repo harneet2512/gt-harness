@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 # The capture is a fraction of the run, never a phase of it. Measured runtimes
@@ -212,20 +213,71 @@ def identity_paths_for(names: Iterable[str], known_paths: Iterable[str] = ()) ->
     known = {str(path).replace("\\", "/") for path in known_paths}
     found: set[str] = set()
     for name in names:
-        candidate = str(name or "").split("::", 1)[0].replace("\\", "/").strip()
-        while candidate.startswith("./"):
-            candidate = candidate[2:]
-        if not candidate:
+        raw = str(name or "").replace("\\", "/").strip()
+        while raw.startswith("./"):
+            raw = raw[2:]
+        if not raw:
             continue
-        if "/" in candidate or candidate.endswith((".py", ".js", ".ts", ".go", ".rb", ".php")):
+        first_seg = raw.split("::", 1)[0]
+        if "::" in raw and not first_seg.endswith(
+            (".py", ".js", ".ts", ".go", ".rb", ".php", ".rs", ".cs")
+        ) and "/" not in first_seg:
+            # Rust-style module path `a::b::test` — the test lives in the crate
+            # tree under src/ or tests/, so offer every plausible resolution
+            # and keep only paths the snapshot actually carries. Pytest
+            # nodeids (`tests/test_x.py::test_y`) end the first segment in a
+            # file extension and never reach this branch.
+            module = raw.rsplit("::", 1)[0]
+            rel = module.replace("::", "/")
+            for candidate in (
+                f"{rel}.rs", f"src/{rel}.rs", f"tests/{rel}.rs",
+                f"{rel}/mod.rs", f"src/{rel}/mod.rs", f"tests/{rel}/mod.rs",
+                "src/lib.rs", "src/main.rs",
+            ):
+                if candidate in known:
+                    found.add(candidate)
+                    break
+            continue
+        candidate = raw.split("::", 1)[0]
+        if "/" in candidate or candidate.endswith((".py", ".js", ".ts", ".go", ".rb", ".php", ".rs", ".cs")):
             found.add(candidate)
             continue
+        if re.fullmatch(r"[A-Za-z_]\w*", candidate):
+            # A bare snake/ident name — cargo prints `test sorting_test ... ok`
+            # for a fn at the crate root of tests/sorting_test.rs. Only paths
+            # the snapshot carries count; an unresolvable name stays name-only.
+            for path in (
+                f"tests/{candidate}.rs", f"tests/{candidate}/mod.rs",
+                f"src/{candidate}.rs", f"{candidate}.rs",
+            ):
+                if path in known:
+                    found.add(path)
+                    break
+            else:
+                # test module `mod sorting_test {}` inside the crate root.
+                for path in ("src/lib.rs", "src/main.rs"):
+                    if path in known:
+                        found.add(path)
+                        break
         parts = candidate.split(".")
         for stop in range(len(parts), 0, -1):
             module = "/".join(parts[:stop]) + ".py"
             if module in known:
                 found.add(module)
                 break
+        else:
+            # dotnet fully-qualified `Ns.Class.Test` — the file is the class
+            # name: scan every shortening prefix for a matching .cs path.
+            for stop in range(len(parts) - 1, 0, -1):
+                leaf = "/".join(parts[1:stop + 1]) + ".cs"
+                if leaf in known:
+                    found.add(leaf)
+                    break
+                basename = parts[stop] + ".cs"
+                hits = [p for p in known if p.rsplit("/", 1)[-1] == basename]
+                if hits:
+                    found.update(hits)
+                    break
     return tuple(sorted(found))
 
 
@@ -379,12 +431,23 @@ def run_baseline(
         # that had no covering test silently lost its check as well. A
         # low-confidence guess that cannot even spawn is worth one retry
         # through this interpreter before giving up.
-        fallback = (sys.executable, "-m", "pytest")
+        fallback = _repo_python_argv(child_env)
         if tuple(command) != fallback and basis != "interpreter_fallback":
-            return run_baseline(
+            result = run_baseline(
                 repo_root, budget_seconds=budget_seconds, command=fallback,
                 basis="interpreter_fallback", confidence="low",
                 execution_env=child_env,
+            )
+            # The fallback overwrites `command`; without provenance the
+            # journal can never show what discovery actually found
+            # (smoke20 bandit-taint: tox superseded by a pytest fallback
+            # that then could not spawn a pytest either).
+            return replace(
+                result,
+                detail=(
+                    f"superseded:{shlex.join(command)}"
+                    + (f";{result.detail}" if result.detail else "")
+                ),
             )
         return BaselineResult(
             status="spawn_failed", command=tuple(command), basis=basis,
@@ -439,6 +502,24 @@ def run_baseline(
         config_sha256=_grouped_digest(after, _CONFIG_BASENAMES),
         dependency_sha256=_grouped_digest(after, _DEPENDENCY_BASENAMES),
     )
+
+
+def _repo_python_argv(child_env: dict[str, str]) -> tuple[str, ...]:
+    """The repo environment's interpreter for the spawn-failure retry.
+
+    ``sys.executable`` is the harness's own interpreter - the nano-harness
+    uv-tool venv, guaranteed dependency-poor (no pytest). Smoke20
+    bandit-taint's baseline fell back to it and could never observe a test:
+    ``No module named pytest`` -> ``no_tests_observed`` -> ambient-proxy
+    verification. Prefer the python the task environment resolves on its
+    own PATH; the harness interpreter is the last resort, not the first.
+    """
+    path = child_env.get("PATH")
+    for name in ("python3", "python"):
+        resolved = shutil.which(name, path=path) if path else shutil.which(name)
+        if resolved and Path(resolved).resolve() != Path(sys.executable).resolve():
+            return (resolved, "-m", "pytest")
+    return (sys.executable, "-m", "pytest")
 
 
 def compare_to_baseline(

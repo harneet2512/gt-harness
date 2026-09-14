@@ -1,99 +1,102 @@
+"""Capability-coverage enforcement.
+
+Run 34801009507 proved the failure mode of the whole project: defect classes
+reached a paid run because no offline check owned them. This matrix is the
+ledger - every GT capability, every observed failure mode, and the test
+surface that covers it. A failure mode with no covering test is a readiness
+blocker unless it is explicitly classified (``open`` with a reason, or
+``known-issue``); an unlisted defect class can never silently ship because
+adding it to the matrix is the only way to describe it.
+
+The test enforces the ledger, not the fixes: entries marked ``open`` fail the
+readiness gate only when someone asserts readiness; per-mode coverage must
+always name real files so the matrix cannot rot into fiction.
+"""
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from gt_engine.graph_context import (
-    GITNEXUS_PINNED_REVISION,
-    build_capability_matrix,
-    load_capability_matrix,
-    persist_capability_matrix,
-    verify_capability_matrix,
+ROOT = Path(__file__).resolve().parents[1]
+MATRIX = json.loads(
+    (ROOT / "tests" / "fixtures" / "capability_matrix.json").read_text(
+        encoding="utf-8"
+    )
 )
 
-GT_REVISION = "e56c7ef17eaffee36c80ff4dde4f0cd3991c4dcd"
-GITNEXUS_ROOT = Path(os.environ["GT_GITNEXUS_ROOT"]) if os.environ.get("GT_GITNEXUS_ROOT") else None
-GT_ROOT = Path(__file__).parents[1]
+# Statuses that mean "this mode has an owned test surface" - they must name
+# covering tests. Anything else is an open/in-flight status and must carry a
+# reason so the readiness gate knows what blocks it.
+_TESTED_STATUSES = {"covered", "fixed", "covered-by-design"}
+_OPEN_STATUSES = {
+    "open", "known-issue", "fixing", "investigating", "diagnosing", "partial",
+}
 
 
-def _pinned_roots() -> dict[str, Path]:
-    if GITNEXUS_ROOT is None or not GITNEXUS_ROOT.is_dir():
-        pytest.skip("set GT_GITNEXUS_ROOT to the immutable GitNexus checkout")
-    result = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(GITNEXUS_ROOT),
-            "cat-file",
-            "-e",
-            f"{GITNEXUS_PINNED_REVISION}^{{commit}}",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        pytest.skip("GT_GITNEXUS_ROOT does not contain the reviewed immutable revision")
-    return {"gt": GT_ROOT, "gitnexus": GITNEXUS_ROOT}
+def _modes():
+    for cap in MATRIX["capabilities"]:
+        for mode in cap["failure_modes"]:
+            yield cap["id"], mode
 
 
-def test_capability_matrix_is_source_backed_and_persisted(tmp_path: Path) -> None:
-    roots = _pinned_roots()
-    matrix = build_capability_matrix(
-        GT_ROOT,
-        gt_revision=GT_REVISION,
-        gitnexus_root=roots["gitnexus"],
-    )
-    assert matrix["schema"] == "gt.capability_matrix.v2"
-    assert matrix["gitnexus_revision"] == GITNEXUS_PINNED_REVISION
-    assert verify_capability_matrix(matrix, roots)
-    assert all(
-        "symbol" in cell["citation"] and "line" in cell["citation"]
-        for cell in matrix["cells"]
-    )
-    assert [cell["capability"] for cell in matrix["cells"]] == sorted(
-        cell["capability"] for cell in matrix["cells"]
-    )
-    artifact = tmp_path / "capability-matrix.json"
-    persist_capability_matrix(artifact, matrix)
-    assert load_capability_matrix(artifact) == matrix
-    assert json.loads(json.dumps(matrix, sort_keys=True)) == matrix
+def test_every_named_test_file_exists():
+    missing = []
+    for cap_id, mode in _modes():
+        for ref in mode.get("covering_tests", []):
+            if not (ROOT / ref).exists():
+                missing.append(f"{cap_id}/{mode['id']}: {ref}")
+    assert not missing, "covering_tests entries that do not exist:\n" + "\n".join(missing)
 
 
-def test_capability_matrix_rejects_mutated_citation_and_symbol(tmp_path: Path) -> None:
-    roots = _pinned_roots()
-    matrix = build_capability_matrix(
-        GT_ROOT,
-        gt_revision=GT_REVISION,
-        gitnexus_root=roots["gitnexus"],
-    )
-    matrix["cells"][0]["citation"]["sha256"] = "0" * 64
-    assert not verify_capability_matrix(matrix, roots)
-
-    matrix = build_capability_matrix(
-        GT_ROOT,
-        gt_revision=GT_REVISION,
-        gitnexus_root=roots["gitnexus"],
-    )
-    matrix["cells"][0]["citation"]["symbol"] = "invented_symbol"
-    assert not verify_capability_matrix(matrix, roots)
-
-    matrix = build_capability_matrix(
-        GT_ROOT,
-        gt_revision=GT_REVISION,
-        gitnexus_root=roots["gitnexus"],
-    )
-    matrix["cells"][0]["citation"]["revision"] = "8f1bef056e4be9138afe76c253014dc0f2d038af"
-    assert not verify_capability_matrix(matrix, roots)
+@pytest.mark.parametrize(
+    "cap_id,mode",
+    [pytest.param(c, m, id=f"{c}:{m['id']}") for c, m in _modes()],
+)
+def test_failure_mode_has_owner(cap_id, mode):
+    status = mode["status"]
+    head = status.split(" ")[0].split(";")[0].rstrip("-")
+    if any(status.startswith(s) for s in _TESTED_STATUSES):
+        assert mode.get("covering_tests"), (
+            f"{cap_id}/{mode['id']} claims {status} with no covering_tests"
+        )
+    else:
+        assert head in _OPEN_STATUSES or status.startswith("open"), (
+            f"{cap_id}/{mode['id']} has untracked status {status!r}"
+        )
+        # Open modes are readiness blockers: they must carry the reason.
+        assert (
+            " - " in status or ";" in status or status.rstrip() in _OPEN_STATUSES
+        ), f"{cap_id}/{mode['id']} status {status!r} needs a reason"
 
 
-def test_checked_in_matrix_artifact_is_verifiable() -> None:
-    roots = _pinned_roots()
-    artifact = GT_ROOT / "gt_finalstand" / "receipts" / "har41_capability_matrix.json"
-    matrix = load_capability_matrix(artifact)
-    assert matrix["source_revision"] == GT_REVISION
-    assert verify_capability_matrix(matrix, roots)
+def test_every_capability_has_at_least_one_tested_mode_or_open_reason():
+    for cap in MATRIX["capabilities"]:
+        statuses = [m["status"] for m in cap["failure_modes"]]
+        assert any(
+            any(s.startswith(t) for t in _TESTED_STATUSES)
+            or any(s.startswith(o) for o in _OPEN_STATUSES)
+            or s.startswith(("fixing", "investigating", "diagnosing", "partial"))
+            for s in statuses
+        ), f"{cap['id']} has no classified failure modes"
+
+
+def test_matrix_lists_every_smoke20_defect_class():
+    """The defects the paid run surfaced must each have a matrix home."""
+    joined = json.dumps(MATRIX)
+    for needle in (
+        "unsupported_shell_operator",
+        "no_tests_observed",
+        "duplicate GT delivery identity",
+        "immediate boundary",
+        "rate_limit",
+        "missing_patch",
+        "diagnostics",
+        "tsserver",
+        "churn",
+        "non_convergence",
+        "zero_edges",
+        "rust",
+    ):
+        assert needle in joined, f"smoke20 defect class missing from matrix: {needle}"

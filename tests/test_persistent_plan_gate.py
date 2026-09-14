@@ -91,15 +91,36 @@ def test_gate_legacy_call_does_not_invent_mapping_evidence():
 
 def test_every_row_verified_proves_completion():
     """completion_proven was hardcoded False, so a fully-verified plan and an
-    unverified one journaled identically."""
+    unverified one journaled identically. Proof also requires a baseline that
+    could see the grading signal - captured, not blind."""
     decision = decide(
         plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+        baseline_status="captured",
         row_states={"req-a": "CHECK_PASSED", "req-b": "PROVEN"}, **AMPLE)
     assert decision.accepted
     row = decision.as_row()
     assert row["completion_proven"] is True
     assert row["evidence"]["completion_assessment"] == "all_rows_verified"
     assert row["evidence"]["proven_rows"] == ["req-b"]
+
+
+def test_verified_rows_on_a_blind_baseline_are_not_proven():
+    """Run 34801009507, bandit-interprocedural-taint-checks: every plan row
+    reached CHECK_PASSED and completion_proven journaled true while the
+    verifier failed the submission - the baseline was no_tests_observed, so
+    the bound checks were ambient checks, never the graded suite. Verified
+    rows on a blind baseline are verification against a proxy, not proof."""
+    for blind in ("no_tests_observed", "probe_failed", "budget_not_checked", ""):
+        decision = decide(
+            plan=_plan(), unmet_rows=(), regressions=(), refusals=0,
+            baseline_status=blind,
+            row_states={"req-a": "CHECK_PASSED", "req-b": "CHECK_PASSED"}, **AMPLE)
+        assert decision.accepted
+        row = decision.as_row()
+        assert row["completion_proven"] is False, blind
+        # The ledger still reports what it saw - honesty changes the claim,
+        # not the observation.
+        assert row["evidence"]["completion_assessment"] == "all_rows_verified"
 
 
 def test_unverified_rows_do_not_claim_completion():

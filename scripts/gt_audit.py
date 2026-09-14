@@ -1401,7 +1401,17 @@ def _audit_native_miniswe_task(
     a.provider_receipts_required = bool(counts["provider_delivery"])
 
     state_dir = journal_path.parent if journal_path is not None else task_dir
-    delivery_material: dict[str, tuple[str, int, int]] = {}
+    # A delivery occurrence is (identity, boundary), not identity alone. The
+    # same sealed payload may legitimately be delivered again at a later
+    # decision boundary - e.g. a periodic advisory re-emitted under a new
+    # dedup key after the producer's dedup state was reset across graph
+    # recovery (run 34801009507 shipped identical churn_steer bytes at
+    # iterations 27 and 68, each joined to the request one iteration later).
+    # What stays forbidden is the same identity twice into ONE boundary - the
+    # runtime's per-observed-iteration uniqueness - and, for the prompt lane,
+    # the run-scoped at-most-once guarantee its dedup set enforces.
+    delivery_material: dict[str, dict[int, tuple[str, int, int]]] = {}
+    prompt_delivered: set[str] = set()
     for row in rows:
         if row.get("event") not in {
             "evidence_delivery", "context_addition_delivery",
@@ -1415,17 +1425,24 @@ def _audit_native_miniswe_task(
         a.attribution_issues.extend(issues)
         if issues:
             continue
+        lane = str(row.get("lane") or "sealed")
+        boundary = int(row.get("iteration") or 0)
+        occurrences = delivery_material.setdefault(identity, {})
+        if boundary in occurrences or (
+            lane == "prompt" and identity in prompt_delivered
+        ):
+            a.attribution_issues.append(
+                f"duplicate GT delivery identity: {identity}"
+            )
+            continue
         try:
-            if identity in delivery_material:
-                a.attribution_issues.append(
-                    f"duplicate GT delivery identity: {identity}"
-                )
-                continue
-            delivery_material[identity] = (
+            occurrences[boundary] = (
                 (state_dir / str(row["delivery_blob"])).read_text(encoding="utf-8"),
                 int(row.get("sequence") or 0),
-                int(row.get("iteration") or 0),
+                boundary,
             )
+            if lane == "prompt":
+                prompt_delivered.add(identity)
         except (OSError, KeyError, UnicodeError):
             a.attribution_issues.append(
                 f"GT delivery blob is not valid UTF-8: {identity}"
@@ -1547,30 +1564,36 @@ def _audit_native_miniswe_task(
 
             audited_ids: set[str] = set()
             for delivery_id in sorted(delivery_ids & match_ids):
-                material = delivery_material.get(delivery_id)
-                if material is None:
+                occurrences = delivery_material.get(delivery_id)
+                if not occurrences:
                     a.attribution_issues.append(
                         f"provider request {request_id}: no sealed bytes for delivery {delivery_id}"
                     )
                     continue
-                rendered, delivery_sequence, delivery_iteration = material
                 request_sequence = int(row.get("sequence") or 0)
                 request_iteration = int(row.get("iteration") or 0)
-                intervening_provider_boundary = any(
+                # Each occurrence joins the provider boundary one iteration
+                # after its own delivery: a redelivery at iteration 68 joins
+                # request 69 while the earlier occurrence stays joined to
+                # request 28. material is None when no occurrence immediately
+                # precedes this request - the same not-joined verdict the
+                # identity-keyed map produced for a stale or foreign claim.
+                material = occurrences.get(request_iteration - 1)
+                intervening_provider_boundary = material is not None and any(
                     other.get("event") in {"provider_delivery", "provider_response"}
-                    and delivery_sequence < int(other.get("sequence") or 0)
+                    and material[1] < int(other.get("sequence") or 0)
                     < request_sequence
                     for other in rows
                 )
                 if (
-                    request_sequence <= delivery_sequence
-                    or request_iteration != delivery_iteration + 1
+                    material is None
+                    or request_sequence <= material[1]
                     or intervening_provider_boundary
                 ):
                     a.attribution_issues.append(
                         f"provider request {request_id}: delivery is not joined to its immediate boundary: {delivery_id}"
                     )
-                elif not contains_text(request_messages, rendered):
+                elif not contains_text(request_messages, material[0]):
                     a.attribution_issues.append(
                         f"provider request {request_id}: delivery bytes absent from final messages: {delivery_id}"
                     )
@@ -1754,8 +1777,13 @@ def _audit_native_miniswe_task(
 
     def _delivery_terms(identity: str, target: str,
                         ) -> tuple[set[str], set[str]]:
-        material = delivery_material.get(identity)
-        rendered = material[0] if material is not None else None
+        occurrences = delivery_material.get(identity)
+        # Every occurrence of one identity seals the same bytes - the
+        # identity is the payload's own digest - so any occurrence's
+        # rendered text is the same document.
+        rendered = (
+            next(iter(occurrences.values()))[0] if occurrences else None
+        )
         return delivery_distinctive_terms(identity, target, rendered)
 
     def _token_hit(command: str, tokens: frozenset[str] | set[str]) -> str:

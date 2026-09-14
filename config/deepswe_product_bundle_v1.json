@@ -26,10 +26,24 @@
     "source_tree": "1abb13f6c80c23211c04d8e93fbb94c76c611095",
     "graph_schema_version": "v15.2-trust-tier",
     "wheel_path": "vendor/groundtruth_mcp-1.0.0-py3-none-any.whl",
-    "wheel_sha256": "53ae59ef15af1670e4af68273f0cde63e9d4a4b64340ab2d4b93530fafc4683f",
+    "wheel_sha256": "f987c1385c130d476ca80007a3403e74635981f7686dc3662c757c2bb5cdc157",
     "producer_path": "vendor/gt-index-linux-amd64",
     "producer_sha256": "2acc26d6623dd11e36fa1a1910df92a4fa557ccb947f683f3066910ace26ecbd",
     "provenance_status": "VERIFIED_ROUTE_B_SOURCE_BOUND",
+    "worktree_delta": {
+      "schema": "gt.groundtruth_worktree_delta.v1",
+      "note": "wheel built from D:/tmp/gsrc working tree on 3f5ff8e; files below are uncommitted source deltas pending upstream landing in harneet2512/groundtruth",
+      "paths": [
+        "src/groundtruth/resolve.py",
+        "src/groundtruth/runtime/obligations.py",
+        "src/groundtruth/runtime/patterns.py",
+        "src/groundtruth/runtime/repo_adapters.py",
+        "src/groundtruth/runtime/test_runner.py",
+        "tests/unit/test_obligations_proof_languages.py",
+        "tests/unit/test_runtime_repo_adapters.py",
+        "tests/unit/test_validation_observation_languages.py"
+      ]
+    },
     "wheel_runtime_status": "VERIFIED_VENDORED_ROUTE_B",
     "accepted_default_ref": "origin/gt-trial",
     "accepted_default_ancestor": false,

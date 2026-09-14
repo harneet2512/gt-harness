@@ -30,13 +30,62 @@ _ARCHAEOLOGY = re.compile(
 )
 # A command that runs the project's own checks is a productive action even
 # without an edit - it is the agent verifying, not rummaging.
-_VERIFICATION = re.compile(
-    r"(^|[;&|\s])(pytest|py\.test|go\s+test|cargo\s+test|npm\s+test"
-    r"|yarn\s+test|pnpm\s+test|mvn\s+test|gradle(test|w\s+test)"
-    r"|make\s+(test|check)|ctest|tox|unittest|rspec|go\s+vet)\b"
+# Verification commands reuse the wheel's canonical runner pattern: the plan
+# binder admits exactly TEST_RUNNER_RE commands, so any runner the binder can
+# bind must read as verification here or a bound check run counts as a stall
+# turn. The previous local copy drifted narrow (no ./mvnw, vendor/bin/phpunit,
+# node_modules/.bin/jest, bazel, sbt testOnly, turbo run test) and even missed
+# plain `gradle test` - run 34801009507's dead-check class reappearing as
+# governor false stalls.
+from groundtruth.runtime.patterns import TEST_RUNNER_RE as _VERIFICATION
+
+_VERIFICATION_EXTRA = re.compile(
+    r"(^|[;&|\s])(?:go\s+vet\b|(?:npx\s+|yarn\s+|pnpm\s+)?ava\b)"
+)
+# Active engineering: compiling, building, or executing produced artifacts.
+# Run 34801009507 task fd showed the blind spot - the agent probed a Rust API
+# by writing throwaway crates under /tmp and running `cargo build`/`cargo run`
+# plus the produced binary. None of that mutates the repo diff and none of it
+# matches *test, so fifty turns of genuine work read as a stall and the
+# governor killed a working run. Executing something the agent made is the
+# same class of evidence as running a test: the environment answered a
+# question. Inline interpreters (`python -c`, `node -e`) are excluded on
+# purpose - ad-hoc eval is how archaeology scripts run, not engineering.
+_BUILD_OR_EXEC = re.compile(
+    r"(^|[;&|\s])("
+    r"cargo\s+(?:build|check|run|clippy|bench|doc|install|fix)"
+    r"|rustc\b|go\s+(?:build|run|install|generate)"
+    r"|npm\s+(?:run|exec|start|install|ci)|npx\s+\S"
+    r"|yarn\s+(?:run|build|install|add)|pnpm\s+(?:run|build|install|add)"
+    r"|make\b(?!.*\b(?:test|check)\b)|cmake\b|tsc\b|javac\b"
+    r"|gcc\b|g\+\+\b|clang\b|cc\b|mvn\s+(?:compile|package|install|verify)"
+    r"|(?:[^\s;&|]+/)?mvnw\s+(?:compile|package|install|verify|deploy)"
+    r"|gradle(?:w)?\s+(?:build|assemble|compileJava|jar|check)"
+    r"|(?:[^\s;&|]+/)?gradlew\s+(?:build|assemble|compileJava|jar)"
+    r"|dotnet\s+(?:build|publish|pack|restore)"
+    r"|sbt\s+(?:compile|package|assembly|publish)"
+    r"|mix\s+(?:compile|deps\.get|release)|bazel\s+(?:build|run)\b"
+    r"|nx\s+(?:build|run|serve)\b|turbo\s+(?:run\s+)?build"
+    r"|composer\s+(?:install|update|dump-autoload)|bundle\s+install"
+    r"|deno\s+(?:task|compile|bundle)|rake\s+(?:build|compile)"
+    r"|pip(?:3)?\s+install"
+    r"|python\d*\s+(?!-c\b)\S+\.py|python\d*\s+-m\s+\S"
+    r"|node\s+(?!-e\b)\S+\.js|tsx?\s+\S+\.ts"
+    r"|bash\s+\S+\.sh|sh\s+\S+\.sh"
+    r"|\./[^\s]*(?:target|bin|build|dist|out)[^\s]*|\./a\.out"
+    r")"
+)
+# File-mutation intent, lexically: redirects and in-place editors mutate a
+# file whether or not it lives under the watched repo root. This is what
+# catches probe writes under /tmp that the repo diff cannot see. Plain `cat`
+# without a redirect still reads as a read.
+_WRITE_INTENT = re.compile(
+    r"(?:cat\b[^;&|]*>>?|>>?\s*\S|tee\b|sed\s+-i|perl\s+-pi\b"
+    r"|\bpatch\b|git\s+apply|apply_patch|\bcp\b|\bmv\b|mkdir\b|touch\b"
+    r"|install\s+-[dm]|rsync\b|chmod\b|ln\b)"
 )
 
-Signal = Literal["", "steer", "abort"]
+Signal = Literal["", "steer", "abort", "verify_steer"]
 
 
 def _env_int(name: str, default: int) -> int:
@@ -71,6 +120,8 @@ class ChurnGovernor:
         churn_ratio: float | None = None,
         repeat_abort: int | None = None,
         max_steers: int | None = None,
+        max_verify_steers: int | None = None,
+        verify_steer_streak: int | None = None,
         disabled: bool | None = None,
     ) -> None:
         self.window = window if window is not None else _env_int("GT_CHURN_WINDOW", 40)
@@ -96,12 +147,23 @@ class ChurnGovernor:
         )
         if disabled is None:
             disabled = os.environ.get("GT_CHURN_DISABLED", "") in {"1", "true", "yes"}
+        self.max_verify_steers = (
+            max_verify_steers if max_verify_steers is not None
+            else _env_int("GT_CHURN_MAX_VERIFY_STEERS", 2)
+        )
+        self.verify_steer_streak = (
+            verify_steer_streak if verify_steer_streak is not None
+            else _env_int("GT_CHURN_VERIFY_STEER_STREAK", 20)
+        )
         self.disabled = disabled
         self._commands: deque[str] = deque(maxlen=self.window)
         self._stall_turns = 0
         self._turns = 0
         self._steers = 0
+        self._verify_steers = 0
+        self._verify_fail_streak = 0
         self._last_steer_turn = -10**9
+        self._last_verify_steer_turn = -10**9
         self.aborted = False
         self.steer_events: list[int] = []
 
@@ -130,14 +192,39 @@ class ChurnGovernor:
             best = max(best, current)
         return best
 
-    def observe(self, command: str, *, productive: bool = False) -> Signal:
+    def observe(
+        self,
+        command: str,
+        *,
+        productive: bool = False,
+        returncode: int | None = None,
+    ) -> Signal:
         """Feed one executed action; get the governor's reaction."""
         if self.disabled or self.aborted:
             return "abort" if self.aborted else ""
         self._turns += 1
         normalized = self._normalize(command)
         self._commands.append(normalized)
-        if productive or _VERIFICATION.search(normalized):
+        is_verification = bool(
+            _VERIFICATION.search(normalized)
+            or _VERIFICATION_EXTRA.search(normalized)
+        )
+        if is_verification and returncode is not None:
+            # Quiet non-convergence (smoke20 pest/bandit-taint/testem-pl):
+            # edit -> test -> edit -> test with every test failing reads as
+            # fully productive to the stall counter. Only a passing check is
+            # evidence the loop is converging; intervening edits do not
+            # reset the streak because they are the loop, not progress.
+            if returncode == 0:
+                self._verify_fail_streak = 0
+            else:
+                self._verify_fail_streak += 1
+        if (
+            productive
+            or is_verification
+            or _BUILD_OR_EXEC.search(normalized)
+            or _WRITE_INTENT.search(normalized)
+        ):
             self._stall_turns = 0
         else:
             self._stall_turns += 1
@@ -185,6 +272,18 @@ class ChurnGovernor:
             self._last_steer_turn = self._turns
             self.steer_events.append(self._turns)
             return "steer"
+        # A failing-verification streak earns a convergence steer, never an
+        # abort: the agent is working, and on a genuinely hard task long
+        # iteration is legitimate - killing it repeats the fd mistake. The
+        # streak has its own steer budget so it cannot starve stall steers.
+        if (
+            self._verify_steers < self.max_verify_steers
+            and self._verify_fail_streak >= self.verify_steer_streak
+            and self._turns - self._last_verify_steer_turn >= 15
+        ):
+            self._verify_steers += 1
+            self._last_verify_steer_turn = self._turns
+            return "verify_steer"
         return ""
 
     @property
@@ -198,3 +297,11 @@ class ChurnGovernor:
     @property
     def steers_issued(self) -> int:
         return self._steers
+
+    @property
+    def verify_fail_streak(self) -> int:
+        return self._verify_fail_streak
+
+    @property
+    def verify_steers_issued(self) -> int:
+        return self._verify_steers

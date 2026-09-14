@@ -712,8 +712,13 @@ jobs:
           # stays on column zero inside this YAML block.
           printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
             "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "pyright/langserver.index.js" > "$lsp_bin/pyright-langserver"
-          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" --tsserver-path "%s/servers/node_modules/typescript/lib/tsserver.js" "$@"\n' \
-            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" "/installed-agent/lsp-bin/node-runtime" > "$lsp_bin/typescript-language-server"
+          # typescript-language-server@6.0.0 rejects --tsserver-path (run
+          # 34801009507's LSP receipt: "error: unknown option
+          # '--tsserver-path'"); it resolves the staged typescript package
+          # itself through node_modules walk-up from its own lib/ directory,
+          # which is exactly the layout the file assertions below pin.
+          printf '#!/bin/sh\nexec "%s/bin/node" "%s/servers/node_modules/%s" "$@"\n' \
+            "/installed-agent/lsp-bin/node-runtime" "/installed-agent/lsp-bin/node-runtime" "typescript-language-server/lib/cli.mjs" > "$lsp_bin/typescript-language-server"
           chmod 755 "$lsp_bin/pyright-langserver" "$lsp_bin/typescript-language-server"
 
           # npm writes node_modules/.bin symlinks regardless of the shims
@@ -728,10 +733,29 @@ jobs:
           test -x "$node_root/bin/node"
           test -f "$node_root/servers/node_modules/pyright/langserver.index.js"
           test -f "$node_root/servers/node_modules/typescript-language-server/lib/cli.mjs"
-          # The tsserver bundle the shim points at: typescript@7 packages are
-          # the native tsgo/API layout and ship no lib/tsserver.js, which is
-          # exactly the install-missing failure this staging exists to prevent.
+          # The tsserver bundle the staged typescript package ships:
+          # typescript@7 packages are the native tsgo/API layout and ship no
+          # lib/tsserver.js, which is exactly the install-missing failure this
+          # staging exists to prevent. TLS 6.0.0 finds it through node_modules
+          # walk-up; there is no CLI flag to point at it.
           test -f "$node_root/servers/node_modules/typescript/lib/tsserver.js"
+
+          # File existence cannot see a server that launches and dies before
+          # its first message - which is exactly what --tsserver-path did to
+          # every JS/TS leg in run 34801009507 while staging stayed green.
+          # Render the exact staged shim with host paths substituted, launch
+          # it with the real --stdio argument, and require one bounded LSP
+          # initialize handshake per npm-served server before the manifest is
+          # recorded. A server that cannot initialize fails staging here,
+          # before a paid task discovers it.
+          "$node_root/bin/node" scripts/lsp_initialize_probe.mjs \
+            --shim "$lsp_bin/typescript-language-server" \
+            --prefix-map "/installed-agent/lsp-bin=$lsp_bin" \
+            --timeout-ms 30000 --probe-name typescript-language-server -- --stdio
+          "$node_root/bin/node" scripts/lsp_initialize_probe.mjs \
+            --shim "$lsp_bin/pyright-langserver" \
+            --prefix-map "/installed-agent/lsp-bin=$lsp_bin" \
+            --timeout-ms 30000 --probe-name pyright-langserver -- --stdio
 
           # Record the staged tree. verify_lsp_assets opens
           # $lsp_bin/manifest.json unconditionally, so without this the agent
@@ -819,16 +843,69 @@ jobs:
           set -e
           kill "$MONITOR_PID" 2>/dev/null || :
           wait "$MONITOR_PID" 2>/dev/null || :
-          exit "$pier_status"
+          # A nonzero pier exit - including the artifact-collection crash that
+          # ended smoke20's boa/fd legs - is a trial outcome, not a job
+          # failure. Recording it inside the evidence root keeps the exit code
+          # as typed input to the bind and diagnostics steps that follow;
+          # failing the step here is what turned a provider failure into a
+          # crashed matrix leg with no receipts. The leg still fails later if
+          # the evidence path itself cannot be produced.
+          mkdir -p results/swelive
+          printf '{"schema":"gt.pier_run_exit.v1","task_id":"%s","exit_code":%d,"job_name":"swelive-gt-harness-%s-%s"}\n' \
+            "$TASK" "$pier_status" "$GITHUB_RUN_ID" "$TASK" > results/swelive/pier-run.json
+          cp pier-stdout.log results/swelive/pier-stdout.log 2>/dev/null || :
+          if [ "$pier_status" -ne 0 ]; then
+            echo "::warning::pier run exited $pier_status for $TASK; preserving typed ERROR evidence rather than failing the task job"
+          fi
+          exit 0
 
       - name: Bind the Pier reward to the canonical product receipt
         if: always()
         run: |
+          set -uo pipefail
+          # standardize_benchmark_result returns 1 whenever the emitted
+          # receipt is a typed ERROR - provider failure, governor abort,
+          # missing verifier, missing result. That exit code is the typed
+          # outcome, not a construction failure: the receipt file is the
+          # deliverable, and a leg that produced one must not mark the task
+          # job failed (run 34801009507: two typed-error legs turned the
+          # whole matrix job red). Fail only when NO receipt exists at all -
+          # the one state that is genuine evidence loss.
+          bind_status=0
           python -m scripts.standardize_benchmark_result \
             --root results/swelive \
             --suite swelive \
             --task-id "$TASK" \
-            --source-sha "${{ needs.plan.outputs.source_sha }}"
+            --source-sha "${{ needs.plan.outputs.source_sha }}" || bind_status=$?
+          if ! find results/swelive -path '*/agent/official-verifier-result.json' -print -quit | grep -q .; then
+            echo "::error::official-verifier bind produced no receipt for $TASK (status=$bind_status)"
+            exit 1
+          fi
+          if [ "$bind_status" -ne 0 ]; then
+            echo "::notice::bind emitted a typed ERROR receipt for $TASK (status=$bind_status); reward stays null"
+          fi
+          exit 0
+
+      - name: Emit honest task diagnostics for every outcome
+        if: always()
+        run: |
+          set -euo pipefail
+          # The in-container DiagnosticJournal.seal only runs when the agent
+          # session reaches its close path. Provider failures, governor
+          # aborts, and runner crashes die before it, and even a solved task
+          # can lose the trio to a partial export - run 34801009507 shipped 8
+          # of 20 tasks (including solved abs-stepped-slices) with no
+          # diagnostics, which the strict attestation then reports as missing
+          # evidence. This step guarantees diagnostics.json +
+          # diagnostics.txt + incident-replay.json for every outcome: it
+          # repairs missing siblings of a real sealed document
+          # deterministically, or synthesizes an honest document whose
+          # capabilities are all UNEXERCISED and whose events restate only
+          # the typed receipt. It never writes a reward, a patch, or a
+          # capability claim the evidence does not support.
+          python -m scripts.emit_task_diagnostics \
+            --root results/swelive \
+            --task-id "$TASK"
 
       - name: Normalize task evidence ownership for archival
         if: always()

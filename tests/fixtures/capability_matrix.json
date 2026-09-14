@@ -1,0 +1,470 @@
+{
+ "schema": "gt.capability_coverage.v1",
+ "purpose": "Every GT capability and its known failure modes, mapped to the offline tests that cover them. A capability or failure mode with no covering test is a benchmark-readiness blocker - meta-test enforces.",
+ "benchmarks": {
+  "deepswe": "in-container GT via pier_gt_harness_adapter; cargo/rust workspace churn; matrix parallelism shares one provider route",
+  "swelive_lite": "in-container GT via harbor; gate-one then cohort; same adapter surface as deepswe",
+  "tb2": "host-owned GT (eval.gt_central_agent); container sees only bash commands; no in-container journal/LSP - separate coverage track in gt-harness repo"
+ },
+ "capabilities": [
+  {
+   "id": "delivery_lanes",
+   "surface": "evidence_delivery/context_addition_delivery/delivery_prepared/delivery_refused/provider_delivery",
+   "failure_modes": [
+    {
+     "id": "redelivery_after_graph_recovery",
+     "observed": "smoke20 oxvg - same payload_sha256 delivered at iter 27-28 and 68-69 across graph_recovery; audit keyed delivery_material by identity only - per-occurrence delivery_material keying",
+     "covering_tests": [
+      "tests/test_smoke20_recorded.py",
+      "tests/fixtures/smoke20_recorded/"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "duplicate_identity_same_boundary",
+     "observed": "duplicate GT delivery identity must still be flagged - distinct from legitimate redelivery after recovery",
+     "covering_tests": [
+      "tests/test_runtime_receipts.py"
+     ],
+     "status": "covered"
+    },
+    {
+     "id": "boundary_join_break",
+     "observed": "delivery not joined to immediate boundary when occurrence map collides - per-occurrence delivery_material keying",
+     "covering_tests": [
+      "tests/test_smoke20_recorded.py",
+      "tests/fixtures/smoke20_recorded/"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "ceiling_frontload_starve",
+     "observed": "smoke20 bandit-taint: localization_task_ceiling refused 113 deliveries; evidence front-loaded then starved",
+     "covering_tests": [
+      "tests/test_delivery_payload.py"
+     ],
+     "status": "known-issue"
+    },
+    {
+     "id": "byte_budget_exceeded",
+     "observed": "delivery_context_budget_exceeded",
+     "covering_tests": [
+      "tests/test_runtime_receipts.py",
+      "tests/test_delivery_payload.py"
+     ],
+     "status": "covered"
+    }
+   ]
+  },
+  {
+   "id": "provider_pipeline",
+   "surface": "provider_delivery/provider_response/provider_admission/provider_wait",
+   "failure_modes": [
+    {
+     "id": "rate_limit_mid_run",
+     "observed": "smoke20 boa: ApiRateLimitError at 20-way parallelism; typed correctly, bind step crashed after",
+     "covering_tests": [
+      "tests/test_provider_fault_injection.py",
+      "tests/test_miniswe_provider_error_mapping.py",
+      "tests/test_provider_failure_rehearsal.py"
+     ],
+     "status": "covered-unit; workflow-fix-pending"
+    },
+    {
+     "id": "orphaned_provider_request",
+     "observed": "smoke20 fd run_terminal: orphaned_provider_requests + api_calls != provider_requests",
+     "covering_tests": [
+      "tests/test_miniswe_repro.py"
+     ],
+     "status": "partial"
+    },
+    {
+     "id": "transport_timeout",
+     "observed": "classified provider_failure, typed outcome",
+     "covering_tests": [
+      "tests/test_provider_fault_injection.py",
+      "tests/test_run_diagnostics.py",
+      "tests/test_provider_failure_rehearsal.py"
+     ],
+     "status": "covered"
+    },
+    {
+     "id": "cohort_throttle",
+     "observed": "20-way matrix on one relace route",
+     "covering_tests": [],
+     "status": "open - needs pacing decision"
+    },
+    {
+     "id": "disconnect_billing_badrequest_malformed_rehearsal",
+     "observed": "scripted-failure rehearsal: disconnect/billing/bad-request/unclassifiable exceptions through the real wrapped query must each emit typed provider_failure + classified diagnostic with correct retryability; recovery must still bind a response; a failed query must not feed the governor",
+     "covering_tests": [
+      "tests/test_provider_failure_rehearsal.py"
+     ],
+     "status": "fixed"
+    }
+   ]
+  },
+  {
+   "id": "persistent_plan",
+   "surface": "persistent_plan_inputs/built/delivered/predicates/checks/gate",
+   "failure_modes": [
+    {
+     "id": "unbindable_checks_parens",
+     "observed": "smoke20 fd: 39/40 plan_check_binding_pending on unsupported_shell_operator:(",
+     "covering_tests": [
+      "tests/test_plan_check_composite.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "blind_baseline",
+     "observed": "smoke20 bandit-taint+claude-code: no_tests_observed; fd: baseline_failing 0/241 ambient - plan can't see f2p signal",
+     "covering_tests": [
+      "tests/test_persistent_plan_baseline.py"
+     ],
+     "status": "fixing - interpreter_fallback now uses repo-env python + provenance; JS adapter no longer emits phantom npm test + reaches subpackage suites; deeper contract-blindness (ambient-vs-graded) remains open"
+    },
+    {
+     "id": "vacuous_proof",
+     "observed": "smoke20 bandit-taint: all_rows_verified + completion_proven true, verifier failed - proof against proxy not contract",
+     "covering_tests": [
+      "tests/test_persistent_plan_gate.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "plan_static_frontloaded",
+     "observed": "delivered once at t~0, never re-delivered across 140-210 calls; gate decided 1-3 times total",
+     "covering_tests": [],
+     "status": "open - design question"
+    },
+    {
+     "id": "budget_escape_by_design",
+     "observed": "smoke20 claude-code: gate wanted refuse, escaped time at <600s - designed trade-off",
+     "covering_tests": [
+      "tests/test_persistent_plan_gate.py"
+     ],
+     "status": "covered-by-design"
+    },
+    {
+     "id": "behavioral_program_checks_unbindable",
+     "observed": "fd's 39 acceptance checks were shell programs (mktemp/cd/touch/test \"$(fd --sort)\" = ...) - not test-runner argv, so every CheckSpec gate refused them; rows sat pending until the gate conceded and the task closed submitted_unverified while the official verifier ran those exact programs",
+     "covering_tests": [
+      "tests/test_program_check_channel.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "vacuous_program_verdict",
+     "observed": "a program whose last command is not an assertion (pytest x | tail -1 -> tail owns rc; fd | sort | head -> no verdict) would manufacture CHECK_PASSED if bound; the channel binds only programs ending in an assertion head or test-runner",
+     "covering_tests": [
+      "tests/test_program_check_channel.py"
+     ],
+     "status": "fixed"
+    }
+   ]
+  },
+  {
+   "id": "submit_gate",
+   "surface": "submit_advisory/submit_decision/plan_submit_gate",
+   "failure_modes": [
+    {
+     "id": "advisory_accept_with_red",
+     "observed": "smoke20 claude-code: submit_decision accepted with 14 active_red predicates - advisory mode journals but cannot block",
+     "covering_tests": [
+      "tests/test_persistent_plan_gate.py"
+     ],
+     "status": "covered-by-design; visibility gap noted"
+    },
+    {
+     "id": "gate_refuse_then_prove",
+     "observed": "smoke20 bandit-taint: refused twice, agent proved rows, accepted - machinery worked, target was wrong",
+     "covering_tests": [
+      "tests/test_persistent_plan_gate.py"
+     ],
+     "status": "covered"
+    }
+   ]
+  },
+  {
+   "id": "graph_pipeline",
+   "surface": "graph_publication/sync_amend/invalidated/recovery/recovery_failed/refresh/pin_refused",
+   "failure_modes": [
+    {
+     "id": "rust_workspace_churn_storm",
+     "observed": "smoke20 oxvg: invalidated x7 recovery_failed x3 + 180s rust-analyzer readiness stall; bandit-taint (python): recovery_failed x16 all GT_INDEX_MEMORY_HEADROOM_INSUFFICIENT, gt_index OOM-killed exit=-9 -> consecutive-obsolete backoff (defer 60s doubling to 300s) + memory-refusal defer 120s gate _maybe_schedule_lsp_promotion; churn simulator tests",
+     "covering_tests": [
+      "tests/test_miniswe_integration.py",
+      "tests/test_miniswe_integration.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "obsolete_promotions",
+     "observed": "smoke20 oxvg/pest 13-14/17-18 obsolete; bandit-taint 15/36 obsolete - live graph_revision re-mints every 35-60s under agent edits+sibling publishes+recovery adoptions, faster than ~30-60s leg latency -> _note_lsp_churn_outcome backoff on obsolete/obsolete_after_certification; salvage merges surviving mutations (policy: never publish stale, salvage what proved)",
+     "covering_tests": [
+      "tests/test_miniswe_integration.py",
+      "tests/test_miniswe_integration.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "readiness_stall",
+     "observed": "fd: rust-analyzer ready=False 180s at project-readiness barrier; bandit-taint pyright project_ready=false on all 23 probing legs inside 20s cap - cold-index probes return failed_empty, zero LSP edges ever -> pyright-langserver/pyright added to _READY_BUDGET_S_BY_SERVER at 150s in wheel (was 20s default; every leg cold-starts fresh server); sha e3b82b1c",
+     "covering_tests": [
+      "tests/test_miniswe_integration.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "salvage_merge_integrity_error",
+     "observed": "smoke20 bandit-taint: lsp_salvage failed IntegrityError UNIQUE constraint failed: edges.id x2 - sibling publish landed identical lineage row at same id, or intra-merge remap collision",
+     "covering_tests": [
+      "tests/test_scoped_merge.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "l1_brief_witnessless_outranks_witnessed",
+     "observed": "generate_v1r_brief result.files order is HASHSEED-NONDETERMINISTIC: identical fixture+graph ranks beets/library.py (WARNING, no witness) above beets/importer.py (VERIFIED, witnessed) under some PYTHONHASHSEED values and correctly under others (PYTHONHASHSEED=1 passes, confirmed). A set/dict iteration leak survives upstream of the final ordering - the B5-4 sorted(_ein_n) determinism patch did not close the last hole. Brief order varies run-to-run on identical input, violating GT's deterministic-context contract. Pre-existing wheel-side defect in pretask ranking; independent of the runtime-patterns wave",
+     "covering_tests": [
+      "tests/test_wheel_l1_localizer_ranking.py"
+     ],
+     "status": "known-issue"
+    }
+   ]
+  },
+  {
+   "id": "lsp_promotion",
+   "surface": "lsp_promotion_scheduled/terminal/salvage/lsp_receipts",
+   "failure_modes": [
+    {
+     "id": "missing_toolchain",
+     "observed": "typescript@7 ships no lib/tsserver.js - install succeeds, server cannot run",
+     "covering_tests": [
+      "tests/test_gt_session.py"
+     ],
+     "status": "fixed (pin 5.9.3 + file assert)"
+    },
+    {
+     "id": "server_crash_after_launch",
+     "observed": "smoke20: --tsserver-path unknown option on TLS 6.0.0 - staged files exist, server exits code 1 - flag removed + real LSP initialize probe gates staging",
+     "covering_tests": [
+      "scripts/lsp_initialize_probe.mjs"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "serviceable_zero_edges",
+     "observed": "smoke20 bandit-taint pyright: server_launched+probe_answered on all 36 legs but zero resolved calls - every probing leg ran cold (project_ready never reached in 20s cap); decomposition: revision churn dominant + memory exhaustion + unproven resolution gap -> pyright 150s readiness budget in wheel (environment-bound, not a resolution gap); zero-mutation legs still land no_edge_mutations honestly",
+     "covering_tests": [
+      "tests/test_miniswe_integration.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "unserviceable_leg_classification",
+     "observed": "env-bound legs must not block strict diagnose",
+     "covering_tests": [
+      "tests/test_gt_session.py"
+     ],
+     "status": "covered"
+    }
+   ]
+  },
+  {
+   "id": "churn_governor",
+   "surface": "churn_steer/churn_abort",
+   "failure_modes": [
+    {
+     "id": "probe_exploration_false_positive",
+     "observed": "smoke20 fd: /tmp probe writes + cargo run/build counted as stall (no repo mutation, no *test) - killed a working 3/4 run",
+     "covering_tests": [
+      "tests/test_churn_governor.py",
+      "tests/test_agent_loop_soak.py",
+      "tests/fixtures/smoke20_recorded/fd_churn_abort_commands.json"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "quiet_non_convergence",
+     "observed": "smoke20 pest(282)/bandit-taint(210)/claude-code(144)/testem-pl(218) calls unsolved - failing-verification streaks earned no signal; now verify_steer on consecutive failed checks (steer-only, never abort); deeper contract-blindness (verifying substitute harness) remains a plan-boundary item",
+     "covering_tests": [
+      "tests/test_churn_governor.py",
+      "tests/test_agent_loop_soak.py"
+     ],
+     "status": "fixed - steer-level; contract-blindness tracked under persistent_plan blind_baseline"
+    },
+    {
+     "id": "archaeology_churn",
+     "observed": "run 34656860834: 54% GT-internal reads, 2 edits/840 cmds - real churn",
+     "covering_tests": [
+      "tests/test_churn_governor.py",
+      "tests/test_agent_loop_soak.py"
+     ],
+     "status": "covered"
+    },
+    {
+     "id": "binder_runner_drift_false_stall",
+     "observed": "governor kept its own narrow runner regex - commands the plan binder binds (./mvnw test, vendor/bin/phpunit, node_modules/.bin/jest, bazel test, sbt testOnly, turbo run test, gradle test) counted as stall turns. _VERIFICATION now aliases canonical TEST_RUNNER_RE; invariant test locks parity.",
+     "covering_tests": [
+      "tests/test_churn_governor.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "build_commands_no_engineering_credit",
+     "observed": "non-test build/package/compile commands (./mvnw package, dotnet build, sbt compile, bazel build, turbo run build, composer/bundle install, deno task) earned no productivity credit - same fd-class blind spot on the build side",
+     "covering_tests": [
+      "tests/test_churn_governor.py"
+     ],
+     "status": "fixed"
+    }
+   ]
+  },
+  {
+   "id": "receipts_attestation",
+   "surface": "runtime_receipts/gt_audit/capability rows/diagnostics/standardize",
+   "failure_modes": [
+    {
+     "id": "missing_diagnostics",
+     "observed": "smoke20: 8/20 tasks missing diagnostics artifacts incl. solved - collection defect - emit_task_diagnostics synthesizes honest UNEXERCISED trio when absent",
+     "covering_tests": [
+      "tests/test_run_diagnostics.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "run_scoped_identity_assumption",
+     "observed": "smoke20 oxvg duplicate delivery identity - per-occurrence delivery_material keying",
+     "covering_tests": [
+      "tests/test_smoke20_recorded.py",
+      "tests/fixtures/smoke20_recorded/"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "env_bound_false_required",
+     "observed": "gate-one 34790375793: unserviceable leg required=True blocked attestation",
+     "covering_tests": [
+      "tests/test_gt_session.py"
+     ],
+     "status": "covered"
+    }
+   ]
+  },
+  {
+   "id": "verifier_reward_binding",
+   "surface": "result.json/reward/typed outcomes/model.patch",
+   "failure_modes": [
+    {
+     "id": "missing_patch_bind_crash",
+     "observed": "smoke20 boa+fd: docker cp model.patch RuntimeError killed job instead of typed ERROR receipt",
+     "covering_tests": [
+      "tests/test_standardize_benchmark_result.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "typed_error_vs_graded",
+     "observed": "provider_failure/governor_abort must keep reward:null, never fabricate",
+     "covering_tests": [
+      "tests/test_standardize_benchmark_result.py"
+     ],
+     "status": "covered"
+    }
+   ]
+  },
+  {
+   "id": "tb2_host_side",
+   "surface": "eval.gt_central_agent exec transport + host-only probes (gt-harness repo)",
+   "failure_modes": [
+    {
+     "id": "exec_transport_failure",
+     "observed": "container exec fails/timeouts host-side",
+     "covering_tests": [],
+     "status": "open - separate repo track"
+    },
+    {
+     "id": "no_incontainer_journal",
+     "observed": "receipt surface differs - host-side state only",
+     "covering_tests": [],
+     "status": "open - separate repo track"
+    }
+   ]
+  },
+  {
+   "id": "runtime_observation",
+   "surface": "TEST_RUNNER_RE / TEST_PASS_RE / TEST_FAIL_RE / STATIC_CHECK_RE / COMPILER_CHECK_RE / COMPILE_FAIL_RE / ENV_FAIL_RE / classify_test_observation / classify_validation_observation / obligations behavioral proof / repo_adapters test_commands",
+   "failure_modes": [
+    {
+     "id": "runner_pattern_language_drift",
+     "observed": "three divergent runner regexes (patterns.py canonical, obligations.py narrow copy, governor local copy) - mvn/gradle/dotnet/sbt/mix/bazel/nx/turbo/phpunit/rspec commands bound nowhere or proved nowhere; obligations+trajectory_state consolidated onto canonical imports, governor aliases canonical",
+     "covering_tests": [
+      "tests/test_churn_governor.py",
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "adapter_emits_unbindable_command",
+     "observed": "JavaRepoAdapter emits ./mvnw test / ./gradlew test verbatim but TEST_RUNNER_RE anchored at ^ and lacked path prefixes - adapter output could never bind. Cross-surface invariant test: every adapter-emitted command must match TEST_RUNNER_RE",
+     "covering_tests": [
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "pass_fail_marker_language_drift",
+     "observed": "TEST_PASS_RE/TEST_FAIL_RE lacked .NET Passed:/Failed:, RSpec N examples 0 failures, Bun N pass/N fail, sbt [success], pytest N errors - green output on non-Python ecosystems could never prove",
+     "covering_tests": [
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "validation_observation_uncovered_surface",
+     "observed": "classify_validation_observation had ZERO tests; STATIC_CHECK_RE missed vendor/bin/ and node_modules/.bin/ path forms plus rubocop/phpstan/checkstyle/detekt/credo/clang-tidy/dotnet-format-verify families; COMPILER_CHECK_RE missed ./mvnw//gradlew/dotnet/sbt/mix/bazel/swift/kotlinc and g++ boundary bug (g\\+\\+\b never matched 'g++ <args>')",
+     "covering_tests": [
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "wrapper_prefix_drift",
+     "observed": "TEST_RUNNER_RE prefix list and _SEGMENT_HEAD were separate copies - sudo/nice/command/bundle exec/poetry run/uv run diverged; now shared _WRAPPER_ALTERNATIVES constant",
+     "covering_tests": [
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "compile_fail_language_drift",
+     "observed": "COMPILE_FAIL_RE knew only rust/TS/python shapes - file:line:col error diagnostics (gcc/clang/javac/swift), coded errors (CS/C/LNK/MSB), BUILD FAILED invisible; fatal error: stays in ENV_FAIL_RE by design (missing headers = env truth)",
+     "covering_tests": [
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "fixed"
+    },
+    {
+     "id": "prose_counterfeit_verification",
+     "observed": "echo pytest / cat pytest.log must never reset a stall counter or prove behavior - canonical pattern anchors runners at command boundaries only",
+     "covering_tests": [
+      "tests/test_churn_governor.py",
+      "tests/test_wheel_language_matrix.py"
+     ],
+     "status": "covered"
+    },
+    {
+     "id": "count_only_baseline_conservation_unknown",
+     "observed": "smoke20 fd: cargo `test NAME ... ok` name lines went unparsed (only pytest/unittest forms known) -> passing_names:[] -> compare_results could never prove conservation -> unknown forever. _detect_runner lacked dotnet/sbt/mix/phpunit/bazel entirely; name/count parsers extended per language; identity_paths_for resolves rust ::-modules, bare rust names, and dotnet FQ names",
+     "covering_tests": [
+      "tests/test_wheel_language_matrix.py",
+      "tests/test_persistent_plan_baseline.py"
+     ],
+     "status": "fixed"
+    }
+   ]
+  }
+ ]
+}
