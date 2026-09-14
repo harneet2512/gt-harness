@@ -547,7 +547,7 @@ evidence the live run passed. A new paid smoke requires a fresh owner
 approval receipt on the green-gate SHA; `remaining-19` stays gated
 behind a clean one-task gate throughout.
 
-## Generalized workload simulator + ancestry fix (2026-09-15, uncommitted)
+## Generalized workload simulator + ancestry fix (2026-09-15, `23badbcb`)
 
 The standing gap the gate-one postmortem named: the deterministic suite
 proved unit behavior, never sustained load. `tests/test_workload_simulation.py`
@@ -589,6 +589,35 @@ New coverage: 4 sim scenarios + 3 parameterized shapes in
 rebuild-severs-chain, published-output-replaced) plus an honest fixture
 update in `test_gt_session.py`. Lint clean on the new file; only
 pre-existing findings remain elsewhere.
+
+Full serial suite: vendored-producer fingerprint and smoke20 recorded-replay
+failures reproduce at clean `HEAD` — pre-existing Windows-environment
+defects, not this wave. Product-identity tests green on the committed tip.
+Provider-free gates re-dispatched on `23badbcb`: acceptance `34884400879`,
+installed rehearsal `34884403332`.
+
+## SWE-bench-Live smoke authorization — 2026-09-15
+
+Owner instruction (verbatim): "do 5 smoke of swe live lite tasks as they are
+smaller and use 5 different languages". Scope resolved before dispatch:
+SWE-bench-Live `lite` is Python-only upstream (per the SWE-bench-Live paper —
+"our benchmark SWE-bench-Live primarily focuses on the Python language only" —
+and the leaderboard), and the pinned suite binds exactly two tasks:
+`cyclotruc__gitingest-94` (gate task) and `dynaconf__dynaconf-1241`
+(remaining). A 5-language Lite smoke does not exist; the multi-language
+variant is a different dataset (`SWE-bench-Live/MultiLang`) and would be a
+separate suite integration, not a dispatch. The owner selected the bound
+2-task smoke.
+
+Authorization scope: paid SWE-bench-Live Lite smoke, staged — `gate-one`
+(gitingest-94) first, attestation validation, then `remaining`
+(dynaconf-1241) bound to the gate run via `prior_gate_run_id`. Preconditions
+unchanged: provider-free acceptance and installed rehearsal green on the
+dispatch SHA (`23badbcb`), readiness bound by `readiness_run_id`, the
+official verifier is sole authority for task success, GT-off never run (no
+SWE-Live baseline exists and none may be created). Any further paid scope —
+DeepSWE gate-one re-run, expanded cohorts, a MultiLang suite — requires its
+own fresh approval receipt.
 
 ## Outcome claims
 
