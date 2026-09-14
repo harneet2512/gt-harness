@@ -20,3 +20,8 @@ test_textstats.py
 .agent-handoff/
 skills.md
 .measure/
+
+# Report/analysis docs stay local (code-only repo)
+docs/HANDOFF-*.md
+docs/*AUDIT*.md
+docs/*REPORT*.md
