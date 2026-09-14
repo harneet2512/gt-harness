@@ -283,11 +283,66 @@ A main-branch side effect of the workflow registration also broke
 `test_only_closed_supported_workflow_set_is_active` there; repaired in
 `e4fe9661`.
 
-**Status:** this attempt does not authorize a paid retry. Per the standing
-rule and the owner's directive, the next paid run is gated on (a) provider-free
-acceptance and installed rehearsal green on `e41d1fe9`, and (b) fresh explicit
-authorization, and is designated the final paid validation run — not the start
-of an exploratory paid series.
+**Status:** provider-free acceptance `34795536349` and installed rehearsal
+`34795537759` passed on `e41d1fe9`; the owner authorized the final gate-one
+retry, dispatched as run `34796061920` on source `8dd02318`.
+
+## Gate-one retry — run 34796061920 (2026-09-14)
+
+The retry ran the same task `cyclotruc__gitingest-94` on `8dd02318`. Verdict:
+**the task solved again** — attestation PASS, `solved: true`, `reward: 1`,
+`status: GRADED`, `verified: true`, graph CERTIFIED, 15/15 provider calls on
+the relace-pinned route ($0.010 total), terminal `submitted_verified` (the
+plan gate bound verification before submit this time). F9/F10/F11 all held:
+no `refused_then_delivered`, reward bound `GRADED`, diagnostics shipped.
+
+The workflow still reported `failure` on one line: `diagnose_benchmark_run
+--strict` exits 1 whenever a `required=True` capability is not WORKING, and
+`lsp_promotion` read DEGRADED `terminal_succeeded:no_edge_mutations` because
+the run's only promotable candidates were 2 JavaScript edges whose leg was
+skipped — `install_missing_reason: no workspace TypeScript install
+(node_modules/typescript) and no tsserver.path`. Root cause: the staged
+`typescript@7.0.2` package ships no `lib/tsserver.js` (the TS7 package is the
+native/API layout), so `typescript-language-server` could never initialize
+even though staging succeeded. `validate_prior_gate` requires
+`diagnostics.exit_code == 0` plus every required capability WORKING+verified,
+so this solved run could not unlock the remaining cohort — under the old
+contract a Lite gate-one could never produce healthy diagnostics on any repo
+whose only promotable edges need an absent toolchain.
+
+Fixed in `aef3a2f5`, two layers:
+
+- **Provision:** all three LSP-staging workflows now pin `typescript@5.9.3`
+  (ships `lib/tsserver.js`, published 2025-09-30), pass `--tsserver-path` to
+  the `typescript-language-server` shim, and assert the staged file exists so
+  a package-layout change fails setup instead of silently degrading legs.
+- **Classification:** `_leg_serviceable` marks a language leg unserviceable
+  only on positive evidence (`install_missing_reason`, server never
+  launched, zero candidates, zero requests issued despite candidates). When
+  every leg is environment-bound, `lsp_promotion` reports DEGRADED with
+  `:no_serviceable_candidates` evidence but `required=False`; missing
+  receipts, absent fields, mixed legs, and never-scheduled all fail closed
+  as required. `no_op` stays not-required. A leg that served requests and
+  produced nothing remains a required failure — the gate keeps its teeth on
+  real capability gaps.
+
+**Status:** provider-free acceptance `34799716299` and installed rehearsal
+`34799717545` passed on `aef3a2f5`. The corrected paid gate-one ran as
+`34800169651` and is the first fully green paid run: the task solved
+(`resolved: true`, `reward: 1`, `GRADED`), attestation PASS, strict
+diagnostic `exit_code: 0`, `lsp_promotion` honestly
+`DEGRADED:terminal_succeeded_no_edge_mutations_no_serviceable_candidates`
+with `required=False`, 20/20 provider calls on the relace-only route
+($0.0117), `submitted_verified`, and `run-status/` snapshots now ship in the
+collected artifact tree. The LSP receipt additionally showed
+`typescript-language-server@6.0.0` rejecting `--tsserver-path` as an unknown
+flag — the leg stayed environment-bound rather than failed, and the
+classifier held; the provisioning refinement is queued for the next
+SHA-binding window.
+
+The owner then authorized the conditional continuation: DeepSWE smoke20
+dispatched as run `34801009507`, `all-20` stage on `aef3a2f5`, readiness
+reused from `34799716299`, all 20 task jobs in flight on the pinned images.
 
 ## Outcome claims
 
