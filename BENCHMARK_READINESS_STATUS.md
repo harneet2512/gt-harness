@@ -538,10 +538,14 @@ Full affected surface green: `test_miniswe_integration`,
 `test_lsp_graph_publication`, `test_lsp_promotion_wiring`,
 `test_capability_matrix`, `test_index_reuse`.
 
+Provider-free re-verification on `eb1611b5` (fix wave + ledger tip):
+canonical acceptance `34874051204` **GREEN**; installed full-flow
+rehearsal `34874053460` **GREEN**.
+
 **Paid state**: gate-one's verdict stands rejected — the fix is not
-evidence the live run passed. A new paid smoke requires provider-free
-acceptance + installed rehearsal green on `6d19b195` (or later), then a
-fresh owner approval receipt.
+evidence the live run passed. A new paid smoke requires a fresh owner
+approval receipt on the green-gate SHA; `remaining-19` stays gated
+behind a clean one-task gate throughout.
 
 ## Outcome claims
 
